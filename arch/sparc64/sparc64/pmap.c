@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.70 2010/04/20 23:27:00 deraadt Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.74 2011/05/30 22:25:22 oga Exp $	*/
 /*	$NetBSD: pmap.c,v 1.107 2001/08/31 16:47:41 eeh Exp $	*/
 #undef	NO_VCACHE /* Don't forget the locked TLB in dostart */
 /*
@@ -206,11 +206,6 @@ void	pmap_pinit(struct pmap *);
 void	pmap_release(struct pmap *);
 pv_entry_t pa_to_pvh(paddr_t);
 
-/*
- * First and last managed physical addresses.  XXX only used for dumping the system.
- */
-paddr_t	vm_first_phys, vm_num_phys;
-
 u_int64_t first_phys_addr;
 
 pv_entry_t
@@ -296,8 +291,6 @@ struct mem_region *mem, *avail, *orig;
 int memsize;
 
 static int memh = 0, vmemh = 0;	/* Handles to OBP devices */
-
-paddr_t avail_start, avail_end;
 
 static int ptelookup_va(vaddr_t va); /* sun4u */
 
@@ -468,9 +461,9 @@ pmap_enter_kpage(vaddr_t va, int64_t data)
 {
 	paddr_t newp;
 
-	newp = NULL;
+	newp = 0;
 	while (pseg_set(pmap_kernel(), va, data, newp) == 1) {
-		newp = NULL;
+		newp = 0;
 		if (!pmap_get_page(&newp, NULL, pmap_kernel())) {
 			prom_printf("pmap_enter_kpage: out of pages\n");
 			panic("pmap_enter_kpage");
@@ -1242,8 +1235,7 @@ remap_data:
 			atop(mp->start),
 			atop(mp->start+mp->size),
 			atop(mp->start),
-			atop(mp->start+mp->size),
-			VM_FREELIST_DEFAULT);
+			atop(mp->start+mp->size), 0);
 	}
 
 #if 0
@@ -1253,8 +1245,7 @@ remap_data:
 		uvm_page_physload(atop(ekdatap), 
 			atop(roundup(ekdatap, (4*MEG))),
 			atop(ekdatap), 
-			atop(roundup(ekdatap, (4*MEG))),
-			VM_FREELIST_DEFAULT);
+			atop(roundup(ekdatap, (4*MEG))), 0);
 	}
 #endif
 
@@ -1454,12 +1445,6 @@ remap_data:
 	}
 
 	vmmap = (vaddr_t)reserve_dumppages((caddr_t)(u_long)vmmap);
-	/*
-	 * Set up bounds of allocatable memory for vmstat et al.
-	 */
-	avail_start = avail->start;
-	for (mp = avail; mp->size; mp++)
-		avail_end = mp->start+mp->size;
 	BDPRINTF(PDB_BOOT1, ("Finished pmap_bootstrap()\r\n"));
 
 	pmap_bootstrap_cpu(cpus->ci_paddr);
@@ -1593,9 +1578,6 @@ pmap_init()
 	pool_init(&pv_pool, sizeof(struct pv_entry), 0, 0, 0, "pv_entry", NULL);
 	pool_init(&pmap_pool, sizeof(struct pmap), 0, 0, 0, "pmappl",
 	    &pool_allocator_nointr);
-
-	vm_first_phys = avail_start;
-	vm_num_phys = avail_end - avail_start;
 }
 
 /* Start of non-cachable physical memory on UltraSPARC-III. */
@@ -1764,11 +1746,11 @@ pmap_release(pm)
 								       pa);
 						}
 					}
-					stxa(pdirentp, ASI_PHYS_CACHED, NULL);
+					stxa(pdirentp, ASI_PHYS_CACHED, 0);
 					pmap_free_page((paddr_t)ptbl, pm);
 				}
 			}
-			stxa(psegentp, ASI_PHYS_CACHED, NULL);
+			stxa(psegentp, ASI_PHYS_CACHED, 0);
 			pmap_free_page((paddr_t)pdir, pm);
 		}
 	}
@@ -1852,14 +1834,14 @@ pmap_collect(pm)
 					}
 					if (!n) {
 						/* Free the damn thing */
-						stxa((paddr_t)(u_long)&pdir[k], ASI_PHYS_CACHED, NULL);
+						stxa((paddr_t)(u_long)&pdir[k], ASI_PHYS_CACHED, 0);
 						pmap_free_page((paddr_t)ptbl, pm);
 					}
 				}
 			}
 			if (!m) {
 				/* Free the damn thing */
-				stxa((paddr_t)(u_long)&pm->pm_segs[i], ASI_PHYS_CACHED, NULL);
+				stxa((paddr_t)(u_long)&pm->pm_segs[i], ASI_PHYS_CACHED, 0);
 				pmap_free_page((paddr_t)pdir, pm);
 			}
 		}
@@ -1906,7 +1888,7 @@ pmap_activate(p)
 	s = splvm();
 	if (p == curproc) {
 		write_user_windows();
-		if (pmap->pm_ctx == NULL)
+		if (pmap->pm_ctx == 0)
 			ctx_alloc(pmap);
 		if (CPU_ISSUN4V)
 			stxa(CTX_SECONDARY, ASI_MMU_CONTEXTID, pmap->pm_ctx);
@@ -2169,9 +2151,9 @@ pmap_enter(pm, va, pa, prot, flags)
 	}
 	KDASSERT((tte.data & TLB_NFO) == 0);
 
-	pg = NULL;
+	pg = 0;
 	while (pseg_set(pm, va, tte.data, pg) == 1) {
-		pg = NULL;
+		pg = 0;
 		if (!pmap_get_page(&pg, NULL, pm)) {
 			if ((flags & PMAP_CANFAIL) == 0)
 				panic("pmap_enter: no memory");
@@ -3227,7 +3209,7 @@ ctx_alloc(pm)
 		 */
 		if (cnum >= numctx - 2)
 			cnum = 0;
-	} while (ctxbusy[++cnum] != NULL && cnum != next);
+	} while (ctxbusy[++cnum] != 0 && cnum != next);
 	if (cnum==0) cnum++; /* Never steal ctx 0 */
 	if (ctxbusy[cnum]) {
 		int i;
@@ -3287,7 +3269,7 @@ ctx_free(pm)
 		Debugger();
 	}
 #endif
-	ctxbusy[oldctx] = NULL;
+	ctxbusy[oldctx] = 0;
 }
 
 /*
@@ -3630,7 +3612,8 @@ pmap_remove_holes(struct vm_map *map)
 
 	(void)uvm_map(map, &shole, ehole - shole, NULL, UVM_UNKNOWN_OFFSET, 0,
 	    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-	      UVM_ADV_RANDOM, UVM_FLAG_NOMERGE | UVM_FLAG_HOLE));
+	      UVM_ADV_RANDOM,
+	      UVM_FLAG_NOMERGE | UVM_FLAG_HOLE | UVM_FLAG_FIXED));
 }
 
 #ifdef DDB

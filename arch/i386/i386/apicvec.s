@@ -1,4 +1,4 @@
-/* $OpenBSD: apicvec.s,v 1.21 2010/01/11 23:09:52 kettenis Exp $ */
+/* $OpenBSD: apicvec.s,v 1.24 2011/07/05 17:11:07 oga Exp $ */
 /* $NetBSD: apicvec.s,v 1.1.2.2 2000/02/21 21:54:01 sommerfeld Exp $ */
 
 /*-
@@ -170,16 +170,10 @@ XINTR(ltimer):
 	ioapic_asm_ack()
 	sti
 	incl	CPUVAR(IDEPTH)
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintlock)
-#endif
 	movl	%esp,%eax
 	pushl	%eax
 	call	_C_LABEL(lapic_clockintr)
 	addl	$4,%esp
-#ifdef MULTIPROCESSOR
-	call	_C_LABEL(i386_softintunlock)
-#endif
 	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
@@ -207,13 +201,6 @@ XINTR(softclock):
 	decl	CPUVAR(IDEPTH)
 	jmp	_C_LABEL(Xdoreti)
 
-#define DONETISR(s, c) \
-	.globl  _C_LABEL(c)	;\
-	testl	$(1 << s),%edi	;\
-	jz	1f		;\
-	call	_C_LABEL(c)	;\
-1:
-
 XINTR(softnet):
 	pushl	$0
 	pushl	$T_ASTFLT
@@ -228,11 +215,6 @@ XINTR(softnet):
 #ifdef MULTIPROCESSOR
 	call	_C_LABEL(i386_softintlock)
 #endif
-	xorl	%edi,%edi
-	xchgl	_C_LABEL(netisr),%edi
-
-#include <net/netisr_dispatch.h>
-
 	pushl	$I386_SOFTINTR_SOFTNET
 	call	_C_LABEL(softintr_dispatch)
 	addl	$4,%esp
@@ -314,8 +296,14 @@ _C_LABEL(Xintr_##name##num):						\
 	jz	4f							;\
 	addl	$1,IH_COUNT(%ebx)	/* count the intrs */		;\
 	adcl	$0,IH_COUNT+4(%ebx)					;\
-4:									 \
-	UNLOCK_KERNEL(IF_PPL(%esp))					;\
+	cmp	$0,_C_LABEL(intr_shared_edge)				;\
+	jne	4f			/* if no shared edges ... */	;\
+	orl	%eax,%eax		/* ... 1 means stop trying */	;\
+	js	4f							;\
+1:	UNLOCK_KERNEL(IF_PPL(%esp))					;\
+	decl	CPUVAR(IDEPTH)						;\
+	jmp	8f							;\
+4:	UNLOCK_KERNEL(IF_PPL(%esp))					;\
 	decl	CPUVAR(IDEPTH)						;\
 	movl	IH_NEXT(%ebx),%ebx	/* next handler in chain */	;\
 	testl	%ebx,%ebx						;\

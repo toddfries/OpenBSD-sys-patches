@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.11 2009/08/17 23:27:57 dms Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.18 2011/07/08 00:08:00 krw Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1996/05/03 19:42:03 christos Exp $	*/
 
 /*
@@ -37,9 +37,6 @@
 #include <sys/disklabel.h>
 #include <sys/disk.h>
 
-int	readdpmelabel(struct buf *, void (*)(struct buf *),
-	    struct disklabel *, int *, int);
-
 /*
  * Attempt to read a disk label from a device
  * using the indicated strategy routine.
@@ -49,14 +46,11 @@ int	readdpmelabel(struct buf *, void (*)(struct buf *),
  * must be filled in before calling us.
  *
  * If dos partition table requested, attempt to load it and
- * find disklabel inside a DOS partition. Return buffer
- * for use in signalling errors if requested.
+ * find disklabel inside a DOS partition.
  *
  * We would like to check if each MBR has a valid DOSMBR_SIGNATURE, but
  * we cannot because it doesn't always exist. So.. we assume the
  * MBR is valid.
- *
- * Returns null on success and an error string on failure.
  */
 int
 readdisklabel(dev_t dev, void (*strat)(struct buf *),
@@ -71,10 +65,6 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 	/* get a buffer and initialize it */
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
-
-	error = readdpmelabel(bp, strat, lp, NULL, spoofonly);
-	if (error == 0)
-		goto done;
 
 	error = readdoslabel(bp, strat, lp, NULL, spoofonly);
 	if (error == 0)
@@ -96,93 +86,8 @@ done:
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
+	disk_change = 1;
 	return (error);
-}
-
-int
-readdpmelabel(struct buf *bp, void (*strat)(struct buf *),
-    struct disklabel *lp, int *partoffp, int spoofonly)
-{
-	int i, part_cnt, n, hfspartoff = -1;
-	u_int64_t hfspartend = DL_GETDSIZE(lp);
-	struct part_map_entry *part;
-
-	/* First check for a DPME (HFS) disklabel */
-	bp->b_blkno = 1;
-	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
-	(*strat)(bp);
-	if (biowait(bp))
-		return (bp->b_error);
-
-	/* if successful, wander through DPME partition table */
-	part = (struct part_map_entry *)bp->b_data;
-	/* if first partition is not valid, assume not HFS/DPME partitioned */
-	if (part->pmSig != PART_ENTRY_MAGIC)
-		return (EINVAL);	/* not a DPME partition */
-	part_cnt = part->pmMapBlkCnt;
-	n = 8;
-	for (i = 0; i < part_cnt; i++) {
-		struct partition *pp;
-		char *s;
-
-		bp->b_blkno = 1+i;
-		bp->b_bcount = lp->d_secsize;
-		bp->b_flags = B_BUSY | B_READ | B_RAW;
-		(*strat)(bp);
-		if (biowait(bp))
-			return (bp->b_error);
-
-		part = (struct part_map_entry *)bp->b_data;
-		/* toupper the string, in case caps are different... */
-		for (s = part->pmPartType; *s; s++)
-			if ((*s >= 'a') && (*s <= 'z'))
-				*s = (*s - 'a' + 'A');
-
-		if (strcmp(part->pmPartType, PART_TYPE_OPENBSD) == 0) {
-			hfspartoff = part->pmPyPartStart - LABELSECTOR;
-			hfspartend = hfspartoff + part->pmPartBlkCnt;
-			if (partoffp) {
-				*partoffp = hfspartoff;
-				return (0);
-			} else {
-				DL_SETBSTART(lp, hfspartoff);
-				DL_SETBEND(lp,
-				    hfspartend < DL_GETDSIZE(lp) ? hfspartend :
-				    DL_GETDSIZE(lp));
-			}
-			continue;
-		}
-
-		if (n >= MAXPARTITIONS || partoffp)
-			continue;
-
-		/* Currently we spoof HFS partitions only. */
-		if (strcmp(part->pmPartType, PART_TYPE_MAC) == 0) {
-			pp = &lp->d_partitions[n];
-			DL_SETPOFFSET(pp, part->pmPyPartStart);
-			DL_SETPSIZE(pp, part->pmPartBlkCnt);
-			pp->p_fstype = FS_HFS;
-			n++;
-		}
-	}
-
-	if (hfspartoff == -1)
-		return (EINVAL);
-
-	if (spoofonly)
-		return (0);
-
-	/* next, dig out disk label */
-	bp->b_blkno = hfspartoff + LABELSECTOR;
-	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
-	(*strat)(bp);
-	if (biowait(bp))
-		return (bp->b_error);
-
-	return checkdisklabel(bp->b_data + LABELOFFSET, lp, hfspartoff,
-	    hfspartend);
 }
 
 /*
@@ -192,6 +97,7 @@ int
 writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 {
 	int error = EIO, partoff = -1;
+	int offset;
 	struct disklabel *dlp;
 	struct buf *bp = NULL;
 
@@ -199,21 +105,24 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
-	if (readdpmelabel(bp, strat, lp, &partoff, 1) != NULL &&
-	    readdoslabel(bp, strat, lp, &partoff, 1) != NULL)
+	if (readdoslabel(bp, strat, lp, &partoff, 1) != 0)
 		goto done;
 
 	/* Read it in, slap the new label in, and write it back out */
-	bp->b_blkno = partoff + LABELSECTOR;
+	bp->b_blkno = DL_BLKTOSEC(lp, partoff + DOS_LABELSECTOR) *
+	    DL_BLKSPERSEC(lp);
+	offset = DL_BLKOFFSET(lp, partoff + DOS_LABELSECTOR);
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 	if ((error = biowait(bp)) != 0)
 		goto done;
 
-	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
+	dlp = (struct disklabel *)(bp->b_data + offset);
 	*dlp = *lp;
-	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_WRITE | B_RAW);
 	(*strat)(bp);
 	error = biowait(bp);
 
@@ -222,5 +131,6 @@ done:
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
+	disk_change = 1;
 	return (error);
 }

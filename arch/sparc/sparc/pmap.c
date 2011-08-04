@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.157 2010/07/10 19:32:25 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.160 2011/05/30 22:25:22 oga Exp $	*/
 /*	$NetBSD: pmap.c,v 1.118 1998/05/19 19:00:18 thorpej Exp $ */
 
 /*
@@ -865,7 +865,7 @@ pmap_page_upload(void)
 				start, chop, end);
 #endif
 			uvm_page_physload(atop(start), atop(chop),
-				atop(start), atop(chop), VM_FREELIST_DEFAULT);
+				atop(start), atop(chop), 0);
 
 			/*
 			 * Adjust the start address to reflect the
@@ -883,7 +883,7 @@ pmap_page_upload(void)
 
 		/* Upload (the rest of) this segment */
 		uvm_page_physload(atop(start), atop(end),
-			atop(start), atop(end), VM_FREELIST_DEFAULT);
+			atop(start), atop(end), 0);
 	}
 }
 
@@ -6239,13 +6239,10 @@ kvm_setcache(va, npages, cached)
  * least likely to cause cache aliases.
  * (This will just seg-align mappings.)
  */
-void
-pmap_prefer(foff, vap)
-	vaddr_t foff;
-	vaddr_t *vap;
+vaddr_t
+pmap_prefer(vaddr_t foff, vaddr_t va)
 {
-	vaddr_t va = *vap;
-	long d, m;
+	vaddr_t d, m;
 
 #if defined(SUN4) || defined(SUN4C) || defined(SUN4E)
 	if (VA_INHOLE(va))
@@ -6253,12 +6250,13 @@ pmap_prefer(foff, vap)
 #endif
 
 	m = CACHE_ALIAS_DIST;
-	if (m == 0)		/* m=0 => no cache aliasing */
-		return;
+	if (m != 0) {		/* m=0 => no cache aliasing */
+		d = foff - va;
+		d &= (m - 1);
+		va += d;
+	}
 
-	d = foff - va;
-	d &= (m - 1);
-	*vap = va + d;
+	return va;
 }
 
 void
@@ -6277,7 +6275,8 @@ pmap_remove_holes(struct vm_map *map)
 		(void)uvm_map(map, &shole, ehole - shole, NULL,
 		    UVM_UNKNOWN_OFFSET, 0,
 		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-		      UVM_ADV_RANDOM, UVM_FLAG_NOMERGE | UVM_FLAG_HOLE));
+		      UVM_ADV_RANDOM,
+		      UVM_FLAG_NOMERGE | UVM_FLAG_HOLE | UVM_FLAG_FIXED));
 	}
 #endif
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82489var.h,v 1.10 2009/06/09 02:56:38 krw Exp $	*/
+/*	$OpenBSD: i82489var.h,v 1.13 2011/06/30 22:18:01 jsg Exp $	*/
 /*	$NetBSD: i82489var.h,v 1.1 2003/02/26 21:26:10 fvdl Exp $	*/
 
 /*-
@@ -30,8 +30,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _X86_I82489REG_H_
-#define _X86_I82489REG_H_
+#ifndef _MACHINE_I82489VAR_H_
+#define _MACHINE_I82489VAR_H_
 
 /*
  * Software definitions belonging to Local APIC driver.
@@ -46,17 +46,14 @@ extern volatile u_int32_t lapic_tpr;
 #endif
 
 static __inline__ u_int32_t
-i82489_readreg(reg)
-	int reg;
+i82489_readreg(int reg)
 {
 	return *((volatile u_int32_t *)(((volatile u_int8_t *)local_apic)
 	    + reg));
 }
 
 static __inline__ void
-i82489_writereg(reg, val)
-	int reg;
-	u_int32_t val;
+i82489_writereg(int reg, u_int32_t val)
 {
 	*((volatile u_int32_t *)(((volatile u_int8_t *)local_apic) + reg)) = val;
 }
@@ -123,6 +120,7 @@ extern void lapic_boot_init(paddr_t);
 extern void lapic_set_lvt(void);
 extern void lapic_enable(void);
 extern void lapic_calibrate_timer(struct cpu_info *ci);
+extern void lapic_startclock(void);
 extern void lapic_initclocks(void);
 
 #endif

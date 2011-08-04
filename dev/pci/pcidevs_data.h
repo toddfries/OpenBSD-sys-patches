@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1565 2010/07/18 17:10:52 kettenis Exp 
+ *	OpenBSD: pcidevs,v 1.1617 2011/07/31 15:31:22 kettenis Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -1160,6 +1160,62 @@ static const struct pci_known_product pci_known_products[] = {
 	    "AMD64 11h Link Cfg",
 	},
 	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_HB,
+	    "AMD64 14h Host",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_PCIE_1,
+	    "AMD64 14h PCIE",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_PCIE_2,
+	    "AMD64 14h PCIE",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_PCIE_3,
+	    "AMD64 14h PCIE",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_PCIE_4,
+	    "AMD64 14h PCIE",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_PCIE_5,
+	    "AMD64 14h PCIE",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_LINK,
+	    "AMD64 14h Link Cfg",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_ADDR,
+	    "AMD64 14h Address Map",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_DRAM,
+	    "AMD64 14h DRAM Cfg",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_MISC,
+	    "AMD64 14h Misc Cfg",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_CPU_PM,
+	    "AMD64 14h CPU Power",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_NB_PM,
+	    "AMD64 14h NB Power",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_RESERVED_1,
+	    "AMD64 14h Reserved",
+	},
+	{
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_AMD64_14_RESERVED_2,
+	    "AMD64 14h Reserved",
+	},
+	{
 	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_PCNET_PCI,
 	    "79c970 PCnet-PCI",
 	},
@@ -1396,8 +1452,8 @@ static const struct pci_known_product pci_known_products[] = {
 	    "RS780 Host",
 	},
 	{
-	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_RS780_HB_2,
-	    "RS780 Host",
+	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_RS880_HB,
+	    "RS880 Host",
 	},
 	{
 	    PCI_VENDOR_AMD, PCI_PRODUCT_AMD_RS780_PCIE_1,
@@ -1800,12 +1856,24 @@ static const struct pci_known_product pci_known_products[] = {
 	    "ARC-1681",
 	},
 	{
+	    PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1880,
+	    "ARC-1880",
+	},
+	{
 	    PCI_VENDOR_ASIX, PCI_PRODUCT_ASIX_AX88140A,
 	    "AX88140A/88141",
 	},
 	{
+	    PCI_VENDOR_ASMEDIA, PCI_PRODUCT_ASMEDIA_ASM1042,
+	    "ASM1042 XHCI",
+	},
+	{
 	    PCI_VENDOR_ASUSTEK, PCI_PRODUCT_ASUSTEK_HFCPCI,
 	    "ISDN",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD6310_HDA,
+	    "Radeon HD 6310 HD Audio",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_M241P,
@@ -2186,6 +2254,22 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB700_ISA,
 	    "SB700 ISA",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB800_PCIE_1,
+	    "SB800 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB800_PCIE_2,
+	    "SB800 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB800_PCIE_3,
+	    "SB800 PCIE",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SB800_PCIE_4,
+	    "SB800 PCIE",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_MIGP_RS250,
@@ -2928,72 +3012,72 @@ static const struct pci_known_product pci_known_products[] = {
 	    "RD790 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_0,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_HB,
+	    "SR5690 Host",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_1,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_HB,
+	    "RD890 Host",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_2,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5670_HB,
+	    "SR5670 Host",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_3,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5650_HB,
+	    "SR5650 Host",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_4,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_0,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_5,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_1,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_6,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_2,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_7,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_3,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_8,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_4,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_9,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_5,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_A,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_6,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_B,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_7,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_C,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_8,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_D,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_9,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_E,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_SR5690_PCIE_A,
+	    "SR5690 PCIE",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RD890_PCIE_F,
-	    "RD890 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS400_HB,
+	    "RS400 Host",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RX200_HB,
-	    "Radeon XPRESS 200",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RC410_HB,
+	    "RC410 Host",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RX480_PCIE,
@@ -3132,6 +3216,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon X800 GTO Sec",
 	},
 	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X850XT_S,
+	    "Radeon X850 XT Sec",
+	},
+	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_FIREGL_V5000_R410,
 	    "FireGL V5000",
 	},
@@ -3174,6 +3262,18 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD5700,
 	    "Radeon HD 5700",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD5670,
+	    "Radeon HD 5670",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_MOBILITY_HD5470,
+	    "Radeon Mobility HD 5470",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD5450,
+	    "Radeon HD 5450",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS100_PCI,
@@ -3752,16 +3852,8 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon HD 3450",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS780_HB,
-	    "RS780 Host",
-	},
-	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS780_PCIE_1,
-	    "RS780 PCIE",
-	},
-	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS780_PCIE_2,
-	    "RS780 PCIE",
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3450_AGP,
+	    "Radeon HD 3450 AGP",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS780_HDA,
@@ -3784,12 +3876,44 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon HD 3300",
 	},
 	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD3000,
+	    "Radeon HD 3000",
+	},
+	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4200_HDA,
 	    "Radeon HD 4200 HD Audio",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4200,
 	    "Radeon HD 4200",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4200_M,
+	    "Mobility Radeon HD 4200",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4290,
+	    "Radeon HD 4290",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD4250,
+	    "Radeon HD 4250",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD6310_1,
+	    "Radeon HD 6310",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD6310_2,
+	    "Radeon HD 6310",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD6250_1,
+	    "Radeon HD 6250",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD6250_2,
+	    "Radeon HD 6250",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_HDA,
@@ -3826,6 +3950,14 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD5700_HDA,
 	    "Radeon HD 5700 Audio",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD5600_HDA,
+	    "Radeon HD 5600 Audio",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD5470_HDA,
+	    "Radeon HD 5470 Audio",
 	},
 	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RS100_AGP,
@@ -3948,6 +4080,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "AR9300",
 	},
 	{
+	    PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9485,
+	    "AR9485",
+	},
+	{
 	    PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR5210_AP,
 	    "AR5210 (Early)",
 	},
@@ -4000,8 +4136,24 @@ static const struct pci_known_product pci_known_products[] = {
 	    "L1C",
 	},
 	{
+	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L1D,
+	    "L1D",
+	},
+	{
+	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L1D_1,
+	    "L1D",
+	},
+	{
 	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L2,
 	    "L2",
+	},
+	{
+	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L2C_1,
+	    "L2C",
+	},
+	{
+	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L2C_2,
+	    "L2C",
 	},
 	{
 	    PCI_VENDOR_AUREAL, PCI_PRODUCT_AUREAL_AU8820,
@@ -4188,6 +4340,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "BCM5718",
 	},
 	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5719,
+	    "BCM5719",
+	},
+	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5720,
 	    "BCM5720",
 	},
@@ -4214,6 +4370,14 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5705M_ALT,
 	    "BCM5705M Alt",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57712,
+	    "BCM57712",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57712E,
+	    "BCM57712E",
 	},
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5714,
@@ -4404,6 +4568,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "BCM57795",
 	},
 	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_SD,
+	    "SD Host Controller",
+	},
+	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5702_ALT,
 	    "BCM5702 Alt",
 	},
@@ -4524,12 +4692,24 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Serial",
 	},
 	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM43224,
+	    "BCM43224",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM43225,
+	    "BCM43225",
+	},
+	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM4401,
 	    "BCM4401",
 	},
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM4401B0,
 	    "BCM4401B0",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM4313,
+	    "BCM4313",
 	},
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_5801,
@@ -4794,6 +4974,30 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_CIRRUS, PCI_PRODUCT_CIRRUS_CS4281,
 	    "CS4281 CrystalClear",
+	},
+	{
+	    PCI_VENDOR_CISCO, PCI_PRODUCT_CISCO_VIC_PCIE_1,
+	    "VIC PCIE",
+	},
+	{
+	    PCI_VENDOR_CISCO, PCI_PRODUCT_CISCO_VIC_PCIE_2,
+	    "VIC PCIE",
+	},
+	{
+	    PCI_VENDOR_CISCO, PCI_PRODUCT_CISCO_VIC_PCIE_3,
+	    "VIC PCIE",
+	},
+	{
+	    PCI_VENDOR_CISCO, PCI_PRODUCT_CISCO_VIC_MGMT,
+	    "VIC Management",
+	},
+	{
+	    PCI_VENDOR_CISCO, PCI_PRODUCT_CISCO_VIC_ETH,
+	    "VIC Ethernet",
+	},
+	{
+	    PCI_VENDOR_CISCO, PCI_PRODUCT_CISCO_VIC_FCOE,
+	    "VIC FCoE",
 	},
 	{
 	    PCI_VENDOR_CMDTECH, PCI_PRODUCT_CMDTECH_AAR_1210SA,
@@ -5166,6 +5370,22 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_COREGA, PCI_PRODUCT_COREGA_CGLAPCIGT,
 	    "CG-LAPCIGT",
+	},
+	{
+	    PCI_VENDOR_COREGA2, PCI_PRODUCT_COREGA2_RTL8192E_1,
+	    "RTL8192E",
+	},
+	{
+	    PCI_VENDOR_COREGA2, PCI_PRODUCT_COREGA2_RTL8190P_1,
+	    "RTL8190P",
+	},
+	{
+	    PCI_VENDOR_COREGA2, PCI_PRODUCT_COREGA2_RTL8190P_2,
+	    "RTL8190P",
+	},
+	{
+	    PCI_VENDOR_COREGA2, PCI_PRODUCT_COREGA2_RTL8192E_2,
+	    "RTL8192E",
 	},
 	{
 	    PCI_VENDOR_COROLLARY, PCI_PRODUCT_COROLLARY_CBUSII_PCIB,
@@ -6288,6 +6508,22 @@ static const struct pci_known_product pci_known_products[] = {
 	    "USB",
 	},
 	{
+	    PCI_VENDOR_HP, PCI_PRODUCT_HP_ILO3_SERIAL,
+	    "iLO3 Serial",
+	},
+	{
+	    PCI_VENDOR_HP, PCI_PRODUCT_HP_ILO3_SLAVE,
+	    "iLO3 Slave",
+	},
+	{
+	    PCI_VENDOR_HP, PCI_PRODUCT_HP_ILO3_MGMT,
+	    "iLO3 Management",
+	},
+	{
+	    PCI_VENDOR_HP, PCI_PRODUCT_HP_ILO3_WATCHDOG,
+	    "iLO3 Watchdog",
+	},
+	{
 	    PCI_VENDOR_HP, PCI_PRODUCT_HP_IPMI,
 	    "IPMI",
 	},
@@ -6552,7 +6788,7 @@ static const struct pci_known_product pci_known_products[] = {
 	    "21145",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE_HB,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE_HB_0,
 	    "Core Host",
 	},
 	{
@@ -6568,52 +6804,104 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Core PCIE",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE_HB_1,
+	    "Core Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_3400_PCIE,
+	    "3400 PCIE",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ARRANDALE_IGD,
 	    "Mobile HD graphics",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005A_2X2_1,
-	    "Centrino Advanced-N 6205a",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6005_1,
+	    "Centrino Advanced-N 6005",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_1000_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1000_1,
 	    "WiFi Link 1000",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_1000_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1000_2,
 	    "WiFi Link 1000",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005A_2X2_2,
-	    "Centrino Advanced-N 6205a",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6005_2,
+	    "Centrino Advanced-N 6205",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2X2_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6050_1,
 	    "Centrino Advanced-N 6250",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6050_2X2_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6050_2,
 	    "Centrino Advanced-N 6250",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_1X1_1,
-	    "Centrino Advanced-N 6205b",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1030_1,
+	    "WiFi Link 1030",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_1X1_2,
-	    "Centrino Advanced-N 6205b",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1030_2,
+	    "WiFi Link 1030",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_2X2_1,
-	    "Centrino Advanced-N 6205b",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6030_1,
+	    "Centrino Advanced-N 6030",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_2X2_2,
-	    "Centrino Advanced-N 6205b",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6030_2,
+	    "Centrino Advanced-N 6030",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6005B_2X2_3,
-	    "Centrino Advanced-N 6205b",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_HB,
+	    "Core 2G Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_PCIE_1,
+	    "Core 2G PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT1,
+	    "GT1 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_HB,
+	    "Core 2G Host",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_PCIE_2,
+	    "Core 2G PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT1,
+	    "GT1 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_PCIE_3,
+	    "Core 2G PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_PCIE_4,
+	    "Core 2G PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT2,
+	    "GT2 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT2,
+	    "GT2 Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT2_PLUS,
+	    "GT2+ Video",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT2_PLUS,
+	    "GT2+ Video",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80303,
@@ -6633,15 +6921,15 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6700PXH_A,
-	    "PCIE-PCIE",
+	    "6700PXH PCIE-PCIX",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6700PXH_B,
-	    "PCIE-PCIE",
+	    "6700PXH PCIE-PCIX",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6702PXH,
-	    "PCIE-PCIE",
+	    "6702PXH PCIE-PCIX",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_IOP332_A,
@@ -6672,6 +6960,22 @@ static const struct pci_known_product pci_known_products[] = {
 	    "IOP333 PCIE-PCIX",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_DH89XXCC_SGMII,
+	    "DH89XXCC SGMII",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_DH89XXCC_SERDES,
+	    "DH89XXCC SerDes",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_DH89XXCC_BPLANE,
+	    "DH89XXCC backplane",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_DH89XXCC_SFP,
+	    "DH89XXCC SFP",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PCEB,
 	    "82375EB EISA",
 	},
@@ -6689,7 +6993,7 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PCMC,
-	    "82434LX/NX PCI/Cache/DRAM",
+	    "82434LX/NX",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_GDT_RAID1,
@@ -6698,6 +7002,30 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_GDT_RAID2,
 	    "GDT RAID",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6150_1,
+	    "WiFi Link 6150",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6150_2,
+	    "WiFi Link 6150",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_130_1,
+	    "WiFi Link 130",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_130_2,
+	    "WiFi Link 130",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_1,
+	    "WiFi Link 100",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_2,
+	    "WiFi Link 100",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80960RP,
@@ -7256,12 +7584,12 @@ static const struct pci_known_product pci_known_products[] = {
 	    "PRO/1000 QP (82571EB)",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_CX4,
-	    "10GbE CX4 (82598EB)",
-	},
-	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_SFP,
 	    "10GbE SFP+ (82598EB)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_CX4,
+	    "10GbE CX4 (82598EB)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH10_D_BM_LM,
@@ -7306,6 +7634,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598EB_CX4_DUAL,
 	    "10GbE CX4 Dual (82598EB)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599VF,
+	    "10GbE VF (82599)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM,
@@ -7421,7 +7753,7 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82437MX,
-	    "82437 PCI/Cache/DRAM",
+	    "82437MX",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82441FX,
@@ -7460,6 +7792,14 @@ static const struct pci_known_product pci_known_products[] = {
 	    "ICH8 82567V-3",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82579LM,
+	    "82579LM",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82579V,
+	    "82579V",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP_EM,
 	    "10GbE SFP EM (82599)",
 	},
@@ -7470,6 +7810,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_NS,
 	    "PRO/1000 (82576NS)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82598AT2,
+	    "10GbE (82598AT)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82583V,
@@ -7504,12 +7848,52 @@ static const struct pci_known_product pci_known_products[] = {
 	    "10GbE KX4 (82599)",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_KR,
+	    "10GbE KR (82599)",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_NS_SERDES,
 	    "82576NS SerDes",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_T3_LOM,
+	    "82599 T3",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_COPPER,
+	    "I350",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_FIBER,
+	    "I350 Fiber",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_SERDES,
+	    "I350 SerDes",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_SGMII,
+	    "I350 SGMII",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82576_QUAD_CU_ET2,
 	    "PRO/1000 QP (82576)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_QUAD_FIBER,
+	    "82580 QF",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X540T,
+	    "X540T",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP_FCOE,
+	    "SFP+ FCOE (82599)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_BPLANE_FCOE,
+	    "FCOE (82599)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80960RP_ATU,
@@ -7546,6 +7930,162 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82597EX_LR,
 	    "PRO/10GbE LR (82597EX)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_SATA_1,
+	    "6 Series SATA",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_SATA_2,
+	    "6 Series SATA",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_AHCI_1,
+	    "6 Series AHCI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_AHCI_2,
+	    "6 Series AHCI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_RAID_1,
+	    "6 Series RAID",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_RAID_2,
+	    "6 Series RAID",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_RAID_3,
+	    "6 Series RAID",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_SATA_3,
+	    "6 Series SATA",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_SATA_4,
+	    "6 Series SATA",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_PCIE_1,
+	    "6 Series PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_PCIE_2,
+	    "6 Series PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_PCIE_3,
+	    "6 Series PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_PCIE_4,
+	    "6 Series PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_PCIE_5,
+	    "6 Series PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_PCIE_6,
+	    "6 Series PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_PCIE_7,
+	    "6 Series PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_PCIE_8,
+	    "6 Series PCIE",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_HDA,
+	    "6 Series HD Audio",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_SMB,
+	    "6 Series SMBus",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_THERM,
+	    "6 Series Thermal",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_DMI,
+	    "6 Series DMI-PCI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_EHCI_1,
+	    "6 Series USB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_EHCI_2,
+	    "6 Series USB",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_MEI,
+	    "6 Series MEI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_KT,
+	    "6 Series KT",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_P67_LPC,
+	    "P67 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_UM67_LPC,
+	    "UM67 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_HM65_LPC,
+	    "HM65 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_H67_LPC,
+	    "H67 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_HM67_LPC,
+	    "HM67 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_Q65_LPC,
+	    "Q65 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_QS67_LPC,
+	    "QS67 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_Q67_LPC,
+	    "Q67 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_QM67_LPC,
+	    "QM67 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_B65_LPC,
+	    "B65 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_H61_LPC,
+	    "H61 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_C202_LPC,
+	    "C202 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_C204_LPC,
+	    "C204 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_C206_LPC,
+	    "C206 LPC",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801AA_LPC,
@@ -9609,7 +10149,7 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_FSBINT,
-	    "7300 E5400 FSB/Boot/Interrupt",
+	    "7300 FSB/Boot/Interrupt",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7300_SNOOP,
@@ -10016,80 +10556,84 @@ static const struct pci_known_product pci_known_products[] = {
 	    "3400 MEI",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_3400_PT_IDER,
+	    "3400 PT IDER",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_3400_KT,
 	    "3400 KT",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_HB,
-	    "E5400 Host",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_HB,
+	    "5400 Host",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400A_HB,
-	    "E5400A Host",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400A_HB,
+	    "5400A Host",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400B_HB,
-	    "E5400B Host",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400B_HB,
+	    "5400B Host",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_PCIE_1,
-	    "E5400 PCIE",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_PCIE_1,
+	    "5400 PCIE",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_PCIE_2,
-	    "E5400 PCIE",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_PCIE_2,
+	    "5400 PCIE",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_PCIE_3,
-	    "E5400 PCIE",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_PCIE_3,
+	    "5400 PCIE",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_PCIE_4,
-	    "E5400 PCIE",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_PCIE_4,
+	    "5400 PCIE",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_PCIE_5,
-	    "E5400 PCIE",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_PCIE_5,
+	    "5400 PCIE",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_PCIE_6,
-	    "E5400 PCIE",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_PCIE_6,
+	    "5400 PCIE",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_PCIE_7,
-	    "E5400 PCIE",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_PCIE_7,
+	    "5400 PCIE",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_PCIE_8,
-	    "E5400 PCIE",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_PCIE_8,
+	    "5400 PCIE",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_PCIE_9,
-	    "E5400 PCIE",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_PCIE_9,
+	    "5400 PCIE",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_IOAT_SNB,
 	    "I/OAT SNB",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_FSBINT,
-	    "E5400 FSB/Boot/Interrupt",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_FSBINT,
+	    "5400 FSB/Boot/Interrupt",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_CE,
-	    "E5400 Coherency Engine",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_CE,
+	    "5400 Coherency Engine",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_IOAPIC,
-	    "E5400 IOAPIC",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_IOAPIC,
+	    "5400 IOAPIC",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_RAS_0,
-	    "E5400 RAS",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_RAS_0,
+	    "5400 RAS",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E5400_RAS_1,
-	    "E5400 RAS",
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5400_RAS_1,
+	    "5400 RAS",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_WL_2200BG,
@@ -10116,59 +10660,59 @@ static const struct pci_known_product pci_known_products[] = {
 	    "PRO/Wireless 3945ABG",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_4965_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_4965_1,
 	    "Wireless WiFi Link 4965",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_3X3_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6300_1,
 	    "Centrino Ultimate-N 6300",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_IPA_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6200_1,
 	    "Centrino Advanced-N 6200",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_4965_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_4965_2,
 	    "Wireless WiFi Link 4965",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5100_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5100_1,
 	    "WiFi Link 5100",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5300_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5300_1,
 	    "WiFi Link 5300",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5300_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5300_2,
 	    "WiFi Link 5300",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5100_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5100_2,
 	    "WiFi Link 5100",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_3X3_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6300_2,
 	    "Centrino Ultimate-N 6300",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_6000_IPA_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6200_2,
 	    "Centrino Advanced-N 6200",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5350_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5350_1,
 	    "WiFi Link 5350",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5350_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5350_2,
 	    "WiFi Link 5350",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5150_1,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5150_1,
 	    "WiFi Link 5150",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WIFI_LINK_5150_2,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_5150_2,
 	    "WiFi Link 5150",
 	},
 	{
@@ -10365,7 +10909,7 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82439TX,
-	    "82439TX System",
+	    "82439TX",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82371AB_ISA,
@@ -10628,6 +11172,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Core DMI",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE_DMI_2,
+	    "Core DMI",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE_PCIE_2,
 	    "Core PCIE",
 	},
@@ -10652,15 +11200,15 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Core QPI Routing",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE_DMI_2,
-	    "Core DMI",
-	},
-	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE_DMI_3,
 	    "Core DMI",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE_DMI_4,
+	    "Core DMI",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE_DMI_5,
 	    "Core DMI",
 	},
 	{
@@ -10805,6 +11353,38 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_XD,
+	    "xD",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_SD_3,
+	    "SD Host Controller",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_SDMMC_3,
+	    "SD/MMC",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_MS_3,
+	    "Memory Stick",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_XD_3,
+	    "xD",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_SD_2,
+	    "SD Host Controller",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_SDMMC_2,
+	    "SD/MMC",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_MS_2,
+	    "Memory Stick",
+	},
+	{
+	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_XD_2,
 	    "xD",
 	},
 	{
@@ -11396,6 +11976,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "88SX7042 SATA",
 	},
 	{
+	    PCI_VENDOR_MARVELL2, PCI_PRODUCT_MARVELL2_88SE9123,
+	    "88SE9123 SATA",
+	},
+	{
 	    PCI_VENDOR_MATROX, PCI_PRODUCT_MATROX_ATLAS,
 	    "MGA PX2085 (Atlas)",
 	},
@@ -11628,6 +12212,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Z8E",
 	},
 	{
+	    PCI_VENDOR_MYRICOM, PCI_PRODUCT_MYRICOM_Z8E_9,
+	    "Z8E",
+	},
+	{
 	    PCI_VENDOR_MYRICOM, PCI_PRODUCT_MYRICOM_LANAI_92,
 	    "Myrinet LANai 9.2",
 	},
@@ -11690,6 +12278,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_NETXEN, PCI_PRODUCT_NETXEN_NXB_HMEZ_2,
 	    "HMEZ 10GbE Mgmt",
+	},
+	{
+	    PCI_VENDOR_NETXEN, PCI_PRODUCT_NETXEN_NX3031,
+	    "NX3031",
 	},
 	{
 	    PCI_VENDOR_NS, PCI_PRODUCT_NS_DP83810,
@@ -11902,6 +12494,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_NETMOS, PCI_PRODUCT_NETMOS_NM9901,
 	    "Nm9901",
+	},
+	{
+	    PCI_VENDOR_NETMOS, PCI_PRODUCT_NETMOS_NM9922,
+	    "Nm9922",
 	},
 	{
 	    PCI_VENDOR_NETSEC, PCI_PRODUCT_NETSEC_7751,
@@ -12244,8 +12840,80 @@ static const struct pci_known_product pci_known_products[] = {
 	    "SAS1078",
 	},
 	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2116_1,
+	    "SAS2116",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2116_2,
+	    "SAS2116",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2308_3,
+	    "SAS2308",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2004,
+	    "SAS2004",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2008,
+	    "SAS2008",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2108_3,
+	    "SAS2108",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2108_4,
+	    "SAS2108",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2108_5,
+	    "SAS2108",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2108_1,
+	    "MegaRAID SAS2108 CRYPTO GEN2",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2108_2,
+	    "MegaRAID SAS2108 GEN2",
+	},
+	{
 	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS1078DE,
 	    "SAS1078DE",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2208_1,
+	    "SAS2208",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2208_2,
+	    "SAS2208",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2208_3,
+	    "SAS2208",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2208_4,
+	    "SAS2208",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2208_5,
+	    "SAS2208",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2208_6,
+	    "SAS2208",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2308_1,
+	    "SAS2308",
+	},
+	{
+	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2308_2,
+	    "SAS2308",
 	},
 	{
 	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_875J,
@@ -12340,18 +13008,6 @@ static const struct pci_known_product pci_known_products[] = {
 	    "MegaRAID",
 	},
 	{
-	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2008,
-	    "SAS2008",
-	},
-	{
-	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2108_1,
-	    "MegaRAID SAS2108 CRYPTO GEN2",
-	},
-	{
-	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_SAS2108_2,
-	    "MegaRAID SAS2108 GEN2",
-	},
-	{
 	    PCI_VENDOR_SYMBIOS, PCI_PRODUCT_SYMBIOS_PE_GNIC,
 	    "Packet Engines G-NIC",
 	},
@@ -12366,6 +13022,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_PERICOM, PCI_PRODUCT_PERICOM_PPB_2,
 	    "PCI-PCI",
+	},
+	{
+	    PCI_VENDOR_PERICOM, PCI_PRODUCT_PERICOM_PI7C9X130,
+	    "PI7C9X130 PCIE-PCIX",
 	},
 	{
 	    PCI_VENDOR_PLANEX, PCI_PRODUCT_PLANEX_FNW_3603_TX,
@@ -14020,6 +14680,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "GeForce 8800 GT",
 	},
 	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE_9800_GT,
+	    "GeForce 9800 GT",
+	},
+	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE_9600_GT,
 	    "GeForce 9600 GT",
 	},
@@ -14224,6 +14888,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "MCP73 LAN",
 	},
 	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE7100,
+	    "GeForce 7100",
+	},
+	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE7050,
 	    "GeForce 7050",
 	},
@@ -14318,6 +14986,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_ION_VGA,
 	    "ION VGA",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE_320M,
+	    "GeForce 320M",
 	},
 	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE210,
@@ -14572,8 +15244,60 @@ static const struct pci_known_product pci_known_products[] = {
 	    "MCP77 AHCI",
 	},
 	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GF108_HDA,
+	    "GF108 HD Audio",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_HB,
+	    "MCP89 Host",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_MEM_1,
+	    "MCP89 Memory",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_MEM_2,
+	    "MCP89 Memory",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_PPB_1,
+	    "MCP89 PCIE",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_SMB,
+	    "MCP89 SMBus",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_COPROC,
+	    "MCP89 Co-processor",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_MEM_4,
+	    "MCP89 Memory",
+	},
+	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_LAN,
 	    "MCP89 LAN",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_LPC,
+	    "MCP89 LPC",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_SATA_1,
+	    "MCP89 SATA",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_SATA_2,
+	    "MCP89 SATA",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_SATA_3,
+	    "MCP89 SATA",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_SATA_4,
+	    "MCP89 SATA",
 	},
 	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_AHCI_1,
@@ -14592,36 +15316,20 @@ static const struct pci_known_product pci_known_products[] = {
 	    "MCP89 AHCI",
 	},
 	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_AHCI_5,
-	    "MCP89 AHCI",
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_RAID_1,
+	    "MCP89 RAID",
 	},
 	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_AHCI_6,
-	    "MCP89 AHCI",
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_RAID_2,
+	    "MCP89 RAID",
 	},
 	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_AHCI_7,
-	    "MCP89 AHCI",
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_RAID_3,
+	    "MCP89 RAID",
 	},
 	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_AHCI_8,
-	    "MCP89 AHCI",
-	},
-	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_AHCI_9,
-	    "MCP89 AHCI",
-	},
-	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_AHCI_10,
-	    "MCP89 AHCI",
-	},
-	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_AHCI_11,
-	    "MCP89 AHCI",
-	},
-	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_AHCI_12,
-	    "MCP89 AHCI",
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_RAID_4,
+	    "MCP89 RAID",
 	},
 	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_HDA_1,
@@ -14638,6 +15346,26 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_HDA_4,
 	    "MCP89 HD Audio",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_PPB_2,
+	    "MCP89 PCIE",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_PPB_3,
+	    "MCP89 PCIE",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_OHCI,
+	    "MCP89 USB",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP89_EHCI,
+	    "MCP89 USB",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE_425M,
+	    "GeForce 425M",
 	},
 	{
 	    PCI_VENDOR_OAKTECH, PCI_PRODUCT_OAKTECH_OTI1007,
@@ -15164,12 +15892,28 @@ static const struct pci_known_product pci_known_products[] = {
 	    "PEX 8548",
 	},
 	{
+	    PCI_VENDOR_PLX, PCI_PRODUCT_PLX_PEX_8612,
+	    "PEX 8612",
+	},
+	{
+	    PCI_VENDOR_PLX, PCI_PRODUCT_PLX_PEX_8613,
+	    "PEX 8613",
+	},
+	{
+	    PCI_VENDOR_PLX, PCI_PRODUCT_PLX_PEX_8614,
+	    "PEX 8614",
+	},
+	{
 	    PCI_VENDOR_PLX, PCI_PRODUCT_PLX_PEX_8616,
 	    "PEX 8616",
 	},
 	{
 	    PCI_VENDOR_PLX, PCI_PRODUCT_PLX_PEX_8624,
 	    "PEX 8624",
+	},
+	{
+	    PCI_VENDOR_PLX, PCI_PRODUCT_PLX_PEX_8632,
+	    "PEX 8632",
 	},
 	{
 	    PCI_VENDOR_PLX, PCI_PRODUCT_PLX_PEX_8648,
@@ -15532,6 +16276,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "R1010 IDE",
 	},
 	{
+	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R1011_IDE,
+	    "R1011 IDE",
+	},
+	{
 	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R6021_HB,
 	    "R6021 Host",
 	},
@@ -15550,6 +16298,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_RDC, PCI_PRODUCT_RDC_R6061_EHCI,
 	    "R6061 USB",
+	},
+	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTS5209,
+	    "RTS5209 Card Reader",
 	},
 	{
 	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8029,
@@ -15598,6 +16350,18 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8185,
 	    "8185",
+	},
+	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8188,
+	    "8188CE",
+	},
+	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8190P,
+	    "RTL8190P",
+	},
+	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8192E,
+	    "RTL8192E",
 	},
 	{
 	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8187SE,
@@ -15666,6 +16430,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_R5U822,
 	    "5U822 SD/MMC",
+	},
+	{
+	    PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_R5U823,
+	    "5U823 SD/MMC",
 	},
 	{
 	    PCI_VENDOR_RICOH, PCI_PRODUCT_RICOH_R5U832,
@@ -16001,7 +16769,7 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_86C202,
-	    "86C202 VGA",
+	    "86C202 AGP",
 	},
 	{
 	    PCI_VENDOR_SIS, PCI_PRODUCT_SIS_648FX,
@@ -16478,6 +17246,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_SONY, PCI_PRODUCT_SONY_MEMSTICK_SLOT,
 	    "Memory Stick Slot",
+	},
+	{
+	    PCI_VENDOR_SONY, PCI_PRODUCT_SONY_RS780,
+	    "RS780 PCI-PCI",
 	},
 	{
 	    PCI_VENDOR_STALLION, PCI_PRODUCT_STALLION_EASYIO,
@@ -17420,6 +18192,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "VT8371 Host",
 	},
 	{
+	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6415,
+	    "VT6415 IDE",
+	},
+	{
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8501,
 	    "VT8501",
 	},
@@ -18152,6 +18928,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "VT8605 AGP",
 	},
 	{
+	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VX900_IDE,
+	    "VX900 IDE",
+	},
+	{
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VX800_SDMMC,
 	    "VX800 SD/MMC",
 	},
@@ -18856,6 +19636,10 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	    "Dynalink",
 	},
 	{
+	    PCI_VENDOR_COREGA2,
+	    "Corega",
+	},
+	{
 	    PCI_VENDOR_RHINO,
 	    "Rhino Equipment",
 	},
@@ -19290,6 +20074,10 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_PHILIPS,
 	    "Philips",
+	},
+	{
+	    PCI_VENDOR_CISCO,
+	    "Cisco",
 	},
 	{
 	    PCI_VENDOR_ZIATECH,
@@ -19898,6 +20686,14 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_QUMRANET,
 	    "Qumranet",
+	},
+	{
+	    PCI_VENDOR_ASMEDIA,
+	    "ASMedia",
+	},
+	{
+	    PCI_VENDOR_MARVELL2,
+	    "Marvell",
 	},
 	{
 	    PCI_VENDOR_SYMPHONY2,

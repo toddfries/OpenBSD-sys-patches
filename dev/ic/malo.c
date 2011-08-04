@@ -1,4 +1,4 @@
-/*	$OpenBSD: malo.c,v 1.90 2010/05/19 15:27:35 oga Exp $ */
+/*	$OpenBSD: malo.c,v 1.93 2011/07/03 21:35:38 dhill Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -26,6 +26,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/workq.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
@@ -248,10 +249,8 @@ int	malo_alloc_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring,
 	    int count);
 void	malo_reset_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring);
 void	malo_free_tx_ring(struct malo_softc *sc, struct malo_tx_ring *ring);
-int	malo_init(struct ifnet *ifp);
 int	malo_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data);
 void	malo_start(struct ifnet *ifp);
-void	malo_stop(struct malo_softc *sc);
 void	malo_watchdog(struct ifnet *ifp);
 int	malo_newstate(struct ieee80211com *ic, enum ieee80211_state nstate,
 	    int arg);
@@ -348,7 +347,6 @@ malo_attach(struct malo_softc *sc)
 
 	/* setup interface */
 	ifp->if_softc = sc;
-	ifp->if_init = malo_init;
 	ifp->if_ioctl = malo_ioctl;
 	ifp->if_start = malo_start;
 	ifp->if_watchdog = malo_watchdog;
@@ -474,7 +472,7 @@ malo_alloc_cmd(struct malo_softc *sc)
 
 	sc->sc_cookie = sc->sc_cmd_mem;
 	*sc->sc_cookie = htole32(0xaa55aa55);
-	sc->sc_cmd_mem = sc->sc_cmd_mem + sizeof(uint32_t);
+	sc->sc_cmd_mem = (caddr_t)sc->sc_cmd_mem + sizeof(uint32_t);
 	sc->sc_cookie_dmaaddr = sc->sc_cmd_dmam->dm_segs[0].ds_addr;
 	sc->sc_cmd_dmaaddr = sc->sc_cmd_dmam->dm_segs[0].ds_addr +
 	    sizeof(uint32_t);

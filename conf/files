@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.497 2010/07/13 16:47:03 deraadt Exp $
+#	$OpenBSD: files,v 1.525 2011/07/09 00:47:18 henning Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -15,7 +15,6 @@ define	atascsi {}
 define	ifmedia
 define	mii {[phy = -1]}
 define	midibus {}
-define	midisyn
 define	radiobus {}
 define	i2cbus {}
 define	gpiobus {}
@@ -324,11 +323,6 @@ file	dev/ic/pckbc.c			pckbc needs-flag
 device	pcfiic: i2cbus
 file	dev/ic/pcf8584.c		pcfiic
 
-# OPL2/OPL3 FM synth driver
-device	opl: midibus, midisyn
-file	dev/ic/opl.c			opl
-file	dev/ic/oplinstrs.c		opl
-
 # AC-97 CODECs
 define	ac97
 file	dev/ic/ac97.c			ac97
@@ -499,7 +493,7 @@ pseudo-device vnd: disk
 pseudo-device ccd: disk
 pseudo-device raid: disk
 pseudo-device rd: disk
-file	dev/ramdisk.c			rd needs-flag
+file	dev/rd.c			rd needs-flag
 
 pseudo-device pty: tty
 pseudo-device nmea: tty
@@ -523,6 +517,7 @@ pseudo-device crypto: ifnet
 pseudo-device trunk: ifnet, ether, ifmedia
 pseudo-device mpe: ifnet, ether
 pseudo-device vether: ifnet, ether
+pseudo-device pppx: ifnet
 
 pseudo-device sequencer
 pseudo-device systrace
@@ -563,10 +558,8 @@ file altq/altq_subr.c			altq
 file altq/altq_red.c			altq
 file altq/altq_cbq.c			altq
 file altq/altq_rmclass.c		altq
-file altq/altq_cdnr.c			altq_cdnr
 file altq/altq_hfsc.c			altq
 file altq/altq_priq.c			altq
-file altq/altq_rio.c			altq_rio
 file ddb/db_access.c			ddb | kgdb
 file ddb/db_aout.c			ddb
 file ddb/db_break.c			ddb
@@ -605,7 +598,6 @@ file dev/ic/lm700x.c			lm700x
 file dev/ic/tc921x.c			tc921x
 file dev/ic/pt2254a.c			pt2254a
 file dev/midi.c				midi | midibus		needs-flag
-file dev/midisyn.c			midisyn
 file dev/mulaw.c			mulaw
 file dev/sequencer.c			sequencer		needs-flag
 file dev/systrace.c			systrace		needs-flag
@@ -729,6 +721,7 @@ file kern/subr_autoconf.c
 file kern/subr_disk.c
 file kern/subr_evcount.c
 file kern/subr_extent.c
+file kern/subr_hibernate.c		hibernate
 file kern/subr_log.c
 file kern/subr_pool.c
 file kern/dma_alloc.c
@@ -765,7 +758,6 @@ file kern/vfs_bio.c
 file kern/vfs_biomem.c
 file kern/vfs_cache.c
 file kern/vfs_cluster.c
-file kern/vfs_conf.c
 file kern/vfs_default.c
 file kern/vfs_init.c
 file kern/vfs_lockf.c
@@ -773,13 +765,12 @@ file kern/vfs_lookup.c
 file kern/vfs_subr.c
 file kern/vfs_sync.c
 file kern/vfs_syscalls.c
+file kern/vfs_vops.c
 file kern/vfs_vnops.c
 file kern/vfs_getcwd.c
-file kern/vnode_if.c
+file kern/spec_vnops.c
 file miscfs/deadfs/dead_vnops.c
 file miscfs/fifofs/fifo_vnops.c		fifo
-file miscfs/portal/portal_vfsops.c	portal
-file miscfs/portal/portal_vnops.c	portal
 file miscfs/procfs/procfs_cmdline.c	procfs
 file miscfs/procfs/procfs_ctl.c		procfs
 file miscfs/procfs/procfs_linux.c	procfs
@@ -788,8 +779,6 @@ file miscfs/procfs/procfs_status.c	procfs
 file miscfs/procfs/procfs_subr.c	procfs
 file miscfs/procfs/procfs_vfsops.c	procfs
 file miscfs/procfs/procfs_vnops.c	procfs
-file miscfs/specfs/spec_vnops.c
-file miscfs/specfs/spec_subr.c
 file msdosfs/msdosfs_conv.c		msdosfs
 file msdosfs/msdosfs_denode.c		msdosfs
 file msdosfs/msdosfs_fat.c		msdosfs
@@ -813,10 +802,10 @@ file net/if_loop.c			loop
 file net/if_media.c			ifmedia
 file net/if_sl.c			sl			needs-count
 file net/if_ppp.c			ppp			needs-count
+file net/netisr.c
 file net/ppp_tty.c			ppp
 file net/bsd-comp.c			ppp_bsdcomp
 file net/ppp-deflate.c			ppp_deflate
-file net/zlib.c				ppp_deflate | ipsec | crypto
 file net/if_tun.c			tun			needs-count
 file net/if_bridge.c			bridge			needs-count
 file net/bridgestp.c			bridge
@@ -835,6 +824,7 @@ file net/if_trunk.c			trunk			needs-count
 file net/trunklacp.c			trunk
 file net/if_mpe.c			mpe			needs-count
 file net/if_vether.c			vether			needs-count
+file net/if_pppx.c			pppx			needs-count
 file net/if_aoe.c			ether & aoe
 file net80211/ieee80211.c		wlan
 file net80211/ieee80211_amrr.c		wlan
@@ -890,7 +880,6 @@ file crypto/sha1.c			(inet & ipsec) | crypto | carp | wlan
 file crypto/sha2.c			(inet & ipsec) | crypto | wlan
 file crypto/blf.c			(inet & ipsec) | crypto | vnd
 file crypto/cast.c			(inet & ipsec) | crypto
-file crypto/skipjack.c			(inet & ipsec) | crypto
 file crypto/ecb_enc.c			(inet & ipsec) | crypto
 file crypto/set_key.c			(inet & ipsec) | crypto
 file crypto/ecb3_enc.c			(inet & ipsec) | crypto
@@ -899,19 +888,14 @@ file crypto/cryptodev.c			((inet & ipsec) | crypto)	needs-flag
 file crypto/criov.c			(inet & ipsec) | crypto
 file crypto/cryptosoft.c		(inet & ipsec) | crypto
 file crypto/xform.c			(inet & ipsec) | crypto
-file crypto/deflate.c			(inet & ipsec) | crypto
+file crypto/xform_ipcomp.c		(inet & ipsec) | crypto
 file crypto/arc4.c			
 file crypto/michael.c			wlan
 file crypto/cmac.c			wlan
 file crypto/hmac.c			wlan | (softraid & crypto)
+file crypto/gmac.c			(inet & ipsec) | crypto
 file crypto/key_wrap.c			wlan
 file crypto/idgen.c			inet6 | nfsclient | nfsserver
-file netatalk/aarp.c			netatalk
-file netatalk/at_control.c		netatalk
-file netatalk/at_proto.c		netatalk
-file netatalk/ddp_input.c		netatalk
-file netatalk/ddp_output.c		netatalk
-file netatalk/ddp_usrreq.c		netatalk
 file netbt/bt_input.c			bluetooth		needs-flag
 file netbt/bt_proto.c			bluetooth
 file netbt/hci_event.c			bluetooth
@@ -1014,7 +998,6 @@ file uvm/uvm_object.c
 file uvm/uvm_page.c
 file uvm/uvm_pager.c
 file uvm/uvm_pdaemon.c
-file uvm/uvm_pglist.c
 file uvm/uvm_pmemrange.c
 file uvm/uvm_stat.c
 file uvm/uvm_swap.c
@@ -1022,7 +1005,6 @@ file uvm/uvm_swap_encrypt.c		uvm_swap_encrypt
 file uvm/uvm_unix.c
 file uvm/uvm_user.c
 file uvm/uvm_vnode.c
-file dev/rd.c				ramdisk_hooks
 
 # IPv6
 file net/if_faith.c			faith			needs-count
@@ -1063,23 +1045,7 @@ file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
 file compat/common/compat_exec.c	!small_kernel
 file compat/common/compat_util.c	!small_kernel
 file compat/common/compat_dir.c		!small_kernel
-file compat/common/compat_vm.c		!small_kernel &
-	(compat_freebsd | compat_linux)
-file compat/common/kern_info_09.c	!small_kernel &
-	(compat_freebsd | compat_linux)
-file compat/common/kern_ipc_10.c	!small_kernel & compat_freebsd
-file compat/common/vfs_syscalls_25.c	!small_kernel & compat_freebsd
-file compat/common/vfs_syscalls_35.c	!small_kernel & (compat_35 |
-	compat_freebsd )
-file compat/common/kern_ipc_35.c	!small_kernel & compat_35
-file compat/common/kern_exit_43.c	!small_kernel
-file compat/common/kern_info_43.c	!small_kernel
-file compat/common/kern_resource_43.c	!small_kernel
-file compat/common/kern_sig_43.c	!small_kernel
-file compat/common/tty_43.c		!small_kernel
-file compat/common/uipc_syscalls_43.c	!small_kernel
-file compat/common/vfs_syscalls_43.c	!small_kernel
-file compat/common/vm_43.c		!small_kernel
+file compat/common/tty_43.c		compat_43
 
 # libx86emu
 file dev/x86emu/x86emu.c		x86emu
@@ -1089,6 +1055,8 @@ file dev/x86emu/x86emu_util.c		x86emu
 file lib/libkern/mcount.c		gprof
 file lib/libkern/getsn.c
 file lib/libkern/random.c
+file lib/libkern/explicit_bzero.c
+file lib/libkern/timingsafe_bcmp.c
 file lib/libkern/arch/${MACHINE_ARCH}/strchr.S | lib/libkern/strchr.c
 file lib/libkern/arch/${MACHINE_ARCH}/strrchr.S | lib/libkern/strrchr.c
 file lib/libkern/arch/${MACHINE_ARCH}/__main.S | lib/libkern/__main.c
@@ -1121,3 +1089,16 @@ file lib/libkern/arch/${MACHINE_ARCH}/skpc.S | lib/libkern/skpc.c
 file lib/libkern/arch/${MACHINE_ARCH}/htonl.S | lib/libkern/htonl.c
 file lib/libkern/arch/${MACHINE_ARCH}/htons.S | lib/libkern/htons.c
 file lib/libkern/arch/${MACHINE_ARCH}/strncasecmp.S | lib/libkern/strncasecmp.c
+
+file lib/libz/adler32.c			ppp_deflate | ipsec | crypto | bios
+file lib/libz/crc32.c			ppp_deflate | ipsec | crypto
+file lib/libz/infback.c			ppp_deflate | ipsec | crypto
+file lib/libz/inffast.c			ppp_deflate | ipsec | crypto
+file lib/libz/inflate.c			ppp_deflate | ipsec | crypto
+file lib/libz/inftrees.c		ppp_deflate | ipsec | crypto
+file lib/libz/deflate.c			ppp_deflate | ipsec | crypto
+file lib/libz/zutil.c			ppp_deflate | ipsec | crypto
+file lib/libz/zopenbsd.c		ppp_deflate | ipsec | crypto
+file lib/libz/trees.c			ppp_deflate | ipsec | crypto
+file lib/libz/compress.c		ppp_deflate | ipsec | crypto
+

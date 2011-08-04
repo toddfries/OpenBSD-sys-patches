@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.40 2010/07/06 06:25:56 deraadt Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.47 2010/11/13 04:16:42 guenther Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -116,7 +116,7 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 			if (rsdp->revision == 0 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp1)) == 0)
 				return (ptr);
-			else if (rsdp->revision >= 2 && rsdp->revision <= 3 &&
+			else if (rsdp->revision >= 2 && rsdp->revision <= 4 &&
 			    acpi_checksum(ptr, sizeof(struct acpi_rsdp)) == 0)
 				return (ptr);
 		}
@@ -207,10 +207,11 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		return (ENXIO);
 	}
 
+	rtcstop();
+
 	/* amd64 does not do lazy pmap_activate */
 
 	/*
-	 *
 	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0
 	 * implementations - it's in the FACS table as wakeup_vector and
 	 * indicates a 32-bit physical address containing real-mode wakeup
@@ -219,10 +220,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	 * The second wakeup vector is in the FACS table as
 	 * x_wakeup_vector and indicates a 64-bit physical address
 	 * containing protected-mode wakeup code.
-	 *
 	 */
 	sc->sc_facs->wakeup_vector = (u_int32_t)ACPI_TRAMPOLINE;
-	if (sc->sc_facs->version == 1)
+	if (sc->sc_facs->length > 32 && sc->sc_facs->version >= 1)
 		sc->sc_facs->x_wakeup_vector = 0;
 
 	/* Copy the current cpu registers into a safe place for resume.
@@ -242,11 +242,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 	}
 
 	/* Resume path continues here */
-#if 0
-	/* Temporarily disabled for debugging purposes */
-	/* Reset the wakeup vector to avoid resuming on reboot */
+
+	/* Reset the vector */
 	sc->sc_facs->wakeup_vector = 0;
-#endif
 
 #if NISA > 0
 	i8259_default_setup();
@@ -255,7 +253,8 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 #if NLAPIC > 0
 	lapic_enable();
-	lapic_initclocks();
+	if (initclock_func == lapic_initclocks)
+		lapic_startclock();
 	lapic_set_lvt();
 #endif
 
@@ -268,7 +267,9 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 #if NIOAPIC > 0
 	ioapic_enable();
 #endif
-	initrtclock();
+	i8254_startclock();
+	if (initclock_func == i8254_initclocks)
+		rtcstart();		/* in i8254 mode, rtc is profclock */
 	inittodr(time_second);
 
 	return (0);
@@ -302,7 +303,7 @@ acpi_resume_machdep(void)
 		p = ci->ci_schedstate.spc_idleproc;
 		pcb = &p->p_addr->u_pcb;
 
-		tf = (struct trapframe *)pcb->pcb_tss.tss_rsp0 - 1;
+		tf = (struct trapframe *)pcb->pcb_kstack - 1;
 		sf = (struct switchframe *)tf - 1;
 		sf->sf_r12 = (u_int64_t)sched_idle;
 		sf->sf_r13 = (u_int64_t)ci;

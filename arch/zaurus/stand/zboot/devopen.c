@@ -1,4 +1,4 @@
-/*	$OpenBSD: devopen.c,v 1.6 2007/06/27 20:29:38 mk Exp $	*/
+/*	$OpenBSD: devopen.c,v 1.10 2011/06/26 23:19:11 tedu Exp $	*/
 
 /*
  * Copyright (c) 1996-1999 Michael Shalayeff
@@ -34,17 +34,17 @@
 
 /* XXX use slot for 'rd' for 'hd' pseudo-device */
 const char bdevs[][4] = {
-	"wd", "", "fd", "", "sd", "st", "cd", "mcd",
-	"", "", "", "", "", "", "", "scd", "", "hd", ""
+	"wd", "", "fd", "", "sd", "st", "cd", "",
+	"", "", "", "", "", "", "", "", "", "hd", ""
 
 };
-const int nbdevs = NENTS(bdevs);
+const int nbdevs = nitems(bdevs);
 
 const char cdevs[][4] = {
 	"cn", "", "", "", "", "", "", "",
 	"", "", "", "", "com"
 };
-const int ncdevs = NENTS(cdevs);
+const int ncdevs = nitems(cdevs);
 
 /* pass dev_t to the open routines */
 int

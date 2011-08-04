@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.60 2010/04/09 19:24:17 jasper Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.64 2011/04/15 20:52:55 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -253,6 +253,8 @@ printf("vI %d ", irq);
 		o_intrtype[irq] = type;
 		break;
 	case IST_EDGE:
+		intr_shared_edge = 1;
+		/* FALLTHROUGH */
 	case IST_LEVEL:
 		if (type == o_intrtype[irq])
 			break;
@@ -290,8 +292,7 @@ printf("vI %d ", irq);
 	ih->ih_next = NULL;
 	ih->ih_level = level;
 	ih->ih_irq = irq;
-	evcount_attach(&ih->ih_count, name, (void *)&o_hwirq[irq],
-	    &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &o_hwirq[irq]);
 	*p = ih;
 
 	return (ih);
@@ -399,9 +400,9 @@ openpic_calc_mask()
 		if (o_virq[irq] != 0) {
 			/* Enable (dont mask) interrupts at lower levels */ 
 			for (i = IPL_NONE; i < min; i++)
-				imask[i] &= ~(1 << o_virq[irq]);
+				cpu_imask[i] &= ~(1 << o_virq[irq]);
 			for (; i <= IPL_HIGH; i++)
-				imask[i] |= (1 << o_virq[irq]);
+				cpu_imask[i] |= (1 << o_virq[irq]);
 		}
 	}
 
@@ -410,11 +411,11 @@ openpic_calc_mask()
 
 	for (i = IPL_NONE; i <= IPL_HIGH; i++) {
 		if (i > IPL_NONE)
-			imask[i] |= SINT_ALLMASK;
+			cpu_imask[i] |= SINT_ALLMASK;
 		if (i >= IPL_CLOCK)
-			imask[i] |= SPL_CLOCKMASK;
+			cpu_imask[i] |= SPL_CLOCKMASK;
 	}
-	imask[IPL_HIGH] = 0xffffffff;
+	cpu_imask[IPL_HIGH] = 0xffffffff;
 }
 
 /*
@@ -484,12 +485,12 @@ openpic_do_pending_int()
 	while (hwpend) {
 		/* this still doesn't handle the interrupts in priority order */
 		for (pri = IPL_HIGH; pri >= IPL_NONE; pri--) {
-			pripending = hwpend & ~imask[pri];
+			pripending = hwpend & ~cpu_imask[pri];
 			if (pripending == 0)
 				continue;
 			irq = 31 - cntlzw(pripending);
 			ci->ci_ipending &= ~(1 << irq);
-			ci->ci_cpl = imask[o_intrmaxlvl[o_hwirq[irq]]];
+			ci->ci_cpl = cpu_imask[o_intrmaxlvl[o_hwirq[irq]]];
 			openpic_enable_irq_mask(~ci->ci_cpl);
 			ih = o_intrhand[irq];
 			while(ih) {
@@ -666,7 +667,7 @@ openpic_send_ipi(struct cpu_info *ci, int id)
 		id = 1;
 		break;
 	default:
-		panic("invalid ipi send to cpu %d %d\n", ci->ci_cpuid, id);
+		panic("invalid ipi send to cpu %d %d", ci->ci_cpuid, id);
 	}
 		
 		
@@ -680,7 +681,7 @@ ext_intr_openpic()
 {
 	struct cpu_info *ci = curcpu();
 	int irq, realirq;
-	int r_imen;
+	int r_imen, ret;
 	int pcpl, ocpl;
 	struct intrhand *ih;
 
@@ -714,23 +715,26 @@ ext_intr_openpic()
 		if ((pcpl & r_imen) != 0) {
 			/* Masked! Mark this as pending. */
 			ci->ci_ipending |= r_imen;
-			openpic_enable_irq_mask(~imask[o_intrmaxlvl[realirq]]);
+			openpic_enable_irq_mask(~cpu_imask[o_intrmaxlvl[realirq]]);
 			openpic_eoi(ci->ci_cpuid);
 		} else {
-			openpic_enable_irq_mask(~imask[o_intrmaxlvl[realirq]]);
+			openpic_enable_irq_mask(~cpu_imask[o_intrmaxlvl[realirq]]);
 			openpic_eoi(ci->ci_cpuid);
-			ocpl = splraise(imask[o_intrmaxlvl[realirq]]);
+			ocpl = splraise(cpu_imask[o_intrmaxlvl[realirq]]);
 
 			ih = o_intrhand[irq];
 			while (ih) {
 				ppc_intr_enable(1);
 
 				KERNEL_LOCK();
-				if ((*ih->ih_fun)(ih->ih_arg))
+				ret = (*ih->ih_fun)(ih->ih_arg);
+				if (ret)
 					ih->ih_count.ec_count++;
 				KERNEL_UNLOCK();
 
 				(void)ppc_intr_disable();
+				if (intr_shared_edge == 00 && ret == 1)
+					break;
 				ih = ih->ih_next;
 			}
 
@@ -789,14 +793,10 @@ openpic_init()
 	x |= (15 << OPENPIC_PRIORITY_SHIFT) | IPI_VECTOR_DDB;
 	openpic_write(OPENPIC_IPI_VECTOR(1), x);
 
-	evcount_attach(&ipi_nop[0], "ipi_nop0", (void *)&ipi_nopirq,
-	    &evcount_intr);
-	evcount_attach(&ipi_nop[1], "ipi_nop1", (void *)&ipi_nopirq,
-	    &evcount_intr);
-	evcount_attach(&ipi_ddb[0], "ipi_ddb0", (void *)&ipi_ddbirq,
-	    &evcount_intr);
-	evcount_attach(&ipi_ddb[1], "ipi_ddb1", (void *)&ipi_ddbirq,
-	    &evcount_intr);
+	evcount_attach(&ipi_nop[0], "ipi_nop0", &ipi_nopirq);
+	evcount_attach(&ipi_nop[1], "ipi_nop1", &ipi_nopirq);
+	evcount_attach(&ipi_ddb[0], "ipi_ddb0", &ipi_ddbirq);
+	evcount_attach(&ipi_ddb[1], "ipi_ddb1", &ipi_ddbirq);
 #endif
 
 	/* XXX set spurious intr vector */

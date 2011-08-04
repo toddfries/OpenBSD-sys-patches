@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_clock.c,v 1.70 2010/01/14 23:12:11 schwarze Exp $	*/
+/*	$OpenBSD: kern_clock.c,v 1.72 2011/03/07 07:07:13 guenther Exp $	*/
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-
@@ -317,7 +317,7 @@ hardclock(struct clockframe *frame)
  * compute the second argument to timeout_add() from an absolute time.
  */
 int
-hzto(struct timeval *tv)
+hzto(const struct timeval *tv)
 {
 	struct timeval now;
 	unsigned long ticks;
@@ -369,7 +369,7 @@ hzto(struct timeval *tv)
  * Compute number of hz in the specified amount of time.
  */
 int
-tvtohz(struct timeval *tv)
+tvtohz(const struct timeval *tv)
 {
 	unsigned long ticks;
 	long sec, usec;
@@ -491,7 +491,7 @@ statclock(struct clockframe *frame)
 		 * If this process is being profiled record the tick.
 		 */
 		p->p_uticks++;
-		if (p->p_nice > NZERO)
+		if (p->p_p->ps_nice > NZERO)
 			spc->spc_cp_time[CP_NICE]++;
 		else
 			spc->spc_cp_time[CP_USER]++;

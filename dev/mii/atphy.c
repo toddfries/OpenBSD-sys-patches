@@ -1,4 +1,4 @@
-/*	$OpenBSD: atphy.c,v 1.4 2009/07/25 12:23:40 martynas Exp $	*/
+/*	$OpenBSD: atphy.c,v 1.6 2011/06/17 09:59:52 kevlo Exp $	*/
 
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
@@ -81,9 +81,13 @@ const struct mii_phy_funcs atphy_funcs = {
         atphy_service, atphy_status, atphy_reset,
 };
 
-static const struct mii_phydesc etphys[] = {
+static const struct mii_phydesc atphys[] = {
 	{ MII_OUI_ATHEROS,	MII_MODEL_ATHEROS_F1,
 	  MII_STR_ATHEROS_F1 },
+	{ MII_OUI_ATHEROS,	MII_MODEL_ATHEROS_F1_7,
+	  MII_STR_ATHEROS_F1_7 },
+	{ MII_OUI_ATHEROS,	MII_MODEL_ATHEROS_F2,
+	  MII_STR_ATHEROS_F2 },
 	{ 0,			0,
 	  NULL },
 };
@@ -102,7 +106,7 @@ atphy_match(struct device *parent, void *match, void *aux)
 {
 	struct mii_attach_args *ma = aux;
 
-	if (mii_phy_match(ma, etphys) != NULL)
+	if (mii_phy_match(ma, atphys) != NULL)
 		return (10);
 
 	return (0);
@@ -116,12 +120,13 @@ atphy_attach(struct device *parent, struct device *self, void *aux)
 	struct mii_data *mii = ma->mii_data;
 	const struct mii_phydesc *mpd;
 
-	mpd = mii_phy_match(ma, etphys);
+	mpd = mii_phy_match(ma, atphys);
 	printf(": %s, rev. %d\n", mpd->mpd_name, MII_REV(ma->mii_id2));
 
 	sc->mii_inst = mii->mii_instance;
 	sc->mii_phy = ma->mii_phyno;
 	sc->mii_funcs = &atphy_funcs;
+	sc->mii_model = MII_MODEL(ma->mii_id2);
 	sc->mii_pdata = mii;
 	sc->mii_flags = ma->mii_flags;
 	sc->mii_anegticks = MII_ANEGTICKS_GIGE;
@@ -257,7 +262,7 @@ done:
 		 * Only retry autonegotiation every mii_anegticks seconds.
 		 */
 		if (sc->mii_ticks <= sc->mii_anegticks)
-			break;
+			return (0);
 
 		sc->mii_ticks = 0;
 		atphy_mii_phy_auto(sc);
@@ -379,6 +384,18 @@ atphy_mii_phy_auto(struct mii_softc *sc)
 	if (sc->mii_extcapabilities & (EXTSR_1000TFDX | EXTSR_1000THDX))
 		PHY_WRITE(sc, MII_100T2CR, GTCR_ADV_1000TFDX |
 		    GTCR_ADV_1000THDX);
+	else if (sc->mii_model == MII_MODEL_ATHEROS_F1) {
+		/*
+		 * AR8132 has 10/100 PHY and the PHY uses the same
+		 * model number of F1 gigabit PHY.  The PHY has no
+		 * ability to establish gigabit link so explicitly
+		 * disable 1000baseT configuration for the PHY.
+		 * Otherwise, there is a case that atphy(4) could
+		 * not establish a link against gigabit link partner
+		 * unless the link partner supports down-shifting.
+		 */
+		PHY_WRITE(sc, MII_100T2CR, 0);
+	}
 	PHY_WRITE(sc, MII_BMCR, BMCR_RESET | BMCR_AUTOEN | BMCR_STARTNEG);
 
 	return (EJUSTRETURN);

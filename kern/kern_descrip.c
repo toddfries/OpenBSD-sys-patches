@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.84 2010/07/19 23:00:15 guenther Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.88 2011/07/08 21:26:27 matthew Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -59,6 +59,7 @@
 #include <sys/syscallargs.h>
 #include <sys/event.h>
 #include <sys/pool.h>
+#include <sys/ktrace.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -312,6 +313,7 @@ restart:
 	switch (SCARG(uap, cmd)) {
 
 	case F_DUPFD:
+	case F_DUPFD_CLOEXEC:
 		newmin = (long)SCARG(uap, arg);
 		if ((u_int)newmin >= p->p_rlimit[RLIMIT_NOFILE].rlim_cur ||
 		    (u_int)newmin >= maxfiles) {
@@ -332,6 +334,9 @@ restart:
 			error = finishdup(p, fp, fd, i, retval);
 		else
 			FRELE(fp);
+
+		if (!error && SCARG(uap, cmd) == F_DUPFD_CLOEXEC)
+			fdp->fd_ofileflags[i] |= UF_EXCLOSE;
 
 		fdpunlock(fdp);
 		return (error);
@@ -389,12 +394,12 @@ restart:
 		if ((long)SCARG(uap, arg) <= 0) {
 			SCARG(uap, arg) = (void *)(-(long)SCARG(uap, arg));
 		} else {
-			struct proc *p1 = pfind((long)SCARG(uap, arg));
-			if (p1 == 0) {
+			struct process *pr1 = prfind((long)SCARG(uap, arg));
+			if (pr1 == 0) {
 				error = ESRCH;
 				break;
 			}
-			SCARG(uap, arg) = (void *)(long)p1->p_pgrp->pg_id;
+			SCARG(uap, arg) = (void *)(long)pr1->ps_pgrp->pg_id;
 		}
 		error = ((*fp->f_ops->fo_ioctl)
 			(fp, TIOCSPGRP, (caddr_t)&SCARG(uap, arg), p));
@@ -632,6 +637,10 @@ sys_fstat(struct proc *p, void *v, register_t *retval)
 		error = copyout((caddr_t)&ub, (caddr_t)SCARG(uap, sb),
 		    sizeof (ub));
 	}
+#ifdef KTRACE
+	if (error == 0 && KTRPOINT(p, KTR_STRUCT))
+		ktrstat(p, &ub);
+#endif
 	return (error);
 }
 
@@ -1192,7 +1201,7 @@ dupfdopen(struct filedesc *fdp, int indx, int dfd, int mode, int error)
 	 * Assume that the filename was user-specified; applications do
 	 * not tend to open /dev/fd/# when they can just call dup()
 	 */
-	if ((curproc->p_flag & (P_SUGIDEXEC | P_SUGID))) {
+	if ((curproc->p_p->ps_flags & (PS_SUGIDEXEC | PS_SUGID))) {
 		if (curproc->p_descfd == 255)
 			return (EPERM);
 		if (curproc->p_descfd != curproc->p_dupfd)

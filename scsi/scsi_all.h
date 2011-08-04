@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_all.h,v 1.49 2010/06/29 21:12:01 krw Exp $	*/
+/*	$OpenBSD: scsi_all.h,v 1.53 2011/07/08 08:13:19 dlg Exp $	*/
 /*	$NetBSD: scsi_all.h,v 1.10 1996/09/12 01:57:17 thorpej Exp $	*/
 
 /*
@@ -85,6 +85,7 @@ struct scsi_inquiry {
 #define SI_PG_SUPPORTED	0x00
 #define SI_PG_SERIAL	0x80
 #define SI_PG_DEVID	0x83
+#define SI_PG_ATA	0x89
 	u_int8_t length[2];
 	u_int8_t control;
 };
@@ -262,8 +263,7 @@ struct scsi_inquiry_data {
 struct scsi_vpd_hdr {
 	u_int8_t device;
 	u_int8_t page_code;
-	u_int8_t reserved;
-	u_int8_t page_length;
+	u_int8_t page_length[2];
 };
 
 struct scsi_vpd_serial {
@@ -307,6 +307,21 @@ struct scsi_vpd_devid_hdr {
 #define VPD_DEVID_TYPE_NAME		0x8
 	u_int8_t reserved;
 	u_int8_t len;
+};
+
+struct scsi_vpd_ata {
+	struct scsi_vpd_hdr hdr;
+
+	u_int8_t _reserved1[4];
+	u_int8_t sat_vendor[8];
+	u_int8_t sat_product[16];
+	u_int8_t sat_revision[4];
+	u_int8_t device_signature[20];
+	u_int8_t command_code;
+#define VPD_ATA_COMMAND_CODE_ATA	0xec
+#define VPD_ATA_COMMAND_CODE_ATAPI	0xa1
+	u_int8_t _reserved2[3];
+	u_int8_t identify[512];
 };
 
 struct scsi_sense_data_unextended {
@@ -430,6 +445,9 @@ struct scsi_mode_header_big {
 	u_int8_t reserved2;
 	u_int8_t blk_desc_len[2];
 };
+
+/* Both disks and tapes use dev_spec to report READONLY status. */
+#define	SMH_DSP_WRITE_PROT	0x80
 
 union scsi_mode_sense_buf {
 	struct scsi_mode_header hdr;

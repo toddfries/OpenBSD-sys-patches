@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82093var.h,v 1.9 2009/08/22 02:54:50 mk Exp $	*/
+/*	$OpenBSD: i82093var.h,v 1.11 2011/05/21 15:14:57 kettenis Exp $	*/
 /* $NetBSD: i82093var.h,v 1.1 2003/02/26 21:26:10 fvdl Exp $ */
 
 /*-
@@ -32,8 +32,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _I386_I82093VAR_H_
-#define _I386_I82093VAR_H_
+#ifndef _MACHINE_I82093VAR_H_
+#define _MACHINE_I82093VAR_H_
 
 #include <machine/apicvar.h>
 
@@ -71,6 +71,7 @@ struct ioapic_softc {
  */
 
 #define APIC_INT_VIA_APIC	0x10000000
+#define APIC_INT_VIA_MSG	0x20000000
 #define APIC_INT_APIC_MASK	0x00ff0000
 #define APIC_INT_APIC_SHIFT	16
 #define APIC_INT_PIN_MASK	0x0000ff00
@@ -98,4 +99,4 @@ extern struct ioapic_softc *ioapics;
 extern u_int16_t ioapic_id_map;
 extern u_int8_t ioapic_id_remap[];
 
-#endif /* !_I386_I82093VAR_H_ */
+#endif /* !_MACHINE_I82093VAR_H_ */

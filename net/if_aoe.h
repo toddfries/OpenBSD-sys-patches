@@ -1,4 +1,4 @@
-/* $OpenBSD: if_aoe.h,v 1.1 2008/11/23 23:44:01 tedu Exp $ */
+/* $OpenBSD: if_aoe.h,v 1.3 2011/07/04 03:18:01 tedu Exp $ */
 /*
  * Copyright (c) 2007 Ted Unangst <tedu@openbsd.org>
  *
@@ -15,6 +15,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 #include <sys/workq.h>
+#include <sys/timeout.h>	/* for struct timeout */
 
 struct aoe_packet {
 #define	AOE_F_ERROR	(1 << 2)

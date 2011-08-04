@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.105 2010/04/08 00:23:53 tedu Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.109 2011/07/07 20:42:56 henning Exp $	*/
 /*	$NetBSD: if_de.c,v 1.58 1998/01/12 09:39:58 thorpej Exp $	*/
 
 /*-
@@ -224,7 +224,6 @@ int tulip_busdma_init(tulip_softc_t * const sc);
 void tulip_initcsrs(tulip_softc_t * const sc, bus_addr_t csr_base, size_t csr_size);
 void tulip_initring(tulip_softc_t * const sc, tulip_ringinfo_t * const ri,
     tulip_desc_t *descs, int ndescs);
-void tulip_shutdown(void *arg);
 
 bus_dmamap_t tulip_alloc_rxmap(tulip_softc_t *);
 void tulip_free_rxmap(tulip_softc_t *, bus_dmamap_t);
@@ -3062,7 +3061,7 @@ tulip_reset(tulip_softc_t * const sc)
 		      TULIP_BUSMODE_DESC_BIGENDIAN : 0));
 
     sc->tulip_txtimer = 0;
-    sc->tulip_txq.ifq_maxlen = TULIP_TXDESCS;
+    IFQ_SET_MAXLEN(&sc->tulip_txq, TULIP_TXDESCS);
     /*
      * Free all the mbufs that were on the transmit ring.
      */
@@ -3206,7 +3205,7 @@ tulip_rx_intr(tulip_softc_t * const sc)
 	bus_dmamap_t map;
 	int error;
 
-	if (fillok && sc->tulip_rxq.ifq_len < TULIP_RXQ_TARGET)
+	if (fillok && IF_LEN(&sc->tulip_rxq) < TULIP_RXQ_TARGET)
 	    goto queue_mbuf;
 
 #if defined(TULIP_DEBUG)
@@ -3459,7 +3458,7 @@ tulip_rx_intr(tulip_softc_t * const sc)
 	    IF_ENQUEUE(&sc->tulip_rxq, ms);
 	} while ((ms = me) != NULL);
 
-	if (sc->tulip_rxq.ifq_len >= TULIP_RXQ_TARGET)
+	if (IF_LEN(&sc->tulip_rxq) >= TULIP_RXQ_TARGET)
 	    sc->tulip_flags &= ~TULIP_RXBUFSLOW;
 	TULIP_PERFEND(rxget);
     }
@@ -3608,7 +3607,7 @@ tulip_print_abnormal_interrupt(tulip_softc_t * const sc, u_int32_t csr)
     u_int32_t mask;
     const char thrsh[] = "72|128\0\0\0" "96|256\0\0\0" "128|512\0\0" "160|1024\0";
 
-    csr &= (1 << (sizeof(tulip_status_bits)/sizeof(tulip_status_bits[0]))) - 1;
+    csr &= (1 << (nitems(tulip_status_bits))) - 1;
     printf(TULIP_PRINTF_FMT ": abnormal interrupt:", TULIP_PRINTF_ARGS);
     for (sep = " ", mask = 1; mask <= csr; mask <<= 1, msgp++) {
 	if ((csr & mask) && *msgp != NULL) {
@@ -4521,16 +4520,6 @@ tulip_probe(struct device *parent, void *match, void *aux)
 }
 
 void
-tulip_shutdown(void *arg)
-{
-    tulip_softc_t * const sc = arg;
-    TULIP_CSR_WRITE(sc, csr_busmode, TULIP_BUSMODE_SWRESET);
-    DELAY(10);	/* Wait 10 microseconds (actually 50 PCI cycles but at
-		   33MHz that comes to two microseconds but wait a
-		   bit longer anyways) */
-}
-
-void
 tulip_attach(struct device * const parent, struct device * const self, void * const aux)
 {
     tulip_softc_t * const sc = (tulip_softc_t *) self;
@@ -4702,11 +4691,6 @@ tulip_attach(struct device * const parent, struct device * const self, void * co
 			== TULIP_HAVE_ISVSROM ? " (invalid EESPROM checksum)" : "",
 		   intrstr, ether_sprintf(sc->tulip_enaddr));
 	}
-
-	sc->tulip_ats = shutdownhook_establish(tulip_shutdown, sc);
-	if (sc->tulip_ats == NULL)
-	    printf("%s: warning: couldn't establish shutdown hook\n",
-		   sc->tulip_xname);
 
 	ifp->if_flags = IFF_BROADCAST|IFF_SIMPLEX|IFF_NOTRAILERS|IFF_MULTICAST;
 	ifp->if_ioctl = tulip_ifioctl;

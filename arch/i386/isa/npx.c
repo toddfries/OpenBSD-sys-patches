@@ -1,4 +1,4 @@
-/*	$OpenBSD: npx.c,v 1.48 2010/06/29 21:13:43 thib Exp $	*/
+/*	$OpenBSD: npx.c,v 1.57 2011/07/11 15:40:47 guenther Exp $	*/
 /*	$NetBSD: npx.c,v 1.57 1996/05/12 23:12:24 mycroft Exp $	*/
 
 #if 0
@@ -96,6 +96,11 @@
 #define	fwait()			__asm("fwait")
 #define	clts()			__asm("clts")
 #define	stts()			lcr0(rcr0() | CR0_TS)
+
+/*
+ * The mxcsr_mask for this host, taken from fxsave() on the primary CPU
+ */
+uint32_t	fpu_mxcsr_mask;
 
 int npxintr(void *);
 static int npxprobe1(struct isa_attach_args *);
@@ -351,6 +356,16 @@ npxinit(struct cpu_info *ci)
 		printf("%s: WARNING: Pentium FDIV bug detected!\n",
 		    ci->ci_dev.dv_xname);
 	}
+	if (fpu_mxcsr_mask == 0 && i386_use_fxsave) {
+		struct savexmm xm __attribute__((aligned(16)));
+
+		bzero(&xm, sizeof(xm));
+		fxsave(&xm);
+		if (xm.sv_env.en_mxcsr_mask)
+			fpu_mxcsr_mask = xm.sv_env.en_mxcsr_mask;
+		else
+			fpu_mxcsr_mask = __INITIAL_MXCSR_MASK__;
+	}
 	lcr0(rcr0() | (CR0_TS));
 }
 
@@ -563,9 +578,9 @@ npxtrap(struct trapframe *frame)
 	addr->sv_xmm.sv_ex_tw = addr->sv_xmm.sv_env.en_tw;
 	code = x86fpflags_to_siginfo (statbits);
 	sv.sival_int = frame->tf_eip;
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 	trapsignal(p, SIGFPE, frame->tf_err, code, sv);
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 }
 
 static int
@@ -600,7 +615,7 @@ x86fpflags_to_siginfo(u_int32_t flags)
 int
 npxdna_xmm(struct cpu_info *ci)
 {
-	union savefpu *addr;
+	union savefpu *sfp;
 	struct proc *p;
 	int s;
 
@@ -631,7 +646,7 @@ npxdna_xmm(struct cpu_info *ci)
 	if (ci->ci_fpcurproc != NULL) {
 		IPRINTF(("%s: fp save %lx\n", ci->ci_dev.dv_xname,
 		    (u_long)ci->ci_fpcurproc));
-		npxsave_cpu(ci, 1);
+		npxsave_cpu(ci, ci->ci_fpcurproc != &proc0);
 	} else {
 		clts();
 		IPRINTF(("%s: fp init\n", ci->ci_dev.dv_xname));
@@ -657,12 +672,13 @@ npxdna_xmm(struct cpu_info *ci)
 	splx(s);
 	uvmexp.fpswtch++;
 
-	addr = &p->p_addr->u_pcb.pcb_savefpu;
+	sfp = &p->p_addr->u_pcb.pcb_savefpu;
 
 	if ((p->p_md.md_flags & MDP_USEDFPU) == 0) {
-		fldcw(&addr->sv_xmm.sv_env.en_cw);
-		if (i386_has_sse || i386_has_sse2)
-			ldmxcsr(&addr->sv_xmm.sv_env.en_mxcsr);
+		bzero(&sfp->sv_xmm, sizeof(sfp->sv_xmm));
+		sfp->sv_xmm.sv_env.en_cw = __OpenBSD_NPXCW__;
+		sfp->sv_xmm.sv_env.en_mxcsr = __INITIAL_MXCSR__;
+		fxrstor(&sfp->sv_xmm);
 		p->p_md.md_flags |= MDP_USEDFPU;
 	} else {
 		static double	zero = 0.0;
@@ -673,7 +689,7 @@ npxdna_xmm(struct cpu_info *ci)
 		 */
 		fnclex();
 		__asm __volatile("ffree %%st(7)\n\tfld %0" : : "m" (zero));
-		fxrstor(&addr->sv_xmm);
+		fxrstor(&sfp->sv_xmm);
 	}
 
 	return (1);
@@ -682,6 +698,7 @@ npxdna_xmm(struct cpu_info *ci)
 int
 npxdna_s87(struct cpu_info *ci)
 {
+	union savefpu *sfp;
 	struct proc *p;
 	int s;
 
@@ -710,7 +727,7 @@ npxdna_s87(struct cpu_info *ci)
 	if (ci->ci_fpcurproc != NULL) {
 		IPRINTF(("%s: fp save %lx\n", ci->ci_dev.dv_xname,
 		    (u_long)ci->ci_fpcurproc));
-		npxsave_cpu(ci, 1);
+		npxsave_cpu(ci, ci->ci_fpcurproc != &proc0);
 	} else {
 		clts();
 		IPRINTF(("%s: fp init\n", ci->ci_dev.dv_xname));
@@ -736,8 +753,13 @@ npxdna_s87(struct cpu_info *ci)
 	splx(s);
 	uvmexp.fpswtch++;
 
+	sfp = &p->p_addr->u_pcb.pcb_savefpu;
+
 	if ((p->p_md.md_flags & MDP_USEDFPU) == 0) {
-		fldcw(&p->p_addr->u_pcb.pcb_savefpu.sv_87.sv_env.en_cw);
+		bzero(&sfp->sv_87, sizeof(sfp->sv_87));
+		sfp->sv_87.sv_env.en_cw = __OpenBSD_NPXCW__;
+		sfp->sv_87.sv_env.en_tw = 0xffff;
+		frstor(&sfp->sv_87);
 		p->p_md.md_flags |= MDP_USEDFPU;
 	} else {
 		/*
@@ -753,7 +775,7 @@ npxdna_s87(struct cpu_info *ci)
 		 * fnclex if it is the first FPU instruction after a context
 		 * switch.
 		 */
-		frstor(&p->p_addr->u_pcb.pcb_savefpu.sv_87);
+		frstor(&sfp->sv_87);
 	}
 
 	return (1);
@@ -848,9 +870,9 @@ npxsave_proc(struct proc *p, int save)
 		IPRINTF(("%s: fp ipi to %s %s %lx\n", ci->ci_dev.dv_xname,
 		    oci->ci_dev.dv_xname, save ? "save" : "flush", (u_long)p));
 
+		oci->ci_fpsaveproc = p;
 		i386_send_ipi(oci,
 		    save ? I386_IPI_SYNCH_FPU : I386_IPI_FLUSH_FPU);
-
 		while (p->p_addr->u_pcb.pcb_fpcpu != NULL)
 			SPINLOCK_SPIN_HOOK;
 	}
@@ -863,19 +885,15 @@ npxsave_proc(struct proc *p, int save)
 void
 fpu_kernel_enter(void)
 {
-	struct cpu_info	*oci, *ci = curcpu();
-	struct proc	*p = curproc;
+	struct cpu_info	*ci = curcpu();
 	uint32_t	 cw;
 	int		 s;
 
-	KASSERT(p != NULL && (p->p_flag & P_SYSTEM));
-
 	/*
-	 * Fast path. If we were the last proc on the FPU,
-	 * there is no work to do besides clearing TS.
+	 * Fast path.  If the kernel was using the FPU before, there
+	 * is no work to do besides clearing TS.
 	 */
-	if (ci->ci_fpcurproc == p) {
-		p->p_addr->u_pcb.pcb_cr0 &= ~CR0_TS;
+	if (ci->ci_fpcurproc == &proc0) {
 		clts();
 		return;
 	}
@@ -887,22 +905,12 @@ fpu_kernel_enter(void)
 		uvmexp.fpswtch++;
 	}
 
-	/*
-	 * If we were switched away to the other cpu, cleanup
-	 * an fpcurproc pointer.
-	 */
-	oci = p->p_addr->u_pcb.pcb_fpcpu;
-	if (oci != NULL && oci != ci && oci->ci_fpcurproc == p)
-		oci->ci_fpcurproc = NULL;
-
 	/* Claim the FPU */
-	ci->ci_fpcurproc = p;
-	p->p_addr->u_pcb.pcb_fpcpu = ci;
-	p->p_addr->u_pcb.pcb_cr0 &= ~CR0_TS;
+	ci->ci_fpcurproc = &proc0;
 
 	splx(s);
 
-	/* Disables DNA exceptions */
+	/* Disable DNA exceptions */
 	clts();
 
 	/* Initialize the FPU */
@@ -918,9 +926,6 @@ fpu_kernel_enter(void)
 void
 fpu_kernel_exit(void)
 {
-	/*
-	 * Nothing to do.
-	 * TS is restored on a context switch automatically
-	 * as long as we use hardware assisted task switching.
-	 */
+	/* Enable DNA exceptions */
+	stts();
 }

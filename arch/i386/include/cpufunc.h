@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpufunc.h,v 1.16 2009/12/09 14:28:46 oga Exp $	*/
+/*	$OpenBSD: cpufunc.h,v 1.18 2011/03/23 16:54:35 pirofti Exp $	*/
 /*	$NetBSD: cpufunc.h,v 1.8 1994/10/27 04:15:59 cgd Exp $	*/
 
 /*
@@ -31,8 +31,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _I386_CPUFUNC_H_
-#define	_I386_CPUFUNC_H_
+#ifndef _MACHINE_CPUFUNC_H_
+#define	_MACHINE_CPUFUNC_H_
 
 #ifdef _KERNEL
 
@@ -78,7 +78,7 @@ invlpg(u_int addr)
 static __inline void
 lidt(void *p)
 {
-	__asm __volatile("lidt (%0)" : : "r" (p));
+	__asm __volatile("lidt (%0)" : : "r" (p) : "memory");
 }
 
 static __inline void
@@ -288,4 +288,4 @@ breakpoint(void)
 void amd64_errata(struct cpu_info *);
 
 #endif /* _KERNEL */
-#endif /* !_I386_CPUFUNC_H_ */
+#endif /* !_MACHINE_CPUFUNC_H_ */

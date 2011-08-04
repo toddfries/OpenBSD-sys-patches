@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.130 2009/12/31 11:58:41 kettenis Exp $
+#	$OpenBSD: files.sparc64,v 1.134 2011/07/06 05:48:57 kettenis Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -84,18 +84,21 @@ include	"dev/pcmcia/files.pcmcia"
 device	zs {[channel = -1]}
 
 # Sun specific files
-include	"../../../dev/sun/files.sun"
+include	"dev/sun/files.sun"
 
 define	iommu
 define	viommu
 file	arch/sparc64/dev/iommu.c		iommu | viommu | sbus
 file	arch/sparc64/dev/viommu.c		viommu
 
+define msi
+file	arch/sparc64/dev/msi.c			msi
+
 attach	sbus at mainbus with sbus_mb
 attach	sbus at xbox with sbus_xbox
 file	arch/sparc64/dev/sbus.c			sbus
 
-device	creator: wsemuldisplaydev, rasops32
+device	creator: wsemuldisplaydev, rasops32, firmload
 attach	creator at mainbus, upa
 file	arch/sparc64/dev/creator.c		creator
 
@@ -116,11 +119,11 @@ device	schizo: pcibus, iommu
 attach	schizo at mainbus
 file	arch/sparc64/dev/schizo.c		schizo
 
-device	pyro: pcibus, iommu
+device	pyro: pcibus, iommu, msi
 attach	pyro at mainbus
 file	arch/sparc64/dev/pyro.c			pyro
 
-device	vpci: pcibus, viommu
+device	vpci: pcibus, viommu, msi
 attach	vpci at mainbus
 file	arch/sparc64/dev/vpci.c			vpci
 
@@ -349,7 +352,7 @@ file	arch/sparc64/dev/md_root.c	memory_disk_hooks
 #
 # Machine-independent SCSI drivers
 #
-include	"../../../scsi/files.scsi"
+include	"scsi/files.scsi"
 major	{sd = 7}
 major	{vnd = 8}
 major	{cd = 18}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mvme197.h,v 1.10 2009/02/16 23:03:33 miod Exp $ */
+/*	$OpenBSD: mvme197.h,v 1.12 2011/03/23 16:54:36 pirofti Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1999 Steve Murphree, Jr.
@@ -43,8 +43,10 @@
  * thereof, and that both notices appear in supporting documentation.
  *
  */
-#ifndef __MACHINE_MVME197_H__
-#define __MACHINE_MVME197_H__
+#ifndef _MACHINE_MVME197_H_
+#define _MACHINE_MVME197_H_
+
+#define	ECDM_BASE	0xfff01100	/* not what the doc says... */
 
 #define	FLASH_START	0xff800000	/* start of flash memory area */
 #define	FLASH_SIZE	0x00400000
@@ -64,4 +66,4 @@ void	m197_send_complex_ipi(int, cpuid_t, u_int32_t, u_int32_t);
 void	m197_send_ipi(int, cpuid_t);
 #endif
 
-#endif	/* __MACHINE_MVME197_H__ */
+#endif	/* _MACHINE_MVME197_H_ */

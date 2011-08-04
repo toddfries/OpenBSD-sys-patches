@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc_scsi.c,v 1.23 2010/06/20 23:05:29 mk Exp $	*/
+/*	$OpenBSD: sdmmc_scsi.c,v 1.30 2011/07/17 22:46:48 matthew Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -70,21 +70,22 @@ struct sdmmc_scsi_softc {
 	struct sdmmc_ccb *sc_ccbs;		/* allocated ccbs */
 	struct sdmmc_ccb_list sc_ccb_freeq;	/* free ccbs */
 	struct sdmmc_ccb_list sc_ccb_runq;	/* queued ccbs */
+	struct mutex sc_ccb_mtx;
+	struct scsi_iopool sc_iopool;
 };
 
 int	sdmmc_alloc_ccbs(struct sdmmc_scsi_softc *, int);
 void	sdmmc_free_ccbs(struct sdmmc_scsi_softc *);
-struct sdmmc_ccb *sdmmc_get_ccb(struct sdmmc_scsi_softc *, int);
-void	sdmmc_put_ccb(struct sdmmc_ccb *);
+void	*sdmmc_ccb_alloc(void *);
+void	sdmmc_ccb_free(void *, void *);
 
 void	sdmmc_scsi_cmd(struct scsi_xfer *);
+void	sdmmc_inquiry(struct scsi_xfer *);
 void	sdmmc_start_xs(struct sdmmc_softc *, struct sdmmc_ccb *);
 void	sdmmc_complete_xs(void *);
 void	sdmmc_done_xs(struct sdmmc_ccb *);
 void	sdmmc_stimeout(void *);
 void	sdmmc_scsi_minphys(struct buf *, struct scsi_link *);
-
-#define DEVNAME(sc)	SDMMCDEVNAME(sc)
 
 #ifdef SDMMC_DEBUG
 #define DPRINTF(s)	printf s
@@ -99,7 +100,7 @@ sdmmc_scsi_attach(struct sdmmc_softc *sc)
 	struct sdmmc_scsi_softc *scbus;
 	struct sdmmc_function *sf;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	scbus = malloc(sizeof *scbus, M_DEVBUF, M_WAITOK | M_ZERO);
 
@@ -135,6 +136,7 @@ sdmmc_scsi_attach(struct sdmmc_softc *sc)
 	scbus->sc_link.luns = 1;
 	scbus->sc_link.openings = 1;
 	scbus->sc_link.adapter = &scbus->sc_adapter;
+	scbus->sc_link.pool = &scbus->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
 	saa.scsi_link = &scbus->sc_link;
@@ -161,7 +163,7 @@ sdmmc_scsi_detach(struct sdmmc_softc *sc)
 	struct sdmmc_ccb *ccb;
 	int s;
 
-	SDMMC_ASSERT_LOCKED(sc);
+	rw_assert_wrlock(&sc->sc_lock);
 
 	scbus = sc->sc_scsibus;
 	if (scbus == NULL)
@@ -202,6 +204,9 @@ sdmmc_alloc_ccbs(struct sdmmc_scsi_softc *scbus, int nccbs)
 
 	TAILQ_INIT(&scbus->sc_ccb_freeq);
 	TAILQ_INIT(&scbus->sc_ccb_runq);
+	mtx_init(&scbus->sc_ccb_mtx, IPL_BIO);
+	scsi_iopool_init(&scbus->sc_iopool, scbus, sdmmc_ccb_alloc,
+	    sdmmc_ccb_free);
 
 	for (i = 0; i < nccbs; i++) {
 		ccb = &scbus->sc_ccbs[i];
@@ -224,40 +229,42 @@ sdmmc_free_ccbs(struct sdmmc_scsi_softc *scbus)
 	}
 }
 
-struct sdmmc_ccb *
-sdmmc_get_ccb(struct sdmmc_scsi_softc *scbus, int flags)
+void *
+sdmmc_ccb_alloc(void *xscbus)
 {
+	struct sdmmc_scsi_softc *scbus = xscbus;
 	struct sdmmc_ccb *ccb;
-	int s;
 
-	s = splbio();
-	while ((ccb = TAILQ_FIRST(&scbus->sc_ccb_freeq)) == NULL &&
-	    !ISSET(flags, SCSI_NOSLEEP))
-		tsleep(&scbus->sc_ccb_freeq, PRIBIO, "getccb", 0);
+	mtx_enter(&scbus->sc_ccb_mtx);
+	ccb = TAILQ_FIRST(&scbus->sc_ccb_freeq);
 	if (ccb != NULL) {
 		TAILQ_REMOVE(&scbus->sc_ccb_freeq, ccb, ccb_link);
 		ccb->ccb_state = SDMMC_CCB_READY;
 	}
-	splx(s);
+	mtx_leave(&scbus->sc_ccb_mtx);
+
 	return ccb;
 }
 
 void
-sdmmc_put_ccb(struct sdmmc_ccb *ccb)
+sdmmc_ccb_free(void *xscbus, void *xccb)
 {
-	struct sdmmc_scsi_softc *scbus = ccb->ccb_scbus;
+	struct sdmmc_scsi_softc *scbus = xscbus;
+	struct sdmmc_ccb *ccb = xccb;
 	int s;
 
 	s = splbio();
 	if (ccb->ccb_state == SDMMC_CCB_QUEUED)
 		TAILQ_REMOVE(&scbus->sc_ccb_runq, ccb, ccb_link);
+	splx(s);
+
 	ccb->ccb_state = SDMMC_CCB_FREE;
 	ccb->ccb_flags = 0;
 	ccb->ccb_xs = NULL;
+
+	mtx_enter(&scbus->sc_ccb_mtx);
 	TAILQ_INSERT_TAIL(&scbus->sc_ccb_freeq, ccb, ccb_link);
-	if (TAILQ_NEXT(ccb, ccb_link) == NULL)
-		wakeup(&scbus->sc_ccb_freeq);
-	splx(s);
+	mtx_leave(&scbus->sc_ccb_mtx);
 }
 
 /*
@@ -290,7 +297,6 @@ sdmmc_scsi_cmd(struct scsi_xfer *xs)
 	struct sdmmc_softc *sc = link->adapter_softc;
 	struct sdmmc_scsi_softc *scbus = sc->sc_scsibus;
 	struct sdmmc_scsi_target *tgt = &scbus->sc_tgt[link->target];
-	struct scsi_inquiry_data inq;
 	struct scsi_read_cap_data rcd;
 	u_int32_t blockno;
 	u_int32_t blockcnt;
@@ -321,17 +327,7 @@ sdmmc_scsi_cmd(struct scsi_xfer *xs)
 		break;
 
 	case INQUIRY:
-		bzero(&inq, sizeof inq);
-		inq.device = T_DIRECT;
-		inq.version = 2;
-		inq.response_format = 2;
-		inq.additional_length = 32;
-		strlcpy(inq.vendor, "SD/MMC ", sizeof(inq.vendor));
-		snprintf(inq.product, sizeof(inq.product),
-		    "Drive #%02d", link->target);
-		strlcpy(inq.revision, "   ", sizeof(inq.revision));
-		bcopy(&inq, xs->data, MIN(xs->datalen, sizeof inq));
-		scsi_done(xs);
+		sdmmc_inquiry(xs);
 		return;
 
 	case TEST_UNIT_READY:
@@ -368,20 +364,46 @@ sdmmc_scsi_cmd(struct scsi_xfer *xs)
 		return;
 	}
 
-	ccb = sdmmc_get_ccb(sc->sc_scsibus, xs->flags);
-	if (ccb == NULL) {
-		printf("%s: out of ccbs\n", DEVNAME(sc));
-		xs->error = XS_DRIVER_STUFFUP;
-		scsi_done(xs);
-		return;
-	}
+	ccb = xs->io;
 
 	ccb->ccb_xs = xs;
-
 	ccb->ccb_blockcnt = blockcnt;
 	ccb->ccb_blockno = blockno;
 
 	sdmmc_start_xs(sc, ccb);
+}
+
+void
+sdmmc_inquiry(struct scsi_xfer *xs)
+{
+	struct scsi_link *link = xs->sc_link;
+	struct scsi_inquiry_data inq;
+	struct scsi_inquiry *cdb = (struct scsi_inquiry *)xs->cmd;
+
+        if (xs->cmdlen != sizeof(*cdb)) {
+		xs->error = XS_DRIVER_STUFFUP;
+		goto done;
+	}
+
+	if (ISSET(cdb->flags, SI_EVPD)) {
+		xs->error = XS_DRIVER_STUFFUP;
+		goto done;
+	}
+
+	bzero(&inq, sizeof inq);
+	inq.device = T_DIRECT;
+	inq.version = 2;
+	inq.response_format = 2;
+	inq.additional_length = 32;
+	strlcpy(inq.vendor, "SD/MMC ", sizeof(inq.vendor));
+	snprintf(inq.product, sizeof(inq.product),
+	    "Drive #%02d", link->target);
+	strlcpy(inq.revision, "   ", sizeof(inq.revision));
+
+	bcopy(&inq, xs->data, MIN(xs->datalen, sizeof(inq)));
+
+done:
+	scsi_done(xs);
 }
 
 void
@@ -460,7 +482,6 @@ sdmmc_done_xs(struct sdmmc_ccb *ccb)
 	if (ISSET(ccb->ccb_flags, SDMMC_CCB_F_ERR))
 		xs->error = XS_DRIVER_STUFFUP;
 
-	sdmmc_put_ccb(ccb);
 	scsi_done(xs);
 }
 

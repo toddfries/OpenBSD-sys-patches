@@ -1,4 +1,4 @@
-/*	$OpenBSD: isp_sbus.c,v 1.29 2009/08/30 21:22:25 kettenis Exp $	*/
+/*	$OpenBSD: isp_sbus.c,v 1.31 2011/04/22 23:29:18 deraadt Exp $	*/
 /*
  * SBus specific probe and attach routines for Qlogic ISP SCSI adapters.
  *
@@ -290,7 +290,7 @@ isp_sbus_attach(struct device *parent, struct device *self, void *aux)
 	isp->isp_dblev = ISP_LOGDEFAULT;
 #else
 	isp->isp_dblev = ISP_LOGWARN|ISP_LOGERR;
-#ifdef	SCSIDEBUG
+#if 0
 	isp->isp_dblev |= ISP_LOGDEBUG1|ISP_LOGDEBUG2;
 #endif
 #ifdef	DEBUG
@@ -443,11 +443,10 @@ isp_sbus_mbxdma(struct ispsoftc *isp)
 	 */
 
 	len = isp->isp_maxcmds * sizeof (XS_T);
-	isp->isp_xflist = (XS_T **) malloc(len, M_DEVBUF, M_WAITOK);
-	bzero(isp->isp_xflist, len);
+	isp->isp_xflist = (XS_T **) malloc(len, M_DEVBUF, M_WAITOK | M_ZERO);
 	len = isp->isp_maxcmds * sizeof (vaddr_t);
-	sbc->sbus_kdma_allocs = (vaddr_t *) malloc(len, M_DEVBUF, M_WAITOK);
-	bzero(sbc->sbus_kdma_allocs, len);
+	sbc->sbus_kdma_allocs = (vaddr_t *) malloc(len, M_DEVBUF,
+	    M_WAITOK | M_ZERO);
 
 	/*
 	 * Allocate and map the request queue.

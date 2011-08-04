@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.131 2010/07/19 23:00:15 guenther Exp $	*/
+/*	$OpenBSD: proc.h,v 1.141 2011/07/07 18:00:33 guenther Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -41,9 +41,9 @@
 #define	_SYS_PROC_H_
 
 #include <machine/proc.h>		/* Machine-dependent proc substruct. */
-#include <sys/selinfo.h>			/* For struct selinfo. */
+#include <sys/selinfo.h>		/* For struct selinfo */
 #include <sys/queue.h>
-#include <sys/timeout.h>		/* For struct timeout. */
+#include <sys/timeout.h>		/* For struct timeout */
 #include <sys/event.h>			/* For struct klist */
 #include <sys/mutex.h>			/* For struct mutex */
 #include <machine/atomic.h>
@@ -55,9 +55,10 @@
 /*
  * One structure allocated per session.
  */
+struct process;
 struct	session {
 	int	s_count;		/* Ref cnt; pgrps in session. */
-	struct	proc *s_leader;		/* Session leader. */
+	struct	process *s_leader;	/* Session leader. */
 	struct	vnode *s_ttyvp;		/* Vnode of controlling terminal. */
 	struct	tty *s_ttyp;		/* Controlling terminal. */
 	char	s_login[MAXLOGNAME];	/* Setlogin() name. */
@@ -68,7 +69,7 @@ struct	session {
  */
 struct	pgrp {
 	LIST_ENTRY(pgrp) pg_hash;	/* Hash chain. */
-	LIST_HEAD(, proc) pg_members;	/* Pointer to pgrp members. */
+	LIST_HEAD(, process) pg_members;/* Pointer to pgrp members. */
 	struct	session *pg_session;	/* Pointer to session. */
 	pid_t	pg_id;			/* Pgrp id. */
 	int	pg_jobc;	/* # procs qualifying pgrp for job control */
@@ -78,6 +79,7 @@ struct	pgrp {
  * One structure allocated per emulation.
  */
 struct exec_package;
+struct proc;
 struct ps_strings;
 struct uvm_object;
 union sigval;
@@ -138,14 +140,20 @@ struct process {
 	 * the pid of the process. This is gross, but considering the horrible
 	 * pid semantics we have right now, it's unavoidable.
 	 */
-	struct proc *ps_mainproc;
+	struct	proc *ps_mainproc;
 	struct	pcred *ps_cred;		/* Process owner's identity. */
 
 	TAILQ_HEAD(,proc) ps_threads;	/* Threads in this process. */
 
+	LIST_ENTRY(process) ps_pglist;	/* List of processes in pgrp. */
+	struct	process *ps_pptr; 	/* Pointer to parent process. */
+	LIST_ENTRY(process) ps_sibling;	/* List of sibling processes. */
+	LIST_HEAD(, process) ps_children;/* Pointer to list of children. */
+
 /* The following fields are all zeroed upon creation in process_new. */
 #define	ps_startzero	ps_klist
 	struct	klist ps_klist;		/* knotes attached to this process */
+	int	ps_flags;		/* PS_* flags. */
 
 /* End area that is zeroed on creation. */
 #define	ps_endzero	ps_startcopy
@@ -154,16 +162,43 @@ struct process {
 #define	ps_startcopy	ps_limit
 
 	struct	plimit *ps_limit;	/* Process limits. */
+	struct	pgrp *ps_pgrp;		/* Pointer to process group. */
 	u_int	ps_rtableid;		/* Process routing table/domain. */
+	char	ps_nice;		/* Process "nice" value. */
 
 /* End area that is copied on creation. */
 #define ps_endcopy	ps_refcnt
 
 	int	ps_refcnt;		/* Number of references. */
 };
-#else
-struct process;
-#endif
+
+#define	ps_pid		ps_mainproc->p_pid
+#define	ps_session	ps_pgrp->pg_session
+#define	ps_pgid		ps_pgrp->pg_id
+
+/*
+ * These flags are kept in ps_flags, but they used to be in proc's p_flag
+ * and were exported to userspace via the KERN_PROC2 sysctl.  We'll retain
+ * compat by using non-overlapping bits for PS_* and P_* flags and just
+ * OR them together for export.
+ */
+#define	PS_CONTROLT	_P_CONTROLT
+#define	PS_PPWAIT	_P_PPWAIT
+#define	PS_PROFIL	_P_PROFIL
+#define	PS_SUGID	_P_SUGID
+#define	PS_SYSTEM	_P_SYSTEM
+#define	PS_TRACED	_P_TRACED
+#define	PS_WAITED	_P_WAITED
+#define	PS_EXEC		_P_EXEC
+#define	PS_ISPWAIT	_P_ISPWAIT
+#define	PS_SUGIDEXEC	_P_SUGIDEXEC
+#define	PS_NOZOMBIE	_P_NOZOMBIE
+#define	PS_INEXEC	_P_INEXEC
+#define	PS_SYSTRACE	_P_SYSTRACE
+#define	PS_CONTINUED	_P_CONTINUED
+#define	PS_STOPPED	_P_STOPPED
+
+#endif /* __need_process */
 
 struct proc {
 	TAILQ_ENTRY(proc) p_runq;
@@ -190,10 +225,6 @@ struct proc {
 
 	pid_t	p_pid;			/* Process identifier. */
 	LIST_ENTRY(proc) p_hash;	/* Hash chain. */
-	LIST_ENTRY(proc) p_pglist;	/* List of processes in pgrp. */
-	struct	proc *p_pptr;	 	/* Pointer to parent process. */
-	LIST_ENTRY(proc) p_sibling;	/* List of sibling processes. */
-	LIST_HEAD(, proc) p_children;	/* Pointer to list of children. */
 
 /* The following fields are all zeroed upon creation in fork. */
 #define	p_startzero	p_oppid
@@ -239,6 +270,7 @@ struct proc {
 					/* NULL. Malloc type M_EMULDATA */
 
 	sigset_t p_sigdivert;		/* Signals to be diverted to thread. */
+	struct	sigaltstack p_sigstk;	/* sp & on stack state variable */
 
 /* End area that is zeroed on creation. */
 #define	p_endzero	p_startcopy
@@ -247,20 +279,22 @@ struct proc {
 #define	p_startcopy	p_sigmask
 
 	sigset_t p_sigmask;	/* Current signal mask. */
-	sigset_t p_sigignore;	/* Signals being ignored. */
-	sigset_t p_sigcatch;	/* Signals being caught by user. */
 
 	u_char	p_priority;	/* Process priority. */
-	u_char	p_usrpri;	/* User-priority based on p_cpu and p_nice. */
-	char	p_nice;		/* Process "nice" value. */
+	u_char	p_usrpri;	/* User-priority based on p_cpu and ps_nice. */
 	char	p_comm[MAXCOMLEN+1];
 
 	struct	emul *p_emul;		/* Emulation information */
-	struct 	pgrp *p_pgrp;	/* Pointer to process group. */
 	vaddr_t	p_sigcode;	/* user pointer to the signal code. */
 
 /* End area that is copied on creation. */
 #define	p_endcopy	p_addr
+
+	sigset_t p_oldmask;	/* Saved mask from before sigpause */
+	union sigval p_sigval;	/* For core dump/debugger XXX */
+	long	p_sicode;	/* For core dump/debugger XXX */
+	int	p_sisig;	/* For core dump/debugger XXX */
+	int	p_sitype;	/* For core dump/debugger XXX */
 
 	struct	user *p_addr;	/* Kernel virtual addr of u-area */
 	struct	mdproc p_md;	/* Any machine-dependent fields. */
@@ -269,9 +303,6 @@ struct proc {
 	u_short	p_acflag;	/* Accounting flags. */
 	struct	rusage *p_ru;	/* Exit information. XXX */
 };
-
-#define	p_session	p_pgrp->pg_session
-#define	p_pgid		p_pgrp->pg_id
 
 /* Status values. */
 #define	SIDL	1		/* Process being created by fork. */
@@ -284,46 +315,56 @@ struct proc {
 
 #define P_ZOMBIE(p)	((p)->p_stat == SZOMB || (p)->p_stat == SDEAD)
 
-/* These flags are kept in p_flag. */
-#define	P_CONTROLT	0x000002	/* Has a controlling terminal. */
+/*
+ * These flags are kept in p_flag, except those with a leading underbar,
+ * which are in process's ps_flags
+ */
+#define	_P_CONTROLT	0x000002	/* Has a controlling terminal. */
 #define	P_INMEM		0x000004	/* Loaded into memory. UNUSED */
-#define	P_NOCLDSTOP	0x000008	/* No SIGCHLD when children stop. */
-#define	P_PPWAIT	0x000010	/* Parent waits for child exec/exit. */
+#define	P_SIGSUSPEND	0x000008	/* Need to restore before-suspend mask*/
+#define	_P_PPWAIT	0x000010	/* Parent waits for exec/exit. */
 #define	P_PROFIL	0x000020	/* Has started profiling. */
 #define	P_SELECT	0x000040	/* Selecting; wakeup/waiting danger. */
 #define	P_SINTR		0x000080	/* Sleep is interruptible. */
-#define	P_SUGID		0x000100	/* Had set id privs since last exec. */
+#define	_P_SUGID	0x000100	/* Had set id privs since last exec. */
 #define	P_SYSTEM	0x000200	/* No sigs, stats or swapping. */
 #define	P_TIMEOUT	0x000400	/* Timing out during sleep. */
 #define	P_TRACED	0x000800	/* Debugged process being traced. */
 #define	P_WAITED	0x001000	/* Debugging proc has waited for child. */
 /* XXX - Should be merged with INEXEC */
 #define	P_WEXIT		0x002000	/* Working on exiting. */
-#define	P_EXEC		0x004000	/* Process called exec. */
+#define	_P_EXEC		0x004000	/* Process called exec. */
 
 /* Should be moved to machine-dependent areas. */
 #define	P_OWEUPC	0x008000	/* Owe proc an addupc() at next ast. */
+#define	_P_ISPWAIT	0x010000	/* Is parent of PPWAIT child. */
 
 /* XXX Not sure what to do with these, yet. */
 #define	P_SSTEP		0x020000	/* proc needs single-step fixup ??? */
-#define	P_SUGIDEXEC	0x040000	/* last execve() was set[ug]id */
+#define	_P_SUGIDEXEC	0x040000	/* last execve() was set[ug]id */
 
-#define	P_NOCLDWAIT	0x080000	/* Let pid 1 wait for my children */
 #define	P_NOZOMBIE	0x100000	/* Pid 1 waits for me instead of dad */
 #define P_INEXEC	0x200000	/* Process is doing an exec right now */
 #define P_SYSTRACE	0x400000	/* Process system call tracing active*/
 #define P_CONTINUED	0x800000	/* Proc has continued from a stopped state. */
-#define P_BIGLOCK	0x2000000	/* Process needs kernel "big lock" to run */
 #define	P_THREAD	0x4000000	/* Only a thread, not a real process */
 #define	P_IGNEXITRV	0x8000000	/* For thread kills */
 #define	P_SOFTDEP	0x10000000	/* Stuck processing softdep worklist */
 #define P_STOPPED	0x20000000	/* Just stopped. */
 #define P_CPUPEG	0x40000000	/* Do not move to another cpu. */
 
+#ifndef _KERNEL
+#define	P_CONTROLT	_P_CONTROLT
+#define	P_PPWAIT	_P_PPWAIT
+#define	P_SUGID		_P_SUGID
+#define	P_EXEC		_P_EXEC
+#define	P_SUGIDEXEC	_P_SUGIDEXEC
+#endif
+
 #define	P_BITS \
-    ("\20\02CONTROLT\03INMEM\04NOCLDSTOP\05PPWAIT\06PROFIL\07SELECT" \
+    ("\20\02CONTROLT\03INMEM\04SIGPAUSE\05PPWAIT\06PROFIL\07SELECT" \
      "\010SINTR\011SUGID\012SYSTEM\013TIMEOUT\014TRACED\015WAITED\016WEXIT" \
-     "\017EXEC\020PWEUPC\022SSTEP\023SUGIDEXEC\024NOCLDWAIT" \
+     "\017EXEC\020PWEUPC\021ISPWAIT\022SSTEP\023SUGIDEXEC" \
      "\025NOZOMBIE\026INEXEC\027SYSTRACE\030CONTINUED\032BIGLOCK" \
      "\033THREAD\034IGNEXITRV\035SOFTDEP\036STOPPED\037CPUPEG")
 
@@ -366,7 +407,7 @@ struct uidinfo *uid_find(uid_t);
 #define	NO_PID		(PID_MAX+1)
 #define	THREAD_PID_OFFSET	1000000
 
-#define SESS_LEADER(p)	((p)->p_session->s_leader == (p))
+#define SESS_LEADER(pr)	((pr)->ps_session->s_leader == (pr))
 #define	SESSHOLD(s)	((s)->s_count++)
 #define	SESSRELE(s) do {						\
 	if (--(s)->s_count == 0)					\
@@ -420,22 +461,23 @@ extern struct pool pcred_pool;		/* memory pool for pcreds */
 
 struct simplelock;
 
-struct proc *pfind(pid_t);	/* Find process by id. */
+struct process *prfind(pid_t);	/* Find process by id. */
+struct proc *pfind(pid_t);	/* Find thread by id. */
 struct pgrp *pgfind(pid_t);	/* Find process group by id. */
 void	proc_printit(struct proc *p, const char *modif,
     int (*pr)(const char *, ...));
 
 int	chgproccnt(uid_t uid, int diff);
-int	enterpgrp(struct proc *p, pid_t pgid, struct pgrp *newpgrp,
-	    struct session *newsess);
-void	fixjobc(struct proc *p, struct pgrp *pgrp, int entering);
-int	inferior(struct proc *, struct proc *);
-int	leavepgrp(struct proc *p);
+int	enterpgrp(struct process *, pid_t, struct pgrp *, struct session *);
+void	fixjobc(struct process *, struct pgrp *, int);
+int	inferior(struct process *, struct process *);
+void	leavepgrp(struct process *);
 void	preempt(struct proc *);
-void	pgdelete(struct pgrp *pgrp);
+void	pgdelete(struct pgrp *);
 void	procinit(void);
 void	resetpriority(struct proc *);
 void	setrunnable(struct proc *);
+void	endtsleep(void *);
 void	unsleep(struct proc *);
 void	reaper(void);
 void	exit1(struct proc *, int, int);

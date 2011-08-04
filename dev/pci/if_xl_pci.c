@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_xl_pci.c,v 1.29 2010/04/08 00:23:53 tedu Exp $	*/
+/*	$OpenBSD: if_xl_pci.c,v 1.37 2011/07/08 18:56:47 stsp Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -92,16 +92,21 @@ int xl_pci_match(struct device *, void *, void *);
 void xl_pci_attach(struct device *, struct device *, void *);
 int xl_pci_detach(struct device *, int);
 void xl_pci_intr_ack(struct xl_softc *);
+#ifndef SMALL_KERNEL
+void xl_pci_wol_power(void *);
+#endif
 
 struct xl_pci_softc {
 	struct xl_softc		psc_softc;
 	pci_chipset_tag_t	psc_pc;
+	pcitag_t		psc_tag;
 	bus_size_t		psc_iosize;
 	bus_size_t		psc_funsize;
 };
 
 struct cfattach xl_pci_ca = {
-	sizeof(struct xl_pci_softc), xl_pci_match, xl_pci_attach, xl_pci_detach
+	sizeof(struct xl_pci_softc), xl_pci_match, xl_pci_attach,
+	xl_pci_detach, xl_activate
 };
 
 const struct pci_matchid xl_pci_devices[] = {
@@ -139,7 +144,7 @@ int
 xl_pci_match(struct device *parent, void *match, void *aux)
 {
 	return (pci_matchbyid((struct pci_attach_args *)aux, xl_pci_devices,
-	    sizeof(xl_pci_devices)/sizeof(xl_pci_devices[0])));
+	    nitems(xl_pci_devices)));
 }
 
 void
@@ -155,9 +160,11 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 	u_int32_t command;
 
 	psc->psc_pc = pc;
+	psc->psc_tag = pa->pa_tag;
 	sc->sc_dmat = pa->pa_dmat;
 
 	sc->xl_flags = 0;
+	sc->wol_power = sc->wol_power_arg = NULL;
 
 	/* set required flags */
 	switch (PCI_PRODUCT(pa->pa_id)) {
@@ -259,6 +266,18 @@ xl_pci_attach(struct device *parent, struct device *self, void *aux)
 			pci_conf_write(pc, pa->pa_tag, XL_PCI_LOMEM, mem);
 			pci_conf_write(pc, pa->pa_tag, XL_PCI_INTLINE, irq);
 		}
+
+#ifndef SMALL_KERNEL
+		/* The card is WOL-capable if it supports PME# assertion
+		 * from D3hot power state. Install a callback to configure
+		 * PCI power state for WOL. It will be invoked when the
+		 * interface stops and WOL was enabled. */
+		command = pci_conf_read(pc, pa->pa_tag, XL_PCI_PWRMGMTCAP);
+		if ((command >> 16) & XL_PME_CAP_D3_HOT) {
+			sc->wol_power = xl_pci_wol_power;
+			sc->wol_power_arg = psc; 
+		}
+#endif
 	}
 
 	/*
@@ -341,3 +360,13 @@ xl_pci_intr_ack(struct xl_softc *sc)
 	bus_space_write_4(sc->xl_funct, sc->xl_funch, XL_PCI_INTR,
 	    XL_PCI_INTRACK);
 }
+
+#ifndef SMALL_KERNEL
+void
+xl_pci_wol_power(void *ppsc)
+{
+	struct xl_pci_softc *psc = (struct xl_pci_softc*)ppsc;
+
+	pci_set_powerstate(psc->psc_pc, psc->psc_tag, PCI_PMCSR_STATE_D3);
+}
+#endif

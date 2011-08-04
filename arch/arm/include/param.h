@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.13 2010/05/24 02:00:35 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.15 2011/04/07 15:45:16 miod Exp $	*/
 /*	$NetBSD: param.h,v 1.9 2002/03/24 03:37:23 thorpej Exp $	*/
 
 /*
@@ -138,11 +138,11 @@ void	delay (unsigned);
  *
  */
 #define ALIGNBYTES		(sizeof(int) - 1)
-#define ALIGN(p)		(((u_int)(p) + ALIGNBYTES) &~ ALIGNBYTES)
+#define ALIGN(p)		(((u_long)(p) + ALIGNBYTES) &~ ALIGNBYTES)
 #define ALIGNED_POINTER(p,t)	((((u_long)(p)) & (sizeof(t)-1)) == 0)
 /* ARM-specific macro to align a stack pointer (downwards). */
 #define STACKALIGNBYTES		(8 - 1)
-#define STACKALIGN(p)		((u_int)(p) &~ STACKALIGNBYTES)
+#define STACKALIGN(p)		((u_long)(p) &~ STACKALIGNBYTES)
 
 #define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
 #define	DEV_BSIZE	(1 << DEV_BSHIFT)
@@ -155,7 +155,6 @@ void	delay (unsigned);
 /* pages ("clicks") to disk blocks */
 #define	ctod(x)	((x) << (PAGE_SHIFT - DEV_BSHIFT))
 #define	dtoc(x)	((x) >> (PAGE_SHIFT - DEV_BSHIFT))
-/*#define	dtob(x)	((x) << DEV_BSHIFT)*/
 
 #define	btodb(bytes)	 		/* calculates (bytes / DEV_BSIZE) */ \
 	((bytes) >> DEV_BSHIFT)
@@ -169,13 +168,9 @@ void	delay (unsigned);
 
 #define ovbcopy bcopy
 
-#ifdef _KERNEL
-#ifdef _LOCORE
-#include <machine/psl.h>
-#else
+#if defined(_KERNEL) && !defined(_LOCORE)
 #include <sys/param.h>
 #include <machine/cpu.h>
-#endif
 #endif
 
 #endif	/* _ARM_PARAM_H_ */

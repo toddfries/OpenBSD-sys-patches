@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.8 2005/04/19 15:23:37 miod Exp $ */
+/*	$OpenBSD: db_machdep.h,v 1.12 2011/03/23 16:54:36 pirofti Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)
@@ -26,8 +26,8 @@
  *
  */
 
-#ifndef	_MIPS_DB_MACHDEP_H_
-#define	_MIPS_DB_MACHDEP_H_
+#ifndef	_MIPS64_DB_MACHDEP_H_
+#define	_MIPS64_DB_MACHDEP_H_
 
 #include <machine/frame.h>
 #include <machine/trap.h>
@@ -61,17 +61,25 @@ db_addr_t	next_instr_address(db_addr_t, boolean_t);
  */
 #define	IT_CALL		0x01
 #define	IT_BRANCH	0x02
-#define	IT_LOAD		0x03
-#define	IT_STORE	0x04
 
 #define	inst_branch(i)	(db_inst_type(i) == IT_BRANCH)
 #define	inst_trap_return(i)	((i) & 0)
 #define	inst_call(i)	(db_inst_type(i) == IT_CALL)
 #define	inst_return(i)	((i) == 0x03e00008)
-#define	inst_load(i)	(db_inst_type(i) == IT_LOAD)
-#define	inst_store(i)	(db_inst_type(i) == IT_STORE)
 
 int db_inst_type(int);
 void db_machine_init(void);
 
-#endif	/* !_MIPS_DB_MACHDEP_H_ */
+int db_enter_ddb(void);
+void db_startcpu(int);
+void db_stopcpu(int);
+
+int	dbmd_print_insn(uint32_t, db_addr_t, int (*)(const char *, ...));
+
+extern struct mutex ddb_mp_mutex;
+
+#define DDB_STATE_NOT_RUNNING	0
+#define DDB_STATE_RUNNING	1
+#define DDB_STATE_EXITING	2
+
+#endif	/* !_MIPS64_DB_MACHDEP_H_ */

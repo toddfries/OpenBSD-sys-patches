@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.32 2009/04/10 20:53:54 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.34 2011/03/23 16:54:37 pirofti Exp $	*/
 /*	$NetBSD: cpu.h,v 1.24 1997/03/15 22:25:15 pk Exp $ */
 
 /*
@@ -41,8 +41,8 @@
  *	@(#)cpu.h	8.4 (Berkeley) 1/5/94
  */
 
-#ifndef _SPARC_CPU_H_
-#define _SPARC_CPU_H_
+#ifndef _MACHINE_CPU_H_
+#define _MACHINE_CPU_H_
 
 /*
  * CTL_MACHDEP definitions.
@@ -180,7 +180,6 @@ void	iommu_enter(u_int, u_int);
 void	iommu_remove(u_int, u_int);
 /* emul.c */
 struct trapframe;
-int fixalign(struct proc *, struct trapframe *);
 int emulinstr(int, struct trapframe *);
 
 /*
@@ -203,4 +202,4 @@ struct trapvec {
 extern struct trapvec *trapbase;	/* the 256 vectors */
 
 #endif /* _KERNEL */
-#endif /* _SPARC_CPU_H_ */
+#endif /* _MACHINE_CPU_H_ */

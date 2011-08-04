@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdvar.h,v 1.31 2010/06/02 13:32:13 dlg Exp $	*/
+/*	$OpenBSD: sdvar.h,v 1.38 2011/07/11 06:26:09 dlg Exp $	*/
 /*	$NetBSD: sdvar.h,v 1.7 1998/08/17 00:49:03 mycroft Exp $	*/
 
 /*-
@@ -51,25 +51,23 @@
 struct sd_softc {
 	struct device		sc_dev;
 	struct disk		sc_dk;
-	struct bufq		*sc_bufq;
+	struct bufq		sc_bufq;
 
 	int			flags;
-#define	SDF_LOCKED	0x01
-#define	SDF_WANTED	0x02
-#define	SDF_WLABEL	0x04		/* label is writable */
-#define	SDF_LABELLING	0x08		/* writing label */
 #define	SDF_ANCIENT	0x10		/* disk is ancient; for minphys */
 #define	SDF_DIRTY	0x20		/* disk is dirty; needs cache flush */
 #define	SDF_DYING	0x40		/* dying, when deactivated */
 #define	SDF_WAITING	0x80
+#define	SDF_THIN	0x01		/* disk is thin provisioned */
 	struct scsi_link	*sc_link; /* contains our targ, lun, etc. */
 	struct disk_parms {
 		u_long	heads;		/* number of heads */
 		u_long	cyls;		/* number of cylinders */
 		u_long	sectors;	/* number of sectors/track */
-		u_long	blksize;	/* number of bytes/sector */
-		u_long	rot_rate;	/* rotational rate, in RPM */
+		u_long	secsize;	/* number of bytes/sector */
 		daddr64_t	disksize;	/* total number sectors */
+		u_int32_t	unmap_sectors;	/* maximum sectors/unmap */
+		u_int32_t	unmap_descs;	/* maximum descriptors/unmap */
 	} params;
 	void *sc_sdhook;		/* our shutdown hook */
 	struct timeout sc_timeout;

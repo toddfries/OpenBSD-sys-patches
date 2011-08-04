@@ -1,4 +1,4 @@
-/*      $OpenBSD: cpu.h,v 1.35 2009/03/26 17:24:33 oga Exp $      */
+/*      $OpenBSD: cpu.h,v 1.39 2011/07/06 20:42:05 miod Exp $      */
 /*      $NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $      */
 
 /*
@@ -31,8 +31,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _VAX_CPU_H_
-#define _VAX_CPU_H_
+#ifndef _MACHINE_CPU_H_
+#define _MACHINE_CPU_H_
 #ifdef _KERNEL
 
 #include <sys/cdefs.h>
@@ -53,6 +53,9 @@ struct cpu_info {
 
 	struct schedstate_percpu ci_schedstate; /* scheduler state */
 	u_int32_t 		ci_randseed;
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
 };
 
 extern struct cpu_info cpu_info_store;
@@ -88,7 +91,6 @@ struct	cpu_dep {
 	void	(*cpu_halt)(void); /* Cpu dependent halt call */
 	void	(*cpu_reboot)(int); /* Cpu dependent reboot call */
 	void	(*cpu_clrf)(void); /* Clear cold/warm start flags */
-	void	(*cpu_subconf)(struct device *);/*config cpu dep. devs */
 	void	(*cpu_hardclock)(struct clockframe *);	/* hardclock handler */
 };
 
@@ -149,7 +151,6 @@ void	dumpconf(void);
 void	dumpsys(void);
 void	swapconf(void);
 void	disk_printtype(int, int);
-void	disk_reallymapin(struct buf *, pt_entry_t *, int, int);
 vaddr_t	vax_map_physmem(paddr_t, int);
 void	vax_unmap_physmem(vaddr_t, int);
 void	ioaccess(vaddr_t, paddr_t, int);
@@ -173,4 +174,4 @@ int	kdbrint(int);
 	{ "led_blink", CTLTYPE_INT } \
 }
 
-#endif /* _VAX_CPU_H_ */
+#endif /* _MACHINE_CPU_H_ */

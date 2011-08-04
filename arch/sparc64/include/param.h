@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.32 2010/06/18 23:49:37 miod Exp $	*/
+/*	$OpenBSD: param.h,v 1.35 2011/04/07 15:45:18 miod Exp $	*/
 /*	$NetBSD: param.h,v 1.25 2001/05/30 12:28:51 mrg Exp $ */
 
 /*
@@ -64,8 +64,8 @@
  *
  */
 
-#ifndef _SPARC64_PARAM_H_
-#define _SPARC64_PARAM_H_
+#ifndef _MACHINE_PARAM_H_
+#define _MACHINE_PARAM_H_
 
 #define	_MACHINE	sparc64
 #define	MACHINE		"sparc64"
@@ -75,7 +75,7 @@
 
 /*
  * Round p (pointer or byte index) up to a correctly-aligned value for
- * the machine's strictest data type.  The result is u_int and must be
+ * the machine's strictest data type.  The result is u_long and must be
  * cast to any desired pointer type.
  *
  * ALIGNED_POINTER is a boolean macro that checks whether an address
@@ -136,7 +136,6 @@
  */
 #define	KERNBASE	0x001000000	/* start of kernel virtual space */
 #define	KERNEND		0x0e0000000	/* end of kernel virtual space */
-#define	VM_MAX_KERNEL_BUF	((KERNEND-KERNBASE)/4)
 
 #define _MAXNBPG	8192	/* fixed VAs, independent of actual NBPG */
 
@@ -221,4 +220,4 @@ extern int cputyp;
 #endif
 #endif
 
-#endif	/* _SPARC64_PARAM_H_ */
+#endif	/* _MACHINE_PARAM_H_ */

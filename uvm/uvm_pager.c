@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pager.c,v 1.56 2010/06/27 20:53:31 oga Exp $	*/
+/*	$OpenBSD: uvm_pager.c,v 1.60 2011/07/03 18:34:14 oga Exp $	*/
 /*	$NetBSD: uvm_pager.c,v 1.36 2000/11/27 18:26:41 chs Exp $	*/
 
 /*
@@ -88,11 +88,8 @@ struct	uvm_pseg psegs[PSEG_NUMSEGS];
 #define UVM_PSEG_INUSE(pseg,id)	(((pseg)->use & (1 << (id))) != 0)
 
 void		uvm_pseg_init(struct uvm_pseg *);
-void		uvm_pseg_destroy(struct uvm_pseg *);
 vaddr_t		uvm_pseg_get(int);
 void		uvm_pseg_release(vaddr_t);
-
-struct vm_page	*uvm_pageratop(vaddr_t);
 
 /*
  * uvm_pager_init: init pagers (at boot time)
@@ -139,25 +136,6 @@ uvm_pseg_init(struct uvm_pseg *pseg)
 	KASSERT(pseg->start == 0);
 	KASSERT(pseg->use == 0);
 	pseg->start = uvm_km_valloc_try(kernel_map, MAX_PAGER_SEGS * MAXBSIZE);
-}
-
-/*
- * Destroy a uvm_pseg.
- *
- * Never fails.
- *
- * Requires that seg != &psegs[0]
- *
- * Caller locks uvm_pseg_lck.
- */
-void
-uvm_pseg_destroy(struct uvm_pseg *pseg)
-{
-	KASSERT(pseg != &psegs[0]);
-	KASSERT(pseg->start != 0);
-	KASSERT(pseg->use == 0);
-	uvm_km_free(kernel_map, pseg->start, MAX_PAGER_SEGS * MAXBSIZE);
-	pseg->start = 0;
 }
 
 /*
@@ -225,6 +203,7 @@ uvm_pseg_release(vaddr_t segaddr)
 {
 	int id;
 	struct uvm_pseg *pseg;
+	vaddr_t va = 0;
 
 	for (pseg = &psegs[0]; pseg != &psegs[PSEG_NUMSEGS]; pseg++) {
 		if (pseg->start <= segaddr &&
@@ -246,10 +225,15 @@ uvm_pseg_release(vaddr_t segaddr)
 	pseg->use &= ~(1 << id);
 	wakeup(&psegs);
 
-	if (pseg != &psegs[0] && UVM_PSEG_EMPTY(pseg))
-		uvm_pseg_destroy(pseg);
+	if (pseg != &psegs[0] && UVM_PSEG_EMPTY(pseg)) {
+		va = pseg->start;
+		pseg->start = 0;
+	}
 
 	mtx_leave(&uvm_pseg_lck);
+
+	if (va)
+		uvm_km_free(kernel_map, va, MAX_PAGER_SEGS * MAXBSIZE);
 }
 
 /*
@@ -266,11 +250,6 @@ uvm_pagermapin(struct vm_page **pps, int npages, int flags)
 	vsize_t size;
 	struct vm_page *pp;
 
-	UVMHIST_FUNC("uvm_pagermapin"); UVMHIST_CALLED(maphist);
-
-	UVMHIST_LOG(maphist,"(pps=%p, npages=%ld, flags=%d)",
-	    pps, npages, flags,0);
-
 	prot = VM_PROT_READ;
 	if (flags & UVMPAGER_MAPIN_READ)
 		prot |= VM_PROT_WRITE;
@@ -279,10 +258,8 @@ uvm_pagermapin(struct vm_page **pps, int npages, int flags)
 	KASSERT(size <= MAXBSIZE);
 
 	kva = uvm_pseg_get(flags);
-	if (kva == 0) {
-		UVMHIST_LOG(maphist,"<- NOWAIT failed", 0,0,0,0);
+	if (kva == 0)
 		return 0;
-	}
 
 	for (cva = kva ; size != 0 ; size -= PAGE_SIZE, cva += PAGE_SIZE) {
 		pp = *pps++;
@@ -294,12 +271,10 @@ uvm_pagermapin(struct vm_page **pps, int npages, int flags)
 			pmap_remove(pmap_kernel(), kva, cva);
 			pmap_update(pmap_kernel());
 			uvm_pseg_release(kva);
-			UVMHIST_LOG(maphist,"<- pmap_enter failed", 0,0,0,0);
 			return 0;
 		}
 	}
 	pmap_update(pmap_kernel());
-	UVMHIST_LOG(maphist, "<- done (KVA=0x%lx)", kva,0,0,0);
 	return kva;
 }
 
@@ -311,15 +286,11 @@ uvm_pagermapin(struct vm_page **pps, int npages, int flags)
 void
 uvm_pagermapout(vaddr_t kva, int npages)
 {
-	UVMHIST_FUNC("uvm_pagermapout"); UVMHIST_CALLED(maphist);
-
-	UVMHIST_LOG(maphist, " (kva=0x%lx, npages=%ld)", kva, npages,0,0);
 
 	pmap_remove(pmap_kernel(), kva, kva + (npages << PAGE_SHIFT));
 	pmap_update(pmap_kernel());
 	uvm_pseg_release(kva);
 
-	UVMHIST_LOG(maphist,"<- done",0,0,0,0);
 }
 
 /*
@@ -353,7 +324,6 @@ uvm_mk_pcluster(struct uvm_object *uobj, struct vm_page **pps, int *npages,
 	struct vm_page **ppsp, *pclust;
 	voff_t lo, hi, curoff;
 	int center_idx, forward, incr;
-	UVMHIST_FUNC("uvm_mk_pcluster"); UVMHIST_CALLED(maphist);
 
 	/* 
 	 * center page should already be busy and write protected.  XXX:
@@ -467,7 +437,6 @@ uvm_mk_pcluster(struct uvm_object *uobj, struct vm_page **pps, int *npages,
 	 * done!  return the cluster array to the caller!!!
 	 */
 
-	UVMHIST_LOG(maphist, "<- done",0,0,0,0);
 	return(ppsp);
 }
 
@@ -520,7 +489,6 @@ uvm_pager_put(struct uvm_object *uobj, struct vm_page *pg,
 	int result;
 	daddr64_t swblk;
 	struct vm_page **ppsp = *ppsp_ptr;
-	UVMHIST_FUNC("uvm_pager_put"); UVMHIST_CALLED(pdhist);
 
 	/*
 	 * note that uobj is null  if we are doing a swap-backed pageout.
@@ -572,7 +540,6 @@ ReTry:
 	if (uobj) {
 		/* object is locked */
 		result = uobj->pgops->pgo_put(uobj, ppsp, *npages, flags);
-		UVMHIST_LOG(pdhist, "put -> %ld", result, 0,0,0);
 		/* object is now unlocked */
 	} else {
 		/* nothing locked */
@@ -763,7 +730,6 @@ uvm_pager_dropcluster(struct uvm_object *uobj, struct vm_page *pg,
 				    PG_BUSY);
 				UVM_PAGE_OWN(ppsp[lcv], NULL);
 
-				pmap_page_protect(ppsp[lcv], VM_PROT_NONE);
 				simple_unlock(&ppsp[lcv]->uanon->an_lock);
 				/* kills anon and frees pg */
 				uvm_anfree(ppsp[lcv]->uanon);
@@ -833,8 +799,6 @@ uvm_aio_aiodone(struct buf *bp)
 	struct uvm_object *uobj;
 	int i, error;
 	boolean_t write, swap;
-	UVMHIST_FUNC("uvm_aio_aiodone"); UVMHIST_CALLED(pdhist);
-	UVMHIST_LOG(pdhist, "bp %p", bp, 0,0,0);
 
 	KASSERT(npages <= MAXPHYS >> PAGE_SHIFT);
 	splassert(IPL_BIO);
@@ -843,10 +807,8 @@ uvm_aio_aiodone(struct buf *bp)
 	write = (bp->b_flags & B_READ) == 0;
 
 	uobj = NULL;
-	for (i = 0; i < npages; i++) {
-		pgs[i] = uvm_pageratop((vaddr_t)bp->b_data + (i << PAGE_SHIFT));
-		UVMHIST_LOG(pdhist, "pgs[%ld] = %p", i, pgs[i],0,0);
-	}
+	for (i = 0; i < npages; i++)
+		pgs[i] = uvm_atopg((vaddr_t)bp->b_data + (i << PAGE_SHIFT));
 	uvm_pagermapout((vaddr_t)bp->b_data, npages);
 #ifdef UVM_SWAP_ENCRYPT
 	/*
@@ -919,21 +881,3 @@ freed:
 	}
 	pool_put(&bufpool, bp);
 }
-
-/*
- * uvm_pageratop: convert KVAs in the pager map back to their page
- * structures.
- */
-struct vm_page *
-uvm_pageratop(vaddr_t kva)
-{
-	struct vm_page *pg;
-	paddr_t pa;
-	boolean_t rv;
- 
-	rv = pmap_extract(pmap_kernel(), kva, &pa);
-	KASSERT(rv);
-	pg = PHYS_TO_VM_PAGE(pa);
-	KASSERT(pg != NULL);
-	return (pg);
-} 

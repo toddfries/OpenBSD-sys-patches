@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpufunc.h,v 1.4 2009/12/09 14:28:46 oga Exp $	*/
+/*	$OpenBSD: cpufunc.h,v 1.7 2011/03/23 16:54:34 pirofti Exp $	*/
 /*	$NetBSD: cpufunc.h,v 1.3 2003/05/08 10:27:43 fvdl Exp $	*/
 
 /*-
@@ -30,8 +30,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _AMD64_CPUFUNC_H_
-#define	_AMD64_CPUFUNC_H_
+#ifndef _MACHINE_CPUFUNC_H_
+#define	_MACHINE_CPUFUNC_H_
 
 /*
  * Functions to provide access to i386-specific instructions.
@@ -61,7 +61,7 @@ invlpg(u_int64_t addr)
 static __inline void
 lidt(void *p)
 {
-	__asm __volatile("lidt (%0)" : : "r" (p));
+	__asm __volatile("lidt (%0)" : : "r" (p) : "memory");
 }
 
 static __inline void
@@ -245,19 +245,18 @@ wrmsr(u_int msr, u_int64_t newval)
 static __inline u_int64_t
 rdmsr_locked(u_int msr, u_int code)
 {
-	uint64_t rv;
-	__asm volatile("rdmsr"
-	    : "=A" (rv)
+	uint32_t hi, lo;
+	__asm __volatile("rdmsr"
+	    : "=d" (hi), "=a" (lo)
 	    : "c" (msr), "D" (code));
-	return (rv);
+	return (((uint64_t)hi << 32) | (uint64_t) lo);
 }
 
 static __inline void
 wrmsr_locked(u_int msr, u_int code, u_int64_t newval)
 {
-	__asm volatile("wrmsr"
-	    :
-	    : "A" (newval), "c" (msr), "D" (code));
+	__asm __volatile("wrmsr" :
+	    : "a" (newval & 0xffffffff), "d" (newval >> 32), "c" (msr), "D" (code));
 }
 
 static __inline void
@@ -310,4 +309,4 @@ void amd64_errata(struct cpu_info *);
 
 #endif /* _KERNEL */
 
-#endif /* !_AMD64_CPUFUNC_H_ */
+#endif /* !_MACHINE_CPUFUNC_H_ */

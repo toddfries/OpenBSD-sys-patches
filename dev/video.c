@@ -1,4 +1,4 @@
-/*	$OpenBSD: video.c,v 1.25 2010/07/14 21:24:33 jakemsr Exp $	*/
+/*	$OpenBSD: video.c,v 1.28 2011/07/03 15:47:16 matthew Exp $	*/
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
  * Copyright (c) 2008 Marcus Glocker <mglocker@openbsd.org>
@@ -231,6 +231,16 @@ videoioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 			error = (sc->hw_if->g_fmt)(sc->hw_hdl,
 			    (struct v4l2_format *)data);
 		break;
+	case VIDIOC_S_PARM:
+		if (sc->hw_if->s_parm)
+			error = (sc->hw_if->s_parm)(sc->hw_hdl,
+			    (struct v4l2_streamparm *)data);
+		break;
+	case VIDIOC_G_PARM:
+		if (sc->hw_if->g_parm)
+			error = (sc->hw_if->g_parm)(sc->hw_hdl,
+			    (struct v4l2_streamparm *)data);
+		break;
 	case VIDIOC_ENUMINPUT:
 		if (sc->hw_if->enum_input)
 			error = (sc->hw_if->enum_input)(sc->hw_hdl,
@@ -375,11 +385,7 @@ videommap(dev_t dev, off_t off, int prot)
 		panic("videommap: invalid page");
 	sc->sc_vidmode = VIDMODE_MMAP;
 
-#if defined(__powerpc__) || defined(__sparc64__)
 	return (pa);
-#else
-	return (atop(pa));
-#endif
 }
 
 /*
@@ -446,9 +452,6 @@ videoactivate(struct device *self, int act)
 	struct video_softc *sc = (struct video_softc *)self;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		sc->sc_dying = 1;
 		break;

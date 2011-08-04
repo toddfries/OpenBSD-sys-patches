@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.70 2010/07/02 19:57:14 tedu Exp $ */
+/*	$OpenBSD: trap.c,v 1.74 2011/07/05 04:48:01 guenther Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -286,8 +286,8 @@ copyfault:
 		type |= T_USER;
 		p->p_sigacts->ps_sigact[SIGILL] = SIG_DFL;
 		i = sigmask(SIGILL);
-		p->p_sigignore &= ~i;
-		p->p_sigcatch &= ~i;
+		p->p_sigacts->ps_sigignore &= ~i;
+		p->p_sigacts->ps_sigcatch &= ~i;
 		p->p_sigmask &= ~i;
 		i = SIGILL;
 		ucode = frame.f_format;	/* XXX was ILL_RESAD_FAULT */
@@ -1101,7 +1101,7 @@ intr_establish(vec, ih, name)
 		}
 	}
 
-	evcount_attach(&ih->ih_count, name, &ih->ih_ipl, &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &ih->ih_ipl);
 	SLIST_INSERT_HEAD(list, ih, ih_link);
 	return (0);
 }

@@ -1,4 +1,4 @@
-/* $OpenBSD: rf_openbsdkintf.c,v 1.57 2010/06/26 23:24:45 guenther Exp $	*/
+/* $OpenBSD: rf_openbsdkintf.c,v 1.65 2011/07/06 04:49:36 matthew Exp $	*/
 /* $NetBSD: rf_netbsdkintf.c,v 1.109 2001/07/27 03:30:07 oster Exp $	*/
 
 /*-
@@ -215,8 +215,6 @@ struct raid_softc {
 
 /* sc_flags */
 #define	RAIDF_INITED	0x01	/* Unit has been initialized. */
-#define	RAIDF_WLABEL	0x02	/* Label area is writable. */
-#define	RAIDF_LABELLING	0x04	/* Unit is currently being labelled. */
 #define	RAIDF_WANTED	0x40	/* Someone is waiting to obtain a lock. */
 #define	RAIDF_LOCKED	0x80	/* Unit is locked. */
 
@@ -724,7 +722,6 @@ raidstrategy(struct buf *bp)
 	RF_Raid_t *raidPtr;
 	struct raid_softc *rs = &raid_softc[raidID];
 	struct disklabel *lp;
-	int wlabel;
 
 	s = splbio();
 
@@ -761,10 +758,9 @@ raidstrategy(struct buf *bp)
 	 * Do bounds checking and adjust transfer.  If there's an
 	 * error, the bounds check will flag that for us.
 	 */
-	wlabel = rs->sc_flags & (RAIDF_WLABEL | RAIDF_LABELLING);
-	if (bounds_check_with_label(bp, lp, wlabel) <= 0) {
-		db1_printf(("Bounds check failed!!:%d %d\n",
-		    (int)bp->b_blkno, (int)wlabel));
+	if (bounds_check_with_label(bp, lp) == -1) {
+		db1_printf(("Bounds check failed!!: %d\n",
+		    (int)bp->b_blkno));
 		biodone(bp);
 		goto raidstrategy_end;
 	}
@@ -799,7 +795,7 @@ raidread(dev_t dev, struct uio *uio, int flags)
 
 	db1_printf(("raidread: unit: %d partition: %d\n", unit, part));
 
-	return (physio(raidstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(raidstrategy, dev, B_READ, minphys, uio));
 }
 
 /* ARGSUSED */
@@ -816,7 +812,7 @@ raidwrite(dev_t dev, struct uio *uio, int flags)
 	if ((rs->sc_flags & RAIDF_INITED) == 0)
 		return (ENXIO);
 	db1_printf(("raidwrite\n"));
-	return (physio(raidstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(raidstrategy, dev, B_WRITE, minphys, uio));
 }
 
 int
@@ -858,7 +854,6 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	switch (cmd) {
 	case DIOCSDINFO:
 	case DIOCWDINFO:
-	case DIOCWLABEL:
 		if ((flag & FWRITE) == 0)
 			return (EBADF);
 	}
@@ -869,7 +864,6 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case DIOCSDINFO:
 	case DIOCWDINFO:
 	case DIOCGPART:
-	case DIOCWLABEL:
 	case DIOCRLDINFO:
 	case DIOCGPDINFO:
 	case RAIDFRAME_SHUTDOWN:
@@ -967,7 +961,7 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		 *  there is no stale data left in the case of a
 		 *  reconfiguration.
 		 */
-		bzero((char *) raidPtr, sizeof(RF_Raid_t));
+		bzero(raidPtr, sizeof(RF_Raid_t));
 
 		/* Configure the system. */
 		raidPtr->raidid = unit;
@@ -1048,7 +1042,7 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		if (clabel == NULL)
 			return (ENOMEM);
 
-		bzero((char *) clabel, sizeof(RF_ComponentLabel_t));
+		bzero(clabel, sizeof(RF_ComponentLabel_t));
 
 		retcode = copyin( *clabel_ptr, clabel,
 				  sizeof(RF_ComponentLabel_t));
@@ -1247,7 +1241,7 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 			  (RF_DeviceConfig_t *));
 		if (d_cfg == NULL)
 			return (ENOMEM);
-		bzero((char *) d_cfg, sizeof(RF_DeviceConfig_t));
+		bzero(d_cfg, sizeof(RF_DeviceConfig_t));
 		d_cfg->rows = raidPtr->numRow;
 		d_cfg->cols = raidPtr->numCol;
 		d_cfg->ndevs = raidPtr->numRow * raidPtr->numCol;
@@ -1553,8 +1547,6 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		if ((error = raidlock(rs)) != 0)
 			return (error);
 
-		rs->sc_flags |= RAIDF_LABELLING;
-
 		error = setdisklabel(rs->sc_dkdev.dk_label, lp, 0);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
@@ -1562,21 +1554,12 @@ raidioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 				    raidstrategy, rs->sc_dkdev.dk_label);
 		}
 
-		rs->sc_flags &= ~RAIDF_LABELLING;
-
 		raidunlock(rs);
 
 		if (error)
 			return (error);
 		break;
 	}
-
-	case DIOCWLABEL:
-		if (*(int *)data != 0)
-			rs->sc_flags |= RAIDF_WLABEL;
-		else
-			rs->sc_flags &= ~RAIDF_WLABEL;
-		break;
 
 	case DIOCGPDINFO:
 		raidgetdisklabel(dev, rs, (struct disklabel *)data, 1);
@@ -1619,7 +1602,7 @@ raidinit(RF_Raid_t *raidPtr)
 	 * other things, so it's critical to call this *BEFORE* we try
 	 * putzing with disklabels.
 	 */
-	disk_attach(&rs->sc_dkdev);
+	disk_attach(NULL, &rs->sc_dkdev);
 
 	/*
 	 * XXX There may be a weird interaction here between this, and
@@ -2720,7 +2703,7 @@ rf_find_raid_components(void)
 		if (bdevvp(dev, &vp))
 			panic("RAID can't alloc vnode");
 
-		error = VOP_OPEN(vp, FREAD, NOCRED, 0);
+		error = VOP_OPEN(vp, FREAD, NOCRED, curproc);
 
 		if (error) {
 			/*
@@ -2733,7 +2716,7 @@ rf_find_raid_components(void)
 
 		/* Ok, the disk exists.  Go get the disklabel. */
 		error = VOP_IOCTL(vp, DIOCGDINFO, (caddr_t)&label,
-				  FREAD, NOCRED, 0);
+				  FREAD, NOCRED, curproc);
 		if (error) {
 			/*
 			 * XXX can't happen - open() would
@@ -2747,7 +2730,7 @@ rf_find_raid_components(void)
 		 * We don't need this any more.  We'll allocate it again
 		 * a little later if we really do...
 		 */
-		VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, 0);
+		VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, curproc);
 		vrele(vp);
 
 		for (i=0; i < label.d_npartitions; i++) {
@@ -2770,7 +2753,7 @@ rf_find_raid_components(void)
 			if (bdevvp(dev, &vp))
 				panic("RAID can't alloc vnode");
 
-			error = VOP_OPEN(vp, FREAD, NOCRED, 0);
+			error = VOP_OPEN(vp, FREAD, NOCRED, curproc);
 			if (error) {
 				/* Whatever... */
 				vput(vp);
@@ -2825,7 +2808,7 @@ rf_find_raid_components(void)
 			if (!good_one) {
 				/* Cleanup. */
 				free(clabel, M_RAIDFRAME);
-				VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, 0);
+				VOP_CLOSE(vp, FREAD | FWRITE, NOCRED, curproc);
 				vrele(vp);
 			}
 		}
@@ -3160,7 +3143,7 @@ rf_create_configuration(RF_AutoConfig_t *ac, RF_Config_t *config,
 	}
 
 	for(i=0;i<RF_MAXDBGV;i++) {
-		config->debugVars[i][0] = NULL;
+		config->debugVars[i][0] = '\0';
 	}
 
 #ifdef	RAID_DEBUG_ALL
@@ -3328,7 +3311,7 @@ rf_release_all_vps(RF_ConfigSet_t *cset)
 	while(ac!=NULL) {
 		/* Close the vp, and give it back. */
 		if (ac->vp) {
-			VOP_CLOSE(ac->vp, FREAD, NOCRED, 0);
+			VOP_CLOSE(ac->vp, FREAD, NOCRED, curproc);
 			vrele(ac->vp);
 			ac->vp = NULL;
 		}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: rfcomm_session.c,v 1.6 2010/07/02 02:40:16 blambert Exp $	*/
+/*	$OpenBSD: rfcomm_session.c,v 1.8 2010/07/29 14:40:47 blambert Exp $	*/
 /*	$NetBSD: rfcomm_session.c,v 1.14 2008/08/06 15:01:24 plunky Exp $	*/
 
 /*-
@@ -35,6 +35,7 @@
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/mbuf.h>
+#include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/types.h>

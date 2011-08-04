@@ -1,4 +1,4 @@
-/*	$OpenBSD: device.h,v 1.41 2009/11/23 14:12:10 deraadt Exp $	*/
+/*	$OpenBSD: device.h,v 1.44 2011/07/03 15:47:16 matthew Exp $	*/
 /*	$NetBSD: device.h,v 1.15 1996/04/09 20:55:24 cgd Exp $	*/
 
 /*
@@ -62,10 +62,10 @@ enum devclass {
 /*
  * Actions for ca_activate.
  */
-#define	DVACT_ACTIVATE		0	/* activate the device */
 #define	DVACT_DEACTIVATE	1	/* deactivate the device */
 #define	DVACT_SUSPEND		2	/* suspend the device */
 #define	DVACT_RESUME		3	/* resume the device */
+#define	DVACT_QUIESCE		4	/* warn the device about suspend */
 
 struct device {
 	enum	devclass dv_class;	/* this device's classification */
@@ -95,7 +95,6 @@ struct cfdata {
 	int	cf_flags;		/* flags from config */
 	short	*cf_parents;		/* potential parents */
 	int	cf_locnames;		/* start of names */
-	void	(**cf_ivstubs)(void);	/* config-generated vectors, if any */
 	short	cf_starunit1;		/* 1st usable unit number by STAR */
 };
 extern struct cfdata cfdata[];
@@ -184,7 +183,6 @@ void config_scan(cfscan_t, struct device *);
 struct device *config_attach(struct device *, void *, void *, cfprint_t);
 int config_detach(struct device *, int);
 int config_detach_children(struct device *, int);
-int config_activate(struct device *);
 int config_deactivate(struct device *);
 int config_suspend(struct device *, int);
 int config_activate_children(struct device *, int);

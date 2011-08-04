@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpireg.h,v 1.22 2010/06/29 22:08:29 jordan Exp $	*/
+/*	$OpenBSD: acpireg.h,v 1.26 2011/06/16 23:02:11 pirofti Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
@@ -380,6 +380,17 @@ struct acpi_hpet {
 	u_int8_t	page_protection;
 } __packed;
 
+struct acpi_mcfg {
+	struct acpi_table_header	hdr;
+#define MCFG_SIG	"MCFG"
+	u_int8_t	reserved[8];
+	u_int64_t	base_address;
+	u_int16_t	segment;
+	u_int8_t	min_bus_number;
+	u_int8_t	max_bus_number;
+	u_int32_t	reserved1;
+} __packed;
+
 struct acpi_facs {
 	u_int8_t	signature[4];
 #define	FACS_SIG	"FACS"
@@ -396,8 +407,8 @@ struct acpi_facs {
 	u_int8_t	reserved[31];
 } __packed;
 
-/* 
- * Intel ACPI DMA Remapping Entries 
+/*
+ * Intel ACPI DMA Remapping Entries
  */
 struct acpidmar_devpath {
 	uint8_t		device;
@@ -406,10 +417,10 @@ struct acpidmar_devpath {
 
 struct acpidmar_devscope {
 	uint8_t		type;
-#define DMAR_ENDPOINT 			0x1
-#define DMAR_BRIDGE 			0x2
-#define DMAR_IOAPIC 			0x3
-#define DMAR_HPET 			0x4
+#define DMAR_ENDPOINT			0x1
+#define DMAR_BRIDGE			0x2
+#define DMAR_IOAPIC			0x3
+#define DMAR_HPET			0x4
 	uint8_t		length;
 	uint16_t	reserved;
 	uint8_t		enumid;
@@ -454,10 +465,10 @@ struct acpidmar_atsr {
 union acpidmar_entry {
 	struct {
 		uint16_t	type;
-#define DMAR_DRHD 			0x0
-#define DMAR_RMRR 			0x1
-#define DMAR_ATSR 			0x2
-#define DMAR_RHSA 			0x3
+#define DMAR_DRHD			0x0
+#define DMAR_RMRR			0x1
+#define DMAR_ATSR			0x2
+#define DMAR_RHSA			0x3
 		uint16_t	length;
 	} __packed;
 	struct acpidmar_drhd	drhd;
@@ -474,8 +485,8 @@ struct acpi_dmar {
 	/* struct acpidmar_entry[]; */
 } __packed;
 
-/* 
- * AMD I/O Virtualization Remapping Entries 
+/*
+ * AMD I/O Virtualization Remapping Entries
  */
 union acpi_ivhd_entry {
 	uint8_t		type;
@@ -702,7 +713,11 @@ struct acpi_ivrs {
 #define ACPI_DEV_THZ	"THERMALZONE"	/* Thermal Zone */
 #define ACPI_DEV_FFB	"FIXEDBUTTON"	/* Fixed Feature Button */
 #define ACPI_DEV_ASUS	"ASUS010"	/* ASUS Hotkeys */
-#define ACPI_DEV_THINKPAD "IBM0068"	/* ThinkPad support */
+#define ACPI_DEV_IBM	"IBM0068"	/* IBM ThinkPad support */
+#define ACPI_DEV_LENOVO	"LEN0068"	/* Lenovo ThinkPad support */
 #define ACPI_DEV_ASUSAIBOOSTER	"ATK0110"	/* ASUSTeK AI Booster */
+#define ACPI_DEV_TOSHIBA_LIBRETTO	"TOS6200"	/* Toshiba Libretto support */
+#define ACPI_DEV_TOSHIBA_DYNABOOK	"TOS6207"	/* Toshiba Dynabook support */
+#define ACPI_DEV_TOSHIBA_SPA40	"TOS6208"	/* Toshiba SPA40 support */
 
 #endif	/* !_DEV_ACPI_ACPIREG_H_ */

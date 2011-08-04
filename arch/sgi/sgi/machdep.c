@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.105 2010/06/27 13:28:46 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.112 2011/06/26 22:40:00 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -47,6 +47,7 @@
 #include <sys/sem.h>
 #endif
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
@@ -82,22 +83,12 @@ void dump_tlb(void);
 char	machine[] = MACHINE;		/* Machine "architecture" */
 char	cpu_model[30];
 
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5	/* Can be changed in config. */
-#endif
-#ifndef	BUFPAGES
-#define BUFPAGES 0		/* Can be changed in config. */
-#endif
-
-int	bufpages = BUFPAGES;
-int	bufcachepercent = BUFCACHEPERCENT;
-
 /* low 32 bits range. */
 struct uvm_constraint_range  dma_constraint = { 0x0, 0x7fffffff };
-struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
+struct uvm_constraint_range *uvm_md_constraints[] = {
+	&dma_constraint,
+	NULL
+};
 
 vm_map_t exec_map;
 vm_map_t phys_map;
@@ -116,7 +107,6 @@ int	rsvdmem;		/* Reserved memory not usable. */
 int	ncpu = 1;		/* At least one CPU in the system. */
 struct	user *proc0paddr;
 int	console_ok;		/* Set when console initialized. */
-int	kbd_reset;
 int16_t	masternasid;
 
 int32_t *environment;
@@ -138,7 +128,6 @@ void	dumpconf(void);
 static void dobootopts(int, void *);
 
 void	arcbios_halt(int);
-void	build_trampoline(vaddr_t, vaddr_t);
 boolean_t is_memory_range(paddr_t, psize_t, psize_t);
 
 void	(*md_halt)(int) = arcbios_halt;
@@ -240,7 +229,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		ip32_setup();
 		break;
 #endif
-
 #ifdef TGT_ORIGIN
 	case SGI_IP27:
 		bios_printf("Found SGI-IP27, setting up.\n");
@@ -257,7 +245,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 
 		break;
 #endif
-
 #ifdef TGT_OCTANE
 	case SGI_OCTANE:
 		bios_printf("Found SGI-IP30, setting up.\n");
@@ -265,7 +252,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		ip30_setup();
 		break;
 #endif
-
 	default:
 		bios_printf("Kernel doesn't support this system type!\n");
 		bios_printf("Halting system.\n");
@@ -277,7 +263,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	 * Look at arguments passed to us and compute boothowto.
 	 */
 	boothowto = RB_AUTOBOOT;
-
 	dobootopts(argc, argv);
 
 	/*
@@ -317,7 +302,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_last_page != 0; i++) {
 		uint64_t fp, lp;
 		uint64_t firstkernpage, lastkernpage;
-		unsigned int freelist;
 		paddr_t firstkernpa, lastkernpa;
 
 		if (IS_XKPHYS((vaddr_t)start))
@@ -334,14 +318,13 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
-		freelist = mem_layout[i].mem_freelist;
 
 		/* Account for kernel and kernel symbol table. */
 		if (fp >= firstkernpage && lp < lastkernpage)
 			continue;	/* In kernel. */
 
 		if (lp < firstkernpage || fp > lastkernpage) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 			continue;	/* Outside kernel. */
 		}
 
@@ -351,11 +334,11 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 			lp = firstkernpage;
 		else { /* Need to split! */
 			uint64_t xp = firstkernpage;
-			uvm_page_physload(fp, xp, fp, xp, freelist);
+			uvm_page_physload(fp, xp, fp, xp, 0);
 			fp = lastkernpage;
 		}
 		if (lp > fp) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 		}
 	}
 
@@ -447,7 +430,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	/*
 	 * Init message buffer.
 	 */
-	msgbufbase = (caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL,NULL);
+	msgbufbase = (caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL, NULL);
 	initmsgbuf(msgbufbase, MSGBUFSIZE);
 
 	/*
@@ -525,73 +508,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 }
 
 /*
- * Build a tlb trampoline
- */
-void
-build_trampoline(vaddr_t addr, vaddr_t dest)
-{
-	const uint32_t insns[] = {
-		0x3c1a0000,	/* lui k0, imm16 */
-		0x675a0000,	/* daddiu k0, k0, imm16 */
-		0x001ad438,	/* dsll k0, k0, 0x10 */
-		0x675a0000,	/* daddiu k0, k0, imm16 */
-		0x001ad438,	/* dsll k0, k0, 0x10 */
-		0x675a0000,	/* daddiu k0, k0, imm16 */
-		0x03400008,	/* jr k0 */
-		0x00000000	/* nop */
-	};
-	uint32_t *dst = (uint32_t *)addr;
-	const uint32_t *src = insns;
-	uint32_t a, b, c, d;
-
-	/*
-	 * Decompose the handler address in the four components which,
-	 * added with sign extension, will produce the correct address.
-	 */
-	d = dest & 0xffff;
-	dest >>= 16;
-	if (d & 0x8000)
-		dest++;
-	c = dest & 0xffff;
-	dest >>= 16;
-	if (c & 0x8000)
-		dest++;
-	b = dest & 0xffff;
-	dest >>= 16;
-	if (b & 0x8000)
-		dest++;
-	a = dest & 0xffff;
-
-	/*
-	 * Build the trampoline, skipping noop computations.
-	 */
-	*dst++ = *src++ | a;
-	if (b != 0)
-		*dst++ = *src++ | b;
-	else
-		src++;
-	*dst++ = *src++;
-	if (c != 0)
-		*dst++ = *src++ | c;
-	else
-		src++;
-	*dst++ = *src++;
-	if (d != 0)
-		*dst++ = *src++ | d;
-	else
-		src++;
-	*dst++ = *src++;
-	*dst++ = *src++;
-
-	/*
-	 * Note that we keep the delay slot instruction a nop, instead
-	 * of branching to the second instruction of the handler and
-	 * having its first instruction in the delay slot, so that the
-	 * tlb handler is free to use k0 immediately.
-	 */
-}
-
-/*
  * Decode boot options.
  */
 static void
@@ -614,11 +530,11 @@ dobootopts(int argc, void *argv)
 		 */
 		if (strncmp(cp, "OSLoadOptions=", 14) == 0) {
 			if (strcmp(&cp[14], "auto") == 0)
-					boothowto &= ~(RB_SINGLE|RB_ASKNAME);
+				boothowto &= ~(RB_SINGLE|RB_ASKNAME);
 			else if (strcmp(&cp[14], "single") == 0)
-					boothowto |= RB_SINGLE;
+				boothowto |= RB_SINGLE;
 			else if (strcmp(&cp[14], "debug") == 0)
-					boothowto |= RB_KDB;
+				boothowto |= RB_KDB;
 			continue;
 		}
 
@@ -679,10 +595,10 @@ cpu_startup()
 	 * Good {morning,afternoon,evening,night}.
 	 */
 	printf(version);
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
-	    ptoa(physmem)/1024/1024);
-	printf("rsvd mem = %u (%uMB)\n", ptoa(rsvdmem),
-	    ptoa(rsvdmem)/1024/1024);
+	printf("real mem = %lu (%luMB)\n", ptoa((psize_t)physmem),
+	    ptoa((psize_t)physmem)/1024/1024);
+	printf("rsvd mem = %lu (%luMB)\n", ptoa((psize_t)rsvdmem),
+	    ptoa((psize_t)rsvdmem)/1024/1024);
 
 	/*
 	 * Allocate a submap for exec arguments. This map effectively
@@ -698,8 +614,8 @@ cpu_startup()
 #ifdef PMAPDEBUG
 	pmapdebug = opmapdebug;
 #endif
-	printf("avail mem = %u (%uMB)\n", ptoa(uvmexp.free),
-	    ptoa(uvmexp.free)/1024/1024);
+	printf("avail mem = %lu (%luMB)\n", ptoa((psize_t)uvmexp.free),
+	    ptoa((psize_t)uvmexp.free)/1024/1024);
 
 	/*
 	 * Set up CPU-specific registers, cache, etc.
@@ -741,50 +657,10 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return ENOTDIR;		/* Overloaded */
 
 	switch (name[0]) {
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return EOPNOTSUPP;
 	}
 }
-
-/*
- * Set registers on exec for native exec format. For o64/64.
- */
-void
-setregs(p, pack, stack, retval)
-	struct proc *p;
-	struct exec_package *pack;
-	u_long stack;
-	register_t *retval;
-{
-	struct cpu_info *ci = curcpu();
-
-	bzero((caddr_t)p->p_md.md_regs, sizeof(struct trap_frame));
-	p->p_md.md_regs->sp = stack;
-	p->p_md.md_regs->pc = pack->ep_entry & ~3;
-	p->p_md.md_regs->t9 = pack->ep_entry & ~3; /* abicall req */
-	p->p_md.md_regs->sr = SR_FR_32 | SR_XX | SR_KSU_USER | SR_KX | SR_UX |
-	    SR_EXL | SR_INT_ENAB;
-#if defined(CPU_R10000) && !defined(TGT_COHERENT)
-	if (ci->ci_hw.type == MIPS_R12000)
-		p->p_md.md_regs->sr |= SR_DSD;
-#endif
-	p->p_md.md_regs->sr |= idle_mask & SR_INT_MASK;
-	p->p_md.md_regs->ic = (idle_mask << 8) & IC_INT_MASK;
-	p->p_md.md_flags &= ~MDP_FPUSED;
-	if (ci->ci_fpuproc == p)
-		ci->ci_fpuproc = (struct proc *)0;
-	p->p_md.md_ss_addr = 0;
-	p->p_md.md_pc_ctrl = 0;
-	p->p_md.md_watch_1 = 0;
-	p->p_md.md_watch_2 = 0;
-
-	retval[1] = 0;
-}
-
 
 int	waittime = -1;
 
@@ -828,6 +704,7 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	(void) splhigh();		/* Extreme priority. */

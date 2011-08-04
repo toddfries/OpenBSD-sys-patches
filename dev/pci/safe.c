@@ -1,4 +1,4 @@
-/*	$OpenBSD: safe.c,v 1.29 2010/07/02 02:40:16 blambert Exp $	*/
+/*	$OpenBSD: safe.c,v 1.33 2011/04/05 11:48:28 blambert Exp $	*/
 
 /*-
  * Copyright (c) 2003 Sam Leffler, Errno Consulting
@@ -472,7 +472,8 @@ safe_process(struct cryptop *crp)
 			if (enccrd->crd_flags & CRD_F_IV_EXPLICIT)
 				bcopy(enccrd->crd_iv, iv, ivsize);
 			else
-				bcopy(ses->ses_iv, iv, ivsize);
+				arc4random_buf(iv, ivsize);
+
 			if ((enccrd->crd_flags & CRD_F_IV_PRESENT) == 0) {
 				if (crp->crp_flags & CRYPTO_F_IMBUF)
 					m_copyback(re->re_src_m,
@@ -485,7 +486,6 @@ safe_process(struct cryptop *crp)
 			for (i = 0; i < ivsize / sizeof(iv[0]); i++)
 				re->re_sastate.sa_saved_iv[i] = htole32(iv[i]);
 			cmd0 |= SAFE_SA_CMD0_IVLD_STATE | SAFE_SA_CMD0_SAVEIV;
-			re->re_flags |= SAFE_QFLAGS_COPYOUTIV;
 		} else {
 			cmd0 |= SAFE_SA_CMD0_INBOUND;
 
@@ -512,7 +512,7 @@ safe_process(struct cryptop *crp)
 		cmd0 |= SAFE_SA_CMD0_PAD_ZERO;
 
 		/* XXX assert key bufs have the same size */
-		for (i = 0; i < sizeof(sa->sa_key)/sizeof(sa->sa_key[0]); i++)
+		for (i = 0; i < nitems(sa->sa_key); i++)
 			sa->sa_key[i] = ses->ses_key[i];
 	}
 
@@ -533,7 +533,7 @@ safe_process(struct cryptop *crp)
 		 */
 		/* XXX assert digest bufs have the same size */
 		for (i = 0;
-		     i < sizeof(sa->sa_outdigest)/sizeof(sa->sa_outdigest[i]);
+		     i < nitems(sa->sa_outdigest);
 		     i++) {
 			sa->sa_indigest[i] = ses->ses_hminner[i];
 			sa->sa_outdigest[i] = ses->ses_hmouter[i];
@@ -807,7 +807,8 @@ safe_process(struct cryptop *crp)
 					goto errout;
 				}
 				if (len == MHLEN) {
-					err = m_dup_pkthdr(m, re->re_src_m);
+					err = m_dup_pkthdr(m, re->re_src_m,
+					    M_DONTWAIT);
 					if (err) {
 						m_free(m);
 						goto errout;
@@ -1349,7 +1350,7 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 				return (ENOMEM);
 			bcopy(sc->sc_sessions, ses, sesn *
 			    sizeof(struct safe_session));
-			bzero(sc->sc_sessions, sesn *
+			explicit_bzero(sc->sc_sessions, sesn *
 			    sizeof(struct safe_session));
 			free(sc->sc_sessions, M_DEVBUF);
 			sc->sc_sessions = ses;
@@ -1362,14 +1363,10 @@ safe_newsession(u_int32_t *sidp, struct cryptoini *cri)
 	ses->ses_used = 1;
 
 	if (encini) {
-		/* get an IV */
-		arc4random_buf(ses->ses_iv, sizeof(ses->ses_iv));
-
 		ses->ses_klen = encini->cri_klen;
 		bcopy(encini->cri_key, ses->ses_key, ses->ses_klen / 8);
 
-		for (i = 0;
-		     i < sizeof(ses->ses_key)/sizeof(ses->ses_key[0]); i++)
+		for (i = 0; i < nitems(ses->ses_key); i++)
 			ses->ses_key[i] = htole32(ses->ses_key[i]);
 	}
 
@@ -1452,7 +1449,8 @@ safe_freesession(u_int64_t tid)
 
 	session = SAFE_SESSION(sid);
 	if (session < sc->sc_nsessions) {
-		bzero(&sc->sc_sessions[session], sizeof(sc->sc_sessions[session]));
+		explicit_bzero(&sc->sc_sessions[session],
+		    sizeof(sc->sc_sessions[session]));
 		ret = 0;
 	} else
 		ret = EINVAL;
@@ -1673,33 +1671,6 @@ safe_callback(struct safe_softc *sc, struct safe_ringentry *re)
 	if ((crp->crp_flags & CRYPTO_F_IMBUF) && re->re_src_m != re->re_dst_m) {
 		m_freem(re->re_src_m);
 		crp->crp_buf = (caddr_t)re->re_dst_m;
-	}
-
-	if (re->re_flags & SAFE_QFLAGS_COPYOUTIV) {
-		/* copy out IV for future use */
-		for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
-			int ivsize;
-
-			if (crd->crd_alg == CRYPTO_DES_CBC ||
-			    crd->crd_alg == CRYPTO_3DES_CBC) {
-				ivsize = 2*sizeof(u_int32_t);
-			} else if (crd->crd_alg == CRYPTO_AES_CBC) {
-				ivsize = 4*sizeof(u_int32_t);
-			} else
-				continue;
-			if (crp->crp_flags & CRYPTO_F_IMBUF) {
-				m_copydata((struct mbuf *)crp->crp_buf,
-					crd->crd_skip + crd->crd_len - ivsize,
-					ivsize,
-					(caddr_t) sc->sc_sessions[re->re_sesn].ses_iv);
-			} else if (crp->crp_flags & CRYPTO_F_IOV) {
-				cuio_copydata((struct uio *)crp->crp_buf,
-					crd->crd_skip + crd->crd_len - ivsize,
-					ivsize,
-					(caddr_t)sc->sc_sessions[re->re_sesn].ses_iv);
-			}
-			break;
-		}
 	}
 
 	if (re->re_flags & SAFE_QFLAGS_COPYOUTICV) {
@@ -2019,6 +1990,7 @@ safe_kpoll(void *vsc)
 	for (i = SAFE_PK_RAM_START; i < SAFE_PK_RAM_END; i += 4)
 		WRITE_REG(sc, i, 0);
 
+	explicit_bzero(&buf, sizeof(buf));
 	crypto_kdone(q->pkq_krp);
 	free(q, M_DEVBUF);
 	sc->sc_pkq_cur = NULL;

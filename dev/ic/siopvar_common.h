@@ -1,4 +1,4 @@
-/*	$OpenBSD: siopvar_common.h,v 1.27 2010/04/27 20:12:56 kettenis Exp $ */
+/*	$OpenBSD: siopvar_common.h,v 1.29 2011/04/05 22:37:39 dlg Exp $ */
 /*	$NetBSD: siopvar_common.h,v 1.33 2005/11/18 23:10:32 bouyer Exp $ */
 
 /*
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -84,6 +79,7 @@ struct siop_common_cmd {
 	struct siop_common_target *siop_target; /* pointer to our target def */
 	struct scsi_xfer *xs; /* xfer from the upper level */
 	struct siop_common_xfer *siop_tables; /* tables for this cmd */
+	struct scsi_sense_data *sense;
 	bus_addr_t	dsa; /* DSA value to load */
 	bus_dmamap_t	dmamap_data;
 	int status;

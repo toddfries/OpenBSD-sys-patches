@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthum.c,v 1.14 2010/04/20 14:37:38 deraadt Exp $   */
+/*	$OpenBSD: uthum.c,v 1.17 2011/07/03 15:47:17 matthew Exp $   */
 
 /*
  * Copyright (c) 2009, 2010 Yojiro UO <yuo@nui.org>
@@ -220,8 +220,6 @@ uthum_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_olen = hid_report_size(desc, size, hid_output, repid);
 	sc->sc_flen = hid_report_size(desc, size, hid_feature, repid);
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    &sc->sc_hdev.sc_dev);
 	printf("\n");
 
 	if (sc->sc_flen < 32) {
@@ -270,8 +268,6 @@ uthum_detach(struct device *self, int flags)
 	struct uthum_softc *sc = (struct uthum_softc *)self;
 	int i, rv = 0;
 
-	sc->sc_dying = 1;
-
 	if (sc->sc_num_sensors > 0) {
 		wakeup(&sc->sc_sensortask);
 		sensordev_deinstall(&sc->sc_sensordev);
@@ -284,9 +280,6 @@ uthum_detach(struct device *self, int flags)
 			sensor_task_unregister(sc->sc_sensortask);
 	}
 
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-	    &sc->sc_hdev.sc_dev);
-
 	return (rv);
 }
 
@@ -296,9 +289,6 @@ uthum_activate(struct device *self, int act)
 	struct uthum_softc *sc = (struct uthum_softc *)self;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		sc->sc_dying = 1;
 		break;

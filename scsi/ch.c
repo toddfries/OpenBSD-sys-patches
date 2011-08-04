@@ -1,4 +1,4 @@
-/*	$OpenBSD: ch.c,v 1.40 2010/07/01 05:11:18 krw Exp $	*/
+/*	$OpenBSD: ch.c,v 1.46 2011/06/17 00:00:51 matthew Exp $	*/
 /*	$NetBSD: ch.c,v 1.26 1997/02/21 22:06:52 thorpej Exp $	*/
 
 /*
@@ -46,6 +46,7 @@
 #include <sys/chio.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/pool.h>
 #include <sys/conf.h>
 #include <sys/fcntl.h>
 
@@ -134,24 +135,20 @@ struct chquirk chquirks[] = {
 };
 
 int
-chmatch(parent, match, aux)
-	struct device *parent;
-	void *match, *aux;
+chmatch(struct device *parent, void *match, void *aux)
 {
 	struct scsi_attach_args *sa = aux;
 	int priority;
 
 	(void)scsi_inqmatch(sa->sa_inqbuf,
-	    ch_patterns, sizeof(ch_patterns)/sizeof(ch_patterns[0]),
+	    ch_patterns, nitems(ch_patterns),
 	    sizeof(ch_patterns[0]), &priority);
 
 	return (priority);
 }
 
 void
-chattach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+chattach(struct device *parent, struct device *self, void *aux)
 {
 	struct ch_softc *sc = (struct ch_softc *)self;
 	struct scsi_attach_args *sa = aux;
@@ -173,10 +170,7 @@ chattach(parent, self, aux)
 }
 
 int
-chopen(dev, flags, fmt, p)
-	dev_t dev;
-	int flags, fmt;
-	struct proc *p;
+chopen(dev_t dev, int flags, int fmt, struct proc *p)
 {
 	struct ch_softc *sc;
 	int oldcounts[4];
@@ -254,10 +248,7 @@ chopen(dev, flags, fmt, p)
 }
 
 int
-chclose(dev, flags, fmt, p)
-	dev_t dev;
-	int flags, fmt;
-	struct proc *p;
+chclose(dev_t dev, int flags, int fmt, struct proc *p)
 {
 	struct ch_softc *sc = ch_cd.cd_devs[CHUNIT(dev)];
 
@@ -266,12 +257,7 @@ chclose(dev, flags, fmt, p)
 }
 
 int
-chioctl(dev, cmd, data, flags, p)
-	dev_t dev;
-	u_long cmd;
-	caddr_t data;
-	int flags;
-	struct proc *p;
+chioctl(dev_t dev, u_long cmd, caddr_t data, int flags, struct proc *p)
 {
 	struct ch_softc *sc = ch_cd.cd_devs[CHUNIT(dev)];
 	int error = 0;
@@ -344,11 +330,11 @@ chioctl(dev, cmd, data, flags, p)
 }
 
 int
-ch_move(sc, cm)
-	struct ch_softc *sc;
-	struct changer_move *cm;
+ch_move(struct ch_softc *sc, struct changer_move *cm)
 {
-	struct scsi_move_medium cmd;
+	struct scsi_move_medium *cmd;
+	struct scsi_xfer *xs;
+	int error;
 	u_int16_t fromelem, toelem;
 
 	/*
@@ -375,27 +361,33 @@ ch_move(sc, cm)
 	/*
 	 * Build the SCSI command.
 	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = MOVE_MEDIUM;
-	_lto2b(sc->sc_picker, cmd.tea);
-	_lto2b(fromelem, cmd.src);
-	_lto2b(toelem, cmd.dst);
-	if (cm->cm_flags & CM_INVERT)
-		cmd.flags |= MOVE_MEDIUM_INVERT;
+	xs = scsi_xs_get(sc->sc_link, 0);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->retries = CHRETRIES;
+	xs->timeout = 100000;
 
-	/*
-	 * Send command to changer.
-	 */
-	return (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), NULL, 0, CHRETRIES, 100000, NULL, 0));
+	cmd = (struct scsi_move_medium *)xs->cmd;
+	cmd->opcode = MOVE_MEDIUM;
+	_lto2b(sc->sc_picker, cmd->tea);
+	_lto2b(fromelem, cmd->src);
+	_lto2b(toelem, cmd->dst);
+	if (cm->cm_flags & CM_INVERT)
+		cmd->flags |= MOVE_MEDIUM_INVERT;
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
 
 int
-ch_exchange(sc, ce)
-	struct ch_softc *sc;
-	struct changer_exchange *ce;
+ch_exchange(struct ch_softc *sc, struct changer_exchange *ce)
 {
-	struct scsi_exchange_medium cmd;
+	struct scsi_exchange_medium *cmd;
+	struct scsi_xfer *xs;
+	int error;
 	u_int16_t src, dst1, dst2;
 
 	/*
@@ -428,30 +420,36 @@ ch_exchange(sc, ce)
 	/*
 	 * Build the SCSI command.
 	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = EXCHANGE_MEDIUM;
-	_lto2b(sc->sc_picker, cmd.tea);
-	_lto2b(src, cmd.src);
-	_lto2b(dst1, cmd.fdst);
-	_lto2b(dst2, cmd.sdst);
-	if (ce->ce_flags & CE_INVERT1)
-		cmd.flags |= EXCHANGE_MEDIUM_INV1;
-	if (ce->ce_flags & CE_INVERT2)
-		cmd.flags |= EXCHANGE_MEDIUM_INV2;
+	xs = scsi_xs_get(sc->sc_link, 0);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->retries = CHRETRIES;
+	xs->timeout = 100000;
 
-	/*
-	 * Send command to changer.
-	 */
-	return (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), NULL, 0, CHRETRIES, 100000, NULL, 0));
+	cmd = (struct scsi_exchange_medium *)xs->cmd;
+	cmd->opcode = EXCHANGE_MEDIUM;
+	_lto2b(sc->sc_picker, cmd->tea);
+	_lto2b(src, cmd->src);
+	_lto2b(dst1, cmd->fdst);
+	_lto2b(dst2, cmd->sdst);
+	if (ce->ce_flags & CE_INVERT1)
+		cmd->flags |= EXCHANGE_MEDIUM_INV1;
+	if (ce->ce_flags & CE_INVERT2)
+		cmd->flags |= EXCHANGE_MEDIUM_INV2;
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
 
 int
-ch_position(sc, cp)
-	struct ch_softc *sc;
-	struct changer_position *cp;
+ch_position(struct ch_softc *sc, struct changer_position *cp)
 {
-	struct scsi_position_to_element cmd;
+	struct scsi_position_to_element *cmd;
+	struct scsi_xfer *xs;
+	int error;
 	u_int16_t dst;
 
 	/*
@@ -470,18 +468,24 @@ ch_position(sc, cp)
 	/*
 	 * Build the SCSI command.
 	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = POSITION_TO_ELEMENT;
-	_lto2b(sc->sc_picker, cmd.tea);
-	_lto2b(dst, cmd.dst);
-	if (cp->cp_flags & CP_INVERT)
-		cmd.flags |= POSITION_TO_ELEMENT_INVERT;
+	xs = scsi_xs_get(sc->sc_link, 0);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->retries = CHRETRIES;
+	xs->timeout = 100000;
 
-	/*
-	 * Send command to changer.
-	 */
-	return (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), NULL, 0, CHRETRIES, 100000, NULL, 0));
+	cmd = (struct scsi_position_to_element *)xs->cmd;
+	cmd->opcode = POSITION_TO_ELEMENT;
+	_lto2b(sc->sc_picker, cmd->tea);
+	_lto2b(dst, cmd->dst);
+	if (cp->cp_flags & CP_INVERT)
+		cmd->flags |= POSITION_TO_ELEMENT_INVERT;
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
 
 /*
@@ -529,9 +533,8 @@ copy_element_status(int flags,	struct read_element_status_descriptor *desc,
  * changer_element_status structures)
  */
 int
-ch_usergetelemstatus(sc, cesr)
-	struct ch_softc *sc;
-	struct changer_element_status_request *cesr;
+ch_usergetelemstatus(struct ch_softc *sc,
+    struct changer_element_status_request *cesr)
 {
 	struct changer_element_status *user_data = NULL;
 	struct read_element_status_header *st_hdr;
@@ -556,8 +559,9 @@ ch_usergetelemstatus(sc, cesr)
 	 * we can allocate enough storage for all of them.  We assume
 	 * that the first one can fit into 1k.
 	 */
-	data = malloc(1024, M_DEVBUF, M_WAITOK);
-	error = ch_getelemstatus(sc, sc->sc_firsts[chet], 1, data, 1024,
+	size = 1024;
+	data = dma_alloc(size, PR_WAITOK);
+	error = ch_getelemstatus(sc, sc->sc_firsts[chet], 1, data, size,
 	    want_voltags);
 	if (error)
 		goto done;
@@ -566,16 +570,16 @@ ch_usergetelemstatus(sc, cesr)
 	pg_hdr = (struct read_element_status_page_header *) (st_hdr + 1);
 	desclen = _2btol(pg_hdr->edl);
 
-	size = sizeof(struct read_element_status_header) +
-	    sizeof(struct read_element_status_page_header) +
-	    (desclen * sc->sc_counts[chet]);
+	dma_free(data, size);
 
 	/*
 	 * Reallocate storage for descriptors and get them from the
 	 * device.
 	 */
-	free(data, M_DEVBUF);
-	data = malloc(size, M_DEVBUF, M_WAITOK);
+	size = sizeof(struct read_element_status_header) +
+	    sizeof(struct read_element_status_page_header) +
+	    (desclen * sc->sc_counts[chet]);
+	data = dma_alloc(size, PR_WAITOK);
 	error = ch_getelemstatus(sc, sc->sc_firsts[chet],
 	    sc->sc_counts[chet], data, size, want_voltags);
 	if (error)
@@ -609,51 +613,52 @@ ch_usergetelemstatus(sc, cesr)
 
  done:
 	if (data != NULL)
-		free(data, M_DEVBUF);
+		dma_free(data, size);
 	if (user_data != NULL)
 		free(user_data, M_DEVBUF);
 	return (error);
 }
 
 int
-ch_getelemstatus(sc, first, count, data, datalen, voltag)
-	struct ch_softc *sc;
-	int first;
-	int count;
-	caddr_t data;
-	size_t datalen;
-	int voltag;
+ch_getelemstatus(struct ch_softc *sc, int first, int count, caddr_t data,
+    size_t datalen, int voltag)
 {
-	struct scsi_read_element_status cmd;
+	struct scsi_read_element_status *cmd;
+	struct scsi_xfer *xs;
+	int error;
 
 	/*
 	 * Build SCSI command.
 	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = READ_ELEMENT_STATUS;
-	_lto2b(first, cmd.sea);
-	_lto2b(count, cmd.count);
-	_lto3b(datalen, cmd.len);
+	xs = scsi_xs_get(sc->sc_link, SCSI_DATA_IN);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->data = data;
+	xs->datalen = datalen;
+	xs->retries = CHRETRIES;
+	xs->timeout = 100000;
+
+	cmd = (struct scsi_read_element_status *)xs->cmd;
+	cmd->opcode = READ_ELEMENT_STATUS;
+	_lto2b(first, cmd->sea);
+	_lto2b(count, cmd->count);
+	_lto3b(datalen, cmd->len);
 	if (voltag)
-		cmd.byte2 |= READ_ELEMENT_STATUS_VOLTAG;
+		cmd->byte2 |= READ_ELEMENT_STATUS_VOLTAG;
 
-	/*
-	 * Send command to changer.
-	 */
-	return (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), (u_char *)data, datalen, CHRETRIES, 100000, NULL,
-	    SCSI_DATA_IN));
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
-
 
 /*
  * Ask the device about itself and fill in the parameters in our
  * softc.
  */
 int
-ch_get_params(sc, flags)
-	struct ch_softc *sc;
-	int flags;
+ch_get_params(struct ch_softc *sc, int flags)
 {
 	union scsi_mode_sense_buf *data;
 	struct page_element_address_assignment *ea;
@@ -661,7 +666,7 @@ ch_get_params(sc, flags)
 	int error, from;
 	u_int8_t *moves, *exchanges;
 
-	data = malloc(sizeof(*data), M_TEMP, M_NOWAIT);
+	data = dma_alloc(sizeof(*data), PR_NOWAIT);
 	if (data == NULL)
 		return (ENOMEM);
 
@@ -677,7 +682,7 @@ ch_get_params(sc, flags)
 		printf("%s: could not sense element address page\n",
 		    sc->sc_dev.dv_xname);
 #endif
-		free(data, M_TEMP);
+		dma_free(data, sizeof(*data));
 		return (error);
 	}
 
@@ -704,7 +709,7 @@ ch_get_params(sc, flags)
 		printf("%s: could not sense capabilities page\n",
 		    sc->sc_dev.dv_xname);
 #endif
-		free(data, M_TEMP);
+		dma_free(data, sizeof(*data));
 		return (error);
 	}
 
@@ -718,14 +723,12 @@ ch_get_params(sc, flags)
 	}
 
 	sc->sc_link->flags |= SDEV_MEDIA_LOADED;
-	free(data, M_TEMP);
+	dma_free(data, sizeof(*data));
 	return (0);
 }
 
 void
-ch_get_quirks(sc, inqbuf)
-	struct ch_softc *sc;
-	struct scsi_inquiry_data *inqbuf;
+ch_get_quirks(struct ch_softc *sc, struct scsi_inquiry_data *inqbuf)
 {
 	const struct chquirk *match;
 	int priority;
@@ -747,8 +750,7 @@ ch_get_quirks(sc, inqbuf)
  *                            (-1 = continue processing)
  */
 int
-ch_interpret_sense(xs)
-	struct scsi_xfer *xs;
+ch_interpret_sense(struct scsi_xfer *xs)
 {
 	struct scsi_sense_data *sense = &xs->sense;
 	struct scsi_link *sc_link = xs->sc_link;

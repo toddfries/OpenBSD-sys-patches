@@ -1,4 +1,4 @@
-/*	$OpenBSD: pool.h,v 1.35 2010/07/13 16:47:02 deraadt Exp $	*/
+/*	$OpenBSD: pool.h,v 1.41 2011/07/05 16:36:15 tedu Exp $	*/
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
@@ -91,15 +91,15 @@ struct pool {
 	const char	*pr_wchan;	/* tsleep(9) identifier */
 	unsigned int	pr_flags;	/* r/w flags */
 	unsigned int	pr_roflags;	/* r/o flags */
-#define PR_MALLOCOK	0x01
-#define	PR_NOWAIT	0x00		/* for symmetry */
-#define PR_WAITOK	0x02
-#define PR_WANTED	0x04
-#define PR_PHINPAGE	0x08
-#define PR_LOGGING	0x10
-#define PR_LIMITFAIL	0x20	/* even if waiting, fail if we hit limit */
-#define PR_DEBUG	0x40
-#define PR_ZERO		0x100
+#define PR_WAITOK	0x0001 /* M_WAITOK */
+#define PR_NOWAIT	0x0002 /* M_NOWAIT */
+#define PR_LIMITFAIL	0x0004 /* M_CANFAIL */
+#define PR_ZERO		0x0008 /* M_ZERO */
+#define PR_WANTED	0x0100
+#define PR_PHINPAGE	0x0200
+#define PR_LOGGING	0x0400
+#define PR_DEBUG	0x0800
+#define PR_DEBUGCHK	0x1000
 
 	int			pr_ipl;
 
@@ -133,8 +133,7 @@ struct pool {
 	unsigned long	pr_nidle;	/* # of idle pages */
 
 	/* Physical memory configuration. */
-	struct uvm_constraint_range *pr_crange;
-	int		pr_pa_nsegs;
+	const struct kmem_pa_mode *pr_crange;
 };
 
 #ifdef _KERNEL
@@ -150,7 +149,7 @@ void		pool_sethiwat(struct pool *, int);
 int		pool_sethardlimit(struct pool *, u_int, const char *, int);
 struct uvm_constraint_range; /* XXX */
 void		pool_set_constraints(struct pool *,
-		    struct uvm_constraint_range *, int);
+		    const struct kmem_pa_mode *mode);
 void		pool_set_ctordtor(struct pool *, int (*)(void *, void *, int),
 		    void(*)(void *, void *), void *);
 
@@ -158,6 +157,7 @@ void		pool_set_ctordtor(struct pool *, int (*)(void *, void *, int),
 void		*pool_get(struct pool *, int) __malloc;
 void		pool_put(struct pool *, void *);
 int		pool_reclaim(struct pool *);
+void		pool_reclaim_all(void);
 int		pool_prime(struct pool *, int);
 
 #ifdef DDB
@@ -166,7 +166,7 @@ int		pool_prime(struct pool *, int);
  */
 void		pool_printit(struct pool *, const char *,
 		    int (*)(const char *, ...));
-int		pool_chk(struct pool *, const char *);
+int		pool_chk(struct pool *);
 void		pool_walk(struct pool *, int, int (*)(const char *, ...),
 		    void (*)(void *, int, int (*)(const char *, ...)));
 #endif

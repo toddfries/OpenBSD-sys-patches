@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.74 2010/06/29 00:28:14 tedu Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.85 2011/07/05 04:48:02 guenther Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -96,27 +96,13 @@
 #include <compat/linux/linux_exec.h>
 #endif
 
-#ifdef COMPAT_SVR4
-#include <compat/svr4/svr4_exec.h>
-#endif
-
-#ifdef COMPAT_FREEBSD
-#include <compat/freebsd/freebsd_exec.h>
-#endif
-
 struct ELFNAME(probe_entry) {
 	int (*func)(struct proc *, struct exec_package *, char *,
 	    u_long *, u_int8_t *);
 } ELFNAME(probes)[] = {
 	/* XXX - bogus, shouldn't be size independent.. */
-#ifdef COMPAT_FREEBSD
-	{ freebsd_elf_probe },
-#endif
 #ifdef COMPAT_LINUX
 	{ linux_elf_probe },
-#endif
-#ifdef COMPAT_SVR4
-	{ svr4_elf_probe },
 #endif
 	{ NULL }
 };
@@ -159,7 +145,7 @@ struct emul ELFNAMEEND(emul) = {
 #else
 	NULL,
 #endif
-	sizeof (AuxInfo) * ELF_AUX_ENTRIES,
+	(sizeof(AuxInfo) * ELF_AUX_ENTRIES / sizeof(char *)),
 	ELFNAME(copyargs),
 	setregs,
 	ELFNAME2(exec,fixup),
@@ -417,11 +403,11 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 		addr = trunc_page(pos + loadmap[i].vaddr);
 		size =  round_page(addr + loadmap[i].memsz) - addr;
 
-		/* CRAP - map_findspace does not avoid daddr+MAXDSIZ */
+		/* CRAP - map_findspace does not avoid daddr+BRKSIZ */
 		if ((addr + size > (vaddr_t)p->p_vmspace->vm_daddr) &&
-		    (addr < (vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ))
+		    (addr < (vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ))
 			addr = round_page((vaddr_t)p->p_vmspace->vm_daddr +
-			    MAXDSIZ);
+			    BRKSIZ);
 
 		vm_map_lock(&p->p_vmspace->vm_map);
 		if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
@@ -1078,6 +1064,8 @@ ELFNAMEEND(coredump)(struct proc *p, void *cookie)
 	}
 
 out:
+	if (psections)
+		free(psections, M_TEMP);
 	return (error);
 #endif
 }
@@ -1137,6 +1125,7 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 	struct uio uio;
 	struct elfcore_procinfo cpi;
 	Elf_Note nhdr;
+	struct process *pr = p->p_p;
 	struct proc *q;
 	size_t size, notesize;
 	int error;
@@ -1151,19 +1140,19 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 
 		cpi.cpi_version = ELFCORE_PROCINFO_VERSION;
 		cpi.cpi_cpisize = sizeof(cpi);
-		cpi.cpi_signo = p->p_sigacts->ps_sig;
-		cpi.cpi_sigcode = p->p_sigacts->ps_code;
+		cpi.cpi_signo = p->p_sisig;
+		cpi.cpi_sigcode = p->p_sicode;
 
 		cpi.cpi_sigpend = p->p_siglist;
 		cpi.cpi_sigmask = p->p_sigmask;
-		cpi.cpi_sigignore = p->p_sigignore;
-		cpi.cpi_sigcatch = p->p_sigcatch;
+		cpi.cpi_sigignore = p->p_sigacts->ps_sigignore;
+		cpi.cpi_sigcatch = p->p_sigacts->ps_sigcatch;
 
-		cpi.cpi_pid = p->p_pid;
-		cpi.cpi_ppid = p->p_pptr->p_pid;
-		cpi.cpi_pgrp = p->p_pgid;
-		if (p->p_session->s_leader)
-			cpi.cpi_sid = p->p_session->s_leader->p_pid;
+		cpi.cpi_pid = pr->ps_pid;
+		cpi.cpi_ppid = pr->ps_pptr->ps_pid;
+		cpi.cpi_pgrp = pr->ps_pgid;
+		if (pr->ps_session->s_leader)
+			cpi.cpi_sid = pr->ps_session->s_leader->ps_pid;
 		else
 			cpi.cpi_sid = 0;
 
@@ -1263,7 +1252,7 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 	 * per-thread notes.  Since we're dumping core, we don't bother
 	 * locking.
 	 */
-	TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
+	TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
 		if (q == p)		/* we've taken care of this thread */
 			continue;
 		error = ELFNAMEEND(coredump_note)(q, iocookie, &notesize);

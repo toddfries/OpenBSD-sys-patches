@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.14 2010/07/02 00:36:52 weingart Exp $	*/
+/*	$OpenBSD: conf.c,v 1.19 2011/03/08 17:24:31 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove
@@ -27,6 +27,7 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <libsa.h>
@@ -42,7 +43,7 @@
 #include <biosdev.h>
 #include <dev/cons.h>
 
-const char version[] = "3.14";
+const char version[] = "3.16";
 int	debug = 1;
 
 
@@ -57,10 +58,10 @@ void (*amd64_probe2[])(void) = {
 };
 
 struct i386_boot_probes probe_list[] = {
-	{ "probing", amd64_probe1, NENTS(amd64_probe1) },
-	{ "disk",    amd64_probe2, NENTS(amd64_probe2) }
+	{ "probing", amd64_probe1, nitems(amd64_probe1) },
+	{ "disk",    amd64_probe2, nitems(amd64_probe2) }
 };
-int nibprobes = NENTS(probe_list);
+int nibprobes = nitems(probe_list);
 
 struct fs_ops file_system[] = {
 	{ cd9660_open, cd9660_close, cd9660_read, cd9660_write, cd9660_seek,
@@ -76,12 +77,12 @@ struct fs_ops file_system[] = {
 	  fat_stat,    fat_readdir    },
 #endif
 };
-int nfsys = NENTS(file_system);
+int nfsys = nitems(file_system);
 
 struct devsw	devsw[] = {
 	{ "BIOS", biosstrategy, biosopen, biosclose, biosioctl },
 };
-int ndevs = NENTS(devsw);
+int ndevs = nitems(devsw);
 
 struct consdev constab[] = {
 	{ pc_probe, pc_init, pc_getc, pc_putc },

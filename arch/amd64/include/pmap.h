@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.33 2010/05/13 19:27:24 oga Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.39 2011/06/30 22:18:01 jsg Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 2003/04/26 18:39:46 fvdl Exp $	*/
 
 /*
@@ -72,8 +72,8 @@
  * pmap.h: see pmap.c for the history of this pmap module.
  */
 
-#ifndef	_AMD64_PMAP_H_
-#define	_AMD64_PMAP_H_
+#ifndef	_MACHINE_PMAP_H_
+#define	_MACHINE_PMAP_H_
 
 #ifndef _LOCORE
 #include <machine/cpufunc.h>
@@ -318,12 +318,7 @@ struct pmap {
 					/* pointer to a PTP in our pmap */
 	struct pmap_statistics pm_stats;  /* pmap stats (lck by object lock) */
 
-	int pm_flags;			/* see below */
-
-	union descriptor *pm_ldt;	/* user-set LDT */
-	int pm_ldt_len;			/* number of LDT entries */
-	int pm_ldt_sel;			/* LDT selector */
-	u_int32_t pm_cpus;		/* mask of CPUs using pmap */
+	u_int64_t pm_cpus;		/* mask of CPUs using pmap */
 };
 
 /*
@@ -393,7 +388,6 @@ extern pd_entry_t *pdes[];
 #define pmap_is_modified(pg)		pmap_test_attrs(pg, PG_M)
 #define pmap_is_referenced(pg)		pmap_test_attrs(pg, PG_U)
 #define pmap_move(DP,SP,D,L,S)		
-#define pmap_phys_address(ppn)		ptoa(ppn)
 #define pmap_valid_entry(E) 		((E) & PG_V) /* is PDE or PTE valid? */
 
 #define pmap_proc_iflush(p,va,len)	/* nothing */
@@ -469,8 +463,7 @@ pmap_remove_all(struct pmap *pmap)
  */
 
 __inline static void
-pmap_update_pg(va)
-	vaddr_t va;
+pmap_update_pg(vaddr_t va)
 {
 	invlpg(va);
 }
@@ -480,8 +473,7 @@ pmap_update_pg(va)
  */
 
 __inline static void
-pmap_update_2pg(va, vb)
-	vaddr_t va, vb;
+pmap_update_2pg(vaddr_t va, vaddr_t vb)
 {
 	invlpg(va);
 	invlpg(vb);
@@ -517,10 +509,7 @@ pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
  */
 
 __inline static void
-pmap_protect(pmap, sva, eva, prot)
-	struct pmap *pmap;
-	vaddr_t sva, eva;
-	vm_prot_t prot;
+pmap_protect(struct pmap *pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 {
 	if ((prot & VM_PROT_WRITE) == 0) {
 		if (prot & (VM_PROT_READ|VM_PROT_EXECUTE)) {
@@ -576,4 +565,4 @@ kvtopte(vaddr_t va)
 #define __HAVE_PMAP_DIRECT
 
 #endif /* _KERNEL && !_LOCORE */
-#endif	/* _AMD64_PMAP_H_ */
+#endif	/* _MACHINE_PMAP_H_ */

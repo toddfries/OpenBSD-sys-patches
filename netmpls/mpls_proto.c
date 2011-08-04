@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls_proto.c,v 1.4 2009/01/08 12:47:45 michele Exp $	*/
+/*	$OpenBSD: mpls_proto.c,v 1.6 2011/03/31 10:36:42 jasper Exp $	*/
 
 /*
  * Copyright (C) 1999, 2000 and 2001 AYAME Project, WIDE Project.
@@ -69,8 +69,8 @@ struct protosw mplssw[] = {
 struct domain mplsdomain = {
 	AF_MPLS, "mpls", mpls_init, 0, 0,
 	mplssw,
-	&mplssw[sizeof(mplssw)/sizeof(mplssw[0])], 0,
-	rn_inithead,
+	&mplssw[nitems(mplssw)], 0,
+	rn_mpath_inithead,
 	offsetof(struct sockaddr_mpls, smpls_label) << 3,
 	sizeof(struct sockaddr_mpls)
 };

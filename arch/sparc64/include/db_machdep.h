@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.11 2008/12/14 17:10:44 kettenis Exp $	*/
+/*	$OpenBSD: db_machdep.h,v 1.13 2011/03/23 16:54:37 pirofti Exp $	*/
 /*	$NetBSD: db_machdep.h,v 1.12 2001/07/07 15:16:13 eeh Exp $ */
 
 /*
@@ -27,8 +27,8 @@
  * the rights to redistribute these changes.
  */
 
-#ifndef	_SPARC_DB_MACHDEP_H_
-#define	_SPARC_DB_MACHDEP_H_
+#ifndef	_MACHINE_DB_MACHDEP_H_
+#define	_MACHINE_DB_MACHDEP_H_
 
 /*
  * Machine-dependent defines for new kernel debugger.
@@ -112,8 +112,6 @@ boolean_t	db_inst_trap_return(int inst);
 boolean_t	db_inst_return(int inst);
 boolean_t	db_inst_call(int inst);
 boolean_t	db_inst_branch(int inst);
-int		db_inst_load(int inst);
-int		db_inst_store(int inst);
 boolean_t	db_inst_unconditional_flow_transfer(int inst);
 db_addr_t	db_branch_taken(int inst, db_addr_t pc, db_regs_t *regs);
 void		db_machine_init(void);
@@ -122,8 +120,6 @@ void		db_machine_init(void);
 #define inst_return(ins)	db_inst_return(ins)
 #define inst_call(ins)		db_inst_call(ins)
 #define inst_branch(ins)	db_inst_branch(ins)
-#define inst_load(ins)		db_inst_load(ins)
-#define inst_store(ins)		db_inst_store(ins)
 #define	inst_unconditional_flow_transfer(ins) \
 				db_inst_unconditional_flow_transfer(ins)
 #define branch_taken(ins, pc, fun, regs) \
@@ -147,4 +143,4 @@ int kdb_trap(int, struct trapframe64 *);
 /* Register device-specific method for triggering XIRs. */
 void db_register_xir(void (*)(void *, int), void *);
 
-#endif	/* _SPARC_DB_MACHDEP_H_ */
+#endif	/* _MACHINE_DB_MACHDEP_H_ */

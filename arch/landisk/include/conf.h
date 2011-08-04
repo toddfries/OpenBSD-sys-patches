@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.3 2006/11/03 20:21:23 mickey Exp $	*/
+/*	$OpenBSD: conf.h,v 1.6 2011/07/04 16:52:41 nicm Exp $	*/
 
 /*
  * Copyright (c) 1997 Mark Brinicombe.
@@ -39,8 +39,8 @@
  * Prototypes for device driver functions
  */
 
-#ifndef _LANDISK_CONF_H
-#define	_LANDISK_CONF_H
+#ifndef _MACHINE_CONF_H_
+#define	_MACHINE_CONF_H_
  
 
 #include <sys/conf.h>
@@ -63,8 +63,8 @@ cdev_decl(fd);
 #define cdev_apm_init(c,n) { \
         dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
         (dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev, 0, D_KQFILTER, dev_init(c,n,kqfilter) }
+	(dev_type_stop((*))) enodev, 0, selfalse, \
+	(dev_type_mmap((*))) enodev, 0, 0, dev_init(c,n,kqfilter) }
 
 cdev_decl(com);
 cdev_decl(rtc);
@@ -74,4 +74,4 @@ cdev_decl(apm);
 cdev_decl(spkr);
 cdev_decl(scif);
 
-#endif	/* _LANDISK_CONF_H_ */
+#endif	/* _MACHINE_CONF_H_ */

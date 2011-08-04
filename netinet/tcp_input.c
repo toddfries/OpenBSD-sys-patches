@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.234 2010/07/09 16:58:06 reyk Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.250 2011/05/13 14:31:16 oga Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -108,6 +108,7 @@
 struct	tcpiphdr tcp_saveti;
 
 int tcp_mss_adv(struct ifnet *, int);
+int tcp_flush_queue(struct tcpcb *);
 
 #ifdef INET6
 #include <netinet6/in6_var.h>
@@ -175,16 +176,22 @@ do { \
  * Macro to compute ACK transmission behavior.  Delay the ACK unless
  * we have already delayed an ACK (must send an ACK every two segments).
  * We also ACK immediately if we received a PUSH and the ACK-on-PUSH
- * option is enabled.
+ * option is enabled or when the packet is comming from a loopback
+ * interface.
  */
-#define	TCP_SETUP_ACK(tp, tiflags) \
+#define	TCP_SETUP_ACK(tp, tiflags, m) \
 do { \
 	if ((tp)->t_flags & TF_DELACK || \
-	    (tcp_ack_on_push && (tiflags) & TH_PUSH)) \
+	    (tcp_ack_on_push && (tiflags) & TH_PUSH) || \
+	    (m && (m->m_flags & M_PKTHDR) && m->m_pkthdr.rcvif && \
+	    (m->m_pkthdr.rcvif->if_flags & IFF_LOOPBACK))) \
 		tp->t_flags |= TF_ACKNOW; \
 	else \
 		TCP_SET_DELACK(tp); \
 } while (0)
+
+void syn_cache_put(struct syn_cache *);
+void syn_cache_rm(struct syn_cache *);
 
 /*
  * Insert segment ti into reassembly queue of tcp with
@@ -201,15 +208,6 @@ int
 tcp_reass(struct tcpcb *tp, struct tcphdr *th, struct mbuf *m, int *tlen)
 {
 	struct tcpqent *p, *q, *nq, *tiqe;
-	struct socket *so = tp->t_inpcb->inp_socket;
-	int flags;
-
-	/*
-	 * Call with th==0 after become established to
-	 * force pre-ESTABLISHED data up to user socket.
-	 */
-	if (th == 0)
-		goto present;
 
 	/*
 	 * Allocate a new queue entry, before we throw away any data.
@@ -299,7 +297,19 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, struct mbuf *m, int *tlen)
 		TAILQ_INSERT_AFTER(&tp->t_segq, p, tiqe, tcpqe_q);
 	}
 
-present:
+	if (th->th_seq != tp->rcv_nxt)
+		return (0);
+
+	return (tcp_flush_queue(tp));
+}
+
+int
+tcp_flush_queue(struct tcpcb *tp)
+{
+	struct socket *so = tp->t_inpcb->inp_socket;
+	struct tcpqent *q, *nq;
+	int flags;
+
 	/*
 	 * Present data to user, advancing rcv_nxt through
 	 * completed sequence space.
@@ -325,7 +335,9 @@ present:
 		pool_put(&tcpqe_pool, q);
 		q = nq;
 	} while (q != NULL && q->tcpqe_tcp->th_seq == tp->rcv_nxt);
+	tp->t_flags |= TF_BLOCKOUTPUT;
 	sorwakeup(so);
+	tp->t_flags &= ~TF_BLOCKOUTPUT;
 	return (flags);
 }
 
@@ -365,7 +377,7 @@ tcp_input(struct mbuf *m, ...)
 	struct tcpcb *tp = 0;
 	int tiflags;
 	struct socket *so = NULL;
-	int todrop, acked, ourfinisacked, needoutput = 0;
+	int todrop, acked, ourfinisacked;
 	int hdroptlen = 0;
 	short ostate = 0;
 	tcp_seq iss, *reuse = NULL;
@@ -465,7 +477,8 @@ tcp_input(struct mbuf *m, ...)
 	case AF_INET:
 		ip = mtod(m, struct ip *);
 		if (IN_MULTICAST(ip->ip_dst.s_addr) ||
-		    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif))
+		    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif,
+		    m->m_pkthdr.rdomain))
 			goto drop;
 #ifdef TCP_ECN
 		/* save ip_tos before clearing it for checksum */
@@ -720,67 +733,69 @@ findpcb:
 			}
 		}
 		if (so->so_options & SO_ACCEPTCONN) {
-			if ((tiflags & (TH_RST|TH_ACK|TH_SYN)) != TH_SYN) {
-				if (tiflags & TH_RST) {
-					syn_cache_reset(&src.sa, &dst.sa, th,
-					    inp->inp_rtableid);
-				} else if ((tiflags & (TH_ACK|TH_SYN)) ==
-				    (TH_ACK|TH_SYN)) {
+			switch (tiflags & (TH_RST|TH_SYN|TH_ACK)) {
+
+			case TH_SYN|TH_ACK|TH_RST:
+			case TH_SYN|TH_RST:
+			case TH_ACK|TH_RST:
+			case TH_RST:
+				syn_cache_reset(&src.sa, &dst.sa, th,
+				    inp->inp_rtableid);
+				goto drop;
+
+			case TH_SYN|TH_ACK:
+				/*
+				 * Received a SYN,ACK.  This should
+				 * never happen while we are in
+				 * LISTEN.  Send an RST.
+				 */
+				goto badsyn;
+
+			case TH_ACK:
+				so = syn_cache_get(&src.sa, &dst.sa,
+					th, iphlen, tlen, so, m);
+				if (so == NULL) {
 					/*
-					 * Received a SYN,ACK.  This should
-					 * never happen while we are in
-					 * LISTEN.  Send an RST.
+					 * We don't have a SYN for
+					 * this ACK; send an RST.
 					 */
 					goto badsyn;
-				} else if (tiflags & TH_ACK) {
-					so = syn_cache_get(&src.sa, &dst.sa,
-						th, iphlen, tlen, so, m);
-					if (so == NULL) {
-						/*
-						 * We don't have a SYN for
-						 * this ACK; send an RST.
-						 */
-						goto badsyn;
-					} else if (so ==
-					    (struct socket *)(-1)) {
-						/*
-						 * We were unable to create
-						 * the connection.  If the
-						 * 3-way handshake was
-						 * completed, and RST has
-						 * been sent to the peer.
-						 * Since the mbuf might be
-						 * in use for the reply,
-						 * do not free it.
-						 */
-						m = NULL;
-					} else {
-						/*
-						 * We have created a
-						 * full-blown connection.
-						 */
-						tp = NULL;
-						inp = (struct inpcb *)so->so_pcb;
-						tp = intotcpcb(inp);
-						if (tp == NULL)
-							goto badsyn;	/*XXX*/
-
-						/*
-						 * Compute proper scaling
-						 * value from buffer space
-						 */
-						tcp_rscale(tp, so->so_rcv.sb_hiwat);
-						goto after_listen;
-					}
+				} else if (so == (struct socket *)(-1)) {
+					/*
+					 * We were unable to create
+					 * the connection.  If the
+					 * 3-way handshake was
+					 * completed, and RST has
+					 * been sent to the peer.
+					 * Since the mbuf might be
+					 * in use for the reply,
+					 * do not free it.
+					 */
+					m = NULL;
+					goto drop;
 				} else {
 					/*
-					 * None of RST, SYN or ACK was set.
-					 * This is an invalid packet for a
-					 * TCB in LISTEN state.  Send a RST.
+					 * We have created a
+					 * full-blown connection.
 					 */
-					goto badsyn;
+					tp = NULL;
+					inp = (struct inpcb *)so->so_pcb;
+					tp = intotcpcb(inp);
+					if (tp == NULL)
+						goto badsyn;	/*XXX*/
+
 				}
-			} else {
+				break;
+
+			default:
+				/*
+				 * None of RST, SYN or ACK was set.
+				 * This is an invalid packet for a
+				 * TCB in LISTEN state.  Send a RST.
+				 */
+				goto badsyn;
+
+			case TH_SYN:
 				/*
 				 * Received a SYN.
 				 */
@@ -861,16 +876,15 @@ findpcb:
 				 * SYN looks ok; create compressed TCP
 				 * state for it.
 				 */
-				if (so->so_qlen <= so->so_qlimit &&
+				if (so->so_qlen > so->so_qlimit ||
 				    syn_cache_add(&src.sa, &dst.sa, th, iphlen,
-				    so, m, optp, optlen, &opti, reuse))
-					m = NULL;
+				    so, m, optp, optlen, &opti, reuse) == -1)
+					goto drop;
+				return;
 			}
-			goto drop;
 		}
 	}
 
-after_listen:
 #ifdef DIAGNOSTIC
 	/*
 	 * Should not happen now that all embryonic connections
@@ -1091,9 +1105,14 @@ after_listen:
 				else if (TCP_TIMER_ISARMED(tp, TCPT_PERSIST) == 0)
 					TCP_TIMER_ARM(tp, TCPT_REXMT, tp->t_rxtcur);
 
-				if (sb_notify(&so->so_snd))
+				tcp_update_sndspace(tp);
+				if (sb_notify(&so->so_snd)) {
+					tp->t_flags |= TF_BLOCKOUTPUT;
 					sowwakeup(so);
-				if (so->so_snd.sb_cc)
+					tp->t_flags &= ~TF_BLOCKOUTPUT;
+				}
+				if (so->so_snd.sb_cc ||
+				    tp->t_flags & TF_NEEDOUTPUT)
 					(void) tcp_output(tp);
 				return;
 			}
@@ -1115,6 +1134,8 @@ after_listen:
 			tcpstat.tcps_rcvpack++;
 			tcpstat.tcps_rcvbyte += tlen;
 			ND6_HINT(tp);
+
+			TCP_SETUP_ACK(tp, tiflags, m);
 			/*
 			 * Drop TCP, IP headers and TCP options then add data
 			 * to socket buffer.
@@ -1122,12 +1143,23 @@ after_listen:
 			if (so->so_state & SS_CANTRCVMORE)
 				m_freem(m);
 			else {
+				if (opti.ts_present && opti.ts_ecr) {
+					if (tp->rfbuf_ts < opti.ts_ecr &&
+					    opti.ts_ecr - tp->rfbuf_ts < hz) {
+						tcp_update_rcvspace(tp);
+						/* Start over with next RTT. */
+						tp->rfbuf_cnt = 0;
+						tp->rfbuf_ts = 0;
+					} else
+						tp->rfbuf_cnt += tlen;
+				}
 				m_adj(m, iphlen + off);
 				sbappendstream(&so->so_rcv, m);
 			}
+			tp->t_flags |= TF_BLOCKOUTPUT;
 			sorwakeup(so);
-			TCP_SETUP_ACK(tp, tiflags);
-			if (tp->t_flags & TF_ACKNOW)
+			tp->t_flags &= ~TF_BLOCKOUTPUT;
+			if (tp->t_flags & (TF_ACKNOW|TF_NEEDOUTPUT))
 				(void) tcp_output(tp);
 			return;
 		}
@@ -1151,6 +1183,10 @@ after_listen:
 		win = 0;
 	tp->rcv_wnd = imax(win, (int)(tp->rcv_adv - tp->rcv_nxt));
 	}
+
+	/* Reset receive buffer auto scaling when not in bulk receive mode. */
+	tp->rfbuf_cnt = 0;
+	tp->rfbuf_ts = 0;
 
 	switch (tp->t_state) {
 
@@ -1230,10 +1266,9 @@ after_listen:
 		 * peer is ECN capable.
 		 */
 		if (tcp_do_ecn) {
-			if ((tiflags & (TH_ACK|TH_ECE|TH_CWR))
-			    == (TH_ACK|TH_ECE) ||
-			    (tiflags & (TH_ACK|TH_ECE|TH_CWR))
-			    == (TH_ECE|TH_CWR)) {
+			switch (tiflags & (TH_ACK|TH_ECE|TH_CWR)) {
+			case TH_ACK|TH_ECE:
+			case TH_ECE|TH_CWR:
 				tp->t_flags |= TF_ECN_PERMIT;
 				tiflags &= ~(TH_ECE|TH_CWR);
 				tcpstat.tcps_ecn_accepts++;
@@ -1252,8 +1287,8 @@ after_listen:
 				tp->snd_scale = tp->requested_s_scale;
 				tp->rcv_scale = tp->request_r_scale;
 			}
-			(void) tcp_reass(tp, (struct tcphdr *)0,
-				(struct mbuf *)0, &tlen);
+			tcp_flush_queue(tp);
+
 			/*
 			 * if we didn't have to retransmit the SYN,
 			 * use its rtt as our initial srtt & rtt var.
@@ -1530,8 +1565,7 @@ trimthenstep6:
 			tp->rcv_scale = tp->request_r_scale;
 			tiwin = th->th_win << tp->snd_scale;
 		}
-		(void) tcp_reass(tp, (struct tcphdr *)0, (struct mbuf *)0,
-				 &tlen);
+		tcp_flush_queue(tp);
 		tp->snd_wl1 = th->th_seq - 1;
 		/* fall into ... */
 
@@ -1759,10 +1793,10 @@ trimthenstep6:
 #if defined(TCP_SACK) && defined(TCP_FACK)
 					/* Force call to tcp_output */
 					if (tp->snd_awnd < tp->snd_cwnd)
-						needoutput = 1;
+						tp->t_flags |= TF_NEEDOUTPUT;
 #else
 					tp->snd_cwnd += tp->t_maxseg;
-					needoutput = 1;
+					tp->t_flags |= TF_NEEDOUTPUT;
 #endif /* TCP_FACK */
 				} else {
 					/* Out of fast recovery */
@@ -1830,7 +1864,7 @@ trimthenstep6:
 		 */
 		if (th->th_ack == tp->snd_max) {
 			TCP_TIMER_DISARM(tp, TCPT_REXMT);
-			needoutput = 1;
+			tp->t_flags |= TF_NEEDOUTPUT;
 		} else if (TCP_TIMER_ISARMED(tp, TCPT_PERSIST) == 0)
 			TCP_TIMER_ARM(tp, TCPT_REXMT, tp->t_rxtcur);
 		/*
@@ -1861,8 +1895,13 @@ trimthenstep6:
 			tp->snd_wnd -= acked;
 			ourfinisacked = 0;
 		}
-		if (sb_notify(&so->so_snd))
+
+		tcp_update_sndspace(tp);
+		if (sb_notify(&so->so_snd)) {
+			tp->t_flags |= TF_BLOCKOUTPUT;
 			sowwakeup(so);
+			tp->t_flags &= ~TF_BLOCKOUTPUT;
+		}
 
 		/*
 		 * If we had a pending ICMP message that referred to data
@@ -1980,7 +2019,7 @@ step6:
 		tp->snd_wl2 = th->th_ack;
 		if (tp->snd_wnd > tp->max_sndwnd)
 			tp->max_sndwnd = tp->snd_wnd;
-		needoutput = 1;
+		tp->t_flags |= TF_NEEDOUTPUT;
 	}
 
 	/*
@@ -2060,7 +2099,7 @@ dodata:							/* XXX */
 #endif
 		if (th->th_seq == tp->rcv_nxt && TAILQ_EMPTY(&tp->t_segq) &&
 		    tp->t_state == TCPS_ESTABLISHED) {
-			TCP_SETUP_ACK(tp, tiflags);
+			TCP_SETUP_ACK(tp, tiflags, m);
 			tp->rcv_nxt += tlen;
 			tiflags = th->th_flags & TH_FIN;
 			tcpstat.tcps_rcvpack++;
@@ -2072,7 +2111,9 @@ dodata:							/* XXX */
 				m_adj(m, hdroptlen);
 				sbappendstream(&so->so_rcv, m);
 			}
+			tp->t_flags |= TF_BLOCKOUTPUT;
 			sorwakeup(so);
+			tp->t_flags &= ~TF_BLOCKOUTPUT;
 		} else {
 			m_adj(m, hdroptlen);
 			tiflags = tcp_reass(tp, th, m, &tlen);
@@ -2166,9 +2207,8 @@ dodata:							/* XXX */
 	/*
 	 * Return any desired output.
 	 */
-	if (needoutput || (tp->t_flags & TF_ACKNOW)) {
+	if (tp->t_flags & (TF_ACKNOW|TF_NEEDOUTPUT))
 		(void) tcp_output(tp);
-	}
 	return;
 
 badsyn:
@@ -2223,12 +2263,12 @@ dropwithreset:
 		goto drop;
 	if (tiflags & TH_ACK) {
 		tcp_respond(tp, mtod(m, caddr_t), th, (tcp_seq)0, th->th_ack,
-		    TH_RST, 0);
+		    TH_RST, m->m_pkthdr.rdomain);
 	} else {
 		if (tiflags & TH_SYN)
 			tlen++;
 		tcp_respond(tp, mtod(m, caddr_t), th, th->th_seq + tlen,
-		    (tcp_seq)0, TH_RST|TH_ACK, 0);
+		    (tcp_seq)0, TH_RST|TH_ACK, m->m_pkthdr.rdomain);
 	}
 	m_freem(m);
 	return;
@@ -2351,7 +2391,7 @@ tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
 			if (optlen != TCPOLEN_SIGNATURE)
 				continue;
 
-			if (sigp && bcmp(sigp, cp + 2, 16))
+			if (sigp && timingsafe_bcmp(sigp, cp + 2, 16))
 				return (-1);
 
 			sigp = cp + 2;
@@ -2419,7 +2459,7 @@ tcp_dooptions(struct tcpcb *tp, u_char *cp, int cnt, struct tcphdr *th,
 		if (tcp_signature(tdb, tp->pf, m, th, iphlen, 1, sig) < 0)
 			return (-1);
 
-		if (bcmp(sig, sigp, 16)) {
+		if (timingsafe_bcmp(sig, sigp, 16)) {
 			tcpstat.tcps_rcvbadsig++;
 			return (-1);
 		}
@@ -3323,27 +3363,29 @@ do {									\
 } while (/*CONSTCOND*/0)
 #endif /* INET6 */
 
-#define	SYN_CACHE_RM(sc)						\
-do {									\
-	(sc)->sc_flags |= SCF_DEAD;					\
-	TAILQ_REMOVE(&tcp_syn_cache[(sc)->sc_bucketidx].sch_bucket,	\
-	    (sc), sc_bucketq);						\
-	(sc)->sc_tp = NULL;						\
-	LIST_REMOVE((sc), sc_tpq);					\
-	tcp_syn_cache[(sc)->sc_bucketidx].sch_length--;			\
-	timeout_del(&(sc)->sc_timer);					\
-	syn_cache_count--;						\
-} while (/*CONSTCOND*/0)
+void
+syn_cache_rm(struct syn_cache *sc)
+{
+	sc->sc_flags |= SCF_DEAD;
+	TAILQ_REMOVE(&tcp_syn_cache[sc->sc_bucketidx].sch_bucket,
+	    sc, sc_bucketq);
+	sc->sc_tp = NULL;
+	LIST_REMOVE(sc, sc_tpq);
+	tcp_syn_cache[sc->sc_bucketidx].sch_length--;
+	timeout_del(&sc->sc_timer);
+	syn_cache_count--;
+}
 
-#define	SYN_CACHE_PUT(sc)						\
-do {									\
-	if ((sc)->sc_ipopts)						\
-		(void) m_free((sc)->sc_ipopts);				\
-	if ((sc)->sc_route4.ro_rt != NULL)				\
-		RTFREE((sc)->sc_route4.ro_rt);				\
-	timeout_set(&(sc)->sc_timer, syn_cache_reaper, (sc));		\
-	timeout_add(&(sc)->sc_timer, 0);				\
-} while (/*CONSTCOND*/0)
+void
+syn_cache_put(struct syn_cache *sc)
+{
+	if (sc->sc_ipopts)
+		(void) m_free(sc->sc_ipopts);
+	if (sc->sc_route4.ro_rt != NULL)
+		RTFREE(sc->sc_route4.ro_rt);
+	timeout_set(&sc->sc_timer, syn_cache_reaper, sc);
+	timeout_add(&sc->sc_timer, 0);
+}
 
 struct pool syn_cache_pool;
 
@@ -3417,8 +3459,8 @@ syn_cache_insert(struct syn_cache *sc, struct tcpcb *tp)
 		if (sc2 == NULL)
 			panic("syn_cache_insert: bucketoverflow: impossible");
 #endif
-		SYN_CACHE_RM(sc2);
-		SYN_CACHE_PUT(sc2);
+		syn_cache_rm(sc2);
+		syn_cache_put(sc2);
 	} else if (syn_cache_count >= tcp_syn_cache_limit) {
 		struct syn_cache_head *scp2, *sce;
 
@@ -3451,8 +3493,8 @@ syn_cache_insert(struct syn_cache *sc, struct tcpcb *tp)
 #endif
 		}
 		sc2 = TAILQ_FIRST(&scp2->sch_bucket);
-		SYN_CACHE_RM(sc2);
-		SYN_CACHE_PUT(sc2);
+		syn_cache_rm(sc2);
+		syn_cache_put(sc2);
 	}
 
 	/*
@@ -3517,8 +3559,8 @@ syn_cache_timer(void *arg)
 
  dropit:
 	tcpstat.tcps_sc_timed_out++;
-	SYN_CACHE_RM(sc);
-	SYN_CACHE_PUT(sc);
+	syn_cache_rm(sc);
+	syn_cache_put(sc);
 	splx(s);
 }
 
@@ -3554,8 +3596,8 @@ syn_cache_cleanup(struct tcpcb *tp)
 		if (sc->sc_tp != tp)
 			panic("invalid sc_tp in syn_cache_cleanup");
 #endif
-		SYN_CACHE_RM(sc);
-		SYN_CACHE_PUT(sc);
+		syn_cache_rm(sc);
+		syn_cache_put(sc);
 	}
 	/* just for safety */
 	LIST_INIT(&tp->t_sc);
@@ -3629,6 +3671,9 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	struct mbuf *am;
 	int s;
 	struct socket *oso;
+#if NPF > 0
+	struct pf_divert *divert = NULL;
+#endif
 
 	s = splsoftnet();
 	if ((sc = syn_cache_lookup(src, dst, &scp,
@@ -3650,7 +3695,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	}
 
 	/* Remove this cache entry */
-	SYN_CACHE_RM(sc);
+	syn_cache_rm(sc);
 	splx(s);
 
 	/*
@@ -3712,6 +3757,12 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	inp = (struct inpcb *)so->so_pcb;
 #endif /* INET6 */
 
+#if NPF > 0
+	if (m && m->m_pkthdr.pf.flags & PF_TAG_DIVERTED &&
+	    (divert = pf_find_divert(m)) != NULL)
+		inp->inp_rtableid = divert->rdomain;
+	else
+#endif
 	/* inherit rtable from listening socket */
 	inp->inp_rtableid = sc->sc_rtableid;
 
@@ -3796,6 +3847,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 #endif
 
 	tp->ts_modulate = sc->sc_modulate;
+	tp->ts_recent = sc->sc_timestamp;
 	tp->iss = sc->sc_iss;
 	tp->irs = sc->sc_irs;
 	tcp_sendseqinit(tp);
@@ -3848,7 +3900,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	tp->last_ack_sent = tp->rcv_nxt;
 
 	tcpstat.tcps_sc_completed++;
-	SYN_CACHE_PUT(sc);
+	syn_cache_put(sc);
 	return (so);
 
 resetandabort:
@@ -3858,7 +3910,7 @@ resetandabort:
 abort:
 	if (so != NULL)
 		(void) soabort(so);
-	SYN_CACHE_PUT(sc);
+	syn_cache_put(sc);
 	tcpstat.tcps_sc_aborted++;
 	return ((struct socket *)(-1));
 }
@@ -3886,10 +3938,10 @@ syn_cache_reset(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		splx(s);
 		return;
 	}
-	SYN_CACHE_RM(sc);
+	syn_cache_rm(sc);
 	splx(s);
 	tcpstat.tcps_sc_reset++;
-	SYN_CACHE_PUT(sc);
+	syn_cache_put(sc);
 }
 
 void
@@ -3925,10 +3977,10 @@ syn_cache_unreach(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		return;
 	}
 
-	SYN_CACHE_RM(sc);
+	syn_cache_rm(sc);
 	splx(s);
 	tcpstat.tcps_sc_unreach++;
-	SYN_CACHE_PUT(sc);
+	syn_cache_put(sc);
 }
 
 /*
@@ -3976,6 +4028,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 #else
 	if (optp) {
 #endif
+		bzero(&tb, sizeof(tb));
 		tb.pf = tp->pf;
 #ifdef TCP_SACK
 		tb.sack_enable = tp->sack_enable;
@@ -3988,7 +4041,7 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		tb.t_state = TCPS_LISTEN;
 		if (tcp_dooptions(&tb, optp, optlen, th, m, iphlen, oi,
 		    sotoinpcb(so)->inp_rtableid))
-			return (0);
+			return (-1);
 	} else
 		tb.t_flags = 0;
 
@@ -4027,14 +4080,14 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 			tcpstat.tcps_sndacks++;
 			tcpstat.tcps_sndtotal++;
 		}
-		return (1);
+		return (0);
 	}
 
 	sc = pool_get(&syn_cache_pool, PR_NOWAIT|PR_ZERO);
 	if (sc == NULL) {
 		if (ipopts)
 			(void) m_free(ipopts);
-		return (0);
+		return (-1);
 	}
 
 	/*
@@ -4063,9 +4116,28 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	    (TF_RCVD_SCALE|TF_REQ_SCALE)) {
 		sc->sc_requested_s_scale = tb.requested_s_scale;
 		sc->sc_request_r_scale = 0;
+		/*
+		 * Pick the smallest possible scaling factor that
+		 * will still allow us to scale up to sb_max.
+		 *
+		 * We do this because there are broken firewalls that
+		 * will corrupt the window scale option, leading to
+		 * the other endpoint believing that our advertised
+		 * window is unscaled.  At scale factors larger than
+		 * 5 the unscaled window will drop below 1500 bytes,
+		 * leading to serious problems when traversing these
+		 * broken firewalls.
+		 *
+		 * With the default sbmax of 256K, a scale factor
+		 * of 3 will be chosen by this algorithm.  Those who
+		 * choose a larger sbmax should watch out
+		 * for the compatiblity problems mentioned above.
+		 *
+		 * RFC1323: The Window field in a SYN (i.e., a <SYN>
+		 * or <SYN,ACK>) segment itself is never scaled.
+		 */
 		while (sc->sc_request_r_scale < TCP_MAX_WINSHIFT &&
-		    TCP_MAXWIN << sc->sc_request_r_scale <
-		    so->so_rcv.sb_hiwat)
+		    (TCP_MAXWIN << sc->sc_request_r_scale) < sb_max)
 			sc->sc_request_r_scale++;
 	} else {
 		sc->sc_requested_s_scale = 15;
@@ -4097,10 +4169,11 @@ syn_cache_add(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 		tcpstat.tcps_sndacks++;
 		tcpstat.tcps_sndtotal++;
 	} else {
-		SYN_CACHE_PUT(sc);
+		syn_cache_put(sc);
 		tcpstat.tcps_sc_dropped++;
 	}
-	return (1);
+
+	return (0);
 }
 
 int

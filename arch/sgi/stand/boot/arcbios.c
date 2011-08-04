@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.c,v 1.12 2009/07/22 20:23:44 miod Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.14 2011/04/09 20:46:33 miod Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  * Copyright (c) 1996-2004 Opsycon AB.  All rights reserved.
@@ -36,7 +36,7 @@
 
 #include <stand.h>
 
-static int	bios_is_32bit;
+int	bios_is_32bit;
 
 u_int	kl_n_shift = 32;
 int	arcbios_init(void);
@@ -184,7 +184,16 @@ arcbios_init()
 			sysid = (char *)(long)cf->id;
 			sysid_len = cf->id_len;
 		} else {
+#ifndef __LP64__
+			/*
+			 * Hopeless pointer truncation relying upon sign
+			 * extension; we expect 64-bit ARCS to fail to
+			 * load 32-bit boot code anyway.
+			 */
+			sysid = (char *)(int32_t)((arc_config64_t *)cf)->id;
+#else
 			sysid = (char *)((arc_config64_t *)cf)->id;
+#endif
 			sysid_len = ((arc_config64_t *)cf)->id_len;
 		}
 
@@ -304,7 +313,7 @@ boot_get_path_component(const char *p, char *comp, int *no)
 		*comp++ = *p++;
 	*comp = '\0';
 
-	if (*p == NULL)
+	if (*p == '\0')
 		return (NULL);
 
 	*no = 0;

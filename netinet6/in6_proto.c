@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_proto.c,v 1.59 2010/07/08 19:42:46 jsg Exp $	*/
+/*	$OpenBSD: in6_proto.c,v 1.62 2011/03/31 10:36:42 jasper Exp $	*/
 /*	$KAME: in6_proto.c,v 1.66 2000/10/10 15:35:47 itojun Exp $	*/
 
 /*
@@ -137,7 +137,7 @@ struct ip6protosw inet6sw[] = {
   0,		0,		0,
   udp_sysctl,
 },
-{ SOCK_STREAM,	&inet6domain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS,
+{ SOCK_STREAM,	&inet6domain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS|PR_SPLICE,
   tcp6_input,	0,		tcp6_ctlinput,	tcp_ctloutput,
   tcp_usrreq,
 #ifdef INET	/* don't call initialization and timeout routines twice */
@@ -252,7 +252,7 @@ struct ip6protosw inet6sw[] = {
 struct domain inet6domain =
     { AF_INET6, "internet6", 0, 0, 0,
       (struct protosw *)inet6sw,
-      (struct protosw *)&inet6sw[sizeof(inet6sw)/sizeof(inet6sw[0])], 0,
+      (struct protosw *)&inet6sw[nitems(inet6sw)], 0,
 #ifndef SMALL_KERNEL
       rn_mpath_inithead,
 #else
@@ -310,7 +310,7 @@ u_long	rip6_sendspace = RIPV6SNDQ;
 u_long	rip6_recvspace = RIPV6RCVQ;
 
 /* ICMPV6 parameters */
-int	icmp6_rediraccept = 1;		/* accept and process redirects */
+int	icmp6_rediraccept = 0;		/* don't process redirects by default */
 int	icmp6_redirtimeout = 10 * 60;	/* 10 minutes */
 int	icmp6errppslim = 100;		/* 100pps */
 int	icmp6_nodeinfo = 1;		/* enable/disable NI response */

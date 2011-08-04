@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.87 2010/03/28 12:08:49 kettenis Exp $	*/
+/*	$OpenBSD: bios.c,v 1.90 2011/04/26 17:33:17 jsing Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -455,6 +455,7 @@ bios_getopt()
 {
 	bootarg_t *q;
 	bios_ddb_t *bios_ddb;
+	bios_rootduid_t *bios_rootduid;
 
 #ifdef BIOS_DEBUG
 	printf("bootargv:");
@@ -538,6 +539,12 @@ bios_getopt()
 #ifdef DDB
 			db_console = bios_ddb->db_console;
 #endif
+			break;
+
+		case BOOTARG_ROOTDUID:
+			bios_rootduid = (bios_rootduid_t *)q->ba_arg;
+			bcopy(bios_rootduid, rootduid, sizeof(rootduid));
+			break;
 
 		default:
 #ifdef BIOS_DEBUG
@@ -666,45 +673,6 @@ biosioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	return 0;
 }
 
-void
-bioscnprobe(struct consdev *cn)
-{
-#if 0
-	bios_init(I386_BUS_SPACE_MEM); /* XXX */
-	if (!bios_cd.cd_ndevs)
-		return;
-
-	if (0 && bios_call(BOOTC_CHECK, NULL))
-		return;
-
-	cn->cn_pri = CN_LOWPRI;
-	cn->cn_dev = makedev(48, 0);
-#endif
-}
-
-void
-bioscninit(struct consdev *cn)
-{
-
-}
-
-void
-bioscnputc(dev_t dev, int ch)
-{
-
-}
-
-int
-bioscngetc(dev_t dev)
-{
-	return -1;
-}
-
-void
-bioscnpollc(dev_t dev, int on)
-{
-}
-
 int
 bios_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
     size_t newlen, struct proc *p)
@@ -795,7 +763,7 @@ smbios_find_table(u_int8_t type, struct smbtable *st)
 			if (hdr->type == type) {
 				va = (u_int8_t *)hdr + hdr->size;
 				for (; va + 1 < end; va++)
-					if (*va == NULL && *(va + 1) == NULL)
+					if (*va == 0 && *(va + 1) == 0)
 						break;
 				va+= 2;
 				tcount = st->cookie >> 16;
@@ -816,7 +784,7 @@ smbios_find_table(u_int8_t type, struct smbtable *st)
 			break;
 		va+= hdr->size;
 		for (; va + 1 < end; va++)
-			if (*va == NULL && *(va + 1) == NULL)
+			if (*va == 0 && *(va + 1) == 0)
 				break;
 		va+=2;
 	}

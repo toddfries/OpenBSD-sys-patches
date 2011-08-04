@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.84 2010/06/07 13:26:35 henning Exp $	*/
+/*	$OpenBSD: in.h,v 1.90 2011/07/06 01:57:37 dlg Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -187,6 +187,12 @@ struct in_addr {
 #define	IN_CLASSD_HOST		__IPADDR(0x0fffffff)
 #define	IN_MULTICAST(i)		IN_CLASSD(i)
 
+#define	IN_RFC3021_NET		__IPADDR(0xfffffffe)
+#define	IN_RFC3021_NSHIFT	31
+#define	IN_RFC3021_HOST		__IPADDR(0x00000001)
+#define	IN_RFC3021_SUBNET(n)	(((u_int32_t)(n) & IN_RFC3021_NET) == \
+				 IN_RFC3021_NET)
+
 #define	IN_EXPERIMENTAL(i)	(((u_int32_t)(i) & __IPADDR(0xf0000000)) == \
 				 __IPADDR(0xf0000000))
 #define	IN_BADCLASS(i)		(((u_int32_t)(i) & __IPADDR(0xf0000000)) == \
@@ -280,6 +286,10 @@ struct ip_opts {
 #define IP_RECVTTL		31   /* bool; receive IP TTL w/dgram */
 #define IP_MINTTL		32   /* minimum TTL for packet or drop */
 #define IP_RECVDSTPORT		33   /* bool; receive IP dst port w/dgram */
+#define IP_PIPEX		34   /* bool; using PIPEX */
+#define IP_RECVRTABLE		35   /* bool; receive rdomain w/dgram */
+
+#define IP_RTABLE		0x1021	/* int; routing table, see SO_RTABLE */
 
 /*
  * Security levels - IPsec, not IPSO
@@ -791,7 +801,7 @@ in_cksum_addword(u_int16_t a, u_int16_t b)
 
 extern	   struct in_addr zeroin_addr;
 
-int	   in_broadcast(struct in_addr, struct ifnet *);
+int	   in_broadcast(struct in_addr, struct ifnet *, u_int);
 int	   in_canforward(struct in_addr);
 int	   in_cksum(struct mbuf *, int);
 int	   in4_cksum(struct mbuf *, u_int8_t, int, int);
@@ -799,6 +809,7 @@ void	   in_delayed_cksum(struct mbuf *);
 int	   in_localaddr(struct in_addr, u_int);
 void	   in_socktrim(struct sockaddr_in *);
 char	  *inet_ntoa(struct in_addr);
+void	   in_proto_cksum_out(struct mbuf *, struct ifnet *);
 
 #define	in_hosteq(s,t)	((s).s_addr == (t).s_addr)
 #define	in_nullhost(x)	((x).s_addr == INADDR_ANY)

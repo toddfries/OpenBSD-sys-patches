@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip30_machdep.c,v 1.42 2010/04/28 16:20:28 syuu Exp $	*/
+/*	$OpenBSD: ip30_machdep.c,v 1.47 2011/05/30 22:25:22 oga Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -137,21 +137,7 @@ ip30_setup()
 		 * Add memory not obtained through ARCBios.
 		 */
 		if (start >= IP30_MEMORY_BASE + IP30_MEMORY_ARCBIOS_LIMIT) {
-			/*
-			 * XXX Temporary until there is a way to cope with
-			 * XXX xbridge ATE shortage.
-			 */
-			if (end > (2UL << 30)) {
-#if 0
-				physmem += atop(end - (2UL << 30));
-#endif
-				end = 2UL << 30;
-			}
-			if (end <= start)
-				continue;
-
-			memrange_register(atop(start), atop(end),
-			    0, VM_FREELIST_DEFAULT);
+			memrange_register(atop(start), atop(end), 0);
 		}
 	}
 
@@ -532,8 +518,8 @@ hw_cpu_boot_secondary(struct cpu_info *ci)
 	    stackaddr, lparam, rparam, idleflag);
 #endif
 	kstack = alloc_contiguous_pages(USPACE);
-	if (kstack == NULL)
-		panic("unable to allocate idle stack\n");
+	if (kstack == 0)
+		panic("unable to allocate idle stack");
 	ci->ci_curprocpaddr = (void *)kstack;
 
 	*(volatile uint64_t *)(mpconf + MPCONF_STACKADDR(cpuid)) =
@@ -616,4 +602,21 @@ hw_ipi_intr_clear(u_long cpuid)
 	xheart_intr_clear(HEART_ISR_IPI(cpuid));
 }
 
+void
+hw_cpu_init_secondary(struct cpu_info *ci)
+{
+       /*
+        * When attaching secondary processors, cache information is not
+        * available yet.  But since the MP-capable systems we run on
+        * currently all have R10k-style caches, we can quickly compute
+        * the needed values.
+        */
+	ci->ci_cacheways = 2;
+	ci->ci_l1instcachesize = 32 * 1024;
+	ci->ci_l1instcacheline = 64;
+	ci->ci_l1datacachesize = 32 * 1024;
+	ci->ci_l1datacacheline = 64;
+	ci->ci_l2size = ci->ci_hw.l2size;
+	ci->ci_l3size = 0;
+}
 #endif

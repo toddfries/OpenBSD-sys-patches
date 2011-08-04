@@ -1,4 +1,4 @@
-/*	$OpenBSD: intrdefs.h,v 1.7 2010/05/22 21:31:05 deraadt Exp $	*/
+/*	$OpenBSD: intrdefs.h,v 1.9 2011/06/16 19:46:40 kettenis Exp $	*/
 /*	$NetBSD: intrdefs.h,v 1.2 2003/05/04 22:01:56 fvdl Exp $	*/
 
 #ifndef _AMD64_INTRDEFS_H
@@ -44,22 +44,22 @@
  * Local APIC masks. Must not conflict with SIR_* above, and must
  * be >= NUM_LEGACY_IRQs. Note that LIR_IPI must be first.
  */
-#define LIR_IPI		31
-#define LIR_TIMER	30
+#define LIR_IPI		63
+#define LIR_TIMER	62
 
 /* Soft interrupt masks. */
-#define	SIR_CLOCK	29
-#define	SIR_NET		28
-#define	SIR_TTY		27
+#define	SIR_CLOCK	61
+#define	SIR_NET		60
+#define	SIR_TTY		59
 
 
 /*
- * Maximum # of interrupt sources per CPU. 32 to fit in one word.
+ * Maximum # of interrupt sources per CPU. 64 to fit in one word.
  * ioapics can theoretically produce more, but it's not likely to
  * happen. For multiple ioapics, things can be routed to different
  * CPUs.
  */
-#define MAX_INTR_SOURCES	32
+#define MAX_INTR_SOURCES	64
 #define NUM_LEGACY_IRQS		16
 
 /*
@@ -75,16 +75,14 @@
 #define X86_IPI_SYNCH_FPU		0x00000008
 #define X86_IPI_TLB			0x00000010
 #define X86_IPI_MTRR			0x00000020
-#define X86_IPI_GDT			0x00000040
+#define X86_IPI_SETPERF			0x00000040
 #define X86_IPI_DDB			0x00000080
-#define X86_IPI_SETPERF			0x00000100
 
-#define X86_NIPI			9
+#define X86_NIPI			8
 
 #define X86_IPI_NAMES { "halt IPI", "nop IPI", "FPU flush IPI", \
 			 "FPU synch IPI", "TLB shootdown IPI", \
-			 "MTRR update IPI", "GDT update IPI", "ddb IPI", \
-			 "setperf IPI"}
+			 "MTRR update IPI", "setperf IPI", "ddb IPI" }
 
 #define IREENT_MAGIC	0x18041969
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.49 2010/02/02 02:49:57 syuu Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.53 2011/04/07 18:11:52 miod Exp $	*/
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -534,7 +534,7 @@ pmap_destroy(pmap_t pmap)
 {
 	int s, count;
 
-	DPRINTF(PDB_FOLLOW|PDB_CREATE, ("pmap_destroy(%x)\n", pmap));
+	DPRINTF(PDB_FOLLOW|PDB_CREATE, ("pmap_destroy(%p)\n", pmap));
 
 	simple_lock(&pmap->pm_lock);
 	count = --pmap->pm_count;
@@ -583,7 +583,7 @@ void
 pmap_reference(pmap_t pmap)
 {
 
-	DPRINTF(PDB_FOLLOW, ("pmap_reference(%x)\n", pmap));
+	DPRINTF(PDB_FOLLOW, ("pmap_reference(%p)\n", pmap));
 
 	if (pmap) {
 		simple_lock(&pmap->pm_lock);
@@ -630,7 +630,7 @@ pmap_remove(pmap_t pmap, vaddr_t sva, vaddr_t eva)
 	pt_entry_t *pte, entry;
 
 	DPRINTF(PDB_FOLLOW|PDB_REMOVE|PDB_PROTECT,
-		("pmap_remove(%x, %x, %x)\n", pmap, sva, eva));
+		("pmap_remove(%p, %p, %p)\n", pmap, sva, eva));
 
 	stat_count(remove_stats.calls);
 
@@ -1119,16 +1119,13 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
  * Find first virtual address >= *vap that
  * will not cause cache aliases.
  */
-void
-pmap_prefer(paddr_t foff, vaddr_t *vap)
+vaddr_t
+pmap_prefer(paddr_t foff, vaddr_t va)
 {
-	if (CpuCacheAliasMask != 0) {
-#if 1
-		*vap += (foff - *vap) & (CpuCacheAliasMask | PAGE_MASK);
-#else
-		*vap += (*vap ^ foff) & CpuCacheAliasMask;
-#endif
-	}
+	if (CpuCacheAliasMask != 0)
+		va += (foff - va) & (CpuCacheAliasMask | PAGE_MASK);
+
+	return va;
 }
 
 /*
@@ -1504,7 +1501,7 @@ pmap_enter_pv(pmap_t pmap, vaddr_t va, vm_page_t pg, pt_entry_t *npte)
 		}
 
 		DPRINTF(PDB_PVENTRY,
-			("pmap_enter: new pv: pmap %x va %x pg %p\n",
+			("pmap_enter: new pv: pmap %p va %p pg %p\n",
 			    pmap, va, VM_PAGE_TO_PHYS(pg)));
 
 		npv = pmap_pv_alloc();
@@ -1580,7 +1577,7 @@ pmap_remove_pv(pmap_t pmap, vaddr_t va, paddr_t pa)
 			pmap_pv_free(npv);
 		} else {
 #ifdef DIAGNOSTIC
-			panic("pmap_remove_pv(%x, %x, %x) not found",
+			panic("pmap_remove_pv(%p, %p, %p) not found",
 			    pmap, va, pa);
 #endif
 		}
@@ -1629,3 +1626,45 @@ pmap_pg_free(struct pool *pp, void *item)
 	Mips_HitInvalidateDCache(curcpu(), va, pa, PAGE_SIZE);
 	uvm_pagefree(pg);
 }
+
+void
+pmap_proc_iflush(struct proc *p, vaddr_t va, vsize_t len)
+{
+#ifdef MULTIPROCESSOR
+	struct pmap *pmap = vm_map_pmap(&p->p_vmspace->vm_map);
+	CPU_INFO_ITERATOR cii;
+	struct cpu_info *ci;
+
+	CPU_INFO_FOREACH(cii, ci) {
+		if (ci->ci_curpmap == pmap) {
+			Mips_InvalidateICache(ci, va, len);
+			break;
+		}
+	}
+#else
+	Mips_InvalidateICache(curcpu(), va, len);
+#endif
+}
+
+#ifdef __HAVE_PMAP_DIRECT
+vaddr_t
+pmap_map_direct(vm_page_t pg)
+{
+	paddr_t pa = VM_PAGE_TO_PHYS(pg);
+	vaddr_t va = PHYS_TO_XKPHYS(pa, CCA_CACHED);
+
+	return va;
+}
+
+vm_page_t
+pmap_unmap_direct(vaddr_t va)
+{
+	paddr_t pa = XKPHYS_TO_PHYS(va);
+	vm_page_t pg = PHYS_TO_VM_PAGE(pa);
+
+	if (CpuCacheAliasMask)
+		Mips_HitInvalidateDCache(curcpu(), va, pa, PAGE_SIZE);
+
+	return pg;
+}
+#endif

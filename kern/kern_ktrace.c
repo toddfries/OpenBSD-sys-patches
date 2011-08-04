@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ktrace.c,v 1.48 2009/10/31 12:00:08 fgsch Exp $	*/
+/*	$OpenBSD: kern_ktrace.c,v 1.54 2011/07/11 15:40:47 guenther Exp $	*/
 /*	$NetBSD: kern_ktrace.c,v 1.23 1996/02/09 18:59:36 christos Exp $	*/
 
 /*
@@ -54,7 +54,7 @@
 
 void ktrinitheader(struct ktr_header *, struct proc *, int);
 int ktrops(struct proc *, struct proc *, int, int, struct vnode *);
-int ktrsetchildren(struct proc *, struct proc *, int, int,
+int ktrsetchildren(struct proc *, struct process *, int, int,
 			struct vnode *);
 int ktrwrite(struct proc *, struct ktr_header *);
 int ktrcanset(struct proc *, struct proc *);
@@ -138,7 +138,7 @@ ktrsysret(struct proc *p, register_t code, int error, register_t retval)
 	ktrinitheader(&kth, p, KTR_SYSRET);
 	ktp.ktr_code = code;
 	ktp.ktr_error = error;
-	ktp.ktr_retval = retval;		/* what about val2 ? */
+	ktp.ktr_retval = retval;
 
 	kth.ktr_buf = (caddr_t)&ktp;
 	kth.ktr_len = sizeof(struct ktr_sysret);
@@ -273,6 +273,30 @@ ktrcsw(struct proc *p, int out, int user)
 	p->p_traceflag &= ~KTRFAC_ACTIVE;
 }
 
+void
+ktrstruct(struct proc *p, const char *name, const void *data, size_t datalen)
+{
+	struct ktr_header kth;
+	void *buf;
+	size_t buflen;
+
+	p->p_traceflag |= KTRFAC_ACTIVE;
+	ktrinitheader(&kth, p, KTR_STRUCT);
+	
+	if (data == NULL)
+		datalen = 0;
+	buflen = strlen(name) + 1 + datalen;
+	buf = malloc(buflen, M_TEMP, M_WAITOK);
+	strlcpy(buf, name, buflen);
+	bcopy(data, buf + strlen(name) + 1, datalen);
+	kth.ktr_buf = buf;
+	kth.ktr_len = buflen;
+
+	ktrwrite(p, &kth);
+	free(buf, M_TEMP);
+	p->p_traceflag &= ~KTRFAC_ACTIVE;
+}
+
 /* Interface and common routines */
 
 /*
@@ -290,6 +314,7 @@ sys_ktrace(struct proc *curp, void *v, register_t *retval)
 	} */ *uap = v;
 	struct vnode *vp = NULL;
 	struct proc *p = NULL;
+	struct process *pr = NULL;
 	struct pgrp *pg;
 	int facs = SCARG(uap, facs) & ~((unsigned) KTRFAC_ROOT);
 	int ops = KTROP(SCARG(uap, ops));
@@ -352,25 +377,29 @@ sys_ktrace(struct proc *curp, void *v, register_t *retval)
 			error = ESRCH;
 			goto done;
 		}
-		LIST_FOREACH(p, &pg->pg_members, p_pglist)
+		LIST_FOREACH(pr, &pg->pg_members, ps_pglist) {
 			if (descend)
-				ret |= ktrsetchildren(curp, p, ops, facs, vp);
+				ret |= ktrsetchildren(curp, pr, ops, facs, vp);
 			else 
-				ret |= ktrops(curp, p, ops, facs, vp);
+				TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link)
+					ret |= ktrops(curp, p, ops, facs, vp);
+		}
 					
 	} else {
 		/*
 		 * by pid
 		 */
-		p = pfind(SCARG(uap, pid));
-		if (p == NULL) {
+		pr = prfind(SCARG(uap, pid));
+		if (pr == NULL) {
 			error = ESRCH;
 			goto done;
 		}
 		if (descend)
-			ret |= ktrsetchildren(curp, p, ops, facs, vp);
+			ret |= ktrsetchildren(curp, pr, ops, facs, vp);
 		else
-			ret |= ktrops(curp, p, ops, facs, vp);
+			TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link) {
+				ret |= ktrops(curp, p, ops, facs, vp);
+		}
 	}
 	if (!ret)
 		error = EPERM;
@@ -412,30 +441,32 @@ ktrops(struct proc *curp, struct proc *p, int ops, int facs, struct vnode *vp)
 }
 
 int
-ktrsetchildren(struct proc *curp, struct proc *top, int ops, int facs,
+ktrsetchildren(struct proc *curp, struct process *top, int ops, int facs,
     struct vnode *vp)
 {
+	struct process *pr;
 	struct proc *p;
 	int ret = 0;
 
-	p = top;
+	pr = top;
 	for (;;) {
-		ret |= ktrops(curp, p, ops, facs, vp);
+		TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link)
+			ret |= ktrops(curp, p, ops, facs, vp);
 		/*
 		 * If this process has children, descend to them next,
 		 * otherwise do any siblings, and if done with this level,
 		 * follow back up the tree (but not past top).
 		 */
-		if (!LIST_EMPTY(&p->p_children))
-			p = LIST_FIRST(&p->p_children);
+		if (!LIST_EMPTY(&pr->ps_children))
+			pr = LIST_FIRST(&pr->ps_children);
 		else for (;;) {
-			if (p == top)
+			if (pr == top)
 				return (ret);
-			if (LIST_NEXT(p, p_sibling) != NULL) {
-				p = LIST_NEXT(p, p_sibling);
+			if (LIST_NEXT(pr, ps_sibling) != NULL) {
+				pr = LIST_NEXT(pr, ps_sibling);
 				break;
 			}
-			p = p->p_pptr;
+			pr = pr->ps_pptr;
 		}
 	}
 	/*NOTREACHED*/
@@ -508,7 +539,7 @@ ktrcanset(struct proc *callp, struct proc *targetp)
 	    caller->p_rgid == target->p_rgid &&	/* XXX */
 	    target->p_rgid == target->p_svgid &&
 	    (targetp->p_traceflag & KTRFAC_ROOT) == 0 &&
-	    !ISSET(targetp->p_flag, P_SUGID)) ||
+	    !ISSET(targetp->p_p->ps_flags, PS_SUGID)) ||
 	    caller->pc_ucred->cr_uid == 0)
 		return (1);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: astro.c,v 1.3 2010/05/24 15:06:03 deraadt Exp $	*/
+/*	$OpenBSD: astro.c,v 1.5 2011/04/07 15:30:15 miod Exp $	*/
 
 /*
  * Copyright (c) 2007 Mark Kettenis
@@ -640,7 +640,7 @@ iommu_iomap_insert_page(struct iommu_map_state *ims, vaddr_t va, paddr_t pa)
 
 	e->ipe_pa = pa;
 	e->ipe_va = va;
-	e->ipe_dva = NULL;
+	e->ipe_dva = 0;
 
 	e = SPLAY_INSERT(iommu_page_tree, &ipm->ipm_tree, e);
 
@@ -669,7 +669,7 @@ iommu_iomap_translate(struct iommu_map_state *ims, paddr_t pa)
 	e = SPLAY_FIND(iommu_page_tree, &ipm->ipm_tree, &pe);
 
 	if (e == NULL) {
-		panic("couldn't find pa %lx\n", pa);
+		panic("couldn't find pa %lx", pa);
 		return 0;
 	}
 

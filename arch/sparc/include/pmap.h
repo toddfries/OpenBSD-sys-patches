@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.48 2010/07/10 19:32:24 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.52 2011/04/28 20:36:29 ariane Exp $	*/
 /*	$NetBSD: pmap.h,v 1.30 1997/08/04 20:00:47 pk Exp $ */
 
 /*
@@ -44,8 +44,8 @@
  *	@(#)pmap.h	8.1 (Berkeley) 6/11/93
  */
 
-#ifndef	_SPARC_PMAP_H_
-#define _SPARC_PMAP_H_
+#ifndef	_MACHINE_PMAP_H_
+#define _MACHINE_PMAP_H_
 
 #include <machine/pte.h>
 
@@ -263,6 +263,13 @@ int             pmap_dumpmmu(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64
 
 #define PMAP_PREFER(fo, ap)		pmap_prefer((fo), (ap))
 
+extern int	cache_alias_dist;
+/* pmap prefer alignment */
+#define PMAP_PREFER_ALIGN()		cache_alias_dist
+/* pmap prefer offset in alignment */
+#define PMAP_PREFER_OFFSET(of)						\
+	((of) & (cache_alias_dist ? cache_alias_dist - 1 : 0))
+
 #define PMAP_EXCLUDE_DECLS	/* tells MI pmap.h *not* to include decls */
 
 /* FUNCTION DECLARATIONS FOR COMMON PMAP MODULE */
@@ -270,7 +277,7 @@ int             pmap_dumpmmu(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64
 struct proc;
 void		pmap_activate(struct proc *);
 void		pmap_bootstrap(int nmmu, int nctx, int nregion);
-void		pmap_prefer(vaddr_t, vaddr_t *);
+vaddr_t		pmap_prefer(vaddr_t, vaddr_t);
 int		pmap_pa_exists(paddr_t);
 void		pmap_unwire(pmap_t, vaddr_t);
 void		pmap_copy(pmap_t, pmap_t, vaddr_t, vsize_t, vaddr_t);
@@ -297,7 +304,6 @@ void		pmap_writetext(unsigned char *, int);
 #define		pmap_collect(pm)		do { /* nothing */ } while (0)
 #define		pmap_copy(DP,SP,D,L,S)		do { /* nothing */ } while (0)
 #define		pmap_deactivate(p)		do { /* nothing */ } while (0)
-#define		pmap_phys_address(frame)	(frame)
 #define		pmap_proc_iflush(p,va,len)	do { /* nothing */ } while (0)
 #define		pmap_update(pm)			do { /* nothing */ } while (0)
 
@@ -401,4 +407,4 @@ extern void		(*pmap_changeprot_p)(pmap_t, vaddr_t,
 
 #endif /* _KERNEL */
 
-#endif /* _SPARC_PMAP_H_ */
+#endif /* _MACHINE_PMAP_H_ */

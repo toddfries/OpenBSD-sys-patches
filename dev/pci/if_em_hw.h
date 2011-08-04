@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.h,v 1.44 2010/07/02 21:41:59 jsg Exp $ */
+/* $OpenBSD: if_em_hw.h,v 1.51 2011/05/02 12:25:42 jsg Exp $ */
 /* $FreeBSD: if_em_hw.h,v 1.15 2005/05/26 23:32:02 tackerman Exp $ */
 
 /* if_em_hw.h
@@ -70,11 +70,13 @@ typedef enum {
     em_82573,
     em_82574,
     em_82575,
+    em_82580,
     em_80003es2lan,
     em_ich8lan,
     em_ich9lan,
     em_ich10lan,
     em_pchlan,
+    em_pch2lan,
     em_num_macs
 } em_mac_type;
 
@@ -238,6 +240,8 @@ typedef enum {
     em_phy_oem,
     em_phy_82577,
     em_phy_82578,
+    em_phy_82579,
+    em_phy_82580,
     em_phy_undefined = 0xFF
 } em_phy_type;
 
@@ -529,6 +533,8 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_PCH_M_HV_LC         0x10EB
 #define E1000_DEV_ID_PCH_D_HV_DM         0x10EF
 #define E1000_DEV_ID_PCH_D_HV_DC         0x10F0
+#define E1000_DEV_ID_PCH2_LV_LM          0x1502
+#define E1000_DEV_ID_PCH2_LV_V           0x1503
 #define E1000_DEV_ID_82575EB_PT          0x10A7
 #define E1000_DEV_ID_82575EB_PF          0x10A9
 #define E1000_DEV_ID_82575GB_QP          0x10D6
@@ -538,8 +544,11 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_82576_SERDES        0x10E7
 #define E1000_DEV_ID_82576_QUAD_COPPER   0x10E8
 #define E1000_DEV_ID_82576_NS            0x150A
+#define E1000_DEV_ID_82583V              0x150C
 #define E1000_DEV_ID_82576_NS_SERDES     0x1518
 #define E1000_DEV_ID_82576_SERDES_QUAD   0x150D
+#define E1000_DEV_ID_PCH2_LV_LM          0x1502
+#define E1000_DEV_ID_PCH2_LV_V           0x1503
 #define E1000_DEV_ID_82580_COPPER        0x150E
 #define E1000_DEV_ID_82580_FIBER         0x150F
 #define E1000_DEV_ID_82580_SERDES        0x1510
@@ -634,8 +643,12 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
  * reserve one of these spots for our directed address, allowing us room for
  * E1000_RAR_ENTRIES - 1 multicast addresses.
  */
-#define E1000_RAR_ENTRIES 15
-#define E1000_RAR_ENTRIES_ICH8LAN  7
+#define E1000_RAR_ENTRIES		15
+#define E1000_RAR_ENTRIES_ICH8LAN	 7
+#define E1000_RAR_ENTRIES_82575		16
+#define E1000_RAR_ENTRIES_82576		24
+#define E1000_RAR_ENTRIES_82580		24
+#define E1000_RAR_ENTRIES_I350		32
 
 #define MIN_NUMBER_OF_DESCRIPTORS  8
 #define MAX_NUMBER_OF_DESCRIPTORS  0xFFF8
@@ -937,10 +950,12 @@ struct em_ffvt_entry {
 #define E1000_FLA      0x0001C  /* Flash Access - RW */
 #define E1000_MDIC     0x00020  /* MDI Control - RW */
 #define E1000_SCTL     0x00024  /* SerDes Control - RW */
+#define E1000_FEXTNVM4 0x00024  /* Future Extended NVM 4 - RW */
 #define E1000_FEXTNVM  0x00028  /* Future Extended NVM register */
 #define E1000_FCAL     0x00028  /* Flow Control Address Low - RW */
 #define E1000_FCAH     0x0002C  /* Flow Control Address High -RW */
 #define E1000_FCT      0x00030  /* Flow Control Type - RW */
+#define E1000_CONNSW   0x00034  /* Copper/Fiber switch control - RW */
 #define E1000_VET      0x00038  /* VLAN Ether Type - RW */
 #define E1000_ICR      0x000C0  /* Interrupt Cause Read - R/clr */
 #define E1000_ITR      0x000C4  /* Interrupt Throttling Rate - RW */
@@ -1092,6 +1107,9 @@ struct em_ffvt_entry {
 #define E1000_ICTXQMTC 0x0411C  /* Interrupt Cause Tx Queue Minimum Threshold Count */
 #define E1000_ICRXDMTC 0x04120  /* Interrupt Cause Rx Descriptor Minimum Threshold Count */
 #define E1000_ICRXOC   0x04124  /* Interrupt Cause Receiver Overrun Count */
+#define E1000_PCS_CFG0 0x04200  /* PCS Configuration 0 - RW */
+#define E1000_PCS_LCTL 0x04208  /* PCS Link Control - RW */
+#define E1000_PCS_LSTAT 0x0420C /* PCS Link Status - RO */
 #define E1000_RXCSUM   0x05000  /* RX Checksum Control - RW */
 #define E1000_RFCTL    0x05008  /* Receive Filter Control*/
 #define E1000_MTA      0x05200  /* Multicast Table Array - RW Array */
@@ -1151,10 +1169,12 @@ struct em_ffvt_entry {
 #define E1000_82542_FLA      E1000_FLA
 #define E1000_82542_MDIC     E1000_MDIC
 #define E1000_82542_SCTL     E1000_SCTL
+#define E1000_82542_FEXTNVM4 E1000_FEXTNVM4
 #define E1000_82542_FEXTNVM  E1000_FEXTNVM
 #define E1000_82542_FCAL     E1000_FCAL
 #define E1000_82542_FCAH     E1000_FCAH
 #define E1000_82542_FCT      E1000_FCT
+#define E1000_82542_CONNSW   E1000_CONNSW
 #define E1000_82542_VET      E1000_VET
 #define E1000_82542_RA       0x00040
 #define E1000_82542_ICR      E1000_ICR
@@ -1347,6 +1367,9 @@ struct em_ffvt_entry {
 #define E1000_82542_ICRXDMTC    E1000_ICRXDMTC
 #define E1000_82542_ICRXOC      E1000_ICRXOC
 #define E1000_82542_HICR        E1000_HICR
+#define E1000_82542_PCS_CFG0	E1000_PCS_CFG0
+#define E1000_82542_PCS_LCTL	E1000_PCS_LCTL
+#define E1000_82542_PCS_LSTAT	E1000_PCS_LSTAT
 
 #define E1000_82542_CPUVEC      E1000_CPUVEC
 #define E1000_82542_MRQC        E1000_MRQC
@@ -1356,6 +1379,10 @@ struct em_ffvt_entry {
 #define E1000_82542_RSSIR       E1000_RSSIR
 #define E1000_82542_KUMCTRLSTA E1000_KUMCTRLSTA
 #define E1000_82542_SW_FW_SYNC E1000_SW_FW_SYNC
+
+#define E1000_FEXTNVM4_BEACON_DURATION_MASK    0x7
+#define E1000_FEXTNVM4_BEACON_DURATION_8USEC   0x7
+#define E1000_FEXTNVM4_BEACON_DURATION_16USEC  0x3
 
 /* Statistics counters collected by the MAC */
 struct em_hw_stats {
@@ -1566,6 +1593,20 @@ struct em_hw {
 #define E1000_CTRL_VME      0x40000000  /* IEEE VLAN mode enable */
 #define E1000_CTRL_PHY_RST  0x80000000  /* PHY Reset */
 #define E1000_CTRL_SW2FW_INT 0x02000000  /* Initiate an interrupt to manageability engine */
+#define E1000_CTRL_I2C_ENA  0x02000000  /* I2C enable */
+
+#define E1000_CONNSW_ENRGSRC	0x4
+#define E1000_PCS_CFG_PCS_EN	8
+#define E1000_PCS_LCTL_FSV_1000		4
+#define E1000_PCS_LCTL_FDV_FULL		8
+#define E1000_PCS_LCTL_FSD		0x10
+#define E1000_PCS_LCTL_FORCE_FCTRL	0x80
+
+#define E1000_PCS_LSTS_LINK_OK		0x01
+#define E1000_PCS_LSTS_SPEED_100	0x02
+#define E1000_PCS_LSTS_SPEED_1000	0x04
+#define E1000_PCS_LSTS_DUPLEX_FULL	0x08
+#define E1000_PCS_LSTS_SYNK_OK		0x10
 
 /* Device Status */
 #define E1000_STATUS_FD         0x00000001      /* Full duplex.0=half,1=full */
@@ -1669,6 +1710,7 @@ struct em_hw {
 #define E1000_CTRL_EXT_PHY_INT   E1000_CTRL_EXT_SDP5_DATA
 #define E1000_CTRL_EXT_SDP6_DATA 0x00000040 /* Value of SW Defineable Pin 6 */
 #define E1000_CTRL_EXT_SDP7_DATA 0x00000080 /* Value of SW Defineable Pin 7 */
+#define E1000_CTRL_EXT_SDP3_DATA 0x00000080 /* Value of SW Defineable Pin 3 */
 #define E1000_CTRL_EXT_SDP4_DIR  0x00000100 /* Direction of SDP4 0=in 1=out */
 #define E1000_CTRL_EXT_SDP5_DIR  0x00000200 /* Direction of SDP5 0=in 1=out */
 #define E1000_CTRL_EXT_SDP6_DIR  0x00000400 /* Direction of SDP6 0=in 1=out */
@@ -1682,7 +1724,8 @@ struct em_hw {
 #define E1000_CTRL_EXT_LINK_MODE_GMII 0x00000000
 #define E1000_CTRL_EXT_LINK_MODE_TBI  0x00C00000
 #define E1000_CTRL_EXT_LINK_MODE_KMRN 0x00000000
-#define E1000_CTRL_EXT_LINK_MODE_SERDES  0x00C00000
+#define E1000_CTRL_EXT_LINK_MODE_PCIE_SERDES  0x00C00000
+#define E1000_CTRL_EXT_LINK_MODE_1000BASE_KX  0x00400000
 #define E1000_CTRL_EXT_LINK_MODE_SGMII   0x00800000
 #define E1000_CTRL_EXT_WR_WMARK_MASK  0x03000000
 #define E1000_CTRL_EXT_WR_WMARK_256   0x00000000
@@ -2332,6 +2375,7 @@ struct em_host_command_info {
 
 /* EEPROM Size definitions */
 #define EEPROM_WORD_SIZE_SHIFT  6
+#define EEPROM_WORD_SIZE_SHIFT_MAX 14
 #define EEPROM_SIZE_SHIFT       10
 #define EEPROM_SIZE_MASK        0x1C00
 
@@ -2708,6 +2752,14 @@ struct em_host_command_info {
 #define IGP01E1000_PHY_PCS_CTRL_REG  0x00B5
 
 #define IGP01E1000_ANALOG_REGS_PAGE  0x20C0
+
+/* 82580 specific PHY registers */
+#define I82580_ADDR_REG			16
+#define I82580_CFG_REG			22
+#define I82580_CFG_ASSERT_CRS_ON_TX	(1 << 15)
+#define I82580_CFG_ENABLE_DOWNSHIFT	(3 << 10) /* auto downshift 100/10 */
+#define I82580_CTRL_REG			23
+#define I82580_CTRL_DOWNSHIFT_MASK	(7 << 10)
 
 /* Bits...
  * 15-5: page
@@ -3251,7 +3303,9 @@ struct em_host_command_info {
 #define BME1000_E_PHY_ID_R2  0x01410CB1
 #define I82577_E_PHY_ID      0x01540050
 #define I82578_E_PHY_ID      0x004DD040
+#define I82579_E_PHY_ID      0x01540090
 #define I82580_I_PHY_ID      0x015403A0
+#define I350_I_PHY_ID        0x015403B0
 #define IGP04E1000_E_PHY_ID  0x02A80391
 #define M88E1141_E_PHY_ID    0x01410CD0
 

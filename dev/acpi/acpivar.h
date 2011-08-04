@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.63 2010/07/20 12:14:10 deraadt Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.71 2011/04/15 17:34:51 oga Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -49,9 +49,6 @@ struct acpivideo_softc {
 
 	struct acpi_softc *sc_acpi;
 	struct aml_node	*sc_devnode;
-
-	int	*sc_dod;
-	size_t	sc_dod_len;
 };
 
 struct acpi_attach_args {
@@ -61,11 +58,6 @@ struct acpi_attach_args {
 	void		*aaa_table;
 	struct aml_node *aaa_node;
 	const char	*aaa_dev;
-};
-
-struct acpivideo_attach_args {
-	struct acpi_attach_args	aaa;
-	int dod;
 };
 
 struct acpi_mem_map {
@@ -80,6 +72,13 @@ struct acpi_q {
 	int			 q_id;
 	void			*q_table;
 	u_int8_t		 q_data[0];
+};
+
+struct acpi_taskq {
+	SIMPLEQ_ENTRY(acpi_taskq)	next;
+	void 				(*handler)(void *, int);
+	void				*arg0;
+	int				arg1;
 };
 
 struct acpi_wakeq {
@@ -129,10 +128,11 @@ struct acpi_parsestate {
 };
 
 struct acpi_reg_map {
-	bus_space_handle_t  ioh;
-	int		    addr;
-	int		    size;
-	const char	   *name;
+	bus_space_handle_t	ioh;
+	int			addr;
+	int			size;
+	int			access;
+	const char		*name;
 };
 
 struct acpi_thread {
@@ -205,10 +205,7 @@ struct acpi_softc {
 
 	void			*sc_interrupt;
 
-	int			sc_powerbtn;
-	int			sc_sleepbtn;
-
-	int			sc_sleepmode;
+	struct rwlock		sc_lck;
 
 	struct {
 		int slp_typa;
@@ -237,7 +234,6 @@ struct acpi_softc {
 	struct acpi_bat_head	sc_bat;
 
 	struct timeout		sc_dev_timeout;
-	int			sc_poll;
 
 	int			sc_revision;
 
@@ -271,15 +267,6 @@ struct acpi_dev_rank {
 #define	ACPI_IOC_GETFACS	_IOR('A', 0, struct acpi_facs)
 #define	ACPI_IOC_GETTABLE	_IOWR('A', 1, struct acpi_table)
 #define ACPI_IOC_SETSLEEPSTATE	_IOW('A', 2, int)
-
-#define	ACPI_EV_PWRBTN		0x0001	/* Power button was pushed */
-#define	ACPI_EV_SLPBTN		0x0002	/* Sleep button was pushed */
-
-#define	ACPI_EVENT_MASK		0x0003
-
-#define	ACPI_EVENT_COMPOSE(t,i)	(((i) & 0x7fff) << 16 | ((t) & ACPI_EVENT_MASK))
-#define	ACPI_EVENT_TYPE(e)	((e) & ACPI_EVENT_MASK)
-#define	ACPI_EVENT_INDEX(e)	((e) >> 16)
 
 #if defined(_KERNEL)
 struct   acpi_gas;
@@ -328,6 +315,12 @@ void	acpi_sleep(int, char *);
 int acpi_matchhids(struct acpi_attach_args *, const char *[], const char *);
 
 int	acpi_record_event(struct acpi_softc *, u_int);
+
+void	acpi_addtask(struct acpi_softc *, void (*)(void *, int), void *, int);
+int	acpi_dotask(struct acpi_softc *);
+
+void	acpi_powerdown_task(void *, int);
+void	acpi_sleep_task(void *, int);
 
 #endif
 

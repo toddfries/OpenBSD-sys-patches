@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.95 2010/07/09 16:58:06 reyk Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.99 2011/07/06 23:44:20 sthen Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -95,6 +95,8 @@ struct tcpcb {
 #define TF_LASTIDLE	0x00100000	/* no outstanding ACK on last send */
 #define TF_DEAD		0x00200000	/* dead and to-be-released */
 #define TF_PMTUD_PEND	0x00400000	/* Path MTU Discovery pending */
+#define TF_NEEDOUTPUT	0x00800000	/* call tcp_output after tcp_input */
+#define TF_BLOCKOUTPUT	0x01000000	/* avert tcp_output during tcp_input */
 
 	struct	mbuf *t_template;	/* skeletal packet for transmit */
 	struct	inpcb *t_inpcb;		/* back pointer to internet pcb */
@@ -151,6 +153,11 @@ struct tcpcb {
 					 * for slow start exponential to
 					 * linear switch
 					 */
+
+/* auto-sizing variables */
+	u_int	rfbuf_cnt;	/* recv buffer autoscaling byte count */
+	u_int32_t rfbuf_ts;	/* recv buffer autoscaling time stamp */
+
 	u_short	t_maxopd;		/* mss plus options */
 	u_short	t_peermss;		/* peer's maximum segment size */
 
@@ -466,7 +473,8 @@ struct	tcpstat {
 #define	TCPCTL_DROP	       19 /* drop tcp connection */
 #define	TCPCTL_SACKHOLE_LIMIT  20 /* max entries for tcp sack queues */
 #define	TCPCTL_STATS	       21 /* TCP statistics */
-#define	TCPCTL_MAXID	       22
+#define	TCPCTL_ALWAYS_KEEPALIVE 22 /* assume SO_KEEPALIVE is always set */
+#define	TCPCTL_MAXID	       23
 
 #define	TCPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -476,8 +484,8 @@ struct	tcpstat {
 	{ "keepintvl",	CTLTYPE_INT }, \
 	{ "slowhz",	CTLTYPE_INT }, \
 	{ "baddynamic", CTLTYPE_STRUCT }, \
-	{ "recvspace",	CTLTYPE_INT }, \
-	{ "sendspace",	CTLTYPE_INT }, \
+	{ NULL,	0 }, \
+	{ NULL,	0 }, \
 	{ "ident", 	CTLTYPE_STRUCT }, \
 	{ "sack",	CTLTYPE_INT }, \
 	{ "mssdflt",	CTLTYPE_INT }, \
@@ -490,7 +498,8 @@ struct	tcpstat {
 	{ "reasslimit", 	CTLTYPE_INT }, \
 	{ "drop", 	CTLTYPE_STRUCT }, \
 	{ "sackholelimit", 	CTLTYPE_INT }, \
-	{ "stats",	CTLTYPE_STRUCT } \
+	{ "stats",	CTLTYPE_STRUCT }, \
+	{ "always_keepalive",	CTLTYPE_INT } \
 }
 
 #define	TCPCTL_VARS { \
@@ -501,8 +510,8 @@ struct	tcpstat {
 	&tcp_keepintvl, \
 	NULL, \
 	NULL, \
-	&tcp_recvspace, \
-	&tcp_sendspace, \
+	NULL, \
+	NULL, \
 	NULL, \
 	NULL, \
 	&tcp_mssdflt, \
@@ -555,7 +564,7 @@ struct tcpcb *
 	 tcp_close(struct tcpcb *);
 void	 tcp_reaper(void *);
 int	 tcp_freeq(struct tcpcb *);
-#if defined(INET6) && !defined(TCP6)
+#ifdef INET6
 void	 tcp6_ctlinput(int, struct sockaddr *, void *);
 #endif
 void	 *tcp_ctlinput(int, struct sockaddr *, u_int, void *);
@@ -567,7 +576,7 @@ struct tcpcb *
 int	 tcp_dooptions(struct tcpcb *, u_char *, int, struct tcphdr *,
 		struct mbuf *, int, struct tcp_opt_info *, u_int);
 void	 tcp_init(void);
-#if defined(INET6) && !defined(TCP6)
+#ifdef INET6
 int	 tcp6_input(struct mbuf **, int *, int);
 #endif
 void	 tcp_input(struct mbuf *, ...);
@@ -590,6 +599,8 @@ void	 tcp_rscale(struct tcpcb *, u_long);
 void	 tcp_respond(struct tcpcb *, caddr_t, struct tcphdr *, tcp_seq,
 		tcp_seq, int, u_int);
 void	 tcp_setpersist(struct tcpcb *);
+void	 tcp_update_sndspace(struct tcpcb *);
+void	 tcp_update_rcvspace(struct tcpcb *);
 void	 tcp_slowtimo(void);
 struct mbuf *
 	 tcp_template(struct tcpcb *);

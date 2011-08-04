@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nge.c,v 1.69 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: if_nge.c,v 1.71 2011/06/22 16:44:27 tedu Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -154,7 +154,6 @@ int nge_ioctl(struct ifnet *, u_long, caddr_t);
 void nge_init(void *);
 void nge_stop(struct nge_softc *);
 void nge_watchdog(struct ifnet *);
-void nge_shutdown(void *);
 int nge_ifmedia_mii_upd(struct ifnet *);
 void nge_ifmedia_mii_sts(struct ifnet *, struct ifmediareq *);
 int nge_ifmedia_tbi_upd(struct ifnet *);
@@ -541,7 +540,7 @@ nge_miibus_readreg(dev, phy, reg)
 
 	DPRINTFN(9, ("%s: nge_miibus_readreg\n", sc->sc_dv.dv_xname));
 
-	bzero((char *)&frame, sizeof(frame));
+	bzero(&frame, sizeof(frame));
 
 	frame.mii_phyaddr = phy;
 	frame.mii_regaddr = reg;
@@ -561,7 +560,7 @@ nge_miibus_writereg(dev, phy, reg, data)
 
 	DPRINTFN(9, ("%s: nge_miibus_writereg\n", sc->sc_dv.dv_xname));
 
-	bzero((char *)&frame, sizeof(frame));
+	bzero(&frame, sizeof(frame));
 
 	frame.mii_phyaddr = phy;
 	frame.mii_regaddr = reg;
@@ -829,7 +828,7 @@ nge_attach(parent, self, aux)
 	 */
 	printf(", address %s\n", ether_sprintf(eaddr));
 
-	bcopy(eaddr, (char *)&sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
+	bcopy(eaddr, &sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
 
 	sc->sc_dmatag = pa->pa_dmat;
 	DPRINTFN(5, ("%s: bus_dmamem_alloc\n", sc->sc_dv.dv_xname));
@@ -2203,7 +2202,7 @@ nge_stop(sc)
 			sc->nge_ldata->nge_rx_list[i].nge_mbuf = NULL;
 		}
 	}
-	bzero((char *)&sc->nge_ldata->nge_rx_list,
+	bzero(&sc->nge_ldata->nge_rx_list,
 		sizeof(sc->nge_ldata->nge_rx_list));
 
 	/*
@@ -2216,22 +2215,8 @@ nge_stop(sc)
 		}
 	}
 
-	bzero((char *)&sc->nge_ldata->nge_tx_list,
+	bzero(&sc->nge_ldata->nge_tx_list,
 		sizeof(sc->nge_ldata->nge_tx_list));
-}
-
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void
-nge_shutdown(xsc)
-	void *xsc;
-{
-	struct nge_softc *sc = (struct nge_softc *)xsc;
-
-	nge_reset(sc);
-	nge_stop(sc);
 }
 
 struct cfattach nge_ca = {

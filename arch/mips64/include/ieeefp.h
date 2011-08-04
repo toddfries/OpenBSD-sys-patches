@@ -1,12 +1,12 @@
-/*	$OpenBSD: ieeefp.h,v 1.2 2004/08/10 20:28:13 deraadt Exp $	*/
+/*	$OpenBSD: ieeefp.h,v 1.4 2011/03/23 16:54:36 pirofti Exp $	*/
 
 /*
  * Written by J.T. Conklin, Apr 11, 1995
  * Public domain.
  */
 
-#ifndef _MIPS_IEEEFP_H_
-#define _MIPS_IEEEFP_H_
+#ifndef _MIPS64_IEEEFP_H_
+#define _MIPS64_IEEEFP_H_
 
 typedef int fp_except;
 #define FP_X_IMP	0x01	/* imprecise (loss of precision) */
@@ -22,4 +22,25 @@ typedef enum {
     FP_RM=3			/* round toward negative infinity */
 } fp_rnd;
 
-#endif /* !_MIPS_IEEEFP_H_ */
+#ifdef _KERNEL
+
+/*
+ * Defines for the floating-point completion/emulation code.
+ */
+
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/proc.h>
+#include <machine/fpu.h>
+
+#define	float_raise(bits) \
+	do { curproc->p_md.md_regs->fsr |= (bits) << FPCSR_C_SHIFT; } while (0)
+#define	float_set_inexact()	float_raise(FP_X_IMP)
+#define	float_set_invalid()	float_raise(FP_X_INV)
+
+#define	float_get_round(csr)	(csr & FPCSR_RM_MASK)
+#define	fpgetround()		float_get_round(curproc->p_md.md_regs->fsr)
+
+#endif
+
+#endif /* !_MIPS64_IEEEFP_H_ */

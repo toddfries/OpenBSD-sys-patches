@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdhc_pci.c,v 1.8 2010/07/01 18:08:17 deraadt Exp $	*/
+/*	$OpenBSD: sdhc_pci.c,v 1.11 2011/07/31 16:55:01 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -46,12 +46,11 @@ struct sdhc_pci_softc {
 
 int	sdhc_pci_match(struct device *, void *, void *);
 void	sdhc_pci_attach(struct device *, struct device *, void *);
-int	sdhc_pci_activate(struct device *, int act);
 void	sdhc_takecontroller(struct pci_attach_args *);
 
 struct cfattach sdhc_pci_ca = {
 	sizeof(struct sdhc_pci_softc), sdhc_pci_match, sdhc_pci_attach,
-	NULL, sdhc_pci_activate
+	NULL, sdhc_activate
 };
 
 int
@@ -61,6 +60,10 @@ sdhc_pci_match(struct device *parent, void *match, void *aux)
 
 	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_SYSTEM &&
 	    PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_SYSTEM_SDHC)
+		return 1;
+
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_RICOH &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_RICOH_R5U823)
 		return 1;
 
 	return 0;
@@ -80,6 +83,7 @@ sdhc_pci_attach(struct device *parent, struct device *self, void *aux)
 	bus_space_tag_t iot;
 	bus_space_handle_t ioh;
 	bus_size_t size;
+	u_int32_t caps = 0;
 
 	/* Some TI controllers needs special treatment. */
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_TI &&
@@ -87,10 +91,18 @@ sdhc_pci_attach(struct device *parent, struct device *self, void *aux)
             pa->pa_function == 4)
 		sdhc_takecontroller(pa);
 
-	/* ENE controllers break if set to 0V bus power */
+	/* ENE controllers break if set to 0V bus power. */
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_ENE &&
 	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_ENE_SDCARD)
 		sc->sc.sc_flags |= SDHC_F_NOPWR0;
+
+	/* Some RICOH controllers lack a capability register. */
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_RICOH &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_RICOH_R5U823)
+		caps = (0x21 << SDHC_BASE_FREQ_SHIFT) |
+			(0x21 << SDHC_TIMEOUT_FREQ_SHIFT) |
+			SDHC_TIMEOUT_FREQ_UNIT | SDHC_VOLTAGE_SUPP_3_3V |
+			SDHC_DMA_SUPPORT;
 
 	if (pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
@@ -137,31 +149,16 @@ sdhc_pci_attach(struct device *parent, struct device *self, void *aux)
 			continue;
 		}
 
-		if (sdhc_host_found(&sc->sc, iot, ioh, size, usedma) != 0)
+		if (sdhc_host_found(&sc->sc, iot, ioh, size, usedma, caps) != 0)
 			/* XXX: sc->sc_host leak */
 			printf("%s at 0x%x: can't initialize host\n",
 			    sc->sc.sc_dev.dv_xname, reg);
 	}
 
 	/*
-	 * Establish power and shutdown hooks.
+	 * Establish shutdown hooks.
 	 */
-	(void)powerhook_establish(sdhc_power, &sc->sc);
 	(void)shutdownhook_establish(sdhc_shutdown, &sc->sc);
-}
-
-int
-sdhc_pci_activate(struct device *self, int act)
-{
-	switch (act) {
-	case DVACT_SUSPEND:
-		sdhc_power(PWR_SUSPEND, self);
-		break;
-	case DVACT_RESUME:
-		sdhc_power(PWR_RESUME, self);
-		break;
-	}
-	return (0);
 }
 
 void

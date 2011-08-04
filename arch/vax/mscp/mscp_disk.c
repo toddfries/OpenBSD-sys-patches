@@ -1,4 +1,4 @@
-/*	$OpenBSD: mscp_disk.c,v 1.29 2010/05/22 17:10:23 deraadt Exp $	*/
+/*	$OpenBSD: mscp_disk.c,v 1.37 2011/07/06 04:49:36 matthew Exp $	*/
 /*	$NetBSD: mscp_disk.c,v 1.30 2001/11/13 07:38:28 lukem Exp $	*/
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -59,6 +59,7 @@
 #include <sys/reboot.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
+#include <sys/conf.h>
 
 #include <ufs/ufs/dinode.h>
 #include <ufs/ffs/fs.h>
@@ -92,7 +93,6 @@ struct ra_softc {
 	u_long	ra_mediaid;	/* media id */
 	int	ra_hwunit;	/* Hardware unit number */
 	int	ra_havelabel;	/* true if we have a label */
-	int	ra_wlabel;	/* label sector is currently writable */
 };
 
 #define rx_softc ra_softc
@@ -105,15 +105,10 @@ void	rrmakelabel(struct disklabel *, long);
 
 int	ramatch(struct device *, struct cfdata *, void *);
 void	raattach(struct device *, struct device *, void *);
-int	raopen(dev_t, int, int, struct proc *);
-int	raclose(dev_t, int, int, struct proc *);
-void	rastrategy(struct buf *);
 int	raread(dev_t, struct uio *);
 int	rawrite(dev_t, struct uio *);
-int	raioctl(dev_t, int, caddr_t, int, struct proc *);
-int	radump(dev_t, daddr64_t, caddr_t, size_t);
-daddr64_t	rasize(dev_t);
 int	ra_putonline(struct ra_softc *);
+bdev_decl(ra);
 
 struct	cfattach ra_ca = {
 	sizeof(struct ra_softc), (cfmatch_t)ramatch, rxattach
@@ -205,10 +200,6 @@ raopen(dev, flag, fmt, p)
 		if (ra_putonline(ra) == MSCP_FAILED)
 			return ENXIO;
 
-	/* If the disk has no label; allow writing everywhere */
-	if (ra->ra_havelabel == 0)
-		ra->ra_wlabel = 1;
-
 	part = DISKPART(dev);
 	if (part >= ra->ra_disk.dk_label->d_npartitions)
 		return ENXIO;
@@ -273,7 +264,6 @@ raclose(dev, flags, fmt, p)
 			    "raclose", 0);
 		splx(s);
 		ra->ra_state = CLOSED;
-		ra->ra_wlabel = 0;
 	}
 #endif
 	return (0);
@@ -296,8 +286,7 @@ rastrategy(bp)
 	unit = DISKUNIT(bp->b_dev);
 	if (unit >= ra_cd.cd_ndevs || (ra = ra_cd.cd_devs[unit]) == NULL) {
 		bp->b_error = ENXIO;
-		bp->b_flags |= B_ERROR;
-		goto done;
+		goto bad;
 	}
 	/*
 	 * If drive is open `raw' or reading label, let it at it.
@@ -313,17 +302,12 @@ rastrategy(bp)
 	/* If disk is not online, try to put it online */
 	if (ra->ra_state == DK_CLOSED)
 		if (ra_putonline(ra) == MSCP_FAILED) {
-			bp->b_flags |= B_ERROR;
 			bp->b_error = EIO;
-			goto done;
+			goto bad;
 		}
 
-	/*
-	 * Determine the size of the transfer, and make sure it is
-	 * within the boundaries of the partition.
-	 */
-	if (bounds_check_with_label(bp, ra->ra_disk.dk_label,
-	    ra->ra_wlabel) <= 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, ra->ra_disk.dk_label) == -1)
 		goto done;
 
 	/* Make some statistics... /bqt */
@@ -333,7 +317,10 @@ rastrategy(bp)
 	mscp_strategy(bp, ra->ra_dev.dv_parent);
 	return;
 
-done:
+ bad:
+	bp->b_flags |= B_ERROR;
+	bp->b_resid = bp->b_bcount;
+ done:
 	s = splbio();
 	biodone(bp);
 	splx(s);
@@ -345,7 +332,7 @@ raread(dev, uio)
 	struct uio *uio;
 {
 
-	return (physio(rastrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(rastrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -354,7 +341,7 @@ rawrite(dev, uio)
 	struct uio *uio;
 {
 
-	return (physio(rastrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(rastrategy, dev, B_WRITE, minphys, uio));
 }
 
 /*
@@ -363,7 +350,7 @@ rawrite(dev, uio)
 int
 raioctl(dev, cmd, data, flag, p)
 	dev_t dev;
-	int cmd;
+	u_long cmd;
 	caddr_t data;
 	int flag;
 	struct proc *p;
@@ -378,6 +365,7 @@ raioctl(dev, cmd, data, flag, p)
 	switch (cmd) {
 
 	case DIOCGDINFO:
+	case DIOCGPDINFO:	/* no separate 'physical' info available. */
 		bcopy(lp, data, sizeof (struct disklabel));
 		break;
 
@@ -396,18 +384,9 @@ raioctl(dev, cmd, data, flag, p)
 		else {
 			error = setdisklabel(lp, tp, 0);
 			if (error == 0 && cmd == DIOCWDINFO) {
-				ra->ra_wlabel = 1;
 				error = writedisklabel(dev, rastrategy, lp);
-				ra->ra_wlabel = 0;
 			}
 		}
-		break;
-
-	case DIOCWLABEL:
-		if ((flag & FWRITE) == 0)
-			error = EBADF;
-		else
-			ra->ra_wlabel = 1;
 		break;
 
 	default:
@@ -519,7 +498,7 @@ rxattach(parent, self, aux)
 	mi->mi_dp[mp->mscp_unit] = self;
 
 	rx->ra_disk.dk_name = rx->ra_dev.dv_xname;
-	disk_attach((struct disk *)&rx->ra_disk);
+	disk_attach(&rx->ra_dev, &rx->ra_disk);
 
 	/* Fill in what we know. The actual size is gotten later */
 	dl = rx->ra_disk.dk_label;
@@ -675,7 +654,7 @@ rxread(dev, uio)
 	struct uio *uio;
 {
 
-	return (physio(rxstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(rxstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -684,7 +663,7 @@ rxwrite(dev, uio)
 	struct uio *uio;
 {
 
-	return (physio(rxstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(rxstrategy, dev, B_WRITE, minphys, uio));
 }
 
 /*
@@ -708,6 +687,7 @@ rxioctl(dev, cmd, data, flag, p)
 	switch (cmd) {
 
 	case DIOCGDINFO:
+	case DIOCGPDINFO:	/* no separate 'physical' info available. */
 		bcopy(lp, data, sizeof (struct disklabel));
 		break;
 
@@ -720,7 +700,6 @@ rxioctl(dev, cmd, data, flag, p)
 
 	case DIOCWDINFO:
 	case DIOCSDINFO:
-	case DIOCWLABEL:
 		break;
 
 	default:

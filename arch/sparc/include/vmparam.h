@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.35 2010/06/27 03:03:48 thib Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.38 2011/05/30 22:25:22 oga Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.13 1997/07/12 16:20:03 perry Exp $	*/
 
 /*
@@ -41,8 +41,8 @@
  *	@(#)vmparam.h	8.1 (Berkeley) 6/11/93
  */
 
-#ifndef _SPARC_VMPARAM_H_
-#define _SPARC_VMPARAM_H_
+#ifndef _MACHINE_VMPARAM_H_
+#define _MACHINE_VMPARAM_H_
 
 /*
  * Machine dependent constants for Sun-4c SPARC
@@ -66,6 +66,9 @@
 #endif
 #ifndef MAXDSIZ
 #define	MAXDSIZ		(128*1024*1024)		/* max data size */
+#endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
 #endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(512*1024)		/* initial stack size limit */
@@ -127,9 +130,6 @@ struct vm_page_md {
 	(pg)->mdpage.pv_head.pv_flags = 0;	\
 } while (0)
 
-#define VM_NFREELIST		1
-#define VM_FREELIST_DEFAULT	0
-
 #if defined (_KERNEL) && !defined(_LOCORE)
 struct vm_map;
 #define		dvma_mapin(map,va,len,canwait)	dvma_mapin_space(map,va,len,canwait,0)
@@ -137,4 +137,4 @@ vaddr_t		dvma_mapin_space(struct vm_map *, vaddr_t, int, int, int);
 void		dvma_mapout(vaddr_t, vaddr_t, int);
 #endif
 
-#endif /* _SPARC_VMPARAM_H_ */
+#endif /* _MACHINE_VMPARAM_H_ */

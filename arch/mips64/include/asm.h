@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.11 2010/04/28 16:20:28 syuu Exp $ */
+/*	$OpenBSD: asm.h,v 1.14 2011/03/23 16:54:36 pirofti Exp $ */
 
 /*
  * Copyright (c) 2001-2002 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -25,8 +25,8 @@
  * SUCH DAMAGE.
  *
  */
-#ifndef _MIPS64_ASM_H
-#define _MIPS64_ASM_H
+#ifndef _MIPS64_ASM_H_
+#define _MIPS64_ASM_H_
 
 #include <machine/regdef.h>
 
@@ -270,6 +270,13 @@ x: ;				\
 	.end x
 
 /*
+ * WEAK ALIAS: create a weak alias
+ */
+#define WEAK_ALIAS(alias,sym) \
+	.weak alias; alias = sym
+
+
+/*
  * Macros to panic and printf from assembly language.
  */
 #define PANIC(msg) \
@@ -298,13 +305,10 @@ x: ;				\
 	dsll	reg, reg, 59
 
 #ifdef MULTIPROCESSOR
-#define GET_CPU_INFO(ci, tmp)		\
-	LOAD_XKPHYS(ci, CCA_CACHED);	\
-	mfc0	tmp, COP_0_LLADDR;	\
-	or	ci, ci, tmp
+#define GET_CPU_INFO(ci, tmp)	HW_GET_CPU_INFO(ci, tmp)
 #else  /* MULTIPROCESSOR */
 #define GET_CPU_INFO(ci, tmp)		\
 	LA	ci, cpu_info_primary
 #endif /* MULTIPROCESSOR */
 
-#endif /* !_MIPS_ASM_H */
+#endif /* !_MIPS64_ASM_H_ */

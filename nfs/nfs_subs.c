@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_subs.c,v 1.108 2010/05/19 08:31:23 thib Exp $	*/
+/*	$OpenBSD: nfs_subs.c,v 1.113 2011/07/04 21:00:10 deraadt Exp $	*/
 /*	$NetBSD: nfs_subs.c,v 1.27.4.3 1996/07/08 20:34:24 jtc Exp $	*/
 
 /*
@@ -54,6 +54,7 @@
 #include <sys/stat.h>
 #include <sys/pool.h>
 #include <sys/time.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -66,7 +67,6 @@
 #include <nfs/nfsmount.h>
 #include <nfs/nfs_var.h>
 
-#include <miscfs/specfs/specdev.h>
 
 #include <netinet/in.h>
 
@@ -940,7 +940,7 @@ nfs_loadattrcache(struct vnode **vpp, struct mbuf **mdp, caddr_t *dposp,
 	struct vnode *vp = *vpp;
 	struct vattr *vap;
 	struct nfs_fattr *fp;
-	extern int (**spec_nfsv2nodeop_p)(void *);
+	extern struct vops nfs_specvops;
 	struct nfsnode *np;
 	int32_t t1;
 	caddr_t cp2;
@@ -996,12 +996,12 @@ nfs_loadattrcache(struct vnode **vpp, struct mbuf **mdp, caddr_t *dposp,
 #ifndef FIFO
 			return (EOPNOTSUPP);
 #else
-			extern int (**fifo_nfsv2nodeop_p)(void *);
-			vp->v_op = fifo_nfsv2nodeop_p;
+                        extern struct vops nfs_fifovops;
+			vp->v_op = &nfs_fifovops;
 #endif /* FIFO */
 		}
 		if (vp->v_type == VCHR || vp->v_type == VBLK) {
-			vp->v_op = spec_nfsv2nodeop_p;
+			vp->v_op = &nfs_specvops;
 			nvp = checkalias(vp, (dev_t)rdev, vp->v_mount);
 			if (nvp) {
 				/*
@@ -1012,7 +1012,7 @@ nfs_loadattrcache(struct vnode **vpp, struct mbuf **mdp, caddr_t *dposp,
 
 				nvp->v_data = vp->v_data;
 				vp->v_data = NULL;
-				vp->v_op = spec_vnodeop_p;
+				vp->v_op = &spec_vops;
 				vrele(vp);
 				vgone(vp);
 				/*
@@ -1252,7 +1252,7 @@ nfs_namei(struct nameidata *ndp, fhandle_t *fhp, int len,
 	 * And call lookup() to do the real work
 	 */
 	cnp->cn_proc = p;
-	error = lookup(ndp);
+	error = vfs_lookup(ndp);
 	if (error)
 		goto out;
 	/*

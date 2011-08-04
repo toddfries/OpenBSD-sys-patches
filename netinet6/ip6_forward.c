@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_forward.c,v 1.49 2010/07/09 16:58:06 reyk Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.53 2011/07/04 06:54:49 claudio Exp $	*/
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
@@ -351,7 +351,7 @@ reroute:
 #if NPF > 0
 		if ((encif = enc_getif(tdb->tdb_rdomain,
 		    tdb->tdb_tap)) == NULL ||
-		    pf_test6(PF_OUT, encif, &m, NULL) != PF_PASS) {
+		    pf_test(AF_INET6, PF_FWD, encif, &m, NULL) != PF_PASS) {
 			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
@@ -380,19 +380,6 @@ reroute:
 		goto freert;
 	}
 #endif /* IPSEC */
-
-	if (m->m_pkthdr.len > IN6_LINKMTU(rt->rt_ifp)) {
-		in6_ifstat_inc(rt->rt_ifp, ifs6_in_toobig);
-		if (mcopy) {
-			u_long mtu;
-
-			mtu = IN6_LINKMTU(rt->rt_ifp);
-
-			icmp6_error(mcopy, ICMP6_PACKET_TOO_BIG, 0, mtu);
-		}
-		m_freem(m);
-		goto freert;
-	}
 
 	if (rt->rt_flags & RTF_GATEWAY)
 		dst = (struct sockaddr_in6 *)rt->rt_gateway;
@@ -425,7 +412,8 @@ reroute:
 			 * type/code is based on suggestion by Rich Draves.
 			 * not sure if it is the best pick.
 			 */
-			icmp6_error(mcopy, ICMP6_DST_UNREACH,
+			if (mcopy)
+				icmp6_error(mcopy, ICMP6_DST_UNREACH,
 				    ICMP6_DST_UNREACH_ADDR, 0);
 			m_freem(m);
 			goto freert;
@@ -476,7 +464,7 @@ reroute:
 		ip6->ip6_dst.s6_addr16[1] = 0;
 
 #if NPF > 0 
-	if (pf_test6(PF_OUT, rt->rt_ifp, &m, NULL) != PF_PASS) {
+	if (pf_test(AF_INET6, PF_FWD, rt->rt_ifp, &m, NULL) != PF_PASS) {
 		m_freem(m);
 		goto senderr;
 	}
@@ -495,6 +483,20 @@ reroute:
 		goto reroute;
 	}
 #endif 
+
+	/* Check the size after pf_test to give pf a chance to refragment. */
+	if (m->m_pkthdr.len > IN6_LINKMTU(rt->rt_ifp)) {
+		in6_ifstat_inc(rt->rt_ifp, ifs6_in_toobig);
+		if (mcopy) {
+			u_long mtu;
+
+			mtu = IN6_LINKMTU(rt->rt_ifp);
+
+			icmp6_error(mcopy, ICMP6_PACKET_TOO_BIG, 0, mtu);
+		}
+		m_freem(m);
+		goto freert;
+	}
 
 	error = nd6_output(rt->rt_ifp, origifp, m, dst, rt);
 	if (error) {

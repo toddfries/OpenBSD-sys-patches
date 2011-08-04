@@ -1,4 +1,4 @@
-/*	$OpenBSD: ses.c,v 1.47 2007/09/16 01:30:24 krw Exp $ */
+/*	$OpenBSD: ses.c,v 1.51 2011/03/17 21:30:24 deraadt Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -23,6 +23,7 @@
 #include <sys/device.h>
 #include <sys/scsiio.h>
 #include <sys/malloc.h>
+#include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/rwlock.h>
 #include <sys/queue.h>
@@ -207,7 +208,7 @@ ses_attach(struct device *parent, struct device *self, void *aux)
 	    && TAILQ_EMPTY(&sc->sc_slots)
 #endif
 	    ) {
-		free(sc->sc_buf, M_DEVBUF);
+		dma_free(sc->sc_buf, sc->sc_buflen);
 		sc->sc_buf = NULL;
 	}
 }
@@ -247,7 +248,7 @@ ses_detach(struct device *self, int flags)
 	}
 
 	if (sc->sc_buf != NULL)
-		free(sc->sc_buf, M_DEVBUF);
+		dma_free(sc->sc_buf, sc->sc_buflen);
 
 	rw_exit_write(&sc->sc_lock);
 
@@ -257,47 +258,54 @@ ses_detach(struct device *self, int flags)
 int
 ses_read_config(struct ses_softc *sc)
 {
-	struct ses_scsi_diag		cmd;
-	int				flags;
-
-	u_char				*buf, *p;
-
-	struct ses_config_hdr		*cfg;
-	struct ses_enc_hdr		*enc;
+	struct ses_scsi_diag *cmd;
+	struct ses_config_hdr *cfg;
+	struct ses_type_desc *tdh, *tdlist;
 #ifdef SES_DEBUG
-	struct ses_enc_desc		*desc;
+	struct ses_enc_desc *desc;
 #endif
-	struct ses_type_desc		*tdh, *tdlist;
+	struct ses_enc_hdr *enc;
+	struct scsi_xfer *xs;
+	u_char *buf, *p;
+	int error = 0, i;
+	int flags = 0, ntypes = 0, nelems = 0;
 
-	int				i, ntypes = 0, nelems = 0;
-
-	buf = malloc(SES_BUFLEN, M_DEVBUF, M_NOWAIT | M_ZERO);
+	buf = dma_alloc(SES_BUFLEN, PR_NOWAIT | PR_ZERO);
 	if (buf == NULL)
 		return (1);
 
-	memset(&cmd, 0, sizeof(cmd));
-	cmd.opcode = RECEIVE_DIAGNOSTIC;
-	cmd.flags |= SES_DIAG_PCV;
-	cmd.pgcode = SES_PAGE_CONFIG;
-	cmd.length = htobe16(SES_BUFLEN);
-	flags = SCSI_DATA_IN;
-#ifndef SCSIDEBUG
-	flags |= SCSI_SILENT;
-#endif
-
 	if (cold)
 		flags |= SCSI_AUTOCONF;
+	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
+	if (xs == NULL) {
+		error = 1;
+		goto done;
+	}
+	xs->cmdlen = sizeof(*cmd);
+	xs->data = buf;
+	xs->datalen = SES_BUFLEN;
+	xs->retries = 2;
+	xs->timeout = 3000;
 
-	if (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), buf, SES_BUFLEN, 2, 3000, NULL, flags) != 0) {
-		free(buf, M_DEVBUF);
-		return (1);
+	cmd = (struct ses_scsi_diag *)xs->cmd;
+	cmd->opcode = RECEIVE_DIAGNOSTIC;
+	cmd->flags |= SES_DIAG_PCV;
+	cmd->pgcode = SES_PAGE_CONFIG;
+	cmd->length = htobe16(SES_BUFLEN);
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	if (error) {
+		error = 1;
+		goto done;
 	}
 
 	cfg = (struct ses_config_hdr *)buf;
-	if (cfg->pgcode != cmd.pgcode || betoh16(cfg->length) > SES_BUFLEN) {
-		free(buf, M_DEVBUF);
-		return (1);
+	if (cfg->pgcode != SES_PAGE_CONFIG || betoh16(cfg->length) >
+	    SES_BUFLEN) {
+		error = 1;
+		goto done;
 	}
 
 	DPRINTF("%s: config: n_subenc: %d length: %d\n", DEVNAME(sc),
@@ -340,43 +348,53 @@ ses_read_config(struct ses_softc *sc)
 #endif /* SES_DEBUG */
 
 	sc->sc_buflen = SES_STAT_LEN(ntypes, nelems);
-	sc->sc_buf = malloc(sc->sc_buflen, M_DEVBUF, M_NOWAIT);
+	sc->sc_buf = dma_alloc(sc->sc_buflen, PR_NOWAIT);
 	if (sc->sc_buf == NULL) {
-		free(buf, M_DEVBUF);
-		return (1);
+		error = 1;
+		goto done;
 	}
 
 	/* get the status page and then use it to generate a list of sensors */
 	if (ses_make_sensors(sc, tdlist, ntypes) != 0) {
-		free(buf, M_DEVBUF);
-		free(sc->sc_buf, M_DEVBUF);
-		return (1);
+		dma_free(sc->sc_buf, sc->sc_buflen);
+		error = 1;
+		goto done;
 	}
 
-	free(buf, M_DEVBUF);
-	return (0);
+done:
+	if (buf)
+		dma_free(buf, SES_BUFLEN);
+	return (error);
 }
 
 int
 ses_read_status(struct ses_softc *sc)
 {
-	struct ses_scsi_diag		cmd;
-	int				flags;
+	struct ses_scsi_diag *cmd;
+	struct scsi_xfer *xs;
+	int error, flags = 0;
 
-	memset(&cmd, 0, sizeof(cmd));
-	cmd.opcode = RECEIVE_DIAGNOSTIC;
-	cmd.flags |= SES_DIAG_PCV;
-	cmd.pgcode = SES_PAGE_STATUS;
-	cmd.length = htobe16(sc->sc_buflen);
-	flags = SCSI_DATA_IN;
-#ifndef SCSIDEBUG
-	flags |= SCSI_SILENT;
-#endif
 	if (cold)
 		flags |= SCSI_AUTOCONF;
+	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
+	if (xs == NULL)
+		return (1);
+	xs->cmdlen = sizeof(*cmd);
+	xs->data = sc->sc_buf;
+	xs->datalen = sc->sc_buflen;
+	xs->retries = 2;
+	xs->timeout = 3000;
 
-	if (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), sc->sc_buf, sc->sc_buflen, 2, 3000, NULL, flags) != 0)
+	cmd = (struct ses_scsi_diag *)xs->cmd;
+	cmd->opcode = RECEIVE_DIAGNOSTIC;
+	cmd->flags |= SES_DIAG_PCV;
+	cmd->pgcode = SES_PAGE_STATUS;
+	cmd->length = htobe16(sc->sc_buflen);
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	if (error != 0)
 		return (1);
 
 	return (0);
@@ -582,23 +600,31 @@ ses_ioctl(struct device *dev, u_long cmd, caddr_t addr)
 int
 ses_write_config(struct ses_softc *sc)
 {
-	struct ses_scsi_diag		cmd;
-	int				flags;
-
-	memset(&cmd, 0, sizeof(cmd));
-	cmd.opcode = SEND_DIAGNOSTIC;
-	cmd.flags |= SES_DIAG_PF;
-	cmd.length = htobe16(sc->sc_buflen);
-	flags = SCSI_DATA_OUT;
-#ifndef SCSIDEBUG
-	flags |= SCSI_SILENT;
-#endif
+	struct ses_scsi_diag *cmd;
+	struct scsi_xfer *xs;
+	int error, flags = 0;
 
 	if (cold)
 		flags |= SCSI_AUTOCONF;
 
-	if (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), sc->sc_buf, sc->sc_buflen, 2, 3000, NULL, flags) != 0)
+	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_OUT | SCSI_SILENT);
+	if (xs == NULL)
+		return (1);
+	xs->cmdlen = sizeof(*cmd);
+	xs->data = sc->sc_buf;
+	xs->datalen = sc->sc_buflen;
+	xs->retries = 2;
+	xs->timeout = 3000;
+
+	cmd = (struct ses_scsi_diag *)xs->cmd;
+	cmd->opcode = SEND_DIAGNOSTIC;
+	cmd->flags |= SES_DIAG_PF;
+	cmd->length = htobe16(sc->sc_buflen);
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	if (error != 0)
 		return (1);
 
 	return (0);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.107 2010/01/02 01:20:38 kettenis Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.114 2011/07/17 22:46:47 matthew Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -44,13 +44,14 @@
  *	@(#)autoconf.c	8.4 (Berkeley) 10/1/93
  */
 
+#include "mpath.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/buf.h>
 #include <sys/disklabel.h>
 #include <sys/device.h>
 #include <sys/disk.h>
-#include <sys/dkstat.h>
 #include <sys/conf.h>
 #include <sys/reboot.h>
 #include <sys/socket.h>
@@ -85,6 +86,9 @@
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
+#if NMPATH > 0
+#include <scsi/mpathvar.h>
+#endif
 
 #ifdef DDB
 #include <machine/db_machdep.h>
@@ -684,7 +688,7 @@ sun4v_set_soft_state(int state, const char *desc)
 		return;
 
 	if (!pmap_extract(pmap_kernel(), (vaddr_t)desc, &pa))
-		panic("sun4v_set_soft_state: pmap_extract failed\n");
+		panic("sun4v_set_soft_state: pmap_extract failed");
 
 	err = hv_soft_state_set(state, pa);
 	if (err != H_EOK)
@@ -702,6 +706,11 @@ diskconf(void)
 
 	bp = nbootpath == 0 ? NULL : &bootpath[nbootpath-1];
 	bootdv = (bp == NULL) ? NULL : bp->dev;
+
+#if NMPATH > 0
+	if (bootdv != NULL)
+		bootdv = mpath_bootdv(bootdv);
+#endif
 
 	setroot(bootdv, bp->val[2], RB_USERREQ | RB_HALT);
 	dumpconf();
@@ -1220,7 +1229,7 @@ int
 romgetcursoraddr(rowp, colp)
 	int **rowp, **colp;
 {
-	cell_t row = NULL, col = NULL;
+	cell_t row = 0, col = 0;
 
 	OF_interpret("stdout @ is my-self addr line# addr column# ",
 	    2, &col, &row);
@@ -1230,7 +1239,7 @@ romgetcursoraddr(rowp, colp)
 	 * 64-bit values.  To convert them to pointers to interfaces, add
 	 * 4 to the address.
 	 */
-	if (row == NULL || col == NULL)
+	if (row == 0 || col == 0)
 		return (-1);
 	*rowp = (int *)(row + 4);
 	*colp = (int *)(col + 4);
@@ -1364,7 +1373,7 @@ device_register(struct device *dev, void *aux)
 		}
 	}
 
-	if (strcmp(devname, "sd") == 0 || strcmp(devname, "cd") == 0) {
+	if (strcmp(busname, "scsibus") == 0) {
 		/*
 		 * A SCSI disk or cd; retrieve target/lun information
 		 * from parent and match with current bootpath component.

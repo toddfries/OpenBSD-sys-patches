@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.148 2010/05/08 16:54:08 oga Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.155 2011/07/08 03:35:39 kettenis Exp $	*/
 /*	$NetBSD: pmap.c,v 1.91 2000/06/02 17:46:37 thorpej Exp $	*/
 
 /*
@@ -245,16 +245,6 @@ int pmap_pg_g = 0;
 int pmap_pg_wc = PG_UCMINUS;
 
 /*
- * i386 physical memory comes in a big contig chunk with a small
- * hole toward the front of it...  the following 4 paddr_t's
- * (shared with machdep.c) describe the physical address space
- * of this machine.
- */
-paddr_t avail_start;	/* PA of first available physical page */
-paddr_t hole_start;	/* PA of start of "hole" */
-paddr_t hole_end;	/* PA of end of "hole" */
-
-/*
  * other data structures
  */
 
@@ -347,8 +337,6 @@ void		 pmap_sync_flags_pte(struct vm_page *, u_long);
 pt_entry_t	*pmap_map_ptes(struct pmap *);
 struct pv_entry	*pmap_remove_pv(struct vm_page *, struct pmap *, vaddr_t);
 void		 pmap_do_remove(struct pmap *, vaddr_t, vaddr_t, int);
-boolean_t	 pmap_remove_pte(struct pmap *, struct vm_page *, pt_entry_t *,
-    vaddr_t, int);
 void		 pmap_remove_ptes(struct pmap *, struct vm_page *, vaddr_t,
     vaddr_t, vaddr_t, int);
 
@@ -1597,6 +1585,10 @@ pmap_fork(struct pmap *pmap1, struct pmap *pmap2)
 
 		len = pmap1->pm_ldt_len * sizeof(union descriptor);
 		new_ldt = (union descriptor *)uvm_km_alloc(kernel_map, len);
+		if (new_ldt == NULL) {
+			/* XXX needs to be able to fail properly */
+			panic("pmap_fork: out of kva");
+		}
 		bcopy(pmap1->pm_ldt, new_ldt, len);
 		pmap2->pm_ldt = new_ldt;
 		pmap2->pm_ldt_len = pmap1->pm_ldt_len;
@@ -1698,6 +1690,8 @@ pmap_switch(struct proc *o, struct proc *p)
 	 * correct code segment X limit) in the GDT.
 	 */
 	self->ci_gdt[GUCODE_SEL].sd = pmap->pm_codeseg;
+	self->ci_gdt[GUFS_SEL].sd = pcb->pcb_threadsegs[TSEG_FS];
+	self->ci_gdt[GUGS_SEL].sd = pcb->pcb_threadsegs[TSEG_GS];
 
 	lldt(pcb->pcb_ldt_sel);
 }
@@ -2303,7 +2297,7 @@ pmap_write_protect(struct pmap *pmap, vaddr_t sva, vaddr_t eva,
 			md_prot |= PG_u;
 		else if (va < VM_MAX_ADDRESS)
 			/* XXX: write-prot our PTES? never! */
-			md_prot |= (PG_u | PG_RW);
+			md_prot |= PG_RW;
 
 		spte = &ptes[atop(va)];
 		epte = &ptes[atop(blockend)];
@@ -2582,7 +2576,7 @@ enter_now:
 	if (va < VM_MAXUSER_ADDRESS)
 		npte |= PG_u;
 	else if (va < VM_MAX_ADDRESS)
-		npte |= (PG_u | PG_RW);	/* XXXCDC: no longer needed? */
+		npte |= PG_RW;	/* XXXCDC: no longer needed? */
 	if (pmap == pmap_kernel())
 		npte |= pmap_pg_g;
 	if (flags & VM_PROT_READ)
@@ -2786,13 +2780,13 @@ pmap_tlb_shootpage(struct pmap *pm, vaddr_t va)
 	struct cpu_info *ci, *self = curcpu();
 	CPU_INFO_ITERATOR cii;
 	int wait = 0;
-	int mask = 0;
+	u_int64_t mask = 0;
 
 	CPU_INFO_FOREACH(cii, ci) {
 		if (ci == self || !pmap_is_active(pm, ci) ||
 		    !(ci->ci_flags & CPUF_RUNNING))
 			continue;
-		mask |= 1 << ci->ci_cpuid;
+		mask |= (1ULL << ci->ci_cpuid);
 		wait++;
 	}
 
@@ -2805,7 +2799,7 @@ pmap_tlb_shootpage(struct pmap *pm, vaddr_t va)
 		}
 		tlb_shoot_addr1 = va;
 		CPU_INFO_FOREACH(cii, ci) {
-			if ((mask & 1 << ci->ci_cpuid) == 0)
+			if ((mask & (1ULL << ci->ci_cpuid)) == 0)
 				continue;
 			if (i386_fast_ipi(ci, LAPIC_IPI_INVLPG) != 0)
 				panic("pmap_tlb_shootpage: ipi failed");
@@ -2823,14 +2817,14 @@ pmap_tlb_shootrange(struct pmap *pm, vaddr_t sva, vaddr_t eva)
 	struct cpu_info *ci, *self = curcpu();
 	CPU_INFO_ITERATOR cii;
 	int wait = 0;
-	int mask = 0;
+	u_int64_t mask = 0;
 	vaddr_t va;
 
 	CPU_INFO_FOREACH(cii, ci) {
 		if (ci == self || !pmap_is_active(pm, ci) ||
 		    !(ci->ci_flags & CPUF_RUNNING))
 			continue;
-		mask |= 1 << ci->ci_cpuid;
+		mask |= (1ULL << ci->ci_cpuid);
 		wait++;
 	}
 
@@ -2844,7 +2838,7 @@ pmap_tlb_shootrange(struct pmap *pm, vaddr_t sva, vaddr_t eva)
 		tlb_shoot_addr1 = sva;
 		tlb_shoot_addr2 = eva;
 		CPU_INFO_FOREACH(cii, ci) {
-			if ((mask & 1 << ci->ci_cpuid) == 0)
+			if ((mask & (1ULL << ci->ci_cpuid)) == 0)
 				continue;
 			if (i386_fast_ipi(ci, LAPIC_IPI_INVLRANGE) != 0)
 				panic("pmap_tlb_shootrange: ipi failed");
@@ -2863,12 +2857,12 @@ pmap_tlb_shoottlb(void)
 	struct cpu_info *ci, *self = curcpu();
 	CPU_INFO_ITERATOR cii;
 	int wait = 0;
-	int mask = 0;
+	u_int64_t mask = 0;
 
 	CPU_INFO_FOREACH(cii, ci) {
 		if (ci == self || !(ci->ci_flags & CPUF_RUNNING))
 			continue;
-		mask |= 1 << ci->ci_cpuid;
+		mask |= (1ULL << ci->ci_cpuid);
 		wait++;
 	}
 
@@ -2881,7 +2875,7 @@ pmap_tlb_shoottlb(void)
 		}
 
 		CPU_INFO_FOREACH(cii, ci) {
-			if ((mask & 1 << ci->ci_cpuid) == 0)
+			if ((mask & (1ULL << ci->ci_cpuid)) == 0)
 				continue;
 			if (i386_fast_ipi(ci, LAPIC_IPI_INVLTLB) != 0)
 				panic("pmap_tlb_shoottlb: ipi failed");
@@ -2898,13 +2892,13 @@ pmap_tlb_droppmap(struct pmap *pm)
 	struct cpu_info *ci, *self = curcpu();
 	CPU_INFO_ITERATOR cii;
 	int wait = 0;
-	int mask = 0;
+	u_int64_t mask = 0;
 
 	CPU_INFO_FOREACH(cii, ci) {
 		if (ci == self || !(ci->ci_flags & CPUF_RUNNING) ||
 		    ci->ci_curpmap != pm)
 			continue;
-		mask |= 1 << ci->ci_cpuid;
+		mask |= (1ULL << ci->ci_cpuid);
 		wait++;
 	}
 
@@ -2917,7 +2911,7 @@ pmap_tlb_droppmap(struct pmap *pm)
 		}
 
 		CPU_INFO_FOREACH(cii, ci) {
-			if ((mask & 1 << ci->ci_cpuid) == 0)
+			if ((mask & (1ULL << ci->ci_cpuid)) == 0)
 				continue;
 			if (i386_fast_ipi(ci, LAPIC_IPI_RELOADCR3) != 0)
 				panic("pmap_tlb_droppmap: ipi failed");

@@ -1,4 +1,4 @@
-/*	$OpenBSD: prom.h,v 1.17 2007/12/15 19:35:52 miod Exp $ */
+/*	$OpenBSD: prom.h,v 1.19 2011/03/23 16:54:36 pirofti Exp $ */
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -27,8 +27,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef __MACHINE_PROM_H__
-#define __MACHINE_PROM_H__
+#ifndef _MACHINE_PROM_H_
+#define _MACHINE_PROM_H_
 
 /* BUG trap vector */
 #define	MVMEPROM_VECTOR		496
@@ -168,11 +168,9 @@ struct mvmeprom_dskio {
 };
 #define MVMEPROM_BLOCK_SIZE	256
 
-extern unsigned long bugvec[32], sysbugvec[32];	/* BUG trap vector copies */
-
 #endif	/* _LOCORE */
 
 #ifndef RB_NOSYM
 #define RB_NOSYM 0x4000
 #endif
-#endif /* __MACHINE_PROM_H__ */
+#endif /* _MACHINE_PROM_H_ */

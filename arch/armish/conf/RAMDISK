@@ -1,4 +1,4 @@
-# $OpenBSD: RAMDISK,v 1.16 2010/07/03 03:59:16 krw Exp $ 
+# $OpenBSD: RAMDISK,v 1.20 2011/08/02 06:36:29 matthieu Exp $ 
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -35,6 +35,7 @@ option		INET			# IP + ICMP + TCP + UDP
 option		INET6			# IPv6 (needs INET)
 option		DDB			# kernel debugger
 option		EXT2FS			# Second Extended Filesystem
+option		CRYPTO			# Cryptographic framework
 
 config		bsd	root on rd0a swap on rd0b
 
@@ -63,7 +64,6 @@ pci0		at iopxs? bus ?		# PCI/PCI-X support
 
 
 siop*		at pci? 		# NCR 538XX SCSI controllers(new)
-scsibus*	at siop?
 em*		at pci?
 re*		at pci?
 ral*		at pci?
@@ -72,7 +72,9 @@ bwi*		at pci?
 pciide*		at pci? flags 0x0000
 wd*		at pciide? flags 0x0000
 
+softraid0	at root		# Software RAID
 
+scsibus*	at scsi?
 sd*		at scsibus?		# SCSI disk drives
 #st*		at scsibus?		# SCSI tape drives
 cd*		at scsibus?		# SCSI CD-ROM drives
@@ -116,8 +118,6 @@ ucom*	at umsm?
 #midi*	at umidi?
 #ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
-scsibus* at umass?
-atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
@@ -139,7 +139,7 @@ wi*	at uhub?		# WaveLAN IEEE 802.11DS
 #uyap*	at uhub?		# Y@P firmware loader
 #udsbr*	at uhub?		# D-Link DSB-R100 radio
 #radio*	at udsbr?		# USB radio
-#ubt*	at uhub?		# USB Bluetooth
+#ubt*	at uhub? disable	# USB Bluetooth
 ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
 #udcf*	at uhub?		# Gude Expert mouseCLOCK

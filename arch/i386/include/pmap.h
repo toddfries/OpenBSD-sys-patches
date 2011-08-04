@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.55 2010/05/08 16:54:08 oga Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.59 2011/06/25 19:20:41 jsg Exp $	*/
 /*	$NetBSD: pmap.h,v 1.44 2000/04/24 17:18:18 thorpej Exp $	*/
 
 /*
@@ -37,13 +37,12 @@
  * pmap.h: see pmap.c for the history of this pmap module.
  */
 
-#ifndef	_I386_PMAP_H_
-#define	_I386_PMAP_H_
+#ifndef	_MACHINE_PMAP_H_
+#define	_MACHINE_PMAP_H_
 
 #include <machine/cpufunc.h>
 #include <machine/pte.h>
 #include <machine/segments.h>
-#include <uvm/uvm_pglist.h>
 #include <uvm/uvm_object.h>
 
 /*
@@ -364,7 +363,6 @@ extern int pmap_pg_g;			/* do we support PG_G? */
 #define pmap_copy(DP,SP,D,L,S)
 #define pmap_is_modified(pg)		pmap_test_attrs(pg, PG_M)
 #define pmap_is_referenced(pg)		pmap_test_attrs(pg, PG_U)
-#define pmap_phys_address(ppn)		ptoa(ppn)
 #define pmap_valid_entry(E) 		((E) & PG_V) /* is PDE or PTE valid? */
 
 #define pmap_proc_iflush(p,va,len)	/* nothing */
@@ -447,9 +445,7 @@ boolean_t	pmap_zero_page_uncached(paddr_t);
  */
 
 __inline static void
-pmap_page_protect(pg, prot)
-	struct vm_page *pg;
-	vm_prot_t prot;
+pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
 {
 	if ((prot & VM_PROT_WRITE) == 0) {
 		if (prot & (VM_PROT_READ|VM_PROT_EXECUTE)) {
@@ -469,10 +465,7 @@ pmap_page_protect(pg, prot)
  */
 
 __inline static void
-pmap_protect(pmap, sva, eva, prot)
-	struct pmap *pmap;
-	vaddr_t sva, eva;
-	vm_prot_t prot;
+pmap_protect(struct pmap *pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 {
 	if ((prot & VM_PROT_WRITE) == 0) {
 		if (prot & (VM_PROT_READ|VM_PROT_EXECUTE)) {
@@ -489,4 +482,4 @@ void	pmap_ldt_cleanup(struct proc *);
 #endif /* USER_LDT */
 
 #endif /* _KERNEL */
-#endif	/* _I386_PMAP_H_ */
+#endif	/* _MACHINE_PMAP_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivideo.c,v 1.5 2009/06/04 17:16:00 pirofti Exp $	*/
+/*	$OpenBSD: acpivideo.c,v 1.9 2011/05/23 11:58:40 pirofti Exp $	*/
 /*
  * Copyright (c) 2008 Federico G. Schwindt <fgsch@openbsd.org>
  * Copyright (c) 2009 Paul Irofti <pirofti@openbsd.org>
@@ -19,7 +19,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/malloc.h>
 
 #include <machine/bus.h>
 
@@ -54,9 +53,10 @@ void	acpivideo_attach(struct device *, struct device *, void *);
 int	acpivideo_notify(struct aml_node *, int, void *);
 
 void	acpivideo_set_policy(struct acpivideo_softc *, int);
-void	acpivideo_get_dod(struct acpivideo_softc *);
 int	acpi_foundvout(struct aml_node *, void *);
 int	acpivideo_print(void *, const char *);
+
+int	acpivideo_getpcibus(struct acpivideo_softc *, struct aml_node *);
 
 struct cfattach acpivideo_ca = {
 	sizeof(struct acpivideo_softc), acpivideo_match, acpivideo_attach
@@ -90,14 +90,15 @@ acpivideo_attach(struct device *parent, struct device *self, void *aux)
 
 	printf(": %s\n", sc->sc_devnode->name);
 
+	if (acpivideo_getpcibus(sc, sc->sc_devnode) == -1)
+		return;
+
 	aml_register_notify(sc->sc_devnode, aaa->aaa_dev,
 	    acpivideo_notify, sc, ACPIDEV_NOPOLL);
 
 	acpivideo_set_policy(sc,
 	    DOS_SWITCH_BY_OSPM | DOS_BRIGHTNESS_BY_OSPM);
 
-	acpivideo_get_dod(sc);
-	aml_find_node(aaa->aaa_node, "_DCS", acpi_foundvout, sc);
 	aml_find_node(aaa->aaa_node, "_BCL", acpi_foundvout, sc);
 }
 
@@ -132,7 +133,7 @@ acpivideo_set_policy(struct acpivideo_softc *sc, int policy)
 	args.type = AML_OBJTYPE_INTEGER;
 
 	aml_evalname(sc->sc_acpi, sc->sc_devnode, "_DOS", 1, &args, &res);
-	DPRINTF(("%s: set policy to %d", DEVNAME(sc), aml_val2int(&res)));
+	DPRINTF(("%s: set policy to %X\n", DEVNAME(sc), aml_val2int(&res)));
 
 	aml_freevalue(&res);
 }
@@ -140,45 +141,23 @@ acpivideo_set_policy(struct acpivideo_softc *sc, int policy)
 int
 acpi_foundvout(struct aml_node *node, void *arg)
 {
-	struct aml_value	res;
-	int	i, addr;
-	char	fattach = 0;
-
 	struct acpivideo_softc *sc = (struct acpivideo_softc *)arg;
 	struct device *self = (struct device *)arg;
-	struct acpivideo_attach_args av;
+	struct acpi_attach_args aaa;
+	node = node->parent;
 
-	if (sc->sc_dod == NULL)
+	DPRINTF(("Inside acpi_foundvout()\n"));
+	if (node->parent != sc->sc_devnode)
 		return (0);
-	DPRINTF(("Inside acpi_foundvout()"));
-	if (aml_evalname(sc->sc_acpi, node->parent, "_ADR", 0, NULL, &res)) {
-		DPRINTF(("%s: no _ADR\n", DEVNAME(sc)));
-		return (0);
-	}
-	addr = aml_val2int(&res);
-	DPRINTF(("_ADR: %X\n", addr));
-	aml_freevalue(&res);
 
-	for (i = 0; i < sc->sc_dod_len; i++)
-		if (addr == (sc->sc_dod[i]&0xffff)) {
-			DPRINTF(("Matched: %X\n", sc->sc_dod[i]));
-			fattach = 1;
-			break;
-		}
-	if (fattach) {
-		memset(&av, 0, sizeof(av));
-		av.aaa.aaa_iot = sc->sc_acpi->sc_iot;
-		av.aaa.aaa_memt = sc->sc_acpi->sc_memt;
-		av.aaa.aaa_node = node->parent;
-		av.aaa.aaa_name = "acpivout";
-		av.dod = sc->sc_dod[i];
-		/* 
-		 *  Make sure we don't attach twice if both _BCL and
-		 * _DCS methods are found by zeroing the DOD address.
-		 */
-		sc->sc_dod[i] = 0;
+	if (aml_searchname(node, "_BCM") && aml_searchname(node, "_BQC")) {
+		memset(&aaa, 0, sizeof(aaa));
+		aaa.aaa_iot = sc->sc_acpi->sc_iot;
+		aaa.aaa_memt = sc->sc_acpi->sc_memt;
+		aaa.aaa_node = node;
+		aaa.aaa_name = "acpivout";
 
-		config_found(self, &av, acpivideo_print);
+		config_found(self, &aaa, acpivideo_print);
 	}
 
 	return (0);
@@ -199,34 +178,10 @@ acpivideo_print(void *aux, const char *pnp)
 	return (UNCONF);
 }
 
-void
-acpivideo_get_dod(struct acpivideo_softc * sc)
+int
+acpivideo_getpcibus(struct acpivideo_softc *sc, struct aml_node *node)
 {
-	struct aml_value	res;
-	int	i;
-
-	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_DOD", 0, NULL, &res)) {
-		DPRINTF(("%s: no _DOD\n", DEVNAME(sc)));
-		return;
-	}
-	sc->sc_dod_len = res.length;
-	if (sc->sc_dod_len == 0) {
-		sc->sc_dod = NULL;
-		aml_freevalue(&res);
-		return;
-	}
-	sc->sc_dod = malloc(sc->sc_dod_len * sizeof(int), M_DEVBUF, 
-	    M_WAITOK|M_ZERO);
-	if (sc->sc_dod == NULL) {
-		aml_freevalue(&res);
-		return;
-	}
-
-	for (i = 0; i < sc->sc_dod_len; i++) {
-		sc->sc_dod[i] = aml_val2int(res.v_package[i]);
-		DPRINTF(("DOD: %X ", sc->sc_dod[i]));
-	}
-	DPRINTF(("\n"));
-
-	aml_freevalue(&res);
+	/* Check if parent device has PCI mapping */
+	return (node->parent && node->parent->pci) ?
+		node->parent->pci->sub : -1;
 }

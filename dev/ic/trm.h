@@ -1,4 +1,4 @@
-/*	$OpenBSD: trm.h,v 1.1 2002/02/18 01:55:30 krw Exp $
+/*	$OpenBSD: trm.h,v 1.3 2011/04/26 15:46:58 krw Exp $
  * ------------------------------------------------------------
  *   O.S       : OpenBSD
  *   File Name : trm.h
@@ -105,7 +105,7 @@ struct trm_scsi_req_q
 #define TRM_BAD_CCB_OR_SG           0x1A
 #define TRM_ABORT                   0xFF
 
-	u_int8_t	CmdBlock[12];
+	u_int8_t	CmdBlock[16];
 
 	u_int8_t	ScsiCmdLen;
 	u_int8_t	ScsiPhase;
@@ -221,6 +221,9 @@ struct trm_softc
 	struct	SRB_HEAD	freeSRB;
 	struct	SRB_HEAD	goingSRB;
 	struct	SRB_HEAD	waitingSRB;
+
+	struct	mutex		sc_srb_mtx;
+	struct	scsi_iopool	sc_iopool;
 
 	struct	trm_dcb	       *pActiveDCB;
 	struct	trm_dcb        *pDCB[TRM_MAX_TARGETS][TRM_MAX_LUNS];

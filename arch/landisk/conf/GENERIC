@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.26 2010/07/03 03:59:16 krw Exp $
+# $OpenBSD: GENERIC,v 1.36 2011/07/07 23:41:09 tedu Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -25,8 +25,7 @@ option		PCIVERBOSE
 option		USER_PCICONF		# user-space PCI configuration
 option		USBVERBOSE
 
-#config		bsd	swap generic
-config		bsd	root on wd0a
+config		bsd	swap generic
 
 mainbus0 at root
 cpu0	at mainbus?
@@ -73,7 +72,6 @@ ukphy*	at mii?				# generic unknown PHYs
 pciide*		at pci?
 wd*		at pciide?
 atapiscsi*	at pciide? flags 0x0000
-scsibus*	at atapiscsi?
 
 # USB Controller and Devices
 
@@ -120,8 +118,6 @@ audio*	at uaudio?
 #midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
-scsibus* at umass?
-atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
@@ -148,14 +144,18 @@ udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
 ugen*	at uhub?		# USB Generic driver
 uath*	at uhub?		# Atheros AR5005UG/AR5005UX
+athn*	at uhub?		# Atheros AR9002U
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+rsu*	at uhub?		# Realtek RTL8188SU/RTL8191SU/RTL8192SU
+urtwn*	at uhub?		# Realtek RTL8188CU/RTL8192CU
 zyd*	at uhub?		# Zydas ZD1211
 #option	NATM
 #ueagle* at uhub?		# Analog Devices Eagle ADSL
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 uthum*	at uhidev?		# TEMPerHUM sensor
+utwitch* at uhidev?		# YUREX BBU sensor
 #uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 #onewire* at uow?
 
@@ -163,19 +163,19 @@ udl*		at uhub?
 wsdisplay*	at udl?
 
 # Bluetooth controllers
-ubt*	at uhub?		# USB Bluetooth
-bthub*	at ubt?
-
-bthidev* at bthub?		# Bluetooth HID support
+#ubt*	at uhub? disable	# USB Bluetooth
+#bthub*	at ubt?
+#bthidev* at bthub?		# Bluetooth HID support
 #btkbd*	at bthidev?
 #btms*	at bthidev?
 #wskbd*	at btkbd? mux 1
 #wsmouse* at btms? mux 0
-btsco*	at bthub?		# Bluetooth audio support
-audio*	at btsco?
+#btsco*	at bthub?		# Bluetooth audio support
+#audio*	at btsco?
 
+scsibus* at scsi?
 sd*	at scsibus?			# SCSI disk drives
 cd*	at scsibus?			# SCSI CD-ROM drives
 
-# mouse & keyboard multiplexor pseudo-devices
-pseudo-device	wsmux		2
+pseudo-device	hotplug		1	# devices hot plugging
+pseudo-device	wsmux		2	# mouse & keyboard multiplexor

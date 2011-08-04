@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ipw.c,v 1.86 2010/04/20 22:05:43 tedu Exp $	*/
+/*	$OpenBSD: if_ipw.c,v 1.95 2011/04/07 15:30:16 miod Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -64,7 +64,8 @@
 
 int		ipw_match(struct device *, void *, void *);
 void		ipw_attach(struct device *, struct device *, void *);
-void		ipw_power(int, void *);
+int		ipw_activate(struct device *, int);
+void		ipw_resume(void *, void *);
 int		ipw_dma_alloc(struct ipw_softc *);
 void		ipw_release(struct ipw_softc *);
 int		ipw_media_change(struct ifnet *);
@@ -132,7 +133,8 @@ int ipw_debug = 0;
 #endif
 
 struct cfattach ipw_ca = {
-	sizeof (struct ipw_softc), ipw_match, ipw_attach
+	sizeof (struct ipw_softc), ipw_match, ipw_attach, NULL,
+	ipw_activate
 };
 
 int
@@ -260,7 +262,6 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = ipw_init;
 	ifp->if_ioctl = ipw_ioctl;
 	ifp->if_start = ipw_start;
 	ifp->if_watchdog = ipw_watchdog;
@@ -274,8 +275,6 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 	ic->ic_newstate = ipw_newstate;
 	ic->ic_send_mgmt = ipw_send_mgmt;
 	ieee80211_media_init(ifp, ipw_media_change, ipw_media_status);
-
-	sc->powerhook = powerhook_establish(ipw_power, sc);
 
 #if NBPFILTER > 0
 	bpfattach(&sc->sc_drvbpf, ifp, DLT_IEEE802_11_RADIO,
@@ -291,27 +290,50 @@ ipw_attach(struct device *parent, struct device *self, void *aux)
 #endif
 }
 
-void
-ipw_power(int why, void *arg)
+int
+ipw_activate(struct device *self, int act)
 {
-	struct ipw_softc *sc = arg;
-	struct ifnet *ifp;
-	pcireg_t data;
+	struct ipw_softc *sc = (struct ipw_softc *)self;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 
-	if (why != PWR_RESUME)
-		return;
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			ipw_stop(ifp, 0);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    ipw_resume, sc, NULL);
+		break;
+	}
+
+	return 0;
+}
+
+void
+ipw_resume(void *arg1, void *arg2)
+{
+	struct ipw_softc *sc = arg1;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+	pcireg_t data;
+	int s;
 
 	/* clear device specific PCI configuration register 0x41 */
 	data = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
 	data &= ~0x0000ff00;
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, data);
 
-	ifp = &sc->sc_ic.ic_if;
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_init(ifp);
-		if (ifp->if_flags & IFF_RUNNING)
-			ifp->if_start(ifp);
-	}
+	s = splnet();
+	while (sc->sc_flags & IPW_FLAG_BUSY)
+		tsleep(&sc->sc_flags, PZERO, "ipwpwr", 0);
+	sc->sc_flags |= IPW_FLAG_BUSY;
+
+	if (ifp->if_flags & IFF_UP)
+		ipw_init(ifp);
+
+	sc->sc_flags &= ~IPW_FLAG_BUSY;
+	wakeup(&sc->sc_flags);
+	splx(s);
 }
 
 int
@@ -1361,6 +1383,17 @@ ipw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, error = 0;
 
 	s = splnet();
+	/*
+	 * Prevent processes from entering this function while another
+	 * process is tsleep'ing in it.
+	 */
+	while ((sc->sc_flags & IPW_FLAG_BUSY) && error == 0)
+		error = tsleep(&sc->sc_flags, PCATCH, "ipwioc", 0);
+	if (error != 0) {
+		splx(s);
+		return error;
+	}
+	sc->sc_flags |= IPW_FLAG_BUSY;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -1414,6 +1447,8 @@ ipw_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = 0;
 	}
 
+	sc->sc_flags &= ~IPW_FLAG_BUSY;
+	wakeup(&sc->sc_flags);
 	splx(s);
 	return error;
 }
@@ -1477,7 +1512,7 @@ ipw_stop_master(struct ipw_softc *sc)
 	tmp = CSR_READ_4(sc, IPW_CSR_RST);
 	CSR_WRITE_4(sc, IPW_CSR_RST, tmp | IPW_RST_PRINCETON_RESET);
 
-	sc->flags &= ~IPW_FLAG_FW_INITED;
+	sc->sc_flags &= ~IPW_FLAG_FW_INITED;
 }
 
 int
@@ -1962,7 +1997,7 @@ ipw_init(struct ifnet *ifp)
 		goto fail1;
 	}
 
-	if ((error = ipw_read_firmware(sc, &fw)) != NULL) {
+	if ((error = ipw_read_firmware(sc, &fw)) != 0) {
 		printf("%s: error %d, could not read firmware\n",
 		    sc->sc_dev.dv_xname, error);
 		goto fail1;
@@ -1998,7 +2033,7 @@ ipw_init(struct ifnet *ifp)
 		printf("%s: could not load firmware\n", sc->sc_dev.dv_xname);
 		goto fail2;
 	}
-	sc->flags |= IPW_FLAG_FW_INITED;
+	sc->sc_flags |= IPW_FLAG_FW_INITED;
 	free(fw.data, M_DEVBUF);
 
 	/* retrieve information tables base addresses */
@@ -2046,6 +2081,9 @@ ipw_stop(struct ifnet *ifp, int disable)
 	 */
 	for (i = 0; i < IPW_NTBD; i++)
 		ipw_release_sbd(sc, &sc->stbd_list[i]);
+
+	/* in case we were scanning, release the scan "lock" */
+	ic->ic_scan_lock = IEEE80211_SCAN_UNLOCKED;
 
 	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 }

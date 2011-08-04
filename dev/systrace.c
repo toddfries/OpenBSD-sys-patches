@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.c,v 1.52 2009/11/09 17:53:39 nicm Exp $	*/
+/*	$OpenBSD: systrace.c,v 1.59 2011/07/11 15:40:47 guenther Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -57,10 +57,7 @@ void	systraceattach(int);
 
 int	systraceopen(dev_t, int, int, struct proc *);
 int	systraceclose(dev_t, int, int, struct proc *);
-int	systraceread(dev_t, struct uio *, int);
-int	systracewrite(dev_t, struct uio *, int);
 int	systraceioctl(dev_t, u_long, caddr_t, int, struct proc *);
-int	systracepoll(dev_t, int, struct proc *);
 
 uid_t	systrace_seteuid(struct proc *,  uid_t);
 gid_t	systrace_setegid(struct proc *,  gid_t);
@@ -202,11 +199,8 @@ int systrace_debug = 0;
 
 /* ARGSUSED */
 int
-systracef_read(fp, poff, uio, cred)
-	struct file *fp;
-	off_t *poff;
-	struct uio *uio;
-	struct ucred *cred;
+systracef_read(struct file *fp, off_t *poff, struct uio *uio,
+    struct ucred *cred)
 {
 	struct fsystrace *fst = (struct fsystrace *)fp->f_data;
 	struct str_process *process;
@@ -253,26 +247,20 @@ systracef_read(fp, poff, uio, cred)
 
 /* ARGSUSED */
 int
-systracef_write(fp, poff, uio, cred)
-	struct file *fp;
-	off_t *poff;
-	struct uio *uio;
-	struct ucred *cred;
+systracef_write(struct file *fp, off_t *poff, struct uio *uio,
+    struct ucred *cred)
 {
 	return (EIO);
 }
 
 #define POLICY_VALID(x)	((x) == SYSTR_POLICY_PERMIT || \
 			 (x) == SYSTR_POLICY_ASK || \
-			 (x) == SYSTR_POLICY_NEVER)
+			 (x) == SYSTR_POLICY_NEVER || \
+			 (x) == SYSTR_POLICY_KILL)
 
 /* ARGSUSED */
 int
-systracef_ioctl(fp, cmd, data, p)
-	struct file *fp;
-	u_long cmd;
-	caddr_t data;
-	struct proc *p;
+systracef_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 {
 	int ret = 0;
 	struct fsystrace *fst = (struct fsystrace *)fp->f_data;
@@ -412,10 +400,7 @@ systracef_ioctl(fp, cmd, data, p)
 
 /* ARGSUSED */
 int
-systracef_poll(fp, events, p)
-	struct file *fp;
-	int events;
-	struct proc *p;
+systracef_poll(struct file *fp, int events, struct proc *p)
 {
 	struct fsystrace *fst = (struct fsystrace *)fp->f_data;
 	int revents = 0;
@@ -437,28 +422,21 @@ systracef_poll(fp, events, p)
 
 /* ARGSUSED */
 int
-systracef_kqfilter(fp, kn)
-	struct file *fp;
-	struct knote *kn;
+systracef_kqfilter(struct file *fp, struct knote *kn)
 {
 	return (1);
 }
 
 /* ARGSUSED */
 int
-systracef_stat(fp, sb, p)
-	struct file *fp;
-	struct stat *sb;
-	struct proc *p;
+systracef_stat(struct file *fp, struct stat *sb, struct proc *p)
 {
 	return (EOPNOTSUPP);
 }
 
 /* ARGSUSED */
 int
-systracef_close(fp, p)
-	struct file *fp;
-	struct proc *p;
+systracef_close(struct file *fp, struct proc *p)
 {
 	struct fsystrace *fst = (struct fsystrace *)fp->f_data;
 	struct str_process *strp;
@@ -513,50 +491,19 @@ systraceattach(int n)
 }
 
 int
-systraceopen(dev, flag, mode, p)
-	dev_t	dev;
-	int	flag;
-	int	mode;
-	struct proc *p;
+systraceopen(dev_t dev, int flag, int mode, struct proc *p)
 {
 	return (0);
 }
 
 int
-systraceclose(dev, flag, mode, p)
-	dev_t	dev;
-	int	flag;
-	int	mode;
-	struct proc *p;
+systraceclose(dev_t dev, int flag, int mode, struct proc *p)
 {
 	return (0);
 }
 
 int
-systraceread(dev, uio, ioflag)
-	dev_t	dev;
-	struct uio *uio;
-	int	ioflag;
-{
-	return (EIO);
-}
-
-int
-systracewrite(dev, uio, ioflag)
-	dev_t	dev;
-	struct uio *uio;
-	int	ioflag;
-{
-	return (EIO);
-}
-
-int
-systraceioctl(dev, cmd, data, flag, p)
-	dev_t	dev;
-	u_long	cmd;
-	caddr_t	data;
-	int	flag;
-	struct proc *p;
+systraceioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct file *f;
 	struct fsystrace *fst = NULL;
@@ -593,15 +540,6 @@ systraceioctl(dev, cmd, data, flag, p)
 		break;
 	}
 	return (error);
-}
-
-int
-systracepoll(dev, events, p)
-	dev_t	dev;
-	int	events;
-	struct proc *p;
-{
-	return (seltrue(dev, events, p));
 }
 
 void
@@ -750,13 +688,12 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 	 * but we wait until it executes something unprivileged.
 	 * A non-root user may only monitor if the real uid and
 	 * real gid match the monitored process.  Changing the
-	 * uid or gid causes P_SUGID to be set.
+	 * uid or gid causes PS_SUGID to be set.
 	 */
 	if (fst->issuser) {
 		maycontrol = 1;
 		issuser = 1;
-	} else if (!ISSET(p->p_flag, P_SUGID) &&
-	    !ISSET(p->p_flag, P_SUGIDEXEC)) {
+	} else if (!ISSET(p->p_p->ps_flags, PS_SUGID | PS_SUGIDEXEC)) {
 		maycontrol = fst->p_ruid == p->p_cred->p_ruid &&
 		    fst->p_rgid == p->p_cred->p_rgid;
 	}
@@ -779,7 +716,8 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 
 	/* Fast-path */
 	if (policy != SYSTR_POLICY_ASK) {
-		if (policy != SYSTR_POLICY_PERMIT) {
+		if (policy != SYSTR_POLICY_PERMIT &&
+		    policy != SYSTR_POLICY_KILL) {
 			if (policy > 0)
 				error = policy;
 			else
@@ -787,7 +725,12 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 		}
 		systrace_replacefree(strp);
 		rw_exit_write(&fst->lock);
-		if (policy == SYSTR_POLICY_PERMIT)
+		if (policy == SYSTR_POLICY_KILL) {
+			error = EPERM;
+			DPRINTF(("systrace: pid %u killed on syscall %d\n",
+			    p->p_pid, code));
+			psignal(p, SIGKILL);
+		} else if (policy == SYSTR_POLICY_PERMIT)
 			error = (*callp->sy_call)(p, v, retval);
 		return (error);
 	}
@@ -876,7 +819,7 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 
 	systrace_replacefree(strp);
 
-	if (ISSET(p->p_flag, P_SUGID) || ISSET(p->p_flag, P_SUGIDEXEC)) {
+	if (ISSET(p->p_p->ps_flags, PS_SUGID | PS_SUGIDEXEC)) {
 		if ((fst = strp->parent) == NULL || !fst->issuser) {
 			systrace_unlock();
 			return (error);
@@ -944,7 +887,7 @@ systrace_seteuid(struct proc *p,  uid_t euid)
 	 */
 	pc->pc_ucred = crcopy(pc->pc_ucred);
 	pc->pc_ucred->cr_uid = euid;
-	atomic_setbits_int(&p->p_flag, P_SUGID);
+	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
 
 	return (oeuid);
 }
@@ -963,7 +906,7 @@ systrace_setegid(struct proc *p,  gid_t egid)
 	 */
 	pc->pc_ucred = crcopy(pc->pc_ucred);
 	pc->pc_ucred->cr_gid = egid;
-	atomic_setbits_int(&p->p_flag, P_SUGID);
+	atomic_setbits_int(&p->p_p->ps_flags, PS_SUGID);
 
 	return (oegid);
 }
@@ -1282,15 +1225,14 @@ systrace_attach(struct fsystrace *fst, pid_t pid)
 	 *	    gave us setuid/setgid privs (unless
 	 *	    you're root), or...
 	 *
-	 *      [Note: once P_SUGID or P_SUGIDEXEC gets set in execve(),
+	 *      [Note: once PS_SUGID or PS_SUGIDEXEC gets set in execve(),
 	 *      it stays set until the process does another execve(). Hence
 	 *	this prevents a setuid process which revokes its
 	 *	special privileges using setuid() from being
 	 *	traced. This is good security.]
 	 */
 	if ((proc->p_cred->p_ruid != p->p_cred->p_ruid ||
-		ISSET(proc->p_flag, P_SUGID) ||
-		ISSET(proc->p_flag, P_SUGIDEXEC)) &&
+		ISSET(proc->p_flag, PS_SUGID | PS_SUGIDEXEC)) &&
 	    (error = suser(p, 0)) != 0)
 		goto out;
 
@@ -1508,8 +1450,8 @@ systrace_scriptname(struct proc *p, char *dst)
 	rw_enter_write(&fst->lock);
 	systrace_unlock();
 
-	if (!fst->issuser && (ISSET(p->p_flag, P_SUGID) ||
-		ISSET(p->p_flag, P_SUGIDEXEC) ||
+	if (!fst->issuser &&
+		(ISSET(p->p_p->ps_flags, PS_SUGID | PS_SUGIDEXEC) ||
 		fst->p_ruid != p->p_cred->p_ruid ||
 		fst->p_rgid != p->p_cred->p_rgid)) {
 		error = EPERM;

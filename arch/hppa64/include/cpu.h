@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.16 2009/11/25 23:18:14 jsing Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.26 2011/07/07 18:44:39 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -70,60 +70,29 @@
 #define	HPPA_FPU_FORK(s) ((s) & ~((u_int64_t)(HPPA_FPU_XMASK)<<32))
 #define	HPPA_PMSFUS	0x20	/* ??? */
 
-/*
- * Interrupts stuff
- */
-#define	IPL_NONE	0
-#define	IPL_SOFTCLOCK	1   
-#define	IPL_SOFTNET	2
-#define	IPL_BIO		3
-#define	IPL_NET		4
-#define	IPL_SOFTTTY	5
-#define	IPL_TTY		6
-#define	IPL_VM		7
-#define	IPL_AUDIO	8
-#define	IPL_CLOCK	9
-#define	IPL_STATCLOCK	10
-#define	IPL_SCHED	IPL_STATCLOCK
-#define	IPL_HIGH	11
-
-#define	NIPL		12
-
-#define	IST_NONE        0
-#define	IST_PULSE       1
-#define	IST_EDGE        2
-#define	IST_LEVEL       3
-
-#define	splsoftclock()	splraise(IPL_SOFTCLOCK)
-#define	splsoftnet()	splraise(IPL_SOFTNET)
-#define	splbio()	splraise(IPL_BIO)
-#define	splnet()	splraise(IPL_NET)
-#define	splsofttty()	splraise(IPL_SOFTTTY)
-#define	spltty()	splraise(IPL_TTY)
-#define	splvm()		splraise(IPL_VM)
-#define	splaudio()	splraise(IPL_AUDIO)
-#define	splclock()	splraise(IPL_CLOCK)
-#define	splsched()	splraise(IPL_SCHED)
-#define	splstatclock()	splraise(IPL_STATCLOCK)
-#define	splhigh()	splraise(IPL_HIGH)
-#define	spl0()		spllower(IPL_NONE)
-#define	splx(c)		spllower(c)
-
-#define	setsoftast()		(astpending = 1)
-#define	setsoftclock()		/* TODO */
-#define	setsoftnet()		/* TODO */
-#define	setsofttty()		/* TODO */
-
 #ifndef _LOCORE
 #include <sys/time.h>
 #include <sys/sched.h>
 
+/*
+ * Note that the alignment of ci_trap_save is important since we want to keep
+ * it within a single cache line. As a result, it must be kept as the first
+ * entry within the cpu_info struct.
+ */
 struct cpu_info {
+	volatile u_long	ci_trap_save[16];
+
+	volatile int	ci_psw;
+	volatile int	ci_cpl;
+
+	volatile u_long	ci_ipending;
+	volatile int	ci_in_intr;
+
 	struct proc	*ci_curproc;
 	struct pcb	*ci_cpcb;
 	struct cpu_info	*ci_next;
+	paddr_t		ci_fpu_state;		/* Process FPU state. */
 
-	struct proc	*ci_fpproc;
 	int		ci_number;
 	struct schedstate_percpu ci_schedstate;	/* scheduler state */
 	u_int32_t	ci_randseed;
@@ -135,10 +104,15 @@ struct cpu_info {
 	/* Spinning up the CPU */
 	void		(*ci_spinup)(void); /* spinup routine */
 	void		*ci_initstack;
+
+	u_long		ci_itmr;
+#ifdef DIAGNOSTIC
+	int		ci_mutex_level;
+#endif
 };
 
 struct cpu_info *curcpu(void);
-#define	cpu_number()	(curcpu()->ci_number)
+#define	cpu_number()		(curcpu()->ci_number)
 #define	CPU_IS_PRIMARY(ci)	((ci)->ci_number == 0)
 #define	CPU_INFO_ITERATOR	int
 #define	CPU_INFO_FOREACH(cii,ci) \
@@ -146,21 +120,6 @@ struct cpu_info *curcpu(void);
 #define	CPU_INFO_UNIT(ci)	((ci)->ci_number)
 #define MAXCPUS	1
 #define cpu_unidle(ci)
-
-#ifdef DIAGNOSTIC   
-void splassert_fail(int, int, const char *);
-extern int splassert_ctl;
-void splassert_check(int, const char *);
-#define splassert(__wantipl) do {			\
-	if (splassert_ctl > 0) {			\
-		splassert_check(__wantipl, __func__);	\
-	}						\
-} while (0)
-#define splsoftassert(__wantipl) splassert(__wantipl)
-#else
-#define splassert(__wantipl)		do { /* nada */ } while (0)
-#define splsoftassert(__wantipl)	do { /* nada */ } while (0)
-#endif /* DIAGNOSTIC */
 
 /* types */
 enum hppa_cpu_type {
@@ -175,9 +134,9 @@ extern int cpu_hvers;
  * Exported definitions unique to hp700/PA-RISC cpu support.
  */
 
-#define	HPPA_PGALIAS	0x0000000000100000UL
-#define	HPPA_PGAMASK	0xfffffffffff00000UL
-#define	HPPA_PGAOFF	0x00000000000fffffUL
+#define	HPPA_PGALIAS	0x0000000000400000UL
+#define	HPPA_PGAMASK	0xffffffffffc00000UL
+#define	HPPA_PGAOFF	0x00000000003fffffUL
 
 #define	HPPA_PHYSMAP	0x000001ffffffffffUL
 #define	HPPA_IOBEGIN	0xfffffff000000000UL
@@ -211,16 +170,13 @@ extern int want_resched, astpending;
 
 #define DELAY(x) delay(x)
 
-int	splraise(int cpl);
-int	spllower(int cpl);
-
 void	delay(u_int us);
 void	hppa_init(paddr_t start);
 void	trap(int type, struct trapframe *frame);
-int	spcopy(pa_space_t ssp, const void *src,
-		    pa_space_t dsp, void *dst, size_t size);
-int	spstrcpy(pa_space_t ssp, const void *src,
-		      pa_space_t dsp, void *dst, size_t size, size_t *rsize);
+int	spcopy(pa_space_t ssp, const void *src, pa_space_t dsp, void *dst,
+	    size_t size);
+int	spstrcpy(pa_space_t ssp, const void *src, pa_space_t dsp, void *dst,
+	    size_t size, size_t *rsize);
 int	copy_on_fault(void);
 void	switch_trampoline(void);
 int	cpu_dumpsize(void);

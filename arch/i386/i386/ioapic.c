@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioapic.c,v 1.22 2009/08/22 02:54:50 mk Exp $	*/
+/*	$OpenBSD: ioapic.c,v 1.26 2011/04/16 00:40:58 deraadt Exp $	*/
 /* 	$NetBSD: ioapic.c,v 1.7 2003/07/14 22:32:40 lukem Exp $	*/
 
 /*-
@@ -93,6 +93,7 @@
 
 int     ioapic_match(struct device *, void *, void *);
 void    ioapic_attach(struct device *, struct device *, void *);
+int	ioapic_activate(struct device *, int);
 
 /* XXX */
 extern int bus_mem_add_mapping(bus_addr_t, bus_size_t, int,
@@ -104,8 +105,6 @@ void	apic_set_redir(struct ioapic_softc *, int);
 void	apic_vectorset(struct ioapic_softc *, int, int, int);
 
 void	apic_stray(int);
-
-int apic_verbose = 0;
 
 int ioapic_bsp_id = 0;
 int ioapic_cold = 1;
@@ -239,7 +238,8 @@ ioapic_print_redir(struct ioapic_softc *sc, char *why, int pin)
 }
 
 struct cfattach ioapic_ca = {
-	sizeof(struct ioapic_softc), ioapic_match, ioapic_attach
+	sizeof(struct ioapic_softc), ioapic_match, ioapic_attach, NULL,
+	ioapic_activate
 };
 
 struct cfdriver ioapic_cd = {
@@ -363,6 +363,22 @@ ioapic_attach(struct device *parent, struct device *self, void *aux)
 		for (i = 0; i < sc->sc_apic_sz; i++)
 			ioapic_print_redir(sc, "boot", i);
 #endif
+}
+
+int
+ioapic_activate(struct device *self, int act)
+{
+	struct ioapic_softc *sc = (struct ioapic_softc *)self;
+
+	switch (act) {
+	case DVACT_RESUME:
+		/* On resume, reset the APIC id, like we do on boot */
+		ioapic_write(sc, IOAPIC_ID,
+		    (ioapic_read(sc, IOAPIC_ID) & ~IOAPIC_ID_MASK) |
+		    (sc->sc_apicid << IOAPIC_ID_SHIFT));
+	}
+
+	return (0);
 }
 
 /*
@@ -678,6 +694,8 @@ apic_intr_establish(int irq, int type, int level, int (*ih_fun)(void *),
 		pin->ip_type = type;
 		break;
 	case IST_EDGE:
+		intr_shared_edge = 1;
+		/* FALLTHROUGH */
 	case IST_LEVEL:
 		if (type == pin->ip_type)
 			break;
@@ -714,8 +732,7 @@ apic_intr_establish(int irq, int type, int level, int (*ih_fun)(void *),
 	ih->ih_next = NULL;
 	ih->ih_level = level;
 	ih->ih_irq = irq;
-	evcount_attach(&ih->ih_count, ih_what, (void *)&pin->ip_vector,
-	    &evcount_intr);
+	evcount_attach(&ih->ih_count, ih_what, &pin->ip_vector);
 
 	*p = ih;
 

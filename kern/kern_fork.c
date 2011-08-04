@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.120 2010/07/19 23:00:15 guenther Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.128 2011/07/07 18:00:33 guenther Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -158,11 +158,15 @@ process_new(struct proc *newproc, struct proc *parentproc)
 
 	pr = pool_get(&process_pool, PR_WAITOK);
 	pr->ps_mainproc = newproc;
+	parent = parentproc->p_p;
+
 	TAILQ_INIT(&pr->ps_threads);
 	TAILQ_INSERT_TAIL(&pr->ps_threads, newproc, p_thr_link);
+	LIST_INSERT_AFTER(parent, pr, ps_pglist);
+	pr->ps_pptr = parent;
+	LIST_INSERT_HEAD(&parent->ps_children, pr, ps_sibling);
+	LIST_INIT(&pr->ps_children);
 	pr->ps_refcnt = 1;
-
-	parent = parentproc->p_p;
 
 	/*
 	 * Make a process structure for the new process.
@@ -179,6 +183,11 @@ process_new(struct proc *newproc, struct proc *parentproc)
 	bcopy(parent->ps_cred, pr->ps_cred, sizeof(*pr->ps_cred));
 	crhold(parent->ps_cred->pc_ucred);
 	pr->ps_limit->p_refcnt++;
+
+	pr->ps_flags = parent->ps_flags & (PS_SUGID | PS_SUGIDEXEC);
+	if (parent->ps_session->s_ttyvp != NULL &&
+	    parent->ps_flags & PS_CONTROLT)
+		atomic_setbits_int(&pr->ps_flags, PS_CONTROLT);
 
 	newproc->p_p = pr;
 }
@@ -197,8 +206,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	int count;
 	vaddr_t uaddr;
 	int s;
-	extern void endtsleep(void *);
-	extern void realitexpire(void *);
 	struct  ptrace_state *newptstat = NULL;
 #if NSYSTRACE > 0
 	void *newstrp = NULL;
@@ -243,7 +250,8 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	}
 
 	uaddr = uvm_km_kmemalloc_pla(kernel_map, uvm.kernel_object, USPACE,
-	    USPACE_ALIGN, 0, dma_constraint.ucr_low, dma_constraint.ucr_high,
+	    USPACE_ALIGN, UVM_KMF_ZERO,
+	    no_constraint.ucr_low, no_constraint.ucr_high,
 	    0, 0, USPACE/PAGE_SIZE);
 	if (uaddr == 0) {
 		chgproccnt(uid, -1);
@@ -294,7 +302,6 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	 */
 	if (p1->p_flag & P_PROFIL)
 		startprofclock(p2);
-	atomic_setbits_int(&p2->p_flag, p1->p_flag & (P_SUGID | P_SUGIDEXEC));
 	if (flags & FORK_PTRACE)
 		atomic_setbits_int(&p2->p_flag, p1->p_flag & P_TRACED);
 
@@ -310,14 +317,12 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	else
 		p2->p_fd = fdcopy(p1);
 
-	if (p1->p_session->s_ttyvp != NULL && p1->p_flag & P_CONTROLT)
-		atomic_setbits_int(&p2->p_flag, P_CONTROLT);
-	if (flags & FORK_PPWAIT)
-		atomic_setbits_int(&p2->p_flag, P_PPWAIT);
-	p2->p_pptr = p1;
+	if (flags & FORK_PPWAIT) {
+		atomic_setbits_int(&p2->p_p->ps_flags, PS_PPWAIT);
+		atomic_setbits_int(&p1->p_p->ps_flags, PS_ISPWAIT);
+	}
 	if (flags & FORK_NOZOMBIE)
 		atomic_setbits_int(&p2->p_flag, P_NOZOMBIE);
-	LIST_INIT(&p2->p_children);
 
 #ifdef KTRACE
 	/*
@@ -395,12 +400,12 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 
 	LIST_INSERT_HEAD(&allproc, p2, p_list);
 	LIST_INSERT_HEAD(PIDHASH(p2->p_pid), p2, p_hash);
-	LIST_INSERT_HEAD(&p1->p_children, p2, p_sibling);
-	LIST_INSERT_AFTER(p1, p2, p_pglist);
+
 	if (p2->p_flag & P_TRACED) {
 		p2->p_oppid = p1->p_pid;
-		if (p2->p_pptr != p1->p_pptr)
-			proc_reparent(p2, p1->p_pptr);
+		if ((flags & FORK_THREAD) == 0 &&
+		    p2->p_p->ps_pptr != p1->p_p->ps_pptr)
+			proc_reparent(p2->p_p, p1->p_p->ps_pptr);
 
 		/*
 		 * Set ptrace status.
@@ -457,12 +462,14 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 
 	/*
 	 * Preserve synchronization semantics of vfork.  If waiting for
-	 * child to exec or exit, set P_PPWAIT on child, and sleep on our
-	 * proc (in case of exit).
+	 * child to exec or exit, set PS_PPWAIT on child and PS_ISPWAIT
+	 * on ourselves, and sleep on our process for the latter flag
+	 * to go away.
+	 * XXX Need to stop other rthreads in the parent
 	 */
 	if (flags & FORK_PPWAIT)
-		while (p2->p_flag & P_PPWAIT)
-			tsleep(p1, PWAIT, "ppwait", 0);
+		while (p1->p_p->ps_flags & PS_ISPWAIT)
+			tsleep(p1->p_p, PWAIT, "ppwait", 0);
 
 	/*
 	 * If we're tracing the child, alert the parent too.
@@ -475,7 +482,8 @@ fork1(struct proc *p1, int exitsig, int flags, void *stack, size_t stacksize,
 	 * marking us as parent via retval[1].
 	 */
 	if (retval != NULL) {
-		retval[0] = p2->p_pid;
+		retval[0] = p2->p_pid +
+		    (flags & FORK_THREAD ? THREAD_PID_OFFSET : 0);
 		retval[1] = 0;
 	}
 	return (0);
@@ -493,9 +501,10 @@ pidtaken(pid_t pid)
 		return (1);
 	if (pgfind(pid) != NULL)
 		return (1);
-	LIST_FOREACH(p, &zombproc, p_list)
-		if (p->p_pid == pid || (p->p_pgrp && p->p_pgrp->pg_id == pid))
+	LIST_FOREACH(p, &zombproc, p_list) {
+		if (p->p_pid == pid || (p->p_p->ps_pgrp && p->p_p->ps_pgrp->pg_id == pid))
 			return (1);
+	}
 	return (0);
 }
 
@@ -517,6 +526,6 @@ proc_trampoline_mp(void)
 	SCHED_ASSERT_UNLOCKED();
 	KASSERT(__mp_lock_held(&kernel_lock) == 0);
 
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 }
 #endif

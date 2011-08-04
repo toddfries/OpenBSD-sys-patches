@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2010/05/31 22:21:44 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.6 2011/07/10 17:31:38 deraadt Exp $
 
 S=	${.CURDIR}/../..
 KFILE=	GENERIC
@@ -10,7 +10,7 @@ TAGS=	${.CURDIR}/tags
 
 NOPROG=
 NOMAN=
-SUBDIR=	boot
+SUBDIR=	stand
 
 # config the fattest kernel we can find into a temporary dir
 # to create a Makefile.  Then use make to pull some variables
@@ -24,10 +24,11 @@ tags::
 	eval "_mach=\"`make -V _mach -f $${TDIR}/Makefile`\"" && \
 	eval "_machdir=\$S/arch/$${_mach}" && \
 	eval "_archdir=\$S/arch/$${_arch}" && \
+	eval "HFILES=\"`find $S \( -path $S/'arch' -o -path $S/stand -o -path $S/lib/libsa -o -path $S'/lib/libkern/arch' \) -prune -o -name '*.h'; find $${_machdir} $${_archdir} $S/lib/libkern/arch/$${_mach} \( -name boot -o -name stand \) -prune -o -name '*.h'`\"" && \
 	eval "SFILES=\"`make -V SFILES -f $${TDIR}/Makefile`\"" && \
 	eval "CFILES=\"`make -V CFILES -f $${TDIR}/Makefile`\"" && \
 	eval "AFILES=\"`make -V AFILES -f $${TDIR}/Makefile`\"" && \
-	ctags -wdt -f ${TAGS} $${CFILES} && \
+	ctags -wd -f ${TAGS} $${CFILES} $${HFILES} && \
 	egrep "^[_A-Z]*ENTRY[_A-Z]*\(.*\)" $${SFILES} $${AFILES} | \
 	    sed "s;\\([^:]*\\):\\([^(]*\\)(\\([^, )]*\\)\\(.*\\);\\3	\\1	/^\\2(\\3\\4$$/;" \
 	    >> ${TAGS} && \

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.20 2008/07/18 16:40:17 kurt Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.23 2011/05/30 22:25:21 oga Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.1 1996/09/30 16:34:38 ws Exp $	*/
 
 /*-
@@ -47,7 +47,11 @@
 #endif
 
 #ifndef	MAXDSIZ
-#define	MAXDSIZ		(512*1024*1024)		/* max data size */
+#define	MAXDSIZ		(2UL*1024*1024*1024)	/* max data size */
+#endif
+
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
 #endif
 
 #ifndef	DFLSSIZ
@@ -96,9 +100,6 @@ extern vaddr_t ppc_kvm_stolen;
 #define	VM_PHYSSEG_MAX	32	/* actually we could have this many segments */
 #define	VM_PHYSSEG_STRAT	VM_PSTRAT_BSEARCH
 #define	VM_PHYSSEG_NOADD	/* can't add RAM after vm_mem_init */
-
-#define VM_NFREELIST		1
-#define VM_FREELIST_DEFAULT	0
 
 #ifdef _KERNEL
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty_pty.c,v 1.48 2010/07/02 19:57:15 tedu Exp $	*/
+/*	$OpenBSD: tty_pty.c,v 1.57 2011/07/05 04:48:02 guenther Exp $	*/
 /*	$NetBSD: tty_pty.c,v 1.33.4.1 1996/06/02 09:08:11 mrg Exp $	*/
 
 /*
@@ -118,11 +118,7 @@ dev_t	pty_getfree(void);
 void	ptmattach(int);
 int	ptmopen(dev_t, int, int, struct proc *);
 int	ptmclose(dev_t, int, int, struct proc *);
-int	ptmread(dev_t, struct uio *, int);
-int	ptmwrite(dev_t, struct uio *, int);
-int	ptmwrite(dev_t, struct uio *, int);
 int	ptmioctl(dev_t, u_long, caddr_t, int, struct proc *p);
-int	ptmpoll(dev_t, int, struct proc *p);
 static int ptm_vn_open(struct nameidata *);
 
 void
@@ -287,19 +283,20 @@ int
 ptsread(dev_t dev, struct uio *uio, int flag)
 {
 	struct proc *p = curproc;
+	struct process *pr = p->p_p;
 	struct pt_softc *pti = pt_softc[minor(dev)];
 	struct tty *tp = pti->pt_tty;
 	int error = 0;
 
 again:
 	if (pti->pt_flags & PF_REMOTE) {
-		while (isbackground(p, tp)) {
-			if ((p->p_sigignore & sigmask(SIGTTIN)) ||
+		while (isbackground(pr, tp)) {
+			if ((p->p_sigacts->ps_sigignore & sigmask(SIGTTIN)) ||
 			    (p->p_sigmask & sigmask(SIGTTIN)) ||
-			    p->p_pgrp->pg_jobc == 0 ||
-			    p->p_flag & P_PPWAIT)
+			    pr->ps_pgrp->pg_jobc == 0 ||
+			    pr->ps_flags & PS_PPWAIT)
 				return (EIO);
-			pgsignal(p->p_pgrp, SIGTTIN, 1);
+			pgsignal(pr->ps_pgrp, SIGTTIN, 1);
 			error = ttysleep(tp, &lbolt,
 			    TTIPRI | PCATCH, ttybg, 0);
 			if (error)
@@ -467,7 +464,9 @@ ptcread(dev_t dev, struct uio *uio, int flag)
 				if (pti->pt_send & TIOCPKT_IOCTL) {
 					cc = MIN(uio->uio_resid,
 						sizeof(tp->t_termios));
-					uiomove(&tp->t_termios, cc, uio);
+					error = uiomove(&tp->t_termios, cc, uio);
+					if (error)
+						return (error);
 				}
 				pti->pt_send = 0;
 				return (0);
@@ -742,7 +741,7 @@ ptckqfilter(dev_t dev, struct knote *kn)
 		kn->kn_fop = &ptcwrite_filtops;
 		break;
 	default:
-		return (1);
+		return (EINVAL);
 	}
 
 	kn->kn_hook = (caddr_t)pti;
@@ -1079,18 +1078,6 @@ ptmclose(dev_t dev, int flag, int mode, struct proc *p)
 }
 
 int
-ptmread(dev_t dev, struct uio *uio, int ioflag)
-{
-	return (EIO);
-}
-
-int
-ptmwrite(dev_t dev, struct uio *uio, int ioflag)
-{
-	return (EIO);
-}
-
-int
 ptmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	dev_t newdev, error;
@@ -1105,7 +1092,6 @@ ptmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	struct ucred *cred;
 	struct ptmget *ptm = (struct ptmget *)data;
 
-	error = 0;
 	switch (cmd) {
 	case PTMGET:
 		fdplock(fdp);
@@ -1221,10 +1207,4 @@ bad:
 	closef(sfp, p);
 	fdpunlock(fdp);
 	return (error);
-}
-
-int
-ptmpoll(dev_t dev, int events, struct proc *p)
-{
-	return (seltrue(dev, events, p));
 }

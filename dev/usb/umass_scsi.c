@@ -1,4 +1,4 @@
-/*	$OpenBSD: umass_scsi.c,v 1.30 2010/06/28 18:31:02 krw Exp $ */
+/*	$OpenBSD: umass_scsi.c,v 1.38 2011/07/17 22:46:48 matthew Exp $ */
 /*	$NetBSD: umass_scsipi.c,v 1.9 2003/02/16 23:14:08 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -30,8 +30,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "atapiscsi.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -57,7 +55,8 @@
 struct umass_scsi_softc {
 	struct umassbus_softc	base;
 	struct scsi_link	sc_link;
-	struct scsi_adapter	sc_adapter;
+	struct scsi_iopool	sc_iopool;
+	int			sc_open;
 
 	struct scsi_sense	sc_sense_cmd;
 };
@@ -66,16 +65,24 @@ struct umass_scsi_softc {
 #define UMASS_SCSIID_HOST	0x00
 #define UMASS_SCSIID_DEVICE	0x01
 
-#define UMASS_ATAPI_DRIVE	0
-
+int umass_scsi_probe(struct scsi_link *);
 void umass_scsi_cmd(struct scsi_xfer *);
 void umass_scsi_minphys(struct buf *, struct scsi_link *);
+
+struct scsi_adapter umass_scsi_switch = {
+	umass_scsi_cmd,
+	umass_scsi_minphys,
+	umass_scsi_probe
+};
 
 void umass_scsi_cb(struct umass_softc *sc, void *priv, int residue,
 		   int status);
 void umass_scsi_sense_cb(struct umass_softc *sc, void *priv, int residue,
 			 int status);
 struct umass_scsi_softc *umass_scsi_setup(struct umass_softc *);
+
+void *umass_io_get(void *);
+void umass_io_put(void *, void *);
 
 int
 umass_scsi_attach(struct umass_softc *sc)
@@ -105,7 +112,6 @@ umass_scsi_attach(struct umass_softc *sc)
 	return (0);
 }
 
-#if NATAPISCSI > 0
 int
 umass_atapi_attach(struct umass_softc *sc)
 {
@@ -133,7 +139,6 @@ umass_atapi_attach(struct umass_softc *sc)
 
 	return (0);
 }
-#endif
 
 struct umass_scsi_softc *
 umass_scsi_setup(struct umass_softc *sc)
@@ -144,18 +149,47 @@ umass_scsi_setup(struct umass_softc *sc)
 
 	sc->bus = (struct umassbus_softc *)scbus;
 
-	/* Fill in the adapter. */
-	scbus->sc_adapter.scsi_cmd = umass_scsi_cmd;
-	scbus->sc_adapter.scsi_minphys = umass_scsi_minphys;
+	scsi_iopool_init(&scbus->sc_iopool, scbus, umass_io_get, umass_io_put);
 
 	/* Fill in the link. */
 	scbus->sc_link.adapter_buswidth = 2;
-	scbus->sc_link.adapter = &scbus->sc_adapter;
+	scbus->sc_link.adapter = &umass_scsi_switch;
 	scbus->sc_link.adapter_softc = sc;
 	scbus->sc_link.openings = 1;
 	scbus->sc_link.quirks |= SDEV_ONLYBIG | sc->sc_busquirks;
+	scbus->sc_link.pool = &scbus->sc_iopool;
 
 	return (scbus);
+}
+
+int
+umass_scsi_probe(struct scsi_link *link)
+{
+	struct umass_softc *sc = link->adapter_softc;
+	struct usb_device_info udi;
+	size_t len;
+
+	/* dont fake devids when more than one scsi device can attach. */
+	if (sc->maxlun > 0)
+		return (0);
+
+	usbd_fill_deviceinfo(sc->sc_udev, &udi, 1);
+
+	/*
+	 * Create a fake devid using the vendor and product ids and the last
+	 * 12 characters of serial number, as recommended by Section 4.1.1 of
+	 * the USB Mass Storage Class - Bulk Only Transport spec. 
+	 */
+	len = strlen(udi.udi_serial);
+	if (len >= 12) {
+		char buf[21];
+		snprintf(buf, sizeof(buf), "%04x%04x%s", udi.udi_vendorNo,
+		    udi.udi_productNo, udi.udi_serial + len - 12);
+		link->id = devid_alloc(DEVID_SERIAL, DEVID_F_PRINT,
+		    sizeof(buf) - 1, buf);
+	}
+
+	return (0);
 }
 
 void
@@ -417,3 +451,30 @@ umass_scsi_sense_cb(struct umass_softc *sc, void *priv, int residue,
 	scsi_done(xs);
 }
 
+void *
+umass_io_get(void *cookie)
+{
+	struct umass_scsi_softc *scbus = cookie;
+	void *io = NULL;
+	int s;
+
+	s = splusb();
+	if (!scbus->sc_open) {
+		scbus->sc_open = 1;
+		io = scbus; /* just has to be non-NULL */
+	}
+	splx(s);
+
+	return (io);
+}
+
+void
+umass_io_put(void *cookie, void *io)
+{
+	struct umass_scsi_softc *scbus = cookie;
+	int s;
+
+	s = splusb();
+	scbus->sc_open = 0;
+	splx(s);
+}

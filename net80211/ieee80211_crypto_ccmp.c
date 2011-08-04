@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_crypto_ccmp.c,v 1.10 2009/09/24 16:03:10 damien Exp $	*/
+/*	$OpenBSD: ieee80211_crypto_ccmp.c,v 1.12 2011/04/05 11:48:28 blambert Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -176,7 +176,7 @@ ieee80211_ccmp_encrypt(struct ieee80211com *ic, struct mbuf *m0,
 	MGET(n0, M_DONTWAIT, m0->m_type);
 	if (n0 == NULL)
 		goto nospace;
-	if (m_dup_pkthdr(n0, m0))
+	if (m_dup_pkthdr(n0, m0, M_DONTWAIT))
 		goto nospace;
 	n0->m_pkthdr.len += IEEE80211_CCMP_HDRLEN;
 	n0->m_len = MHLEN;
@@ -355,7 +355,7 @@ ieee80211_ccmp_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 	MGET(n0, M_DONTWAIT, m0->m_type);
 	if (n0 == NULL)
 		goto nospace;
-	if (m_dup_pkthdr(n0, m0))
+	if (m_dup_pkthdr(n0, m0, M_DONTWAIT))
 		goto nospace;
 	n0->m_pkthdr.len -= IEEE80211_CCMP_HDRLEN + IEEE80211_CCMP_MICLEN;
 	n0->m_len = MHLEN;
@@ -445,7 +445,7 @@ ieee80211_ccmp_decrypt(struct ieee80211com *ic, struct mbuf *m0,
 
 	/* check that it matches the MIC in received frame */
 	m_copydata(m, moff, IEEE80211_CCMP_MICLEN, mic0);
-	if (memcmp(mic0, b, IEEE80211_CCMP_MICLEN) != 0) {
+	if (timingsafe_bcmp(mic0, b, IEEE80211_CCMP_MICLEN) != 0) {
 		ic->ic_stats.is_ccmp_dec_errs++;
 		m_freem(m0);
 		m_freem(n0);

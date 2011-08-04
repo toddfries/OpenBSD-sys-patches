@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rl_pci.c,v 1.18 2009/12/21 18:14:51 naddy Exp $ */
+/*	$OpenBSD: if_rl_pci.c,v 1.21 2011/04/03 15:36:02 jasper Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -93,7 +93,8 @@ struct rl_pci_softc {
 };
 
 struct cfattach rl_pci_ca = {
-	sizeof(struct rl_pci_softc), rl_pci_match, rl_pci_attach, rl_pci_detach
+	sizeof(struct rl_pci_softc), rl_pci_match, rl_pci_attach, rl_pci_detach,
+	rl_activate
 };
 
 const struct pci_matchid rl_pci_devices[] = {
@@ -124,7 +125,7 @@ rl_pci_match(struct device *parent, void *match, void *aux)
 		return (1);
 
 	return (pci_matchbyid((struct pci_attach_args *)aux, rl_pci_devices,
-	    sizeof(rl_pci_devices)/sizeof(rl_pci_devices[0])));
+	    nitems(rl_pci_devices)));
 }
 
 void
@@ -201,4 +202,3 @@ rl_pci_detach(struct device *self, int flags)
 
 	return (0);
 }
-

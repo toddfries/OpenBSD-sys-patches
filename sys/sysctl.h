@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.104 2010/06/29 00:28:14 tedu Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.116 2011/07/08 18:38:55 yasuoka Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -42,9 +42,7 @@
  * These are for the eproc structure defined below.
  */
 #ifndef _KERNEL
-#include <sys/time.h>
-#include <sys/ucred.h>
-#include <sys/proc.h>
+#include <sys/proc.h>		/* for SRUN, SIDL, etc */
 #include <sys/resource.h>
 #endif
 
@@ -126,9 +124,7 @@ struct ctlname {
 #define	KERN_HOSTID		11	/* int: host identifier */
 #define	KERN_CLOCKRATE		12	/* struct: struct clockinfo */
 #define	KERN_VNODE		13	/* struct: vnode structures */
-#if defined(_KERNEL) || defined(_LIBKVM)
-#define	KERN_PROC		14	/* struct: process entries */
-#endif
+/*define gap: was KERN_PROC	14	*/
 #define	KERN_FILE		15	/* struct: file entries */
 #define	KERN_PROF		16	/* node: kernel profiling info */
 #define	KERN_POSIX1		17	/* int: POSIX.1 version */
@@ -180,7 +176,8 @@ struct ctlname {
 #define KERN_INTRCNT		63	/* node: interrupt counters */
 #define	KERN_WATCHDOG		64	/* node: watchdog */
 #define	KERN_EMUL		65	/* node: emuls */
-#define	KERN_PROC2		66	/* struct: process entries */
+#define	KERN_PROC		66	/* struct: process entries */
+#define	KERN_PROC2		KERN_PROC	/* backwards compat name */
 #define	KERN_MAXCLUSTERS	67	/* number of mclusters */
 #define KERN_EVCOUNT		68	/* node: event counters */
 #define	KERN_TIMECOUNTER	69	/* node: timecounter */
@@ -189,7 +186,10 @@ struct ctlname {
 #define	KERN_CACHEPCT		72	/* buffer cache % of physmem */
 #define	KERN_FILE2		73	/* struct: file entries */
 #define	KERN_RTHREADS		74	/* kernel rthreads support enabled */
-#define	KERN_MAXID		75	/* number of valid kern ids */
+#define	KERN_CONSDEV		75	/* dev_t: console terminal device */
+#define	KERN_NETLIVELOCKS	76	/* int: number of network livelocks */
+#define	KERN_POOL_DEBUG		77	/* int: enable pool_debug */
+#define	KERN_MAXID		78	/* number of valid kern ids */
 
 #define	CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -206,7 +206,7 @@ struct ctlname {
 	{ "hostid", CTLTYPE_INT }, \
 	{ "clockrate", CTLTYPE_STRUCT }, \
 	{ "vnode", CTLTYPE_STRUCT }, \
-	{ "proc", CTLTYPE_STRUCT }, \
+	{ "gap", 0 }, \
 	{ "file", CTLTYPE_STRUCT }, \
 	{ "profiling", CTLTYPE_NODE }, \
 	{ "posix1version", CTLTYPE_INT }, \
@@ -258,7 +258,7 @@ struct ctlname {
 	{ "intrcnt", CTLTYPE_NODE }, \
  	{ "watchdog", CTLTYPE_NODE }, \
  	{ "emul", CTLTYPE_NODE }, \
- 	{ "proc2", CTLTYPE_STRUCT }, \
+ 	{ "proc", CTLTYPE_STRUCT }, \
  	{ "maxclusters", CTLTYPE_INT }, \
 	{ "evcount", CTLTYPE_NODE }, \
  	{ "timecounter", CTLTYPE_NODE }, \
@@ -267,6 +267,9 @@ struct ctlname {
 	{ "bufcachepercent", CTLTYPE_INT }, \
 	{ "file2", CTLTYPE_STRUCT }, \
 	{ "rthreads", CTLTYPE_INT }, \
+	{ "consdev", CTLTYPE_STRUCT }, \
+	{ "netlivelocks", CTLTYPE_INT }, \
+	{ "pool_debug", CTLTYPE_INT }, \
 }
 
 /*
@@ -306,43 +309,7 @@ struct ctlname {
 #define KERN_PROC_NENV		4
 
 /*
- * KERN_PROC subtype ops return arrays of augmented proc structures:
- */
-struct kinfo_proc {
-	struct	proc kp_proc;			/* proc structure */
-	struct	eproc {
-		struct	proc *e_paddr;		/* address of proc */
-		struct	session *e_sess;	/* session pointer */
-		struct	pcred e_pcred;		/* process credentials */
-		struct	ucred e_ucred;		/* current credentials */
-		struct	vmspace e_vm;		/* address space */
-		struct  pstats e_pstats;	/* process stats */
-		int	e_pstats_valid;		/* pstats valid? */
-		pid_t	e_ppid;			/* parent process id */
-		pid_t	e_pgid;			/* process group id */
-		short	e_jobc;			/* job control counter */
-		dev_t	e_tdev;			/* controlling tty dev */
-		pid_t	e_tpgid;		/* tty process group id */
-		struct	session *e_tsess;	/* tty session pointer */
-#define	WMESGLEN	7
-		char	e_wmesg[WMESGLEN+1];	/* wchan message */
-		segsz_t e_xsize;		/* text size */
-		short	e_xrssize;		/* text rss */
-		short	e_xccount;		/* text references */
-		short	e_xswrss;
-		long	e_flag;
-#define	EPROC_CTTY	0x01	/* controlling tty vnode active */
-#define	EPROC_SLEADER	0x02	/* session leader */
-		char	e_login[MAXLOGNAME];	/* setlogin() name */
-#define	EMULNAMELEN	7
-		char	e_emul[EMULNAMELEN+1];	/* syscall emulation name */
-	        rlim_t	e_maxrss;
-		struct plimit *e_limit;
-	} kp_eproc;
-};
-
-/*
- * KERN_PROC2 subtype ops return arrays of relatively fixed size
+ * KERN_PROC subtype ops return arrays of relatively fixed size
  * structures of process info.   Use 8 byte alignment, and new
  * elements should only be added to the end of this structure so
  * binary compatibility can be preserved.
@@ -355,7 +322,10 @@ struct kinfo_proc {
 
 #define KI_NOCPU	(~(u_int64_t)0)
 
-struct kinfo_proc2 {
+struct kinfo_proc {
+#ifndef kinfo_proc2
+#define kinfo_proc2	kinfo_proc
+#endif
 	u_int64_t p_forw;		/* PTR: linked run/sleep queue. */
 	u_int64_t p_back;
 	u_int64_t p_paddr;		/* PTR: address of proc */
@@ -370,7 +340,9 @@ struct kinfo_proc2 {
 	u_int64_t p_tsess;		/* PTR: tty session pointer */
 	u_int64_t p_ru;			/* PTR: Exit information. XXX */
 
-	int32_t	p_eflag;		/* LONG: extra kinfo_proc2 flags */
+	int32_t	p_eflag;		/* LONG: extra kinfo_proc flags */
+#define	EPROC_CTTY	0x01	/* controlling tty vnode active */
+#define	EPROC_SLEADER	0x02	/* session leader */
 	int32_t	p_exitsig;		/* INT: signal to sent to parent on exit */
 	int32_t	p_flag;			/* INT: P_* flags. */
 
@@ -417,7 +389,7 @@ struct kinfo_proc2 {
 
 	int8_t	p_stat;			/* CHAR: S* process status (from LWP). */
 	u_int8_t p_priority;		/* U_CHAR: Process priority. */
-	u_int8_t p_usrpri;		/* U_CHAR: User-priority based on p_cpu and p_nice. */
+	u_int8_t p_usrpri;		/* U_CHAR: User-priority based on p_cpu and ps_nice. */
 	u_int8_t p_nice;		/* U_CHAR: Process "nice" value. */
 
 	u_int16_t p_xstat;		/* U_SHORT: Exit status for wait; also stop signal. */
@@ -474,11 +446,11 @@ struct kinfo_proc2 {
 #if defined(_KERNEL) || defined(_LIBKVM)
 
 /*
- * Macros for filling in the bulk of a kinfo_proc2 structure, used
- * in the kernel to implement the KERN_PROC2 sysctl and in userland
+ * Macros for filling in the bulk of a kinfo_proc structure, used
+ * in the kernel to implement the KERN_PROC sysctl and in userland
  * in libkvm to implement reading from kernel crashes.  The macro
  * arguments are all pointers; by name they are:
- *	kp - target kinfo_proc2 structure
+ *	kp - target kinfo_proc structure
  *	copy_str - a function or macro invoked as copy_str(dst,src,maxlen)
  *	    that has strlcpy or memcpy semantics; the destination is
  *	    pre-filled with zeros
@@ -492,6 +464,7 @@ struct kinfo_proc2 {
  *	vm - source struct vmspace
  *	lim - source struct plimits
  *	ps - source struct pstats
+ *	sa - source struct sigacts
  * There are some members that are not handled by these macros
  * because they're too painful to generalize: p_ppid, p_sid, p_tdev,
  * p_tpgid, p_tsess, p_vm_rssize, p_u[us]time_{sec,usec}, p_cpuid
@@ -499,7 +472,7 @@ struct kinfo_proc2 {
 
 #define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
-#define FILL_KPROC2(kp, copy_str, p, pr, pc, uc, pg, paddr, sess, vm, lim, ps) \
+#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, ps, sa) \
 do {									\
 	memset((kp), 0, sizeof(*(kp)));					\
 									\
@@ -509,11 +482,11 @@ do {									\
 	(kp)->p_limit = PTRTOINT64((pr)->ps_limit);			\
 	(kp)->p_vmspace = PTRTOINT64((p)->p_vmspace);			\
 	(kp)->p_sigacts = PTRTOINT64((p)->p_sigacts);			\
-	(kp)->p_sess = PTRTOINT64((p)->p_session);			\
+	(kp)->p_sess = PTRTOINT64((pr)->ps_session);			\
 	(kp)->p_ru = PTRTOINT64((p)->p_ru);				\
 									\
 	(kp)->p_exitsig = (p)->p_exitsig;				\
-	(kp)->p_flag = (p)->p_flag | P_INMEM;				\
+	(kp)->p_flag = (p)->p_flag | (pr)->ps_flags | P_INMEM;		\
 									\
 	(kp)->p_pid = (p)->p_pid;					\
 	(kp)->p__pgid = (pg)->pg_id;					\
@@ -546,11 +519,11 @@ do {									\
 									\
 	(kp)->p_siglist = (p)->p_siglist;				\
 	(kp)->p_sigmask = (p)->p_sigmask;				\
-	(kp)->p_sigignore = (p)->p_sigignore;				\
-	(kp)->p_sigcatch = (p)->p_sigcatch;				\
+	(kp)->p_sigignore = (sa) ? (sa)->ps_sigignore : 0;		\
+	(kp)->p_sigcatch = (sa) ? (sa)->ps_sigcatch : 0;		\
 									\
 	(kp)->p_stat = (p)->p_stat;					\
-	(kp)->p_nice = (p)->p_nice;					\
+	(kp)->p_nice = (pr)->ps_nice;					\
 									\
 	(kp)->p_xstat = (p)->p_xstat;					\
 	(kp)->p_acflag = (p)->p_acflag;					\
@@ -564,7 +537,7 @@ do {									\
 									\
 	if ((sess)->s_ttyvp)						\
 		(kp)->p_eflag |= EPROC_CTTY;				\
-	if ((sess)->s_leader == (paddr))				\
+	if ((sess)->s_leader == (praddr))				\
 		(kp)->p_eflag |= EPROC_SLEADER;				\
 									\
 	if ((p)->p_stat != SIDL && !P_ZOMBIE(p)) {			\
@@ -785,28 +758,29 @@ struct kinfo_file2 {
 /*
  * CTL_HW identifiers
  */
-#define	HW_MACHINE	 1		/* string: machine class */
-#define	HW_MODEL	 2		/* string: specific machine model */
-#define	HW_NCPU		 3		/* int: number of cpus being used */
-#define	HW_BYTEORDER	 4		/* int: machine byte order */
-#define	HW_PHYSMEM	 5		/* int: total memory */
-#define	HW_USERMEM	 6		/* int: non-kernel memory */
-#define	HW_PAGESIZE	 7		/* int: software page size */
-#define	HW_DISKNAMES	 8		/* strings: disk drive names */
-#define	HW_DISKSTATS	 9		/* struct: diskstats[] */
-#define	HW_DISKCOUNT	10		/* int: number of disks */
-#define	HW_SENSORS	11		/* node: hardware monitors */
-#define	HW_CPUSPEED	12		/* get CPU frequency */
-#define	HW_SETPERF	13		/* set CPU performance % */
-#define	HW_VENDOR	14		/* string: vendor name */
-#define	HW_PRODUCT	15		/* string: product name */
-#define	HW_VERSION	16		/* string: hardware version */
-#define	HW_SERIALNO	17		/* string: hardware serial number */
-#define	HW_UUID		18		/* string: universal unique id */
-#define	HW_PHYSMEM64	19		/* quad: total memory */
-#define	HW_USERMEM64	20		/* quad: non-kernel memory */
-#define	HW_NCPUFOUND	21		/* int: number of cpus found*/
-#define	HW_MAXID	22		/* number of valid hw ids */
+#define	HW_MACHINE		 1	/* string: machine class */
+#define	HW_MODEL		 2	/* string: specific machine model */
+#define	HW_NCPU			 3	/* int: number of cpus being used */
+#define	HW_BYTEORDER		 4	/* int: machine byte order */
+#define	HW_PHYSMEM		 5	/* int: total memory */
+#define	HW_USERMEM		 6	/* int: non-kernel memory */
+#define	HW_PAGESIZE		 7	/* int: software page size */
+#define	HW_DISKNAMES		 8	/* strings: disk drive names */
+#define	HW_DISKSTATS		 9	/* struct: diskstats[] */
+#define	HW_DISKCOUNT		10	/* int: number of disks */
+#define	HW_SENSORS		11	/* node: hardware monitors */
+#define	HW_CPUSPEED		12	/* get CPU frequency */
+#define	HW_SETPERF		13	/* set CPU performance % */
+#define	HW_VENDOR		14	/* string: vendor name */
+#define	HW_PRODUCT		15	/* string: product name */
+#define	HW_VERSION		16	/* string: hardware version */
+#define	HW_SERIALNO		17	/* string: hardware serial number */
+#define	HW_UUID			18	/* string: universal unique id */
+#define	HW_PHYSMEM64		19	/* quad: total memory */
+#define	HW_USERMEM64		20	/* quad: non-kernel memory */
+#define	HW_NCPUFOUND		21	/* int: number of cpus found*/
+#define	HW_ALLOWPOWERDOWN	22	/* allow power button shutdown */
+#define	HW_MAXID		23	/* number of valid hw ids */
 
 #define	CTL_HW_NAMES { \
 	{ 0, 0 }, \
@@ -831,6 +805,7 @@ struct kinfo_file2 {
 	{ "physmem", CTLTYPE_QUAD }, \
 	{ "usermem", CTLTYPE_QUAD }, \
 	{ "ncpufound", CTLTYPE_INT }, \
+	{ "allowpowerdown", CTLTYPE_INT }, \
 }
 
 /*
@@ -954,12 +929,10 @@ int sysctl_doprof(int *, u_int, void *, size_t *, void *, size_t);
 #endif
 int sysctl_dopool(int *, u_int, char *, size_t *);
 
-void fill_eproc(struct proc *, struct eproc *);
-
 void fill_file2(struct kinfo_file2 *, struct file *, struct filedesc *,
     int, struct vnode *, struct proc *, struct proc *);
 
-void fill_kproc2(struct proc *, struct kinfo_proc2 *);
+void fill_kproc(struct proc *, struct kinfo_proc *);
 
 int kern_sysctl(int *, u_int, void *, size_t *, void *, size_t,
 		     struct proc *);
@@ -989,6 +962,7 @@ extern void (*cpu_setperf)(int);
 
 int bpf_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 int pflow_sysctl(int *, u_int, void *, size_t *, void *, size_t);
+int pipex_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 
 #else	/* !_KERNEL */
 #include <sys/cdefs.h>

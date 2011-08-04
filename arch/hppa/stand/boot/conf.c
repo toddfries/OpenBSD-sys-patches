@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.22 2008/04/19 23:20:22 weingart Exp $	*/
+/*	$OpenBSD: conf.c,v 1.26 2011/04/17 09:49:48 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -26,13 +26,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <libsa.h>
 #include <lib/libsa/ufs.h>
 #include <lib/libsa/cd9660.h>
 #include <dev/cons.h>
 
-const char version[] = "1.1";
+const char version[] = "1.2";
 int	debug = 0;
 
 struct fs_ops file_system[] = {
@@ -43,14 +44,14 @@ struct fs_ops file_system[] = {
 	{ lif_open,    lif_close,    lif_read,    lif_write,    lif_seek,
 	  lif_stat,    lif_readdir    },
 };
-int nfsys = NENTS(file_system);
+int nfsys = nitems(file_system);
 
 struct devsw devsw[] = {
 	{ "dk",	iodcstrategy, dkopen, dkclose, noioctl },
 	{ "ct",	iodcstrategy, ctopen, ctclose, noioctl },
 	{ "lf", iodcstrategy, lfopen, lfclose, noioctl }
 };
-int	ndevs = NENTS(devsw);
+int	ndevs = nitems(devsw);
 
 struct consdev	constab[] = {
 	{ ite_probe, ite_init, ite_getc, ite_putc },

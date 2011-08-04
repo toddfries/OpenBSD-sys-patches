@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.145 2010/07/02 00:49:43 claudio Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.151 2011/07/09 00:47:18 henning Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -151,15 +151,6 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <net/pipex.h>
 #endif
 
-#ifdef NETATALK
-#include <netatalk/at.h>
-#include <netatalk/at_var.h>
-#include <netatalk/at_extern.h>
-
-extern u_char	at_org_code[ 3 ];
-extern u_char	aarp_org_code[ 3 ];
-#endif /* NETATALK */
-
 #ifdef MPLS
 #include <netmpls/mpls.h>
 #endif /* MPLS */
@@ -172,19 +163,11 @@ u_char etherbroadcastaddr[ETHER_ADDR_LEN] =
 int
 ether_ioctl(struct ifnet *ifp, struct arpcom *arp, u_long cmd, caddr_t data)
 {
-	struct ifaddr *ifa = (struct ifaddr *)data;
 	struct ifreq *ifr = (struct ifreq *)data;
 	int error = 0;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
-		switch (ifa->ifa_addr->sa_family) {
-#ifdef NETATALK
-		case AF_APPLETALK:
-			/* Nothing to do. */
-			break;
-#endif /* NETATALK */
-		}
 		break;
 
 	case SIOCSIFMTU:
@@ -282,10 +265,12 @@ ether_output(ifp0, m0, dst, rt0)
 			if (rt->rt_gwroute == 0)
 				goto lookup;
 			if (((rt = rt->rt_gwroute)->rt_flags & RTF_UP) == 0) {
-				rtfree(rt); rt = rt0;
-			lookup: rt->rt_gwroute = rtalloc1(rt->rt_gateway,
-			    RT_REPORT, ifp->if_rdomain);
-				if ((rt = rt->rt_gwroute) == 0)
+				rtfree(rt);
+				rt = rt0;
+			lookup:
+				rt->rt_gwroute = rtalloc1(rt->rt_gateway,
+				    RT_REPORT, ifp->if_rdomain);
+				if ((rt = rt->rt_gwroute) == NULL)
 					senderr(EHOSTUNREACH);
 			}
 		}
@@ -314,56 +299,6 @@ ether_output(ifp0, m0, dst, rt0)
 		etype = htons(ETHERTYPE_IPV6);
 		break;
 #endif
-#ifdef NETATALK
-	case AF_APPLETALK: {
-		struct at_ifaddr *aa;
-
-		if (!aarpresolve(ac, m, (struct sockaddr_at *)dst, edst)) {
-#ifdef NETATALKDEBUG
-			extern char *prsockaddr(struct sockaddr *);
-			printf("aarpresolv: failed for %s\n", prsockaddr(dst));
-#endif /* NETATALKDEBUG */
-			return (0);
-		}
-
-		/*
-		 * ifaddr is the first thing in at_ifaddr
-		 */
-		aa = (struct at_ifaddr *)at_ifawithnet(
-			(struct sockaddr_at *)dst,
-			TAILQ_FIRST(&ifp->if_addrlist));
-		if (aa == 0)
-			goto bad;
-
-		/*
-		 * In the phase 2 case, we need to prepend an mbuf for the llc
-		 * header. Since we must preserve the value of m, which is
-		 * passed to us by value, we m_copy() the first mbuf,
-		 * and use it for our llc header.
-		 */
-		if (aa->aa_flags & AFA_PHASE2) {
-			struct llc llc;
-
-			M_PREPEND(m, AT_LLC_SIZE, M_DONTWAIT);
-			if (m == NULL)
-				return (0);
-			/*
-			 * FreeBSD doesn't count the LLC len in
-			 * ifp->obytes, so they increment a length
-			 * field here. We don't do this.
-			 */
-			llc.llc_dsap = llc.llc_ssap = LLC_SNAP_LSAP;
-			llc.llc_control = LLC_UI;
-			bcopy(at_org_code, llc.llc_snap.org_code,
-				sizeof(at_org_code));
-			llc.llc_snap.ether_type = htons( ETHERTYPE_AT );
-			bcopy(&llc, mtod(m, caddr_t), AT_LLC_SIZE);
-			etype = htons(m->m_pkthdr.len);
-		} else {
-			etype = htons(ETHERTYPE_AT);
-		}
-		} break;
-#endif /* NETATALK */
 #ifdef MPLS
        case AF_MPLS:
 		if (rt)
@@ -668,7 +603,7 @@ ether_input(ifp0, eh, m)
 	 * If packet has been filtered by the bpf listener, drop it now
 	 */
 	if (m->m_flags & M_FILDROP) {
-		m_free(m);
+		m_freem(m);
 		return;
 	}
 
@@ -721,27 +656,9 @@ decapsulate:
 		inq = &ip6intrq;
 		break;
 #endif /* INET6 */
-#ifdef NETATALK
-	case ETHERTYPE_AT:
-		schednetisr(NETISR_ATALK);
-		inq = &atintrq1;
-		break;
-	case ETHERTYPE_AARP:
-		/* probably this should be done with a NETISR as well */
-		/* XXX queue this */
-		aarpinput((struct arpcom *)ifp, m);
-		goto done;
-#endif
 #if NPPPOE > 0 || defined(PIPEX)
 	case ETHERTYPE_PPPOEDISC:
 	case ETHERTYPE_PPPOE:
-		/* XXX we dont have this flag */
-		/*
-		if (m->m_flags & M_PROMISC) {
-			m_freem(m);
-			goto done;
-		}
-		*/
 #ifndef PPPOE_SERVER
 		if (m->m_flags & (M_MCAST | M_BCAST)) {
 			m_freem(m);
@@ -755,14 +672,14 @@ decapsulate:
 		eh_tmp = mtod(m, struct ether_header *);
 		bcopy(eh, eh_tmp, sizeof(struct ether_header));
 #ifdef PIPEX
-	{
-		struct pipex_session *session;
+		if (pipex_enable) {
+			struct pipex_session *session;
 
-		if ((session = pipex_pppoe_lookup_session(m)) != NULL) {
-			pipex_pppoe_input(m, session);
-			goto done;
+			if ((session = pipex_pppoe_lookup_session(m)) != NULL) {
+				pipex_pppoe_input(m, session);
+				goto done;
+			}
 		}
-	}
 #endif
 		if (etype == ETHERTYPE_PPPOEDISC)
 			inq = &pppoediscinq;
@@ -771,7 +688,7 @@ decapsulate:
 
 		schednetisr(NETISR_PPPOE);
 		break;
-#endif /* NPPPOE > 0 || defined(PIPEX) */
+#endif
 #ifdef AOE
 	case ETHERTYPE_AOE:
 		aoe_input(ifp, m);
@@ -791,45 +708,13 @@ decapsulate:
 		l = mtod(m, struct llc *);
 		switch (l->llc_dsap) {
 		case LLC_SNAP_LSAP:
-#ifdef NETATALK
-			/*
-			 * Some protocols (like Appletalk) need special
-			 * handling depending on if they are type II
-			 * or SNAP encapsulated. Everything else
-			 * gets handled by stripping off the SNAP header
-			 * and going back up to decapsulate.
-			 */
-			if (l->llc_control == LLC_UI &&
-			    l->llc_ssap == LLC_SNAP_LSAP &&
-			    Bcmp(&(l->llc_snap.org_code)[0],
-			    at_org_code, sizeof(at_org_code)) == 0 &&
-			    ntohs(l->llc_snap.ether_type) == ETHERTYPE_AT) {
-				inq = &atintrq2;
-				m_adj(m, AT_LLC_SIZE);
-				schednetisr(NETISR_ATALK);
-				break;
-			}
-
-			if (l->llc_control == LLC_UI &&
-			    l->llc_ssap == LLC_SNAP_LSAP &&
-			    Bcmp(&(l->llc_snap.org_code)[0],
-			    aarp_org_code, sizeof(aarp_org_code)) == 0 &&
-			    ntohs(l->llc_snap.ether_type) == ETHERTYPE_AARP) {
-				m_adj(m, AT_LLC_SIZE);
-				/* XXX Really this should use netisr too */
-				aarpinput((struct arpcom *)ifp, m);
-				goto done;
-			}
-#endif /* NETATALK */
 			if (l->llc_control == LLC_UI &&
 			    l->llc_dsap == LLC_SNAP_LSAP &&
 			    l->llc_ssap == LLC_SNAP_LSAP) {
 				/* SNAP */
 				if (m->m_pkthdr.len > etype)
 					m_adj(m, etype - m->m_pkthdr.len);
-				m->m_data += 6;		/* XXX */
-				m->m_len -= 6;		/* XXX */
-				m->m_pkthdr.len -= 6;	/* XXX */
+				m_adj(m, 6);
 				M_PREPEND(m, sizeof(*eh), M_DONTWAIT);
 				if (m == 0)
 					goto done;

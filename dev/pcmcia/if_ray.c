@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ray.c,v 1.41 2010/07/02 03:13:42 tedu Exp $	*/
+/*	$OpenBSD: if_ray.c,v 1.48 2011/07/07 19:13:29 henning Exp $	*/
 /*	$NetBSD: if_ray.c,v 1.21 2000/07/05 02:35:54 onoe Exp $	*/
 
 /*
@@ -172,7 +172,6 @@ struct ray_softc {
 	struct pcmcia_mem_handle	sc_mem;
 	int				sc_window;
 	void				*sc_ih;
-	void				*sc_pwrhook;
 	int				sc_flags;
 #define	RAY_FLAGS_RESUMEINIT	0x01
 #define	RAY_FLAGS_ATTACHED	0x02
@@ -633,8 +632,6 @@ ray_attach(struct device *parent, struct device *self, void *aux)
 	/* disable the card */
 	pcmcia_function_disable(sc->sc_pf);
 
-	sc->sc_pwrhook = powerhook_establish(ray_power, sc);
-
 	/* The attach is successful. */
 	sc->sc_flags |= RAY_FLAGS_ATTACHED;
 	return;
@@ -654,30 +651,17 @@ ray_activate(struct device *dev, int act)
 {
 	struct ray_softc *sc = (struct ray_softc *)dev;
 	struct ifnet *ifp = &sc->sc_if;
-	int s;
 
-	RAY_DPRINTF(("%s: activate\n", sc->sc_xname));
-
-	s = splnet();
 	switch (act) {
-	case DVACT_ACTIVATE:
-		pcmcia_function_enable(sc->sc_pf);
-		printf("%s:", sc->sc_dev.dv_xname);
-		ray_enable(sc);
-		printf("\n");
-		break;
-
 	case DVACT_DEACTIVATE:
 		if (ifp->if_flags & IFF_RUNNING)
 			ray_disable(sc);
-		if (sc->sc_ih) {
+		if (sc->sc_ih)
 			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
-			sc->sc_ih = NULL;
-		}
+		sc->sc_ih = NULL;
 		pcmcia_function_disable(sc->sc_pf);
 		break;
 	}
-	splx(s);
 	return (0);
 }
 
@@ -708,9 +692,6 @@ ray_detach(struct device *self, int flags)
 
 	ether_ifdetach(ifp);
 	if_detach(ifp);
-	if (sc->sc_pwrhook != NULL)
-		powerhook_disestablish(sc->sc_pwrhook);
-
 	return (0);
 }
 
@@ -850,7 +831,7 @@ ray_stop(struct ray_softc *sc)
 		wakeup(ray_report_params);
 	}
 	if (sc->sc_updreq) {
-		sc->sc_repreq->r_failcause = RAY_FAILCAUSE_EDEVSTOP;
+		sc->sc_updreq->r_failcause = RAY_FAILCAUSE_EDEVSTOP;
 		wakeup(ray_update_params);
 	}
 
@@ -906,17 +887,16 @@ ray_power(int why, void *arg)
 	/* can't do this until power hooks are called from thread */
 	sc = arg;
 	switch (why) {
-	case PWR_RESUME:
+	case DVACT_RESUME:
 		if ((sc->sc_flags & RAY_FLAGS_RESUMEINIT))
 			ray_init(sc);
 		break;
-	case PWR_SUSPEND:
+	case DVACT_SUSPEND:
 		if ((sc->sc_if.if_flags & IFF_RUNNING)) {
 			ray_stop(sc);
 			sc->sc_flags |= RAY_FLAGS_RESUMEINIT;
 		}
 		break;
-	case PWR_STANDBY:
 	default:
 		break;
 	}
@@ -1124,10 +1104,6 @@ ray_intr_start(struct ray_softc *sc)
 
 	ifp = &sc->sc_if;
 
-	RAY_DPRINTF(("%s: start free %d qlen %d qmax %d\n",
-	    ifp->if_xname, sc->sc_txfree, ifp->if_snd.ifq_len,
-	    ifp->if_snd.ifq_maxlen));
-
 	ray_cmd_cancel(sc, SCP_IFSTART);
 
 	if ((ifp->if_flags & IFF_RUNNING) == 0 || !sc->sc_havenet) {
@@ -1309,7 +1285,7 @@ ray_intr_start(struct ray_softc *sc)
 
 	if (firsti == RAY_CCS_LINK_NULL)
 		return;
-	i = 0;
+
 	if (!RAY_ECF_READY(sc)) {
 		/*
 		 * if this can really happen perhaps we need to save

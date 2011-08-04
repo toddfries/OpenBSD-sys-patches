@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lii.c,v 1.26 2010/02/08 12:28:42 jsing Exp $	*/
+/*	$OpenBSD: if_lii.c,v 1.30 2010/09/19 00:15:41 sthen Exp $	*/
 
 /*
  *  Copyright (c) 2007 The NetBSD Foundation.
@@ -122,6 +122,7 @@ struct lii_softc {
 
 int	lii_match(struct device *, void *, void *);
 void	lii_attach(struct device *, struct device *, void *);
+int	lii_activate(struct device *, int);
 
 struct cfdriver lii_cd = {
 	0,
@@ -132,7 +133,9 @@ struct cfdriver lii_cd = {
 struct cfattach lii_ca = {
 	sizeof(struct lii_softc),
 	lii_match,
-	lii_attach
+	lii_attach,
+	NULL,
+	lii_activate
 };
 
 int	lii_reset(struct lii_softc *);
@@ -268,7 +271,6 @@ lii_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = lii_ioctl;
 	ifp->if_start = lii_start;
 	ifp->if_watchdog = lii_watchdog;
-	ifp->if_init = lii_init;
 	IFQ_SET_READY(&ifp->if_snd);
 
 	if_attach(ifp);
@@ -281,6 +283,31 @@ deintr:
 unmap:
 	bus_space_unmap(sc->sc_mmiot, sc->sc_mmioh, sc->sc_mmios);
 	return;
+}
+
+int
+lii_activate(struct device *self, int act)
+{
+	struct lii_softc *sc = (struct lii_softc *)self;
+	struct ifnet *ifp = &sc->sc_ac.ac_if;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			lii_stop(ifp);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		rv = config_activate_children(self, act);
+		if (ifp->if_flags & IFF_UP)
+			lii_init(ifp);
+		break;
+	}
+	return (rv);
 }
 
 int
@@ -683,8 +710,8 @@ lii_init(struct ifnet *ifp)
 	val = LII_READ_4(sc, LII_MACC) & MACC_FDX;
 
 	val |= MACC_RX_EN | MACC_TX_EN | MACC_MACLP_CLK_PHY |
-	    MACC_TX_FLOW_EN | MACC_RX_FLOW_EN |
-	    MACC_ADD_CRC | MACC_PAD | MACC_BCAST_EN;
+	    MACC_TX_FLOW_EN | MACC_RX_FLOW_EN | MACC_ADD_CRC |
+	    MACC_PAD;
 
 	val |= 7 << MACC_PREAMBLE_LEN_SHIFT;
 	val |= 2 << MACC_HDX_LEFT_BUF_SHIFT;
@@ -1108,8 +1135,13 @@ lii_iff(struct lii_softc *sc)
 	uint32_t crc, val;
 
 	val = LII_READ_4(sc, LII_MACC);
-	val &= ~(MACC_ALLMULTI_EN | MACC_PROMISC_EN);
+	val &= ~(MACC_ALLMULTI_EN | MACC_BCAST_EN | MACC_PROMISC_EN);
 	ifp->if_flags &= ~IFF_ALLMULTI;
+
+	/*
+	 * Always accept broadcast frames.
+	 */
+	val |= MACC_BCAST_EN;
 
 	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
 		ifp->if_flags |= IFF_ALLMULTI;

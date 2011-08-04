@@ -1,4 +1,4 @@
-/*	$OpenBSD: atomic.h,v 1.6 2007/05/25 16:22:11 art Exp $	*/
+/*	$OpenBSD: atomic.h,v 1.8 2011/03/23 16:54:34 pirofti Exp $	*/
 /*	$NetBSD: atomic.h,v 1.1 2003/04/26 18:39:37 fvdl Exp $	*/
 
 /*
@@ -36,8 +36,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _AMD64_ATOMIC_H
-#define _AMD64_ATOMIC_H
+#ifndef _MACHINE_ATOMIC_H_
+#define _MACHINE_ATOMIC_H_
 
 /*
  * Perform atomic operations on memory. Should be atomic with respect
@@ -120,12 +120,10 @@ x86_atomic_clearbits_u64(volatile u_int64_t *ptr, u_int64_t bits)
 	__asm __volatile(LOCK " andq %1,%0" :  "=m" (*ptr) : "ir" (~bits));
 }
 
-#define x86_atomic_testset_ul	x86_atomic_testset_u32
+#define x86_atomic_testset_ul	x86_atomic_testset_u64
 #define x86_atomic_testset_i	x86_atomic_testset_i32
-#define x86_atomic_setbits_l	x86_atomic_setbits_u32
-#define x86_atomic_setbits_ul	x86_atomic_setbits_u32
-#define x86_atomic_clearbits_l	x86_atomic_clearbits_u32
-#define x86_atomic_clearbits_ul	x86_atomic_clearbits_u32
+#define x86_atomic_setbits_ul	x86_atomic_setbits_u64
+#define x86_atomic_clearbits_ul	x86_atomic_clearbits_u64
 
 #define atomic_setbits_int x86_atomic_setbits_u32
 #define atomic_clearbits_int x86_atomic_clearbits_u32
@@ -133,4 +131,4 @@ x86_atomic_clearbits_u64(volatile u_int64_t *ptr, u_int64_t bits)
 #undef LOCK
 
 #endif /* defined(_KERNEL) && !defined(_LOCORE) */
-#endif /* _AMD64_ATOMIC_H_ */
+#endif /* _MACHINE_ATOMIC_H_ */

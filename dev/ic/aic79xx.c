@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx.c,v 1.46 2009/12/10 00:18:44 chl Exp $	*/
+/*	$OpenBSD: aic79xx.c,v 1.48 2011/04/19 21:59:51 chl Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -2251,7 +2251,6 @@ ahd_handle_nonpkt_busfree(struct ahd_softc *ahd)
 			found = ahd_abort_scbs(ahd, target, 'A', saved_lun,
 					       tag, ROLE_INITIATOR,
 					       CAM_REQ_ABORTED);
-			printf("found == 0x%x\n", found);
 			printerror = 0;
 		} else if (ahd_sent_msg(ahd, AHDMSG_1B,
 					MSG_BUS_DEV_RESET, TRUE)) {
@@ -2395,7 +2394,8 @@ ahd_handle_nonpkt_busfree(struct ahd_softc *ahd)
 	 */
 	if (printerror != 0
 	 && (lastphase == P_MESGIN || lastphase == P_MESGOUT)
-	 && ((ahd->msg_flags & MSG_FLAG_EXPECT_PPR_BUSFREE) != 0)) {
+	 && ((ahd->msg_flags & MSG_FLAG_EXPECT_PPR_BUSFREE) != 0)
+	 && (scb != NULL)) {
 
 		ahd_freeze_devq(ahd, scb);
 		aic_set_transaction_status(scb, CAM_REQUEUE_REQ);

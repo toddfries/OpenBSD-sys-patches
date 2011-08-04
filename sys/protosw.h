@@ -1,4 +1,4 @@
-/*	$OpenBSD: protosw.h,v 1.13 2009/11/13 20:54:05 claudio Exp $	*/
+/*	$OpenBSD: protosw.h,v 1.17 2011/07/04 16:02:07 guenther Exp $	*/
 /*	$NetBSD: protosw.h,v 1.10 1996/04/09 20:55:32 cgd Exp $	*/
 
 /*-
@@ -106,6 +106,7 @@ struct protosw {
 #define	PR_RIGHTS	0x10		/* passes capabilities */
 #define	PR_ABRTACPTDIS	0x20		/* abort on accept(2) to disconnected
 					   socket */
+#define	PR_SPLICE	0x40		/* socket splicing is possible */
 
 /*
  * The arguments to usrreq are:
@@ -142,7 +143,6 @@ struct protosw {
 #define	PRU_SLOWTIMO		19	/* 500ms timeout */
 #define	PRU_PROTORCV		20	/* receive from below */
 #define	PRU_PROTOSEND		21	/* send to below */
-#define PRU_PEEREID		22	/* get local peer eid */
 
 #define	PRU_NREQ		22
 
@@ -153,7 +153,7 @@ char *prurequests[] = {
 	"RCVD",		"SEND",		"ABORT",	"CONTROL",
 	"SENSE",	"RCVOOB",	"SENDOOB",	"SOCKADDR",
 	"PEERADDR",	"CONNECT2",	"FASTTIMO",	"SLOWTIMO",
-	"PROTORCV",	"PROTOSEND",	"PEEREID",
+	"PROTORCV",	"PROTOSEND",
 };
 #endif
 

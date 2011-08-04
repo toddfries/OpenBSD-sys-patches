@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_i810.c,v 1.65 2010/07/02 02:33:57 tedu Exp $	*/
+/*	$OpenBSD: agp_i810.c,v 1.69 2010/09/06 15:00:50 oga Exp $	*/
 
 /*-
  * Copyright (c) 2000 Doug Rabson
@@ -90,7 +90,7 @@ struct agp_i810_softc {
 };
 
 void	agp_i810_attach(struct device *, struct device *, void *);
-int	agp_i810_activate(struct device *arg, int act);
+int	agp_i810_activate(struct device *, int);
 void	agp_i810_configure(struct agp_i810_softc *);
 int	agp_i810_probe(struct device *, void *, void *);
 int	agp_i810_get_chiptype(struct pci_attach_args *);
@@ -510,8 +510,40 @@ int
 agp_i810_activate(struct device *arg, int act)
 {
 	struct agp_i810_softc *isc = (struct agp_i810_softc *)arg;
+	bus_space_tag_t bst = isc->map->bst;
+	bus_space_handle_t bsh = isc->map->bsh;
+	bus_size_t offset;
 
-	switch(act) {
+	if (isc->chiptype == CHIP_I915 ||
+	    isc->chiptype == CHIP_G33 ||
+	    isc->chiptype == CHIP_PINEVIEW) {
+		bst = isc->gtt_map->bst;
+		bsh = isc->gtt_map->bsh;
+	}
+
+	switch(isc->chiptype) {
+	case CHIP_I915:
+	case CHIP_G33:
+	case CHIP_PINEVIEW:
+		offset = 0;
+		break;
+	case CHIP_I965:
+		offset = AGP_I965_GTT;
+		break;
+	case CHIP_G4X:
+	case CHIP_IRONLAKE:
+		offset = AGP_G4X_GTT;
+		break;
+	default:
+		offset = AGP_I810_GTT;
+		break;
+	}
+
+	/*
+	 * Anything kept in agp over a suspend/resume cycle (and thus by X
+	 * over a vt switch cycle) is undefined upon resume.
+	 */
+	switch (act) {
 	case DVACT_RESUME:
 		agp_i810_configure(isc);
 		break;

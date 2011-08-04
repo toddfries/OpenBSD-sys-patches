@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.39 2009/08/13 13:24:48 kettenis Exp $	*/
+/*	$OpenBSD: intr.h,v 1.43 2011/07/05 17:11:07 oga Exp $	*/
 /*	$NetBSD: intr.h,v 1.5 1996/05/13 06:11:28 mycroft Exp $	*/
 
 /*
@@ -30,8 +30,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _I386_INTR_H_
-#define _I386_INTR_H_
+#ifndef _MACHINE_INTR_H_
+#define _MACHINE_INTR_H_
 
 #include <machine/intrdefs.h>
 
@@ -107,7 +107,7 @@ void splassert_check(int, const char *);
 #define	spltty()	splraise(IPL_TTY)
 #define	splaudio()	splraise(IPL_AUDIO)
 #define	splclock()	splraise(IPL_CLOCK)
-#define	splstatclock()	splhigh()
+#define	splstatclock()	splclock()
 #define splipi()	splraise(IPL_IPI)
 
 /*
@@ -126,9 +126,6 @@ void splassert_check(int, const char *);
 #define spllock() 	splhigh()
 #define	spl0()		spllower(IPL_NONE)
 
-#define	setsoftnet()	softintr(SIR_NET)
-#define	setsofttty()	softintr(SIR_TTY)
-
 #include <machine/pic.h>
 
 struct cpu_info;
@@ -137,7 +134,6 @@ struct cpu_info;
 int i386_send_ipi(struct cpu_info *, int);
 int i386_fast_ipi(struct cpu_info *, int);
 void i386_broadcast_ipi(int);
-void i386_multicast_ipi(int, int);
 void i386_ipi_handler(void);
 void i386_intlock(int);
 void i386_intunlock(int);
@@ -198,4 +194,4 @@ do {									\
 } while (/*CONSTCOND*/ 0)
 #endif /* _LOCORE */
 
-#endif /* !_I386_INTR_H_ */
+#endif /* !_MACHINE_INTR_H_ */

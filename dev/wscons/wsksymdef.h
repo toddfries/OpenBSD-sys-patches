@@ -1,4 +1,4 @@
-/*	$OpenBSD: wsksymdef.h,v 1.32 2008/06/26 05:42:19 ray Exp $	*/
+/*	$OpenBSD: wsksymdef.h,v 1.34 2011/04/05 19:12:13 miod Exp $	*/
 /*	$NetBSD: wsksymdef.h,v 1.34.4.1 2000/07/07 09:49:54 hannken Exp $ */
 
 /*-
@@ -574,6 +574,10 @@
 #define KS_f18			0xf311
 #define KS_f19			0xf312
 #define KS_f20			0xf313
+#define KS_f21			0xf314
+#define KS_f22			0xf315
+#define KS_f23			0xf316
+#define KS_f24			0xf317
 
 #define KS_F1			0xf340
 #define KS_F2			0xf341
@@ -595,6 +599,10 @@
 #define KS_F18			0xf351
 #define KS_F19			0xf352
 #define KS_F20			0xf353
+#define KS_F21			0xf354
+#define KS_F22			0xf355
+#define KS_F23			0xf356
+#define KS_F24			0xf357
 
 #define KS_Home			0xf381
 #define KS_Prior		0xf382
@@ -725,6 +733,7 @@
 #define KB_SI			0x1900
 #define KB_CF			0x1a00
 #define KB_LV			0x1b00
+#define KB_IS			0x1c00
 
 #define KB_NODEAD		0x000001 /* disable dead accents */
 #define KB_DECLK		0x000002 /* DEC LKnnn layout */
@@ -763,7 +772,8 @@
 	{ KB_PL,	"pl" }, \
 	{ KB_SI,	"si" }, \
 	{ KB_CF,	"cf" }, \
-	{ KB_LV,	"lv" }
+	{ KB_LV,	"lv" }, \
+	{ KB_IS,	"is" }
 
 #define KB_VARTAB \
 	{ KB_NODEAD,	"nodead" }, \

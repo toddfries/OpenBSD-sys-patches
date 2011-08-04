@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_proto.c,v 1.4 2003/06/02 23:28:07 millert Exp $	*/
+/*	$OpenBSD: uipc_proto.c,v 1.6 2011/07/06 06:31:38 matthew Exp $	*/
 /*	$NetBSD: uipc_proto.c,v 1.8 1996/02/13 21:10:47 christos Exp $	*/
 
 /*-
@@ -55,6 +55,11 @@ struct protosw unixsw[] = {
   uipc_usrreq,
   0,		0,		0,		0,
 },
+{ SOCK_SEQPACKET,&unixdomain,	PF_LOCAL,	PR_ATOMIC|PR_CONNREQUIRED|PR_WANTRCVD|PR_RIGHTS,
+  0,		0,		0,		0,
+  uipc_usrreq,
+  0,		0,		0,		0,
+},
 { SOCK_DGRAM,	&unixdomain,	PF_LOCAL,	PR_ATOMIC|PR_ADDR|PR_RIGHTS,
   0,		0,		0,		0,
   uipc_usrreq,
@@ -69,4 +74,4 @@ struct protosw unixsw[] = {
 
 struct domain unixdomain =
     { AF_LOCAL, "unix", 0, unp_externalize, unp_dispose,
-      unixsw, &unixsw[sizeof(unixsw)/sizeof(unixsw[0])] };
+      unixsw, &unixsw[nitems(unixsw)] };

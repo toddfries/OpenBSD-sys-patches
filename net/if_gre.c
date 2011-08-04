@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.51 2010/07/03 04:44:51 guenther Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.57 2011/07/12 15:23:50 jsg Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -68,12 +68,6 @@
 #error "if_gre used without inet"
 #endif
 
-#ifdef NETATALK
-#include <netatalk/at.h>
-#include <netatalk/at_var.h>
-#include <netatalk/at_extern.h>
-#endif
-
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
@@ -115,7 +109,6 @@ int gre_allow = 0;
 int gre_wccp = 0;
 int ip_mobile_allow = 0;
 
-void gre_compute_route(struct gre_softc *);
 void gre_keepalive(void *);
 void gre_send_keepalive(void *);
 void gre_link_state(struct gre_softc *);
@@ -376,11 +369,6 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 			ip_tos = inp->ip_tos;
 			etype = ETHERTYPE_IP;
 			break;
-#ifdef NETATALK
-		case AF_APPLETALK:
-			etype = ETHERTYPE_AT;
-			break;
-#endif
 #ifdef INET6
 		case AF_INET6:
 			etype = ETHERTYPE_IPV6;
@@ -536,8 +524,7 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 
 		/*
-		 * set tunnel endpoints, compute a less specific route
-		 * to the remote end and mark if as up
+		 * set tunnel endpoints and mark if as up
 		 */
 		sa = &ifr->ifr_addr;
 		if (cmd == GRESADDRS )
@@ -547,12 +534,10 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 recompute:
 		if ((sc->g_src.s_addr != INADDR_ANY) &&
 		    (sc->g_dst.s_addr != INADDR_ANY)) {
-			if (sc->route.ro_rt != 0) {
-				/* free old route */
+			if (sc->route.ro_rt != 0)
 				RTFREE(sc->route.ro_rt);
-				sc->route.ro_rt = (struct rtentry *) 0;
-			}
-			gre_compute_route(sc);
+			/* ip_output() will do the lookup */
+			bzero(&sc->route, sizeof(sc->route));
 			ifp->if_flags |= IFF_UP;
 		}
 		break;
@@ -660,70 +645,6 @@ recompute:
 }
 
 /*
- * computes a route to our destination that is not the one
- * which would be taken by ip_output(), as this one will loop back to
- * us. If the interface is p2p as  a--->b, then a routing entry exists
- * If we now send a packet to b (e.g. ping b), this will come down here
- * gets src=a, dst=b tacked on and would from ip_output() sent back to
- * if_gre.
- * Goal here is to compute a route to b that is less specific than
- * a-->b. We know that this one exists as in normal operation we have
- * at least a default route which matches.
- */
-
-void
-gre_compute_route(struct gre_softc *sc)
-{
-	struct route *ro;
-	u_int32_t a, b, c;
-
-	ro = &sc->route;
-
-	bzero(ro, sizeof(struct route));
-	((struct sockaddr_in *) &ro->ro_dst)->sin_addr = sc->g_dst;
-	ro->ro_dst.sa_family = AF_INET;
-	ro->ro_dst.sa_len = sizeof(ro->ro_dst);
-
-	/*
-	 * toggle last bit, so our interface is not found, but a less
-	 * specific route. I'd rather like to specify a shorter mask,
- 	 * but this is not possible. Should work though. XXX
-	 * there is a simpler way ...
-	 */
-	if ((sc->sc_if.if_flags & IFF_LINK1) == 0) {
-		a = ntohl(sc->g_dst.s_addr);
-		b = a & 0x01;
-		c = a & 0xfffffffe;
-		b = b ^ 0x01;
-		a = b | c;
-		((struct sockaddr_in *) &ro->ro_dst)->sin_addr.s_addr = htonl(a);
-	}
-
-	ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT | RT_NOCLONING,
-	    sc->g_rtableid);
-	if (ro->ro_rt == NULL)
-		return;
-
-	/*
-	 * Check whether we just created a loop. An even more paranoid
-	 * check would be against all GRE interfaces, but that would
-	 * not allow people to link GRE tunnels.
-	 */
-	if (ro->ro_rt->rt_ifp == &sc->sc_if) {
-		RTFREE(ro->ro_rt);
-		ro->ro_rt = NULL;
-		return;
-	}
-
-	/*
-	 * now change it back - else ip_output will just drop
-	 * the route and search one to this interface ...
-	 */
-	if ((sc->sc_if.if_flags & IFF_LINK1) == 0)
-		((struct sockaddr_in *) &ro->ro_dst)->sin_addr = sc->g_dst;
-}
-
-/*
  * do a checksum of a buffer - much like in_cksum, which operates on
  * mbufs.
  */
@@ -736,20 +657,20 @@ gre_in_cksum(u_int16_t *p, u_int len)
 	while (nwords-- != 0)
 		sum += *p++;
 
-		if (len & 1) {
-			union {
-				u_short w;
-				u_char c[2];
-			} u;
-			u.c[0] = *(u_char *) p;
-			u.c[1] = 0;
-			sum += u.w;
-		}
+	if (len & 1) {
+		union {
+			u_short w;
+			u_char c[2];
+		} u;
+		u.c[0] = *(u_char *) p;
+		u.c[1] = 0;
+		sum += u.w;
+	}
 
-		/* end-around-carry */
-		sum = (sum >> 16) + (sum & 0xffff);
-		sum += (sum >> 16);
-		return (~sum);
+	/* end-around-carry */
+	sum = (sum >> 16) + (sum & 0xffff);
+	sum += (sum >> 16);
+	return (~sum);
 }
 
 void
@@ -793,7 +714,7 @@ gre_send_keepalive(void *arg)
 	MH_ALIGN(m, m->m_len);
 
 	/* build the ip header */
-	ip = (struct ip *)m->m_data;
+	ip = mtod(m, struct ip *);
 
 	ip->ip_v = IPVERSION;
 	ip->ip_hl = sizeof(*ip) >> 2;
@@ -843,7 +764,8 @@ gre_recv_keepalive(struct gre_softc *sc)
 		}
 		break;
 	case GRE_STATE_UP:
-		sc->sc_ka_holdmax = MAX(sc->sc_ka_holdmax--, sc->sc_ka_cnt);
+		sc->sc_ka_holdmax--;
+		sc->sc_ka_holdmax = MAX(sc->sc_ka_holdmax, sc->sc_ka_cnt);
 		break;
 	}
 

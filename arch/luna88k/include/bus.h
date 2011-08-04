@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.6 2010/04/04 12:49:30 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.8 2011/03/23 16:54:35 pirofti Exp $	*/
 /*	$NetBSD: bus.h,v 1.9 1998/01/13 18:32:15 scottr Exp $	*/
 
 /*-
@@ -57,8 +57,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _LUNA88K_BUS_H_
-#define _LUNA88K_BUS_H_
+#ifndef _MACHINE_BUS_H_
+#define _MACHINE_BUS_H_
 
 /*
  * Bus address and size types
@@ -136,19 +136,6 @@ int	bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart,
 
 void	bus_space_free(bus_space_tag_t t, bus_space_handle_t bsh,
 	    bus_size_t size);
-
-/*
- *	int luna88k_bus_space_probe(bus_space_tag_t t,
- *	    bus_space_handle_t bsh, bus_size_t offset, int sz);
- *
- * Probe the bus at t/bsh/offset, using sz as the size of the load.
- *
- * This is a machine-dependent extension, and is not to be used by
- * machine-independent code.
- */
-
-int	luna88k_bus_space_probe(bus_space_tag_t t,
-	    bus_space_handle_t bsh, bus_size_t offset, int sz);
 
 /*
  *	u_intN_t bus_space_read_N(bus_space_tag_t tag,
@@ -492,4 +479,4 @@ __LUNA88K_copy_N(4)
 #define	BUS_SPACE_BARRIER_READ	0x01		/* force read barrier */
 #define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
 
-#endif /* _LUNA88K_BUS_H_ */
+#endif /* _MACHINE_BUS_H_ */

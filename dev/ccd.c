@@ -1,4 +1,4 @@
-/*	$OpenBSD: ccd.c,v 1.90 2010/05/18 04:41:14 dlg Exp $	*/
+/*	$OpenBSD: ccd.c,v 1.97 2011/07/06 04:49:36 matthew Exp $	*/
 /*	$NetBSD: ccd.c,v 1.33 1996/05/05 04:21:14 thorpej Exp $	*/
 
 /*-
@@ -134,8 +134,6 @@ struct ccd_softc {
 
 /* sc_flags */
 #define CCDF_INITED	0x01	/* unit has been initialized */
-#define CCDF_WLABEL	0x02	/* label area is writable */
-#define CCDF_LABELLING	0x04	/* unit is currently being labelled */
 
 #ifdef CCDDEBUG
 #define CCD_DCALL(m,c)		if (ccddebug & (m)) c
@@ -555,7 +553,7 @@ ccdopen(dev_t dev, int flags, int fmt, struct proc *p)
 	int unit = DISKUNIT(dev);
 	struct ccd_softc *cs;
 	struct disklabel *lp;
-	int error = 0, part, pmask;
+	int error = 0, part;
 
 	CCD_DPRINTF(CCDB_FOLLOW, ("ccdopen(%x, %x)\n", dev, flags));
 
@@ -569,7 +567,6 @@ ccdopen(dev_t dev, int flags, int fmt, struct proc *p)
 	lp = cs->sc_dkdev.dk_label;
 
 	part = DISKPART(dev);
-	pmask = (1 << part);
 
 	/*
 	 * If we're initialized, check to see if there are any other
@@ -579,30 +576,9 @@ ccdopen(dev_t dev, int flags, int fmt, struct proc *p)
 	if ((cs->sc_flags & CCDF_INITED) && (cs->sc_dkdev.dk_openmask == 0))
 		ccdgetdisklabel(dev, cs, lp, 0);
 
-	/* Check that the partition exists. */
-	if (part != RAW_PART) {
-		if (((cs->sc_flags & CCDF_INITED) == 0) ||
-		    ((part >= lp->d_npartitions) ||
-		    (lp->d_partitions[part].p_fstype == FS_UNUSED))) {
-			error = ENXIO;
-			goto done;
-		}
-	}
+	error = disk_openpart(&cs->sc_dkdev, part, fmt,
+	    (cs->sc_flags & CCDF_INITED) != 0);
 
-	/* Prevent our unit from being unconfigured while open. */
-	switch (fmt) {
-	case S_IFCHR:
-		cs->sc_dkdev.dk_copenmask |= pmask;
-		break;
-
-	case S_IFBLK:
-		cs->sc_dkdev.dk_bopenmask |= pmask;
-		break;
-	}
-	cs->sc_dkdev.dk_openmask =
-	    cs->sc_dkdev.dk_copenmask | cs->sc_dkdev.dk_bopenmask;
-
- done:
 	ccdunlock(cs);
 	return (error);
 }
@@ -626,18 +602,7 @@ ccdclose(dev_t dev, int flags, int fmt, struct proc *p)
 
 	part = DISKPART(dev);
 
-	/* ...that much closer to allowing unconfiguration... */
-	switch (fmt) {
-	case S_IFCHR:
-		cs->sc_dkdev.dk_copenmask &= ~(1 << part);
-		break;
-
-	case S_IFBLK:
-		cs->sc_dkdev.dk_bopenmask &= ~(1 << part);
-		break;
-	}
-	cs->sc_dkdev.dk_openmask =
-	    cs->sc_dkdev.dk_copenmask | cs->sc_dkdev.dk_bopenmask;
+	disk_closepart(&cs->sc_dkdev, part, fmt);
 
 	ccdunlock(cs);
 	return (0);
@@ -649,30 +614,18 @@ ccdstrategy(struct buf *bp)
 	int unit = DISKUNIT(bp->b_dev);
 	struct ccd_softc *cs = &ccd_softc[unit];
 	int s;
-	int wlabel;
-	struct disklabel *lp;
 
 	CCD_DPRINTF(CCDB_FOLLOW, ("ccdstrategy(%p): unit %d\n", bp, unit));
 
 	if ((cs->sc_flags & CCDF_INITED) == 0) {
 		bp->b_error = ENXIO;
-		bp->b_resid = bp->b_bcount;
 		bp->b_flags |= B_ERROR;
+		bp->b_resid = bp->b_bcount;
 		goto done;
 	}
 
-	/* If it's a nil transfer, wake up the top half now. */
-	if (bp->b_bcount == 0)
-		goto done;
-
-	lp = cs->sc_dkdev.dk_label;
-
-	/*
-	 * Do bounds checking and adjust transfer.  If there's an
-	 * error, the bounds check will flag that for us.
-	 */
-	wlabel = cs->sc_flags & (CCDF_WLABEL|CCDF_LABELLING);
-	if (bounds_check_with_label(bp, lp, wlabel) <= 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, cs->sc_dkdev.dk_label) == -1)
 		goto done;
 
 	bp->b_resid = bp->b_bcount;
@@ -684,7 +637,8 @@ ccdstrategy(struct buf *bp)
 	ccdstart(cs, bp);
 	splx(s);
 	return;
-done:
+
+ done:
 	s = splbio();
 	biodone(bp);
 	splx(s);
@@ -795,6 +749,7 @@ ccdbuffer(struct ccd_softc *cs, struct buf *bp, daddr64_t bn, caddr_t addr,
 			ccdisk = ii->ii_index[off % ii->ii_ndisk];
 			cbn = ii->ii_startoff + off / ii->ii_ndisk;
 		}
+		ci = &cs->sc_cinfo[ccdisk];
 		if (cs->sc_cflags & CCDF_MIRROR) {
 			/* Mirrored data */
 			ccdisk2 = ccdisk + ii->ii_ndisk;
@@ -803,11 +758,12 @@ ccdbuffer(struct ccd_softc *cs, struct buf *bp, daddr64_t bn, caddr_t addr,
 			if (bp->b_flags & B_READ &&
 			    bcount > bp->b_bcount / 2 &&
 			    (!(ci2->ci_flags & CCIF_FAILED) ||
-			      ci->ci_flags & CCIF_FAILED))
+			      ci->ci_flags & CCIF_FAILED)) {
 				ccdisk = ccdisk2;
+				ci = ci2;
+			}
 		}
 		cbn *= cs->sc_ileave;
-		ci = &cs->sc_cinfo[ccdisk];
 		CCD_DPRINTF(CCDB_IO, ("ccdisk %d cbn %lld ci %p ci2 %p\n",
 		    ccdisk, cbn, ci, ci2));
 	}
@@ -978,7 +934,7 @@ ccdread(dev_t dev, struct uio *uio, int flags)
 	 * in particular, for raw I/O.  Underlying devices might have some
 	 * non-obvious limits, because of the copy to user-space.
 	 */
-	return (physio(ccdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(ccdstrategy, dev, B_READ, minphys, uio));
 }
 
 /* ARGSUSED */
@@ -1002,7 +958,7 @@ ccdwrite(dev_t dev, struct uio *uio, int flags)
 	 * in particular, for raw I/O.  Underlying devices might have some
 	 * non-obvious limits, because of the copy to user-space.
 	 */
-	return (physio(ccdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(ccdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 int
@@ -1031,7 +987,6 @@ ccdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case CCDIOCCLR:
 	case DIOCWDINFO:
 	case DIOCSDINFO:
-	case DIOCWLABEL:
 		if ((flag & FWRITE) == 0)
 			return (EBADF);
 	}
@@ -1118,7 +1073,7 @@ ccdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 		/* Attach the disk. */
 		cs->sc_dkdev.dk_name = cs->sc_xname;
-		disk_attach(&cs->sc_dkdev);
+		disk_attach(NULL, &cs->sc_dkdev);
 
 		/* Try and read the disklabel. */
 		ccdgetdisklabel(dev, cs, cs->sc_dkdev.dk_label, 0);
@@ -1227,8 +1182,6 @@ ccdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		if ((error = ccdlock(cs)) != 0)
 			return (error);
 
-		cs->sc_flags |= CCDF_LABELLING;
-
 		error = setdisklabel(cs->sc_dkdev.dk_label,
 		    (struct disklabel *)data, 0);
 		if (error == 0) {
@@ -1237,19 +1190,10 @@ ccdioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 				    ccdstrategy, cs->sc_dkdev.dk_label);
 		}
 
-		cs->sc_flags &= ~CCDF_LABELLING;
-
 		ccdunlock(cs);
 
 		if (error)
 			return (error);
-		break;
-
-	case DIOCWLABEL:
-		if (*(int *)data != 0)
-			cs->sc_flags |= CCDF_WLABEL;
-		else
-			cs->sc_flags &= ~CCDF_WLABEL;
 		break;
 
 	default:

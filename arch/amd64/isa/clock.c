@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.13 2007/08/02 16:40:27 deraadt Exp $	*/
+/*	$OpenBSD: clock.c,v 1.19 2011/07/05 17:11:07 oga Exp $	*/
 /*	$NetBSD: clock.c,v 1.1 2003/04/26 18:39:50 fvdl Exp $	*/
 
 /*-
@@ -35,28 +35,28 @@
  *
  *	@(#)clock.c	7.2 (Berkeley) 5/12/91
  */
-/* 
+/*
  * Mach Operating System
  * Copyright (c) 1991,1990,1989 Carnegie Mellon University
  * All Rights Reserved.
- * 
+ *
  * Permission to use, copy, modify and distribute this software and its
  * documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
+ *
  * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
  * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND FOR
  * ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
- * 
+ *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
  *  School of Computer Science
  *  Carnegie Mellon University
  *  Pittsburgh PA 15213-3890
- * 
+ *
  * any improvements or extensions that they make and grant Carnegie Mellon
  * the rights to redistribute these changes.
  */
@@ -108,7 +108,7 @@ WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #include <dev/ic/i8253reg.h>
 #include <amd64/isa/nvram.h>
 #include <dev/clock_subr.h>
-#include <machine/specialreg.h> 
+#include <machine/specialreg.h>
 
 /* Timecounter on the i8254 */
 u_int32_t i8254_lastcount;
@@ -128,13 +128,13 @@ int	gettick(void);
 void	rtcdrain(void *v);
 int	rtcget(mc_todregs *);
 void	rtcput(mc_todregs *);
-int 	bcdtobin(int);
+int	bcdtobin(int);
 int	bintobcd(int);
 
-__inline u_int mc146818_read(void *, u_int);
-__inline void mc146818_write(void *, u_int, u_int);
+u_int mc146818_read(void *, u_int);
+void mc146818_write(void *, u_int, u_int);
 
-__inline u_int
+u_int
 mc146818_read(void *sc, u_int reg)
 {
 	outb(IO_RTC, reg);
@@ -142,7 +142,7 @@ mc146818_read(void *sc, u_int reg)
 	return (inb(IO_RTC+1));
 }
 
-__inline void
+void
 mc146818_write(void *sc, u_int reg, u_int datum)
 {
 	outb(IO_RTC, reg);
@@ -154,42 +154,16 @@ mc146818_write(void *sc, u_int reg, u_int datum)
 struct mutex timer_mutex = MUTEX_INITIALIZER(IPL_HIGH);
 
 u_long rtclock_tval;
-int rtclock_init;
-
-/* minimal initialization, enough for delay() */
-void
-initrtclock(void)
-{
-	u_long tval;
-
-	/*
-	 * Compute timer_count, the count-down count the timer will be
-	 * set to.  Also, correctly round
-	 * this by carrying an extra bit through the division.
-	 */
-	tval = (TIMER_FREQ * 2) / (u_long) hz;
-	tval = (tval / 2) + (tval & 0x1);
-
-	mtx_enter(&timer_mutex);
-	/* initialize 8253 clock */
-	outb(IO_TIMER1+TIMER_MODE, TIMER_SEL0|TIMER_RATEGEN|TIMER_16BIT);
-
-	/* Correct rounding will buy us a better precision in timekeeping */
-	outb(IO_TIMER1+TIMER_CNTR0, tval % 256);
-	outb(IO_TIMER1+TIMER_CNTR0, tval / 256);
-
-	rtclock_tval = tval;
-	rtclock_init = 1;
-	mtx_leave(&timer_mutex);
-}
 
 void
-startrtclock(void)
+startclocks(void)
 {
 	int s;
 
-	if (!rtclock_init)
-		initrtclock();
+	mtx_enter(&timer_mutex);
+	rtclock_tval = TIMER_DIV(hz);
+	i8254_startclock();
+	mtx_leave(&timer_mutex);
 
 	/* Check diagnostic status */
 	if ((s = mc146818_read(NULL, NVRAM_DIAG)) != 0)	/* XXX softc */
@@ -269,10 +243,6 @@ i8254_delay(int n)
 		24, 25, 27, 28, 29, 30,
 	};
 
-	/* allow DELAY() to be used before startrtclock() */
-	if (!rtclock_init)
-		initrtclock();
-
 	/*
 	 * Read the counter first, so that the rest of the setup overhead is
 	 * counted.
@@ -340,14 +310,23 @@ rtcdrain(void *v)
 void
 i8254_initclocks(void)
 {
-	static struct timeout rtcdrain_timeout;
-
 	stathz = 128;
 	profhz = 1024;
 
 	isa_intr_establish(NULL, 0, IST_PULSE, IPL_CLOCK, clockintr,
 	    0, "clock");
-	isa_intr_establish(NULL, 8, IST_PULSE, IPL_CLOCK, rtcintr, 0, "rtc");
+	isa_intr_establish(NULL, 8, IST_PULSE, IPL_STATCLOCK, rtcintr,
+	    0, "rtc");
+
+	rtcstart();			/* start the mc146818 clock */
+
+	i8254_inittimecounter();	/* hook the interrupt-based i8254 tc */
+}
+
+void
+rtcstart(void)
+{
+	static struct timeout rtcdrain_timeout;
 
 	mc146818_write(NULL, MC_REGA, MC_BASE_32_KHz | MC_RATE_128_Hz);
 	mc146818_write(NULL, MC_REGB, MC_REGB_24HR | MC_REGB_PIE);
@@ -364,6 +343,12 @@ i8254_initclocks(void)
 	timeout_add(&rtcdrain_timeout, 1);
 }
 
+void
+rtcstop(void)
+{
+	mc146818_write(NULL, MC_REGB, MC_REGB_24HR);
+}
+
 int
 rtcget(mc_todregs *regs)
 {
@@ -371,7 +356,7 @@ rtcget(mc_todregs *regs)
 		return (-1);
 	MC146818_GETTOD(NULL, regs);			/* XXX softc */
 	return (0);
-}	
+}
 
 void
 rtcput(mc_todregs *regs)
@@ -526,7 +511,7 @@ inittodr(time_t base)
 	dt.dt_year = clock_expandyear(bcdtobin(rtclk[MC_YEAR]));
 
 	/*
-	 * If time_t is 32 bits, then the "End of Time" is 
+	 * If time_t is 32 bits, then the "End of Time" is
 	 * Mon Jan 18 22:14:07 2038 (US/Eastern)
 	 * This code copes with RTC's past the end of time if time_t
 	 * is an int32 or less. Needed because sometimes RTCs screw
@@ -637,23 +622,26 @@ i8254_inittimecounter(void)
 void
 i8254_inittimecounter_simple(void)
 {
-	u_long tval = 0x8000;
-
 	i8254_timecounter.tc_get_timecount = i8254_simple_get_timecount;
 	i8254_timecounter.tc_counter_mask = 0x7fff;
-
         i8254_timecounter.tc_frequency = TIMER_FREQ;
 
 	mtx_enter(&timer_mutex);
-	outb(IO_TIMER1 + TIMER_MODE, TIMER_SEL0 | TIMER_RATEGEN | TIMER_16BIT);
-	outb(IO_TIMER1 + TIMER_CNTR0, tval & 0xff);
-	outb(IO_TIMER1 + TIMER_CNTR0, tval >> 8);
-
-	rtclock_tval = tval;
-	rtclock_init = 1;
+	rtclock_tval = 0x8000;
+	i8254_startclock();
 	mtx_leave(&timer_mutex);
 
 	tc_init(&i8254_timecounter);
+}
+
+void
+i8254_startclock(void)
+{
+	u_long tval = rtclock_tval;
+
+	outb(IO_TIMER1 + TIMER_MODE, TIMER_SEL0 | TIMER_RATEGEN | TIMER_16BIT);
+	outb(IO_TIMER1 + TIMER_CNTR0, tval & 0xff);
+	outb(IO_TIMER1 + TIMER_CNTR0, tval >> 8);
 }
 
 u_int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: xlreg.h,v 1.20 2009/12/22 21:10:25 naddy Exp $	*/
+/*	$OpenBSD: xlreg.h,v 1.27 2011/04/17 20:52:43 stsp Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -411,6 +411,12 @@
 #define XL_W7_BM_LEN		0x06
 #define XL_W7_BM_STATUS		0x0B
 #define XL_W7_BM_TIMEr		0x0A
+#define XL_W7_BM_PME		0x0C
+
+#define	XL_BM_PME_WAKE		0x0001
+#define	XL_BM_PME_MAGIC		0x0002
+#define	XL_BM_PME_LINKCHG	0x0004
+#define	XL_BM_PME_WAKETIMER	0x0008
 
 /*
  * bus master control registers
@@ -480,7 +486,9 @@ struct xl_chain_data {
 	struct xl_chain_onefrag	xl_rx_chain[XL_RX_LIST_CNT];
 	struct xl_chain		xl_tx_chain[XL_TX_LIST_CNT];
 
-	struct xl_chain_onefrag	*xl_rx_head;
+	struct xl_chain_onefrag	*xl_rx_cons;
+	struct xl_chain_onefrag *xl_rx_prod;
+	int			xl_rx_cnt;
 
 	/* 3c90x "boomerang" queuing stuff */
 	struct xl_chain		*xl_tx_head;
@@ -569,6 +577,7 @@ struct xl_mii_frame {
 #define XL_FLAG_NO_XCVR_PWR		0x0080
 #define XL_FLAG_USE_MMIO		0x0100
 #define XL_FLAG_NO_MMIO			0x0200
+#define XL_FLAG_WOL			0x0400
 
 #define XL_NO_XCVR_PWR_MAGICBITS	0x0900
 
@@ -595,7 +604,6 @@ struct xl_softc {
 	struct xl_chain_data	xl_cdata;
 	int			xl_flags;
 	void (*intr_ack)(struct xl_softc *);
-	void *			sc_sdhook, *sc_pwrhook;
 	bus_dma_tag_t		sc_dmat;
 	bus_dmamap_t		sc_listmap;
 	bus_dma_segment_t	sc_listseg[1];
@@ -603,6 +611,8 @@ struct xl_softc {
 	caddr_t			sc_listkva;
 	bus_dmamap_t		sc_rx_sparemap;
 	bus_dmamap_t		sc_tx_sparemap;
+	void (*wol_power)(void *);
+	void *wol_power_arg;
 };
 
 #define xl_rx_goodframes(x) \
@@ -740,6 +750,17 @@ struct xl_stats {
 #define XL_PME_EN		0x0010
 #define XL_PME_STATUS		0x8000
 
+/* Bits in the XL_PCI_PWRMGMTCAP register */
+#define XL_PME_CAP_D0		0x0800
+#define XL_PME_CAP_D1		0x1000
+#define XL_PME_CAP_D2		0x2000
+#define XL_PME_CAP_D3_HOT	0x4000
+#define XL_PME_CAP_D3_COLD	0x8000
+
 extern int xl_intr(void *);
 extern void xl_attach(struct xl_softc *);
 extern int xl_detach(struct xl_softc *);
+void xl_init(void *);
+void xl_stop(struct xl_softc *);
+void xl_reset(struct xl_softc *);
+int xl_activate(struct device *, int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.169 2010/07/03 04:44:51 guenther Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.180 2011/07/07 18:00:33 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -89,6 +89,7 @@
 
 #include <net/if.h>
 #include <net/raw_cb.h>
+#include <net/netisr.h>
 
 #if defined(CRYPTO)
 #include <crypto/cryptodev.h>
@@ -106,7 +107,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2010 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2011 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -140,7 +141,7 @@ void	start_init(void *);
 void	start_cleaner(void *);
 void	start_update(void *);
 void	start_reaper(void *);
-void	init_crypto(void);
+void	crypto_init(void);
 void	init_exec(void);
 void	kqueue_init(void);
 void	workq_init(void);
@@ -184,15 +185,13 @@ int
 main(void *framep)
 {
 	struct proc *p;
+	struct process *pr;
 	struct pdevinit *pdev;
 	struct timeval rtv;
 	quad_t lim;
 	int s, i;
 	extern struct pdevinit pdevinit[];
-	extern void scheduler_start(void);
 	extern void disk_init(void);
-	extern void endtsleep(void *);
-	extern void realitexpire(void *);
 
 	/*
 	 * Initialize the current process pointer (curproc) before
@@ -217,6 +216,8 @@ main(void *framep)
 
 	KERNEL_LOCK_INIT();
 	SCHED_LOCK_INIT();
+
+	random_init();
 
 	uvm_init();
 	disk_init();		/* must come before autoconfiguration */
@@ -263,25 +264,25 @@ main(void *framep)
 	TAILQ_INIT(&process0.ps_threads);
 	TAILQ_INSERT_TAIL(&process0.ps_threads, p, p_thr_link);
 	process0.ps_refcnt = 1;
-	p->p_p = &process0;
+	p->p_p = pr = &process0;
 
 	/* Set the default routing table/domain. */
 	process0.ps_rtableid = 0;
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
-	p->p_pgrp = &pgrp0;
+	pr->ps_pgrp = &pgrp0;
 	LIST_INSERT_HEAD(PIDHASH(0), p, p_hash);
 	LIST_INSERT_HEAD(PGRPHASH(0), &pgrp0, pg_hash);
 	LIST_INIT(&pgrp0.pg_members);
-	LIST_INSERT_HEAD(&pgrp0.pg_members, p, p_pglist);
+	LIST_INSERT_HEAD(&pgrp0.pg_members, pr, ps_pglist);
 
 	pgrp0.pg_session = &session0;
 	session0.s_count = 1;
-	session0.s_leader = p;
+	session0.s_leader = pr;
 
-	atomic_setbits_int(&p->p_flag, P_SYSTEM | P_NOCLDWAIT);
+	atomic_setbits_int(&p->p_flag, P_SYSTEM);
 	p->p_stat = SONPROC;
-	p->p_nice = NZERO;
+	pr->ps_nice = NZERO;
 	p->p_emul = &emul_native;
 	bcopy("swapper", p->p_comm, sizeof ("swapper"));
 
@@ -303,7 +304,7 @@ main(void *framep)
 	p->p_fd = fdinit(NULL);
 
 	/* Create the limits structures. */
-	p->p_p->ps_limit = &limit0;
+	pr->ps_limit = &limit0;
 	for (i = 0; i < nitems(p->p_rlimit); i++)
 		limit0.pl_rlimit[i].rlim_cur =
 		    limit0.pl_rlimit[i].rlim_max = RLIM_INFINITY;
@@ -343,6 +344,8 @@ main(void *framep)
 	/* Initialize work queues */
 	workq_init();
 
+	random_start();
+
 	/* Initialize the interface/address trees */
 	ifinit();
 
@@ -362,7 +365,7 @@ main(void *framep)
 	initclocks();
 
 	/* Lock the kernel on behalf of proc0. */
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 
 #ifdef SYSVSHM
 	/* Initialize System V style shared memory. */
@@ -380,12 +383,12 @@ main(void *framep)
 #endif
 
 	/* Attach pseudo-devices. */
-	randomattach();
 	for (pdev = pdevinit; pdev->pdev_attach != NULL; pdev++)
 		if (pdev->pdev_count > 0)
 			(*pdev->pdev_attach)(pdev->pdev_count);
 
 #ifdef CRYPTO
+	crypto_init();
 	swcr_init();
 #endif /* CRYPTO */
 	
@@ -394,6 +397,7 @@ main(void *framep)
 	 * until everything is ready.
 	 */
 	s = splnet();
+	netisr_init();
 	domaininit();
 	if_attachdomain();
 	splx(s);
@@ -523,11 +527,6 @@ main(void *framep)
 	if (kthread_create(uvm_aiodone_daemon, NULL, NULL, "aiodoned"))
 		panic("fork aiodoned");
 
-#ifdef CRYPTO
-	/* Create the crypto kernel thread. */
-	init_crypto();
-#endif /* CRYPTO */
-
 	microtime(&rtv);
 	srandom((u_int32_t)(rtv.tv_sec ^ rtv.tv_usec) ^ arc4random());
 
@@ -612,6 +611,9 @@ start_init(void *arg)
 		(void) tsleep((void *)&start_init_exec, PWAIT, "initexec", 0);
 
 	check_console(p);
+
+	/* process 0 ignores SIGCHLD, but we can't */
+	p->p_sigacts->ps_flags = 0;
 
 	/*
 	 * Need just enough stack to hold the faked-up "execve()" arguments.
@@ -711,7 +713,7 @@ start_init(void *arg)
 		 * other than it doesn't exist, complain.
 		 */
 		if ((error = sys_execve(p, &args, retval)) == 0) {
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 			return;
 		}
 		if (error != ENOENT)

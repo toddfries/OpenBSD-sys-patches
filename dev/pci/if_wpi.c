@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.100 2010/04/20 22:05:43 tedu Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.110 2011/06/02 18:36:53 mk Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -32,6 +32,7 @@
 #include <sys/malloc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -74,7 +75,8 @@ void		wpi_attach(struct device *, struct device *, void *);
 void		wpi_radiotap_attach(struct wpi_softc *);
 #endif
 int		wpi_detach(struct device *, int);
-void		wpi_power(int, void *);
+int		wpi_activate(struct device *, int);
+void		wpi_resume(void *, void *);
 int		wpi_nic_lock(struct wpi_softc *);
 int		wpi_read_prom_data(struct wpi_softc *, uint32_t, void *, int);
 int		wpi_dma_contig_alloc(bus_dma_tag_t, struct wpi_dma_info *,
@@ -161,7 +163,8 @@ struct cfdriver wpi_cd = {
 };
 
 struct cfattach wpi_ca = {
-	sizeof (struct wpi_softc), wpi_match, wpi_attach, wpi_detach
+	sizeof (struct wpi_softc), wpi_match, wpi_attach, wpi_detach,
+	wpi_activate
 };
 
 int
@@ -212,7 +215,7 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Install interrupt handler. */
-	if (pci_intr_map(pa, &ih) != 0) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": can't map interrupt\n");
 		return;
 	}
@@ -297,7 +300,6 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = wpi_init;
 	ifp->if_ioctl = wpi_ioctl;
 	ifp->if_start = wpi_start;
 	ifp->if_watchdog = wpi_watchdog;
@@ -324,9 +326,6 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 	wpi_radiotap_attach(sc);
 #endif
 	timeout_set(&sc->calib_to, wpi_calib_timeout, sc);
-
-	sc->powerhook = powerhook_establish(wpi_power, sc);
-
 	return;
 
 	/* Free allocated memory if something failed during attachment. */
@@ -369,9 +368,6 @@ wpi_detach(struct device *self, int flags)
 	if (sc->sc_ih != NULL)
 		pci_intr_disestablish(sc->sc_pct, sc->sc_ih);
 
-	if (sc->powerhook != NULL)
-		powerhook_disestablish(sc->powerhook);
-
 	/* Free DMA resources. */
 	wpi_free_rx_ring(sc, &sc->rxq);
 	for (qid = 0; qid < WPI_NTXQUEUES; qid++)
@@ -387,16 +383,33 @@ wpi_detach(struct device *self, int flags)
 	return 0;
 }
 
-void
-wpi_power(int why, void *arg)
+int
+wpi_activate(struct device *self, int act)
 {
-	struct wpi_softc *sc = arg;
-	struct ifnet *ifp;
+	struct wpi_softc *sc = (struct wpi_softc *)self;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			wpi_stop(ifp, 0);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    wpi_resume, sc, NULL);
+		break;
+	}
+
+	return 0;
+}
+
+void
+wpi_resume(void *arg1, void *arg2)
+{
+	struct wpi_softc *sc = arg1;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t reg;
 	int s;
-
-	if (why != PWR_RESUME)
-		return;
 
 	/* Clear device-specific "PCI retry timeout" register (41h). */
 	reg = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
@@ -404,12 +417,15 @@ wpi_power(int why, void *arg)
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, reg);
 
 	s = splnet();
-	ifp = &sc->sc_ic.ic_if;
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_init(ifp);
-		if (ifp->if_flags & IFF_RUNNING)
-			ifp->if_start(ifp);
-	}
+	while (sc->sc_flags & WPI_FLAG_BUSY)
+		tsleep(&sc->sc_flags, 0, "wpipwr", 0);
+	sc->sc_flags |= WPI_FLAG_BUSY;
+
+	if (ifp->if_flags & IFF_UP)
+		wpi_init(ifp);
+
+	sc->sc_flags &= ~WPI_FLAG_BUSY;
+	wakeup(&sc->sc_flags);
 	splx(s);
 }
 
@@ -1963,6 +1979,17 @@ wpi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, error = 0;
 
 	s = splnet();
+	/*
+	 * Prevent processes from entering this function while another
+	 * process is tsleep'ing in it.
+	 */
+	while ((sc->sc_flags & WPI_FLAG_BUSY) && error == 0)
+		error = tsleep(&sc->sc_flags, PCATCH, "wpiioc", 0);
+	if (error != 0) {
+		splx(s);
+		return error;
+	}
+	sc->sc_flags |= WPI_FLAG_BUSY;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -2022,6 +2049,8 @@ wpi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 	}
 
+	sc->sc_flags &= ~WPI_FLAG_BUSY;
+	wakeup(&sc->sc_flags);
 	splx(s);
 	return error;
 }

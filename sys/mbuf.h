@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.142 2010/07/14 10:31:54 matthew Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.155 2011/07/08 18:48:51 henning Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -82,15 +82,17 @@ struct pkthdr_pf {
 	u_int16_t	 tag;		/* tag id */
 	u_int8_t	 flags;
 	u_int8_t	 routed;
+	u_int8_t	 prio;
+	u_int8_t	 pad[3];
 };
 
 /* pkthdr_pf.flags */
 #define	PF_TAG_GENERATED		0x01
-#define	PF_TAG_FRAGCACHE		0x02
 #define	PF_TAG_TRANSLATE_LOCALHOST	0x04
 #define	PF_TAG_DIVERTED			0x08
 #define	PF_TAG_DIVERTED_PACKET		0x10
 #define	PF_TAG_REROUTE			0x20
+#define	PF_TAG_REFRAGMENTED		0x40	/* refragmented ipv6 packet */
 
 /* record/packet header in first mbuf of chain; valid if M_PKTHDR set */
 struct	pkthdr {
@@ -167,22 +169,26 @@ struct mbuf {
 #define M_AUTH		0x0800  /* payload was authenticated (AH or ESP auth) */
 #define M_TUNNEL	0x1000  /* IP-in-IP added by tunnel mode IPsec */
 #define M_AUTH_AH	0x2000  /* header was authenticated (AH) */
+#define M_COMP		0x4000  /* header was decompressed */
 #define M_LINK0		0x8000	/* link layer specific flag */
 
 /* flags copied when copying m_pkthdr */
-#define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_PROTO1|M_BCAST|M_MCAST|M_CONF|\
+#define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_PROTO1|M_BCAST|M_MCAST|M_CONF|M_COMP|\
 			 M_AUTH|M_LOOP|M_TUNNEL|M_LINK0|M_VLANTAG|M_FILDROP)
 
 /* Checksumming flags */
 #define	M_IPV4_CSUM_OUT		0x0001	/* IPv4 checksum needed */
-#define M_TCPV4_CSUM_OUT	0x0002	/* TCP checksum needed */
-#define	M_UDPV4_CSUM_OUT	0x0004	/* UDP checksum needed */
+#define M_TCP_CSUM_OUT		0x0002	/* TCP checksum needed */
+#define	M_UDP_CSUM_OUT		0x0004	/* UDP checksum needed */
 #define	M_IPV4_CSUM_IN_OK	0x0008	/* IPv4 checksum verified */
 #define	M_IPV4_CSUM_IN_BAD	0x0010	/* IPv4 checksum bad */
 #define	M_TCP_CSUM_IN_OK	0x0020	/* TCP/IPv4 checksum verified */
 #define	M_TCP_CSUM_IN_BAD	0x0040	/* TCP/IPv4 checksum bad */
 #define	M_UDP_CSUM_IN_OK	0x0080	/* UDP/IPv4 checksum verified */
 #define	M_UDP_CSUM_IN_BAD	0x0100	/* UDP/IPv4 checksum bad */
+#define	M_ICMP_CSUM_OUT		0x0200	/* ICMP checksum needed */
+#define	M_ICMP_CSUM_IN_OK	0x0400	/* ICMP checksum verified */
+#define	M_ICMP_CSUM_IN_BAD	0x0800	/* ICMP checksum bad */
 
 /* mbuf types */
 #define	MT_FREE		0	/* should be on free list */
@@ -283,11 +289,12 @@ struct mbuf {
 
 /*
  * Move just m_pkthdr from from to to,
- * remove M_PKTHDR and clean the tag for from.
+ * remove M_PKTHDR and clean flags/tags for from.
  */
 #define M_MOVE_HDR(to, from) do {					\
 	(to)->m_pkthdr = (from)->m_pkthdr;				\
 	(from)->m_flags &= ~M_PKTHDR;					\
+	SLIST_INIT(&(from)->m_pkthdr.tags);				\
 } while (/* CONSTCOND */ 0)
 
 /*
@@ -396,7 +403,6 @@ int	      m_defrag(struct mbuf *, int);
 struct	mbuf *m_prepend(struct mbuf *, int, int);
 struct	mbuf *m_pulldown(struct mbuf *, int, int, int *);
 struct	mbuf *m_pullup(struct mbuf *, int);
-struct	mbuf *m_pullup2(struct mbuf *, int);
 struct	mbuf *m_split(struct mbuf *, int, int);
 struct  mbuf *m_inject(struct mbuf *, int, int, int);
 struct  mbuf *m_getptr(struct mbuf *, int, int *);
@@ -419,7 +425,7 @@ struct mbuf *m_devget(char *, int, int, struct ifnet *,
 void	m_zero(struct mbuf *);
 int	m_apply(struct mbuf *, int, int,
 	    int (*)(caddr_t, caddr_t, unsigned int), caddr_t);
-int	m_dup_pkthdr(struct mbuf *, struct mbuf *);
+int	m_dup_pkthdr(struct mbuf *, struct mbuf *, int);
 
 /* Packet tag routines */
 struct m_tag *m_tag_get(int, int, int);
@@ -427,8 +433,8 @@ void	m_tag_prepend(struct mbuf *, struct m_tag *);
 void	m_tag_delete(struct mbuf *, struct m_tag *);
 void	m_tag_delete_chain(struct mbuf *);
 struct m_tag *m_tag_find(struct mbuf *, int, struct m_tag *);
-struct m_tag *m_tag_copy(struct m_tag *);
-int	m_tag_copy_chain(struct mbuf *, struct mbuf *);
+struct m_tag *m_tag_copy(struct m_tag *, int);
+int	m_tag_copy_chain(struct mbuf *, struct mbuf *, int);
 void	m_tag_init(struct mbuf *);
 struct m_tag *m_tag_first(struct mbuf *);
 struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
@@ -445,5 +451,6 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 #define PACKET_TAG_DLT			0x0100 /* data link layer type */
 #define PACKET_TAG_PF_DIVERT		0x0200 /* pf(4) diverted packet */
 #define PACKET_TAG_PIPEX		0x0400 /* pipex context XXX */
+#define PACKET_TAG_PF_REASSEMBLED	0x0800 /* pf reassembled ipv6 packet */
 
 #endif

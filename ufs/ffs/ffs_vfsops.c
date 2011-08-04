@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vfsops.c,v 1.124 2010/06/29 14:48:08 thib Exp $	*/
+/*	$OpenBSD: ffs_vfsops.c,v 1.133 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -51,10 +51,9 @@
 #include <sys/pool.h>
 #include <sys/dkio.h>
 #include <sys/disk.h>
+#include <sys/specdev.h>
 
 #include <dev/rndvar.h>
-
-#include <miscfs/specfs/specdev.h>
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/ufsmount.h>
@@ -149,7 +148,8 @@ ffs_mountroot(void)
 	CIRCLEQ_INSERT_TAIL(&mountlist, mp, mnt_list);
 	ump = VFSTOUFS(mp);
 	fs = ump->um_fs;
-	(void) copystr(mp->mnt_stat.f_mntonname, fs->fs_fsmnt, MNAMELEN - 1, 0);
+	(void)copystr(mp->mnt_stat.f_mntonname, fs->fs_fsmnt, MNAMELEN - 1,
+	    NULL);
 	(void)ffs_statfs(mp, &mp->mnt_stat, p);
 	vfs_unbusy(mp);
 	inittodr(fs->fs_time);
@@ -282,9 +282,9 @@ ffs_mount(struct mount *mp, const char *path, void *data,
 			if (fs->fs_clean == 0) {
 #if 0
 				/*
-				 * It is safe mount unclean file system
+				 * It is safe to mount an unclean file system
 				 * if it was previously mounted with softdep
-				 * but we may loss space and must
+				 * but we may lose space and must
 				 * sometimes run fsck manually.
 				 */
 				if (fs->fs_flags & FS_DOSOFTDEP)
@@ -500,7 +500,7 @@ ffs_reload_vnode(struct vnode *vp, void *args)
 
 	error = bread(fra->devvp, 
 	    fsbtodb(fra->fs, ino_to_fsba(fra->fs, ip->i_number)),
-	    (int)fra->fs->fs_bsize, NOCRED, &bp);
+	    (int)fra->fs->fs_bsize, &bp);
 	if (error) {
 		brelse(bp);
 		vput(vp);
@@ -534,7 +534,6 @@ ffs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	struct vnode *devvp;
 	caddr_t space;
 	struct fs *fs, *newfs;
-	struct partinfo dpart;
 	int i, blks, size, error;
 	int32_t *lp;
 	struct buf *bp = NULL;
@@ -555,15 +554,9 @@ ffs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	/*
 	 * Step 2: re-read superblock from disk.
 	 */
-	if (VOP_IOCTL(devvp, DIOCGPART, (caddr_t)&dpart, FREAD, NOCRED, p) != 0)
-		size = DEV_BSIZE;
-	else
-		size = dpart.disklab->d_secsize;
-
 	fs = VFSTOUFS(mountp)->um_fs;
 
-	error = bread(devvp, (daddr64_t)(fs->fs_sblockloc / DEV_BSIZE), SBSIZE,
-	    NOCRED, &bp);
+	error = bread(devvp, fs->fs_sblockloc / DEV_BSIZE, SBSIZE, &bp);
 	if (error) {
 		brelse(bp);
 		return (error);
@@ -600,8 +593,7 @@ ffs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 		size = fs->fs_bsize;
 		if (i + fs->fs_frag > blks)
 			size = (blks - i) * fs->fs_fsize;
-		error = bread(devvp, fsbtodb(fs, fs->fs_csaddr + i), size,
-			      NOCRED, &bp);
+		error = bread(devvp, fsbtodb(fs, fs->fs_csaddr + i), size, &bp);
 		if (error) {
 			brelse(bp);
 			return (error);
@@ -675,7 +667,6 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	struct buf *bp;
 	struct fs *fs;
 	dev_t dev;
-	struct partinfo dpart;
 	caddr_t space;
 	daddr64_t sbloc;
 	int error, i, blks, size, ronly;
@@ -706,10 +697,6 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	error = VOP_OPEN(devvp, ronly ? FREAD : FREAD|FWRITE, FSCRED, p);
 	if (error)
 		return (error);
-	if (VOP_IOCTL(devvp, DIOCGPART, (caddr_t)&dpart, FREAD, cred, p) != 0)
-		size = DEV_BSIZE;
-	else
-		size = dpart.disklab->d_secsize;
 
 	bp = NULL;
 	ump = NULL;
@@ -724,7 +711,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 			bp = NULL;
 		}
 
-		error = bread(devvp, sbtry[i] / DEV_BSIZE, SBSIZE, cred, &bp);
+		error = bread(devvp, sbtry[i] / DEV_BSIZE, SBSIZE, &bp);
 		if (error)
 			goto out;
 
@@ -761,9 +748,9 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	if (fs->fs_clean == 0) {
 #if 0
 		/*
-		 * It is safe mount unclean file system
+		 * It is safe to mount an unclean file system
 		 * if it was previously mounted with softdep
-		 * but we may loss space and must
+		 * but we may lose space and must
 		 * sometimes run fsck manually.
 		 */
 		if (fs->fs_flags & FS_DOSOFTDEP)
@@ -827,8 +814,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 		size = fs->fs_bsize;
 		if (i + fs->fs_frag > blks)
 			size = (blks - i) * fs->fs_fsize;
-		error = bread(devvp, fsbtodb(fs, fs->fs_csaddr + i), size,
-			      cred, &bp);
+		error = bread(devvp, fsbtodb(fs, fs->fs_csaddr + i), size, &bp);
 		if (error) {
 			free(fs->fs_csp, M_UFSMNT);
 			goto out;
@@ -1259,11 +1245,12 @@ retry:
 		return (0);
 
 	/* Allocate a new vnode/inode. */
-	if ((error = getnewvnode(VT_UFS, mp, ffs_vnodeop_p, &vp)) != 0) {
+	if ((error = getnewvnode(VT_UFS, mp, &ffs_vops, &vp)) != 0) {
 		*vpp = NULL;
 		return (error);
 	}
-#ifdef VFSDEBUG
+
+#ifdef VFSLCKDEBUG
 	vp->v_flag |= VLOCKSWORK;
 #endif
 	ip = pool_get(&ffs_ino_pool, PR_WAITOK|PR_ZERO);
@@ -1301,7 +1288,7 @@ retry:
 
 	/* Read in the disk contents for the inode, copy into the inode. */
 	error = bread(ump->um_devvp, fsbtodb(fs, ino_to_fsba(fs, ino)),
-		      (int)fs->fs_bsize, NOCRED, &bp);
+	    (int)fs->fs_bsize, &bp);
 	if (error) {
 		/*
 		 * The inode does not contain anything useful, so it would
@@ -1339,7 +1326,7 @@ retry:
 	 * Initialize the vnode from the inode, check for aliases.
 	 * Note that the underlying vnode may have changed.
 	 */
-	error = ufs_vinit(mp, ffs_specop_p, FFS_FIFOOPS, &vp);
+	error = ufs_vinit(mp, &ffs_specvops, FFS_FIFOOPS, &vp);
 	if (error) {
 		vput(vp);
 		*vpp = NULL;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i82489var.h,v 1.10 2009/06/03 00:49:12 art Exp $	*/
+/*	$OpenBSD: i82489var.h,v 1.13 2011/06/25 19:20:41 jsg Exp $	*/
 /*	$NetBSD: i82489var.h,v 1.1.2.2 2000/02/21 18:46:14 sommerfeld Exp $	*/
 
 /*-
@@ -30,8 +30,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _I386_I82489VAR_H_
-#define _I386_I82489VAR_H_
+#ifndef _MACHINE_I82489VAR_H_
+#define _MACHINE_I82489VAR_H_
 
 static __inline__ u_int32_t i82489_readreg(int);
 static __inline__ void i82489_writereg(int, u_int32_t);
@@ -41,17 +41,14 @@ extern volatile u_int32_t local_apic[];
 #endif
 
 static __inline__ u_int32_t
-i82489_readreg(reg)
-	int reg;
+i82489_readreg(int reg)
 {
 	return *((volatile u_int32_t *)(((volatile u_int8_t *)local_apic)
 	    + reg));
 }
 
 static __inline__ void
-i82489_writereg(reg, val)
-	int reg;
-	u_int32_t val;
+i82489_writereg(int reg, u_int32_t val)
 {
 	*((volatile u_int32_t *)(((volatile u_int8_t *)local_apic) + reg)) =
 	    val;
@@ -119,6 +116,7 @@ extern void (*apichandler[])(void);
 struct cpu_info;
 
 extern void lapic_boot_init(paddr_t);
+extern void lapic_startclock(void);
 extern void lapic_initclocks(void);
 extern void lapic_set_lvt(void);
 extern void lapic_set_softvectors(void);

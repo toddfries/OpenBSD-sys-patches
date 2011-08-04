@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.39 2007/05/16 05:19:15 miod Exp $     */
+/*	$OpenBSD: trap.c,v 1.41 2011/04/03 14:56:28 guenther Exp $     */
 /*	$NetBSD: trap.c,v 1.47 1999/08/21 19:26:20 matt Exp $     */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -96,8 +96,7 @@ int no_traps = 18;
 	do if (p->p_addr->u_pcb.iftrap) {			\
 		frame->pc = (unsigned)p->p_addr->u_pcb.iftrap;	\
 		frame->psl &= ~PSL_FPD;				\
-		frame->r0 = EFAULT;/* for copyin/out */		\
-		frame->r1 = -1; /* for fetch/store */		\
+		frame->r0 = EFAULT;				\
 		return;						\
 	} while (0)
 
@@ -463,6 +462,8 @@ child_return(arg)
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p,
-		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
+		    (p->p_flag & P_THREAD) ? SYS_rfork :
+		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
+		    0, 0);
 #endif
 }

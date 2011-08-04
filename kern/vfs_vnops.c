@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.64 2010/01/08 19:18:21 stsp Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.68 2011/07/09 01:28:48 matthew Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -53,9 +53,9 @@
 #include <sys/cdio.h>
 #include <sys/poll.h>
 #include <sys/filedesc.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
-#include <miscfs/specfs/specdev.h>
 
 int vn_read(struct file *, off_t *, struct uio *, struct ucred *);
 int vn_write(struct file *, off_t *, struct uio *, struct ucred *);
@@ -133,6 +133,10 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 	}
 	if (vp->v_type == VLNK) {
 		error = ELOOP;
+		goto bad;
+	}
+	if ((fmode & O_DIRECTORY) && vp->v_type != VDIR) {
+		error = ENOTDIR;
 		goto bad;
 	}
 	if ((fmode & O_CREAT) == 0) {
@@ -255,8 +259,6 @@ vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base, int len, off_t offset,
 	struct iovec aiov;
 	int error;
 
-	if ((ioflg & IO_NODELOCKED) == 0)
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	auio.uio_iov = &aiov;
 	auio.uio_iovcnt = 1;
 	aiov.iov_base = base;
@@ -266,18 +268,22 @@ vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base, int len, off_t offset,
 	auio.uio_segflg = segflg;
 	auio.uio_rw = rw;
 	auio.uio_procp = p;
+
+	if ((ioflg & IO_NODELOCKED) == 0)
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (rw == UIO_READ) {
 		error = VOP_READ(vp, &auio, ioflg, cred);
 	} else {
 		error = VOP_WRITE(vp, &auio, ioflg, cred);
 	}
+	if ((ioflg & IO_NODELOCKED) == 0)
+		VOP_UNLOCK(vp, 0, p);
+
 	if (aresid)
 		*aresid = auio.uio_resid;
 	else
 		if (auio.uio_resid && error == 0)
 			error = EIO;
-	if ((ioflg & IO_NODELOCKED) == 0)
-		VOP_UNLOCK(vp, 0, p);
 	return (error);
 }
 
@@ -435,9 +441,10 @@ vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
 	case VBLK:
 		error = VOP_IOCTL(vp, com, data, fp->f_flag, p->p_ucred, p);
 		if (error == 0 && com == TIOCSCTTY) {
-			if (p->p_session->s_ttyvp)
-				vrele(p->p_session->s_ttyvp);
-			p->p_session->s_ttyvp = vp;
+			struct session *s = p->p_p->ps_session;
+			if (s->s_ttyvp)
+				vrele(s->s_ttyvp);
+			s->s_ttyvp = vp;
 			vref(vp);
 		}
 		return (error);

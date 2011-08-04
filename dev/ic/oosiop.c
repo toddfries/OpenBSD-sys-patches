@@ -1,4 +1,4 @@
-/*	$OpenBSD: oosiop.c,v 1.17 2010/06/28 18:31:02 krw Exp $	*/
+/*	$OpenBSD: oosiop.c,v 1.19 2011/06/27 21:33:20 miod Exp $	*/
 /*	$NetBSD: oosiop.c,v 1.4 2003/10/29 17:45:55 tsutsui Exp $	*/
 
 /*
@@ -90,6 +90,9 @@ void	oosiop_setup(struct oosiop_softc *, struct oosiop_cb *);
 void	oosiop_poll(struct oosiop_softc *, struct oosiop_cb *);
 void	oosiop_processintr(struct oosiop_softc *, u_int8_t);
 
+void	*oosiop_cb_alloc(void *);
+void	oosiop_cb_free(void *, void *);
+
 /* Trap interrupt code for unexpected data I/O */
 #define	DATAIN_TRAP	0xdead0001
 #define	DATAOUT_TRAP	0xdead0002
@@ -134,6 +137,32 @@ struct scsi_adapter oosiop_adapter = {
 	NULL,
 	NULL
 };
+
+void *
+oosiop_cb_alloc(void *xsc)
+{
+	struct oosiop_softc *sc = xsc;
+	struct oosiop_cb *cb;
+
+	mtx_enter(&sc->sc_cb_mtx);
+	cb = TAILQ_FIRST(&sc->sc_free_cb);
+	if (cb)
+		TAILQ_REMOVE(&sc->sc_free_cb, cb, chain);
+	mtx_leave(&sc->sc_cb_mtx);
+
+	return (cb);
+}
+
+void
+oosiop_cb_free(void *xsc, void *xcb)
+{
+	struct oosiop_softc *sc = xsc;
+	struct oosiop_cb *cb = xcb;
+
+	mtx_enter(&sc->sc_cb_mtx);
+	TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
+	mtx_leave(&sc->sc_cb_mtx);
+}
 
 void
 oosiop_attach(struct oosiop_softc *sc)
@@ -213,6 +242,9 @@ oosiop_attach(struct oosiop_softc *sc)
 	if (sc->sc_minperiod < 25)
 		sc->sc_minperiod = 25;	/* limit to 10MB/s */
 
+	mtx_init(&sc->sc_cb_mtx, IPL_BIO);
+	scsi_iopool_init(&sc->sc_iopool, sc, oosiop_cb_alloc, oosiop_cb_free);
+
 	printf(": NCR53C700%s rev %d, %dMHz\n",
 	    sc->sc_chip == OOSIOP_700_66 ? "-66" : "",
 	    oosiop_read_1(sc, OOSIOP_CTEST7) >> 4,
@@ -238,6 +270,7 @@ oosiop_attach(struct oosiop_softc *sc)
 	sc->sc_link.openings = 1;	/* XXX */
 	sc->sc_link.adapter_buswidth = OOSIOP_NTGT;
 	sc->sc_link.adapter_target = sc->sc_id;
+	sc->sc_link.pool = &sc->sc_iopool;
 	sc->sc_link.quirks = ADEV_NODOORLOCK;
 
 	bzero(&saa, sizeof(saa));
@@ -715,8 +748,8 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 	sc = (struct oosiop_softc *)xs->sc_link->adapter_softc;
 
 	s = splbio();
-	cb = TAILQ_FIRST(&sc->sc_free_cb);
-	TAILQ_REMOVE(&sc->sc_free_cb, cb, chain);
+
+	cb = xs->io;
 
 	cb->xs = xs;
 	cb->xsflags = xs->flags;
@@ -735,10 +768,9 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 	if (err) {
 		printf("%s: unable to load cmd DMA map: %d",
 		    sc->sc_dev.dv_xname, err);
+		splx(s);
 		xs->error = XS_DRIVER_STUFFUP;
 		scsi_done(xs);
-		TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
-		splx(s);
 		return;
 	}
 	bus_dmamap_sync(sc->sc_dmat, cb->cmddma, 0, xs->cmdlen,
@@ -757,11 +789,10 @@ oosiop_scsicmd(struct scsi_xfer *xs)
 		if (err) {
 			printf("%s: unable to load data DMA map: %d",
 			    sc->sc_dev.dv_xname, err);
-			xs->error = XS_DRIVER_STUFFUP;
 			bus_dmamap_unload(sc->sc_dmat, cb->cmddma);
-			scsi_done(xs);
-			TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
 			splx(s);
+			xs->error = XS_DRIVER_STUFFUP;
+			scsi_done(xs);
 			return;
 		}
 		bus_dmamap_sync(sc->sc_dmat, cb->datadma,
@@ -937,7 +968,6 @@ oosiop_done(struct oosiop_softc *sc, struct oosiop_cb *cb)
 FREE:
 		xs->resid = 0;
 		scsi_done(xs);
-		TAILQ_INSERT_TAIL(&sc->sc_free_cb, cb, chain);
 
 		if (cb == sc->sc_curcb)
 			sc->sc_curcb = NULL;

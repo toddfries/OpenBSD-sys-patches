@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sk.c,v 1.157 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: if_sk.c,v 1.160 2011/06/22 16:44:27 tedu Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -134,7 +134,6 @@
 int skc_probe(struct device *, void *, void *);
 void skc_attach(struct device *, struct device *self, void *aux);
 int skc_detach(struct device *, int);
-void skc_shutdown(void *);
 int sk_probe(struct device *, void *, void *);
 void sk_attach(struct device *, struct device *self, void *aux);
 int sk_detach(struct device *, int);
@@ -559,8 +558,7 @@ sk_init_rx_ring(struct sk_if_softc *sc_if)
 	struct sk_ring_data	*rd = sc_if->sk_rdata;
 	int			i, nexti;
 
-	bzero((char *)rd->sk_rx_ring,
-	    sizeof(struct sk_rx_desc) * SK_RX_RING_CNT);
+	bzero(rd->sk_rx_ring, sizeof(struct sk_rx_desc) * SK_RX_RING_CNT);
 
 	for (i = 0; i < SK_RX_RING_CNT; i++) {
 		cd->sk_rx_chain[i].sk_desc = &rd->sk_rx_ring[i];
@@ -600,7 +598,7 @@ sk_init_tx_ring(struct sk_if_softc *sc_if)
 	struct sk_txmap_entry	*entry;
 	int			i, nexti;
 
-	bzero((char *)sc_if->sk_rdata->sk_tx_ring,
+	bzero(sc_if->sk_rdata->sk_tx_ring,
 	    sizeof(struct sk_tx_desc) * SK_TX_RING_CNT);
 
 	SIMPLEQ_INIT(&sc_if->sk_txmap_head);
@@ -936,7 +934,7 @@ skc_probe(struct device *parent, void *match, void *aux)
 		return (1);
 
 	return (pci_matchbyid((struct pci_attach_args *)aux, skc_devices,
-	    sizeof(skc_devices)/sizeof(skc_devices[0])));
+	    nitems(skc_devices)));
 }
 
 /*
@@ -1237,8 +1235,6 @@ sk_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	sc_if->sk_sdhook = shutdownhook_establish(skc_shutdown, sc);
-
 	DPRINTFN(2, ("sk_attach: end\n"));
 	return;
 
@@ -1270,9 +1266,6 @@ sk_detach(struct device *self, int flags)
 
 	/* Delete any remaining media. */
 	ifmedia_delete_instance(&sc_if->sk_mii.mii_media, IFM_INST_ANY);
-
-	if (sc_if->sk_sdhook != NULL)
-		shutdownhook_disestablish(sc_if->sk_sdhook);
 
 	ether_ifdetach(ifp);
 	if_detach(ifp);
@@ -1712,23 +1705,6 @@ sk_watchdog(struct ifnet *ifp)
 
 		sk_init(sc_if);
 	}
-}
-
-void
-skc_shutdown(void *v)
-{
-	struct sk_softc		*sc = v;
-
-	DPRINTFN(2, ("sk_shutdown\n"));
-
-	/* Turn off the 'driver is loaded' LED. */
-	CSR_WRITE_2(sc, SK_LED, SK_LED_GREEN_OFF);
-
-	/*
-	 * Reset the GEnesis controller. Doing this should also
-	 * assert the resets on the attached XMAC(s).
-	 */
-	sk_reset(sc);
 }
 
 static __inline int

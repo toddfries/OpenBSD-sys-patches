@@ -1,4 +1,4 @@
-/* $OpenBSD: vmparam.h,v 1.18 2008/10/06 23:09:37 brad Exp $ */
+/* $OpenBSD: vmparam.h,v 1.21 2011/05/30 22:25:20 oga Exp $ */
 /* $NetBSD: vmparam.h,v 1.18 2000/05/22 17:13:54 thorpej Exp $ */
 
 /*
@@ -39,8 +39,8 @@
  *	@(#)vmparam.h	8.2 (Berkeley) 4/22/94
  */
 
-#ifndef	_ALPHA_VMPARAM_H_
-#define	_ALPHA_VMPARAM_H_
+#ifndef	_MACHINE_VMPARAM_H_
+#define	_MACHINE_VMPARAM_H_
 
 /*
  * Machine dependent constants for Alpha.
@@ -71,6 +71,9 @@
 #endif
 #ifndef MAXDSIZ
 #define	MAXDSIZ		(1*1024*1024*1024)	/* max data size */
+#endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
 #endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(2*1024*1024)		/* initial stack size */
@@ -122,9 +125,6 @@
 #define	VM_PHYSSEG_STRAT	VM_PSTRAT_BSEARCH
 #define	VM_PHYSSEG_NOADD			/* no more after vm_mem_init */
 
-#define	VM_NFREELIST		1
-#define	VM_FREELIST_DEFAULT	0
-
 /*
  * pmap-specific data stored in the vm_physmem[] array.
  */
@@ -133,4 +133,4 @@ struct pmap_physseg {
 	struct pv_head *pvhead;		/* pv list of this seg */
 };
 
-#endif	/* ! _ALPHA_VMPARAM_H_ */
+#endif	/* ! _MACHINE_VMPARAM_H_ */

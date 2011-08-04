@@ -1,4 +1,4 @@
-/*	$OpenBSD: archtype.h,v 1.12 2010/05/08 21:59:56 miod Exp $	*/
+/*	$OpenBSD: archtype.h,v 1.14 2011/07/21 20:36:12 miod Exp $	*/
 /*
  * Copyright (c) 1997-2004 Opsycon AB, Sweden (www.opsycon.se)
  *
@@ -25,8 +25,8 @@
  *
  */
 
-#ifndef _MIPS_ARCHTYPE_H_
-#define _MIPS_ARCHTYPE_H_
+#ifndef _MIPS64_ARCHTYPE_H_
+#define _MIPS64_ARCHTYPE_H_
 /*
  * Define architectural identities for the different Mips machines.
  */
@@ -83,10 +83,11 @@
 #define	LOONGSON_GDIUM		0x0062	/* EMTEC Gdium Liberty */
 #define	LOONGSON_FULOONG	0x0063	/* Lemote Fuloong */
 #define	LOONGSON_LYNLOONG	0x0064	/* Lemote Lynloong */
+#define	LOONGSON_EBT700		0x0065	/* eBenton EBT700 */
 
 #define	MISC_CLASS		0x00f0	/* Misc machines... */
 #define	LAGUNA			0x00f1	/* Heurikon Laguna VME board */
 
 #define	ARCHCLASS(n)	((n) & 0xf0)
 
-#endif /* !_MIPS_ARCHTYPE_H_ */
+#endif /* !_MIPS64_ARCHTYPE_H_ */

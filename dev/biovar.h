@@ -1,4 +1,4 @@
-/*	$OpenBSD: biovar.h,v 1.38 2010/03/26 16:50:59 jsing Exp $	*/
+/*	$OpenBSD: biovar.h,v 1.40 2011/05/20 14:46:44 marco Exp $	*/
 
 /*
  * Copyright (c) 2002 Niklas Hallqvist.  All rights reserved.
@@ -78,7 +78,7 @@ struct bioc_disk {
 #define BIOC_SDOFFLINE		0x01
 #define BIOC_SDOFFLINE_S	"Offline"
 #define BIOC_SDFAILED		0x02
-#define BIOC_SDFAILED_S 	"Failed"
+#define BIOC_SDFAILED_S		"Failed"
 #define BIOC_SDREBUILD		0x03
 #define BIOC_SDREBUILD_S	"Rebuild"
 #define BIOC_SDHOTSPARE		0x04
@@ -213,7 +213,7 @@ struct bioc_discipline {
 	void		*bd_data;
 };
 
-#define BIOCINSTALLBOOT _IOWR('B', 40, struct bioc_installboot)
+#define BIOCINSTALLBOOT _IOWR('B', 41, struct bioc_installboot)
 struct bioc_installboot {
 	void		*bb_cookie;
 	char		bb_dev[16];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pdaemon.c,v 1.55 2009/10/14 17:53:30 beck Exp $	*/
+/*	$OpenBSD: uvm_pdaemon.c,v 1.59 2011/07/06 19:50:38 beck Exp $	*/
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
 /* 
@@ -96,9 +96,9 @@
  * local prototypes
  */
 
-static void		uvmpd_scan(void);
-static boolean_t	uvmpd_scan_inactive(struct pglist *);
-static void		uvmpd_tune(void);
+void		uvmpd_scan(void);
+boolean_t	uvmpd_scan_inactive(struct pglist *);
+void		uvmpd_tune(void);
 
 /*
  * uvm_wait: wait (sleep) for the page daemon to free some pages
@@ -147,18 +147,16 @@ uvm_wait(const char *wmsg)
 	msleep(&uvmexp.free, &uvm.fpageqlock, PVM | PNORELOCK, wmsg, timo);
 }
 
-
 /*
  * uvmpd_tune: tune paging parameters
  *
- * => called when ever memory is added (or removed?) to the system
+ * => called whenever memory is added to (or removed from?) the system
  * => caller must call with page queues locked
  */
 
-static void
+void
 uvmpd_tune(void)
 {
-	UVMHIST_FUNC("uvmpd_tune"); UVMHIST_CALLED(pdhist);
 
 	uvmexp.freemin = uvmexp.npages / 30;
 
@@ -180,8 +178,6 @@ uvmpd_tune(void)
 	/* uvmexp.inactarg: computed in main daemon loop */
 
 	uvmexp.wiredmax = uvmexp.npages / 3;
-	UVMHIST_LOG(pdhist, "<- done, freemin=%ld, freetarg=%ld, wiredmax=%ld",
-	      uvmexp.freemin, uvmexp.freetarg, uvmexp.wiredmax, 0);
 }
 
 /*
@@ -191,10 +187,10 @@ uvmpd_tune(void)
 void
 uvm_pageout(void *arg)
 {
+	struct uvm_constraint_range constraint;
+	struct uvm_pmalloc *pma;
+	int work_done;
 	int npages = 0;
-	UVMHIST_FUNC("uvm_pageout"); UVMHIST_CALLED(pdhist);
-
-	UVMHIST_LOG(pdhist,"<starting uvm pagedaemon>", 0, 0, 0, 0);
 
 	/*
 	 * ensure correct priority and set paging parameters...
@@ -212,12 +208,23 @@ uvm_pageout(void *arg)
 	 */
 
 	for (;;) {
+	  	work_done = 0; /* No work done this iteration. */
+
 		uvm_lock_fpageq();
-		UVMHIST_LOG(pdhist,"  <<SLEEPING>>",0,0,0,0);
-		msleep(&uvm.pagedaemon, &uvm.fpageqlock, PVM | PNORELOCK,
-		    "pgdaemon", 0);
-		uvmexp.pdwoke++;
-		UVMHIST_LOG(pdhist,"  <<WOKE UP>>",0,0,0,0);
+
+		if (TAILQ_EMPTY(&uvm.pmr_control.allocs)) {
+			msleep(&uvm.pagedaemon, &uvm.fpageqlock, PVM,
+			    "pgdaemon", 0);
+			uvmexp.pdwoke++;
+		}
+
+		if ((pma = TAILQ_FIRST(&uvm.pmr_control.allocs)) != NULL) {
+			pma->pm_flags |= UVM_PMA_BUSY;
+			constraint = pma->pm_constraint;
+		} else
+			constraint = no_constraint;
+
+		uvm_unlock_fpageq();
 
 		/*
 		 * now lock page queues and recompute inactive count
@@ -234,17 +241,19 @@ uvm_pageout(void *arg)
 			uvmexp.inactarg = uvmexp.freetarg + 1;
 		}
 
-		UVMHIST_LOG(pdhist,"  free/ftarg=%ld/%ld, inact/itarg=%ld/%ld",
-		    uvmexp.free, uvmexp.freetarg, uvmexp.inactive,
-		    uvmexp.inactarg);
-
 		/*
 		 * get pages from the buffer cache, or scan if needed
 		 */
-		if (((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
+		if (pma != NULL ||
+		    ((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
 		    ((uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg)) {
-			if (bufbackoff() == -1)
+			if (bufbackoff(&constraint,
+			    (pma ? pma->pm_size : -1)) == 0)
+				work_done = 1;
+			else {
 				uvmpd_scan();
+				work_done = 1; /* we hope... */
+			}
 		}
 
 		/*
@@ -255,6 +264,18 @@ uvm_pageout(void *arg)
 		if (uvmexp.free > uvmexp.reserve_kernel ||
 		    uvmexp.paging == 0) {
 			wakeup(&uvmexp.free);
+		}
+
+		if (pma != NULL) {
+			pma->pm_flags &= ~UVM_PMA_BUSY;
+			if (!work_done)
+				pma->pm_flags |= UVM_PMA_FAIL;
+			if (pma->pm_flags & (UVM_PMA_FAIL | UVM_PMA_FREED)) {
+				pma->pm_flags &= ~UVM_PMA_LINKED;
+				TAILQ_REMOVE(&uvm.pmr_control.allocs, pma,
+				    pmq);
+			}
+			wakeup(pma);
 		}
 		uvm_unlock_fpageq();
 
@@ -277,7 +298,6 @@ uvm_aiodone_daemon(void *arg)
 {
 	int s, free;
 	struct buf *bp, *nbp;
-	UVMHIST_FUNC("uvm_aiodoned"); UVMHIST_CALLED(pdhist);
 
 	uvm.aiodoned_proc = curproc;
 
@@ -329,7 +349,7 @@ uvm_aiodone_daemon(void *arg)
  * => we return TRUE if we are exiting because we met our target
  */
 
-static boolean_t
+boolean_t
 uvmpd_scan_inactive(struct pglist *pglst)
 {
 	boolean_t retval = FALSE;	/* assume we haven't hit target */
@@ -345,7 +365,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 	boolean_t swap_backed;
 	vaddr_t start;
 	int dirtyreacts;
-	UVMHIST_FUNC("uvmpd_scan_inactive"); UVMHIST_CALLED(pdhist);
 
 	/*
 	 * note: we currently keep swap-backed pages on a separate inactive
@@ -386,8 +405,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 
 			if (free + uvmexp.paging >= uvmexp.freetarg << 2 ||
 			    dirtyreacts == UVMPD_NUMDIRTYREACTS) {
-				UVMHIST_LOG(pdhist,"  met free target: "
-					    "exit loop", 0, 0, 0, 0);
 				retval = TRUE;
 
 				if (swslot == 0) {
@@ -908,7 +925,6 @@ uvmpd_scan(void)
 	struct vm_page *p, *nextpg;
 	struct uvm_object *uobj;
 	boolean_t got_it;
-	UVMHIST_FUNC("uvmpd_scan"); UVMHIST_CALLED(pdhist);
 
 	uvmexp.pdrevs++;		/* counter */
 	uobj = NULL;
@@ -925,8 +941,6 @@ uvmpd_scan(void)
 	 */
 	if (free < uvmexp.freetarg) {
 		uvmexp.pdswout++;
-		UVMHIST_LOG(pdhist,"  free %ld < target %ld: swapout", free,
-		    uvmexp.freetarg, 0, 0);
 		uvm_unlock_pageq();
 		uvm_swapout_threads();
 		uvm_lock_pageq();
@@ -939,8 +953,6 @@ uvmpd_scan(void)
 	 * we work on meeting our inactive target by converting active pages
 	 * to inactive ones.
 	 */
-
-	UVMHIST_LOG(pdhist, "  starting 'free' loop",0,0,0,0);
 
 	/*
 	 * alternate starting queue between swap and object based on the
@@ -977,8 +989,6 @@ uvmpd_scan(void)
 		swap_shortage = uvmexp.freetarg - uvmexp.free;
 	}
 
-	UVMHIST_LOG(pdhist, "  loop 2: inactive_shortage=%ld swap_shortage=%ld",
-		    inactive_shortage, swap_shortage,0,0);
 	for (p = TAILQ_FIRST(&uvm.page_active);
 	     p != NULL && (inactive_shortage > 0 || swap_shortage > 0);
 	     p = nextpg) {

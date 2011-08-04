@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_vfsops.c,v 1.55 2010/05/18 04:41:14 dlg Exp $	*/
+/*	$OpenBSD: ext2fs_vfsops.c,v 1.64 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ext2fs_vfsops.c,v 1.1 1997/06/11 09:34:07 bouyer Exp $	*/
 
 /*
@@ -44,6 +44,7 @@
 #include <sys/mount.h>
 #include <sys/buf.h>
 #include <sys/device.h>
+#include <sys/disk.h>
 #include <sys/mbuf.h>
 #include <sys/file.h>
 #include <sys/disklabel.h>
@@ -53,8 +54,7 @@
 #include <sys/pool.h>
 #include <sys/lock.h>
 #include <sys/dkio.h>
-
-#include <miscfs/specfs/specdev.h>
+#include <sys/specdev.h>
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/ufsmount.h>
@@ -69,21 +69,6 @@ extern struct lock ufs_hashlock;
 
 int ext2fs_sbupdate(struct ufsmount *, int);
 static int ext2fs_checksb(struct ext2fs *, int);
-
-extern struct vnodeopv_desc ext2fs_vnodeop_opv_desc;
-extern struct vnodeopv_desc ext2fs_specop_opv_desc;
-#ifdef FIFO
-extern struct vnodeopv_desc ext2fs_fifoop_opv_desc;
-#endif
-
-struct vnodeopv_desc *ext2fs_vnodeopv_descs[] = {
-	&ext2fs_vnodeop_opv_desc,
-	&ext2fs_specop_opv_desc,
-#ifdef FIFO
-	&ext2fs_fifoop_opv_desc,
-#endif
-	NULL,
-};
 
 const struct vfsops ext2fs_vfsops = {
 	ext2fs_mount,
@@ -157,11 +142,11 @@ ext2fs_mountroot(void)
 	fs = ump->um_e2fs;
 	bzero(fs->e2fs_fsmnt, sizeof(fs->e2fs_fsmnt));
 	(void)copystr(mp->mnt_stat.f_mntonname, fs->e2fs_fsmnt, 
-	    sizeof(fs->e2fs_fsmnt) - 1, 0);
+	    sizeof(fs->e2fs_fsmnt) - 1, NULL);
 	if (fs->e2fs.e2fs_rev > E2FS_REV0) {
 		bzero(fs->e2fs.e2fs_fsmnt, sizeof(fs->e2fs.e2fs_fsmnt));
 		(void)copystr(mp->mnt_stat.f_mntonname, fs->e2fs.e2fs_fsmnt,
-		    sizeof(fs->e2fs.e2fs_fsmnt) - 1, 0);
+		    sizeof(fs->e2fs.e2fs_fsmnt) - 1, NULL);
 	}
 	(void)ext2fs_statfs(mp, &mp->mnt_stat, p);
 	vfs_unbusy(mp);
@@ -185,10 +170,12 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 	size_t size;
 	int error, flags;
 	mode_t accessmode;
+	char *fspec = NULL;
 
 	error = copyin(data, (caddr_t)&args, sizeof (struct ufs_args));
 	if (error)
 		return (error);
+
 	/*
 	 * If updating, check whether changing from read-only to
 	 * read/write; if there is no device name, that's all we do.
@@ -226,11 +213,9 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 				vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
 				error = VOP_ACCESS(devvp, VREAD | VWRITE,
 				    p->p_ucred, p);
-				if (error) {
-					VOP_UNLOCK(devvp, 0, p);
-					return (error);
-				}
 				VOP_UNLOCK(devvp, 0, p);
+				if (error)
+					return (error);
 			}
 			fs->e2fs_ronly = 0;
 			if (fs->e2fs.e2fs_state == E2FS_ISCLEAN)
@@ -251,18 +236,24 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 	 * Not an update, or updating the name: look up the name
 	 * and verify that it refers to a sensible block device.
 	 */
-	NDINIT(ndp, LOOKUP, FOLLOW, UIO_USERSPACE, args.fspec, p);
+	fspec = malloc(MNAMELEN, M_MOUNT, M_WAITOK);
+	error = copyinstr(args.fspec, fspec, MNAMELEN - 1, &size);
+	if (error)
+		goto error;
+	disk_map(fspec, fspec, MNAMELEN, DM_OPENBLCK);
+
+	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, p);
 	if ((error = namei(ndp)) != 0)
-		return (error);
+		goto error;
 	devvp = ndp->ni_vp;
 
 	if (devvp->v_type != VBLK) {
-		vrele(devvp);
-		return (ENOTBLK);
+		error = ENOTBLK;
+		goto error_devvp;
 	}
 	if (major(devvp->v_rdev) >= nblkdev) {
-		vrele(devvp);
-		return (ENXIO);
+		error = ENXIO;
+		goto error_devvp;
 	}
 	/*
 	 * If mount by non-root, then verify that user has necessary
@@ -274,11 +265,9 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 			accessmode |= VWRITE;
 		vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
 		error = VOP_ACCESS(devvp, accessmode, p->p_ucred, p);
-		if (error) {
-			vput(devvp);
-			return (error);
-		}
 		VOP_UNLOCK(devvp, 0, p);
+		if (error)
+			goto error_devvp;
 	}
 	if ((mp->mnt_flag & MNT_UPDATE) == 0)
 		error = ext2fs_mountfs(devvp, mp, p);
@@ -288,10 +277,8 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 		else
 			vrele(devvp);
 	}
-	if (error) {
-		vrele(devvp);
-		return (error);
-	}
+	if (error)
+		goto error_devvp;
 	ump = VFSTOUFS(mp);
 	fs = ump->um_e2fs;
 	(void)copyinstr(path, fs->e2fs_fsmnt, sizeof(fs->e2fs_fsmnt) - 1,
@@ -303,8 +290,7 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 		bzero(fs->e2fs.e2fs_fsmnt, sizeof(fs->e2fs.e2fs_fsmnt) - size);
 	}
 	bcopy(fs->e2fs_fsmnt, mp->mnt_stat.f_mntonname, MNAMELEN);
-	(void)copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1, 
-		&size);
+	size = strlcpy(mp->mnt_stat.f_mntfromname, fspec, MNAMELEN - 1);
 	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
 	if (fs->e2fs_fmod != 0) {	/* XXX */
 		fs->e2fs_fmod = 0;
@@ -315,7 +301,21 @@ ext2fs_mount(struct mount *mp, const char *path, void *data,
 				mp->mnt_stat.f_mntfromname);
 		(void)ext2fs_cgupdate(ump, MNT_WAIT);
 	}
-	return (0);
+
+	goto success;
+
+error_devvp:
+	/* Error with devvp held. */
+	vrele(devvp);
+
+error:
+	/* Error with no state to backout. */
+
+success:
+	if (fspec)
+		free(fspec, M_MOUNT);
+
+	return (error);
 }
 
 int ext2fs_reload_vnode(struct vnode *, void *args);
@@ -358,7 +358,7 @@ ext2fs_reload_vnode(struct vnode *vp, void *args)
 	ip = VTOI(vp);
 	error = bread(era->devvp, 
 	    fsbtodb(era->fs, ino_to_fsba(era->fs, ip->i_number)),
-	    (int)era->fs->e2fs_bsize, NOCRED, &bp);
+	    (int)era->fs->e2fs_bsize, &bp);
 	if (error) {
 		vput(vp);
 		return (error);
@@ -391,8 +391,7 @@ ext2fs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	struct buf *bp;
 	struct m_ext2fs *fs;
 	struct ext2fs *newfs;
-	struct partinfo dpart;
-	int i, size, error;
+	int i, error;
 	struct ext2fs_reload_args era;
 
 	if ((mountp->mnt_flag & MNT_RDONLY) == 0)
@@ -407,11 +406,7 @@ ext2fs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	/*
 	 * Step 2: re-read superblock from disk.
 	 */
-	if (VOP_IOCTL(devvp, DIOCGPART, (caddr_t)&dpart, FREAD, NOCRED, p) != 0)
-		size = DEV_BSIZE;
-	else
-		size = dpart.disklab->d_secsize;
-	error = bread(devvp, (int32_t)(SBOFF / size), SBSIZE, NOCRED, &bp);
+	error = bread(devvp, (daddr64_t)(SBOFF / DEV_BSIZE), SBSIZE, &bp);
 	if (error) {
 		brelse(bp);
 		return (error);
@@ -449,7 +444,7 @@ ext2fs_reload(struct mount *mountp, struct ucred *cred, struct proc *p)
 	for (i=0; i < fs->e2fs_ngdb; i++) {
 		error = bread(devvp ,
 		    fsbtodb(fs, ((fs->e2fs_bsize>1024)? 0 : 1) + i + 1),
-		    fs->e2fs_bsize, NOCRED, &bp);
+		    fs->e2fs_bsize, &bp);
 		if (error) {
 			brelse(bp);
 			return (error);
@@ -481,8 +476,7 @@ ext2fs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	struct ext2fs *fs;
 	struct m_ext2fs *m_fs;
 	dev_t dev;
-	struct partinfo dpart;
-	int error, i, size, ronly;
+	int error, i, ronly;
 	struct ucred *cred;
 
 	dev = devvp->v_rdev;
@@ -504,10 +498,6 @@ ext2fs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	error = VOP_OPEN(devvp, ronly ? FREAD : FREAD|FWRITE, FSCRED, p);
 	if (error)
 		return (error);
-	if (VOP_IOCTL(devvp, DIOCGPART, (caddr_t)&dpart, FREAD, cred, p) != 0)
-		size = DEV_BSIZE;
-	else
-		size = dpart.disklab->d_secsize;
 
 	bp = NULL;
 	ump = NULL;
@@ -515,7 +505,7 @@ ext2fs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 #ifdef DEBUG_EXT2
 	printf("ext2 sb size: %d\n", sizeof(struct ext2fs));
 #endif
-	error = bread(devvp, (SBOFF / DEV_BSIZE), SBSIZE, cred, &bp);
+	error = bread(devvp, (daddr64_t)(SBOFF / DEV_BSIZE), SBSIZE, &bp);
 	if (error)
 		goto out;
 	fs = (struct ext2fs *)bp->b_data;
@@ -563,7 +553,7 @@ ext2fs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	for (i=0; i < m_fs->e2fs_ngdb; i++) {
 		error = bread(devvp ,
 		    fsbtodb(m_fs, ((m_fs->e2fs_bsize>1024)? 0 : 1) + i + 1),
-		    m_fs->e2fs_bsize, NOCRED, &bp);
+		    m_fs->e2fs_bsize, &bp);
 		if (error) {
 			free(m_fs->e2fs_gd, M_UFSMNT);
 			goto out;
@@ -826,7 +816,7 @@ ext2fs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 		return (0);
 
 	/* Allocate a new vnode/inode. */
-	if ((error = getnewvnode(VT_EXT2FS, mp, ext2fs_vnodeop_p, &vp)) != 0) {
+	if ((error = getnewvnode(VT_EXT2FS, mp, &ext2fs_vops, &vp)) != 0) {
 		*vpp = NULL;
 		return (error);
 	}
@@ -861,7 +851,7 @@ ext2fs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 
 	/* Read in the disk contents for the inode, copy into the inode. */
 	error = bread(ump->um_devvp, fsbtodb(fs, ino_to_fsba(fs, ino)),
-	    (int)fs->e2fs_bsize, NOCRED, &bp);
+	    (int)fs->e2fs_bsize, &bp);
 	if (error) {
 		/*
 		 * The inode does not contain anything useful, so it would
@@ -905,7 +895,7 @@ ext2fs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 	 * Initialize the vnode from the inode, check for aliases.
 	 * Note that the underlying vnode may have changed.
 	 */
-	error = ext2fs_vinit(mp, ext2fs_specop_p, EXT2FS_FIFOOPS, &vp);
+	error = ext2fs_vinit(mp, &ext2fs_specvops, EXT2FS_FIFOOPS, &vp);
 	if (error) {
 		vput(vp);
 		*vpp = NULL;

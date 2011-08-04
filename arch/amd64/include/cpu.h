@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.51 2009/12/09 14:27:34 oga Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.68 2011/06/16 19:46:40 kettenis Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -35,15 +35,14 @@
  *	@(#)cpu.h	5.4 (Berkeley) 5/9/91
  */
 
-#ifndef _AMD64_CPU_H_
-#define _AMD64_CPU_H_
+#ifndef _MACHINE_CPU_H_
+#define _MACHINE_CPU_H_
 
 /*
  * Definitions unique to x86-64 cpu support.
  */
 #include <machine/frame.h>
 #include <machine/segments.h>
-#include <machine/tss.h>
 #include <machine/intrdefs.h>
 #include <machine/cacheinfo.h>
 
@@ -59,6 +58,7 @@
 
 #ifdef _KERNEL
 
+struct x86_64_tss;
 struct cpu_info {
 	struct device *ci_dev;
 	struct cpu_info *ci_self;
@@ -72,22 +72,26 @@ struct cpu_info {
 	u_int32_t ci_randseed;
 
 	u_int64_t ci_scratch;
+	u_int64_t ci_cur_fsbase;
 
 	struct proc *ci_fpcurproc;
+	struct proc *ci_fpsaveproc;
 	int ci_fpsaving;
 
 	struct pcb *ci_curpcb;
 	struct pcb *ci_idle_pcb;
-	int ci_idle_tss_sel;
 
 	struct intrsource *ci_isources[MAX_INTR_SOURCES];
-	u_int32_t	ci_ipending;
+	u_int64_t	ci_ipending;
 	int		ci_ilevel;
 	int		ci_idepth;
-	u_int32_t	ci_imask[NIPL];
-	u_int32_t	ci_iunmask[NIPL];
+	u_int64_t	ci_imask[NIPL];
+	u_int64_t	ci_iunmask[NIPL];
+#ifdef DIAGNOSTIC
+	int		ci_mutex_level;
+#endif
 
-	u_int		ci_flags;
+	volatile u_int	ci_flags;
 	u_int32_t	ci_ipis;
 
 	u_int32_t	ci_feature_flags;
@@ -106,6 +110,7 @@ struct cpu_info {
 
 	struct x86_cache_info ci_cinfo[CAI_COUNT];
 
+	struct	x86_64_tss *ci_tss;
 	char		*ci_gdt;
 
 	volatile int	ci_ddb_paused;
@@ -120,10 +125,6 @@ struct cpu_info {
 #define CI_SETPERF_SHOULDSTOP	1
 #define CI_SETPERF_INTRANSIT	2
 #define CI_SETPERF_DONE		3
-
-	struct x86_64_tss	ci_doubleflt_tss;
-
-	char *ci_doubleflt_stack;
 
 	struct ksensordev	ci_sensordev;
 	struct ksensor		ci_sensor;
@@ -159,7 +160,7 @@ extern void need_resched(struct cpu_info *);
 
 #if defined(MULTIPROCESSOR)
 
-#define MAXCPUS		32	/* bitmask; can be bumped to 64 */
+#define MAXCPUS		64	/* bitmask; can be bumped to 64 */
 
 #define CPU_STARTUP(_ci)	((_ci)->ci_func->start(_ci))
 #define CPU_STOP(_ci)		((_ci)->ci_func->stop(_ci))
@@ -210,8 +211,6 @@ extern struct cpu_info cpu_info_primary;
 #endif
 
 #define aston(p)	((p)->p_md.md_astpending = 1)
-
-extern u_int32_t cpus_attached;
 
 #define curpcb		curcpu()->ci_curpcb
 
@@ -268,7 +267,6 @@ void cpu_probe_features(struct cpu_info *);
 
 /* machdep.c */
 void	dumpconf(void);
-int	cpu_maxproc(void);
 void	cpu_reset(void);
 void	x86_64_proc0_tss_ldt_init(void);
 void	x86_64_bufinit(void);
@@ -289,10 +287,13 @@ void	proc_trampoline(void);
 void	child_trampoline(void);
 
 /* clock.c */
-void	initrtclock(void);
-void	startrtclock(void);
+extern void (*initclock_func)(void);
+void	startclocks(void);
+void	rtcstart(void);
+void	rtcstop(void);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
+void	i8254_startclock(void);
 void	i8254_inittimecounter(void);
 void	i8254_inittimecounter_simple(void);
 
@@ -309,9 +310,6 @@ void	child_return(void *);
 /* dkcsum.c */
 void	dkcsumattach(void);
 
-/* consinit.c */
-void kgdb_port_init(void);
-
 /* bus_machdep.c */
 void x86_bus_space_init(void);
 void x86_bus_space_mallocok(void);
@@ -319,6 +317,10 @@ void x86_bus_space_mallocok(void);
 /* powernow-k8.c */
 void k8_powernow_init(struct cpu_info *);
 void k8_powernow_setperf(int);
+
+/* k1x-pstate.c */
+void k1x_init(struct cpu_info *);
+void k1x_setperf(int);
 
 void est_init(struct cpu_info *);
 void est_setperf(int);
@@ -345,7 +347,8 @@ void mp_setperf_init(void);
 #define CPU_KBDRESET		10	/* keyboard reset under pcvt */
 #define CPU_APMHALT		11	/* halt -p hack */
 #define CPU_XCRYPT		12	/* supports VIA xcrypt in userland */
-#define CPU_MAXID		13	/* number of valid machdep ids */
+#define CPU_LIDSUSPEND		13	/* lid close causes a suspend */
+#define CPU_MAXID		14	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
@@ -361,6 +364,7 @@ void mp_setperf_init(void);
 	{ "kbdreset", CTLTYPE_INT }, \
 	{ "apmhalt", CTLTYPE_INT }, \
 	{ "xcrypt", CTLTYPE_INT }, \
+	{ "lidsuspend", CTLTYPE_INT }, \
 }
 
 /*
@@ -371,4 +375,4 @@ void mp_setperf_init(void);
  */
 #define CR4_DEFAULT (CR4_PAE|CR4_PGE|CR4_PSE|CR4_OSFXSR|CR4_OSXMMEXCPT)
 
-#endif /* !_AMD64_CPU_H_ */
+#endif /* !_MACHINE_CPU_H_ */

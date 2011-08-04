@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.124 2010/06/27 03:03:48 thib Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.136 2011/07/05 04:48:02 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -91,6 +91,7 @@
 #include <sys/syscallargs.h>
 #include <sys/exec.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <sys/sysctl.h>
@@ -159,21 +160,6 @@ int     _bus_dmamem_alloc_range(bus_dma_tag_t tag, bus_dma_tag_t,
 int bus_space_debug = 0;
 
 struct vm_map *exec_map = NULL;
-extern vaddr_t avail_end;
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 10
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
@@ -182,7 +168,6 @@ int	physmem;
 extern	caddr_t msgbufaddr;
 
 int sparc_led_blink;
-int kbd_reset;
 
 #ifdef APERTURE
 #ifdef INSECURE
@@ -308,9 +293,6 @@ setregs(p, pack, stack, retval)
 		break;
 	}
 
-	/* Don't allow misaligned code by default */
-	p->p_md.md_flags &= ~MDP_FIXALIGN;
-
 	/*
 	 * Set the registers to 0 except for:
 	 *	%o6: stack pointer, built in exec())
@@ -357,7 +339,7 @@ setregs(p, pack, stack, retval)
 	tf->tf_global[2] = tf->tf_global[7] = tf->tf_pc;
 	stack -= sizeof(struct rwindow);
 	tf->tf_out[6] = stack - STACK_OFFSET;
-	tf->tf_out[7] = NULL;
+	tf->tf_out[7] = 0;
 #ifdef NOTDEF_DEBUG
 	printf("setregs: setting tf %p sp %p pc %p\n", (long)tf, 
 	       (long)tf->tf_out[6], (long)tf->tf_pc);
@@ -427,10 +409,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_rdint(oldp, oldlenp, newp, ceccerrs));
 	case CPU_CECCLAST:
 		return (sysctl_rdquad(oldp, oldlenp, newp, cecclast));
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -464,13 +442,13 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * Compute new user stack addresses, subtract off
 	 * one signal frame, and align.
 	 */
-	onstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
-	if ((psp->ps_flags & SAS_ALTSTACK) && !onstack &&
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !onstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct sigframe *)((caddr_t)psp->ps_sigstk.ss_sp +
-		    psp->ps_sigstk.ss_size);
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		fp = (struct sigframe *)((caddr_t)p->p_sigstk.ss_sp +
+		    p->p_sigstk.ss_size);
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		fp = (struct sigframe *)oldsp;
 	/* Allocate an aligned sigframe */
@@ -616,9 +594,9 @@ sys_sigreturn(p, v, retval)
 
 	/* Restore signal stack. */
 	if (sc.sc_onstack & SS_ONSTACK)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask. */
 	p->p_sigmask = scp->sc_mask & ~sigcantmask;
@@ -680,6 +658,7 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	(void) splhigh();		/* ??? */
@@ -1373,7 +1352,6 @@ _bus_dmamap_sync(t, t0, map, offset, len, ops)
 		membar(MemIssue);
 }
 
-extern paddr_t   vm_first_phys, vm_num_phys;
 /*
  * Common function for DMA-safe memory allocation.  May be called
  * by bus-specific DMA memory allocation functions.
@@ -1513,12 +1491,8 @@ _bus_dmamem_map(t, t0, segs, nsegs, size, kvap, flags)
 		    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
 		    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 		if (error) {
-			/*
-			 * Clean up after ourselves.
-			 * XXX uvm_wait on WAITOK
-			 */
 			pmap_update(pmap_kernel());
-			uvm_km_free(kernel_map, va, ssize);
+			uvm_km_free(kernel_map, sva, ssize);
 			return (error);
 		}
 		va += PAGE_SIZE;
@@ -1578,7 +1552,7 @@ _bus_dmamem_mmap(t, t0, segs, nsegs, off, prot, flags)
 			continue;
 		}
 
-		return (atop(segs[i].ds_addr + off));
+		return (segs[i].ds_addr + off);
 	}
 
 	/* Page not found. */
@@ -1813,7 +1787,7 @@ sparc_bus_mmap(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t paddr,
 {
 	if (PHYS_ASI(t0->asi)) {
 		printf("\nsparc_bus_mmap: physical ASI");
-		return (NULL);
+		return (0);
 	}
 
 	/* Devices are un-cached... although the driver should do that */
@@ -1888,15 +1862,7 @@ sparc_bus_barrier(bus_space_tag_t t, bus_space_tag_t t0, bus_space_handle_t h,
 	 * with loads, or stores with stores.  The only ones that seem
 	 * generic are #Sync and #MemIssue.  I'll use #Sync for safety.
 	 */
-	if (flags == (BUS_SPACE_BARRIER_READ|BUS_SPACE_BARRIER_WRITE))
-		membar(Sync);
-	else if (flags == BUS_SPACE_BARRIER_READ)
-		membar(Sync);
-	else if (flags == BUS_SPACE_BARRIER_WRITE)
-		membar(Sync);
-	else
-		printf("sparc_bus_barrier: unknown flags\n");
-	return;
+	membar(Sync);
 }
 
 int

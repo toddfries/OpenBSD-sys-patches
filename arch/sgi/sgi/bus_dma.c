@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.19 2010/06/26 23:24:44 guenther Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.22 2011/06/23 20:44:39 ariane Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -61,7 +61,7 @@
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <mips64/archtype.h>
 #include <machine/cpu.h>
@@ -471,12 +471,8 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
 			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 			if (error) {
-				/*
-				 * Clean up after ourselves.
-				 * XXX uvm_wait on WAITOK
-				 */
 				pmap_update(pmap_kernel());
-				uvm_km_free(kernel_map, va, ssize);
+				uvm_km_free(kernel_map, sva, ssize);
 				return (error);
 			}
 
@@ -529,7 +525,7 @@ _dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, off_t off,
 			continue;
 		}
 
-		return (atop((*t->_device_to_pa)(segs[i].ds_addr) + off));
+		return ((*t->_device_to_pa)(segs[i].ds_addr) + off);
 	}
 
 	/* Page not found. */
@@ -575,6 +571,13 @@ _dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 		if (pmap_extract(pmap, vaddr, &curaddr) == FALSE)
 			panic("_dmapmap_load_buffer: pmap_extract(%x, %x) failed!",
 			    pmap, vaddr);
+
+#ifdef DIAGNOSTIC
+		if (curaddr > dma_constraint.ucr_high ||
+		    curaddr < dma_constraint.ucr_low)
+			panic("Non DMA-reachable buffer at curaddr %p (raw)",
+			    curaddr);                                           
+#endif
 
 		/*
 		 * Compute the segment size, and adjust counts.

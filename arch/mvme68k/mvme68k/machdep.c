@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.123 2010/07/02 19:57:14 tedu Exp $ */
+/*	$OpenBSD: machdep.c,v 1.126 2011/06/26 22:40:00 deraadt Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -115,6 +115,7 @@
 #include <ddb/db_var.h>
 #endif
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 /* the following is used externally (sysctl_hw) */
@@ -124,20 +125,6 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 extern vaddr_t avail_end;
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
 
 int   physmem;			/* size of physical memory, in pages */
 
@@ -177,7 +164,7 @@ mvme68k_init()
 	uvmexp.pagesize = NBPG;
 	uvm_setpagesize();
 	uvm_page_physload(atop(avail_start), atop(avail_end),
-	    atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
+	    atop(avail_start), atop(avail_end), 0);
 
 	/* 
 	 * Put machine specific exception vectors in place.
@@ -494,6 +481,7 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();			/* Disable interrupts. */

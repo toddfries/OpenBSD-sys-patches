@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.39 2009/11/07 23:01:38 miod Exp $ */
+/* $OpenBSD: cpu.h,v 1.43 2011/03/23 16:54:34 pirofti Exp $ */
 /* $NetBSD: cpu.h,v 1.45 2000/08/21 02:03:12 thorpej Exp $ */
 
 /*-
@@ -69,8 +69,8 @@
  *	@(#)cpu.h	8.4 (Berkeley) 1/5/94
  */
 
-#ifndef _ALPHA_CPU_H_
-#define _ALPHA_CPU_H_
+#ifndef _MACHINE_CPU_H_
+#define _MACHINE_CPU_H_
 
 #ifndef NO_IEEE
 typedef union alpha_s_float {
@@ -180,6 +180,9 @@ struct cpu_info {
 	u_long ci_spin_locks;		/* # of spin locks held */
 	u_long ci_simple_locks;		/* # of simple locks held */
 #endif
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
 	struct proc *ci_curproc;	/* current owner of the processor */
 	struct simplelock ci_slock;	/* lock on this data structure */
 	cpuid_t ci_cpuid;		/* our CPU ID */
@@ -254,7 +257,7 @@ extern	struct cpu_info cpu_info_store;
 
 /*
  * Arguments to hardclock and gatherstats encapsulate the previous
- * machine state in an opaque clockframe.  One the Alpha, we use
+ * machine state in an opaque clockframe.  On the Alpha, we use
  * what we push on an interrupt (a trapframe).
  */
 struct clockframe {
@@ -336,7 +339,6 @@ do {									\
  * CTL_MACHDEP definitions.
  */
 #define	CPU_CONSDEV		1	/* dev_t: console terminal device */
-#define	CPU_ROOT_DEVICE		2	/* string: root device name */
 #define	CPU_UNALIGNED_PRINT	3	/* int: print unaligned accesses */
 #define	CPU_UNALIGNED_FIX	4	/* int: fix unaligned accesses */
 #define	CPU_UNALIGNED_SIGBUS	5	/* int: SIGBUS unaligned accesses */
@@ -359,7 +361,7 @@ do {									\
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
 	{ "console_device", CTLTYPE_STRUCT }, \
-	{ "root_device", CTLTYPE_STRING }, \
+	{ 0, 0 }, \
 	{ "unaligned_print", CTLTYPE_INT }, \
 	{ "unaligned_fix", CTLTYPE_INT }, \
 	{ "unaligned_sigbus", CTLTYPE_INT }, \
@@ -412,4 +414,4 @@ void alpha_enable_fp(struct proc *, int);
 #endif
 
 #endif /* _KERNEL */
-#endif /* _ALPHA_CPU_H_ */
+#endif /* _MACHINE_CPU_H_ */

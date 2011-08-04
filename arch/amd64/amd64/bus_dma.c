@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.32 2010/05/20 05:46:53 oga Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.38 2011/07/03 18:31:02 oga Exp $	*/
 /*	$NetBSD: bus_dma.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -100,7 +100,7 @@
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include "ioapic.h"
 
@@ -108,8 +108,6 @@
 #include <machine/i82093var.h>
 #include <machine/mpbiosvar.h>
 #endif
-
-extern	paddr_t avail_end;
 
 int _bus_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
     struct proc *, int, paddr_t *, int *, int);
@@ -335,6 +333,10 @@ _bus_dmamap_load_raw(bus_dma_tag_t t, bus_dmamap_t map, bus_dma_segment_t *segs,
 			if (plen < sgsize)
 				sgsize = plen;
 
+			if (paddr > dma_constraint.ucr_high)
+				panic("Non dma-reachable buffer at paddr %p(raw)",
+				    paddr);
+
 			/*
 			 * Make sure we don't cross any boundaries.
 			 */
@@ -404,7 +406,6 @@ void
 _bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
     bus_size_t size, int op)
 {
-
 	/* Nothing to do here. */
 }
 
@@ -469,6 +470,11 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 	bus_addr_t addr;
 	int curseg, pmapflags = 0, error;
 
+	if (nsegs == 1 && (flags & BUS_DMA_NOCACHE) == 0) {
+		*kvap = (caddr_t)PMAP_DIRECT_MAP(segs[0].ds_addr);
+		return (0);
+	}
+
 	if (flags & BUS_DMA_NOCACHE)
 		pmapflags |= PMAP_NOCACHE;
 
@@ -491,12 +497,8 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
 			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 			if (error) {
-				/*
-				 * Clean up after ourselves.
-				 * XXX uvm_wait on WAITOK
-				 */
 				pmap_update(pmap_kernel());
-				uvm_km_free(kernel_map, va, ssize);
+				uvm_km_free(kernel_map, sva, ssize);
 				return (error);
 			}
 		}
@@ -518,6 +520,8 @@ _bus_dmamem_unmap(bus_dma_tag_t t, caddr_t kva, size_t size)
 	if ((u_long)kva & PGOFSET)
 		panic("_bus_dmamem_unmap");
 #endif
+	if (kva >= (caddr_t)PMAP_DIRECT_BASE && kva <= (caddr_t)PMAP_DIRECT_END)
+		return;
 
 	size = round_page(size);
 	uvm_km_free(kernel_map, (vaddr_t)kva, size);
@@ -548,7 +552,7 @@ _bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, off_t off,
 			continue;
 		}
 
-		return (atop(segs[i].ds_addr + off));
+		return (segs[i].ds_addr + off);
 	}
 
 	/* Page not found. */
@@ -588,6 +592,10 @@ _bus_dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 		 * Get the physical address for this segment.
 		 */
 		pmap_extract(pmap, vaddr, (paddr_t *)&curaddr);
+
+		if (curaddr > dma_constraint.ucr_high)
+			panic("Non dma-reachable buffer at curaddr %p(raw)",
+			    curaddr);
 
 		/*
 		 * Compute the segment size, and adjust counts.

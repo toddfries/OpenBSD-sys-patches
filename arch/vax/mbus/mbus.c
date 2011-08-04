@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbus.c,v 1.2 2008/09/22 19:45:35 miod Exp $	*/
+/*	$OpenBSD: mbus.c,v 1.4 2011/04/07 15:30:16 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -126,7 +126,7 @@ mbus_attach(struct device *parent, struct device *self, void *aux)
 
 		pa = MBUS_SLOT_BASE(mid);
 		fbic = vax_map_physmem(pa + FBIC_BASE, 1);
-		if (fbic == NULL)
+		if (fbic == 0)
 			panic("unable to map slot %d registers", mid);
 
 		if (badaddr((caddr_t)(fbic + FBIC_MODTYPE), 4) != 0)
@@ -170,7 +170,7 @@ mbus_attach(struct device *parent, struct device *self, void *aux)
 			ms->ms_fbic[1].regs = ms->ms_fbic[0].regs;
 			ms->ms_nfbic = 2;
 			fbic = vax_map_physmem(pa + FBIC_CPUA_BASE, 1);
-			if (fbic == NULL)
+			if (fbic == 0)
 				panic("unable to map slot %d registers", mid);
 			ms->ms_fbic[0].base = pa + FBIC_CPUA_BASE;
 			ms->ms_fbic[0].regs = fbic;
@@ -403,7 +403,7 @@ mbus_intr_establish(unsigned int vec, int ipl, int (*fn)(void *), void *arg,
 	fi->fi_fn = fn;
 	fi->fi_arg = arg;
 	fi->fi_ipl = ipl;
-	evcount_attach(&fi->fi_cnt, name, &fi->fi_ipl, &evcount_intr);
+	evcount_attach(&fi->fi_cnt, name, &fi->fi_ipl);
 
 	fbicirq = MBUS_VECTOR_TO_IRQ(vec);
 	fbic->firq[fbicirq] = fi;

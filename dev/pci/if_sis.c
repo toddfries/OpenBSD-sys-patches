@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.98 2010/05/19 15:27:35 oga Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.105 2011/06/22 16:44:27 tedu Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -104,9 +104,11 @@
 
 int sis_probe(struct device *, void *, void *);
 void sis_attach(struct device *, struct device *, void *);
+int sis_activate(struct device *, int);
 
 struct cfattach sis_ca = {
-	sizeof(struct sis_softc), sis_probe, sis_attach
+	sizeof(struct sis_softc), sis_probe, sis_attach, NULL,
+	sis_activate
 };
 
 struct cfdriver sis_cd = {
@@ -605,7 +607,7 @@ sis_miibus_readreg(struct device *self, int phy, int reg)
 
 		return (val);
 	} else {
-		bzero((char *)&frame, sizeof(frame));
+		bzero(&frame, sizeof(frame));
 
 		frame.mii_phyaddr = phy;
 		frame.mii_regaddr = reg;
@@ -653,7 +655,7 @@ sis_miibus_writereg(struct device *self, int phy, int reg, int data)
 			printf("%s: PHY failed to come ready\n",
 			    sc->sc_dev.dv_xname);
 	} else {
-		bzero((char *)&frame, sizeof(frame));
+		bzero(&frame, sizeof(frame));
 
 		frame.mii_phyaddr = phy;
 		frame.mii_regaddr = reg;
@@ -859,7 +861,7 @@ int
 sis_probe(struct device *parent, void *match, void *aux)
 {
 	return (pci_matchbyid((struct pci_attach_args *)aux, sis_devices,
-	    sizeof(sis_devices)/sizeof(sis_devices[0])));
+	    nitems(sis_devices)));
 }
 
 /*
@@ -1015,7 +1017,7 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 			tmp[2] = letoh16(sis_reverse(tmp[2]));
 			tmp[1] = letoh16(sis_reverse(tmp[1]));
 
-			bcopy((char *)&tmp[1], sc->arpcom.ac_enaddr,
+			bcopy(&tmp[1], sc->arpcom.ac_enaddr,
 			    ETHER_ADDR_LEN);
 		}
 		break;
@@ -1151,6 +1153,31 @@ fail_1:
 	bus_space_unmap(sc->sis_btag, sc->sis_bhandle, size);
 }
 
+int
+sis_activate(struct device *self, int act)
+{
+	struct sis_softc *sc = (struct sis_softc *)self;
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			sis_stop(sc);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		rv = config_activate_children(self, act);
+		if (ifp->if_flags & IFF_UP)
+			sis_init(sc);
+		break;
+	}
+	return (rv);
+}
+
 /*
  * Initialize the TX and RX descriptors and allocate mbufs for them. Note that
  * we arrange the descriptors in a closed ring, so that the last descriptor
@@ -1245,6 +1272,11 @@ sis_newbuf(struct sis_softc *sc, struct sis_desc *c)
 
 	c->sis_mbuf = m_new;
 	c->sis_ptr = htole32(c->map->dm_segs[0].ds_addr);
+
+	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
+	    ((caddr_t)c - sc->sc_listkva), sizeof(struct sis_desc),
+	    BUS_DMASYNC_PREWRITE);
+
 	c->sis_ctl = htole32(ETHER_MAX_DIX_LEN);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap,
@@ -1444,58 +1476,43 @@ sis_tick(void *xsc)
 int
 sis_intr(void *arg)
 {
-	struct sis_softc	*sc;
-	struct ifnet		*ifp;
+	struct sis_softc	*sc = arg;
+	struct ifnet		*ifp = &sc->arpcom.ac_if;
 	u_int32_t		status;
-	int			claimed = 0;
-
-	sc = arg;
-	ifp = &sc->arpcom.ac_if;
 
 	if (sc->sis_stopped)	/* Most likely shared interrupt */
-		return (claimed);
+		return (0);
 
-	/* Disable interrupts. */
-	CSR_WRITE_4(sc, SIS_IER, 0);
+	/* Reading the ISR register clears all interrupts. */
+	status = CSR_READ_4(sc, SIS_ISR);
+	if ((status & SIS_INTRS) == 0)
+		return (0);
 
-	for (;;) {
-		/* Reading the ISR register clears all interrupts. */
-		status = CSR_READ_4(sc, SIS_ISR);
+	if (status &
+	    (SIS_ISR_TX_DESC_OK | SIS_ISR_TX_ERR |
+	     SIS_ISR_TX_OK | SIS_ISR_TX_IDLE))
+		sis_txeof(sc);
 
-		if ((status & SIS_INTRS) == 0)
-			break;
+	if (status &
+	    (SIS_ISR_RX_DESC_OK | SIS_ISR_RX_OK |
+	     SIS_ISR_RX_ERR | SIS_ISR_RX_IDLE))
+		sis_rxeof(sc);
 
-		claimed = 1;
-
-		if (status &
-		    (SIS_ISR_TX_DESC_OK | SIS_ISR_TX_ERR |
-		     SIS_ISR_TX_OK | SIS_ISR_TX_IDLE))
-			sis_txeof(sc);
-
-		if (status &
-		    (SIS_ISR_RX_DESC_OK | SIS_ISR_RX_OK |
-		     SIS_ISR_RX_ERR | SIS_ISR_RX_IDLE))
-			sis_rxeof(sc);
-
-		if (status & (SIS_ISR_RX_IDLE)) {
-			/* consume what's there so that sis_rx_cons points
-			 * to the first HW owned descriptor. */
-			sis_rxeof(sc);
-			/* reprogram the RX listptr */
-			CSR_WRITE_4(sc, SIS_RX_LISTPTR,
-			    sc->sc_listmap->dm_segs[0].ds_addr +
-			    offsetof(struct sis_list_data,
-			    sis_rx_list[sc->sis_cdata.sis_rx_cons]));
-		}
-
-		if (status & SIS_ISR_SYSERR) {
-			sis_reset(sc);
-			sis_init(sc);
-		}
+	if (status & (SIS_ISR_RX_IDLE)) {
+		/* consume what's there so that sis_rx_cons points
+		 * to the first HW owned descriptor. */
+		sis_rxeof(sc);
+		/* reprogram the RX listptr */
+		CSR_WRITE_4(sc, SIS_RX_LISTPTR,
+		    sc->sc_listmap->dm_segs[0].ds_addr +
+		    offsetof(struct sis_list_data,
+		    sis_rx_list[sc->sis_cdata.sis_rx_cons]));
 	}
 
-	/* Re-enable interrupts. */
-	CSR_WRITE_4(sc, SIS_IER, 1);
+	if (status & SIS_ISR_SYSERR) {
+		sis_reset(sc);
+		sis_init(sc);
+	}
 
 	/*
 	 * XXX: Re-enable RX engine every time otherwise it occasionally
@@ -1506,7 +1523,7 @@ sis_intr(void *arg)
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))
 		sis_start(ifp);
 
-	return (claimed);
+	return (1);
 }
 
 /*
@@ -1963,7 +1980,7 @@ sis_stop(struct sis_softc *sc)
 			m_freem(sc->sis_ldata->sis_rx_list[i].sis_mbuf);
 			sc->sis_ldata->sis_rx_list[i].sis_mbuf = NULL;
 		}
-		bzero((char *)&sc->sis_ldata->sis_rx_list[i],
+		bzero(&sc->sis_ldata->sis_rx_list[i],
 		    sizeof(struct sis_desc) - sizeof(bus_dmamap_t));
 	}
 
@@ -1982,7 +1999,7 @@ sis_stop(struct sis_softc *sc)
 			m_freem(sc->sis_ldata->sis_tx_list[i].sis_mbuf);
 			sc->sis_ldata->sis_tx_list[i].sis_mbuf = NULL;
 		}
-		bzero((char *)&sc->sis_ldata->sis_tx_list[i],
+		bzero(&sc->sis_ldata->sis_tx_list[i],
 		    sizeof(struct sis_desc) - sizeof(bus_dmamap_t));
 	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.12 2010/07/01 22:40:10 drahn Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.18 2011/04/28 20:50:58 ariane Exp $	*/
 /*	$NetBSD: pmap.h,v 1.76 2003/09/06 09:10:46 rearnsha Exp $	*/
 
 /*
@@ -66,8 +66,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef	_ARM32_PMAP_H_
-#define	_ARM32_PMAP_H_
+#ifndef	_ARM_PMAP_H_
+#define	_ARM_PMAP_H_
 
 #ifdef _KERNEL
 
@@ -177,7 +177,6 @@ struct pmap {
 	simple_lock_data_t	pm_lock;
 	struct l2_dtable	*pm_l2[L2_SIZE];
 	struct pmap_statistics	pm_stats;
-	LIST_ENTRY(pmap)	pm_list;
 };
 
 typedef struct pmap *pmap_t;
@@ -244,8 +243,6 @@ extern int		pmap_debug_level; /* Only exists if PMAP_DEBUG */
 #define	pmap_deactivate(p)		do { /* nothing */ } while (0)
 #define	pmap_copy(dp, sp, da, l, sa)	do { /* nothing */ } while (0)
 
-#define pmap_phys_address(ppn)		(ptoa(ppn))
-
 #define pmap_proc_iflush(p, va, len)	do { /* nothing */ } while (0)
 #define pmap_unuse_final(p)		do { /* nothing */ } while (0)
 #define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
@@ -256,6 +253,7 @@ extern int		pmap_debug_level; /* Only exists if PMAP_DEBUG */
 void	pmap_procwr(struct proc *, vaddr_t, int);
 void	pmap_remove_all(pmap_t);
 boolean_t pmap_extract(pmap_t, vaddr_t, paddr_t *);
+void	pmap_uncache_page(paddr_t, vaddr_t);
 
 #define	PMAP_NEED_PROCWR
 #define PMAP_GROWKERNEL		/* turn on pmap_growkernel interface */
@@ -618,12 +616,20 @@ extern void (*pmap_zero_page_func)(struct vm_page *);
 #ifndef _LOCORE
 /* pmap_prefer bits for VIPT ARMv7 */
 #define PMAP_PREFER(fo, ap)	pmap_prefer((fo), (ap))
-void	pmap_prefer(vaddr_t, vaddr_t *);
+vaddr_t	pmap_prefer(vaddr_t, vaddr_t);
 
 extern uint32_t pmap_alias_dist;
 extern uint32_t pmap_alias_bits;
+
+/* pmap prefer alias alignment. */
+#define PMAP_PREFER_ALIGN()	(pmap_alias_dist)
+/* pmap prefer offset withing alignment. */
+#define PMAP_PREFER_OFFSET(of)						\
+    (PMAP_PREFER_ALIGN() == 0 ? 0 : ((of) & (PMAP_PREFER_ALIGN() - 1)))
+
+
 #endif /* _LOCORE */
 
 #endif /* _KERNEL */
 
-#endif	/* _ARM32_PMAP_H_ */
+#endif	/* _ARM_PMAP_H_ */

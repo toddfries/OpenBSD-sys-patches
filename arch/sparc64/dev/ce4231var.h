@@ -1,4 +1,4 @@
-/*	$OpenBSD: ce4231var.h,v 1.9 2009/12/01 23:17:11 edd Exp $	*/
+/*	$OpenBSD: ce4231var.h,v 1.11 2010/07/26 23:17:19 jakemsr Exp $	*/
 
 /*
  * Copyright (c) 1999 Jason L. Wright (jason@thought.net)
@@ -52,8 +52,14 @@ struct cs_volume {
 	u_int8_t	right;
 };
 
-/* number of levels on the card, these relate to CSPORT_* */
-#define CS4231_LVLS	7
+/* DMA info container for each channel (play and record). */
+struct cs_chdma {
+	struct cs_dma	*cur_dma;
+	u_int32_t	blksz;
+	u_int32_t	count;
+	u_int32_t	segsz;
+	u_int32_t	lastaddr;
+};
 
 struct ce4231_softc {
 	struct	device sc_dev;		/* base device */
@@ -65,19 +71,11 @@ struct ce4231_softc {
 	bus_space_handle_t sc_pdmahandle; /* playback DMA handle */
 	bus_space_handle_t sc_auxhandle;  /* AUX handle */
 	int	sc_open;		/* already open? */
-	int	sc_locked;		/* locked? */
 
 	void	(*sc_rintr)(void *);	/* input completion intr handler */
 	void	*sc_rarg;		/* arg for sc_rintr() */
 	void	(*sc_pintr)(void *);	/* output completion intr handler */
 	void	*sc_parg;		/* arg for sc_pintr() */
-
-	char		sc_mute[CS4231_LVLS];	/* which devs are muted */
-	u_int8_t	sc_monoout_enable; /* whether the mono dacout is on */
-	u_int8_t	sc_lineout_enable; /* whether the line dacout is on */
-	u_int8_t	sc_hdphout_enable; /* whether the cans dacout is on */
-	u_int8_t	sc_rec_src;	   /* recording src */
-	struct	cs_volume sc_volume[CS4231_LVLS];	/* software volume */
 
 	int sc_format_bits;
 	int sc_speed_bits;
@@ -85,12 +83,9 @@ struct ce4231_softc {
 	int sc_need_commit;
 	int sc_channels;
 	u_int sc_last_format;
-	u_int32_t	sc_blksz;
-	u_int32_t	sc_playcnt;
-	u_int32_t	sc_playsegsz;
 	u_int32_t	sc_burst;
-	u_int32_t	sc_lastaddr;
 	struct cs_dma	*sc_dmas;	/* dma list */
-	struct cs_dma	*sc_nowplaying;
+	struct cs_chdma	sc_pchdma;
+	struct cs_chdma	sc_rchdma;
 	void *sc_pih, *sc_cih;
 };

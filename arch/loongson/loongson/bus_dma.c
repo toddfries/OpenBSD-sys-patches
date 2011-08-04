@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.5 2010/06/26 23:24:43 guenther Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.7 2011/06/23 20:44:39 ariane Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -466,12 +466,8 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
 			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 			if (error) {
-				/*
-				 * Clean up after ourselves.
-				 * XXX uvm_wait on WAITOK
-				 */
 				pmap_update(pmap_kernel());
-				uvm_km_free(kernel_map, va, ssize);
+				uvm_km_free(kernel_map, sva, ssize);
 				return (error);
 			}
 
@@ -524,7 +520,7 @@ _dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, off_t off,
 			continue;
 		}
 
-		return (atop((*t->_device_to_pa)(segs[i].ds_addr) + off));
+		return ((*t->_device_to_pa)(segs[i].ds_addr) + off);
 	}
 
 	/* Page not found. */

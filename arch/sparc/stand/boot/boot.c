@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.8 2010/07/06 20:41:04 miod Exp $	*/
+/*	$OpenBSD: boot.c,v 1.10 2011/04/14 18:27:49 miod Exp $	*/
 /*	$NetBSD: boot.c,v 1.2 1997/09/14 19:27:21 pk Exp $	*/
 
 /*-
@@ -152,13 +152,13 @@ loadk(char *file, u_long *marks)
 
 	/*
 	 * Regardless of the address where we load the kernel, we need to
-	 * make sure it has enough valid space to use during pmap_bootstrap;
-	 * 4/4c picks it in locore, 4m needs it now.
+	 * make sure it has enough valid space to use during pmap_bootstrap.
+	 * locore.s tries to map the 512KB following the kernel image, and
+	 * we need to make sure this extra room does not overwrite PROM data
+	 * (such as the PROM page tables which are immediately below 4MB on
+	 * most sun4c).
 	 */
-	if (cputyp == CPU_SUN4 || cputyp == CPU_SUN4C)
-		extra = 0;
-	else
-		extra = 512 * 1024;
+	extra = 512 * 1024;
 
 	if ((fd = open(file, 0)) < 0)
 		return (errno ? errno : ENOENT);
@@ -170,7 +170,7 @@ loadk(char *file, u_long *marks)
 
 	if (files[fd].f_flags & F_RAW) {
 		flags = (COUNT_KERNEL & ~COUNT_SYM) | (LOAD_KERNEL & ~LOAD_SYM);
-		minsize = RELOC2 - LOWSTACK;
+		minsize = FOURMB;
 		va = 0xf8000000;		/* KERNBASE */
 #ifdef DEBUG
 		printf("Tape boot: expecting a bsd.rd kernel smaller than %p\n",
@@ -214,14 +214,13 @@ loadk(char *file, u_long *marks)
 	 * boot code has been loaded 1:1, we do not need to allocate
 	 * breathing room after it.
 	 */
+	size = minsize + extra;
 	if (compat != 0) {
 		if (minsize + extra <= RELOC2 - LOWSTACK)
 			size = RELOC2 - LOWSTACK;
 		else
 			compat = 0;
 	}
-	if (compat == 0)
-		size = minsize + extra;
 
 	/* Get a physical load address */
 #ifdef DEBUG
@@ -257,9 +256,11 @@ loadk(char *file, u_long *marks)
 
 	/* try and double-map at VA 0 for compatibility */
 	if (pa + size > bstart) {
+#ifdef DEBUG
 		printf("WARNING: %s is too large for compat mode.\n"
 		    "If your kernel is too old, it will not run correctly.\n",
 		    file);
+#endif
 	} else {
 		if (pa != 0 && pmap_map(0, pa, size) != 0) {
 			error = EFAULT;
@@ -326,10 +327,8 @@ main(int argc, char *argv[])
 		if ((error = loadk(file, marks)) == 0)
 			break;
 
-		if (error != ENOENT) {
-			printf("Cannot load %s: error=%d\n", file, error);
-			prom_boothow |= RB_ASKNAME;
-		}
+		printf("Cannot load %s: error=%d\n", file, error);
+		prom_boothow |= RB_ASKNAME;
 	}
 
 	/* Note: args 2-4 not used due to conflicts with SunOS loaders */

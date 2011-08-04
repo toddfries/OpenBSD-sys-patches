@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.87 2010/07/20 12:23:00 deraadt Exp $	*/
+/*	$OpenBSD: apm.c,v 1.98 2011/07/02 22:20:07 nicm Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -50,7 +50,6 @@
 #include <sys/ioctl.h>
 #include <sys/buf.h>
 #include <sys/event.h>
-#include <sys/mount.h>	/* for vfs_syncwait() proto */
 
 #include <machine/conf.h>
 #include <machine/cpu.h>
@@ -134,6 +133,7 @@ int	cpu_apmwarn = 10;
 #define APMDEV_CTL	8
 
 int	apm_standbys;
+int	apm_lidclose;
 int	apm_userstandbys;
 int	apm_suspends;
 int	apm_resumes;
@@ -162,7 +162,6 @@ struct apmregs {
 };
 
 int  apmcall(u_int, u_int, struct apmregs *);
-void apm_power_print(struct apm_softc *, struct apmregs *);
 int  apm_handle_event(struct apm_softc *, struct apmregs *);
 void apm_set_ver(struct apm_softc *);
 int  apm_periodic_check(struct apm_softc *);
@@ -177,8 +176,7 @@ int  apm_record_event(struct apm_softc *sc, u_int type);
 const char *apm_err_translate(int code);
 
 #define	apm_get_powstat(r) apmcall(APM_POWER_STATUS, APM_DEV_ALLDEVS, r)
-void	apm_standby(void);
-void	apm_suspend(void);
+void	apm_suspend(int);
 void	apm_resume(struct apm_softc *, struct apmregs *);
 void	apm_cpu_slow(void);
 
@@ -241,131 +239,34 @@ apm_perror(const char *str, struct apmregs *regs)
 }
 
 void
-apm_power_print(struct apm_softc *sc, struct apmregs *regs)
-{
-#if !defined(APM_NOPRINT)
-	sc->batt_life = BATT_LIFE(regs);
-	if (BATT_LIFE(regs) != APM_BATT_LIFE_UNKNOWN) {
-		printf("%s: battery life expectancy %d%%\n",
-		    sc->sc_dev.dv_xname,
-		    BATT_LIFE(regs));
-	}
-	printf("%s: AC ", sc->sc_dev.dv_xname);
-	switch (AC_STATE(regs)) {
-	case APM_AC_OFF:
-		printf("off,");
-		break;
-	case APM_AC_ON:
-		printf("on,");
-		break;
-	case APM_AC_BACKUP:
-		printf("backup power,");
-		break;
-	default:
-	case APM_AC_UNKNOWN:
-		printf("unknown,");
-		break;
-	}
-	if (apm_minver == 0) {
-		printf(" battery is ");
-		switch (BATT_STATE(regs)) {
-		case APM_BATT_HIGH:
-			printf("high");
-			break;
-		case APM_BATT_LOW:
-			printf("low");
-			break;
-		case APM_BATT_CRITICAL:
-			printf("CRITICAL");
-			break;
-		case APM_BATT_CHARGING:
-			printf("charging");
-			break;
-		case APM_BATT_UNKNOWN:
-			printf("unknown");
-			break;
-		default:
-			printf("undecoded (%x)", BATT_STATE(regs));
-			break;
-		}
-	} else if (apm_minver >= 1) {
-		if (BATT_FLAGS(regs) & APM_BATT_FLAG_NOBATTERY)
-			printf(" no battery");
-		else {
-			printf(" battery charge ");
-			if (BATT_FLAGS(regs) & APM_BATT_FLAG_HIGH)
-				printf("high");
-			else if (BATT_FLAGS(regs) & APM_BATT_FLAG_LOW)
-				printf("low");
-			else if (BATT_FLAGS(regs) & APM_BATT_FLAG_CRITICAL)
-				printf("critical");
-			else
-				printf("unknown");
-			if (BATT_FLAGS(regs) & APM_BATT_FLAG_CHARGING)
-				printf(", charging");
-			if (BATT_REM_VALID(regs)) {
-				int life = BATT_REMAINING(regs);
-				if (sc->be_batt)
-					life = swap16(life);
-				printf(", estimated %d:%02d hours",
-				    life / 60, life % 60);
-			}
-		}
-	}
-
-	printf("\n");
-#endif
-}
-
-void
-apm_suspend()
-{
-#if NWSDISPLAY > 0
-	wsdisplay_suspend();
-#endif /* NWSDISPLAY > 0 */
-	bufq_quiesce();
-
-	dopowerhooks(PWR_SUSPEND);
-
-	if (cold)
-		vfs_syncwait(0);
-
-	(void)apm_set_powstate(APM_DEV_ALLDEVS, APM_SYS_SUSPEND);
-}
-
-void
-apm_standby()
-{
-#if NWSDISPLAY > 0
-	wsdisplay_suspend();
-#endif /* NWSDISPLAY > 0 */
-	bufq_quiesce();
-
-	dopowerhooks(PWR_STANDBY);
-
-	if (cold)
-		vfs_syncwait(0);
-
-	(void)apm_set_powstate(APM_DEV_ALLDEVS, APM_SYS_STANDBY);
-}
-
-void
-apm_resume(struct apm_softc *sc, struct apmregs *regs)
+apm_suspend(int state)
 {
 	extern int perflevel;
+	int s;
 
-	apm_resumes = APM_RESUME_HOLDOFF;
+#if NWSDISPLAY > 0
+	wsdisplay_suspend();
+#endif /* NWSDISPLAY > 0 */
+	bufq_quiesce();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE);
 
-	/* they say that some machines may require reinitializing the clock */
-	initrtclock();
+	s = splhigh();
+	disable_intr();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
 
+	/* Send machine to sleep */
+	apm_set_powstate(APM_DEV_ALLDEVS, state);
+	/* Wake up  */
+
+	/* They say that some machines may require reinitializing the clocks */
+	i8254_startclock();
+	if (initclock_func == i8254_initclocks)
+		rtcstart();		/* in i8254 mode, rtc is profclock */
 	inittodr(time_second);
-	/* lower bit in cx means pccard was powered down */
-	dopowerhooks(PWR_RESUME);
-	apm_record_event(sc, regs->bx);
 
-	/* acknowledge any rtc interrupt we may have missed */
-	rtcdrain(NULL);
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
+	enable_intr();
+	splx(s);
 
 	/* restore hw.setperf */
 	if (cpu_setperf != NULL)
@@ -374,6 +275,17 @@ apm_resume(struct apm_softc *sc, struct apmregs *regs)
 #if NWSDISPLAY > 0
 	wsdisplay_resume();
 #endif /* NWSDISPLAY > 0 */
+}
+
+void
+apm_resume(struct apm_softc *sc, struct apmregs *regs)
+{
+
+	apm_resumes = APM_RESUME_HOLDOFF;
+
+	/* lower bit in cx means pccard was powered down */
+
+	apm_record_event(sc, regs->bx);
 }
 
 int
@@ -453,13 +365,7 @@ apm_handle_event(struct apm_softc *sc, struct apmregs *regs)
 		break;
 	case APM_POWER_CHANGE:
 		DPRINTF(("power status change\n"));
-		if (apm_get_powstat(&nregs) == 0 &&
-		    BATT_LIFE(&nregs) != APM_BATT_LIFE_UNKNOWN &&
-		    BATT_LIFE(&nregs) < cpu_apmwarn &&
-		    (sc->sc_flags & SCFLAG_PRINT) != SCFLAG_NOPRINT &&
-		    ((sc->sc_flags & SCFLAG_PRINT) != SCFLAG_PCTPRINT ||
-		     sc->batt_life != BATT_LIFE(&nregs)))
-			apm_power_print(sc, &nregs);
+		apm_get_powstat(&nregs);
 		apm_record_event(sc, regs->bx);
 		break;
 	case APM_NORMAL_RESUME:
@@ -482,7 +388,7 @@ apm_handle_event(struct apm_softc *sc, struct apmregs *regs)
 	case APM_CRIT_SUSPEND_REQ:
 		DPRINTF(("suspend required immediately\n"));
 		apm_record_event(sc, regs->bx);
-		apm_suspend();
+		apm_suspend(APM_SYS_SUSPEND);
 		break;
 	case APM_BATTERY_LOW:
 		DPRINTF(("Battery low!\n"));
@@ -535,6 +441,9 @@ apm_periodic_check(struct apm_softc *sc)
 			break;
 		}
 
+		/* If the APM BIOS tells us to suspend, don't do it twice */
+		if (regs.bx == APM_SUSPEND_REQ)
+			apm_lidclose = 0;
 		if (apm_handle_event(sc, &regs))
 			break;
 	}
@@ -542,12 +451,18 @@ apm_periodic_check(struct apm_softc *sc)
 	if (apm_error || APM_ERR_CODE(&regs) == APM_ERR_NOTCONN)
 		ret = -1;
 
+	if (apm_lidclose) {
+		apm_lidclose = 0;
+		/* Fake a suspend request */
+		regs.bx = APM_SUSPEND_REQ;
+		apm_handle_event(sc, &regs);
+	}
 	if (apm_suspends /*|| (apm_battlow && apm_userstandbys)*/) {
 		apm_op_inprog = 0;
-		apm_suspend();
+		apm_suspend(APM_SYS_SUSPEND);
 	} else if (apm_standbys || apm_userstandbys) {
 		apm_op_inprog = 0;
-		apm_standby();
+		apm_suspend(APM_SYS_STANDBY);
 	}
 	apm_suspends = apm_standbys = apm_battlow = apm_userstandbys = 0;
 	apm_error = 0;
@@ -891,9 +806,7 @@ apmattach(struct device *parent, struct device *self, void *aux)
 		apm_powmgt_engage(1, APM_DEV_ALLDEVS);
 
 		bzero(&regs, sizeof(regs));
-		if (apm_get_powstat(&regs) == 0)
-			apm_power_print(sc, &regs);
-		else
+		if (apm_get_powstat(&regs) != 0)
 			apm_perror("get power status", &regs);
 		apm_cpu_busy();
 
@@ -1217,7 +1130,7 @@ apmkqfilter(dev_t dev, struct knote *kn)
 		kn->kn_fop = &apmread_filtops;
 		break;
 	default:
-		return (1);
+		return (EINVAL);
 	}
 
 	kn->kn_hook = (caddr_t)sc;

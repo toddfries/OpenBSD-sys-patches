@@ -1,4 +1,4 @@
-/*	$OpenBSD: st.c,v 1.104 2010/07/01 05:11:18 krw Exp $	*/
+/*	$OpenBSD: st.c,v 1.121 2011/07/03 15:47:18 matthew Exp $	*/
 /*	$NetBSD: st.c,v 1.71 1997/02/21 23:03:49 thorpej Exp $	*/
 
 /*
@@ -62,7 +62,7 @@
 #include <sys/errno.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <sys/malloc.h>
+#include <sys/pool.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
 #include <sys/mtio.h>
@@ -79,6 +79,9 @@
 
 #define STMODE(z)	( minor(z)	 & 0x03)
 #define STUNIT(z)	((minor(z) >> 4)       )
+
+#define STMINOR(unit, mode)	(((unit) << 4) + (mode))
+#define MAXSTMODES	16
 
 #define	ST_IO_TIME	(3 * 60 * 1000)		/* 3 minutes */
 #define	ST_CTL_TIME	(30 * 1000)		/* 30 seconds */
@@ -215,7 +218,7 @@ struct st_softc {
 #define BLKSIZE_SET_BY_USER	0x04
 #define BLKSIZE_SET_BY_QUIRK	0x08
 
-	struct bufq *sc_bufq;
+	struct bufq sc_bufq;
 	struct timeout sc_timeout;
 	struct scsi_xshandler sc_xsh;
 };
@@ -262,7 +265,6 @@ struct cfdriver st_cd = {
 #define	ST_FIXEDBLOCKS	0x0008
 #define	ST_AT_FILEMARK	0x0010
 #define	ST_EIO_PENDING	0x0020	/* we couldn't report it then (had data) */
-#define	ST_READONLY	0x0080	/* st_mode_sense says write protected */
 #define	ST_FM_WRITTEN	0x0100	/*
 				 * EOF file mark written  -- used with
 				 * ~ST_WRITTEN to indicate that multiple file
@@ -276,9 +278,6 @@ struct cfdriver st_cd = {
 #define ST_WAITING	0x2000
 
 #define	ST_PER_ACTION	(ST_AT_FILEMARK | ST_EIO_PENDING | ST_BLANK_READ)
-#define	ST_PER_MOUNT	(ST_INFO_VALID | ST_BLOCK_SET | ST_WRITTEN | \
-			 ST_FIXEDBLOCKS | ST_READONLY | ST_FM_WRITTEN | \
-			 ST_2FM_AT_EOD | ST_PER_ACTION)
 
 #define stlookup(unit) (struct st_softc *)device_lookup(&st_cd, (unit))
 
@@ -294,7 +293,7 @@ stmatch(struct device *parent, void *match, void *aux)
 	int priority;
 
 	(void)scsi_inqmatch(sa->sa_inqbuf,
-	    st_patterns, sizeof(st_patterns)/sizeof(st_patterns[0]),
+	    st_patterns, nitems(st_patterns),
 	    sizeof(st_patterns[0]), &priority);
 	return (priority);
 }
@@ -331,7 +330,7 @@ stattach(struct device *parent, struct device *self, void *aux)
 	    &st->sc_xsh);
 	
 	/* Set up the buf queue for this device. */
-	st->sc_bufq = bufq_init(BUFQ_FIFO);
+	bufq_init(&st->sc_bufq, BUFQ_FIFO);
 
 	/* Start up with media position unknown. */
 	st->media_fileno = -1;
@@ -352,12 +351,9 @@ stactivate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		st->flags |= ST_DYING;
-		bufq_drain(st->sc_bufq);
+		scsi_xsh_del(&st->sc_xsh);
 		break;
 	}
 
@@ -370,27 +366,19 @@ stdetach(struct device *self, int flags)
 	struct st_softc *st = (struct st_softc *)self;
 	int bmaj, cmaj, mn;
 
-	bufq_drain(st->sc_bufq);
+	bufq_drain(&st->sc_bufq);
 
 	/* Locate the lowest minor number to be detached. */
-	mn = STUNIT(self->dv_unit);
+	mn = STMINOR(self->dv_unit, 0);
 
 	for (bmaj = 0; bmaj < nblkdev; bmaj++)
-		if (bdevsw[bmaj].d_open == stopen) {
-			vdevgone(bmaj, mn, mn + 0, VBLK);
-			vdevgone(bmaj, mn, mn + 1, VBLK);
-			vdevgone(bmaj, mn, mn + 2, VBLK);
-			vdevgone(bmaj, mn, mn + 3, VBLK);
-		}
+		if (bdevsw[bmaj].d_open == stopen)
+			vdevgone(bmaj, mn, mn + MAXSTMODES - 1, VBLK);
 	for (cmaj = 0; cmaj < nchrdev; cmaj++)
-		if (cdevsw[cmaj].d_open == stopen) {
-			vdevgone(cmaj, mn, mn + 0, VCHR);
-			vdevgone(cmaj, mn, mn + 1, VCHR);
-			vdevgone(cmaj, mn, mn + 2, VCHR);
-			vdevgone(cmaj, mn, mn + 3, VCHR);
-		}
+		if (cdevsw[cmaj].d_open == stopen)
+			vdevgone(cmaj, mn, mn + MAXSTMODES - 1, VCHR);
 
-	bufq_destroy(st->sc_bufq);
+	bufq_destroy(&st->sc_bufq);
 
 	return (0);
 }
@@ -407,7 +395,7 @@ st_identify_drive(struct st_softc *st, struct scsi_inquiry_data *inqbuf)
 
 	finger = (const struct st_quirk_inquiry_pattern *)scsi_inqmatch(inqbuf,
 	    st_quirk_patterns,
-	    sizeof(st_quirk_patterns)/sizeof(st_quirk_patterns[0]),
+	    nitems(st_quirk_patterns),
 	    sizeof(st_quirk_patterns[0]), &priority);
 	if (priority != 0) {
 		st->quirkdata = &finger->quirkdata;
@@ -457,11 +445,16 @@ stopen(dev_t dev, int flags, int fmt, struct proc *p)
 	st = stlookup(STUNIT(dev));
 	if (st == NULL)
 		return (ENXIO);
+	sc_link = st->sc_link;
+
 	if (st->flags & ST_DYING) {
 		error = ENXIO;
 		goto done;
 	}
-	sc_link = st->sc_link;
+	if (ISSET(flags, FWRITE) && ISSET(sc_link->flags, SDEV_READONLY)) {
+		error = EACCES;
+		goto done;
+	}
 
 	SC_DEBUG(sc_link, SDEV_DB1, ("open: dev=0x%x (unit %d (of %d))\n", dev,
 	    STUNIT(dev), st_cd.cd_ndevs));
@@ -836,15 +829,12 @@ ststrategy(struct buf *bp)
 		bp->b_error = ENXIO;
 		goto bad;
 	}
+
 	sc_link = st->sc_link;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("ststrategy: %ld bytes @ blk %d\n",
 	    bp->b_bcount, bp->b_blkno));
 
-	if (st->flags & ST_DYING) {
-		bp->b_error = ENXIO;
-		goto bad;
-	}
 	/*
 	 * If it's a null transfer, return immediately.
 	 */
@@ -877,7 +867,7 @@ ststrategy(struct buf *bp)
 	 * at the end (a bit silly because we only have on user..
 	 * (but it could fork()))
 	 */
-	BUFQ_QUEUE(st->sc_bufq, bp);
+	bufq_queue(&st->sc_bufq, bp);
 
 	/*
 	 * Tell the device to get going on the transfer if it's
@@ -911,8 +901,10 @@ ststart(struct scsi_xfer *xs)
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("ststart\n"));
 
-	if (st->flags & ST_DYING)
+	if (st->flags & ST_DYING) {
+		scsi_xs_put(xs);
 		return;
+	}
 
 	/*
 	 * if the device has been unmounted by the user
@@ -922,13 +914,13 @@ ststart(struct scsi_xfer *xs)
 	    !(sc_link->flags & SDEV_MEDIA_LOADED)) {
 		/* make sure that one implies the other.. */
 		sc_link->flags &= ~SDEV_MEDIA_LOADED;
-		bufq_drain(st->sc_bufq);
+		bufq_drain(&st->sc_bufq);
 		scsi_xs_put(xs);
 		return;
 	}
 
 	for (;;) {
-		bp = BUFQ_DEQUEUE(st->sc_bufq);
+		bp = bufq_dequeue(&st->sc_bufq);
 		if (bp == NULL) {
 			scsi_xs_put(xs);
 			return;
@@ -1041,7 +1033,7 @@ ststart(struct scsi_xfer *xs)
 	 */
 	if (ISSET(st->flags, ST_WAITING))
 		CLR(st->flags, ST_WAITING);
-	else if (BUFQ_PEEK(st->sc_bufq))
+	else if (bufq_peek(&st->sc_bufq))
 		scsi_xsh_add(&st->sc_xsh);
 }
 
@@ -1060,7 +1052,7 @@ st_buf_done(struct scsi_xfer *xs)
 
 	case XS_NO_CCB:
 		/* The adapter is busy, requeue the buf and try it later. */
-		BUFQ_REQUEUE(st->sc_bufq, bp);
+		bufq_requeue(&st->sc_bufq, bp);
 		scsi_xs_put(xs);
 		SET(st->flags, ST_WAITING); /* dont let ststart xsh_add */
 		timeout_add(&st->sc_timeout, 1);
@@ -1116,7 +1108,7 @@ stminphys(struct buf *bp)
 
 	st = stlookup(STUNIT(bp->b_dev));
 	if (st == NULL)
-		return;  /* can't happen */
+		return;
 
 	(*st->sc_link->adapter->scsi_minphys)(bp, st->sc_link);
 
@@ -1126,35 +1118,13 @@ stminphys(struct buf *bp)
 int
 stread(dev_t dev, struct uio *uio, int iomode)
 {
-	struct st_softc *st;
-
-	st = stlookup(STUNIT(dev));
-	if (st == NULL)
-		return (ENXIO);
-
-	if (st->flags & ST_DYING) {
-		device_unref(&st->sc_dev);
-		return (ENXIO);
-	}
-
-	return (physio(ststrategy, NULL, dev, B_READ, stminphys, uio));
+	return (physio(ststrategy, dev, B_READ, stminphys, uio));
 }
 
 int
 stwrite(dev_t dev, struct uio *uio, int iomode)
 {
-	struct st_softc *st;
-
-	st = stlookup(STUNIT(dev));
-	if (st == NULL)
-		return (ENXIO);
-
-	if (st->flags & ST_DYING) {
-		device_unref(&st->sc_dev);
-		return (ENXIO);
-	}
-
-	return (physio(ststrategy, NULL, dev, B_WRITE, stminphys, uio));
+	return (physio(ststrategy, dev, B_WRITE, stminphys, uio));
 }
 
 /*
@@ -1207,7 +1177,7 @@ stioctl(dev_t dev, u_long cmd, caddr_t arg, int flag, struct proc *p)
 		g->mt_density = st->density;
  		g->mt_mblksiz = st->modes.blksize;
  		g->mt_mdensity = st->modes.density;
-		if (st->flags & ST_READONLY)
+		if (st->sc_link->flags & SDEV_READONLY)
 			g->mt_dsreg |= MT_DS_RDONLY;
 		if (st->flags & ST_MOUNTED)
 			g->mt_dsreg |= MT_DS_MOUNTED;
@@ -1372,24 +1342,35 @@ done:
 int
 st_read(struct st_softc *st, char *buf, int size, int flags)
 {
-	struct scsi_rw_tape cmd;
+	struct scsi_rw_tape *cmd;
+	struct scsi_xfer *xs;
+	int error;
 
-	/*
-	 * If it's a null transfer, return immediately
-	 */
 	if (size == 0)
 		return 0;
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = READ;
+
+	xs = scsi_xs_get(st->sc_link, flags | SCSI_DATA_IN);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->data = buf;
+	xs->datalen = size;
+	xs->retries = 0;
+	xs->timeout = ST_IO_TIME;
+
+	cmd = (struct scsi_rw_tape *)xs->cmd;
+	cmd->opcode = READ;
 	if (st->flags & ST_FIXEDBLOCKS) {
-		cmd.byte2 |= SRW_FIXED;
+		cmd->byte2 |= SRW_FIXED;
 		_lto3b(size / (st->blksize ? st->blksize : DEF_FIXED_BSIZE),
-		    cmd.len);
+		    cmd->len);
 	} else
-		_lto3b(size, cmd.len);
-	return scsi_scsi_cmd(st->sc_link, (struct scsi_generic *) &cmd,
-	    sizeof(cmd), (u_char *) buf, size, 0, ST_IO_TIME, NULL,
-	    flags | SCSI_DATA_IN);
+		_lto3b(size, cmd->len);
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
 
 /*
@@ -1398,38 +1379,47 @@ st_read(struct st_softc *st, char *buf, int size, int flags)
 int
 st_read_block_limits(struct st_softc *st, int flags)
 {
-	struct scsi_block_limits cmd;
-	struct scsi_block_limits_data block_limits;
+	struct scsi_block_limits_data *block_limits = NULL;
+	struct scsi_block_limits *cmd;
 	struct scsi_link *sc_link = st->sc_link;
-	int error;
+	struct scsi_xfer *xs;
+	int error = 0;
 
-	/*
-	 * First check if we have it all loaded
-	 */
 	if ((sc_link->flags & SDEV_MEDIA_LOADED))
-		return 0;
+		return (0);
 
-	/*
-	 * do a 'Read Block Limits'
-	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = READ_BLOCK_LIMITS;
+	block_limits = dma_alloc(sizeof(*block_limits), PR_NOWAIT);
+	if (block_limits == NULL)
+		return (ENOMEM);
 
-	/*
-	 * do the command, update the global values
-	 */
-	error = scsi_scsi_cmd(sc_link, (struct scsi_generic *) &cmd,
-	    sizeof(cmd), (u_char *) &block_limits, sizeof(block_limits),
-	    SCSI_RETRIES, ST_CTL_TIME, NULL, flags | SCSI_DATA_IN);
-	if (error)
-		return error;
+	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN);
+	if (xs == NULL) {
+		error = ENOMEM;
+		goto done;
+	}
 
-	st->blkmin = _2btol(block_limits.min_length);
-	st->blkmax = _3btol(block_limits.max_length);
+	xs->cmdlen = sizeof(*cmd);
+	xs->data = (void *)block_limits;
+	xs->datalen = sizeof(*block_limits);
+	xs->timeout = ST_CTL_TIME;
 
-	SC_DEBUG(sc_link, SDEV_DB3,
-	    ("(%d <= blksize <= %d)\n", st->blkmin, st->blkmax));
-	return 0;
+	cmd = (struct scsi_block_limits *)xs->cmd;
+	cmd->opcode = READ_BLOCK_LIMITS;
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	if (error == 0) {
+		st->blkmin = _2btol(block_limits->min_length);
+		st->blkmax = _3btol(block_limits->max_length);
+		SC_DEBUG(sc_link, SDEV_DB3,
+		    ("(%d <= blksize <= %d)\n", st->blkmin, st->blkmax));
+	}
+
+done:
+	if (block_limits)
+		dma_free(block_limits, sizeof(*block_limits));
+	return (error);
 }
 
 /*
@@ -1445,15 +1435,15 @@ st_read_block_limits(struct st_softc *st, int flags)
 int
 st_mode_sense(struct st_softc *st, int flags)
 {
-	union scsi_mode_sense_buf *data;
+	union scsi_mode_sense_buf *data = NULL;
 	struct scsi_link *sc_link = st->sc_link;
 	u_int64_t block_count;
 	u_int32_t density, block_size;
 	u_char *page0 = NULL;
 	u_int8_t dev_spec;
-	int error, big;
+	int error = 0, big;
 
-	data = malloc(sizeof(*data), M_TEMP, M_NOWAIT);
+	data = dma_alloc(sizeof(*data), PR_NOWAIT);
 	if (data == NULL)
 		return (ENOMEM);
 
@@ -1462,10 +1452,8 @@ st_mode_sense(struct st_softc *st, int flags)
 	 */
 	error = scsi_do_mode_sense(sc_link, 0, data, (void **)&page0,
 	    &density, &block_count, &block_size, 1, flags | SCSI_SILENT, &big);
-	if (error != 0) {
-		free(data, M_TEMP);
-		return (error);
-	}
+	if (error != 0)
+		goto done;
 
 	/* It is valid for no page0 to be available. */
 
@@ -1475,9 +1463,9 @@ st_mode_sense(struct st_softc *st, int flags)
 		dev_spec = data->hdr.dev_spec;
 
 	if (dev_spec & SMH_DSP_WRITE_PROT)
-		st->flags |= ST_READONLY;
+		SET(sc_link->flags, SDEV_READONLY);
 	else
-		st->flags &= ~ST_READONLY;
+		CLR(sc_link->flags, SDEV_READONLY);
 
 	st->numblks = block_count;
 	st->media_blksize = block_size;
@@ -1486,14 +1474,16 @@ st_mode_sense(struct st_softc *st, int flags)
 	SC_DEBUG(sc_link, SDEV_DB3,
 	    ("density code 0x%x, %d-byte blocks, write-%s, ",
 	    st->media_density, st->media_blksize,
-	    st->flags & ST_READONLY ? "protected" : "enabled"));
+	    sc_link->flags & SDEV_READONLY ? "protected" : "enabled"));
 	SC_DEBUGN(sc_link, SDEV_DB3,
 	    ("%sbuffered\n", dev_spec & SMH_DSP_BUFF_MODE ? "" : "un"));
 
 	sc_link->flags |= SDEV_MEDIA_LOADED;
 
-	free(data, M_TEMP);
-	return (0);
+done:
+	if (data)
+		dma_free(data, sizeof(*data));
+	return (error);
 }
 
 /*
@@ -1503,19 +1493,21 @@ st_mode_sense(struct st_softc *st, int flags)
 int
 st_mode_select(struct st_softc *st, int flags)
 {
-	union scsi_mode_sense_buf *inbuf, *outbuf;
+	union scsi_mode_sense_buf *inbuf = NULL, *outbuf = NULL;
 	struct scsi_blk_desc general;
 	struct scsi_link *sc_link = st->sc_link;
 	u_int8_t *page0 = NULL;
-	int error, big, page0_size;
+	int error = 0, big, page0_size;
 
-	inbuf = malloc(sizeof(*inbuf), M_TEMP, M_NOWAIT);
-	if (inbuf == NULL)
-		return (ENOMEM);
-	outbuf = malloc(sizeof(*outbuf), M_TEMP, M_NOWAIT | M_ZERO);
+	inbuf = dma_alloc(sizeof(*inbuf), PR_NOWAIT);
+	if (inbuf == NULL) {
+		error = ENOMEM;
+		goto done;
+	}
+	outbuf = dma_alloc(sizeof(*outbuf), PR_NOWAIT | PR_ZERO);
 	if (outbuf == NULL) {
-		free(inbuf, M_TEMP);
-		return (ENOMEM);
+		error = ENOMEM;
+		goto done;
 	}
 
 	/*
@@ -1527,15 +1519,13 @@ st_mode_select(struct st_softc *st, int flags)
 		SC_DEBUG(sc_link, SDEV_DB3,
 		    ("not setting density 0x%x blksize 0x%x\n",
 		    st->density, st->blksize));
-		free(inbuf, M_TEMP);
-		free(outbuf, M_TEMP);
-		return (0);
+		error = 0;
+		goto done;
 	}
 
 	if (sc_link->flags & SDEV_ATAPI) {
-		free(inbuf, M_TEMP);
-		free(outbuf, M_TEMP);
-		return (0);
+		error = 0;
+		goto done;
 	}
 
 	bzero(&general, sizeof(general));
@@ -1549,11 +1539,8 @@ st_mode_select(struct st_softc *st, int flags)
 	 */
 	error = scsi_do_mode_sense(sc_link, 0, inbuf, (void **)&page0, NULL,
 	    NULL, NULL, 1, flags | SCSI_SILENT, &big);
-	if (error != 0) {
-		free(inbuf, M_TEMP);
-		free(outbuf, M_TEMP);
-		return (error);
-	}
+	if (error != 0)
+		goto done;
 
 	if (page0 == NULL) {
 		page0_size = 0;
@@ -1586,9 +1573,7 @@ st_mode_select(struct st_softc *st, int flags)
 		    &general, sizeof(general));
 		error = scsi_mode_select(st->sc_link, 0, &outbuf->hdr,
 		    flags, ST_CTL_TIME);
-		free(inbuf, M_TEMP);
-		free(outbuf, M_TEMP);
-		return (error);
+		goto done;
 	}
 
 	/* MODE SENSE (10) header was returned, so use MODE SELECT (10). */
@@ -1602,8 +1587,11 @@ st_mode_select(struct st_softc *st, int flags)
 
 	error = scsi_mode_select_big(st->sc_link, 0, &outbuf->hdr_big,
 	    flags, ST_CTL_TIME);
-	free(inbuf, M_TEMP);
-	free(outbuf, M_TEMP);
+done:
+	if (inbuf)
+		dma_free(inbuf, sizeof(*inbuf));
+	if (outbuf)
+		dma_free(outbuf, sizeof(*outbuf));
 	return (error);
 }
 
@@ -1613,30 +1601,38 @@ st_mode_select(struct st_softc *st, int flags)
 int
 st_erase(struct st_softc *st, int full, int flags)
 {
-	struct scsi_erase cmd;
-	int tmo;
+	struct scsi_erase *cmd;
+	struct scsi_xfer *xs;
+	int error;
+
+	xs = scsi_xs_get(st->sc_link, flags);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
 
 	/*
 	 * Full erase means set LONG bit in erase command, which asks
 	 * the drive to erase the entire unit.  Without this bit, we're
 	 * asking the drive to write an erase gap.
 	 */
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = ERASE;
+	cmd = (struct scsi_erase *)xs->cmd;
+	cmd->opcode = ERASE;
 	if (full) {
-		cmd.byte2 = SE_IMMED|SE_LONG;
-		tmo = ST_SPC_TIME;
+		cmd->byte2 = SE_IMMED|SE_LONG;
+		xs->timeout = ST_SPC_TIME;
 	} else {
-		cmd.byte2 = SE_IMMED;
-		tmo = ST_IO_TIME;
+		cmd->byte2 = SE_IMMED;
+		xs->timeout = ST_IO_TIME;
 	}
 
 	/*
 	 * XXX We always do this asynchronously, for now.  How long should
 	 * we wait if we want to (eventually) to it synchronously?
 	 */
-	return (scsi_scsi_cmd(st->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), 0, 0, SCSI_RETRIES, tmo, NULL, flags));
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
 
 /*
@@ -1645,7 +1641,8 @@ st_erase(struct st_softc *st, int full, int flags)
 int
 st_space(struct st_softc *st, int number, u_int what, int flags)
 {
-	struct scsi_space cmd;
+	struct scsi_space *cmd;
+	struct scsi_xfer *xs;
 	int error;
 
 	switch (what) {
@@ -1708,13 +1705,22 @@ st_space(struct st_softc *st, int number, u_int what, int flags)
 	if (number == 0)
 		return 0;
 
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = SPACE;
-	cmd.byte2 = what;
-	_lto3b(number, cmd.number);
+	xs = scsi_xs_get(st->sc_link, flags);
+	if (xs == NULL) {
+		st->media_fileno = -1;
+		st->media_blkno = -1;
+		return (ENOMEM);
+	}
 
-	error = scsi_scsi_cmd(st->sc_link, (struct scsi_generic *) &cmd,
-	    sizeof(cmd), 0, 0, 0, ST_SPC_TIME, NULL, flags);
+	cmd = (struct scsi_space *)xs->cmd;
+	cmd->opcode = SPACE;
+	cmd->byte2 = what;
+	_lto3b(number, cmd->number);
+	xs->cmdlen = sizeof(*cmd);
+	xs->timeout = ST_SPC_TIME;
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
 
 	if (error != 0) {
 		st->media_fileno = -1;
@@ -1750,15 +1756,22 @@ st_space(struct st_softc *st, int number, u_int what, int flags)
 int
 st_write_filemarks(struct st_softc *st, int number, int flags)
 {
-	struct scsi_write_filemarks cmd;
+	struct scsi_write_filemarks *cmd;
+	struct scsi_xfer *xs;
 	int error;
 
-	/*
-	 * It's hard to write a negative number of file marks.
-	 * Don't try.
-	 */
 	if (number < 0)
-		return EINVAL;
+		return (EINVAL);
+
+	xs = scsi_xs_get(st->sc_link, flags);
+	if (xs == NULL) {
+		st->media_fileno = -1;
+		st->media_blkno = -1;
+		return (ENOMEM);
+	}
+	xs->cmdlen = sizeof(*cmd);
+	xs->timeout = ST_IO_TIME * 4;
+
 	switch (number) {
 	case 0:		/* really a command to sync the drive's buffers */
 		break;
@@ -1771,14 +1784,15 @@ st_write_filemarks(struct st_softc *st, int number, int flags)
 		break;
 	default:
 		st->flags &= ~(ST_PER_ACTION | ST_WRITTEN);
+		break;
 	}
 
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = WRITE_FILEMARKS;
-	_lto3b(number, cmd.number);
+	cmd = (struct scsi_write_filemarks *)xs->cmd;
+	cmd->opcode = WRITE_FILEMARKS;
+	_lto3b(number, cmd->number);
 
-	error = scsi_scsi_cmd(st->sc_link, (struct scsi_generic *) &cmd,
-	    sizeof(cmd), 0, 0, 0, ST_IO_TIME * 4, NULL, flags);
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
 
 	if (error != 0) {
 		st->media_fileno = -1;
@@ -1827,36 +1841,44 @@ st_check_eod(struct st_softc *st, int position, int *nmarks, int flags)
 int
 st_load(struct st_softc *st, u_int type, int flags)
 {
-	struct scsi_load cmd;
+	struct scsi_load *cmd;
+	struct scsi_xfer *xs;
+	int error, nmarks;
 
 	st->media_fileno = -1;
 	st->media_blkno = -1;
 
 	if (type != LD_LOAD) {
-		int error;
-		int nmarks;
-
 		error = st_check_eod(st, FALSE, &nmarks, flags);
 		if (error)
-			return error;
+			return (error);
 	}
+
 	if (st->quirks & ST_Q_IGNORE_LOADS) {
 		if (type == LD_LOAD) {
 			/*
 			 * If we ignore loads, at least we should try a rewind.
 			 */
-			return st_rewind(st, 0, flags);
+			return (st_rewind(st, 0, flags));
 		}
 		return (0);
 	}
 
 
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = LOAD;
-	cmd.how = type;
+	xs = scsi_xs_get(st->sc_link, flags);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->timeout = ST_SPC_TIME;
 
-	return scsi_scsi_cmd(st->sc_link, (struct scsi_generic *) &cmd,
-	    sizeof(cmd), 0, 0, SCSI_RETRIES, ST_SPC_TIME, NULL, flags);
+	cmd = (struct scsi_load *)xs->cmd;
+	cmd->opcode = LOAD;
+	cmd->how = type;
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	return (error);
 }
 
 /*
@@ -1865,22 +1887,27 @@ st_load(struct st_softc *st, u_int type, int flags)
 int
 st_rewind(struct st_softc *st, u_int immediate, int flags)
 {
-	struct scsi_rewind cmd;
-	int error;
-	int nmarks;
+	struct scsi_rewind *cmd;
+	struct scsi_xfer *xs;
+	int error, nmarks;
 
 	error = st_check_eod(st, FALSE, &nmarks, flags);
 	if (error)
-		return error;
+		return (error);
 	st->flags &= ~ST_PER_ACTION;
 
-	bzero(&cmd, sizeof(cmd));
-	cmd.opcode = REWIND;
-	cmd.byte2 = immediate;
+	xs = scsi_xs_get(st->sc_link, flags);
+	if (xs == NULL)
+		return (ENOMEM);
+	xs->cmdlen = sizeof(*cmd);
+	xs->timeout = immediate ? ST_CTL_TIME : ST_SPC_TIME;
 
-	error = scsi_scsi_cmd(st->sc_link, (struct scsi_generic *) &cmd,
-	    sizeof(cmd), 0, 0, SCSI_RETRIES,
-	    immediate ? ST_CTL_TIME: ST_SPC_TIME, NULL, flags);
+	cmd = (struct scsi_rewind *)xs->cmd;
+	cmd->opcode = REWIND;
+	cmd->byte2 = immediate;
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
 
 	if (error == 0) {
 		st->media_fileno = 0;
@@ -1903,7 +1930,8 @@ st_interpret_sense(struct scsi_xfer *xs)
 	struct st_softc *st = sc_link->device_softc;
 	u_int8_t serr = sense->error_code & SSD_ERRCODE;
 	u_int8_t skey = sense->flags & SSD_KEY;
-	int32_t info;
+	int32_t resid;
+	int datalen;
 
 	if (((sc_link->flags & SDEV_OPEN) == 0) ||
 	    (serr != SSD_ERRCODE_CURRENT && serr != SSD_ERRCODE_DEFERRED))
@@ -1947,87 +1975,76 @@ st_interpret_sense(struct scsi_xfer *xs)
 	}
 
 	/*
-	 * Get the sense fields and work out what code
+	 * 'resid' can be in units of st->blksize or bytes. xs->resid and
+	 * xs->datalen are always in units of bytes. So we need a variable
+	 * to store datalen in the same units as resid and to adjust
+	 * xs->resid to be in bytes.
 	 */
-	if (sense->error_code & SSD_ERRCODE_VALID)
-		info = _4btol(sense->info);
-	else
-		info = xs->datalen;	/* bad choice if fixed blocks */
-	if (st->flags & ST_FIXEDBLOCKS) {
-		xs->resid = info * st->blksize;
-		if (sense->flags & SSD_EOM) {
-			st->flags |= ST_EIO_PENDING;
+	datalen = xs->datalen;
+	if (sense->error_code & SSD_ERRCODE_VALID) {
+		xs->resid = resid = (int32_t)_4btol(sense->info);
+		if (st->flags & ST_FIXEDBLOCKS) {
+			xs->resid *= st->blksize;
+			datalen /= st->blksize;
 		}
-		if (sense->flags & SSD_FILEMARK) {
-			st->flags |= ST_AT_FILEMARK;
-			if (st->media_fileno != -1) {
-				st->media_fileno++;
-				st->media_blkno = 0;
-			}
+		if (xs->resid < 0 || xs->resid > xs->datalen)
+			xs->resid = xs->datalen;
+	} else {
+		xs->resid = resid = xs->datalen;
+		if (st->flags & ST_FIXEDBLOCKS) {
+			resid /= st->blksize;
+			datalen /= st->blksize;
 		}
-		if (sense->flags & SSD_ILI) {
-			st->flags |= ST_EIO_PENDING;
-			if (sense->error_code & SSD_ERRCODE_VALID &&
-			    (xs->flags & SCSI_SILENT) == 0)
-				printf("%s: block wrong size, %d blocks residual\n",
-				    st->sc_dev.dv_xname, info);
+	}
 
-			/*
-			 * This quirk code helps the drive read
-			 * the first tape block, regardless of
-			 * format.  That is required for these
-			 * drives to return proper MODE SENSE
-			 * information.
-			 */
-			if ((st->quirks & ST_Q_SENSE_HELP) &&
-			    !(sc_link->flags & SDEV_MEDIA_LOADED))
-				st->blksize -= 512;
+	if (sense->flags & SSD_FILEMARK) {
+		if (st->media_fileno != -1) {
+			st->media_fileno++;
+			st->media_blkno = 0;
 		}
-		/*
-		 * If no data was transferred, return immediately
-		 */
-		if (xs->resid >= xs->datalen) {
-			if (st->flags & ST_EIO_PENDING)
-				return EIO;
-			if (st->flags & ST_AT_FILEMARK) {
-				return 0;
-			}
-		}
-	} else {		/* must be variable mode */
-		xs->resid = xs->datalen;	/* to be sure */
-		if (sense->flags & SSD_EOM)
-			return EIO;
-		if (sense->flags & SSD_FILEMARK) {
-			if (st->media_fileno != -1) {
-				st->media_fileno++;
-				st->media_blkno = 0;
-			}
+		if ((st->flags & ST_FIXEDBLOCKS) == 0)
 			return 0;
+		st->flags |= ST_AT_FILEMARK;
+	}
+
+	if (sense->flags & SSD_EOM) {
+		if ((st->flags & ST_FIXEDBLOCKS) == 0)
+			return EIO;
+		st->flags |= ST_EIO_PENDING;
+	}
+
+	if (sense->flags & SSD_ILI) {
+		if ((st->flags & ST_FIXEDBLOCKS) == 0) {
+			if (resid >= 0 && resid <= datalen)
+				return (0);
+			if ((xs->flags & SCSI_SILENT) == 0)
+				printf( "%s: bad residual %d out of "
+				    "%d\n", st->sc_dev.dv_xname, resid,
+				    datalen);
+			return (EIO);
 		}
-		if (sense->flags & SSD_ILI) {
-			if (info < 0) {
-				/*
-				 * the record was bigger than the read
-				 */
-				if ((xs->flags & SCSI_SILENT) == 0)
-					printf("%s: %d-byte record too big\n",
-					    st->sc_dev.dv_xname,
-					    xs->datalen - info);
-				return (EIO);
-			} else if (info > xs->datalen) {
-				/*
-				 * huh? the residual is bigger than the request
-				 */
-				if ((xs->flags & SCSI_SILENT) == 0)
-					printf(
-					    "%s: bad residual %d out of %d\n",
-					    st->sc_dev.dv_xname, info,
-					    xs->datalen);
-				return (EIO);
-			}
-			xs->resid = info;
-			return (0);
-		}
+
+		/* Fixed size blocks. */
+		if (sense->error_code & SSD_ERRCODE_VALID)
+			if ((xs->flags & SCSI_SILENT) == 0)
+				printf("%s: block wrong size, %d blocks "
+				    "residual\n", st->sc_dev.dv_xname, resid);
+		st->flags |= ST_EIO_PENDING;
+		/*
+                 * This quirk code helps the drive read the first tape block,
+		 * regardless of format.  That is required for these drives to
+		 * return proper MODE SENSE information.
+		 */
+		if ((st->quirks & ST_Q_SENSE_HELP) &&
+		    !(sc_link->flags & SDEV_MEDIA_LOADED))
+			st->blksize -= 512;
+	}
+
+	if ((st->flags & ST_FIXEDBLOCKS) && xs->resid == xs->datalen) {
+		if (st->flags & ST_EIO_PENDING)
+			return EIO;
+		if (st->flags & ST_AT_FILEMARK)
+			return 0;
 	}
 
 	if (skey == SKEY_BLANK_CHECK) {
@@ -2069,16 +2086,18 @@ st_interpret_sense(struct scsi_xfer *xs)
 int
 st_touch_tape(struct st_softc *st)
 {
-	char *buf;
-	int readsize;
-	int error;
-
-	buf = malloc(1024, M_TEMP, M_NOWAIT);
-	if (!buf)
-		return ENOMEM;
+	char *buf = NULL;
+	int readsize, maxblksize = 1024;
+	int error = 0;
 
 	if ((error = st_mode_sense(st, 0)) != 0)
-		goto bad;
+		goto done;
+	buf = dma_alloc(maxblksize, PR_NOWAIT);
+	if (!buf) {
+		error = ENOMEM;
+		goto done;
+	}
+
 	st->blksize = 1024;
 	do {
 		switch (st->blksize) {
@@ -2092,16 +2111,14 @@ st_touch_tape(struct st_softc *st)
 			st->flags &= ~ST_FIXEDBLOCKS;
 		}
 		if ((error = st_mode_select(st, 0)) != 0)
-			goto bad;
+			goto done;
 		st_read(st, buf, readsize, SCSI_SILENT);	/* XXX */
-		if ((error = st_rewind(st, 0, 0)) != 0) {
-bad:			free(buf, M_TEMP);
-			return error;
-		}
+		if ((error = st_rewind(st, 0, 0)) != 0)
+			goto done;
 	} while (readsize != 1 && readsize > st->blksize);
-
-	free(buf, M_TEMP);
-	return 0;
+done:
+	dma_free(buf, maxblksize);
+	return (error);
 }
 
 int

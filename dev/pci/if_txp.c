@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_txp.c,v 1.101 2009/08/13 14:24:47 jasper Exp $	*/
+/*	$OpenBSD: if_txp.c,v 1.104 2011/04/05 18:01:21 henning Exp $	*/
 
 /*
  * Copyright (c) 2001
@@ -89,7 +89,6 @@ void txp_attach(struct device *, struct device *, void *);
 void txp_attachhook(void *vsc);
 int txp_intr(void *);
 void txp_tick(void *);
-void txp_shutdown(void *);
 int txp_ioctl(struct ifnet *, u_long, caddr_t);
 void txp_start(struct ifnet *);
 void txp_stop(struct txp_softc *);
@@ -152,7 +151,7 @@ int
 txp_probe(struct device *parent, void *match, void *aux)
 {
 	return (pci_matchbyid((struct pci_attach_args *)aux, txp_devices,
-	    sizeof(txp_devices)/sizeof(txp_devices[0])));
+	    nitems(txp_devices)));
 }
 
 void
@@ -242,7 +241,6 @@ txp_attachhook(void *vsc)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	shutdownhook_establish(txp_shutdown, sc);
 	splx(s);
 }
 
@@ -869,22 +867,6 @@ txp_tx_reclaim(struct txp_softc *sc, struct txp_tx_ring *r,
 		ifp->if_timer = 0;
 }
 
-void
-txp_shutdown(void *vsc)
-{
-	struct txp_softc *sc = (struct txp_softc *)vsc;
-
-	/* mask all interrupts */
-	WRITE_REG(sc, TXP_IMR,
-	    TXP_INT_SELF | TXP_INT_PCI_TABORT | TXP_INT_PCI_MABORT |
-	    TXP_INT_DMA3 | TXP_INT_DMA2 | TXP_INT_DMA1 | TXP_INT_DMA0 |
-	    TXP_INT_LATCH);
-
-	txp_command(sc, TXP_CMD_TX_DISABLE, 0, 0, 0, NULL, NULL, NULL, 0);
-	txp_command(sc, TXP_CMD_RX_DISABLE, 0, 0, 0, NULL, NULL, NULL, 0);
-	txp_command(sc, TXP_CMD_HALT, 0, 0, 0, NULL, NULL, NULL, 0);
-}
-
 int
 txp_alloc_rings(struct txp_softc *sc)
 {
@@ -1396,11 +1378,11 @@ txp_start(struct ifnet *ifp)
 		if (m->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 			txd->tx_pflags |= TX_PFLAGS_IPCKSUM;
 #ifdef TRY_TX_TCP_CSUM
-		if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+		if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
 			txd->tx_pflags |= TX_PFLAGS_TCPCKSUM;
 #endif
 #ifdef TRY_TX_UDP_CSUM
-		if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+		if (m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
 			txd->tx_pflags |= TX_PFLAGS_UDPCKSUM;
 #endif
 

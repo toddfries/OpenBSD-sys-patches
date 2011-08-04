@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.8 2010/06/29 20:30:32 guenther Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.10 2011/05/30 22:25:21 oga Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -63,6 +63,9 @@
 #ifndef MAXDSIZ
 #define	MAXDSIZ		(64*1024*1024)		/* max data size */
 #endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
+#endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(2*1024*1024)		/* initial stack size limit */
 #endif
@@ -110,9 +113,6 @@
  * Constants which control the way the VM system deals with memory segments.
  */
 #define	VM_PHYSSEG_NOADD
-
-#define	VM_NFREELIST		1
-#define	VM_FREELIST_DEFAULT	0
 
 #ifndef _LOCORE
 

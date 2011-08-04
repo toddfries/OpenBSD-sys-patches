@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK-IP30,v 1.19 2010/07/03 03:59:17 krw Exp $
+#	$OpenBSD: RAMDISK-IP30,v 1.22 2011/06/29 20:52:09 matthew Exp $
 #
 # THIS KERNEL IS FOR Octane and Octane 2 (IP30) SYSTEMS ONLY.
 
@@ -10,8 +10,6 @@ option		DST=0		# use daylight savings rules
 
 # Make options
 makeoption	LINK_ADDRESS="0xa800000020020000"
-
-option		ARCBIOS		# Systems uses ARC firmware.
 
 option		PCIVERBOSE
 option		USBVERBOSE
@@ -36,6 +34,7 @@ option		RAMDISK_HOOKS
 # Define what targets to support
 option		TGT_OCTANE	# Octane, Octane 2
 option		TGT_COHERENT
+option		ARCBIOS
 option		CPU_R10000	# R10000/R12000/R14000/R16000 support
 
 # Specify storage configuration using ramdisk
@@ -103,9 +102,6 @@ ubsa*		at uhub?	# Belkin serial adapter
 ucom*		at ubsa?
 #ulpt*		at uhub?	# USB Printers	
 umass*		at uhub?	# USB Mass Storage devices
-atapiscsi*	at umass?
-scsibus*	at atapiscsi?
-scsibus*	at umass?
 uhidev*		at uhub?	# Human Interface Devices
 ums*		at uhidev?	# USB mouse
 wsmouse*	at ums? mux 0
@@ -163,6 +159,7 @@ msk*		at mskc?	#  each port of above
 bge*		at pci?		# Broadcom BCM570x (aka Tigon3)
 vge*		at pci?		# VIA VT612x
 bnx*		at pci?		# Broadcom BCM5706/5708 GigE
+sis*		at pci?		# SiS 900/7016 ethernet
 
 ##### Media Independent Interface (mii) drivers
 exphy*		at mii?		# 3Com internal PHYs
@@ -200,11 +197,8 @@ wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
 
 #### SCSI Bus devices
-scsibus*	at ahc?
-scsibus*	at isp?
-scsibus*	at mpi?
-scsibus*	at siop?
 
+scsibus*	at scsi?
 sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?

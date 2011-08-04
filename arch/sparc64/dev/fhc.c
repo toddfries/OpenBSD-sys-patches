@@ -1,4 +1,4 @@
-/*	$OpenBSD: fhc.c,v 1.16 2008/03/09 13:27:47 kettenis Exp $	*/
+/*	$OpenBSD: fhc.c,v 1.18 2011/04/07 15:30:16 miod Exp $	*/
 
 /*
  * Copyright (c) 2004 Jason L. Wright (jason@thought.net)
@@ -121,7 +121,7 @@ fhc_attach(struct fhc_softc *sc)
 			free(fa.fa_name, M_DEVBUF);
 		if (fa.fa_reg != NULL)
 			free(fa.fa_reg, M_DEVBUF);
-		if (fa.fa_nintr != NULL)
+		if (fa.fa_intr != NULL)
 			free(fa.fa_intr, M_DEVBUF);
 		if (fa.fa_promvaddrs != NULL)
 			free(fa.fa_promvaddrs, M_DEVBUF);
@@ -174,7 +174,7 @@ fhc_alloc_bus_tag(struct fhc_softc *sc)
 	if (bt == NULL)
 		panic("fhc: couldn't alloc bus tag");
 
-	snprintf(bt->name, sizeof(bt->name), "%s", sc->sc_dv.dv_xname);
+	strlcpy(bt->name, sc->sc_dv.dv_xname, sizeof(bt->name));
 	bt->cookie = sc;
 	bt->parent = sc->sc_bt;
 	bt->asi = bt->parent->asi;

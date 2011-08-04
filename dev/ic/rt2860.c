@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2860.c,v 1.56 2010/07/19 19:47:52 damien Exp $	*/
+/*	$OpenBSD: rt2860.c,v 1.65 2010/10/23 14:24:54 damien Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -67,8 +67,6 @@
 
 #include <dev/rndvar.h>
 
-#define RAL_DEBUG
-
 #ifdef RAL_DEBUG
 #define DPRINTF(x)	do { if (rt2860_debug > 0) printf x; } while (0)
 #define DPRINTFN(n, x)	do { if (rt2860_debug >= (n)) printf x; } while (0)
@@ -78,6 +76,7 @@ int rt2860_debug = 0;
 #define DPRINTFN(n, x)
 #endif
 
+void		rt2860_attachhook(void *);
 int		rt2860_alloc_tx_ring(struct rt2860_softc *,
 		    struct rt2860_tx_ring *);
 void		rt2860_reset_tx_ring(struct rt2860_softc *,
@@ -165,7 +164,6 @@ void		rt2860_switch_chan(struct rt2860_softc *,
 int		rt2860_setup_beacon(struct rt2860_softc *);
 #endif
 void		rt2860_enable_tsf_sync(struct rt2860_softc *);
-void		rt2860_power(int, void *);
 
 static const struct {
 	uint32_t	reg;
@@ -206,8 +204,7 @@ rt2860_attach(void *xsc, int id)
 {
 	struct rt2860_softc *sc = xsc;
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct ifnet *ifp = &ic->ic_if;
-	int i, qid, ntries, error;
+	int qid, ntries, error;
 	uint32_t tmp;
 
 	sc->amrr.amrr_min_success_threshold =  1;
@@ -227,11 +224,7 @@ rt2860_attach(void *xsc, int id)
 	}
 	sc->mac_ver = tmp >> 16;
 	sc->mac_rev = tmp & 0xffff;
-#ifdef RAL_DEBUG
-	/* temporarily enable debug for >=RT3071 */
-	if (sc->mac_ver >= 0x3071)
-		rt2860_debug = 10;
-#endif
+
 	if (sc->mac_ver != 0x2860 &&
 	    (id == PCI_PRODUCT_RALINK_RT2890 ||
 	     id == PCI_PRODUCT_RALINK_RT2790 ||
@@ -271,6 +264,34 @@ rt2860_attach(void *xsc, int id)
 	/* mgmt ring is broken on RT2860C, use EDCA AC VO ring instead */
 	sc->mgtqid = (sc->mac_ver == 0x2860 && sc->mac_rev == 0x0100) ?
 	    EDCA_AC_VO : 5;
+
+	if (rootvp == NULL)
+		mountroothook_establish(rt2860_attachhook, sc);
+	else
+		rt2860_attachhook(sc);
+
+	return 0;
+
+fail2:	rt2860_free_rx_ring(sc, &sc->rxq);
+fail1:	while (--qid >= 0)
+		rt2860_free_tx_ring(sc, &sc->txq[qid]);
+	return error;
+}
+
+void
+rt2860_attachhook(void *xsc)
+{
+	struct rt2860_softc *sc = xsc;
+	struct ieee80211com *ic = &sc->sc_ic;
+	struct ifnet *ifp = &ic->ic_if;
+	int i, error;
+
+	error = loadfirmware("ral-rt2860", &sc->ucode, &sc->ucsize);
+	if (error != 0) {
+		printf("%s: error %d, could not read firmware file %s\n",
+		    sc->sc_dev.dv_xname, error, "ral-rt2860");
+		return;
+	}
 
 	ic->ic_phytype = IEEE80211_T_OFDM; /* not only, but not used */
 	ic->ic_opmode = IEEE80211_M_STA; /* default to BSS mode */
@@ -323,7 +344,6 @@ rt2860_attach(void *xsc, int id)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = rt2860_init;
 	ifp->if_ioctl = rt2860_ioctl;
 	ifp->if_start = rt2860_start;
 	ifp->if_watchdog = rt2860_watchdog;
@@ -362,19 +382,6 @@ rt2860_attach(void *xsc, int id)
 	sc->sc_txtap.wt_ihdr.it_len = htole16(sc->sc_txtap_len);
 	sc->sc_txtap.wt_ihdr.it_present = htole32(RT2860_TX_RADIOTAP_PRESENT);
 #endif
-
-	sc->sc_powerhook = powerhook_establish(rt2860_power, sc);
-	if (sc->sc_powerhook == NULL) {
-		printf("%s: WARNING: unable to establish power hook\n",
-		    sc->sc_dev.dv_xname);
-	}
-
-	return 0;
-
-fail2:	rt2860_free_rx_ring(sc, &sc->rxq);
-fail1:	while (--qid >= 0)
-		rt2860_free_tx_ring(sc, &sc->txq[qid]);
-	return error;
 }
 
 int
@@ -384,9 +391,6 @@ rt2860_detach(void *xsc)
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int qid;
 
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
-
 	ieee80211_ifdetach(ifp);	/* free all nodes */
 	if_detach(ifp);
 
@@ -395,7 +399,30 @@ rt2860_detach(void *xsc)
 	rt2860_free_rx_ring(sc, &sc->rxq);
 	rt2860_free_tx_pool(sc);
 
+	if (sc->ucode != NULL)
+		free(sc->ucode, M_DEVBUF);
+
 	return 0;
+}
+
+void
+rt2860_suspend(void *xsc)
+{
+	struct rt2860_softc *sc = xsc;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_RUNNING)
+		rt2860_stop(ifp, 1);
+}
+
+void
+rt2860_resume(void *xsc)
+{
+	struct rt2860_softc *sc = xsc;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	if (ifp->if_flags & IFF_UP)
+		rt2860_init(ifp);
 }
 
 int
@@ -988,7 +1015,8 @@ rt3090_efuse_read_2(struct rt2860_softc *sc, uint16_t addr)
 	tmp |= (addr & ~0xf) << RT3070_EFSROM_AIN_SHIFT | RT3070_EFSROM_KICK;
 	RAL_WRITE(sc, RT3070_EFUSE_CTRL, tmp);
 	for (ntries = 0; ntries < 500; ntries++) {
-		if (!(RAL_READ(sc, RT3070_EFUSE_CTRL) & RT3070_EFSROM_KICK))
+		tmp = RAL_READ(sc, RT3070_EFUSE_CTRL);
+		if (!(tmp & RT3070_EFSROM_KICK))
 			break;
 		DELAY(2);
 	}
@@ -1975,7 +2003,8 @@ rt3090_rf_read(struct rt2860_softc *sc, uint8_t reg)
 	RAL_WRITE(sc, RT3070_RF_CSR_CFG, tmp);
 
 	for (ntries = 0; ntries < 100; ntries++) {
-		if (!(RAL_READ(sc, RT3070_RF_CSR_CFG) & RT3070_RF_KICK))
+		tmp = RAL_READ(sc, RT3070_RF_CSR_CFG);
+		if (!(tmp & RT3070_RF_KICK))
 			break;
 		DELAY(1);
 	}
@@ -3340,14 +3369,11 @@ rt2860_init(struct ifnet *ifp)
 	RAL_BARRIER_WRITE(sc);
 	RAL_WRITE(sc, RT2860_SYS_CTRL, 0xe00);
 
-	if (!(sc->sc_flags & RT2860_FWLOADED)) {
-		if ((error = rt2860_load_microcode(sc)) != 0) {
-			printf("%s: could not load 8051 microcode\n",
-			    sc->sc_dev.dv_xname);
-			rt2860_stop(ifp, 1);
-			return error;
-		}
-		sc->sc_flags |= RT2860_FWLOADED;
+	if ((error = rt2860_load_microcode(sc)) != 0) {
+		printf("%s: could not load 8051 microcode\n",
+		    sc->sc_dev.dv_xname);
+		rt2860_stop(ifp, 1);
+		return error;
 	}
 
 	IEEE80211_ADDR_COPY(ic->ic_myaddr, LLADDR(ifp->if_sadl));
@@ -3620,7 +3646,7 @@ rt2860_stop(struct ifnet *ifp, int disable)
 	if (disable && sc->sc_disable != NULL) {
 		if (sc->sc_flags & RT2860_ENABLED) {
 			(*sc->sc_disable)(sc);
-			sc->sc_flags &= ~(RT2860_ENABLED | RT2860_FWLOADED);
+			sc->sc_flags &= ~RT2860_ENABLED;
 		}
 	}
 }
@@ -3628,20 +3654,12 @@ rt2860_stop(struct ifnet *ifp, int disable)
 int
 rt2860_load_microcode(struct rt2860_softc *sc)
 {
-	u_char *ucode;
-	size_t size;
-	int error, ntries;
-
-	if ((error = loadfirmware("ral-rt2860", &ucode, &size)) != 0) {
-		printf("%s: error %d, could not read firmware file %s\n",
-		    sc->sc_dev.dv_xname, error, "ral-rt2860");
-		return error;
-	}
+	int ntries;
 
 	/* set "host program ram write selection" bit */
 	RAL_WRITE(sc, RT2860_SYS_CTRL, RT2860_HST_PM_SEL);
 	/* write microcode image */
-	RAL_WRITE_REGION_1(sc, RT2860_FW_BASE, ucode, size);
+	RAL_WRITE_REGION_1(sc, RT2860_FW_BASE, sc->ucode, sc->ucsize);
 	/* kick microcontroller unit */
 	RAL_WRITE(sc, RT2860_SYS_CTRL, 0);
 	RAL_BARRIER_WRITE(sc);
@@ -3649,8 +3667,6 @@ rt2860_load_microcode(struct rt2860_softc *sc)
 
 	RAL_WRITE(sc, RT2860_H2M_BBPAGENT, 0);
 	RAL_WRITE(sc, RT2860_H2M_MAILBOX, 0);
-
-	free(ucode, M_DEVBUF);
 
 	/* wait until microcontroller is ready */
 	RAL_BARRIER_READ_WRITE(sc);
@@ -3832,33 +3848,4 @@ rt2860_enable_tsf_sync(struct rt2860_softc *sc)
 #endif
 
 	RAL_WRITE(sc, RT2860_BCN_TIME_CFG, tmp);
-}
-
-void
-rt2860_power(int why, void *arg)
-{
-	struct rt2860_softc *sc = arg;
-	struct ifnet *ifp = &sc->sc_ic.ic_if;
-	int s;
-
-	s = splnet();
-	switch (why) {
-	case PWR_SUSPEND:
-	case PWR_STANDBY:
-		rt2860_stop(ifp, 1);
-		sc->sc_flags &= ~RT2860_FWLOADED;
-		if (sc->sc_power != NULL)
-			(*sc->sc_power)(sc, why);
-		break;
-	case PWR_RESUME:
-		if (ifp->if_flags & IFF_UP) {
-			rt2860_init(ifp);
-			if (sc->sc_power != NULL)
-				(*sc->sc_power)(sc, why);
-			if (ifp->if_flags & IFF_RUNNING)
-				rt2860_start(ifp);
-		}
-		break;
-	}
-	splx(s);
 }

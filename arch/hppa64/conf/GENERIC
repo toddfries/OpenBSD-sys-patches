@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.19 2010/07/03 03:59:16 krw Exp $
+#	$OpenBSD: GENERIC,v 1.25 2011/06/29 20:52:09 matthew Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -15,9 +15,6 @@ maxusers	80			# estimated number of users
 
 option		DEBUG
 option		USER_PCICONF	# user-space PCI configuration
-
-#option	COMPAT_LINUX
-#option		PROCFS		# /proc
 
 config	bsd swap generic
 
@@ -90,8 +87,6 @@ pci*	at ppb?
 #midi*	at umidi?
 #ulpt*	at uhub?		# USB Printers
 #umass*	at uhub?		# USB Mass Storage devices
-#scsibus* at umass?
-#atapiscsi* at umass?
 #uhidev*	at uhub?	# Human Interface Devices
 #ums*	at uhidev?		# USB mouse
 #wsmouse* at ums? mux 0
@@ -124,10 +119,8 @@ pci*	at ppb?
 
 #ie*	at pci?
 
-#siop*	at pci?			# NCR 538XX SCSI controllers(new)
-#scsibus* at siop?
+siop*	at pci?			# NCR 538XX SCSI controllers(new)
 #ahd*	at pci?			# Adaptec 79?? SCSI controllers
-#scsibus* at ahd?
 
 #em*	at pci?			# Intel Pro/1000 ethernet
 #ti*	at pci?			# Alteon Tigon 1Gb ethernet
@@ -175,11 +168,11 @@ ukphy*		at mii?		# generic unknown PHYs
 #wd*	at wdc? flags 0x0000
 #wd*	at pciide? flags 0x0000
 #atapiscsi* at pciide?
-#scsibus* at atapiscsi?
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
-#sd*	at scsibus?
+scsibus* at scsi?
+sd*	at scsibus?
 #st*	at scsibus?
 #cd*	at scsibus?
 #ch*	at scsibus?
@@ -192,5 +185,6 @@ ukphy*		at mii?		# generic unknown PHYs
 #owid*	at onewire?		# ID
 #owsbm*	at onewire?		# Smart Battery Monitor
 #owtemp* at onewire?		# Temperature
+#owctn*	at onewire?			# Counter device
 
 #pseudo-device	wsmux	2	# mouse and keyboard multiplexor

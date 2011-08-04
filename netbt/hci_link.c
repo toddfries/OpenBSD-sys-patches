@@ -1,4 +1,4 @@
-/*	$OpenBSD: hci_link.c,v 1.9 2008/11/22 04:42:58 uwe Exp $	*/
+/*	$OpenBSD: hci_link.c,v 1.11 2010/07/29 14:40:47 blambert Exp $	*/
 /*	$NetBSD: hci_link.c,v 1.20 2008/04/24 11:38:37 ad Exp $	*/
 
 /*-
@@ -35,6 +35,7 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
+#include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/queue.h>
 #include <sys/systm.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: stand.h,v 1.47 2010/05/09 15:30:28 jsg Exp $	*/
+/*	$OpenBSD: stand.h,v 1.51 2011/03/13 00:13:53 deraadt Exp $	*/
 /*	$NetBSD: stand.h,v 1.18 1996/11/30 04:35:51 gwr Exp $	*/
 
 /*-
@@ -48,7 +48,6 @@ struct open_file;
 /*
  * Useful macros
  */
-#define NENTS(x)	sizeof(x)/sizeof(x[0])
 /* don't define if libkern included */
 #ifndef LIBKERN_INLINE
 #define	max(a,b)	(((a)>(b))? (a) : (b))
@@ -83,7 +82,7 @@ extern int nfsys;
 struct devsw {
 	char	*dv_name;
 	int	(*dv_strategy)(void *devdata, int rw,
-				    daddr_t blk, size_t size,
+				    daddr32_t blk, size_t size,
 				    void *buf, size_t *rsize);
 	int	(*dv_open)(struct open_file *f, ...);
 	int	(*dv_close)(struct open_file *f);

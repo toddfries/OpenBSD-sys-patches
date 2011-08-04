@@ -145,7 +145,8 @@ struct prom_map {
 #define PMAP_4M		0x018
 #define PMAP_SZ_TO_TTE(x)	(((x)&0x018)<<58)
 /* If these bits are different in va's to the same PA then there is an aliasing in the d$ */
-#define VA_ALIAS_MASK   (1<<13)	
+#define VA_ALIAS_MASK	(1<<13)	/* = (VA_ALIAS_ALIGN - 1) & ~PAGE_MASK */
+#define VA_ALIAS_ALIGN	(1<<14)
 
 typedef	struct pmap *pmap_t;
 
@@ -161,14 +162,18 @@ extern struct pmap kernel_pmap_;
 
 /* int pmap_change_wiring(pmap_t pm, vaddr_t va, boolean_t wired); */
 #define	pmap_resident_count(pm)		((pm)->pm_stats.resident_count)
-#define	pmap_phys_address(x)		(x)
 #define	pmap_update(pm)			/* nothing (yet) */
 
 #define pmap_proc_iflush(p,va,len)	/* nothing */
 
 void pmap_bootstrap(u_long, u_long, u_int, u_int);
 /* make sure all page mappings are modulo 16K to prevent d$ aliasing */
-#define PMAP_PREFER(pa, va)	(*(va) += (((*(va)) ^ (pa)) & VA_ALIAS_MASK))
+#define PMAP_PREFER(pa, va)	((va) + (((va) ^ (pa)) & VA_ALIAS_MASK))
+
+/* pmap prefer alignment */
+#define PMAP_PREFER_ALIGN()	(VA_ALIAS_ALIGN)
+/* pmap prefer offset in alignment */
+#define PMAP_PREFER_OFFSET(of)	((of) & VA_ALIAS_MASK)
 
 #define PMAP_GROWKERNEL         /* turn on pmap_growkernel interface */
 

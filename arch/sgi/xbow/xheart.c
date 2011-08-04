@@ -1,4 +1,4 @@
-/*	$OpenBSD: xheart.c,v 1.19 2009/11/26 23:32:46 syuu Exp $	*/
+/*	$OpenBSD: xheart.c,v 1.23 2011/07/10 17:48:25 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -26,7 +26,7 @@
 #include <sys/device.h>
 #include <sys/evcount.h>
 #include <sys/malloc.h>
-#include <sys/queue.h>
+#include <sys/timetc.h>
 
 #include <machine/atomic.h>
 #include <machine/autoconf.h>
@@ -73,6 +73,17 @@ uint32_t xheart_intr_handler(uint32_t, struct trap_frame *);
 void	xheart_intr_makemasks(void);
 void	xheart_setintrmask(int);
 void	xheart_splx(int);
+
+u_int	xheart_get_timecount(struct timecounter *);
+
+struct timecounter xheart_timecounter = {
+	.tc_get_timecount = xheart_get_timecount,
+	.tc_poll_pps = NULL,
+	.tc_counter_mask = 0xffffffff,	/* truncate 52-bit counter to 32-bit */
+	.tc_frequency = 12500000,
+	.tc_name = "heart",
+	.tc_quality = 100
+};
 
 extern uint32_t ip30_lights_frob(uint32_t, struct trap_frame *);
 
@@ -134,43 +145,38 @@ xheart_attach(struct device *parent, struct device *self, void *aux)
 	oba.oba_flags = ONEWIRE_SCAN_NOW | ONEWIRE_NO_PERIODIC_SCAN;
 	config_found(self, &oba, onewirebus_print);
 
+	xbow_intr_address = 0x80;
+	xbow_intr_widget_intr_register = xheart_intr_register;
+	xbow_intr_widget_intr_establish = xheart_intr_establish;
+	xbow_intr_widget_intr_disestablish = xheart_intr_disestablish;
+	xbow_intr_widget_intr_clear = xheart_intr_clear;
+	xbow_intr_widget_intr_set = xheart_intr_set;
+
 	/*
-	 * If no other widget has claimed interrupts routing, do it now.
+	 * Acknowledge and disable all interrupts.
 	 */
-	if (xbow_intr_widget == 0) {
-		xbow_intr_widget = xaa->xaa_widget;
-		xbow_intr_widget_register = 0x80;
-		xbow_intr_widget_intr_register = xheart_intr_register;
-		xbow_intr_widget_intr_establish = xheart_intr_establish;
-		xbow_intr_widget_intr_disestablish = xheart_intr_disestablish;
-		xbow_intr_widget_intr_clear = xheart_intr_clear;
-		xbow_intr_widget_intr_set = xheart_intr_set;
-
-		/*
-		 * Acknowledge and disable all interrupts.
-		 */
-		heart = PHYS_TO_XKPHYS(HEART_PIU_BASE, CCA_NC);
-		*(volatile uint64_t*)(heart + HEART_ISR_CLR) =
-		    0xffffffffffffffff;
-		*(volatile uint64_t*)(heart + HEART_IMR(0)) = 0UL;
-		*(volatile uint64_t*)(heart + HEART_IMR(1)) = 0UL;
-		*(volatile uint64_t*)(heart + HEART_IMR(2)) = 0UL;
-		*(volatile uint64_t*)(heart + HEART_IMR(3)) = 0UL;
+	heart = PHYS_TO_XKPHYS(HEART_PIU_BASE, CCA_NC);
+	*(volatile uint64_t*)(heart + HEART_ISR_CLR) = 0xffffffffffffffffUL;
+	*(volatile uint64_t*)(heart + HEART_IMR(0)) = 0UL;
+	*(volatile uint64_t*)(heart + HEART_IMR(1)) = 0UL;
+	*(volatile uint64_t*)(heart + HEART_IMR(2)) = 0UL;
+	*(volatile uint64_t*)(heart + HEART_IMR(3)) = 0UL;
 
 #ifdef notyet
-		set_intr(INTPRI_HEART_4, CR_INT_4, xheart_intr_handler);
-		set_intr(INTPRI_HEART_3, CR_INT_3, xheart_intr_handler);
+	set_intr(INTPRI_HEART_4, CR_INT_4, xheart_intr_handler);
+	set_intr(INTPRI_HEART_3, CR_INT_3, xheart_intr_handler);
 #endif
-		set_intr(INTPRI_HEART_2, CR_INT_2, xheart_intr_handler);
+	set_intr(INTPRI_HEART_2, CR_INT_2, xheart_intr_handler);
 #ifdef notyet
-		set_intr(INTPRI_HEART_1, CR_INT_1, xheart_intr_handler);
+	set_intr(INTPRI_HEART_1, CR_INT_1, xheart_intr_handler);
 #endif
-		set_intr(INTPRI_HEART_0, CR_INT_0, xheart_intr_handler);
+	set_intr(INTPRI_HEART_0, CR_INT_0, xheart_intr_handler);
 
-		set_intr(INTPRI_HEART_LEDS, CR_INT_5, ip30_lights_frob);
+	set_intr(INTPRI_HEART_LEDS, CR_INT_5, ip30_lights_frob);
 
-		register_splx_handler(xheart_splx);
-	}
+	register_splx_handler(xheart_splx);
+
+	tc_init(&xheart_timecounter);
 }
 
 /*
@@ -326,8 +332,7 @@ xheart_intr_establish(int (*func)(void *), void *arg, int intrbit,
 	ih->ih_level = level;
 	ih->ih_irq = intrbit;
 	if (name != NULL)
-		evcount_attach(&ih->ih_count, name, &ih->ih_level,
-		    &evcount_intr);
+		evcount_attach(&ih->ih_count, name, &ih->ih_level);
 
 	s = splhigh();
 
@@ -465,4 +470,16 @@ xheart_setintrmask(int level)
 
 	*(volatile uint64_t *)(heart + HEART_IMR(cpuid)) =
 		xheart_intem[cpuid] & ~xheart_imask[cpuid][level];
+}
+
+/*
+ * Timecounter interface.
+ */
+
+uint
+xheart_get_timecount(struct timecounter *tc)
+{
+	paddr_t heart = PHYS_TO_XKPHYS(HEART_PIU_BASE, CCA_NC);
+
+	return (u_int)*(volatile uint64_t *)(heart + HEART_CTR_VALUE);
 }

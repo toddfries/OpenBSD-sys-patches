@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_table.h,v 1.1 2004/07/25 11:06:42 miod Exp $	*/
+/*	$OpenBSD: pmap_table.h,v 1.4 2011/03/23 16:54:35 pirofti Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1992 Carnegie Mellon University
@@ -25,24 +25,21 @@
  * the rights to redistribute these changes.
  */
 
-#ifndef __M88K_PMAP_TABLE_H__
-#define __M88K_PMAP_TABLE_H__
+#ifndef _M88K_PMAP_TABLE_H_
+#define _M88K_PMAP_TABLE_H_
 
 /*
  * Built-in mappings list.
- * An entry is considered invalid if pm_size = 0, and
- * end of list is indicated by pm_size 0xffffffff
+ * An entry is considered invalid if size = 0, and
+ * end of list is indicated by size 0xffffffff
  */
-typedef struct {
-	vaddr_t		phys_start;	/* in bytes */
-	vaddr_t		virt_start;	/* in bytes */
-	vsize_t		size;		/* in bytes */
-	unsigned int	prot;		/* vm_prot_read, vm_prot_write */
-	unsigned int	cacheability;	/* none, writeback, normal */
-} pmap_table_entry;
+struct pmap_table {
+	paddr_t		start;
+	psize_t		size;
+	vm_prot_t	prot;
+	unsigned int	cacheability;
+};
 
-typedef const pmap_table_entry *pmap_table_t;
+const struct pmap_table *pmap_table_build(void);
 
-pmap_table_t pmap_table_build(void);
-
-#endif	/* __M88K_PMAP_TABLE_H__ */
+#endif	/* _M88K_PMAP_TABLE_H_ */

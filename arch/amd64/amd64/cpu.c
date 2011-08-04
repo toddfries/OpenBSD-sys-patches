@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.34 2010/06/26 23:24:43 guenther Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.44 2011/04/13 02:49:12 guenther Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -85,7 +85,6 @@
 #include <machine/specialreg.h>
 #include <machine/segments.h>
 #include <machine/gdt.h>
-#include <machine/mtrr.h>
 #include <machine/pio.h>
 
 #if NLAPIC > 0
@@ -135,8 +134,6 @@ struct cpu_info cpu_info_primary = { 0, &cpu_info_primary };
 
 struct cpu_info *cpu_info_list = &cpu_info_primary;
 
-u_int32_t cpus_attached = 0;
-
 #ifdef MULTIPROCESSOR
 /*
  * Array of CPU info structures.  Must be statically-allocated because
@@ -168,9 +165,13 @@ cpu_match(struct device *parent, void *match, void *aux)
 	struct cfdata *cf = match;
 	struct cpu_attach_args *caa = aux;
 
-	if (strcmp(caa->caa_name, cf->cf_driver->cd_name) == 0)
-		return 1;
-	return 0;
+	if (strcmp(caa->caa_name, cf->cf_driver->cd_name) != 0)
+		return 0;
+
+	if (cf->cf_unit >= MAXCPUS)
+		return 0;
+
+	return 1;
 }
 
 static void
@@ -280,9 +281,8 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 	pcb = ci->ci_idle_pcb = (struct pcb *) kstack;
 	memset(pcb, 0, USPACE);
 
-	pcb->pcb_tss.tss_rsp0 = kstack + USPACE - 16;
+	pcb->pcb_kstack = kstack + USPACE - 16;
 	pcb->pcb_rbp = pcb->pcb_rsp = kstack + USPACE - 16;
-	pcb->pcb_tss.tss_ist[0] = kstack + PAGE_SIZE - 16;
 	pcb->pcb_pmap = pmap_kernel();
 	pcb->pcb_cr0 = rcr0();
 	pcb->pcb_cr3 = pcb->pcb_pmap->pm_pdirpa;
@@ -346,8 +346,6 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 		panic("unknown processor type??");
 	}
 	cpu_vm_init(ci);
-
-	cpus_attached |= (1 << ci->ci_cpuid);
 
 #if defined(MULTIPROCESSOR)
 	if (mp_verbose) {
@@ -497,7 +495,7 @@ cpu_hatch(void *v)
 	ci->ci_flags |= CPUF_PRESENT;
 
 	lapic_enable();
-	lapic_initclocks();
+	lapic_startclock();
 
 	while ((ci->ci_flags & CPUF_GO) == 0)
 		delay(10);
@@ -512,7 +510,7 @@ cpu_hatch(void *v)
 	gdt_init_cpu(ci);
 	fpuinit(ci);
 
-	lldt(GSYSSEL(GLDT_SEL, SEL_KPL));
+	lldt(0);
 
 	cpu_init(ci);
 
@@ -654,11 +652,12 @@ cpu_init_msrs(struct cpu_info *ci)
 {
 	wrmsr(MSR_STAR,
 	    ((uint64_t)GSEL(GCODE_SEL, SEL_KPL) << 32) |
-	    ((uint64_t)LSEL(LSYSRETBASE_SEL, SEL_UPL) << 48));
+	    ((uint64_t)GSEL(GUCODE32_SEL, SEL_UPL) << 48));
 	wrmsr(MSR_LSTAR, (uint64_t)Xsyscall);
 	wrmsr(MSR_CSTAR, (uint64_t)Xsyscall32);
 	wrmsr(MSR_SFMASK, PSL_NT|PSL_T|PSL_I|PSL_C);
 
+	ci->ci_cur_fsbase = 0;
 	wrmsr(MSR_FSBASE, 0);
 	wrmsr(MSR_GSBASE, (u_int64_t)ci);
 	wrmsr(MSR_KERNELGSBASE, 0);

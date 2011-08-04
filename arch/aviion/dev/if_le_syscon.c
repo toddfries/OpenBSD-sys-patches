@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le_syscon.c,v 1.10 2010/04/24 18:44:27 miod Exp $	*/
+/*	$OpenBSD: if_le_syscon.c,v 1.12 2011/04/07 15:30:15 miod Exp $	*/
 
 /*-
  * Copyright (c) 1996 The NetBSD Foundation, Inc.
@@ -145,7 +145,7 @@ le_syscon_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	va = uvm_km_valloc(kernel_map, ptoa(etherpages));
-	if (va == NULL) {
+	if (va == 0) {
 		printf(": can't map descriptor memory\n");
 		uvm_pglistfree(&pglist);
 		return;
@@ -163,7 +163,7 @@ le_syscon_attach(struct device *parent, struct device *self, void *aux)
 		va += PAGE_SIZE;
 		pa += PAGE_SIZE;
 	}
-	pmap_cache_ctrl(pmap_kernel(), (vaddr_t)sc->sc_mem,
+	pmap_cache_ctrl((vaddr_t)sc->sc_mem,
 	    (vaddr_t)sc->sc_mem + sc->sc_memsize, CACHE_INH);
 	pmap_update(pmap_kernel());
 

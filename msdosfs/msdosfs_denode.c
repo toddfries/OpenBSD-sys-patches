@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_denode.c,v 1.38 2010/03/29 23:33:39 krw Exp $	*/
+/*	$OpenBSD: msdosfs_denode.c,v 1.43 2011/07/04 04:30:41 tedu Exp $	*/
 /*	$NetBSD: msdosfs_denode.c,v 1.23 1997/10/17 11:23:58 ws Exp $	*/
 
 /*-
@@ -91,7 +91,7 @@ msdosfs_hashget(dev_t dev, uint32_t dirclust, uint32_t diroff)
 	struct proc *p = curproc; /* XXX */
        
 	for (;;)
-		for (dep = dehashtbl[DEHASH(dev, dirclust, diroff)];;
+		for (dep = dehashtbl[DEHASH(dev, dirclust, diroff)]; ;
 		     dep = dep->de_next) {
 			if (dep == NULL)
 				return (NULL);
@@ -168,7 +168,7 @@ deget(struct msdosfsmount *pmp, uint32_t dirclust, uint32_t diroffset,
     struct denode **depp)
 {
 	int error;
-	extern int (**msdosfs_vnodeop_p)(void *);
+	extern struct vops msdosfs_vops;
 	struct direntry *direntptr;
 	struct denode *ldep;
 	struct vnode *nvp;
@@ -211,8 +211,7 @@ retry:
 	 * copy it from the passed disk buffer.
 	 */
 	/* getnewvnode() does a vref() on the vnode */
-	error = getnewvnode(VT_MSDOSFS, pmp->pm_mountp,
-			    msdosfs_vnodeop_p, &nvp);
+	error = getnewvnode(VT_MSDOSFS, pmp->pm_mountp, &msdosfs_vops, &nvp);
 	if (error) {
 		*depp = 0;
 		return (error);
@@ -431,12 +430,10 @@ detrunc(struct denode *dep, uint32_t length, int flags, struct ucred *cred,
 	if ((boff = length & pmp->pm_crbomask) != 0) {
 		if (isadir) {
 			bn = cntobn(pmp, eofentry);
-			error = bread(pmp->pm_devvp, bn, pmp->pm_bpcluster,
-			    NOCRED, &bp);
+			error = bread(pmp->pm_devvp, bn, pmp->pm_bpcluster, &bp);
 		} else {
 			bn = de_blk(pmp, length);
-			error = bread(DETOV(dep), bn, pmp->pm_bpcluster,
-			    NOCRED, &bp);
+			error = bread(DETOV(dep), bn, pmp->pm_bpcluster, &bp);
 		}
 		if (error) {
 			brelse(bp);

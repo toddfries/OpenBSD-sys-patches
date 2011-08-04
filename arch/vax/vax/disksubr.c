@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.61 2009/08/13 15:23:13 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.66 2011/07/06 18:32:59 miod Exp $	*/
 /*	$NetBSD: disksubr.c,v 1.21 1999/06/30 18:48:06 ragge Exp $	*/
 
 /*
@@ -48,15 +48,12 @@
 
 #include <vax/mscp/mscp.h> /* For disk encoding scheme */
 
-#include "mba.h"
-
 /*
  * Attempt to read a disk label from a device
  * using the indicated strategy routine.
  * The label must be partly set up before this:
  * secpercyl and anything required in the strategy routine
  * (e.g., sector size) must be filled in before calling us.
- * Returns null on success and an error string on failure.
  */
 int
 readdisklabel(dev_t dev, void (*strat)(struct buf *),
@@ -78,7 +75,8 @@ readdisklabel(dev_t dev, void (*strat)(struct buf *),
 
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 	if (biowait(bp)) {
 		error = bp->b_error;
@@ -106,6 +104,7 @@ done:
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
+	disk_change = 1;
 	return (error);
 }
 
@@ -126,14 +125,16 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 	/* Read it in, slap the new label in, and write it back out */
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 	if ((error = biowait(bp)) != 0)
 		goto done;
 
 	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
 	*dlp = *lp;
-	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_WRITE | B_RAW);
 	(*strat)(bp);
 	error = biowait(bp);
 
@@ -142,6 +143,7 @@ done:
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
+	disk_change = 1;
 	return (error);
 }
 
@@ -158,50 +160,3 @@ disk_printtype(int unit, int type)
 		printf("%c", (int)MSCP_MID_CHAR(0, type));
 	printf("%d\n", MSCP_MID_NUM(type));
 }
-
-#if NMBA > 0
-/*
- * Be sure that the pages we want to do DMA to is actually there
- * by faking page-faults if necessary. If given a map-register address,
- * also map it in.
- */
-void
-disk_reallymapin(struct buf *bp, pt_entry_t *map, int reg, int flag)
-{
-	struct proc *p;
-	volatile pt_entry_t *io;
-	pt_entry_t *pte;
-	struct pcb *pcb;
-	int pfnum, npf, o;
-	caddr_t addr;
-
-	o = (int)bp->b_data & VAX_PGOFSET;
-	npf = vax_atop(bp->b_bcount + o) + 1;
-	addr = bp->b_data;
-	p = bp->b_proc;
-
-	/*
-	 * Get a pointer to the pte pointing out the first virtual address.
-	 * Use different ways in kernel and user space.
-	 */
-	if ((bp->b_flags & B_PHYS) == 0) {
-		pte = kvtopte(addr);
-		p = &proc0;
-	} else {
-		pcb = &p->p_addr->u_pcb;
-		pte = uvtopte(addr, pcb);
-	}
-
-	if (map) {
-		io = &map[reg];
-		while (--npf > 0) {
-			pfnum = (*pte & PG_FRAME);
-			if (pfnum == 0)
-				panic("mapin zero entry");
-			pte++;
-			*(int *)io++ = pfnum | flag;
-		}
-		*(int *)io = 0;
-	}
-}
-#endif

@@ -1,4 +1,4 @@
-/* $OpenBSD: intr.h,v 1.36 2010/05/31 21:39:55 deraadt Exp $ */
+/* $OpenBSD: intr.h,v 1.39 2011/04/15 20:40:05 deraadt Exp $ */
 /* $NetBSD: intr.h,v 1.26 2000/06/03 20:47:41 thorpej Exp $ */
 
 /*-
@@ -58,8 +58,8 @@
  * rights to redistribute these changes.
  */
 
-#ifndef _ALPHA_INTR_H_
-#define _ALPHA_INTR_H_
+#ifndef _MACHINE_INTR_H_
+#define _MACHINE_INTR_H_
 
 #include <sys/evcount.h>
 #include <sys/lock.h>
@@ -235,6 +235,8 @@ struct alpha_shared_intr {
 	((asi)[num].intr_maxstrays != 0 &&				\
 	 (asi)[num].intr_nstrays == (asi)[num].intr_maxstrays)
 
+extern int	intr_shared_edge;
+
 /*
  * simulated software interrupt register
  */
@@ -263,11 +265,6 @@ void	 softintr_dispatch(void);
 void	*softintr_establish(int, void (*)(void *), void *);
 void	 softintr_init(void);
 void	 softintr_schedule(void *);
-
-/* XXX For legacy software interrupts. */
-extern struct alpha_soft_intrhand *softnet_intrhand;
-
-#define	setsoftnet()	softintr_schedule(softnet_intrhand)
 
 struct alpha_shared_intr *alpha_shared_intr_alloc(unsigned int);
 int	alpha_shared_intr_dispatch(struct alpha_shared_intr *,
@@ -304,4 +301,4 @@ void	scb_free(u_long);
 #define	SCB_ALLOC_FAILED	((u_long) -1)
 
 #endif /* _KERNEL */
-#endif /* ! _ALPHA_INTR_H_ */
+#endif /* ! _MACHINE_INTR_H_ */

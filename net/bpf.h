@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.h,v 1.39 2010/06/26 16:49:01 henning Exp $	*/
+/*	$OpenBSD: bpf.h,v 1.42 2011/07/26 09:24:52 martynas Exp $	*/
 /*	$NetBSD: bpf.h,v 1.15 1996/12/13 07:57:33 mikel Exp $	*/
 
 /*
@@ -49,7 +49,7 @@ typedef u_int32_t	bpf_u_int32;
  * Alignment macros.  BPF_WORDALIGN rounds up to the next even multiple of
  * BPF_ALIGNMENT (which is at least as much as what a timeval needs).
  */
-#define BPF_ALIGNMENT sizeof(long)
+#define BPF_ALIGNMENT sizeof(u_int32_t)
 #define BPF_WORDALIGN(x) (((x) + (BPF_ALIGNMENT - 1)) & ~(BPF_ALIGNMENT - 1))
 
 #define BPF_MAXINSNS 512
@@ -150,7 +150,7 @@ struct bpf_hdr {
  * XXX fail-safe: on new machines, we just use the 'safe' sizeof.
  */
 #ifdef _KERNEL
-#if defined(__arm32__) || defined(__i386__) || defined(__m68k__) || \
+#if defined(__arm__) || defined(__i386__) || defined(__m68k__) || \
     defined(__mips__) || defined(__ns32k__) || defined(__sparc__) || \
     defined(__sparc64__) || defined(__vax__)
 #define SIZEOF_BPF_HDR 18
@@ -273,6 +273,7 @@ void	 bpf_mtap(caddr_t, struct mbuf *, u_int);
 void	 bpf_mtap_hdr(caddr_t, caddr_t, u_int, struct mbuf *, u_int);
 void	 bpf_mtap_af(caddr_t, u_int32_t, struct mbuf *, u_int);
 void	 bpf_mtap_ether(caddr_t, struct mbuf *, u_int);
+void	 bpf_mtap_pflog(caddr_t, caddr_t, struct mbuf *);
 void	 bpfattach(caddr_t *, struct ifnet *, u_int, u_int);
 void	 bpfdetach(struct ifnet *);
 void	 bpfilterattach(int);

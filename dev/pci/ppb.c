@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.42 2010/06/30 05:14:39 kettenis Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.52 2011/06/26 23:00:28 deraadt Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -81,8 +81,8 @@ struct ppb_softc {
 	pcireg_t sc_bir;
 	pcireg_t sc_bcr;
 	pcireg_t sc_int;
-
 	pcireg_t sc_slcsr;
+	int sc_pmcsr_state;
 };
 
 int	ppbmatch(struct device *, void *, void *);
@@ -169,9 +169,16 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	/* Check for PCI Express capabilities and setup hotplug support. */
 	if (pci_get_capability(pc, pa->pa_tag, PCI_CAP_PCIEXPRESS,
 	    &sc->sc_cap_off, &reg) && (reg & PCI_PCIE_XCAP_SI)) {
+#ifdef __i386__
 		if (pci_intr_map(pa, &ih) == 0)
-			sc->sc_intrhand = pci_intr_establish(pc, ih, IPL_TTY,
+			sc->sc_intrhand = pci_intr_establish(pc, ih, IPL_BIO,
 			    ppb_intr, sc, self->dv_xname);
+#else
+		if (pci_intr_map_msi(pa, &ih) == 0 ||
+		    pci_intr_map(pa, &ih) == 0)
+			sc->sc_intrhand = pci_intr_establish(pc, ih, IPL_BIO,
+			    ppb_intr, sc, self->dv_xname);
+#endif
 
 		if (sc->sc_intrhand) {
 			printf(": %s", pci_intr_string(pc, ih));
@@ -291,12 +298,10 @@ ppbattach(struct device *parent, struct device *self, void *aux)
 	pba.pba_memt = pa->pa_memt;
 	pba.pba_dmat = pa->pa_dmat;
 	pba.pba_pc = pc;
+	pba.pba_flags = pa->pa_flags & ~PCI_FLAGS_MRM_OKAY;
 	pba.pba_ioex = sc->sc_ioex;
 	pba.pba_memex = sc->sc_memex;
 	pba.pba_pmemex = sc->sc_pmemex;
-#if 0
-	pba.pba_flags = pa->pa_flags & ~PCI_FLAGS_MRM_OKAY;
-#endif
 	pba.pba_domain = pa->pa_domain;
 	pba.pba_bus = PPB_BUSINFO_SECONDARY(busdata);
 	pba.pba_bridgeih = sc->sc_ih;
@@ -346,10 +351,13 @@ ppbactivate(struct device *self, int act)
 	struct ppb_softc *sc = (void *)self;
 	pci_chipset_tag_t pc = sc->sc_pc;
 	pcitag_t tag = sc->sc_tag;
-	pcireg_t blr;
+	pcireg_t blr, reg;
 	int rv = 0;
 
 	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
 	case DVACT_SUSPEND:
 		rv = config_activate_children(self, act);
 
@@ -362,8 +370,19 @@ ppbactivate(struct device *self, int act)
 		if (sc->sc_cap_off)
 			sc->sc_slcsr = pci_conf_read(pc, tag,
 			    sc->sc_cap_off + PCI_PCIE_SLCSR);
+
+		if (pci_dopm) {	
+			/* Place the bridge into D3. */
+			sc->sc_pmcsr_state = pci_get_powerstate(pc, tag);
+			pci_set_powerstate(pc, tag, PCI_PMCSR_STATE_D3);
+		}
 		break;
 	case DVACT_RESUME:
+		if (pci_dopm) {
+			/* Restore power. */
+			pci_set_powerstate(pc, tag, sc->sc_pmcsr_state);
+		}
+
 		/* Restore the registers saved above. */
 		pci_conf_write(pc, tag, PCI_BHLC_REG, sc->sc_bhlcr);
 		pci_conf_write(pc, tag, PPB_REG_BUSINFO, sc->sc_bir);
@@ -403,7 +422,9 @@ ppbactivate(struct device *self, int act)
 		 * Restore command register last to avoid exposing
 		 * uninitialised windows.
 		 */
-		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, sc->sc_csr);
+		reg = pci_conf_read(pc, tag, PCI_COMMAND_STATUS_REG);
+		pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG,
+		    (reg & 0xffff0000) | (sc->sc_csr & 0x0000ffff));
 
 		rv = config_activate_children(self, act);
 		break;
@@ -571,7 +592,7 @@ ppb_intr(void *arg)
 
 	/*
 	 * XXX ignore hotplug events while in autoconf.  On some
-	 * machines with onboard re(4), we gat a bogus hotplug remove
+	 * machines with onboard re(4), we get a bogus hotplug remove
 	 * event when we reset that device.  Ignoring that event makes
 	 * sure we will not try to forcibly detach re(4) when it isn't
 	 * ready to deal with that.

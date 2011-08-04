@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_udavreg.h,v 1.10 2007/11/25 16:40:03 jmc Exp $ */
+/*	$OpenBSD: if_udavreg.h,v 1.12 2011/03/31 17:06:25 mk Exp $ */
 /*	$NetBSD: if_udavreg.h,v 1.2 2003/09/04 15:17:39 tsutsui Exp $	*/
 /*	$nabe: if_udavreg.h,v 1.2 2003/08/21 16:26:40 nabe Exp $	*/
 /*
@@ -185,8 +185,6 @@ struct udav_softc {
 #define	sc_media udav_mii.mii_media
 	struct udav_cdata	sc_cdata;
 
-	int                     sc_attached;
-	int			sc_dying;
         int                     sc_refcnt;
 
 	struct usb_task		sc_tick_task;
@@ -202,6 +200,6 @@ struct udav_rx_hdr {
 #define UDAV_RX_HDRLEN		sizeof(struct udav_rx_hdr)
 
 /* Packet length */
-#define	UDAV_MAX_MTU		1536 /* XXX: max frame size is unknown */
+#define	UDAV_MAX_MTU		1522 /* According to datasheet */
 #define	UDAV_MIN_FRAME_LEN	60
 #define	UDAV_BUFSZ		UDAV_MAX_MTU + UDAV_RX_HDRLEN

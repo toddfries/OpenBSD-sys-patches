@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.21 2010/03/27 00:37:15 oga Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.25 2011/06/23 20:44:39 ariane Exp $	*/
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -77,8 +77,6 @@
 #include <dev/isa/isavar.h>
 
 #include <uvm/uvm_extern.h>
-
-extern paddr_t avail_end;
 
 int	_bus_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *,
     bus_size_t, struct proc *, int, paddr_t *, int *, int);
@@ -367,6 +365,17 @@ _bus_dmamap_unload(bus_dma_tag_t t, bus_dmamap_t map)
 }
 
 /*
+ * Common function for DMA map synchronization.  May be called
+ * by bus-specific DMA map synchronization functions.
+ */
+void
+_bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
+    bus_size_t size, int op)
+{
+	/* Nothing to do here. */
+}
+
+/*
  * Common function for DMA-safe memory allocation.  May be called
  * by bus-specific DMA memory allocation functions.
  */
@@ -447,14 +456,8 @@ _bus_dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs,
 			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
 			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 			if (ret) {
-				/*
-				 * Clean up after ourselves.
-				 * XXX uvm_wait on WAITOK
-				 */
-				pmap_remove(pmap_kernel(), sva, va - PAGE_SIZE);
 				pmap_update(pmap_kernel());
-
-				uvm_km_free(kernel_map, va, ssize);
+				uvm_km_free(kernel_map, sva, ssize);
 				return (ret);
 			}
 
@@ -507,7 +510,7 @@ _bus_dmamem_mmap(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, off_t off,
 			continue;
 		}
 
-		return (atop(segs[i].ds_addr + off));
+		return (segs[i].ds_addr + off);
 	}
 
 	/* Page not found. */

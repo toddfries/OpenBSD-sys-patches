@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosdev.c,v 1.76 2008/08/12 22:48:31 deraadt Exp $	*/
+/*	$OpenBSD: biosdev.c,v 1.84 2011/07/19 01:08:35 krw Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -43,10 +43,10 @@
 static const char *biosdisk_err(u_int);
 static int biosdisk_errno(u_int);
 
-static int CHS_rw (int, int, int, int, int, int, void *);
-static int EDD_rw (int, int, u_int64_t, u_int32_t, void *);
+int CHS_rw (int, int, int, int, int, int, void *);
+static int EDD_rw (int, int, u_int32_t, u_int32_t, void *);
 
-static daddr_t findopenbsd(bios_diskinfo_t *, daddr_t, const char **, int *);
+static u_int findopenbsd(bios_diskinfo_t *, const char **);
 
 extern int debug;
 int bios_bootdev;
@@ -185,7 +185,7 @@ bios_getdiskinfo(int dev, bios_diskinfo_t *pdi)
 /*
  * Read/Write a block from given place using the BIOS.
  */
-static __inline int
+int
 CHS_rw(int rw, int dev, int cyl, int head, int sect, int nsect, void *buf)
 {
 	int rv;
@@ -212,7 +212,7 @@ CHS_rw(int rw, int dev, int cyl, int head, int sect, int nsect, void *buf)
 }
 
 static __inline int
-EDD_rw(int rw, int dev, u_int64_t daddr, u_int32_t nblk, void *buf)
+EDD_rw(int rw, int dev, u_int32_t daddr, u_int32_t nblk, void *buf)
 {
 	int rv;
 	volatile static struct EDD_CB cb;
@@ -244,7 +244,7 @@ EDD_rw(int rw, int dev, u_int64_t daddr, u_int32_t nblk, void *buf)
  * Read given sector, handling retry/errors/etc.
  */
 int
-biosd_io(int rw, bios_diskinfo_t *bd, daddr_t off, int nsect, void *buf)
+biosd_io(int rw, bios_diskinfo_t *bd, u_int off, int nsect, void *buf)
 {
 	int dev = bd->bios_number;
 	int j, error;
@@ -344,21 +344,23 @@ biosd_io(int rw, bios_diskinfo_t *bd, daddr_t off, int nsect, void *buf)
 /*
  * Try to read the bsd label on the given BIOS device
  */
-static daddr_t
-findopenbsd(bios_diskinfo_t *bd, daddr_t mbroff, const char **err, int *n)
+static u_int
+findopenbsd(bios_diskinfo_t *bd, const char **err)
 {
-	int error, i;
 	struct dos_mbr mbr;
 	struct dos_partition *dp;
-	daddr_t off;
+	u_int mbroff = DOSBBSECTOR;
+	u_int mbr_eoff = DOSBBSECTOR;	/* Offset of MBR extended partition. */
+	int error, i, maxebr = DOS_MAXEBR, nextebr;
 
-	/* Limit the number of recursions */
-	if (!(*n)--) {
+again:
+	if (!maxebr--) {
 		*err = "too many extended partitions";
 		return (-1);
 	}
 
 	/* Read MBR */
+	bzero(&mbr, sizeof(mbr));
 	error = biosd_io(F_READ, bd, mbroff, 1, &mbr);
 	if (error) {
 		*err = biosdisk_err(error);
@@ -372,6 +374,7 @@ findopenbsd(bios_diskinfo_t *bd, daddr_t mbroff, const char **err, int *n)
 	}
 
 	/* Search for OpenBSD partition */
+	nextebr = 0;
 	for (i = 0; i < NDOSPART; i++) {
 		dp = &mbr.dmbr_parts[i];
 		if (!dp->dp_size)
@@ -385,13 +388,28 @@ findopenbsd(bios_diskinfo_t *bd, daddr_t mbroff, const char **err, int *n)
 			    dp->dp_start, dp->dp_start);
 #endif
 		if (dp->dp_typ == DOSPTYP_OPENBSD) {
+			if (dp->dp_start > (dp->dp_start + mbroff))
+				continue;
 			return (dp->dp_start + mbroff);
-		} else if (dp->dp_typ == DOSPTYP_EXTEND ||
-		    dp->dp_typ == DOSPTYP_EXTENDL) {
-			off = findopenbsd(bd, dp->dp_start + mbroff, err, n);
-			if (off != -1)
-				return (off);
 		}
+
+		/*
+		 * Record location of next ebr if and only if this is the first
+		 * extended partition in this boot record!
+		 */
+		if (!nextebr && (dp->dp_typ == DOSPTYP_EXTEND ||
+		    dp->dp_typ == DOSPTYP_EXTENDL)) {
+			nextebr = dp->dp_start + mbr_eoff;
+			if (nextebr < dp->dp_start)
+				nextebr = (u_int)-1;
+			if (mbr_eoff == DOSBBSECTOR)
+				mbr_eoff = dp->dp_start;
+		}
+	}
+
+	if (nextebr && nextebr != (u_int)-1) {
+		mbroff = nextebr;
+		goto again;
 	}
 
 	return (-1);
@@ -400,11 +418,10 @@ findopenbsd(bios_diskinfo_t *bd, daddr_t mbroff, const char **err, int *n)
 const char *
 bios_getdisklabel(bios_diskinfo_t *bd, struct disklabel *label)
 {
-	daddr_t off = 0;
+	u_int start = 0;
 	char *buf;
 	const char *err = NULL;
 	int error;
-	int n = 8;
 
 	/* Sanity check */
 	if (bd->bios_edd == -1 &&
@@ -413,23 +430,23 @@ bios_getdisklabel(bios_diskinfo_t *bd, struct disklabel *label)
 
 	/* MBR is a harddisk thing */
 	if (bd->bios_number & 0x80) {
-		off = findopenbsd(bd, DOSBBSECTOR, &err, &n);
-		if (off == -1) {
+		start = findopenbsd(bd, &err);
+		if (start == (u_int)-1) {
 			if (err != NULL)
 				return (err);
  			return "no OpenBSD partition\n";
 		}
 	}
-	off = LABELSECTOR + off;
+	start = LABELSECTOR + start;
 
 	/* Load BSD disklabel */
 	buf = alloca(DEV_BSIZE);
 #ifdef BIOS_DEBUG
 	if (debug)
-		printf("loading disklabel @ %u\n", off);
+		printf("loading disklabel @ %u\n", start);
 #endif
 	/* read disklabel */
-	error = biosd_io(F_READ, bd, off, 1, buf);
+	error = biosd_io(F_READ, bd, start, 1, buf);
 
 	if (error)
 		return "failed to read disklabel";
@@ -539,7 +556,7 @@ biosopen(struct open_file *f, ...)
 #endif
 
 	/* Try for disklabel again (might be removable media) */
-	if (dip->bios_info.flags & BDI_BADLABEL){
+	if (dip->bios_info.flags & BDI_BADLABEL) {
 		const char *st = bios_getdisklabel(&dip->bios_info,
 		    &dip->disklabel);
 #ifdef BIOS_DEBUG
@@ -638,7 +655,7 @@ biosdisk_errno(u_int error)
 }
 
 int
-biosstrategy(void *devdata, int rw, daddr_t blk, size_t size, void *buf,
+biosstrategy(void *devdata, int rw, daddr32_t blk, size_t size, void *buf,
     size_t *rsize)
 {
 	struct diskinfo *dip = (struct diskinfo *)devdata;
@@ -652,7 +669,10 @@ biosstrategy(void *devdata, int rw, daddr_t blk, size_t size, void *buf,
 			d_partitions[B_PARTITION(dip->bsddev)].p_offset;
 
 	/* Read all, sub-functions handle track boundaries */
-	error = biosd_io(rw, bd, blk, nsect, buf);
+	if (blk < 0)
+		error = EINVAL;
+	else
+		error = biosd_io(rw, bd, blk, nsect, buf);
 
 #ifdef BIOS_DEBUG
 	if (debug) {

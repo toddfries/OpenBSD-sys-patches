@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipifuncs.c,v 1.12 2010/06/26 15:56:40 mlarkin Exp $	*/
+/*	$OpenBSD: ipifuncs.c,v 1.16 2011/03/18 03:10:47 guenther Exp $	*/
 /*	$NetBSD: ipifuncs.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $ */
 
 /*-
@@ -53,8 +53,6 @@
 #include <machine/i82093var.h>
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
-#include <machine/mtrr.h>
-#include <machine/gdt.h>
 #include <machine/fpu.h>
 
 #include <ddb/db_output.h>
@@ -80,13 +78,12 @@ void (*ipifunc[X86_NIPI])(struct cpu_info *) =
 	x86_64_ipi_synch_fpu,
 	NULL,
 	x86_64_ipi_reload_mtrr,
-	gdt_reload_cpu,
+	x86_setperf_ipi,
 #ifdef DDB
 	x86_ipi_db,
 #else
 	NULL,
 #endif
-	x86_setperf_ipi,
 };
 
 void
@@ -99,6 +96,7 @@ x86_64_ipi_halt(struct cpu_info *ci)
 {
 	SCHED_ASSERT_UNLOCKED();
 	disable_intr();
+	wbinvd();
 	ci->ci_flags &= ~CPUF_RUNNING;
 	wbinvd();
 
@@ -110,13 +108,15 @@ x86_64_ipi_halt(struct cpu_info *ci)
 void
 x86_64_ipi_flush_fpu(struct cpu_info *ci)
 {
-	fpusave_cpu(ci, 0);
+	if (ci->ci_fpsaveproc == ci->ci_fpcurproc)
+		fpusave_cpu(ci, 0);
 }
 
 void
 x86_64_ipi_synch_fpu(struct cpu_info *ci)
 {
-	fpusave_cpu(ci, 1);
+	if (ci->ci_fpsaveproc == ci->ci_fpcurproc)
+		fpusave_cpu(ci, 1);
 }
 
 #if NMTRR > 0

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.isa,v 1.106 2010/03/28 17:04:29 deraadt Exp $
+#	$OpenBSD: files.isa,v 1.111 2011/06/29 17:48:22 tedu Exp $
 #	$NetBSD: files.isa,v 1.21 1996/05/16 03:45:55 mycroft Exp $
 #
 # Config file and device description for machine-independent ISA code.
@@ -7,7 +7,7 @@
 
 # ports should specify appropriate major numbers for the following
 # devices:
-#	mcd, scd, wd
+#	wd
 
 device	isa {[port = -1], [size = 0],
 	     [iomem = -1], [iosiz = 0],
@@ -77,11 +77,6 @@ file	dev/isa/pckbc_isa.c		pckbc_isa	needs-flag
 attach	vga at isa with vga_isa
 file	dev/isa/vga_isa.c		vga_isa
 
-# Generic EGA
-device	ega: wsemuldisplaydev, pcdisplayops
-attach	ega at isa
-file	dev/isa/ega.c			ega	needs-flag
-
 # Generic PC graphics adapter (MGA, CGA, ...)
 device	pcdisplay: wsemuldisplaydev, pcdisplayops
 attach	pcdisplay at isa
@@ -126,11 +121,6 @@ file	dev/isa/opti.c			opti
 #
 # Other ISA disk controllers
 #
-
-# Mitsumi CD-ROM controllers
-device	mcd: disk, opti
-attach	mcd at isa
-file	dev/isa/mcd.c			mcd needs-flag
 
 # ISA "wd" (ESDI/IDE/etc.) controllers, ATAPI bus
 attach	wdc at isa with wdc_isa: isa_dma
@@ -230,9 +220,6 @@ file	dev/isa/sb.c			sb needs-flag
 attach	sb at isa with sb_isa
 file	dev/isa/sb_isa.c		sb & (sb_isa | sb_isapnp) needs-flag
 
-attach	opl at sbdsp with opl_sb
-file	dev/isa/opl_sb.c		opl_sb
-
 # Soundcards based on Sierra's Aria chipset.
 # Such as the Prometheus Aria 16 or the Diamond
 # sonic sound.
@@ -254,15 +241,6 @@ define	ics2101
 file	dev/isa/ics2101.c		ics2101
 
 
-# Audio systems based on Echo Speech Corp. ESC61[45] ASICs
-device	pss {[port = -1], [size = 0],
-	     [iomem = -1], [iosiz = 0],
-	     [irq = -1], [drq = -1]}
-attach	pss at isa
-device	sp: audio, isa_dma, ad1848, auconv
-attach	sp at pss
-file	dev/isa/pss.c			pss needs-flag
-
 # Microsoft Windows Sound System
 device	wss: audio, isa_dma, ad1848, auconv
 file	dev/isa/wss.c			wss needs-flag
@@ -274,9 +252,6 @@ file	dev/isa/wss_isa.c		wss & (wss_isa | wss_isapnp) needs-flag
 device	ess {} : audio, isa_dma, mulaw, auconv, midibus
 file	dev/isa/ess.c			ess needs-flag
 
-attach	opl at ess with opl_ess
-file	dev/isa/opl_ess.c		opl_ess
-
 # Gravis UltraSound & UltraSound MAX.
 # Use the "flags" keyword in a config file to specify an extra DMA
 # channel for full-duplex operation.
@@ -286,10 +261,6 @@ file	dev/isa/gus.c			gus needs-flag
 
 attach	gus at isa with gus_isa
 file	dev/isa/gus_isa.c		gus & (gus_isa | gus_isapnp) needs-flag
-
-# Yamaha OPL2/OPL3 FM synth
-attach	opl at isa with opl_isa
-file	dev/isa/opl_isa.c		opl_isa
 
 # Sound Forte RadioLink SF16-FMR FM Radio Card
 device sfr: radiobus, tc921x, pt2254a
@@ -325,8 +296,6 @@ file	dev/isa/pcppi.c	pcppi	needs-flag
 device	spkr
 attach	spkr at pcppi
 file	dev/isa/spkr.c			spkr	needs-flag
-attach	midi at pcppi with midi_pcppi: midisyn
-file	dev/isa/midi_pcppi.c		midi_pcppi
 
 # 8255A-based PC parallel ports
 attach	lpt at isa with lpt_isa

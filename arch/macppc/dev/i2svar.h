@@ -1,4 +1,4 @@
-/*	$OpenBSD: i2svar.h,v 1.6 2010/02/26 21:53:43 jasper Exp $	*/
+/*	$OpenBSD: i2svar.h,v 1.8 2011/06/07 16:29:51 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2001,2003 Tsubai Masanari.  All rights reserved.
@@ -70,6 +70,17 @@ struct i2s_softc {
 	u_int sc_vol_r;
 	u_int sc_bass;
 	u_int sc_treble;
+	u_int sc_mute;
+
+	u_int sc_spkr;			/* amp mute gpio offset */
+	u_int sc_hp;			/* headphone mute gpio offset */
+	u_int sc_hp_detect;		/* headphone detect gpio */
+	u_int sc_hp_active;
+	u_int sc_line;			/* line out mute gpio offset */
+	u_int sc_line_detect;		/* line detect gpio */
+	u_int sc_line_active;
+	u_int sc_hw_reset;		/* hw reset gpio */
+
 
 	bus_dma_tag_t sc_dmat;
 	dbdma_regmap_t *sc_odma;

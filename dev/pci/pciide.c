@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.308 2010/04/20 06:59:47 jsg Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.332 2011/07/15 16:44:18 deraadt Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -12,12 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -221,6 +215,7 @@ void ns_scx200_setup_channel(struct channel_softc *);
 void acer_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void acer_setup_channel(struct channel_softc *);
 int  acer_pci_intr(void *);
+int  acer_dma_init(void *, int, int, void *, size_t, int);
 
 void pdc202xx_chip_map(struct pciide_softc *, struct pci_attach_args *);
 void pdc202xx_setup_channel(struct channel_softc *);
@@ -558,6 +553,22 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  0,
 	  piixsata_chip_map
 	},
+	{ PCI_PRODUCT_INTEL_6SERIES_SATA_1, /* Intel 6 Series SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_6SERIES_SATA_2, /* Intel 6 Series SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_6SERIES_SATA_3, /* Intel 6 Series SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_6SERIES_SATA_4, /* Intel 6 Series SATA */
+	  0,
+	  piixsata_chip_map
+	},
 	{ PCI_PRODUCT_INTEL_EP80579_SATA, /* Intel EP80579 SATA */
 	  0,
 	  piixsata_chip_map
@@ -669,6 +680,10 @@ const struct pciide_product_desc pciide_via_products[] =  {
 	  IDE_PCI_CLASS_OVERRIDE,
 	  apollo_chip_map
 	},
+	{ PCI_PRODUCT_VIATECH_VT6415, /* VIA VT6415 IDE */
+	  IDE_PCI_CLASS_OVERRIDE,
+	  apollo_chip_map
+	},
 	{ PCI_PRODUCT_VIATECH_CX700_IDE, /* VIA CX700 IDE */
 	  0,
 	  apollo_chip_map
@@ -678,6 +693,10 @@ const struct pciide_product_desc pciide_via_products[] =  {
 	  apollo_chip_map
 	},
 	{ PCI_PRODUCT_VIATECH_VX855_IDE, /* VIA VX855 IDE */
+	  0,
+	  apollo_chip_map
+	},
+	{ PCI_PRODUCT_VIATECH_VX900_IDE, /* VIA VX900 IDE */
 	  0,
 	  apollo_chip_map
 	},
@@ -1133,6 +1152,22 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	{ PCI_PRODUCT_NVIDIA_MCP79_SATA_4,
 	  0,
 	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP89_SATA_1,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP89_SATA_2,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP89_SATA_3,
+	  0,
+	  sata_chip_map
+	},
+	{ PCI_PRODUCT_NVIDIA_MCP89_SATA_4,
+	  0,
+	  sata_chip_map
 	}
 };
 
@@ -1220,43 +1255,43 @@ struct pciide_vendor_desc {
 
 const struct pciide_vendor_desc pciide_vendors[] = {
 	{ PCI_VENDOR_INTEL, pciide_intel_products,
-	  sizeof(pciide_intel_products)/sizeof(pciide_intel_products[0]) },
+	  nitems(pciide_intel_products) },
 	{ PCI_VENDOR_AMD, pciide_amd_products,
-	  sizeof(pciide_amd_products)/sizeof(pciide_amd_products[0]) },
+	  nitems(pciide_amd_products) },
 #ifdef notyet
 	{ PCI_VENDOR_OPTI, pciide_opti_products,
-	  sizeof(pciide_opti_products)/sizeof(pciide_opti_products[0]) },
+	  nitems(pciide_opti_products) },
 #endif
 	{ PCI_VENDOR_CMDTECH, pciide_cmd_products,
-	  sizeof(pciide_cmd_products)/sizeof(pciide_cmd_products[0]) },
+	  nitems(pciide_cmd_products) },
 	{ PCI_VENDOR_VIATECH, pciide_via_products,
-	  sizeof(pciide_via_products)/sizeof(pciide_via_products[0]) },
+	  nitems(pciide_via_products) },
 	{ PCI_VENDOR_CONTAQ, pciide_cypress_products,
-	  sizeof(pciide_cypress_products)/sizeof(pciide_cypress_products[0]) },
+	  nitems(pciide_cypress_products) },
 	{ PCI_VENDOR_SIS, pciide_sis_products,
-	  sizeof(pciide_sis_products)/sizeof(pciide_sis_products[0]) },
+	  nitems(pciide_sis_products) },
 	{ PCI_VENDOR_NS, pciide_natsemi_products,
-	  sizeof(pciide_natsemi_products)/sizeof(pciide_natsemi_products[0]) },
+	  nitems(pciide_natsemi_products) },
 	{ PCI_VENDOR_ALI, pciide_acer_products,
-	  sizeof(pciide_acer_products)/sizeof(pciide_acer_products[0]) },
+	  nitems(pciide_acer_products) },
 	{ PCI_VENDOR_TRIONES, pciide_triones_products,
-	  sizeof(pciide_triones_products)/sizeof(pciide_triones_products[0]) },
+	  nitems(pciide_triones_products) },
 	{ PCI_VENDOR_ACARD, pciide_acard_products,
-	  sizeof(pciide_acard_products)/sizeof(pciide_acard_products[0]) },
+	  nitems(pciide_acard_products) },
 	{ PCI_VENDOR_RCC, pciide_serverworks_products,
-	  sizeof(pciide_serverworks_products)/sizeof(pciide_serverworks_products[0]) },
+	  nitems(pciide_serverworks_products) },
 	{ PCI_VENDOR_PROMISE, pciide_promise_products,
-	  sizeof(pciide_promise_products)/sizeof(pciide_promise_products[0]) },
+	  nitems(pciide_promise_products) },
 	{ PCI_VENDOR_NVIDIA, pciide_nvidia_products,
-	  sizeof(pciide_nvidia_products)/sizeof(pciide_nvidia_products[0]) },
+	  nitems(pciide_nvidia_products) },
 	{ PCI_VENDOR_ITEXPRESS, pciide_ite_products,
-	  sizeof(pciide_ite_products)/sizeof(pciide_ite_products[0]) },
+	  nitems(pciide_ite_products) },
 	{ PCI_VENDOR_ATI, pciide_ati_products,
-	  sizeof(pciide_ati_products)/sizeof(pciide_ati_products[0]) },
+	  nitems(pciide_ati_products) },
 	{ PCI_VENDOR_JMICRON, pciide_jmicron_products,
-	  sizeof(pciide_jmicron_products)/sizeof(pciide_jmicron_products[0]) },
+	  nitems(pciide_jmicron_products) },
 	{ PCI_VENDOR_PHISON, pciide_phison_products,
-	  sizeof(pciide_phison_products)/sizeof(pciide_phison_products[0]) }
+	  nitems(pciide_phison_products) }
 };
 
 /* options passed via the 'flags' config keyword */
@@ -1290,13 +1325,11 @@ pciide_lookup_product(u_int32_t id)
 	const struct pciide_vendor_desc *vp;
 	int i;
 
-	for (i = 0, vp = pciide_vendors;
-	    i < sizeof(pciide_vendors)/sizeof(pciide_vendors[0]);
-	    vp++, i++)
+	for (i = 0, vp = pciide_vendors; i < nitems(pciide_vendors); vp++, i++)
 		if (PCI_VENDOR(id) == vp->ide_vendor)
 			break;
 
-	if (i == sizeof(pciide_vendors)/sizeof(pciide_vendors[0]))
+	if (i == nitems(pciide_vendors))
 		return (NULL);
 
 	for (pp = vp->ide_products, i = 0; i < vp->ide_nproducts; pp++, i++)
@@ -1409,14 +1442,104 @@ int
 pciide_activate(struct device *self, int act)
 {
 	int rv = 0;
+	struct pciide_softc *sc = (struct pciide_softc *)self;
+	int i;
 
 	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
 	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+
+		for (i = 0; i < nitems(sc->sc_save); i++)
+			sc->sc_save[i] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, PCI_MAPREG_END + 0x18 + (i * 4));
+
+		if (sc->sc_pp->chip_map == sch_chip_map) {
+			sc->sc_save2[0] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, SCH_D0TIM);
+			sc->sc_save2[1] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, SCH_D1TIM);
+		} else if (sc->sc_pp->chip_map == piixsata_chip_map) {
+			sc->sc_save2[0] = pciide_pci_read(sc->sc_pc,
+			    sc->sc_tag, ICH5_SATA_MAP);
+			sc->sc_save2[1] = pciide_pci_read(sc->sc_pc,
+			    sc->sc_tag, ICH5_SATA_PI);
+			sc->sc_save2[2] = pciide_pci_read(sc->sc_pc,
+			    sc->sc_tag, ICH_SATA_PCS);
+		} else if (sc->sc_pp->chip_map == sii3112_chip_map) {
+			sc->sc_save[0] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, SII3112_SCS_CMD);
+			sc->sc_save[1] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, SII3112_PCI_CFGCTL);
+		} else if (sc->sc_pp->chip_map == ite_chip_map) {
+			sc->sc_save2[0] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, IT_TIM(0));
+		} else if (sc->sc_pp->chip_map == nforce_chip_map) {
+			sc->sc_save2[0] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, NFORCE_PIODMATIM);
+			sc->sc_save2[1] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, NFORCE_PIOTIM);
+			sc->sc_save2[2] = pci_conf_read(sc->sc_pc,
+			    sc->sc_tag, NFORCE_UDMATIM);
+		}
+		break;
 	case DVACT_RESUME:
+		for (i = 0; i < nitems(sc->sc_save); i++)
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    PCI_MAPREG_END + 0x18 + (i * 4),
+			    sc->sc_save[i]);
+
+		if (sc->sc_pp->chip_map == default_chip_map ||
+		    sc->sc_pp->chip_map == sata_chip_map ||
+		    sc->sc_pp->chip_map == piix_chip_map ||
+		    sc->sc_pp->chip_map == amd756_chip_map ||
+		    sc->sc_pp->chip_map == phison_chip_map ||
+		    sc->sc_pp->chip_map == ixp_chip_map ||
+		    sc->sc_pp->chip_map == acard_chip_map ||
+		    sc->sc_pp->chip_map == default_chip_map ||
+		    sc->sc_pp->chip_map == apollo_chip_map ||
+		    sc->sc_pp->chip_map == sis_chip_map) {
+			/* nothing to restore -- uses only 0x40 - 0x56 */
+		} else if (sc->sc_pp->chip_map == sch_chip_map) {
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    SCH_D0TIM, sc->sc_save2[0]);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    SCH_D1TIM, sc->sc_save2[1]);
+		} else if (sc->sc_pp->chip_map == piixsata_chip_map) {
+			pciide_pci_write(sc->sc_pc, sc->sc_tag,
+			    ICH5_SATA_MAP, sc->sc_save2[0]);
+			pciide_pci_write(sc->sc_pc, sc->sc_tag,
+			    ICH5_SATA_PI, sc->sc_save2[1]);
+			pciide_pci_write(sc->sc_pc, sc->sc_tag,
+			    ICH_SATA_PCS, sc->sc_save2[2]);
+		} else if (sc->sc_pp->chip_map == sii3112_chip_map) {
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    SII3112_SCS_CMD, sc->sc_save[0]);
+			delay(50 * 1000);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    SII3112_PCI_CFGCTL, sc->sc_save[1]);
+			delay(50 * 1000);
+		} else if (sc->sc_pp->chip_map == ite_chip_map) {
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    IT_TIM(0), sc->sc_save2[0]);
+		} else if (sc->sc_pp->chip_map == nforce_chip_map) {
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    NFORCE_PIODMATIM, sc->sc_save2[0]);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    NFORCE_PIOTIM, sc->sc_save2[1]);
+			pci_conf_write(sc->sc_pc, sc->sc_tag,
+			    NFORCE_UDMATIM, sc->sc_save2[2]);
+		} else {
+			printf("%s: restore for unknown chip map %x\n",
+			    sc->sc_wdcdev.sc_dev.dv_xname,
+			    sc->sc_pp->ide_product);
+		}
+
 		rv = config_activate_children(self, act);
 		break;
 	}
-
 	return (rv);
 }
 
@@ -1966,6 +2089,8 @@ pciide_dma_finish(void *v, int channel, int drive, int force)
 	status = PCIIDE_DMACTL_READ(sc, channel);
 	WDCDEBUG_PRINT(("pciide_dma_finish: status 0x%x\n", status),
 	    DEBUG_XFERS);
+	if (status == 0xff)
+		return (status);
 
 	if (force == 0 && (status & IDEDMA_CTL_INTR) == 0) {
 		error = WDC_DMAST_NOIRQ;
@@ -2030,11 +2155,10 @@ pciide_chansetup(struct pciide_softc *sc, int channel, pcireg_t interface)
 	cp->name = PCIIDE_CHANNEL_NAME(channel);
 	cp->wdc_channel.channel = channel;
 	cp->wdc_channel.wdc = &sc->sc_wdcdev;
-	cp->wdc_channel.ch_queue =
-	    malloc(sizeof(struct channel_queue), M_DEVBUF, M_NOWAIT);
+	cp->wdc_channel.ch_queue = wdc_alloc_queue();
 	if (cp->wdc_channel.ch_queue == NULL) {
 		printf("%s: %s "
-		    "cannot allocate memory for command queue",
+		    "cannot allocate channel queue",
 		    sc->sc_wdcdev.sc_dev.dv_xname, cp->name);
 		return (0);
 	}
@@ -2048,7 +2172,7 @@ pciide_chanfree(struct pciide_softc *sc, int channel)
 {
 	struct pciide_channel *cp = &sc->pciide_channels[channel];
 	if (cp->wdc_channel.ch_queue)
-		free(cp->wdc_channel.ch_queue, M_DEVBUF);
+		wdc_free_queue(cp->wdc_channel.ch_queue);
 }
 
 /* some common code used by several chip channel_map */
@@ -2529,8 +2653,7 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	for (channel = 0; channel < sc->sc_wdcdev.nchannels; channel++) {
 		cp = &sc->pciide_channels[channel];
 
-		/* PIIX is compat-only */
-		if (pciide_chansetup(sc, channel, 0) == 0)
+		if (pciide_chansetup(sc, channel, interface) == 0)
 			continue;
 		idetim = pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_IDETIM);
 		if ((PIIX_IDETIM_READ(idetim, channel) &
@@ -2539,11 +2662,11 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 			    sc->sc_wdcdev.sc_dev.dv_xname, cp->name);
 			continue;
 		}
-		/* PIIX are compat-only pciide devices */
-		pciide_map_compat_intr(pa, cp, channel, 0);
+		pciide_map_compat_intr(pa, cp, channel, interface);
 		if (cp->hw_ok == 0)
 			continue;
-		pciide_mapchan(pa, cp, 0, &cmdsize, &ctlsize, pciide_pci_intr);
+		pciide_mapchan(pa, cp, interface, &cmdsize, &ctlsize,
+		    pciide_pci_intr);
 		if (cp->hw_ok == 0)
 			goto next;
 		if (pciide_chan_candisable(cp)) {
@@ -2557,7 +2680,7 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		sc->sc_wdcdev.set_modes(&cp->wdc_channel);
 next:
 		if (cp->hw_ok == 0)
-			pciide_unmap_compat_intr(pa, cp, channel, 0);
+			pciide_unmap_compat_intr(pa, cp, channel, interface);
 	}
 
 	piix_timing_debug(sc);
@@ -3218,9 +3341,11 @@ apollo_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	}
 
 	if ((PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT6410) ||
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VT6415) ||
 	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_CX700_IDE) ||
 	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VX700_IDE) ||
-	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VX855_IDE)) { 
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VX855_IDE) ||
+	    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_VIATECH_VX900_IDE)) { 
 		printf(": ATA133");
 		sc->sc_wdcdev.UDMA_cap = 6;
 	} else {
@@ -3509,12 +3634,11 @@ cmd_channel_map(struct pci_attach_args *pa, struct pciide_softc *sc,
 		cp->wdc_channel.ch_queue =
 		    sc->pciide_channels[0].wdc_channel.ch_queue;
 	} else {
-		cp->wdc_channel.ch_queue =
-		    malloc(sizeof(struct channel_queue), M_DEVBUF, M_NOWAIT);
+		cp->wdc_channel.ch_queue = wdc_alloc_queue();
 	}
 	if (cp->wdc_channel.ch_queue == NULL) {
 		printf(
-		    "%s: %s cannot allocate memory for command queue",
+		    "%s: %s cannot allocate channel queue",
 		    sc->sc_wdcdev.sc_dev.dv_xname, cp->name);
 		return;
 	}
@@ -3874,11 +3998,10 @@ cmd680_channel_map(struct pci_attach_args *pa, struct pciide_softc *sc,
 	cp->wdc_channel.channel = channel;
 	cp->wdc_channel.wdc = &sc->sc_wdcdev;
 
-	cp->wdc_channel.ch_queue =
-	    malloc(sizeof(struct channel_queue), M_DEVBUF, M_NOWAIT);
+	cp->wdc_channel.ch_queue = wdc_alloc_queue();
 	if (cp->wdc_channel.ch_queue == NULL) {
 		printf("%s %s: "
-		    "can't allocate memory for command queue",
+		    "cannot allocate channel queue",
 		    sc->sc_wdcdev.sc_dev.dv_xname, cp->name);
 		    return;
 	}
@@ -4174,13 +4297,7 @@ sii3112_drv_probe(struct channel_softc *chp)
 	struct pciide_softc *sc = (struct pciide_softc *)cp->wdc_channel.wdc;
 	uint32_t scontrol, sstatus;
 	uint8_t scnt, sn, cl, ch;
-	int i, s;
-
-	/* XXX This should be done by other code. */
-	for (i = 0; i < 2; i++) {
-		chp->ch_drive[i].chnl_softc = chp;
-		chp->ch_drive[i].drive = i;
-	}
+	int s;
 
 	/*
 	 * The 3112 is a 2-port part, and only has one drive per channel
@@ -4483,11 +4600,10 @@ sii3114_chansetup(struct pciide_softc *sc, int channel)
 	cp->name = channel_names[channel];
 	cp->wdc_channel.channel = channel;
 	cp->wdc_channel.wdc = &sc->sc_wdcdev;
-	cp->wdc_channel.ch_queue =
-	    malloc(sizeof(struct channel_queue), M_DEVBUF, M_NOWAIT);
+	cp->wdc_channel.ch_queue = wdc_alloc_queue();
 	if (cp->wdc_channel.ch_queue == NULL) {
 		printf("%s %s channel: "
-		    "can't allocate memory for command queue",
+		    "cannot allocate channel queue",
 		    sc->sc_wdcdev.sc_dev.dv_xname, cp->name);
 		return (0);
 	}
@@ -4683,10 +4799,9 @@ cy693_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	cp->name = PCIIDE_CHANNEL_NAME(0);
 	cp->wdc_channel.channel = 0;
 	cp->wdc_channel.wdc = &sc->sc_wdcdev;
-	cp->wdc_channel.ch_queue =
-	    malloc(sizeof(struct channel_queue), M_DEVBUF, M_NOWAIT);
+	cp->wdc_channel.ch_queue = wdc_alloc_queue();
 	if (cp->wdc_channel.ch_queue == NULL) {
-		printf(": cannot allocate memory for command queue\n");
+		printf(": cannot allocate channel queue\n");
 		return;
 	}
 	printf(", %s %s to ", PCIIDE_CHANNEL_NAME(0),
@@ -5545,6 +5660,8 @@ acer_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		}
 		sc->sc_wdcdev.cap |= WDC_CAPABILITY_IRQACK;
 		sc->sc_wdcdev.irqack = pciide_irqack;
+		if (rev <= 0xC4)
+			sc->sc_wdcdev.dma_init = acer_dma_init;
 	}
 
 	sc->sc_wdcdev.PIO_cap = 4;
@@ -5737,6 +5854,17 @@ acer_pci_intr(void *arg)
 		}
 	}
 	return (rv);
+}
+
+int
+acer_dma_init(void *v, int channel, int drive, void *databuf,
+    size_t datalen, int flags)
+{
+	/* Use PIO for LBA48 transfers. */
+	if (flags & WDC_DMA_LBA48)
+		return (EINVAL);
+
+	return (pciide_dma_init(v, channel, drive, databuf, datalen, flags));
 }
 
 void
@@ -6670,11 +6798,10 @@ pdcsata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		cp->name = NULL;
 		cp->wdc_channel.channel = channel;
 		cp->wdc_channel.wdc = &sc->sc_wdcdev;
-		cp->wdc_channel.ch_queue =
-		    malloc(sizeof(struct channel_queue), M_DEVBUF, M_NOWAIT);
+		cp->wdc_channel.ch_queue = wdc_alloc_queue();
 		if (cp->wdc_channel.ch_queue == NULL) {
 			printf("%s: channel %d: "
-			    "can't allocate memory for command queue\n",
+			    "cannot allocate channel queue\n",
 			sc->sc_wdcdev.sc_dev.dv_xname, channel);
 			continue;
 		}
@@ -6963,13 +7090,7 @@ pdc205xx_drv_probe(struct channel_softc *chp)
 	bus_space_handle_t *iohs;
 	u_int32_t scontrol, sstatus;
 	u_int16_t scnt, sn, cl, ch;
-	int i, s;
-
-	/* XXX This should be done by other code. */
-	for (i = 0; i < 2; i++) {
-		chp->ch_drive[i].chnl_softc = chp;
-		chp->ch_drive[i].drive = i;
-	}
+	int s;
 
 	SCONTROL_WRITE(ps, chp->channel, 0);
 	delay(50*1000);
@@ -7516,6 +7637,16 @@ svwsata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		return;
 	}
 
+	switch (sc->sc_pp->ide_product) {
+	case PCI_PRODUCT_RCC_K2_SATA:
+		bus_space_write_4(ss->ba5_st, ss->ba5_sh, SVWSATA_SICR1,
+		    bus_space_read_4(ss->ba5_st, ss->ba5_sh, SVWSATA_SICR1)
+		    & ~0x00040000);
+		bus_space_write_4(ss->ba5_st, ss->ba5_sh,
+		    SVWSATA_SIM, 0);
+		break;
+	}
+
 	for (channel = 0; channel < sc->sc_wdcdev.nchannels; channel++) {
 		cp = &sc->pciide_channels[channel];
 		if (pciide_chansetup(sc, channel, 0) == 0)
@@ -7611,6 +7742,7 @@ svwsata_mapchan(struct pciide_channel *cp)
 	}
 	wdc_cp->cmd_iot = wdc_cp->ctl_iot = ss->ba5_st;
 	wdc_cp->_vtbl = &wdc_svwsata_vtbl;
+	wdc_cp->ch_flags |= WDCF_DMA_BEFORE_CMD;
 	wdcattach(wdc_cp);
 }
 
@@ -7623,13 +7755,7 @@ svwsata_drv_probe(struct channel_softc *chp)
 	int channel = chp->channel;
 	uint32_t scontrol, sstatus;
 	uint8_t scnt, sn, cl, ch;
-	int i, s;
-
-	/* XXX This should be done by other code. */
-	for (i = 0; i < 2; i++) {
-		chp->ch_drive[i].chnl_softc = chp;
-		chp->ch_drive[i].drive = i;
-	}
+	int s;
 
 	/*
 	 * Request communication initialization sequence, any speed.
@@ -8338,6 +8464,7 @@ ite_setup_channel(struct channel_softc *chp)
 			else
 				mode = drvp->DMA_mode + 2;
 		} else {
+			mode = drvp->PIO_mode;
 			goto pio;
 		}
 		idedma_ctl |= IDEDMA_CTL_DRV_DMA(drive);
@@ -8571,7 +8698,7 @@ jmicron_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	}
 	WDCDEBUG_PRINT(("%s: new conf register 0x%x\n",
 	    sc->sc_wdcdev.sc_dev.dv_xname, conf), DEBUG_PROBE);
-	pci_conf_write(sc->sc_pc, sc->sc_tag, NFORCE_CONF, conf);
+	pci_conf_write(sc->sc_pc, sc->sc_tag, JMICRON_CONF, conf);
 }
 
 void

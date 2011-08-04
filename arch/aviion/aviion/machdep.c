@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.39 2010/06/27 12:41:21 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.45 2011/06/26 22:39:59 deraadt Exp $	*/
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -100,6 +100,7 @@
 
 #include <dev/cons.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include "ksyms.h"
@@ -132,20 +133,6 @@ u_int	hatch_pending_count = 0;
 __cpu_simple_lock_t cpu_hatch_mutex = __SIMPLELOCK_LOCKED;
 __cpu_simple_lock_t cpu_boot_mutex = __SIMPLELOCK_LOCKED;
 #endif
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
-#endif
-
-#ifdef	BUFPAGES
-int bufpages = BUFPAGES;
-#else
-int bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
@@ -245,18 +232,7 @@ setstatclockrate(int newhz)
 void
 cpu_startup()
 {
-	int i;
 	vaddr_t minaddr, maxaddr;
-
-	/*
-	 * Initialize error message buffer (at end of core).
-	 * avail_end was pre-decremented in aviion_bootstrap() to compensate.
-	 */
-	for (i = 0; i < atop(MSGBUFSIZE); i++)
-		pmap_kenter_pa((paddr_t)msgbufp + i * PAGE_SIZE,
-		    avail_end + i * PAGE_SIZE, VM_PROT_READ | VM_PROT_WRITE);
-	pmap_update(pmap_kernel());
-	initmsgbuf((caddr_t)msgbufp, round_page(MSGBUFSIZE));
 
 	/*
 	 * Good {morning,afternoon,evening,night}.
@@ -343,6 +319,7 @@ boot(howto)
 		else
 			printf("WARNING: not updating battery clock\n");
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();		/* Disable interrupts. */
@@ -487,10 +464,7 @@ dumpsys()
 		if (pg != 0 && (pg % NPGMB) == 0)
 			printf("%d ", pg / NPGMB);
 #undef NPGMB
-		pmap_enter(pmap_kernel(), (vaddr_t)vmmap, maddr,
-		    VM_PROT_READ, VM_PROT_READ|PMAP_WIRED);
-
-		error = (*dump)(dumpdev, blkno, vmmap, PAGE_SIZE);
+		error = (*dump)(dumpdev, blkno, (caddr_t)maddr, PAGE_SIZE);
 		if (error == 0) {
 			maddr += PAGE_SIZE;
 			blkno += btodb(PAGE_SIZE);
@@ -698,7 +672,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 void
 aviion_bootstrap()
 {
-	extern int kernelstart;
 	extern char *end;
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;
@@ -764,10 +737,6 @@ aviion_bootstrap()
 	avail_start = round_page(first_addr);
 	avail_end = last_addr;
 
-	/* Steal MSGBUFSIZE at the top of physical memory for msgbuf. */
-	avail_end -= round_page(MSGBUFSIZE);
-	pmap_bootstrap((vaddr_t)trunc_page((vaddr_t)&kernelstart));
-
 	/*
 	 * Tell the VM system about available physical memory.
 	 * The aviion systems only have one contiguous area.
@@ -776,7 +745,15 @@ aviion_bootstrap()
 	 * XXX so we will need to upload two ranges of pages on them.
 	 */
 	uvm_page_physload(atop(avail_start), atop(avail_end),
-	    atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
+	    atop(avail_start), atop(avail_end), 0);
+
+	/*
+	 * Initialize message buffer.
+	 */
+	initmsgbuf((caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL, NULL),
+	    MSGBUFSIZE);
+
+	pmap_bootstrap(0, 0);	/* ROM image is on top of physical memory */
 
 	/* Initialize the "u-area" pages. */
 	bzero((caddr_t)curpcb, USPACE);

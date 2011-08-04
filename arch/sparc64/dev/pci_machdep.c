@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.39 2009/08/22 02:54:51 mk Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.42 2011/07/06 05:08:50 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.22 2001/07/20 00:07:13 eeh Exp $	*/
 
 /*
@@ -316,6 +316,17 @@ sparc64_pci_enumerate_bus(struct pci_softc *sc,
 	return (0);
 }
 
+int
+pci_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	int val = 0;
+
+        if (PCITAG_NODE(tag) != -1)
+		val = pc->conf_size(pc, tag);
+
+        return (val);
+}
+
 pcireg_t
 pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
@@ -393,6 +404,20 @@ pci_intr_map(pa, ihp)
 }
 
 int
+pci_intr_map_msi(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
+{
+	pci_chipset_tag_t pc = pa->pa_pc;
+	pcitag_t tag = pa->pa_tag;
+
+	if ((pa->pa_flags & PCI_FLAGS_MSI_ENABLED) == 0 ||
+	    pci_get_capability(pc, tag, PCI_CAP_MSI, NULL, NULL) == 0)
+		return (-1);
+
+	*ihp = PCITAG_OFFSET(pa->pa_tag) | PCI_INTR_MSI;
+	return (0);
+}
+
+int
 pci_intr_line(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 {
 	return (ih);
@@ -406,7 +431,10 @@ pci_intr_string(pc, ih)
 	static char str[16];
 
 	DPRINTF(SPDB_INTR, ("pci_intr_string: ih %u", ih));
-	snprintf(str, sizeof str, "ivec 0x%x", INTVEC(ih));
+	if (ih & PCI_INTR_MSI)
+		snprintf(str, sizeof str, "msi");
+	else
+		snprintf(str, sizeof str, "ivec 0x%x", INTVEC(ih));
 	DPRINTF(SPDB_INTR, ("; returning %s\n", str));
 
 	return (str);
@@ -441,4 +469,24 @@ pci_intr_disestablish(pc, cookie)
 
 	/* XXX */
 	printf("can't disestablish PCI interrupts yet\n");
+}
+
+void
+pci_msi_enable(pci_chipset_tag_t pc, pcitag_t tag, bus_addr_t addr, int vec)
+{
+	pcireg_t reg;
+	int off;
+
+	if (pci_get_capability(pc, tag, PCI_CAP_MSI, &off, &reg) == 0)
+		panic("%s: no msi capability", __func__);
+
+	if (reg & PCI_MSI_MC_C64) {
+		pci_conf_write(pc, tag, off + PCI_MSI_MA, addr);
+		pci_conf_write(pc, tag, off + PCI_MSI_MAU32, 0);
+		pci_conf_write(pc, tag, off + PCI_MSI_MD64, vec);
+	} else {
+		pci_conf_write(pc, tag, off + PCI_MSI_MA, addr);
+		pci_conf_write(pc, tag, off + PCI_MSI_MD32, vec);
+	}
+	pci_conf_write(pc, tag, off, reg | PCI_MSI_MC_MSIE);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioapic.c,v 1.18 2009/08/13 13:24:48 kettenis Exp $	*/
+/*	$OpenBSD: ioapic.c,v 1.20 2010/08/08 16:43:21 deraadt Exp $	*/
 /* 	$NetBSD: ioapic.c,v 1.6 2003/05/15 13:30:31 fvdl Exp $	*/
 
 /*-
@@ -90,6 +90,7 @@
 
 int     ioapic_match(struct device *, void *, void *);
 void    ioapic_attach(struct device *, struct device *, void *);
+int	ioapic_activate(struct device *, int);
 
 extern int x86_mem_add_mapping(bus_addr_t, bus_size_t,
     int, bus_space_handle_t *); /* XXX XXX */
@@ -99,8 +100,6 @@ void ioapic_hwunmask(struct pic *, int);
 void ioapic_addroute(struct pic *, struct cpu_info *, int, int, int);
 void ioapic_delroute(struct pic *, struct cpu_info *, int, int, int);
 void apic_set_redir(struct ioapic_softc *, int, int, struct cpu_info *);
-
-int apic_verbose = 0;
 
 int ioapic_bsp_id = 0;
 int ioapic_cold = 1;
@@ -234,7 +233,8 @@ ioapic_print_redir(struct ioapic_softc *sc, char *why, int pin)
 }
 
 struct cfattach ioapic_ca = {
-	sizeof(struct ioapic_softc), ioapic_match, ioapic_attach
+	sizeof(struct ioapic_softc), ioapic_match, ioapic_attach, NULL,
+	ioapic_activate
 };
 
 struct cfdriver ioapic_cd = {
@@ -368,6 +368,22 @@ ioapic_attach(struct device *parent, struct device *self, void *aux)
 		for (i = 0; i < sc->sc_apic_sz; i++)
 			ioapic_print_redir(sc, "boot", i);
 #endif
+}
+
+int
+ioapic_activate(struct device *self, int act)
+{
+	struct ioapic_softc *sc = (struct ioapic_softc *)self;
+
+	switch (act) {
+	case DVACT_RESUME:
+		/* On resume, reset the APIC id, like we do on boot */
+		ioapic_write(sc, IOAPIC_ID,
+		    (ioapic_read(sc, IOAPIC_ID) & ~IOAPIC_ID_MASK) |
+		    (sc->sc_apicid << IOAPIC_ID_SHIFT));
+	}
+
+	return (0);
 }
 
 void

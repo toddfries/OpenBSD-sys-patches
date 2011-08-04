@@ -1,4 +1,4 @@
-/*	$OpenBSD: aac.c,v 1.47 2010/06/28 18:31:01 krw Exp $	*/
+/*	$OpenBSD: aac.c,v 1.54 2011/07/17 22:46:48 matthew Exp $	*/
 
 /*-
  * Copyright (c) 2000 Michael Smith
@@ -111,9 +111,6 @@ int	aac_alloc_commands(struct aac_softc *);
 void	aac_free_commands(struct aac_softc *);
 void	aac_unmap_command(struct aac_command *);
 
-#if 0
-int	aac_raw_scsi_cmd(struct scsi_xfer *);
-#endif
 void	aac_scsi_cmd(struct scsi_xfer *);
 void	aac_startio(struct aac_softc *);
 void	aac_startup(struct aac_softc *);
@@ -129,12 +126,6 @@ struct cfdriver aac_cd = {
 struct scsi_adapter aac_switch = {
 	aac_scsi_cmd, aacminphys, 0, 0,
 };
-
-#if 0
-struct scsi_adapter aac_raw_switch = {
-	aac_raw_scsi_cmd, aacminphys, 0, 0,
-};
-#endif
 
 /* Falcon/PPC interface */
 int	aac_fa_get_fwstatus(struct aac_softc *);
@@ -423,7 +414,7 @@ aac_add_container(struct aac_softc *sc, struct aac_mntinforesp *mir, int f)
 		co = (struct aac_container *)malloc(sizeof *co, M_DEVBUF,
 		       M_NOWAIT);
 		if (co == NULL)
-			panic("Out of memory?!\n");
+			panic("Out of memory?!");
 		bzero(co, sizeof *co);
 		AAC_DPRINTF(AAC_D_MISC,
 			    ("%s: id %x  name '%.16s'  size %u  type %d\n", 
@@ -547,7 +538,7 @@ aac_detach(device_t dev)
 	}
 
 	if (sc->aifflags & AAC_AIFFLAGS_RUNNING)
-		panic("Cannot shutdown AIF thread\n");
+		panic("Cannot shutdown AIF thread");
 
 	if ((error = aac_shutdown(dev)))
 		return(error);
@@ -769,7 +760,7 @@ aac_startio(struct aac_softc *sc)
 		 * catastrophic since it means that bus_dmamap_load() failed.
 		 */
 		if (aac_map_command(cm) != 0)
-			panic("aac: error mapping command %p\n", cm);
+			panic("aac: error mapping command %p", cm);
 
 		AAC_DPRINTF(AAC_D_CMD, ("\n%s: another command",
 					sc->aac_dev.dv_xname));
@@ -1006,7 +997,7 @@ aac_bio_command(struct aac_softc *sc, struct aac_command **cmp)
 		opcode = WRITE_COMMAND;
 		break;
 	default:
-		panic("%s: invalid opcode %#x\n", sc->aac_dev.dv_xname,
+		panic("%s: invalid opcode %#x", sc->aac_dev.dv_xname,
 		      xs->cmd->opcode);
 	}
 
@@ -1048,7 +1039,7 @@ aac_bio_command(struct aac_softc *sc, struct aac_command **cmp)
 			br->Flags = 0;
 			fib->Header.Size += sizeof(struct aac_blockread64);
 			cm->cm_flags |= AAC_CMD_DATAOUT;
-			(struct aac_sg_table64 *)cm->cm_sgtable = &br->SgMap64;
+			cm->cm_sgtable = (struct aac_sg_table *)&br->SgMap64;
 		} else {
 			struct aac_blockwrite64 *bw;
 			bw = (struct aac_blockwrite64 *)&fib->data[0];
@@ -1060,7 +1051,7 @@ aac_bio_command(struct aac_softc *sc, struct aac_command **cmp)
 			bw->Flags = 0;
 			fib->Header.Size += sizeof(struct aac_blockwrite64);
 			cm->cm_flags |= AAC_CMD_DATAIN;
-			(struct aac_sg_table64 *)cm->cm_sgtable = &bw->SgMap64;
+			cm->cm_sgtable = (struct aac_sg_table *)&bw->SgMap64;
 		}
 	}
 
@@ -1547,7 +1538,8 @@ aac_init(struct aac_softc *sc)
 	sc->aac_common_busaddr = sc->aac_common_map->dm_segs[0].ds_addr;
 
 	if (sc->aac_common_busaddr < 8192) {
-		(uint8_t *)sc->aac_common += 8192;
+		sc->aac_common = (struct aac_common *)
+		    ((uint8_t *)sc->aac_common + 8192);
 		sc->aac_common_busaddr += 8192;
 	}
     
@@ -2429,7 +2421,7 @@ aac_internal_cache_cmd(struct scsi_xfer *xs)
 	case REQUEST_SENSE:
 		AAC_DPRINTF(AAC_D_CMD, ("REQUEST SENSE tgt %d ", target));
 		bzero(&sd, sizeof sd);
-		sd.error_code = 0x70;
+		sd.error_code = SSD_ERRCODE_CURRENT;
 		sd.segment = 0;
 		sd.flags = SKEY_NO_SENSE;
 		aac_enc32(sd.info, 0);
@@ -2447,6 +2439,7 @@ aac_internal_cache_cmd(struct scsi_xfer *xs)
 		inq.version = 2;
 		inq.response_format = 2;
 		inq.additional_length = 32;
+		inq.flags |= SID_CmdQue;
 		strlcpy(inq.vendor, "Adaptec", sizeof inq.vendor);
 		snprintf(inq.product, sizeof inq.product, "Container #%02d",
 		    target);
@@ -2486,24 +2479,6 @@ aacminphys(struct buf *bp, struct scsi_link *sl)
 	minphys(bp);
 }
 
-#if 0
-int
-aac_raw_scsi_cmd(struct scsi_xfer *xs)
-{
-#ifdef AAC_DEBUG
-	struct aac_softc *sc = xs->sc_link->adapter_softc;
-#endif
-	int s;
-
-	AAC_DPRINTF(AAC_D_CMD, ("%s: aac_raw_scsi_cmd\n",
-				sc->aac_dev.dv_xname));
-
-	/* XXX Not yet implemented */
-	xs->error = XS_DRIVER_STUFFUP;
-	scsi_done(xs);
-}
-#endif
-
 void
 aac_scsi_cmd(struct scsi_xfer *xs)
 {
@@ -2514,7 +2489,9 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 	u_int32_t blockno, blockcnt;
 	struct scsi_rw *rw;
 	struct scsi_rw_big *rwb;
-	int s = splbio();
+	int s;
+
+	s = splbio();
 
 	xs->error = XS_NOERROR;
 
@@ -2524,9 +2501,9 @@ aac_scsi_cmd(struct scsi_xfer *xs)
 		 * XXX Should be XS_SENSE but that would require setting up a
 		 * faked sense too.
 		 */
+		splx(s);
 		xs->error = XS_DRIVER_STUFFUP;
 		scsi_done(xs);
-		splx(s);
 		return;
 	}
 

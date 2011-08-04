@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_ioctl.c,v 1.45 2010/07/10 02:52:38 matthew Exp $	*/
+/*	$OpenBSD: scsi_ioctl.c,v 1.48 2011/06/21 22:36:42 matthew Exp $	*/
 /*	$NetBSD: scsi_ioctl.c,v 1.23 1996/10/12 23:23:17 christos Exp $	*/
 
 /*
@@ -42,7 +42,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/file.h>
-#include <sys/malloc.h>
+#include <sys/pool.h>
 #include <sys/buf.h>
 #include <sys/device.h>
 #include <sys/fcntl.h>
@@ -116,8 +116,7 @@ scsi_ioc_cmd(struct scsi_link *link, scsireq_t *screq)
 	xs->cmdlen = screq->cmdlen;
 
 	if (screq->datalen > 0) {
-		xs->data = malloc(screq->datalen, M_TEMP,
-		    M_WAITOK | M_CANFAIL | M_ZERO);
+		xs->data = dma_alloc(screq->datalen, PR_WAITOK | PR_ZERO);
 		if (xs->data == NULL) {
 			err = ENOMEM;
 			goto err;
@@ -192,7 +191,7 @@ scsi_ioc_cmd(struct scsi_link *link, scsireq_t *screq)
 
 err:
 	if (xs->data)
-		free(xs->data, M_TEMP);
+		dma_free(xs->data, screq->datalen);
 	scsi_xs_put(xs);
 
 	return (err);
@@ -239,8 +238,7 @@ scsi_ioc_ata_cmd(struct scsi_link *link, atareq_t *atareq)
 	xs->cmdlen = sizeof(*cdb);
 
 	if (atareq->datalen > 0) {
-		xs->data = malloc(atareq->datalen, M_TEMP,
-		    M_WAITOK | M_CANFAIL | M_ZERO);
+		xs->data = dma_alloc(atareq->datalen, PR_WAITOK | PR_ZERO);
 		if (xs->data == NULL) {
 			err = ENOMEM;
 			goto err;
@@ -290,7 +288,7 @@ scsi_ioc_ata_cmd(struct scsi_link *link, atareq_t *atareq)
 
 err:
 	if (xs->data)
-		free(xs->data, M_TEMP);
+		dma_free(xs->data, atareq->datalen);
 	scsi_xs_put(xs);
 
 	return (err);
@@ -316,7 +314,7 @@ scsi_do_ioctl(struct scsi_link *sc_link, u_long cmd, caddr_t addr, int flag)
 		else	
 			/* An 'emulated' SCSI target. */
 			sca->type = TYPE_ATAPI;
-		sca->scbus = sc_link->scsibus;
+		sca->scbus = sc_link->bus->sc_dev.dv_unit;
 		sca->target = sc_link->target;
 		sca->lun = sc_link->lun;
 		return (0);

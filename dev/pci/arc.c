@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc.c,v 1.90 2010/07/18 12:49:10 mk Exp $ */
+/*	$OpenBSD: arc.c,v 1.95 2011/07/17 22:46:48 matthew Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -592,7 +592,7 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_shutdownhook = shutdownhook_establish(arc_shutdown, sc);
 	if (sc->sc_shutdownhook == NULL)
-		panic("unable to establish arc powerhook");
+		panic("unable to establish arc shutdownhook");
 
 	sc->sc_link.adapter = &arc_switch;
 	sc->sc_link.adapter_softc = sc;
@@ -613,7 +613,7 @@ arc_attach(struct device *parent, struct device *self, void *aux)
 
 #if NBIO > 0
 	if (bio_register(self, arc_bioctl) != 0)
-		panic("%s: bioctl registration failed\n", DEVNAME(sc));
+		panic("%s: bioctl registration failed", DEVNAME(sc));
 
 #ifndef SMALL_KERNEL
 	/*
@@ -668,14 +668,14 @@ arc_intr(void *arg)
 	char				*kva = ARC_DMA_KVA(sc->sc_requests);
 	struct arc_io_cmd		*cmd;
 	u_int32_t			reg, intrstat;
+	int				ret = 0;
 
 	intrstat = arc_read(sc, ARC_RA_INTRSTAT);
-	if (intrstat == 0x0)
-		return (0);
 	intrstat &= ARC_RA_INTRSTAT_POSTQUEUE | ARC_RA_INTRSTAT_DOORBELL;
 	arc_write(sc, ARC_RA_INTRSTAT, intrstat);
 
 	if (intrstat & ARC_RA_INTRSTAT_DOORBELL) {
+		ret = 1;
 		if (sc->sc_talking) {
 			/* if an ioctl is talking, wake it up */
 			arc_write(sc, ARC_RA_INTRMASK,
@@ -692,6 +692,7 @@ arc_intr(void *arg)
 	}
 
 	while ((reg = arc_pop(sc)) != 0xffffffff) {
+		ret = 1;
 		cmd = (struct arc_io_cmd *)(kva +
 		    ((reg << ARC_RA_REPLY_QUEUE_ADDR_SHIFT) -
 		    (u_int32_t)ARC_DMA_DVA(sc->sc_requests)));
@@ -704,7 +705,7 @@ arc_intr(void *arg)
 		arc_scsi_cmd_done(sc, ccb, reg);
 	}
 
-	return (1);
+	return (ret);
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_prf.c,v 1.74 2008/06/27 17:23:24 miod Exp $	*/
+/*	$OpenBSD: subr_prf.c,v 1.76 2011/04/03 16:46:19 drahn Exp $	*/
 /*	$NetBSD: subr_prf.c,v 1.45 1997/10/24 18:14:25 chuck Exp $	*/
 
 /*-
@@ -123,6 +123,11 @@ int	db_console = 1;
 #else
 int	db_console = 0;
 #endif
+
+/*
+ * flag to indicate if we are currently in ddb (on some processor)
+ */
+int db_is_active;
 #endif
 
 /*
@@ -324,10 +329,16 @@ void
 kputchar(int c, int flags, struct tty *tp)
 {
 	extern int msgbufmapped;
+	int ddb_active = 0;
+
+#ifdef DDB
+	ddb_active = db_is_active;
+#endif
 
 	if (panicstr)
 		constty = NULL;
-	if ((flags & TOCONS) && tp == NULL && constty) {
+
+	if ((flags & TOCONS) && tp == NULL && constty && !ddb_active) {
 		tp = constty;
 		flags |= TOTTY;
 	}
@@ -337,7 +348,7 @@ kputchar(int c, int flags, struct tty *tp)
 	if ((flags & TOLOG) &&
 	    c != '\0' && c != '\r' && c != 0177 && msgbufmapped)
 		msgbuf_putchar(c);
-	if ((flags & TOCONS) && constty == NULL && c != '\0')
+	if ((flags & TOCONS) && (constty == NULL || ddb_active) && c != '\0')
 		(*v_putc)(c);
 #ifdef DDB
 	if (flags & TODDB)
@@ -357,12 +368,12 @@ kputchar(int c, int flags, struct tty *tp)
 void
 uprintf(const char *fmt, ...)
 {
-	struct proc *p = curproc;
+	struct process *pr = curproc->p_p;
 	va_list ap;
 
-	if (p->p_flag & P_CONTROLT && p->p_session->s_ttyvp) {
+	if (pr->ps_flags & PS_CONTROLT && pr->ps_session->s_ttyvp) {
 		va_start(ap, fmt);
-		kprintf(fmt, TOTTY, p->p_session->s_ttyp, NULL, ap);
+		kprintf(fmt, TOTTY, pr->ps_session->s_ttyp, NULL, ap);
 		va_end(ap);
 	}
 }
@@ -380,6 +391,7 @@ uprintf(const char *fmt, ...)
 
 /*
  * tprintf_open: get a tprintf handle on a process "p"
+ * XXX change s/proc/process
  *
  * => returns NULL if process can't be printed to
  */
@@ -387,10 +399,11 @@ uprintf(const char *fmt, ...)
 tpr_t
 tprintf_open(struct proc *p)
 {
+	struct process *pr = p->p_p;
 
-	if (p->p_flag & P_CONTROLT && p->p_session->s_ttyvp) {
-		SESSHOLD(p->p_session);
-		return ((tpr_t) p->p_session);
+	if (pr->ps_flags & PS_CONTROLT && pr->ps_session->s_ttyvp) {
+		SESSHOLD(pr->ps_session);
+		return ((tpr_t)pr->ps_session);
 	}
 	return ((tpr_t) NULL);
 }

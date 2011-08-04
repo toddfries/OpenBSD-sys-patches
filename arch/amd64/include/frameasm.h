@@ -1,4 +1,4 @@
-/*	$OpenBSD: frameasm.h,v 1.1 2004/01/28 01:39:39 mickey Exp $	*/
+/*	$OpenBSD: frameasm.h,v 1.6 2011/07/04 15:54:24 guenther Exp $	*/
 /*	$NetBSD: frameasm.h,v 1.1 2003/04/26 18:39:40 fvdl Exp $	*/
 
 #ifndef _AMD64_MACHINE_FRAMEASM_H
@@ -30,24 +30,6 @@
 	movq	%rcx,TF_RCX(%rsp)	; \
 	movq	%rax,TF_RAX(%rsp)
 
-#define	INTR_RESTORE_GPRS \
-	movq	TF_R15(%rsp),%r15	; \
-	movq	TF_R14(%rsp),%r14	; \
-	movq	TF_R13(%rsp),%r13	; \
-	movq	TF_R12(%rsp),%r12	; \
-	movq	TF_R11(%rsp),%r11	; \
-	movq	TF_R10(%rsp),%r10	; \
-	movq	TF_R9(%rsp),%r9		; \
-	movq	TF_R8(%rsp),%r8		; \
-	movq	TF_RDI(%rsp),%rdi	; \
-	movq	TF_RSI(%rsp),%rsi	; \
-	movq	TF_RBP(%rsp),%rbp	; \
-	movq	TF_RBX(%rsp),%rbx	; \
-	movq	TF_RDX(%rsp),%rdx	; \
-	movq	TF_RCX(%rsp),%rcx	; \
-	movq	TF_RAX(%rsp),%rax	; \
-	addq	$120,%rsp
-
 #define	INTRENTRY \
 	subq	$32,%rsp		; \
 	testq	$SEL_UPL,56(%rsp)	; \
@@ -60,17 +42,7 @@
 98: 	INTR_SAVE_GPRS
 
 #define INTRFASTEXIT \
-	INTR_RESTORE_GPRS 		; \
-	testq	$SEL_UPL,56(%rsp)	; \
-	je	99f			; \
-	cli				; \
-	swapgs				; \
-	movw	0(%rsp),%gs		; \
-	movw	8(%rsp),%fs		; \
-	movw	16(%rsp),%es		; \
-	movw	24(%rsp),%ds		; \
-99:	addq	$48,%rsp		; \
-	iretq
+	jmp	intr_fast_exit
 
 #define INTR_RECURSE_HWFRAME \
 	movq	%rsp,%r10		; \
@@ -81,6 +53,37 @@
 	movl	%cs,%r11d		; \
 	pushq	%r11			; \
 	pushq	%r13			;
+
+/*
+ * Restore %ds, %es, %fs, and %gs, dealing with the FS.base MSR for
+ * %fs and doing the cli/swapgs for %gs.  Uses %rax, %rcx, and %rdx
+ */
+#define INTR_RESTORE_SELECTORS						\
+	movq	CPUVAR(CURPCB),%rdx	/* for below */			; \
+	/* %es and %ds */						  \
+	movw	TF_ES(%rsp),%es						; \
+	movw	$(GSEL(GUDATA_SEL, SEL_UPL)),%ax			; \
+	movw	%ax,%ds							; \
+	/* Make sure both %fs and FS.base are the desired values */	  \
+	movq	PCB_FSBASE(%rdx),%rax					; \
+	cmpq	$0,%rax							; \
+	jne	96f							; \
+	movw	TF_FS(%rsp),%fs	/* zero FS.base by setting %fs */	; \
+	jmp	98f							; \
+96:	cmpq	CPUVAR(CUR_FSBASE),%rax					; \
+	jne	97f							; \
+	movw	%fs,%cx		/* FS.base same, how about %fs? */	; \
+	cmpw	TF_FS(%rsp),%cx						; \
+	je	99f							; \
+97:	movw	TF_FS(%rsp),%fs		/* set them both */		; \
+	movq	%rax,%rdx						; \
+	shrq	$32,%rdx						; \
+	movl	$MSR_FSBASE,%ecx					; \
+	wrmsr								; \
+98:	movq	%rax,CPUVAR(CUR_FSBASE)					; \
+99:	cli		/* %fs done, so swapgs and do %gs */		; \
+	swapgs								; \
+	movw	TF_GS(%rsp),%gs
 
 
 #define CHECK_ASTPENDING(reg)	movq	CPUVAR(CURPROC),reg		; \

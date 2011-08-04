@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.39 2009/06/09 02:56:38 krw Exp $	*/
+/*	$OpenBSD: locore.S,v 1.48 2011/07/04 15:54:24 guenther Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -637,12 +637,6 @@ longmode_hi:
 
 /*
  * Signal trampoline; copied to top of user stack.
- *
- * Note, the "system call" to sigreturn() needs to be an 'int $0x80' one
- * so that the kernel returns using 'iretq' method.  This way if a process
- * was interrupted (by tick) as opposed to in the kernel when a signal was
- * being delivered, the process will be completely restored, including the
- * userland %rcx register, which the 'sysret' instruction can not restore.
  */
 NENTRY(sigcode)
 	call	*%rax
@@ -650,7 +644,7 @@ NENTRY(sigcode)
 	movq	%rsp,%rdi
 	pushq	%rdi			/* fake return address */
 	movq	$SYS_sigreturn,%rax
-	int	$0x80
+	syscall
 	movq	$SYS_exit,%rax
 	syscall
 	.globl	_C_LABEL(esigcode)
@@ -741,6 +735,8 @@ ENTRY(cpu_switchto)
 	movb	$SONPROC,P_STAT(%r12)	# p->p_stat = SONPROC
 	SET_CURPROC(%r12,%rcx)
 
+	movl	CPUVAR(CPUID),%edi
+
 	/* If old proc exited, don't bother. */
 	testq	%r13,%r13
 	jz	switch_exited
@@ -752,12 +748,15 @@ ENTRY(cpu_switchto)
 	 *   %rax, %rcx - scratch
 	 *   %r13 - old proc, then old pcb
 	 *   %r12 - new proc
+	 *   %edi - cpuid
 	 */
 
-	movq	%r13,%rdi
-	call	pmap_deactivate
-
 	movq	P_ADDR(%r13),%r13
+
+	/* clear the old pmap's bit for the cpu */
+	movq	PCB_PMAP(%r13),%rcx
+	lock
+	btrq	%rdi,PM_CPUS(%rcx)
 
 	/* Save stack pointers. */
 	movq	%rsp,PCB_RSP(%r13)
@@ -781,30 +780,27 @@ switch_exited:
 	movq	PCB_RSP(%r13),%rsp
 	movq	PCB_RBP(%r13),%rbp
 
-#if 0
+	movq	CPUVAR(TSS),%rcx
+	movq	PCB_KSTACK(%r13),%rdx
+	movq	%rdx,TSS_RSP0(%rcx)
+
+	movq	PCB_CR3(%r13),%rax
+	movq	%rax,%cr3
+
 	/* Don't bother with the rest if switching to a system process. */
 	testl	$P_SYSTEM,P_FLAG(%r12)
 	jnz	switch_restored
+
+	/* set the new pmap's bit for the cpu */
+	movl	CPUVAR(CPUID),%edi
+	movq	PCB_PMAP(%r13),%rcx
+	lock
+	btsq	%rdi,PM_CPUS(%rcx)
+#ifdef DIAGNOSTIC
+	jc	_C_LABEL(switch_pmcpu_set)
 #endif
 
-	/* Load TSS info. */
-#ifdef MULTIPROCESSOR
-	movq    CPUVAR(GDT),%rax
-#else   
-	movq	_C_LABEL(gdtstore)(%rip),%rax
-#endif
-	movl	P_MD_TSS_SEL(%r12),%edx
-
-	/* Switch TSS. Reset "task busy" flag before */
-	andl	$~0x0200,4(%rax,%rdx, 1)
-	ltr	%dx
-
-	movq	%r12,%rdi
-	call	_C_LABEL(pmap_activate)
-
-#if 0
 switch_restored:
-#endif
 	/* Restore cr0 (including FPU state). */
 	movl	PCB_CR0(%r13),%ecx
 #ifdef MULTIPROCESSOR
@@ -876,6 +872,11 @@ NENTRY(switch_error3)
 	call	_C_LABEL(panic)
 	/* NOTREACHED */
 1:	.asciz	"cpu_switch 3"
+NENTRY(switch_pmcpu_set)
+	movabsq	$1f,%rdi
+	call	_C_LABEL(panic)
+	/* NOTREACHED */
+1:	.asciz	"activate already active pmap"
 #endif /* DIAGNOSTIC */
 
 /*
@@ -900,7 +901,7 @@ IDTVEC(syscall)
 	swapgs
 	movq	%r15,CPUVAR(SCRATCH)
 	movq	CPUVAR(CURPCB),%r15
-	movq	PCB_RSP0(%r15),%r15
+	movq	PCB_KSTACK(%r15),%r15
 	xchgq	%r15,%rsp
 	sti
 
@@ -911,7 +912,7 @@ IDTVEC(syscall)
 	 * ss:rsp, etc, so that all GP registers can be
 	 * saved. Then, fill in the rest.
 	 */
-	pushq	$(LSEL(LUDATA_SEL, SEL_UPL))
+	pushq	$(GSEL(GUDATA_SEL, SEL_UPL))
 	pushq	%r15
 	subq	$(TF_RSP-TF_TRAPNO),%rsp
 	movq	CPUVAR(SCRATCH),%r15
@@ -920,9 +921,9 @@ IDTVEC(syscall)
 	movw	%fs,TF_FS(%rsp)
 	movw	%gs,TF_GS(%rsp)
 	movw	%es,TF_ES(%rsp)
-	movw	$(LSEL(LUDATA_SEL, SEL_UPL)),TF_DS(%rsp)
+	movw	$(GSEL(GUDATA_SEL, SEL_UPL)),TF_DS(%rsp)
 	movq	%r11, TF_RFLAGS(%rsp)	/* old rflags from syscall insn */
-	movq	$(LSEL(LUCODE_SEL, SEL_UPL)), TF_CS(%rsp)
+	movq	$(GSEL(GUCODE_SEL, SEL_UPL)), TF_CS(%rsp)
 	movq	%rcx,TF_RIP(%rsp)
 	movq	$2,TF_ERR(%rsp)
 	movq	$T_ASTFLT, TF_TRAPNO(%rsp)
@@ -951,23 +952,28 @@ syscall_return:
 #ifdef DIAGNOSTIC
 	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
 	jne	3f
-#endif
-	/*
-	 * XXX interrupts off longer than they should be here.
-	 */
-	cli
-	swapgs
-	movw	TF_ES(%rsp),%es
-	movw	TF_FS(%rsp),%fs
-	movw	TF_GS(%rsp),%gs
-	INTR_RESTORE_GPRS
-	movw	$(LSEL(LUDATA_SEL, SEL_UPL)),%r11
-	movw	%r11,%ds
-	addq	$48,%rsp
-	popq	%rcx	/* return rip */
-	addq	$8,%rsp
-	popq	%r11	/* flags as set by sysret insn */
-	movq	%ss:(%rsp),%rsp
+#endif /* DIAGNOSTIC */
+
+	movq	TF_RDI(%rsp),%rdi
+	movq	TF_RSI(%rsp),%rsi
+	movq	TF_R8(%rsp),%r8
+	movq	TF_R9(%rsp),%r9
+	movq	TF_R10(%rsp),%r10
+	movq	TF_R12(%rsp),%r12
+	movq	TF_R13(%rsp),%r13
+	movq	TF_R14(%rsp),%r14
+	movq	TF_R15(%rsp),%r15
+	movq	TF_RBP(%rsp),%rbp
+	movq	TF_RBX(%rsp),%rbx
+
+	INTR_RESTORE_SELECTORS
+
+	movq	TF_RDX(%rsp),%rdx
+	movq	TF_RAX(%rsp),%rax
+
+	movq	TF_RIP(%rsp),%rcx
+	movq	TF_RFLAGS(%rsp),%r11
+	movq	TF_RSP(%rsp),%rsp
 	sysretq
 
 #ifdef DIAGNOSTIC
@@ -1006,28 +1012,12 @@ NENTRY(child_trampoline)
 	call	*%r12
 	jmp	syscall_return
 
-	.globl  _C_LABEL(osyscall_return)
-
-/* XXX - can we zap the following two? */
 
 /*
- * Old call gate entry for syscall. only needed if we're
- * going to support running old NetBSD or ibcs2 binaries, etc,
- * on NetBSD/amd64.
- */
-IDTVEC(oosyscall)
-	/* Set rflags in trap frame. */
-	pushfq
-	popq	8(%rsp)
-	pushq	$7		# size of instruction for restart
-	jmp	osyscall1
-
-/*
- * Trap gate entry for int $80 syscall, also used by sigreturn.
+ * Trap gate entry for old int $80 syscall (used to be used by sigreturn)
  */
 IDTVEC(osyscall)
 	pushq	$2		# size of instruction for restart
-osyscall1:
 	pushq	$T_ASTFLT	# trap # for doing ASTs
 	INTRENTRY
 	sti
@@ -1048,13 +1038,45 @@ _C_LABEL(osyscall_return):
 	call	_C_LABEL(trap)
 	jmp	2b
 
+/*
+ * Return via iretq, for real interrupts and signal returns
+ */
 iret_return:
-#ifndef DIAGNOSTIC
-1:	INTRFASTEXIT
-#else /* DIAGNOSTIC */
-1:	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
+1:
+#ifdef DIAGNOSTIC
+	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
 	jne	3f
-	INTRFASTEXIT
+#endif /* DIAGNOSTIC */
+	.globl	intr_fast_exit
+intr_fast_exit:
+	movq	TF_RDI(%rsp),%rdi
+	movq	TF_RSI(%rsp),%rsi
+	movq	TF_R8(%rsp),%r8
+	movq	TF_R9(%rsp),%r9
+	movq	TF_R10(%rsp),%r10
+	movq	TF_R12(%rsp),%r12
+	movq	TF_R13(%rsp),%r13
+	movq	TF_R14(%rsp),%r14
+	movq	TF_R15(%rsp),%r15
+	movq	TF_RBP(%rsp),%rbp
+	movq	TF_RBX(%rsp),%rbx
+
+	testq	$SEL_UPL,TF_CS(%rsp)
+	je	5f
+
+	INTR_RESTORE_SELECTORS
+
+5:	movq	TF_RDX(%rsp),%rdx
+	movq	TF_RCX(%rsp),%rcx
+	movq	TF_R11(%rsp),%r11
+	movq	TF_RAX(%rsp),%rax
+	addq	$TF_RIP,%rsp
+
+	.globl	_C_LABEL(doreti_iret)
+_C_LABEL(doreti_iret):
+	iretq
+
+#ifdef DIAGNOSTIC
 3:	sti
 	movabsq	$4f, %rdi
 	xorq	%rax,%rax

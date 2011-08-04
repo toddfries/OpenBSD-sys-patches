@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.18 2010/05/06 21:33:51 nicm Exp $	*/
+/*	$OpenBSD: trap.c,v 1.25 2011/07/11 15:40:47 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.2 2003/05/04 23:51:56 fvdl Exp $	*/
 
 /*-
@@ -150,12 +150,7 @@ trap(struct trapframe *frame)
 	struct proc *p = curproc;
 	int type = (int)frame->tf_trapno;
 	struct pcb *pcb;
-	extern char resume_iret[], IDTVEC(oosyscall)[];
-#if 0
-	extern char resume_pop_ds[], resume_pop_es[];
-#endif
-	struct trapframe *vframe;
-	void *resume;
+	extern char doreti_iret[], resume_iret[];
 	caddr_t onfault;
 	int error;
 	uint64_t cr2;
@@ -167,7 +162,7 @@ trap(struct trapframe *frame)
 
 #ifdef DEBUG
 	if (trapdebug) {
-		printf("trap %d code %lx eip %lx cs %lx rflags %lx cr2 %lx "
+		printf("trap %d code %lx rip %lx cs %lx rflags %lx cr2 %lx "
 		       "cpl %x\n",
 		    type, frame->tf_err, frame->tf_rip, frame->tf_cs,
 		    frame->tf_rflags, rcr2(), curcpu()->ci_ilevel);
@@ -214,8 +209,8 @@ trap(struct trapframe *frame)
 		    type, frame->tf_err, (u_long)frame->tf_rip, frame->tf_cs,
 		    frame->tf_rflags, rcr2(), curcpu()->ci_ilevel, frame->tf_rsp);
 
-		/* panic("trap"); */
-		boot(RB_HALT);
+		panic("trap type %d, code=%lx, pc=%lx",
+		    type, frame->tf_err, frame->tf_rip);
 		/*NOTREACHED*/
 
 	case T_PROTFLT:
@@ -235,34 +230,14 @@ copyfault:
 
 		/*
 		 * Check for failure during return to user mode.
-		 *
-		 * XXXfvdl check for rex prefix?
-		 *
-		 * We do this by looking at the instruction we faulted on.  The
-		 * specific instructions we recognize only happen when
-		 * returning from a trap, syscall, or interrupt.
-		 *
-		 * XXX
-		 * The heuristic used here will currently fail for the case of
-		 * one of the 2 pop instructions faulting when returning from a
-		 * a fast interrupt.  This should not be possible.  It can be
-		 * fixed by rearranging the trap frame so that the stack format
-		 * at this point is the same as on exit from a `slow'
-		 * interrupt.
+		 * We do this by looking at the address of the
+		 * instruction that faulted.
 		 */
-		switch (*(u_char *)frame->tf_rip) {
-		case 0xcf:	/* iret */
-			vframe = (void *)((u_int64_t)&frame->tf_rsp - 44);
-			resume = resume_iret;
-			break;
-		default:
-			goto we_re_toast;
+		if (frame->tf_rip == (u_int64_t)doreti_iret) {
+			frame->tf_rip = (u_int64_t)resume_iret;
+			return;
 		}
-		if (KERNELMODE(vframe->tf_cs, vframe->tf_rflags))
-			goto we_re_toast;
-
-		frame->tf_rip = (u_int64_t)resume;
-		return;
+		goto we_re_toast;
 
 	case T_PROTFLT|T_USER:		/* protection fault */
 	case T_TSSFLT|T_USER:
@@ -275,22 +250,22 @@ copyfault:
 		frame_dump(frame);
 #endif
 		sv.sival_ptr = (void *)frame->tf_rip;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGBUS, type & ~T_USER, BUS_OBJERR, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		goto out;
 	case T_ALIGNFLT|T_USER:
 		sv.sival_ptr = (void *)frame->tf_rip;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGBUS, type & ~T_USER, BUS_ADRALN, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		goto out;
 
 	case T_PRIVINFLT|T_USER:	/* privileged instruction fault */
 		sv.sival_ptr = (void *)frame->tf_rip;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGILL, type & ~T_USER, ILL_PRVOPC, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		goto out;
 	case T_FPOPFLT|T_USER:		/* coprocessor operand fault */
 #ifdef TRAP_SIGDEBUG
@@ -299,17 +274,17 @@ copyfault:
 		frame_dump(frame);
 #endif
 		sv.sival_ptr = (void *)frame->tf_rip;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGILL, type & ~T_USER, ILL_COPROC, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		goto out;
 
 	case T_ASTFLT|T_USER:		/* Allow process switch */
 		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			ADDUPROF(p);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 		}
 		/* Allow a forced task switch. */
 		if (curcpu()->ci_want_resched)
@@ -318,21 +293,21 @@ copyfault:
 
 	case T_BOUND|T_USER:
 		sv.sival_ptr = (void *)frame->tf_rip;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGFPE, type &~ T_USER, FPE_FLTSUB, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		goto out;
 	case T_OFLOW|T_USER:
 		sv.sival_ptr = (void *)frame->tf_rip;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGFPE, type &~ T_USER, FPE_INTOVF, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		goto out;
 	case T_DIVIDE|T_USER:
 		sv.sival_ptr = (void *)frame->tf_rip;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGFPE, type &~ T_USER, FPE_INTDIV, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		goto out;
 
 	case T_ARITHTRAP|T_USER:
@@ -355,7 +330,7 @@ copyfault:
 		extern struct vm_map *kernel_map;
 
 		cr2 = rcr2();
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 faultcommon:
 		vm = p->p_vmspace;
 		if (vm == NULL)
@@ -402,7 +377,7 @@ faultcommon:
 				KERNEL_UNLOCK();
 				return;
 			}
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 			goto out;
 		}
 		if (error == EACCES) {
@@ -434,21 +409,11 @@ faultcommon:
 			sv.sival_ptr = (void *)fa;
 			trapsignal(p, SIGSEGV, T_PAGEFLT, SEGV_MAPERR, sv);
 		}
-		if (type == T_PAGEFLT)
-			KERNEL_UNLOCK();
-		else
-			KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 	}
 
 	case T_TRCTRAP:
-		/* Check whether they single-stepped into a lcall. */
-		if (frame->tf_rip == (register_t)IDTVEC(oosyscall))
-			return;
-		if (frame->tf_rip == (register_t)IDTVEC(oosyscall) + 1) {
-			frame->tf_rflags &= ~PSL_T;
-			return;
-		}
 		goto we_re_toast;
 
 	case T_BPTFLT|T_USER:		/* bpt instruction fault */
@@ -456,9 +421,9 @@ faultcommon:
 #ifdef MATH_EMULATE
 	trace:
 #endif
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGTRAP, type &~ T_USER, TRAP_BRKPT, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 #if	NISA > 0

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fxp.c,v 1.101 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: fxp.c,v 1.108 2011/04/07 15:30:16 miod Exp $	*/
 /*	$NetBSD: if_fxp.c,v 1.2 1997/06/05 02:01:55 thorpej Exp $	*/
 
 /*
@@ -47,6 +47,7 @@
 #include <sys/socket.h>
 #include <sys/syslog.h>
 #include <sys/timeout.h>
+#include <sys/workq.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -147,9 +148,7 @@ void fxp_mediastatus(struct ifnet *, struct ifmediareq *);
 void fxp_scb_wait(struct fxp_softc *);
 void fxp_start(struct ifnet *);
 int fxp_ioctl(struct ifnet *, u_long, caddr_t);
-void fxp_init(void *);
 void fxp_load_ucode(struct fxp_softc *);
-void fxp_stop(struct fxp_softc *, int, int);
 void fxp_watchdog(struct ifnet *);
 int fxp_add_rfabuf(struct fxp_softc *, struct mbuf *);
 int fxp_mdi_read(struct device *, int, int);
@@ -284,34 +283,42 @@ fxp_write_eeprom(struct fxp_softc *sc, u_short *data, int offset, int words)
  * Operating system-specific autoconfiguration glue
  *************************************************************/
 
-void	fxp_power(int, void *);
-
 struct cfdriver fxp_cd = {
 	NULL, "fxp", DV_IFNET
 };
 
-/*
- * Power handler routine. Called when the system is transitioning
- * into/out of power save modes.  The main purpose of this routine
- * is to shut off receiver DMA so it doesn't clobber kernel memory
- * at the wrong time.
- */
-void
-fxp_power(int why, void *arg)
+int
+fxp_activate(struct device *self, int act)
 {
-	struct fxp_softc *sc = arg;
-	struct ifnet *ifp;
-	int s;
+	struct fxp_softc *sc = (struct fxp_softc *)self;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;	
+	int rv = 0;
 
-	s = splnet();
-	if (why != PWR_RESUME)
-		fxp_stop(sc, 0, 0);
-	else {
-		ifp = &sc->sc_arpcom.ac_if;
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			fxp_stop(sc, 1, 0);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		rv = config_activate_children(self, act);
 		if (ifp->if_flags & IFF_UP)
-			fxp_init(sc);
+			workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+			    fxp_resume, sc, NULL);
+		break;
 	}
-	splx(s);
+	return (rv);
+}
+
+void
+fxp_resume(void *arg1, void *arg2)
+{
+	struct fxp_softc *sc = arg1;
+
+	fxp_init(sc);
 }
 
 /*************************************************************
@@ -496,13 +503,6 @@ fxp_attach(struct fxp_softc *sc, const char *intrstr)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-	/*
-	 * Add power hook, so that DMA is disabled prior to reboot. Not
-	 * doing so could allow DMA to corrupt kernel memory during the
-	 * reboot before the driver initializes.
-	 */
-	sc->sc_powerhook = powerhook_establish(fxp_power, sc);
 
 	/*
 	 * Initialize timeout for statistics update.
@@ -1052,9 +1052,6 @@ fxp_detach(struct fxp_softc *sc)
 
 	ether_ifdetach(ifp);
 	if_detach(ifp);
-
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
 }
 
 /*
@@ -1835,7 +1832,7 @@ fxp_load_ucode(struct fxp_softc *sc)
 	for (uc = ucode_table; uc->revision != 0; uc++)
 		if (sc->sc_revision == uc->revision)
 			break;
-	if (uc->revision == NULL)
+	if (uc->revision == 0)
 		return;	/* no ucode for this chip is found */
 
 	error = loadfirmware(uc->uname, (u_char **)&ucode_buf, &ucode_len);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ucom.c,v 1.50 2010/07/02 17:27:01 nicm Exp $ */
+/*	$OpenBSD: ucom.c,v 1.54 2011/07/03 19:38:50 deraadt Exp $ */
 /*	$NetBSD: ucom.c,v 1.49 2003/01/01 00:10:25 thorpej Exp $	*/
 
 /*
@@ -210,8 +210,6 @@ ucom_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_cua = 0;
 
 	rw_init(&sc->sc_lock, "ucomlk");
-
-	sc->sc_open = 0;
 }
 
 int
@@ -224,8 +222,6 @@ ucom_detach(struct device *self, int flags)
 
 	DPRINTF(("ucom_detach: sc=%p flags=%d tp=%p, pipe=%d,%d\n",
 		 sc, flags, tp, sc->sc_bulkin_no, sc->sc_bulkout_no));
-
-	sc->sc_dying = 1;
 
 	if (sc->sc_bulkin_pipe != NULL)
 		usbd_abort_pipe(sc->sc_bulkin_pipe);
@@ -273,9 +269,6 @@ ucom_activate(struct device *self, int act)
 	DPRINTFN(5,("ucom_activate: %d\n", act));
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		sc->sc_dying = 1;
 		break;
@@ -324,9 +317,8 @@ ucomopen(dev_t dev, int flag, int mode, struct proc *p)
 
 	/* open the pipes if this is the first open */
 	ucom_lock(sc);
-	if (sc->sc_open++ == 0) {
-		s = splusb();
-
+	s = splusb();
+	if (sc->sc_open == 0) {
 		DPRINTF(("ucomopen: open pipes in=%d out=%d\n",
 		    sc->sc_bulkin_no, sc->sc_bulkout_no));
 		DPRINTF(("ucomopen: hid %p pipes in=%p out=%p\n",
@@ -405,12 +397,11 @@ ucomopen(dev_t dev, int flag, int mode, struct proc *p)
 		ucom_status_change(sc);
 
 		ucomstartread(sc);
-
-		splx(s);
+		sc->sc_open = 1;
 	}
-	ucom_unlock(sc);
-
+	splx(s);
 	s = spltty();
+	ucom_unlock(sc);
 	tp = sc->sc_tty;
 	splx(s);
 
@@ -559,8 +550,8 @@ ucomclose(dev_t dev, int flag, int mode, struct proc *p)
 	CLR(tp->t_state, TS_BUSY | TS_FLUSH);
 	sc->sc_cua = 0;
 	ttyclose(tp);
-	ucom_cleanup(sc);
 	splx(s);
+	ucom_cleanup(sc);
 
 	if (sc->sc_methods->ucom_close != NULL)
 		sc->sc_methods->ucom_close(sc->sc_parent, sc->sc_portno);
@@ -771,9 +762,7 @@ XXX;
 }
 
 void
-ucom_break(sc, onoff)
-	struct ucom_softc *sc;
-	int onoff;
+ucom_break(struct ucom_softc *sc, int onoff)
 {
 	DPRINTF(("ucom_break: onoff=%d\n", onoff));
 
@@ -1150,31 +1139,31 @@ ucomreadcb(usbd_xfer_handle xfer, usbd_private_handle p, usbd_status status)
 void
 ucom_cleanup(struct ucom_softc *sc)
 {
-	if (--sc->sc_open == 0) {
-		DPRINTF(("ucom_cleanup: closing pipes\n"));
+	DPRINTF(("ucom_cleanup: closing pipes\n"));
 
-		ucom_shutdown(sc);
-		if (sc->sc_bulkin_pipe != NULL) {
-			usbd_abort_pipe(sc->sc_bulkin_pipe);
-			usbd_close_pipe(sc->sc_bulkin_pipe);
-			sc->sc_bulkin_pipe = NULL;
-		}
-		if (sc->sc_bulkout_pipe != NULL) {
-			usbd_abort_pipe(sc->sc_bulkout_pipe);
-			usbd_close_pipe(sc->sc_bulkout_pipe);
-			sc->sc_bulkout_pipe = NULL;
-		}
-		if (sc->sc_ixfer != NULL) {
-			if (sc->sc_uhidev == NULL)
-				usbd_free_xfer(sc->sc_ixfer);
-			sc->sc_ixfer = NULL;
-		}
-		if (sc->sc_oxfer != NULL) {
-			usbd_free_buffer(sc->sc_oxfer);
-			if (sc->sc_uhidev == NULL)
-				usbd_free_xfer(sc->sc_oxfer);
-			sc->sc_oxfer = NULL;
-		}
+	sc->sc_open = 0;
+
+	ucom_shutdown(sc);
+	if (sc->sc_bulkin_pipe != NULL) {
+		usbd_abort_pipe(sc->sc_bulkin_pipe);
+		usbd_close_pipe(sc->sc_bulkin_pipe);
+		sc->sc_bulkin_pipe = NULL;
+	}
+	if (sc->sc_bulkout_pipe != NULL) {
+		usbd_abort_pipe(sc->sc_bulkout_pipe);
+		usbd_close_pipe(sc->sc_bulkout_pipe);
+		sc->sc_bulkout_pipe = NULL;
+	}
+	if (sc->sc_ixfer != NULL) {
+		if (sc->sc_uhidev == NULL)
+			usbd_free_xfer(sc->sc_ixfer);
+		sc->sc_ixfer = NULL;
+	}
+	if (sc->sc_oxfer != NULL) {
+		usbd_free_buffer(sc->sc_oxfer);
+		if (sc->sc_uhidev == NULL)
+			usbd_free_xfer(sc->sc_oxfer);
+		sc->sc_oxfer = NULL;
 	}
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.92 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.95 2010/08/27 17:08:00 jsg Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -45,6 +45,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/workq.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
@@ -288,13 +289,11 @@ void		 bwi_get_clock_freq(struct bwi_softc *,
 		     struct bwi_clock_freq *);
 int		 bwi_set_clock_mode(struct bwi_softc *, enum bwi_clock_mode);
 int		 bwi_set_clock_delay(struct bwi_softc *);
-int		 bwi_init(struct ifnet *);
 int		 bwi_ioctl(struct ifnet *, u_long, caddr_t);
 void		 bwi_start(struct ifnet *);
 void		 bwi_watchdog(struct ifnet *);
 void		 bwi_newstate_begin(struct bwi_softc *, enum ieee80211_state);
 void		 bwi_init_statechg(struct bwi_softc *, int);
-int		 bwi_stop(struct bwi_softc *, int);
 int		 bwi_newstate(struct ieee80211com *, enum ieee80211_state, int);
 int		 bwi_media_change(struct ifnet *);
 void		 bwi_iter_func(void *, struct ieee80211_node *);
@@ -799,7 +798,6 @@ bwi_attach(struct bwi_softc *sc)
 
 	/* setup interface */
 	ifp->if_softc = sc;
-	ifp->if_init = bwi_init;
 	ifp->if_ioctl = bwi_ioctl;
 	ifp->if_start = bwi_start;
 	ifp->if_watchdog = bwi_watchdog;
@@ -857,7 +855,7 @@ bwi_attach(struct bwi_softc *sc)
 		error = ENXIO;
 		goto fail;
 	} else
-		panic("unknown phymode %d\n", phy->phy_mode);
+		panic("unknown phymode %d", phy->phy_mode);
 
 	printf(", address %s\n", ether_sprintf(ic->ic_myaddr));
 
@@ -2177,7 +2175,7 @@ bwi_mac_hostflags_init(struct bwi_mac *mac)
 		if (phy->phy_rev >= 2 && rf->rf_type == BWI_RF_T_BCM2050)
 			host_flags &= ~BWI_HFLAG_GDC_WA;
 	} else {
-		panic("unknown PHY mode %u\n", phy->phy_mode);
+		panic("unknown PHY mode %u", phy->phy_mode);
 	}
 
 	HFLAGS_WRITE(mac, host_flags);
@@ -2277,7 +2275,7 @@ bwi_mac_set_ackrates(struct bwi_mac *mac, const struct ieee80211_rateset *rs)
 			    IEEE80211_MODE_11G) & 0xf) * 2;
 			break;
 		default:
-			panic("unsupported modtype %u\n", modtype);
+			panic("unsupported modtype %u", modtype);
 		}
 
 		MOBJ_WRITE_2(mac, BWI_COMM_MOBJ, ofs + 0x20,
@@ -4265,7 +4263,7 @@ bwi_phy812_value(struct bwi_mac *mac, uint16_t lpd)
 		case 0x100:
 			return ((0x2093 | ext_lna));
 		default:
-			panic("unsupported lpd\n");
+			panic("unsupported lpd");
 		}
 	} else {
 		ext_lna |= (loop << 8);
@@ -4278,11 +4276,11 @@ bwi_phy812_value(struct bwi_mac *mac, uint16_t lpd)
 		case 0x100:
 			return ((0x93 | ext_lna));
 		default:
-			panic("unsupported lpd\n");
+			panic("unsupported lpd");
 		}
 	}
 
-	panic("never reached\n");
+	panic("never reached");
 
 	return (0);
 }
@@ -6530,7 +6528,7 @@ bwi_led_event(struct bwi_softc *sc, int event)
 		rate = 0;
 		break;
 	default:
-		panic("unknown LED event %d\n", event);
+		panic("unknown LED event %d", event);
 		break;
 	}
 	bwi_led_blink_start(sc, bwi_led_duration[rate].on_dur,
@@ -8545,7 +8543,7 @@ bwi_plcp_header(void *plcp, int pkt_len, uint8_t rate)
 	else if (modtype == IEEE80211_MODTYPE_DS)
 		bwi_ds_plcp_header(plcp, pkt_len, rate);
 	else
-		panic("unsupport modulation type %u\n", modtype);
+		panic("unsupport modulation type %u", modtype);
 }
 
 enum bwi_modtype
@@ -8617,7 +8615,7 @@ bwi_ack_rate(struct ieee80211_node *ni, uint8_t rate)
 		ack_rate = 48;
 		break;
 	default:
-		panic("unsupported rate %d\n", rate);
+		panic("unsupported rate %d", rate);
 	}
 	return ack_rate;
 }
@@ -9104,7 +9102,7 @@ bwi_regwin_name(const struct bwi_regwin *rw)
 	case BWI_REGWIN_T_BUSPCIE:
 		return ("PCIE");
 	}
-	panic("unknown regwin type 0x%04x\n", rw->rw_type);
+	panic("unknown regwin type 0x%04x", rw->rw_type);
 
 	return (NULL);
 }

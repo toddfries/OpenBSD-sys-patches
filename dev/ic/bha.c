@@ -1,4 +1,4 @@
-/*	$OpenBSD: bha.c,v 1.25 2010/06/28 18:31:02 krw Exp $	*/
+/*	$OpenBSD: bha.c,v 1.29 2011/07/04 07:47:42 jsg Exp $	*/
 /*	$NetBSD: bha.c,v 1.27 1998/11/19 21:53:00 thorpej Exp $	*/
 
 #undef BHADEBUG
@@ -82,9 +82,9 @@ int     bha_debug = 1;
 
 integrate void bha_finish_ccbs(struct bha_softc *);
 integrate void bha_reset_ccb(struct bha_softc *, struct bha_ccb *);
-void bha_free_ccb(struct bha_softc *, struct bha_ccb *);
+void bha_ccb_free(void *, void *);
 integrate int bha_init_ccb(struct bha_softc *, struct bha_ccb *);
-struct bha_ccb *bha_get_ccb(struct bha_softc *, int);
+void *bha_ccb_alloc(void *);
 struct bha_ccb *bha_ccb_phys_kv(struct bha_softc *, u_long);
 void bha_queue_ccb(struct bha_softc *, struct bha_ccb *);
 void bha_collect_mbo(struct bha_softc *);
@@ -252,6 +252,12 @@ bha_attach(sc, bpd)
 	struct scsibus_attach_args saa;
 	int s;
 
+	TAILQ_INIT(&sc->sc_free_ccb);
+	TAILQ_INIT(&sc->sc_waiting_ccb);
+
+	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
+	scsi_iopool_init(&sc->sc_iopool, sc, bha_ccb_alloc, bha_ccb_free);
+
 	/*
 	 * Fill in the adapter.
 	 */
@@ -265,9 +271,7 @@ bha_attach(sc, bpd)
 	sc->sc_link.adapter_target = bpd->sc_scsi_dev;
 	sc->sc_link.adapter = &sc->sc_adapter;
 	sc->sc_link.openings = 4;
-
-	TAILQ_INIT(&sc->sc_free_ccb);
-	TAILQ_INIT(&sc->sc_waiting_ccb);
+	sc->sc_link.pool = &sc->sc_iopool;
 
 	s = splbio();
 	bha_inquire_setup_information(sc);
@@ -459,25 +463,17 @@ bha_reset_ccb(sc, ccb)
  * A ccb is put onto the free list.
  */
 void
-bha_free_ccb(sc, ccb)
-	struct bha_softc *sc;
-	struct bha_ccb *ccb;
+bha_ccb_free(xsc, xccb)
+	void *xsc, *xccb;
 {
-	int s;
-
-	s = splbio();
+	struct bha_softc *sc = xsc;
+	struct bha_ccb *ccb = xccb;
 
 	bha_reset_ccb(sc, ccb);
+
+	mtx_enter(&sc->sc_ccb_mtx);
 	TAILQ_INSERT_HEAD(&sc->sc_free_ccb, ccb, chain);
-
-	/*
-	 * If there were none, wake anybody waiting for one to come free,
-	 * starting with queued entries.
-	 */
-	if (TAILQ_NEXT(ccb, chain) == NULL)
-		wakeup(&sc->sc_free_ccb);
-
-	splx(s);
+	mtx_leave(&sc->sc_ccb_mtx);
 }
 
 integrate int
@@ -541,39 +537,22 @@ bha_create_ccbs(sc, ccbstore, count)
 
 /*
  * Get a free ccb
- *
- * If there are none, see if we can allocate a new one.  If so, put it in
- * the hash table too otherwise either return an error or sleep.
  */
-struct bha_ccb *
-bha_get_ccb(sc, flags)
-	struct bha_softc *sc;
-	int flags;
+void *
+bha_ccb_alloc(xsc)
+	void *xsc;
 {
+	struct bha_softc *sc = xsc;
 	struct bha_ccb *ccb;
-	int s;
 
-	s = splbio();
-
-	/*
-	 * If we can and have to, sleep waiting for one to come free
-	 * but only if we can't allocate a new one.
-	 */
-	for (;;) {
-		ccb = TAILQ_FIRST(&sc->sc_free_ccb);
-		if (ccb) {
-			TAILQ_REMOVE(&sc->sc_free_ccb, ccb, chain);
-			break;
-		}
-		if ((flags & SCSI_NOSLEEP) != 0)
-			goto out;
-		tsleep(&sc->sc_free_ccb, PRIBIO, "bhaccb", 0);
+	mtx_enter(&sc->sc_ccb_mtx);
+	ccb = TAILQ_FIRST(&sc->sc_free_ccb);
+	if (ccb) {
+		TAILQ_REMOVE(&sc->sc_free_ccb, ccb, chain);
+		ccb->flags |= CCB_ALLOC;
 	}
+	mtx_leave(&sc->sc_ccb_mtx);
 
-	ccb->flags |= CCB_ALLOC;
-
-out:
-	splx(s);
 	return (ccb);
 }
 
@@ -739,13 +718,13 @@ bha_done(sc, ccb)
 	 */
 #ifdef BHADIAG
 	if (ccb->flags & CCB_SENDING) {
-		panic("%s: exiting ccb still in transit!\n",
+		panic("%s: exiting ccb still in transit!",
 		    sc->sc_dev.dv_xname);
 		return;
 	}
 #endif
 	if ((ccb->flags & CCB_ALLOC) == 0) {
-		panic("%s: exiting ccb not allocated!\n",
+		panic("%s: exiting ccb not allocated!",
 		    sc->sc_dev.dv_xname);
 		return;
 	}
@@ -781,7 +760,6 @@ bha_done(sc, ccb)
 		} else
 			xs->resid = 0;
 	}
-	bha_free_ccb(sc, ccb);
 	scsi_done(xs);
 }
 
@@ -1270,22 +1248,13 @@ bha_scsi_cmd(xs)
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("bha_scsi_cmd\n"));
 
-	s = splbio();		/* protect the queue */
-
 	/*
 	 * get a ccb to use. If the transfer
 	 * is from a buf (possibly from interrupt time)
 	 * then we can't allow it to sleep
 	 */
 	flags = xs->flags;
-	if ((ccb = bha_get_ccb(sc, flags)) == NULL) {
-		xs->error = XS_NO_CCB;
-		scsi_done(xs);
-		splx(s);
-		return;
-	}
-
-	splx(s);		/* done playing with the queue */
+	ccb = xs->io;
 
 	ccb->xs = xs;
 	ccb->timeout = xs->timeout;
@@ -1395,7 +1364,6 @@ bha_scsi_cmd(xs)
 
 bad:
 	xs->error = XS_DRIVER_STUFFUP;
-	bha_free_ccb(sc, ccb);
 	scsi_done(xs);
 }
 
@@ -1453,7 +1421,7 @@ bha_timeout(arg)
 	 */
 	bha_collect_mbo(sc);
 	if (ccb->flags & CCB_SENDING)
-		panic("%s: not taking commands!\n", sc->sc_dev.dv_xname);
+		panic("%s: not taking commands!", sc->sc_dev.dv_xname);
 #endif
 
 	/*

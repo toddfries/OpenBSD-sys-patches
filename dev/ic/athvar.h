@@ -1,4 +1,4 @@
-/*      $OpenBSD: athvar.h,v 1.29 2010/07/02 06:06:30 reyk Exp $  */
+/*      $OpenBSD: athvar.h,v 1.32 2011/04/27 16:06:13 deraadt Exp $  */
 /*	$NetBSD: athvar.h,v 1.10 2004/08/10 01:03:53 dyoung Exp $	*/
 
 /*-
@@ -260,9 +260,7 @@ struct ath_softc {
 
 	struct ath_desc		*sc_desc;	/* TX/RX descriptors */
 	bus_dma_segment_t	sc_dseg;
-#ifndef __NetBSD__
 	int			sc_dnseg;	/* number of segments */
-#endif
 	bus_dmamap_t		sc_ddmamap;	/* DMA map for descriptors */
 	bus_addr_t		sc_desc_paddr;	/* physical addr of sc_desc */
 	bus_addr_t		sc_desc_len;	/* size of sc_desc */
@@ -307,7 +305,6 @@ struct ath_softc {
 	HAL_MIB_STATS		sc_mib_stats;	/* MIB counter statistics */
 
 #ifndef __FreeBSD__
-	void			*sc_powerhook;	/* power management hook */
 	u_int			sc_flags;	/* misc flags */
 #endif
 
@@ -407,9 +404,7 @@ typedef unsigned long u_intptr_t;
 int	ath_attach(u_int16_t, struct ath_softc *);
 int	ath_detach(struct ath_softc *, int);
 int	ath_enable(struct ath_softc *);
-void	ath_resume(struct ath_softc *, int);
-void	ath_suspend(struct ath_softc *, int);
-void	ath_power(int, void *);
+int	ath_activate(struct device *, int);
 int	ath_intr(void *);
 int	ath_enable(struct ath_softc *);
 

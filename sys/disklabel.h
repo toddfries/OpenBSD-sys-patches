@@ -1,4 +1,4 @@
-/*	$OpenBSD: disklabel.h,v 1.48 2010/04/25 06:15:16 deraadt Exp $	*/
+/*	$OpenBSD: disklabel.h,v 1.51 2011/06/03 21:14:11 matthew Exp $	*/
 /*	$NetBSD: disklabel.h,v 1.41 1996/05/10 23:07:37 mark Exp $	*/
 
 /*
@@ -403,6 +403,9 @@ struct partinfo {
 #define	DOSMBR_SIGNATURE	(0xaa55)
 #define	DOSMBR_SIGNATURE_OFF	(0x1fe)
 
+/* Maximum number of Extended Boot Records (EBRs) to traverse. */
+#define	DOS_MAXEBR	256
+
 struct dos_partition {
 	u_int8_t	dp_flag;	/* bootstrap flags */
 	u_int8_t	dp_shd;		/* starting head */
@@ -452,7 +455,7 @@ int	 checkdisklabel(void *, struct disklabel *, u_int64_t, u_int64_t);
 int	 setdisklabel(struct disklabel *, struct disklabel *, u_int);
 int	 readdisklabel(dev_t, void (*)(struct buf *), struct disklabel *, int);
 int	 writedisklabel(dev_t, void (*)(struct buf *), struct disklabel *);
-int	 bounds_check_with_label(struct buf *, struct disklabel *, int);
+int	 bounds_check_with_label(struct buf *, struct disklabel *);
 int	 readdoslabel(struct buf *, void (*)(struct buf *),
 	    struct disklabel *, int *, int);
 #ifdef CD9660

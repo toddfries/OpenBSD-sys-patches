@@ -1,22 +1,21 @@
-#	$OpenBSD: Makefile,v 1.24 2010/07/01 17:30:25 tedu Exp $
+#	$OpenBSD: Makefile,v 1.33 2011/07/07 22:02:17 tedu Exp $
 
 # Makefile for kernel tags files, init_sysent, etc.
 
 ARCH=	alpha amd64 armish aviion beagle hp300 \
 	hppa hppa64 i386 landisk loongson \
 	luna88k mac68k macppc mvme68k \
-	mvme88k mvmeppc palm sgi socppc \
+	mvme88k palm sgi socppc \
 	solbourne sparc sparc64 vax zaurus
 
-all:	init_sysent.c vnode_if.c
+all:
+	@echo "Doing nothing.  Did you want make syscalls?"
+
+syscalls:	init_sysent.c
 
 SYSCALLSRC = makesyscalls.sh syscalls.conf syscalls.master
 init_sysent.c syscalls.c ../sys/syscall.h ../sys/syscallargs.h: ${SYSCALLSRC}
 	sh makesyscalls.sh syscalls.conf syscalls.master
-
-VNODEIFSRC = vnode_if.sh vnode_if.src
-vnode_if.c ../sys/vnode_if.h: ${VNODEIFSRC}
-	sh vnode_if.sh vnode_if.src
 
 # Kernel tags:
 # tags files are built in the top-level directory for each architecture.
@@ -30,8 +29,8 @@ SYSTAGS=/var/db/sys_tags
 SYSDIR=/sys
 
 # Directories in which to place tags links (other than machine-dependent)
-DGEN=	compat compat/common compat/freebsd \
-	compat/linux compat/sunos compat/svr4 \
+DGEN=	compat compat/common \
+	compat/linux \
 	conf \
 	ddb \
 	dev dev/eisa dev/ic dev/isa dev/pci dev/pcmcia dev/cardbus \
@@ -40,8 +39,7 @@ DGEN=	compat compat/common compat/freebsd \
 	kern \
 	lib/libkern lib/libkern/arch/${MACHINE} \
 	lib/libkern/arch/${MACHINE_ARCH} \
-	miscfs miscfs/deadfs miscfs/fifofs \
-	miscfs/portal miscfs/procfs miscfs/specfs \
+	miscfs miscfs/deadfs miscfs/fifofs miscfs/procfs \
 	msdosfs \
 	net netinet netmpls \
 	nfs \

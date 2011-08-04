@@ -1,4 +1,4 @@
-/*	$OpenBSD: aps.c,v 1.19 2009/05/24 16:40:18 jsg Exp $	*/
+/*	$OpenBSD: aps.c,v 1.24 2011/04/04 10:17:13 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Jonathan Gray <jsg@openbsd.org>
  * Copyright (c) 2008 Can Erkin Acar <canacar@openbsd.org>
@@ -28,9 +28,17 @@
 #include <sys/sensors.h>
 #include <sys/timeout.h>
 #include <machine/bus.h>
+#include <sys/event.h>
 
 #include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
+
+#ifdef __i386__
+#include "apm.h"
+#include <machine/acpiapm.h>
+#include <machine/biosvar.h>
+#include <machine/apmvar.h>
+#endif
 
 #if defined(APSDEBUG)
 #define DPRINTF(x)		do { printf x; } while (0)
@@ -139,19 +147,18 @@ struct aps_softc {
 
 int	 aps_match(struct device *, void *, void *);
 void	 aps_attach(struct device *, struct device *, void *);
+int	 aps_activate(struct device *, int);
 
 int	 aps_init(bus_space_tag_t, bus_space_handle_t);
 int	 aps_read_data(struct aps_softc *);
 void	 aps_refresh_sensor_data(struct aps_softc *);
 void	 aps_refresh(void *);
-void	 aps_power(int, void *);
 int	 aps_do_io(bus_space_tag_t, bus_space_handle_t,
 		   unsigned char *, int, int);
 
 struct cfattach aps_ca = {
 	sizeof(struct aps_softc),
-	aps_match,
-	aps_attach
+	aps_match, aps_attach, NULL, aps_activate
 };
 
 struct cfdriver aps_cd = {
@@ -233,25 +240,17 @@ aps_do_io(bus_space_tag_t iot, bus_space_handle_t ioh,
 int
 aps_match(struct device *parent, void *match, void *aux)
 {
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh;
 	struct isa_attach_args *ia = aux;
-	int iobase;
+	bus_space_tag_t iot = ia->ia_iot;
+	bus_space_handle_t ioh;
+	int iobase = ia->ipa_io[0].base;
 	u_int8_t cr;
-
 	unsigned char iobuf[16];
-
-	iot = ia->ia_iot;
-	iobase = ia->ipa_io[0].base;
 
 	if (bus_space_map(iot, iobase, APS_ADDR_SIZE, 0, &ioh)) {
 		DPRINTF(("aps: can't map i/o space\n"));
 		return (0);
 	}
-
-
-	/* See if this machine has APS */
-
 	/* get APS mode */
 	iobuf[APS_CMD] = 0x13;
 	if (aps_do_io(iot, ioh, iobuf, APS_WRITE_0, APS_READ_1)) {
@@ -268,9 +267,14 @@ aps_match(struct device *parent, void *match, void *aux)
 	 */
 
 	cr = iobuf[APS_ARG1];
+	DPRINTF(("aps: state register 0x%x\n", cr));
+
+	if (aps_init(iot, ioh)) {
+		bus_space_unmap(iot, ioh, APS_ADDR_SIZE);
+		return (0);
+	}
 
 	bus_space_unmap(iot, ioh, APS_ADDR_SIZE);
-	DPRINTF(("aps: state register 0x%x\n", cr));
 
 	if (iobuf[APS_RET] != 0 || cr < 1 || cr > 5) {
 		DPRINTF(("aps0: unsupported state %d\n", cr));
@@ -282,7 +286,6 @@ aps_match(struct device *parent, void *match, void *aux)
 	ia->ipa_nmem = 0;
 	ia->ipa_nirq = 0;
 	ia->ipa_ndrq = 0;
-
 	return (1);
 }
 
@@ -306,9 +309,6 @@ aps_attach(struct device *parent, struct device *self, void *aux)
 	ioh = sc->aps_ioh;
 
 	printf("\n");
-
-	if (aps_init(iot, ioh))
-		goto out;
 
 	sc->sensors[APS_SENSOR_XACCEL].type = SENSOR_INTEGER;
 	snprintf(sc->sensors[APS_SENSOR_XACCEL].desc,
@@ -349,15 +349,9 @@ aps_attach(struct device *parent, struct device *self, void *aux)
 	}
 	sensordev_install(&sc->sensordev);
 
-	powerhook_establish(aps_power, (void *)sc);
-
 	/* Refresh sensor data every 0.5 seconds */
 	timeout_set(&aps_timeout, aps_refresh, sc);
 	timeout_add_msec(&aps_timeout, 500);
-	return;
-out:
-	printf("%s: failed to initialize\n", sc->sc_dev.dv_xname);
-	return;
 }
 
 int
@@ -374,22 +368,22 @@ aps_init(bus_space_tag_t iot, bus_space_handle_t ioh)
 		return (1);
 
 	if (iobuf[APS_RET] != 0 ||iobuf[APS_ARG3] != 0)
-		return (1);
+		return (2);
 
 	/* Test values from the Linux driver */
 	if ((iobuf[APS_ARG1] != 0 || iobuf[APS_ARG2] != 0x60) &&
 	    (iobuf[APS_ARG1] != 1 || iobuf[APS_ARG2] != 0))
-		return (1);
+		return (3);
 
 	/* command 0x14: set power */
 	iobuf[APS_CMD] = 0x14;
 	iobuf[APS_ARG1] = 0x01;
 
 	if (aps_do_io(iot, ioh, iobuf, APS_WRITE_1, APS_READ_0))
-		return (1);
+		return (4);
 
 	if (iobuf[APS_RET] != 0)
-		return (1);
+		return (5);
 
 	/* command 0x10: set config (sample rate and order) */
 	iobuf[APS_CMD] = 0x10;
@@ -398,17 +392,15 @@ aps_init(bus_space_tag_t iot, bus_space_handle_t ioh)
 	iobuf[APS_ARG3] = 0x02;
 
 	if (aps_do_io(iot, ioh, iobuf, APS_WRITE_3, APS_READ_0))
-		return (1);
+		return (6);
 
 	if (iobuf[APS_RET] != 0)
-		return (1);
+		return (7);
 
 	/* command 0x11: refresh data */
 	iobuf[APS_CMD] = 0x11;
 	if (aps_do_io(iot, ioh, iobuf, APS_WRITE_0, APS_READ_1))
-		return (1);
-	if (iobuf[APS_ARG1] != 0)
-		return (1);
+		return (8);
 
 	return (0);
 }
@@ -442,6 +434,10 @@ aps_refresh_sensor_data(struct aps_softc *sc)
 {
 	int64_t temp;
 	int i;
+#if NAPM > 0
+	extern int lid_suspend;
+	extern int apm_lidclose;
+#endif
 
 	if (aps_read_data(sc))
 		return;
@@ -471,6 +467,13 @@ aps_refresh_sensor_data(struct aps_softc *sc)
 	    (sc->aps_data.input &  APS_INPUT_KB) ? 1 : 0;
 	sc->sensors[APS_SENSOR_MSACT].value =
 	    (sc->aps_data.input & APS_INPUT_MS) ? 1 : 0;
+#if NAPM > 0
+	if (lid_suspend &&
+	    (sc->sensors[APS_SENSOR_LIDOPEN].value == 1) &&
+	    (sc->aps_data.input & APS_INPUT_LIDOPEN) == 0)
+		/* Inform APM that the lid has closed */
+		apm_lidclose = 1;
+#endif
 	sc->sensors[APS_SENSOR_LIDOPEN].value =
 	    (sc->aps_data.input & APS_INPUT_LIDOPEN) ? 1 : 0;
 }
@@ -484,28 +487,35 @@ aps_refresh(void *arg)
 	timeout_add_msec(&aps_timeout, 500);
 }
 
-void
-aps_power(int why, void *arg)
+int
+aps_activate(struct device *self, int act)
 {
-	struct aps_softc *sc = (struct aps_softc *)arg;
+	struct aps_softc *sc = (struct aps_softc *)self;
 	bus_space_tag_t iot = sc->aps_iot;
 	bus_space_handle_t ioh = sc->aps_ioh;
 	unsigned char iobuf[16];
 
-	if (why != PWR_RESUME) {
-		timeout_del(&aps_timeout);
-		return;
-	}
-	/*
-	 * Redo the init sequence on resume, because APS is 
-	 * as forgetful as it is deaf.
-	 */
+	/* check if we bombed during attach */
+	if (!timeout_initialized(&aps_timeout))
+		return (0);
 
-	/* get APS mode */
-	iobuf[APS_CMD] = 0x13;
-	if (aps_do_io(iot, ioh, iobuf, APS_WRITE_0, APS_READ_1)
-	    || aps_init(iot, ioh))
-		printf("aps: failed to wake up\n");
-	else
+	switch (act) {
+	case DVACT_SUSPEND:
+		timeout_del(&aps_timeout);
+		break;
+	case DVACT_RESUME:
+		/*
+		 * Redo the init sequence on resume, because APS is 
+		 * as forgetful as it is deaf.
+		 */
+
+		/* get APS mode */
+		iobuf[APS_CMD] = 0x13;
+		aps_do_io(iot, ioh, iobuf, APS_WRITE_0, APS_READ_1);
+
+		aps_init(iot, ioh);
 		timeout_add_msec(&aps_timeout, 500);
+		break;
+	}
+	return (0);
 }

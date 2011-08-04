@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.12 2008/03/30 18:24:02 miod Exp $	*/
+/*	$OpenBSD: db_machdep.h,v 1.14 2011/03/23 16:54:37 pirofti Exp $	*/
 /*	$NetBSD: db_machdep.h,v 1.6 1998/08/10 14:33:33 ragge Exp $	*/
 
 /* 
@@ -27,8 +27,8 @@
  * the rights to redistribute these changes.
  */
 
-#ifndef	_VAX_DB_MACHDEP_H_
-#define	_VAX_DB_MACHDEP_H_
+#ifndef	_MACHINE_DB_MACHDEP_H_
+#define	_MACHINE_DB_MACHDEP_H_
 
 /*
  * Machine-dependent defines for new kernel debugger.
@@ -70,9 +70,6 @@ extern db_regs_t	ddb_regs;	/* register state */
 #define	inst_return(ins)	(((ins)&0xff) == I_RET)
 #define	inst_call(ins)		(((ins)&0xff) == I_CALL)
 
-#define inst_load(ins)		0
-#define inst_store(ins)		0
-
 /* Prototypes */
 void	kdb_trap(struct trapframe *);
 
@@ -81,4 +78,4 @@ void	kdb_trap(struct trapframe *);
  */
 #define	DB_AOUT_SYMBOLS
 
-#endif	/* _VAX_DB_MACHDEP_H_ */
+#endif	/* _MACHINE_DB_MACHDEP_H_ */

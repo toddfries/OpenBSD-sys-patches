@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.32 2010/07/03 03:59:16 krw Exp $ 
+# $OpenBSD: GENERIC,v 1.42 2011/07/07 23:41:09 tedu Exp $ 
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -61,7 +61,6 @@ pci0		at iopxs? bus ?	# PCI/PCI-X support
 
 
 siop*		at pci? # NCR 538XX SCSI controllers(new)
-scsibus*	at siop?
 em*		at pci?
 re*		at pci?
 ral*		at pci?
@@ -71,6 +70,7 @@ pciide* 	at pci? flags 0x0000
 wd*		at pciide? flags 0x0000
 
 
+scsibus*	at scsi?
 sd*		at scsibus?	# SCSI disk drives
 #st*		at scsibus?	# SCSI tape drives
 cd*		at scsibus?	# SCSI CD-ROM drives
@@ -120,8 +120,6 @@ umidi*	at uhub?		# USB MIDI
 midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
-scsibus* at umass?
-atapiscsi* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
@@ -144,7 +142,7 @@ udav*	at uhub?		# Davicom DM9601 based Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
-uscanner* at uhub?		# USB Scanners
+uscanner* at uhub? disable	# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -152,22 +150,25 @@ ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500USB
 rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
+rsu*	at uhub?		# Realtek RTL8188SU/RTL8191SU/RTL8192SU
+urtwn*	at uhub?		# Realtek RTL8188CU/RTL8192CU
+athn*	at uhub?		# Atheros AR9002U
 #udcf*	at uhub?		# Gude Expert mouseCLOCK
 uthum*	at uhidev?		# TEMPerHUM sensor
+utwitch* at uhidev?		# YUREX BBU sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
 # Bluetooth controllers
-ubt*	at uhub?		# USB Bluetooth
-bthub*	at ubt?
-
-bthidev* at bthub?		# Bluetooth HID support
-btkbd*	at bthidev?
-btms*	at bthidev?
-wskbd*	at btkbd? mux 1
-wsmouse* at btms? mux 0
-btsco*	at bthub?		# Bluetooth audio support
-audio*	at btsco?
+#ubt*	at uhub? disable	# USB Bluetooth
+#bthub*	at ubt?
+#bthidev* at bthub?		# Bluetooth HID support
+#btkbd*	at bthidev?
+#btms*	at bthidev?
+#wskbd*	at btkbd? mux 1
+#wsmouse* at btms? mux 0
+#btsco*	at bthub?		# Bluetooth audio support
+#audio*	at btsco?
 
 amphy*		at mii?		# AMD 79C873 PHYs
 dcphy*		at mii?		# Digital Clone PHYs
@@ -200,6 +201,7 @@ option ONEWIREVERBOSE
 owid*	at onewire?		# ID
 owsbm*	at onewire?		# Smart Battery Monitor
 owtemp* at onewire?		# Temperature
+owctr*	at onewire?		# Counter device
 
 # mouse & keyboard multiplexor pseudo-devices
 pseudo-device	wsmux		2

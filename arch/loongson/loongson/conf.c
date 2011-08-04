@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.7 2010/07/03 03:59:16 krw Exp $ */
+/*	$OpenBSD: conf.c,v 1.12 2011/01/14 19:04:08 jasper Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -80,17 +80,11 @@ struct bdevsw	bdevsw[] =
 	bdev_notdef(),			/* 15:  */
 };
 
-int	nblkdev = sizeof (bdevsw) / sizeof (bdevsw[0]);
+int	nblkdev = nitems(bdevsw);
 
 /*
  *	Character devices.
  */
-
-/* open, close, write, ioctl */
-#define	cdev_lpt_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
-	dev_init(c,n,write), dev_init(c,n,ioctl), (dev_type_stop((*))) enodev, \
-	0, seltrue, (dev_type_mmap((*))) enodev }
 
 #define mmread mmrw
 #define mmwrite mmrw
@@ -136,9 +130,11 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
+#include "uscanner.h"
 
 #include "bthub.h"
 #include "vscsi.h"
+#include "pppx.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -221,9 +217,11 @@ struct cdevsw	cdevsw[] =
 	cdev_bthub_init(NBTHUB,bthub),	/* 68: bluetooth hub */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 69: vscsi */
 	cdev_disk_init(1,diskmap),	/* 70: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 71: pppx */
+	cdev_usbdev_init(NUSCANNER,uscanner),	/* 72: USB scanners */
 };
 
-int	nchrdev = sizeof (cdevsw) / sizeof (cdevsw[0]);
+int	nchrdev = nitems(cdevsw);
 
 /*
  * Swapdev is a fake device implemented
@@ -296,14 +294,8 @@ int chrtoblktbl[] =  {
 	/* 23 */	6		/* ccd */
 };
 
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(int);
+int nchrtoblktbl = nitems(chrtoblktbl);
 
-/*
- * This entire table could be autoconfig()ed but that would mean that
- * the kernel's idea of the console would be out of sync with that of
- * the standalone boot.  I think it best that they both use the same
- * known algorithm unless we see a pressing need otherwise.
- */
 #include <dev/cons.h>
 
 cons_decl(ws);

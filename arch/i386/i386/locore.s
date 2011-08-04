@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.130 2010/07/03 04:54:32 kettenis Exp $	*/
+/*	$OpenBSD: locore.s,v 1.139 2011/07/09 01:49:16 pirofti Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -47,14 +47,8 @@
 
 #include <sys/errno.h>
 #include <sys/syscall.h>
-#ifdef COMPAT_SVR4
-#include <compat/svr4/svr4_syscall.h>
-#endif
 #ifdef COMPAT_LINUX
 #include <compat/linux/linux_syscall.h>
-#endif
-#ifdef COMPAT_FREEBSD
-#include <compat/freebsd/freebsd_syscall.h>
 #endif
 
 #include <machine/cputypes.h>
@@ -112,6 +106,7 @@
 	movl	$GSEL(GDATA_SEL, SEL_KPL),%eax	; \
 	movw	%ax,%ds		; \
 	movw	%ax,%es		; \
+	xorl	%eax,%eax	; /* $GSEL(GNULL_SEL, SEL_KPL) == 0 */ \
 	movw	%ax,%gs		; \
 	pushl	%fs		; \
 	movl	$GSEL(GCPU_SEL, SEL_KPL),%eax	; \
@@ -128,7 +123,6 @@
 	popl	%edx		; \
 	popl	%ecx		; \
 	popl	%eax		; \
-	sti			; \
 	addl	$8,%esp		; \
 	iret
 
@@ -530,11 +524,7 @@ try586:	/* Use the `cpuid' instruction. */
 	movl	%edx,%ecx
 	subl	%eax,%ecx
 	shrl	$PGSHIFT,%ecx
-#ifdef DDB
-	orl	$(PG_V|PG_KW),%eax
-#else
 	orl	$(PG_V|PG_KR),%eax
-#endif
 	fillkpt
 
 	/* Map the data, BSS, and bootstrap tables read-write. */
@@ -653,22 +643,6 @@ _C_LABEL(esigcode):
 
 /*****************************************************************************/
 
-#ifdef COMPAT_SVR4
-NENTRY(svr4_sigcode)
-	call	*SVR4_SIGF_HANDLER(%esp)
-	leal	SVR4_SIGF_UC(%esp),%eax	# ucp (the call may have clobbered the
-					# copy at SIGF_UCP(%esp))
-	pushl	%eax
-	pushl	$1			# setcontext(p) == syscontext(1, p)
-	pushl	%eax			# junk to fake return address
-	movl	$SVR4_SYS_context,%eax
-	int	$0x80			# enter kernel with args on stack
-	movl	$SVR4_SYS_exit,%eax
-	int	$0x80			# exit if sigreturn fails
-	.globl	_C_LABEL(svr4_esigcode)
-_C_LABEL(svr4_esigcode):
-#endif
-
 /*****************************************************************************/
 
 #ifdef COMPAT_LINUX
@@ -686,26 +660,6 @@ NENTRY(linux_sigcode)
 	int	$0x80			# exit if sigreturn fails
 	.globl	_C_LABEL(linux_esigcode)
 _C_LABEL(linux_esigcode):
-#endif
-
-/*****************************************************************************/
-
-#ifdef COMPAT_FREEBSD
-/*
- * Signal trampoline; copied to top of user stack.
- */
-NENTRY(freebsd_sigcode)
-	call	*FREEBSD_SIGF_HANDLER(%esp)
-	leal	FREEBSD_SIGF_SC(%esp),%eax # scp (the call may have clobbered
-					# the copy at SIGF_SCP(%esp))
-	pushl	%eax
-	pushl	%eax			# junk to fake return address
-	movl	$FREEBSD_SYS_sigreturn,%eax
-	int	$0x80			# enter kernel with args on stack
-	movl	$FREEBSD_SYS_exit,%eax
-	int	$0x80			# exit if sigreturn fails
-	.globl	_C_LABEL(freebsd_esigcode)
-_C_LABEL(freebsd_esigcode):
 #endif
 
 /*****************************************************************************/
@@ -882,7 +836,7 @@ ENTRY(copyout)
 	cmpl	$VM_MAXUSER_ADDRESS,%edx
 	ja	_C_LABEL(copy_fault)
 
-3:	GET_CURPCB(%edx)
+	GET_CURPCB(%edx)
 	movl	$_C_LABEL(copy_fault),PCB_ONFAULT(%edx)
 
 	/* bcopy(%esi, %edi, %eax); */
@@ -935,7 +889,7 @@ ENTRY(copyin)
 	cmpl	$VM_MAXUSER_ADDRESS,%edx
 	ja	_C_LABEL(copy_fault)
 
-3:	/* bcopy(%esi, %edi, %eax); */
+	/* bcopy(%esi, %edi, %eax); */
 	cld
 	movl	%eax,%ecx
 	shrl	$2,%ecx
@@ -1488,6 +1442,7 @@ IDTVEC(align)
  * This will cause the process to get a SIGBUS.
  */
 NENTRY(resume_iret)
+	sti
 	ZTRAP(T_PROTFLT)
 NENTRY(resume_pop_ds)
 	pushl	%es
@@ -1495,7 +1450,7 @@ NENTRY(resume_pop_ds)
 	movw	%ax,%es
 NENTRY(resume_pop_es)
 	pushl	%gs
-	movl	$GSEL(GDATA_SEL, SEL_KPL),%eax
+	xorl	%eax,%eax	/* $GSEL(GNULL_SEL, SEL_KPL) == 0 */
 	movw	%ax,%gs
 NENTRY(resume_pop_gs)
 	pushl	%fs
@@ -1503,6 +1458,7 @@ NENTRY(resume_pop_gs)
 	movw	%ax,%fs
 NENTRY(resume_pop_fs)
 	movl	$T_PROTFLT,TF_TRAPNO(%esp)
+	sti
 	jmp	calltrap
 
 NENTRY(alltraps)
@@ -1550,26 +1506,10 @@ calltrap:
 #endif /* DIAGNOSTIC */
 
 /*
- * Old call gate entry for syscall
- */
-IDTVEC(osyscall)
-	/* Set eflags in trap frame. */
-	pushfl
-	popl	8(%esp)
-	/* Turn off trace flag and nested task. */
-	pushfl
-	andb	$~((PSL_T|PSL_NT)>>8),1(%esp)
-	popfl
-	pushl	$7		# size of instruction for restart
-	jmp	syscall1
-IDTVEC(osyscall_end)
-
-/*
  * Trap gate entry for syscall
  */
 IDTVEC(syscall)
 	pushl	$2		# size of instruction for restart
-syscall1:
 	pushl	$T_ASTFLT	# trap # for doing ASTs
 	INTRENTRY
 	pushl	%esp
@@ -1754,6 +1694,40 @@ ENTRY(acpi_release_global_lock)
 	andl	$1, %eax
 	ret
 #endif
+
+/*
+ * ucas_32(volatile int32_t *uptr, int32_t old, int32_t new);
+ */
+ENTRY(ucas_32)
+#ifdef DDB
+	pushl	%ebp
+	movl	%esp,%ebp
+#endif
+	pushl	%esi
+	pushl	%edi
+	pushl	$0	
+	
+	movl	16+FPADD(%esp),%esi
+	movl	20+FPADD(%esp),%eax
+	movl	24+FPADD(%esp),%edi
+
+	cmpl    $VM_MAXUSER_ADDRESS-4, %esi
+	ja      _C_LABEL(copy_fault)
+
+	GET_CURPCB(%edx)
+	movl	$_C_LABEL(copy_fault),PCB_ONFAULT(%edx)
+
+	lock
+	cmpxchgl %edi, (%esi)
+
+	popl	PCB_ONFAULT(%edx)
+	popl	%edi
+	popl	%esi
+	xorl	%eax,%eax
+#ifdef DDB
+	leave
+#endif
+	ret
 
 #if NLAPIC > 0
 #include <i386/i386/apicvec.s>

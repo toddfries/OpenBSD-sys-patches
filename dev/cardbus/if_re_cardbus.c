@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_cardbus.c,v 1.19 2010/03/27 21:40:13 jsg Exp $	*/
+/*	$OpenBSD: if_re_cardbus.c,v 1.22 2011/04/02 17:47:04 jasper Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -76,8 +76,6 @@ void	re_cardbus_attach(struct device *, struct device *, void *);
 int	re_cardbus_detach(struct device *, int);
 void	re_cardbus_setup(struct rl_softc *);
 
-void	re_cardbus_powerhook(int, void *);
-
 /*
  * Cardbus autoconfig definitions
  */
@@ -100,8 +98,7 @@ int
 re_cardbus_probe(struct device *parent, void *match, void *aux)
 {
 	return (cardbus_matchbyid((struct cardbus_attach_args *)aux,
-	    re_cardbus_devices,
-	    sizeof(re_cardbus_devices)/sizeof(re_cardbus_devices[0])));
+	    re_cardbus_devices, nitems(re_cardbus_devices)));
 }
 
 /*
@@ -160,12 +157,8 @@ re_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	}
 	snprintf(intrstr, sizeof(intrstr), "irq %d", ca->ca_intrline);
 
-	sc->sc_pwrhook = powerhook_establish(re_cardbus_powerhook, sc);
-
 	/* Call bus-independent (common) attach routine */
 	if (re_attach(sc, intrstr)) {
-		if (sc->sc_pwrhook != NULL)
-			powerhook_disestablish(sc->sc_pwrhook);
 		cardbus_intr_disestablish(ct->ct_cc, ct->ct_cf, csc->sc_ih);
 		Cardbus_mapreg_unmap(ct, csc->sc_bar_reg, sc->rl_btag,
 		    sc->rl_bhandle, csc->sc_mapsize);
@@ -259,10 +252,6 @@ re_cardbus_detach(struct device *self, int flags)
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 
-	/* No more hooks */
-	if (sc->sc_pwrhook != NULL)
-		powerhook_disestablish(sc->sc_pwrhook);
-
 	/* Disable interrupts */
 	if (csc->sc_ih != NULL)
 		cardbus_intr_disestablish(ct->ct_cc, ct->ct_cf, csc->sc_ih);
@@ -272,14 +261,4 @@ re_cardbus_detach(struct device *self, int flags)
 	    csc->sc_mapsize);
 
 	return (0);
-}
-
-void
-re_cardbus_powerhook(int why, void *arg)
-{
-	struct rl_softc *sc = arg;
-	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-
-	if (why == PWR_RESUME)
-		re_init(ifp);
 }

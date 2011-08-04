@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.97 2010/07/08 19:42:46 jsg Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.101 2011/07/06 02:42:28 henning Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -89,8 +89,7 @@
 
 #ifdef INET
 #include <netinet/ip.h>
-#include <netinet/ip_icmp.h>
-#endif /*INET*/
+#endif
 
 #include <netinet/in_pcb.h>
 #include <netinet6/in6_var.h>
@@ -156,7 +155,7 @@ ip6_init(void)
 		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW &&
 		    pr->pr_protocol < IPPROTO_MAX)
 			ip6_protox[pr->pr_protocol] = pr - inet6sw;
-	ip6intrq.ifq_maxlen = ip6qmaxlen;
+	IFQ_SET_MAXLEN(&ip6intrq, ip6qmaxlen);
 	ip6_randomid_init();
 	nd6_init();
 	frag6_init();
@@ -333,7 +332,7 @@ ip6_input(struct mbuf *m)
          * Packet filter
          */
 	odst = ip6->ip6_dst;
-	if (pf_test6(PF_IN, m->m_pkthdr.rcvif, &m, NULL) != PF_PASS)
+	if (pf_test(AF_INET6, PF_IN, m->m_pkthdr.rcvif, &m, NULL) != PF_PASS)
 		goto bad;
 	if (m == NULL)
 		return;
@@ -730,7 +729,7 @@ ip6_input(struct mbuf *m)
 	m_freem(m);
 }
 
-/* scan packet for RH0 routing header. Mostly stolen from pf.c:pf_test6() */
+/* scan packet for RH0 routing header. Mostly stolen from pf.c:pf_test() */
 int
 ip6_check_rh0hdr(struct mbuf *m)
 {
@@ -975,8 +974,8 @@ ip6_process_hopopts(struct mbuf *m, u_int8_t *opthead, int hbhlen,
 /*
  * Unknown option processing.
  * The third argument `off' is the offset from the IPv6 header to the option,
- * which is necessary if the IPv6 header the and option header and IPv6 header
- * is not continuous in order to return an ICMPv6 error.
+ * which allows returning an ICMPv6 error even if the IPv6 header and the
+ * option header are not continuous.
  */
 int
 ip6_unknown_opt(u_int8_t *optp, struct mbuf *m, int off)

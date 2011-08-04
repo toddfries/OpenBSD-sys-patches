@@ -1,4 +1,4 @@
-/* 	$OpenBSD: vmparam.h,v 1.4 2007/06/09 05:57:32 drahn Exp $	*/
+/* 	$OpenBSD: vmparam.h,v 1.7 2011/05/30 22:25:20 oga Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.23 2003/05/22 05:47:07 thorpej Exp $	*/
 
 /*
@@ -30,14 +30,17 @@
  * SUCH DAMAGE.
  */
 
-#ifndef	_ARMISH_VMPARAM_H_
-#define	_ARMISH_VMPARAM_H_
+#ifndef	_MACHINE_VMPARAM_H_
+#define	_MACHINE_VMPARAM_H_
 
 #define	ARM_KERNEL_BASE		0xc0000000
 
 /* Allow armish to have bigger DSIZ than generic arm, allow user to override */
 #ifndef	MAXDSIZ
 #define	MAXDSIZ		(1024*1024*1024)		/* max data size */
+#endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ				/* heap gap size */
 #endif
 
 #include <arm/vmparam.h>
@@ -90,8 +93,4 @@
  */
 #endif /* _KERNEL */
 
-#define	VM_NFREELIST		2
-#define	VM_FREELIST_DEFAULT	0
-
-
-#endif	/* _ARMISH_VMPARAM_H_ */
+#endif	/* _MACHINE_VMPARAM_H_ */

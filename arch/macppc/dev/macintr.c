@@ -1,4 +1,4 @@
-/*	$OpenBSD: macintr.c,v 1.39 2009/10/01 20:19:18 kettenis Exp $	*/
+/*	$OpenBSD: macintr.c,v 1.42 2011/04/15 20:52:55 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1995 Per Fogelstrom
@@ -251,6 +251,8 @@ printf("vI %d ", irq);
 		m_intrtype[irq] = type;
 		break;
 	case IST_EDGE:
+		intr_shared_edge = 1;
+		/* FALLTHROUGH */
 	case IST_LEVEL:
 		if (type == m_intrtype[irq])
 			break;
@@ -288,8 +290,7 @@ printf("vI %d ", irq);
 	ih->ih_next = NULL;
 	ih->ih_level = level;
 	ih->ih_irq = irq;
-	evcount_attach(&ih->ih_count, name, (void *)&m_hwirq[irq],
-	    &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &m_hwirq[irq]);
 	*p = ih;
 
 	return (ih);
@@ -374,7 +375,7 @@ intr_calculatemasks()
 		for (irq = 0; irq < ICU_LEN; irq++)
 			if (m_intrlevel[irq] & (1 << level))
 				irqs |= 1 << irq;
-		imask[level] = irqs | SINT_ALLMASK;
+		cpu_imask[level] = irqs | SINT_ALLMASK;
 	}
 
 	/*
@@ -384,22 +385,22 @@ intr_calculatemasks()
 	 * Enforce a hierarchy that gives slow devices a better chance at not
 	 * dropping data.
 	 */
-	imask[IPL_NET] |= imask[IPL_BIO];
-	imask[IPL_TTY] |= imask[IPL_NET];
-	imask[IPL_VM] |= imask[IPL_TTY];
-	imask[IPL_CLOCK] |= imask[IPL_VM] | SPL_CLOCKMASK;
+	cpu_imask[IPL_NET] |= cpu_imask[IPL_BIO];
+	cpu_imask[IPL_TTY] |= cpu_imask[IPL_NET];
+	cpu_imask[IPL_VM] |= cpu_imask[IPL_TTY];
+	cpu_imask[IPL_CLOCK] |= cpu_imask[IPL_VM] | SPL_CLOCKMASK;
 
 	/*
 	 * These are pseudo-levels.
 	 */
-	imask[IPL_NONE] = 0x00000000;
-	imask[IPL_HIGH] = 0xffffffff;
+	cpu_imask[IPL_NONE] = 0x00000000;
+	cpu_imask[IPL_HIGH] = 0xffffffff;
 
 	/* And eventually calculate the complete masks. */
 	for (irq = 0; irq < ICU_LEN; irq++) {
 		register int irqs = 1 << irq;
 		for (q = m_intrhand[irq]; q; q = q->ih_next)
-			irqs |= imask[q->ih_level];
+			irqs |= cpu_imask[q->ih_level];
 		m_intrmask[irq] = irqs | SINT_ALLMASK;
 	}
 
@@ -500,7 +501,7 @@ mac_ext_intr()
 {
 	int irq = 0;
 	int o_imen, r_imen;
-	int pcpl;
+	int pcpl, ret;
 	struct cpu_info *ci = curcpu();
 	struct intrhand *ih;
 	volatile unsigned long int_state;
@@ -527,8 +528,12 @@ start:
 
 		ih = m_intrhand[irq];
 		while (ih) {
-			if ((*ih->ih_fun)(ih->ih_arg))
+			ret = ((*ih->ih_fun)(ih->ih_arg));
+			if (ret) {
 				ih->ih_count.ec_count++;
+				if (intr_shared_edge == 0 && ret == 1)
+					break;
+			}
 			ih = ih->ih_next;
 		}
 

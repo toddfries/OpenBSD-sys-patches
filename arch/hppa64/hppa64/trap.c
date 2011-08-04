@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.10 2010/07/01 04:33:59 jsing Exp $	*/
+/*	$OpenBSD: trap.c,v 1.21 2011/07/09 02:12:16 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -27,22 +27,29 @@
 #include <sys/signalvar.h>
 #include <sys/user.h>
 
-#include <net/netisr.h>
-
 #include "systrace.h"
 #include <dev/systrace.h>
 
 #include <uvm/uvm.h>
 
 #include <machine/autoconf.h>
+#include <machine/cpufunc.h>
 #include <machine/psl.h>
 
-#include <machine/db_machdep.h>	/* XXX always needed for inst_store() */
 #ifdef DDB
+#include <machine/db_machdep.h>
+#endif
+
 #ifdef TRAPDEBUG
 #include <ddb/db_output.h>
 #endif
-#endif
+
+static __inline int inst_store(u_int ins) {
+	return (ins & 0xf0000000) == 0x60000000 ||	/* st */
+	       (ins & 0xf4000200) == 0x24000200 ||	/* fst/cst */
+	       (ins & 0xfc000200) == 0x0c000200 ||	/* stby */
+	       (ins & 0xfc0003c0) == 0x0c0001c0;	/* ldcw */
+}
 
 const char *trap_type[] = {
 	"invalid",
@@ -155,11 +162,8 @@ userret(struct proc *p, register_t pc, u_quad_t oticks)
 }
 
 void
-trap(type, frame)
-	int type;
-	struct trapframe *frame;
+trap(int type, struct trapframe *frame)
 {
-	extern int cpl;	/* from locore.o */
 	struct proc *p = curproc;
 	vaddr_t va;
 	struct vm_map *map;
@@ -172,8 +176,9 @@ trap(type, frame)
 	const char *tts;
 	vm_fault_t fault = VM_FAULT_INVALID;
 #ifdef DIAGNOSTIC
-	long oldcpl;
+	long oldcpl = curcpu()->ci_cpl;
 #endif
+	u_long mask;
 
 	trapnum = type & ~T_USER;
 	opcode = frame->tf_iir;
@@ -222,7 +227,8 @@ trap(type, frame)
 #endif
 	if (trapnum != T_INTERRUPT) {
 		uvmexp.traps++;
-	/* TODO	mtctl(frame->tf_eiem, CR_EIEM); */
+		mtctl(frame->tf_eiem, CR_EIEM);
+	        ssm(PSL_I, mask);
 	}
 
 	switch (type) {
@@ -277,9 +283,13 @@ trap(type, frame)
 		break;
 
 	case T_EXCEPTION | T_USER: {
-		u_int64_t *fpp = (u_int64_t *)frame->tf_cr30;
+		struct hppa_fpstate *hfp;
+		u_int64_t *fpp;
 		u_int32_t *pex;
 		int i, flt;
+
+		hfp = (struct hppa_fpstate *)frame->tf_cr30;
+		fpp = (u_int64_t *)&hfp->hfp_regs;
 
 		pex = (u_int32_t *)&fpp[0];
 		for (i = 0, pex++; i < 7 && !*pex; i++, pex++);
@@ -461,9 +471,10 @@ printf("here\n");
 					frame->tf_iir = 0;
 #endif
 				} else {
-					panic("trap: "
-					    "uvm_fault(%p, %lx, %d, %d): %d",
+					printf("trap: "
+					    "uvm_fault(%p, %lx, %d, %d): %d\n",
 					    map, va, fault, vftype, ret);
+					goto dead_end;
 				}
 			}
 		}
@@ -476,8 +487,7 @@ printf("here\n");
 
 	case T_INTERRUPT:
 	case T_INTERRUPT | T_USER:
-/*		cpu_intr(frame); */
-printf("eirr 0x%08x\n", mfctl(CR_EIRR));
+		cpu_intr(frame);
 		break;
 
 	case T_CONDITION:
@@ -515,21 +525,21 @@ printf("eirr 0x%08x\n", mfctl(CR_EIRR));
 		}
 		/* FALLTHROUGH to unimplemented */
 	default:
-#if 1
-if (kdb_trap (type, va, frame))
-	return;
+#ifdef TRAPDEBUG
+		if (kdb_trap(type, va, frame))
+			return;
 #endif
 		panic("trap: unimplemented \'%s\' (%d)", tts, trapnum);
 	}
 
 #ifdef DIAGNOSTIC
-	if (cpl != oldcpl)
+	if (curcpu()->ci_cpl != oldcpl)
 		printf("WARNING: SPL (%d) NOT LOWERED ON "
-		    "TRAP (%d) EXIT\n", cpl, trapnum);
+		    "TRAP (%d) EXIT\n", curcpu()->ci_cpl, trapnum);
 #endif
 
 	if (trapnum != T_INTERRUPT)
-		splx(cpl);	/* process softints */
+		splx(curcpu()->ci_cpl);	/* process softints */
 
 	/*
 	 * in case we were interrupted from the syscall gate page
@@ -543,8 +553,7 @@ if (kdb_trap (type, va, frame))
 }
 
 void
-child_return(arg)
-	void *arg;
+child_return(void *arg)
 {
 	struct proc *p = (struct proc *)arg;
 	struct trapframe *tf = p->p_md.md_regs;
@@ -560,7 +569,9 @@ child_return(arg)
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p,
-		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
+		    (p->p_flag & P_THREAD) ? SYS_rfork :
+		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
+		    0, 0);
 #endif
 }
 
@@ -572,16 +583,13 @@ void	syscall(struct trapframe *frame);
 void
 syscall(struct trapframe *frame)
 {
-	extern int cpl;	/* from locore.o */
 	register struct proc *p = curproc;
 	register const struct sysent *callp;
-	int retq, nsys, code, argsize, argoff, oerror, error;
+	int nsys, code, oerror, error;
 	register_t args[8], rval[2];
 #ifdef DIAGNOSTIC
-	long oldcpl;
+	long oldcpl = curcpu()->ci_cpl;
 #endif
-
-	/* TODO syscall */
 
 	uvmexp.syscalls++;
 
@@ -592,34 +600,27 @@ syscall(struct trapframe *frame)
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
 
-	argoff = 4; retq = 0;
 	switch (code = frame->tf_r1) {
 	case SYS_syscall:
+	case SYS___syscall:
 		code = frame->tf_args[0];
 		args[0] = frame->tf_args[1];
 		args[1] = frame->tf_args[2];
 		args[2] = frame->tf_args[3];
-		argoff = 3;
-		break;
-	case SYS___syscall:
-		if (callp != sysent)
-			break;
-		/*
-		 * this works, because quads get magically swapped
-		 * due to the args being laid backwards on the stack
-		 * and then copied in words
-		 */
-		code = frame->tf_args[0];
-		args[0] = frame->tf_args[2];
-		args[1] = frame->tf_args[3];
-		argoff = 2;
-		retq = 1;
+		args[3] = frame->tf_args[4];
+		args[4] = frame->tf_args[5];
+		args[5] = frame->tf_args[6];
+		args[6] = frame->tf_args[7];
 		break;
 	default:
 		args[0] = frame->tf_args[0];
 		args[1] = frame->tf_args[1];
 		args[2] = frame->tf_args[2];
 		args[3] = frame->tf_args[3];
+		args[4] = frame->tf_args[4];
+		args[5] = frame->tf_args[5];
+		args[6] = frame->tf_args[6];
+		args[7] = frame->tf_args[7];
 		break;
 	}
 
@@ -629,43 +630,6 @@ syscall(struct trapframe *frame)
 		callp += code;
 
 	oerror = error = 0;
-	if ((argsize = callp->sy_argsize)) {
-		int i;
-
-/* TODO syscallargs */
-
-		/*
-		 * coming from syscall() or __syscall we must be
-		 * having one of those w/ a 64 bit arguments,
-		 * which needs a word swap due to the order
-		 * of the arguments on the stack.
-		 * this assumes that none of 'em are called
-		 * by their normal syscall number, maybe a regress
-		 * test should be used, to watch the behaviour.
-		 */
-		if (!error && argoff < 4) {
-			int t;
-
-			i = 0;
-			switch (code) {
-			case SYS_lseek:		retq = 0;
-			case SYS_truncate:
-			case SYS_ftruncate:	i = 2;	break;
-			case SYS_preadv:
-			case SYS_pwritev:
-			case SYS_pread:
-			case SYS_pwrite:	i = 4;	break;
-			case SYS_mquery:
-			case SYS_mmap:		i = 6;	break;
-			}
-
-			if (i) {
-				t = args[i];
-				args[i] = args[i + 1];
-				args[i + 1] = t;
-			}
-		}
-	}
 
 #ifdef SYSCALL_DEBUG
 	scdebug_call(p, code, args);
@@ -674,9 +638,6 @@ syscall(struct trapframe *frame)
 	if (KTRPOINT(p, KTR_SYSCALL))
 		ktrsyscall(p, code, callp->sy_argsize, args);
 #endif
-	if (error)
-		goto bad;
-
 	rval[0] = 0;
 	rval[1] = frame->tf_ret1;
 #if NSYSTRACE > 0
@@ -688,7 +649,7 @@ syscall(struct trapframe *frame)
 	switch (error) {
 	case 0:
 		frame->tf_ret0 = rval[0];
-		frame->tf_ret1 = rval[!retq];
+		frame->tf_ret1 = rval[1];
 		frame->tf_r1 = 0;
 		break;
 	case ERESTART:
@@ -697,7 +658,6 @@ syscall(struct trapframe *frame)
 	case EJUSTRETURN:
 		break;
 	default:
-	bad:
 		if (p->p_emul->e_errno)
 			error = p->p_emul->e_errno[error];
 		frame->tf_r1 = error;
@@ -714,12 +674,13 @@ syscall(struct trapframe *frame)
 		ktrsysret(p, code, oerror, rval[0]);
 #endif
 #ifdef DIAGNOSTIC
-	if (cpl != oldcpl) {
+	if (curcpu()->ci_cpl != oldcpl) {
 		printf("WARNING: SPL (0x%x) NOT LOWERED ON "
 		    "syscall(0x%x, 0x%x, 0x%x, 0x%x...) EXIT, PID %d\n",
-		    cpl, code, args[0], args[1], args[2], p->p_pid);
-		cpl = oldcpl;
+		    curcpu()->ci_cpl, code, args[0], args[1], args[2],
+		    p->p_pid);
+		curcpu()->ci_cpl = oldcpl;
 	}
 #endif
-	splx(cpl);	/* process softints */
+	splx(curcpu()->ci_cpl);	/* process softints */
 }

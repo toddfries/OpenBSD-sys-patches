@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_disk.h,v 1.26 2010/05/05 11:33:26 dlg Exp $	*/
+/*	$OpenBSD: scsi_disk.h,v 1.32 2011/07/08 07:28:45 dlg Exp $	*/
 /*	$NetBSD: scsi_disk.h,v 1.10 1996/07/05 16:19:05 christos Exp $	*/
 
 /*
@@ -14,7 +14,7 @@
  * Grenoble, FRANCE
  *
  * 		All Rights Reserved
- * 
+ *
  *   Permission to use, copy, modify, and distribute this software and
  * its documentation for any purpose and without fee is hereby granted,
  * provided that the above copyright notice appears in all copies and
@@ -23,7 +23,7 @@
  * Foundation not be used in advertising or publicity pertaining to
  * distribution of the software without specific, written prior
  * permission.
- * 
+ *
  *   OSF DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE
  * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS,
  * IN NO EVENT SHALL OSF BE LIABLE FOR ANY SPECIAL, INDIRECT, OR
@@ -39,7 +39,7 @@
  *
  * TRW Financial Systems, in accordance with their agreement with Carnegie
  * Mellon University, makes this software available to CMU to distribute
- * or use in any manner that they see fit as long as this message is kept with 
+ * or use in any manner that they see fit as long as this message is kept with
  * the software. For this reason TFS also grants any other persons or
  * organisations permission to use or modify this software.
  *
@@ -192,6 +192,52 @@ struct scsi_rw_16 {
 	u_int8_t control;
 };
 
+struct scsi_write_same_10 {
+	u_int8_t opcode;
+	u_int8_t flags;
+#define WRITE_SAME_F_LBDATA	(1 << 1)
+#define WRITE_SAME_F_PBDATA	(1 << 2)
+	u_int8_t lba[4];
+	u_int8_t group_number;
+	u_int8_t length[2];
+	u_int8_t control;
+};
+
+struct scsi_write_same_16 {
+	u_int8_t opcode;
+	u_int8_t flags;
+/* includes WRITE SAME 10 flags */
+#define WRITE_SAME_F_UNMAP	(1 << 3)
+#define WRITE_SAME_F_ANCHOR	(1 << 4)
+	u_int8_t lba[8];
+	u_int8_t length[4];
+	u_int8_t group_number;
+	u_int8_t control;
+};
+
+struct scsi_unmap {
+	u_int8_t opcode;
+	u_int8_t anchor;
+	u_int8_t _reserved[4];
+	u_int8_t group_number;
+	u_int8_t list_len[2];
+	u_int8_t control;
+};
+
+struct scsi_unmap_data {
+	u_int8_t data_length[2];
+	u_int8_t desc_length[2];
+	u_int8_t _reserved[4];
+
+	/* followed by struct scsi_unmap_desc */
+};
+
+struct scsi_unmap_desc {
+	u_int8_t logical_addr[8];
+	u_int8_t logical_blocks[4];
+	u_int8_t _reserved[4];
+};
+
 struct scsi_read_capacity {
 	u_int8_t opcode;
 	u_int8_t byte2;
@@ -253,6 +299,9 @@ struct scsi_synchronize_cache {
 #define READ_16			0x88
 #define WRITE_16		0x8a
 #define SYNCHRONIZE_CACHE	0x35
+#define WRITE_SAME_10		0x41
+#define WRITE_SAME_16		0x93
+#define UNMAP			0x42
 
 
 struct scsi_read_cap_data {
@@ -380,14 +429,14 @@ struct page_caching_mode {
 	u_int8_t pg_code;	/* page code (should be 8) */
 	u_int8_t pg_length;	/* page length (should be 0x12) */
 	u_int8_t flags;
-#define PG_CACHE_FL_IC		(1<<0)
-#define PG_CACHE_FL_ABPF	(1<<1)
-#define PG_CACHE_FL_CAP		(1<<2)
-#define PG_CACHE_FL_DISC	(1<<3)
-#define PG_CACHE_FL_SIZE	(1<<4)
-#define PG_CACHE_FL_WCE		(1<<5)
-#define PG_CACHE_FL_MF		(1<<6)
-#define PG_CACHE_FL_RCD		(1<<7)
+#define PG_CACHE_FL_RCD		(1<<0)
+#define PG_CACHE_FL_MF		(1<<1)
+#define PG_CACHE_FL_WCE		(1<<2)
+#define PG_CACHE_FL_SIZE	(1<<3)
+#define PG_CACHE_FL_DISC	(1<<4)
+#define PG_CACHE_FL_CAP		(1<<5)
+#define PG_CACHE_FL_ABPF	(1<<6)
+#define PG_CACHE_FL_IC		(1<<7)
 	u_int8_t priority;
 #define PG_CACHE_PRI_DEMAND(_f)		((_f) & 0x0f)
 #define PG_CACHE_PRI_WRITE(_f)		(((_f) >> 4) & 0x0f)
@@ -399,9 +448,10 @@ struct page_caching_mode {
 
 #define SI_PG_DISK_LIMITS	0xb0 /* block limits */
 #define SI_PG_DISK_INFO		0xb1 /* device charateristics */
+#define SI_PG_DISK_THIN		0xb2 /* thing provisioning */
 
 struct scsi_vpd_disk_limits {
-        struct scsi_vpd_hdr hdr;
+	struct scsi_vpd_hdr hdr;
 #define SI_PG_DISK_LIMITS_LEN		0x10
 #define SI_PG_DISK_LIMITS_LEN_THIN	0x3c
 
@@ -422,12 +472,13 @@ struct scsi_vpd_disk_limits {
 	u_int8_t		optimal_unmap_granularity[4];
 
 	u_int8_t		unmap_granularity_align[4];
+#define SI_PG_DISK_LIMITS_UGAVALID	(1 << 31)
 
 	u_int8_t		_reserved2[28];
-}; 
+};
 
 struct scsi_vpd_disk_info {
-        struct scsi_vpd_hdr	hdr;
+	struct scsi_vpd_hdr	hdr;
 	u_int8_t		rpm[2];
 #define VPD_DISK_INFO_RPM_UNDEF		0x0000
 #define VPD_DISK_INFO_RPM_NONE		0x0001
@@ -441,6 +492,22 @@ struct scsi_vpd_disk_info {
 #define VPD_DISK_INFO_FORM_1_8		0x4
 #define VPD_DISK_INFO_FORM_LT_1_8	0x5
 	u_int8_t		_reserved2[56];
-}; 
+};
+
+struct scsi_vpd_disk_thin {
+	struct scsi_vpd_hdr	hdr;
+
+	u_int8_t		threshold_exponent;
+	u_int8_t		flags;
+#define VPD_DISK_THIN_DP		(1 << 0) /* descriptor present */
+#define VPD_DISK_THIN_ANC_SUP		(0x7 << 1)
+#define VPD_DISK_THIN_ANC_SUP_NO	(0x0 << 1)
+#define VPD_DISK_THIN_ANC_SUP_YES	(0x1 << 1)
+#define VPD_DISK_THIN_TPWS		(1 << 6) /* WRITE SAME 16 */
+#define VPD_DISK_THIN_TPU		(1 << 7) /* UNMAP */
+	u_int8_t		_reserved1[2];
+
+	/* followed by a designation descriptor if DP is set */
+};
 
 #endif /* _SCSI_SCSI_DISK_H */

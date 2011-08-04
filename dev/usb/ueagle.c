@@ -1,4 +1,4 @@
-/*	$OpenBSD: ueagle.c,v 1.26 2010/06/05 13:06:57 damien Exp $	*/
+/*	$OpenBSD: ueagle.c,v 1.34 2011/07/03 15:47:17 matthew Exp $	*/
 
 /*-
  * Copyright (c) 2003-2006
@@ -210,11 +210,11 @@ ueagle_attach(struct device *parent, struct device *self, void *aux)
 	    sc->sc_dev.dv_xname, addr[0], addr[1], addr[2], addr[3],
 	    addr[4], addr[5]);
 
-	usb_init_task(&sc->sc_swap_task, ueagle_loadpage, sc);
+	usb_init_task(&sc->sc_swap_task, ueagle_loadpage, sc,
+	    USB_TASK_TYPE_GENERIC);
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_SIMPLEX;
-	ifp->if_init = ueagle_init;
 	ifp->if_ioctl = ueagle_ioctl;
 	ifp->if_start = ueagle_start;
 	IFQ_SET_READY(&ifp->if_snd);
@@ -229,9 +229,6 @@ ueagle_attach(struct device *parent, struct device *self, void *aux)
 #if NBPFILTER > 0
 	bpfattach(&ifp->if_bpf, ifp, DLT_RAW, 0);
 #endif
-
-	usbd_add_drv_event(USB_EVENT_DRIVER_ATTACH, sc->sc_udev,
-	    &sc->sc_dev);
 }
 
 int
@@ -243,7 +240,6 @@ ueagle_detach(struct device *self, int flags)
 	if (sc->fw != NULL)
 		return 0; /* shortcut for pre-firmware devices */
 
-	sc->gone = 1;
 	ueagle_stop(ifp, 1);
 
 	/* wait for stat thread to exit properly */
@@ -257,10 +253,8 @@ ueagle_detach(struct device *self, int flags)
 		    sc->sc_dev.dv_xname));
 	}
 
-	if_detach(ifp);
-
-	usbd_add_drv_event(USB_EVENT_DRIVER_DETACH, sc->sc_udev,
-	    &sc->sc_dev);
+	if (ifp->if_softc != NULL)
+		if_detach(ifp);
 
 	return 0;
 }
@@ -318,6 +312,9 @@ ueagle_loadpage(void *xsc)
 	uint32_t pageoffset;
 	uint8_t *p;
 	int i;
+
+	if (usbd_is_dying(sc->sc_udev))
+		return;
 
 	p = sc->dsp;
 	pagecount = *p++;
@@ -577,6 +574,8 @@ ueagle_stat_thread(void *arg)
 			break;
 
 		usbd_delay_ms(sc->sc_udev, 5000);
+		if (usbd_is_dying(sc->sc_udev))
+			break;
 	}
 
 	wakeup(sc->stat_thread);
@@ -697,12 +696,10 @@ ueagle_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		if (status == USBD_NOT_STARTED || status == USBD_CANCELLED)
 			return;
 
-		printf("%s: abnormal interrupt status: %s\n",
-		    sc->sc_dev.dv_xname, usbd_errstr(status));
+		DPRINTF(("%s: abnormal interrupt status: %s\n",
+		    sc->sc_dev.dv_xname, usbd_errstr(status)));
 
-		if (status == USBD_STALLED)
-			usbd_clear_endpoint_stall_async(sc->pipeh_intr);
-
+		usbd_clear_endpoint_stall_async(sc->pipeh_intr);
 		return;
 	}
 
@@ -1464,11 +1461,8 @@ ueagle_activate(struct device *self, int act)
 	struct ueagle_softc *sc = (struct ueagle_softc *)self;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
-		sc->gone = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 

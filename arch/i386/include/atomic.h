@@ -1,4 +1,4 @@
-/*	$OpenBSD: atomic.h,v 1.7 2008/06/26 05:42:10 ray Exp $	*/
+/*	$OpenBSD: atomic.h,v 1.9 2011/07/09 01:49:16 pirofti Exp $	*/
 /* $NetBSD: atomic.h,v 1.1.2.2 2000/02/21 18:54:07 sommerfeld Exp $ */
 
 /*-
@@ -32,8 +32,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _I386_ATOMIC_H_
-#define _I386_ATOMIC_H_
+#ifndef _MACHINE_ATOMIC_H_
+#define _MACHINE_ATOMIC_H_
 
 /*
  * Perform atomic operations on memory. Should be atomic with respect
@@ -99,10 +99,13 @@ i486_atomic_cas_int(volatile u_int *ptr, u_int expect, u_int set)
 	return (res);
 }
 
+int ucas_32(volatile int32_t *, int32_t, int32_t);
+#define atomic_ucas_32 ucas_32
+
 #define atomic_setbits_int i386_atomic_setbits_l
 #define atomic_clearbits_int i386_atomic_clearbits_l
 
 #undef LOCK
 
 #endif /* defined(_KERNEL) && !defined(_LOCORE) */
-#endif /* _I386_ATOMIC_H_ */
+#endif /* _MACHINE_ATOMIC_H_ */

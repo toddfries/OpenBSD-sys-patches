@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.29 2008/06/24 21:24:03 deraadt Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.31 2011/05/30 22:25:23 oga Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.32 2000/03/07 00:05:59 matt Exp $	*/
 
 /*-
@@ -36,8 +36,8 @@
  *
  *	@(#)vmparam.h	5.9 (Berkeley) 5/12/91
  */
-#ifndef _VMPARAM_H_
-#define _VMPARAM_H_
+#ifndef _MACHINE_VMPARAM_H_
+#define _MACHINE_VMPARAM_H_
 
 /*
  * Machine dependent constants for VAX.
@@ -47,8 +47,7 @@
  * USRTEXT is the start of the user text/data space, while USRSTACK
  * is the top (end) of the user stack. Immediately above the user stack
  * resides kernel.
- *
- */
+ * */
 
 #define USRTEXT		NBPG
 #define USRSTACK	KERNBASE
@@ -89,9 +88,6 @@
 #define VM_PHYSSEG_NOADD
 #define VM_PHYSSEG_STRAT	VM_PSTRAT_RANDOM
 
-#define	VM_NFREELIST		1
-#define	VM_FREELIST_DEFAULT	0
-
 /* MD round macros */
 #define	vax_round_page(x) (((vaddr_t)(x) + VAX_PGOFSET) & ~VAX_PGOFSET)
 #define	vax_trunc_page(x) ((vaddr_t)(x) & ~VAX_PGOFSET)
@@ -123,4 +119,4 @@ struct vm_page_md {
 		(pg)->mdpage.pv_attr = 0; \
 	} while (0)
 
-#endif
+#endif /* _MACHINE_VMPARAM_H_ */

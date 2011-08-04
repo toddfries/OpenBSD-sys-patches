@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.107 2010/07/08 08:40:29 yasuoka Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.112 2011/07/09 00:47:18 henning Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -73,11 +73,6 @@
 
 #ifdef PIPEX
 #include <net/pipex.h>
-#endif
-
-#ifdef NETATALK
-#include <netatalk/at.h>
-#include <netatalk/at_var.h>
 #endif
 
 #include "bpfilter.h"
@@ -342,9 +337,6 @@ tunopen(dev_t dev, int flag, int mode, struct proc *p)
 	struct tun_softc	*tp;
 	struct ifnet		*ifp;
 	int			 error, s;
-
-	if ((error = suser(p, 0)) != 0)
-		return (error);
 
 	if ((tp = tun_lookup(minor(dev))) == NULL) {	/* create on demand */
 		char	xname[IFNAMSIZ];
@@ -821,7 +813,7 @@ tunread(dev_t dev, struct uio *uio, int ioflag)
 		m_freem(m0);
 	}
 	if (error)
-		ifp->if_ierrors++;
+		ifp->if_oerrors++;
 
 	return (error);
 }
@@ -951,12 +943,6 @@ tunwrite(dev_t dev, struct uio *uio, int ioflag)
 		isr = NETISR_IPV6;
 		break;
 #endif
-#ifdef NETATALK
-	case AF_APPLETALK:
-		ifq = &atintrq2;
-		isr = NETISR_ATALK;
-		break;
-#endif
 	default:
 		m_freem(top);
 		return (EAFNOSUPPORT);
@@ -1005,7 +991,7 @@ tunpoll(dev_t dev, int events, struct proc *p)
 		IFQ_POLL(&ifp->if_snd, m);
 		if (m != NULL) {
 			TUNDEBUG(("%s: tunselect q=%d\n", ifp->if_xname,
-			    ifp->if_snd.ifq_len));
+			    IFQ_LEN(ifp->if_snd)));
 			revents |= events & (POLLIN | POLLRDNORM);
 		} else {
 			TUNDEBUG(("%s: tunpoll waiting\n", ifp->if_xname));
@@ -1054,7 +1040,7 @@ tunkqfilter(dev_t dev, struct knote *kn)
 			kn->kn_fop = &tunwrite_filtops;
 			break;
 		default:
-			return (EPERM);	/* 1 */
+			return (EINVAL);
 	}
 
 	kn->kn_hook = (caddr_t)tp;
@@ -1099,10 +1085,10 @@ filt_tunread(struct knote *kn, long hint)
 	IFQ_POLL(&ifp->if_snd, m);
 	if (m != NULL) {
 		splx(s);
-		kn->kn_data = ifp->if_snd.ifq_len;
+		kn->kn_data = IFQ_LEN(&ifp->if_snd);
 
 		TUNDEBUG(("%s: tunkqread q=%d\n", ifp->if_xname,
-		    ifp->if_snd.ifq_len));
+		    IFQ_LEN(&ifp->if_snd)));
 		return (1);
 	}
 	splx(s);

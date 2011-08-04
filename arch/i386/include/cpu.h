@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.110 2010/05/23 22:41:49 deraadt Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.120 2011/05/23 09:54:20 claudio Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -35,8 +35,8 @@
  *	@(#)cpu.h	5.4 (Berkeley) 5/9/91
  */
 
-#ifndef _I386_CPU_H_
-#define _I386_CPU_H_
+#ifndef _MACHINE_CPU_H_
+#define _MACHINE_CPU_H_
 
 /*
  * Definitions unique to i386 cpu support.
@@ -92,6 +92,7 @@ struct cpu_info {
 	 * Private members.
 	 */
 	struct proc *ci_fpcurproc;	/* current owner of the FPU */
+	struct proc *ci_fpsaveproc;
 	int ci_fpsaving;		/* save in progress */
 
 	struct pcb *ci_curpcb;		/* VA of current HW PCB */
@@ -105,11 +106,13 @@ struct cpu_info {
 	int		ci_idepth;
 	u_int32_t	ci_imask[NIPL];
 	u_int32_t	ci_iunmask[NIPL];
+#ifdef DIAGNOSTIC
+	int		ci_mutex_level;
+#endif
 
 	paddr_t		ci_idle_pcb_paddr; /* PA of idle PCB */
-	u_long		ci_flags;	/* flags; see below */
+	volatile u_long	ci_flags;	/* flags; see below */
 	u_int32_t	ci_ipis; 	/* interprocessor interrupts pending */
-	int		sc_apic_version;/* local APIC version */
 
 	u_int32_t	ci_level;
 	u_int32_t	ci_vendor[4];
@@ -370,14 +373,16 @@ void	switch_exit(struct proc *);
 void	proc_trampoline(void);
 
 /* clock.c */
-void	initrtclock(void);
-void	startrtclock(void);
+extern void (*initclock_func)(void);
+void	startclocks(void);
 void	rtcdrain(void *);
+void	rtcstart(void);
+void	rtcstop(void);
 void	i8254_delay(int);
 void	i8254_initclocks(void);
+void	i8254_startclock(void);
 void	i8254_inittimecounter(void);
 void	i8254_inittimecounter_simple(void);
-
 
 #if !defined(SMALL_KERNEL)
 /* est.c */
@@ -398,6 +403,9 @@ void	k7_powernow_setperf(int);
 /* powernow-k8.c */
 void 	k8_powernow_init(void);
 void 	k8_powernow_setperf(int);
+/* k1x-pstate.c */
+void k1x_init(struct cpu_info *);
+void k1x_setperf(int);
 #endif
 
 /* npx.c */
@@ -454,7 +462,8 @@ void	vm86_gpfault(struct proc *, int);
 #define CPU_SSE			14	/* supports SSE */
 #define CPU_SSE2		15	/* supports SSE2 */
 #define CPU_XCRYPT		16	/* supports VIA xcrypt in userland */
-#define CPU_MAXID		17	/* number of valid machdep ids */
+#define CPU_LIDSUSPEND		17	/* lid close causes a suspend */
+#define CPU_MAXID		18	/* number of valid machdep ids */
 
 #define	CTL_MACHDEP_NAMES { \
 	{ 0, 0 }, \
@@ -474,6 +483,7 @@ void	vm86_gpfault(struct proc *, int);
 	{ "sse", CTLTYPE_INT }, \
 	{ "sse2", CTLTYPE_INT }, \
 	{ "xcrypt", CTLTYPE_INT }, \
+	{ "lidsuspend", CTLTYPE_INT }, \
 }
 
 /*
@@ -484,4 +494,4 @@ void	vm86_gpfault(struct proc *, int);
 #include <sys/mplock.h>
 #endif
 
-#endif /* !_I386_CPU_H_ */
+#endif /* !_MACHINE_CPU_H_ */

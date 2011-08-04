@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_proto.c,v 1.53 2010/05/11 09:36:07 claudio Exp $	*/
+/*	$OpenBSD: in_proto.c,v 1.56 2011/03/31 10:36:42 jasper Exp $	*/
 /*	$NetBSD: in_proto.c,v 1.14 1996/02/18 18:58:32 christos Exp $	*/
 
 /*
@@ -149,9 +149,9 @@
 
 #ifdef IPSEC
 #include <netinet/ip_ipsp.h>
-#include <netinet/ip_ether.h>
 #endif
 
+#include <netinet/ip_ether.h>
 #include <netinet/ip_ipip.h>
 
 #include "gre.h"
@@ -189,7 +189,7 @@ struct protosw inetsw[] = {
   udp_usrreq,
   udp_init,	0,		0,		0,		udp_sysctl
 },
-{ SOCK_STREAM,	&inetdomain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS,
+{ SOCK_STREAM,	&inetdomain,	IPPROTO_TCP,	PR_CONNREQUIRED|PR_WANTRCVD|PR_ABRTACPTDIS|PR_SPLICE,
   tcp_input,	0,		tcp_ctlinput,	tcp_ctloutput,
   tcp_usrreq,
   tcp_init,	0,		tcp_slowtimo,	0,		tcp_sysctl
@@ -315,7 +315,7 @@ struct protosw inetsw[] = {
 
 struct domain inetdomain =
     { AF_INET, "internet", 0, 0, 0,
-      inetsw, &inetsw[sizeof(inetsw)/sizeof(inetsw[0])], 0,
+      inetsw, &inetsw[nitems(inetsw)], 0,
 #ifndef SMALL_KERNEL
       rn_mpath_inithead,
 #else
@@ -341,6 +341,6 @@ struct protosw hysw[] = {
 };
 
 struct domain hydomain =
-    { AF_HYLINK, "hy", 0, 0, 0, hysw, &hysw[sizeof (hysw)/sizeof(hysw[0])] };
+    { AF_HYLINK, "hy", 0, 0, 0, hysw, &hysw[nitems(hysw)] };
 #endif
 #endif

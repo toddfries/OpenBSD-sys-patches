@@ -1,4 +1,4 @@
-/*      $OpenBSD: param.h,v 1.26 2009/12/13 08:27:15 deraadt Exp $ */
+/*      $OpenBSD: param.h,v 1.29 2011/04/07 15:45:17 miod Exp $ */
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -37,8 +37,8 @@
  *	from: @(#)param.h	8.1 (Berkeley) 6/10/93
  */
 
-#ifndef _MIPS_PARAM_H_
-#define _MIPS_PARAM_H_
+#ifndef _MIPS64_PARAM_H_
+#define _MIPS64_PARAM_H_
 
 #ifdef _KERNEL
 #include <machine/cpu.h>
@@ -46,7 +46,7 @@
 
 /*
  * Round p (pointer or byte index) up to a correctly-aligned value for all
- * data types (int, long, ...).   The result is u_int and must be cast to
+ * data types (int, long, ...).   The result is u_long and must be cast to
  * any desired pointer type.
  */
 #define	ALIGNBYTES	7
@@ -94,7 +94,7 @@
 #define	NKMEMPAGES_MAX_DEFAULT  ((128 * 1024 * 1024) >> PAGE_SHIFT)
 #endif /* _KERNEL */
 
-/* pages ("clicks") (4096 bytes) to disk blocks */
+/* pages ("clicks") to disk blocks */
 #define	ctod(x)	((x) << (PGSHIFT - DEV_BSHIFT))
 #define	dtoc(x)	((x) >> (PGSHIFT - DEV_BSHIFT))
 
@@ -109,4 +109,4 @@ void delay(int);
 #endif
 #endif /* _KERNEL */
 
-#endif /* !_MIPS_PARAM_H_ */
+#endif /* !_MIPS64_PARAM_H_ */

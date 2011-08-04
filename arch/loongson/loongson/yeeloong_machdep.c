@@ -1,4 +1,4 @@
-/*	$OpenBSD: yeeloong_machdep.c,v 1.12 2010/05/08 21:59:56 miod Exp $	*/
+/*	$OpenBSD: yeeloong_machdep.c,v 1.17 2011/07/21 20:36:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -17,8 +17,9 @@
  */
 
 /*
- * Lemote {Fu,Lyn,Yee}loong specific code and configuration data.
- * (this file really ought to be named lemote_machdep.c by now)
+ * eBenton EBT700 and Lemote {Fu,Lyn,Yee}loong specific code and
+ * configuration data.
+ * (this file probably ought to be named lemote_machdep.c by now)
  */
 
 #include <sys/param.h>
@@ -36,13 +37,16 @@
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
 
+#include <dev/pci/glxreg.h>
+#include <dev/pci/glxvar.h>
+
 #include <loongson/dev/bonitoreg.h>
 #include <loongson/dev/bonitovar.h>
 #include <loongson/dev/bonito_irq.h>
-#include <loongson/dev/glxreg.h>
-#include <loongson/dev/glxvar.h>
+#include <loongson/dev/kb3310var.h>
 
 #include "com.h"
+#include "ykbec.h"
 
 #if NCOM > 0
 #include <sys/termios.h>
@@ -193,7 +197,34 @@ const struct platform yeeloong_platform = {
 	.device_register = lemote_device_register,
 
 	.powerdown = yeeloong_powerdown,
-	.reset = lemote_reset
+	.reset = lemote_reset,
+#if NYKBEC > 0
+	.suspend = ykbec_suspend,
+	.resume = ykbec_resume
+#endif
+};
+
+/* eBenton EBT700 is similar to Lemote Yeeloong, except for a smaller screen */
+const struct platform ebenton_platform = {
+	.system_type = LOONGSON_EBT700,
+	.vendor = "eBenton",
+	.product = "EBT700",
+
+	.bonito_config = &lemote_bonito,
+	.isa_chipset = &lemote_isa_chipset,
+	.legacy_io_ranges = yeeloong_legacy_ranges,
+
+	.setup = NULL,
+	.device_register = lemote_device_register,
+
+	.powerdown = yeeloong_powerdown,
+	.reset = lemote_reset,
+#ifdef notyet
+#if NYKBEC > 0
+	.suspend = ykbec_suspend,
+	.resume = ykbec_resume
+#endif
+#endif
 };
 
 /*
@@ -339,7 +370,7 @@ lemote_isa_intr(uint32_t hwpend, struct trap_frame *frame)
 	 * Now process allowed interrupts.
 	 */
 	if (isr != 0) {
-		int lvl, bitno;
+		int lvl, bitno, ret;
 		uint64_t tmpisr;
 
 		/* Service higher level interrupts first */
@@ -358,13 +389,16 @@ lemote_isa_intr(uint32_t hwpend, struct trap_frame *frame)
 				for (ih = bonito_intrhand[BONITO_ISA_IRQ(bitno)];
 				    ih != NULL; ih = ih->ih_next) {
 					splraise(ih->ih_level);
-					if ((*ih->ih_fun)(ih->ih_arg) != 0) {
+					ret = (*ih->ih_fun)(ih->ih_arg);
+					if (ret) {
 						rc = 1;
 						ih->ih_count.ec_count++;
 					}
 					__asm__ (".set noreorder\n");
 					curcpu()->ci_ipl = frame->ipl;
 					__asm__ ("sync\n\t.set reorder\n");
+					if (ret == 1)
+						break;
 				}
 				if (rc == 0)
 					printf("spurious isa interrupt %d\n",

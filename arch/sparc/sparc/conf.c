@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.53 2010/07/10 19:32:24 miod Exp $	*/
+/*	$OpenBSD: conf.c,v 1.58 2011/07/04 22:53:53 tedu Exp $	*/
 /*	$NetBSD: conf.c,v 1.40 1996/04/11 19:20:03 thorpej Exp $ */
 
 /*
@@ -122,12 +122,14 @@ struct bdevsw	bdevsw[] =
 	bdev_disk_init(NRAID,raid),	/* 25: RAIDframe disk driver */
 	bdev_disk_init(NPRESTO,presto),	/* 26: Prestoserve NVRAM */
 };
-int	nblkdev = sizeof(bdevsw) / sizeof(bdevsw[0]);
+int	nblkdev = nitems(bdevsw);
 
 #include "pf.h"
 #include "systrace.h"
 #include "tctrl.h"
 #include "vscsi.h"
+#include "pppx.h"
+#include "hotplug.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -174,7 +176,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 40 */
 	cdev_notdef(),			/* 41 */
 	cdev_disk_init(NXD,xd),		/* 42: SMD disk */
-	cdev_svr4_net_init(NSVR4_NET,svr4_net),	/* 43: svr4 net pseudo-device */
+	cdev_notdef(),			/* 43 */
 	cdev_notdef(),			/* 44 */
 	cdev_notdef(),			/* 45 */
 	cdev_notdef(),			/* 46 */
@@ -266,10 +268,14 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(NRAID,raid),     /* 123: RAIDframe disk driver */
 	cdev_bio_init(NBIO,bio),	/* 124: ioctl tunnel */
 	cdev_ptm_init(NPTY,ptm),	/* 125: pseudo-tty ptm device */
+	cdev_notdef(),			/* 126 */
+	cdev_notdef(),			/* 127 */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 128: vscsi */
 	cdev_disk_init(1,diskmap),	/* 129: disk mapper */
+	cdev_pppx_init(NPPPX,pppx),	/* 130: pppx */
+	cdev_hotplug_init(NHOTPLUG,hotplug),	/* 131: devices hot plugging */
 };
-int	nchrdev = sizeof(cdevsw) / sizeof(cdevsw[0]);
+int	nchrdev = nitems(cdevsw);
 
 int	mem_no = 3; 	/* major device number of memory special file */
 
@@ -438,4 +444,4 @@ int chrtoblktbl[] = {
 	/*122 */	NODEV,
 	/*123 */	25,
 };
-int nchrtoblktbl = sizeof(chrtoblktbl) / sizeof(chrtoblktbl[0]);
+int nchrtoblktbl = nitems(chrtoblktbl);

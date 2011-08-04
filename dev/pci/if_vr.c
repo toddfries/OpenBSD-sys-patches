@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.105 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.111 2011/06/22 16:44:27 tedu Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -137,6 +137,9 @@ void vr_reset(struct vr_softc *);
 int vr_list_rx_init(struct vr_softc *);
 void vr_fill_rx_ring(struct vr_softc *);
 int vr_list_tx_init(struct vr_softc *);
+#ifndef SMALL_KERNEL
+int vr_wol(struct ifnet *, int);
+#endif
 
 int vr_alloc_mbuf(struct vr_softc *, struct vr_chain_onefrag *);
 
@@ -278,7 +281,7 @@ vr_miibus_readreg(struct device *dev, int phy, int reg)
 		break;
 	}
 
-	bzero((char *)&frame, sizeof(frame));
+	bzero(&frame, sizeof(frame));
 
 	frame.mii_phyaddr = phy;
 	frame.mii_regaddr = reg;
@@ -302,7 +305,7 @@ vr_miibus_writereg(struct device *dev, int phy, int reg, int data)
 		break;
 	}
 
-	bzero((char *)&frame, sizeof(frame));
+	bzero(&frame, sizeof(frame));
 
 	frame.mii_phyaddr = phy;
 	frame.mii_regaddr = reg;
@@ -643,6 +646,13 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->vr_quirks & VR_Q_CSUM)
 		ifp->if_capabilities |= IFCAP_CSUM_IPv4|IFCAP_CSUM_TCPv4|
 					IFCAP_CSUM_UDPv4;
+#ifndef SMALL_KERNEL
+	if (sc->vr_revid >= REV_ID_VT3065_A) {
+		ifp->if_capabilities |= IFCAP_WOL;
+		ifp->if_wol = vr_wol;
+		vr_wol(ifp, 0);
+	}
+#endif
 
 	/*
 	 * Do MII setup.
@@ -1045,18 +1055,11 @@ vr_intr(void *arg)
 		return 0;
 	}
 
-	/* Disable interrupts. */
-	CSR_WRITE_2(sc, VR_IMR, 0x0000);
+	status = CSR_READ_2(sc, VR_ISR);
+	if (status)
+		CSR_WRITE_2(sc, VR_ISR, status);
 
-	for (;;) {
-
-		status = CSR_READ_2(sc, VR_ISR);
-		if (status)
-			CSR_WRITE_2(sc, VR_ISR, status);
-
-		if ((status & VR_INTRS) == 0)
-			break;
-
+	if (status & VR_INTRS) {
 		claimed = 1;
 
 		if (status & VR_ISR_RX_OK)
@@ -1092,7 +1095,7 @@ vr_intr(void *arg)
 				    sc->sc_dev.dv_xname);
 			vr_reset(sc);
 			vr_init(sc);
-			break;
+			status = 0;
 		}
 
 		if ((status & VR_ISR_TX_OK) || (status & VR_ISR_TX_ABRT) ||
@@ -1120,9 +1123,6 @@ vr_intr(void *arg)
 		}
 	}
 
-	/* Re-enable interrupts. */
-	CSR_WRITE_2(sc, VR_IMR, VR_INTRS);
-
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))
 		vr_start(ifp);
 
@@ -1143,9 +1143,9 @@ vr_encap(struct vr_softc *sc, struct vr_chain *c, struct mbuf *m_head)
 	if (sc->vr_quirks & VR_Q_CSUM) {
 		if (m_head->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 			vr_flags |= VR_TXCTL_IPCSUM;
-		if (m_head->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+		if (m_head->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
 			vr_flags |= VR_TXCTL_TCPCSUM;
-		if (m_head->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+		if (m_head->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
 			vr_flags |= VR_TXCTL_UDPCSUM;
 	}
 
@@ -1509,8 +1509,7 @@ vr_stop(struct vr_softc *sc)
 			sc->vr_cdata.vr_rx_chain[i].vr_map = NULL;
 		}
 	}
-	bzero((char *)&sc->vr_ldata->vr_rx_list,
-		sizeof(sc->vr_ldata->vr_rx_list));
+	bzero(&sc->vr_ldata->vr_rx_list, sizeof(sc->vr_ldata->vr_rx_list));
 
 	/*
 	 * Free the TX list buffers.
@@ -1529,9 +1528,36 @@ vr_stop(struct vr_softc *sc)
 			sc->vr_cdata.vr_tx_chain[i].vr_map = NULL;
 		}
 	}
-	bzero((char *)&sc->vr_ldata->vr_tx_list,
-		sizeof(sc->vr_ldata->vr_tx_list));
+	bzero(&sc->vr_ldata->vr_tx_list, sizeof(sc->vr_ldata->vr_tx_list));
 }
+
+#ifndef SMALL_KERNEL
+int
+vr_wol(struct ifnet *ifp, int enable)
+{
+	struct vr_softc *sc = ifp->if_softc;
+
+	/* Clear WOL configuration */
+	CSR_WRITE_1(sc, VR_WOLCRCLR, 0xFF);
+
+	/* Clear event status bits. */
+	CSR_WRITE_1(sc, VR_PWRCSRCLR, 0xFF);
+
+	/* Disable PME# assertion upon wake event. */
+	VR_CLRBIT(sc, VR_STICKHW, VR_STICKHW_WOL_ENB);
+	VR_SETBIT(sc, VR_WOLCFGCLR, VR_WOLCFG_PMEOVR);
+
+	if (enable) {
+		VR_SETBIT(sc, VR_WOLCRSET, VR_WOLCR_MAGIC);
+
+		/* Enable PME# assertion upon wake event. */
+		VR_SETBIT(sc, VR_STICKHW, VR_STICKHW_WOL_ENB);
+		VR_SETBIT(sc, VR_WOLCFGSET, VR_WOLCFG_PMEOVR);
+	}
+
+	return (0);
+}
+#endif
 
 int
 vr_alloc_mbuf(struct vr_softc *sc, struct vr_chain_onefrag *r)
@@ -1562,6 +1588,10 @@ vr_alloc_mbuf(struct vr_softc *sc, struct vr_chain_onefrag *r)
 	d = r->vr_ptr;
 	d->vr_data = htole32(r->vr_map->dm_segs[0].ds_addr);
 	d->vr_ctl = htole32(VR_RXCTL | VR_RXLEN);
+
+	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap, 0,
+	    sc->sc_listmap->dm_mapsize, BUS_DMASYNC_PREWRITE);
+
 	d->vr_status = htole32(VR_RXSTAT);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap, 0,

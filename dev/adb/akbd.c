@@ -1,4 +1,4 @@
-/*	$OpenBSD: akbd.c,v 1.8 2010/05/23 15:09:38 deraadt Exp $	*/
+/*	$OpenBSD: akbd.c,v 1.10 2011/06/15 21:32:05 miod Exp $	*/
 /*	$NetBSD: akbd.c,v 1.17 2005/01/15 16:00:59 chs Exp $	*/
 
 /*
@@ -48,10 +48,6 @@
 #include <dev/adb/adb.h>
 #include <dev/adb/akbdmap.h>
 #include <dev/adb/akbdvar.h>
-
-#ifdef WSDISPLAY_COMPAT_RAWKBD
-#define KEYBOARD_ARRAY
-#endif
 #include <dev/adb/keyboard.h>
 
 /*
@@ -103,6 +99,9 @@ int
 akbdmatch(struct device *parent, void *vcf, void *aux)
 {
 	struct adb_attach_args *aa_args = (struct adb_attach_args *)aux;
+
+	if (strcmp(aa_args->name, adb_device_name) != 0)
+		return (0);
 
 	if (aa_args->origaddr == ADBADDR_KBD)
 		return (1);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.174 2010/07/15 03:43:11 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.198 2011/07/03 15:47:16 matthew Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -36,7 +36,6 @@
  *
  *
  * TO DO:
- *  - power hook
  *  - multiple codecs (needed?)
  *  - multiple streams (needed?)
  */
@@ -123,11 +122,14 @@ typedef struct {
 	azalia_dma_t buffer;
 	void (*intr)(void*);
 	void *intr_arg;
-	int active;
 	int bufsize;
 	uint16_t fmt;
 	int blk;
-	int lpib;
+	int nblks;			/* # of blocks in the buffer */
+	u_long swpos;			/* position in the audio(4) layer */
+	u_int last_hwpos;		/* last known lpib */
+	u_long hw_base;			/* this + lpib = overall position */
+	u_int pos_offs;			/* hardware fifo space */
 } stream_t;
 #define STR_READ_1(s, r)	\
 	bus_space_read_1((s)->az->iot, (s)->az->ioh, (s)->regbase + HDA_SD_##r)
@@ -159,7 +161,9 @@ typedef struct azalia_t {
 	codec_t *codecs;
 	int ncodecs;		/* number of codecs */
 	int codecno;		/* index of the using codec */
-
+	int detached;		/* 1 if failed to initialize, 2 if
+				 * azalia_pci_detach has run
+				 */
 	azalia_dma_t corb_dma;
 	int corb_entries;
 	uint8_t corbsize;
@@ -195,6 +199,7 @@ int	azalia_pci_match(struct device *, void *, void *);
 void	azalia_pci_attach(struct device *, struct device *, void *);
 int	azalia_pci_activate(struct device *, int);
 int	azalia_pci_detach(struct device *, int);
+void	azalia_configure_pci(azalia_t *);
 int	azalia_intr(void *);
 void	azalia_print_codec(codec_t *);
 int	azalia_reset(azalia_t *);
@@ -205,10 +210,8 @@ int	azalia_init_streams(azalia_t *);
 void	azalia_shutdown(void *);
 int	azalia_halt_corb(azalia_t *);
 int	azalia_init_corb(azalia_t *, int);
-int	azalia_delete_corb(azalia_t *);
 int	azalia_halt_rirb(azalia_t *);
 int	azalia_init_rirb(azalia_t *, int);
-int	azalia_delete_rirb(azalia_t *);
 int	azalia_set_command(azalia_t *, nid_t, int, uint32_t, uint32_t);
 int	azalia_get_response(azalia_t *, uint32_t *);
 void	azalia_rirb_kick_unsol_events(void *);
@@ -246,11 +249,10 @@ void	azalia_widget_print_audio(const widget_t *, const char *);
 void	azalia_widget_print_pin(const widget_t *);
 
 int	azalia_stream_init(stream_t *, azalia_t *, int, int, int);
-int	azalia_stream_delete(stream_t *, azalia_t *);
 int	azalia_stream_reset(stream_t *);
 int	azalia_stream_start(stream_t *);
 int	azalia_stream_halt(stream_t *);
-int	azalia_stream_intr(stream_t *, uint32_t);
+int	azalia_stream_intr(stream_t *);
 
 int	azalia_open(void *, int);
 void	azalia_close(void *);
@@ -372,66 +374,30 @@ azalia_pci_write(pci_chipset_tag_t pc, pcitag_t pa, int reg, uint8_t val)
 	pci_conf_write(pc, pa, (reg & ~0x03), pcival);
 }
 
-int
-azalia_pci_match(struct device *parent, void *match, void *aux)
-{
-	struct pci_attach_args *pa;
-
-	pa = aux;
-	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_MULTIMEDIA
-	    && PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_MULTIMEDIA_HDAUDIO)
-		return 1;
-	return 0;
-}
-
 void
-azalia_pci_attach(struct device *parent, struct device *self, void *aux)
+azalia_configure_pci(azalia_t *az)
 {
-	azalia_t *sc;
-	struct pci_attach_args *pa;
 	pcireg_t v;
-	pci_intr_handle_t ih;
-	const char *interrupt_str;
 	uint8_t reg;
 
-	sc = (azalia_t*)self;
-	pa = aux;
-
-	sc->dmat = pa->pa_dmat;
-
-	v = pci_conf_read(pa->pa_pc, pa->pa_tag, ICH_PCI_HDBARL);
-	v &= PCI_MAPREG_TYPE_MASK | PCI_MAPREG_MEM_TYPE_MASK;
-	if (pci_mapreg_map(pa, ICH_PCI_HDBARL, v, 0,
-			   &sc->iot, &sc->ioh, NULL, &sc->map_size, 0)) {
-		printf(": can't map device i/o space\n");
-		return;
-	}
-
 	/* enable back-to-back */
-	v = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+	v = pci_conf_read(az->pc, az->tag, PCI_COMMAND_STATUS_REG);
+	pci_conf_write(az->pc, az->tag, PCI_COMMAND_STATUS_REG,
 	    v | PCI_COMMAND_BACKTOBACK_ENABLE);
 
 	/* traffic class select */
-	v = pci_conf_read(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL);
-	pci_conf_write(pa->pa_pc, pa->pa_tag, ICH_PCI_HDTCSEL,
+	v = pci_conf_read(az->pc, az->tag, ICH_PCI_HDTCSEL);
+	pci_conf_write(az->pc, az->tag, ICH_PCI_HDTCSEL,
 	    v & ~(ICH_PCI_HDTCSEL_MASK));
 
-	/* disable MSI, use INTx instead */
-	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_INTEL) {
-		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag, ICH_PCI_MMC);
-		reg &= ~(ICH_PCI_MMC_ME);
-		azalia_pci_write(pa->pa_pc, pa->pa_tag, ICH_PCI_MMC, reg);
-	}
-
 	/* enable PCIe snoop */
-	switch (PCI_PRODUCT(pa->pa_id)) {
+	switch (PCI_PRODUCT(az->pciid)) {
 	case PCI_PRODUCT_ATI_SB450_HDA:
 	case PCI_PRODUCT_ATI_SBX00_HDA:
-		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag, ATI_PCIE_SNOOP_REG);
+		reg = azalia_pci_read(az->pc, az->tag, ATI_PCIE_SNOOP_REG);
 		reg &= ATI_PCIE_SNOOP_MASK;
 		reg |= ATI_PCIE_SNOOP_ENABLE;
-		azalia_pci_write(pa->pa_pc, pa->pa_tag, ATI_PCIE_SNOOP_REG, reg);
+		azalia_pci_write(az->pc, az->tag, ATI_PCIE_SNOOP_REG, reg);
 		break;
 	case PCI_PRODUCT_NVIDIA_MCP51_HDA:
 	case PCI_PRODUCT_NVIDIA_MCP55_HDA:
@@ -455,26 +421,26 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	case PCI_PRODUCT_NVIDIA_MCP89_HDA_2:
 	case PCI_PRODUCT_NVIDIA_MCP89_HDA_3:
 	case PCI_PRODUCT_NVIDIA_MCP89_HDA_4:
-		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag,
+		reg = azalia_pci_read(az->pc, az->tag,
 		    NVIDIA_HDA_OSTR_COH_REG);
 		reg |= NVIDIA_HDA_STR_COH_ENABLE;
-		azalia_pci_write(pa->pa_pc, pa->pa_tag,
+		azalia_pci_write(az->pc, az->tag,
 		    NVIDIA_HDA_OSTR_COH_REG, reg);
 
-		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag,
+		reg = azalia_pci_read(az->pc, az->tag,
 		    NVIDIA_HDA_ISTR_COH_REG);
 		reg |= NVIDIA_HDA_STR_COH_ENABLE;
-		azalia_pci_write(pa->pa_pc, pa->pa_tag,
+		azalia_pci_write(az->pc, az->tag,
 		    NVIDIA_HDA_ISTR_COH_REG, reg);
 
-		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag,
+		reg = azalia_pci_read(az->pc, az->tag,
 		    NVIDIA_PCIE_SNOOP_REG);
 		reg &= NVIDIA_PCIE_SNOOP_MASK;
 		reg |= NVIDIA_PCIE_SNOOP_ENABLE;
-		azalia_pci_write(pa->pa_pc, pa->pa_tag,
+		azalia_pci_write(az->pc, az->tag,
 		    NVIDIA_PCIE_SNOOP_REG, reg);
 
-		reg = azalia_pci_read(pa->pa_pc, pa->pa_tag,
+		reg = azalia_pci_read(az->pc, az->tag,
 		    NVIDIA_PCIE_SNOOP_REG);
 		if ((reg & NVIDIA_PCIE_SNOOP_ENABLE) !=
 		    NVIDIA_PCIE_SNOOP_ENABLE) {
@@ -483,14 +449,62 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 		break;
 	}
+}
+
+int
+azalia_pci_match(struct device *parent, void *match, void *aux)
+{
+	struct pci_attach_args *pa;
+
+	pa = aux;
+	if (PCI_CLASS(pa->pa_class) == PCI_CLASS_MULTIMEDIA
+	    && PCI_SUBCLASS(pa->pa_class) == PCI_SUBCLASS_MULTIMEDIA_HDAUDIO)
+		return 1;
+	return 0;
+}
+
+void
+azalia_pci_attach(struct device *parent, struct device *self, void *aux)
+{
+	azalia_t *sc;
+	struct pci_attach_args *pa;
+	pcireg_t v;
+	uint8_t reg;
+	pci_intr_handle_t ih;
+	const char *interrupt_str;
+
+	sc = (azalia_t*)self;
+	pa = aux;
+
+	sc->dmat = pa->pa_dmat;
+
+	v = pci_conf_read(pa->pa_pc, pa->pa_tag, ICH_PCI_HDBARL);
+	v &= PCI_MAPREG_TYPE_MASK | PCI_MAPREG_MEM_TYPE_MASK;
+	if (pci_mapreg_map(pa, ICH_PCI_HDBARL, v, 0,
+			   &sc->iot, &sc->ioh, NULL, &sc->map_size, 0)) {
+		printf(": can't map device i/o space\n");
+		return;
+	}
+
+	sc->pc = pa->pa_pc;
+	sc->tag = pa->pa_tag;
+	sc->pciid = pa->pa_id;
+	sc->subid = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
+
+	azalia_configure_pci(sc);
+
+	/* disable MSI, use INTx instead */
+	if (PCI_VENDOR(sc->pciid) == PCI_VENDOR_INTEL) {
+		reg = azalia_pci_read(sc->pc, sc->tag, ICH_PCI_MMC);
+		reg &= ~(ICH_PCI_MMC_ME);
+		azalia_pci_write(sc->pc, sc->tag, ICH_PCI_MMC, reg);
+	}
 
 	/* interrupt */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) && pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
 		return;
 	}
-	sc->pc = pa->pa_pc;
-	sc->tag = pa->pa_tag;
 	interrupt_str = pci_intr_string(pa->pa_pc, ih);
 	sc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO, azalia_intr,
 	    sc, sc->dev.dv_xname);
@@ -502,9 +516,6 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	printf(": %s\n", interrupt_str);
-
-	sc->pciid = pa->pa_id;
-	sc->subid = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_SUBSYS_ID_REG);
 
 	if (azalia_init(sc, 0))
 		goto err_exit;
@@ -522,58 +533,70 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	return;
 
 err_exit:
-	printf("%s: initialization failure, detaching\n", XNAME(sc));
+	sc->detached = 1;
 	azalia_pci_detach(self, 0);
 }
 
 int
 azalia_pci_activate(struct device *self, int act)
 {
-	azalia_t *sc;
-	int ret;
+	azalia_t *sc = (azalia_t*)self;
+	int rv = 0; 
 
-	sc = (azalia_t*)self;
-	ret = 0;
 	switch (act) {
-	case DVACT_ACTIVATE:
-		return ret;
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		azalia_suspend(sc);
+		break;
+	case DVACT_RESUME:
+		azalia_resume(sc);
+		rv = config_activate_children(self, act);
+		break;
 	case DVACT_DEACTIVATE:
 		if (sc->audiodev != NULL)
-			ret = config_deactivate(sc->audiodev);
-		return ret;
-	case DVACT_SUSPEND:
-		ret = azalia_suspend(sc);
-		return ret;
-	case DVACT_RESUME:
-		ret = azalia_resume(sc);
-		return ret;
+			rv = config_deactivate(sc->audiodev);
+		break;
 	}
-	return EOPNOTSUPP;
+	return (rv);
 }
 
 int
 azalia_pci_detach(struct device *self, int flags)
 {
-	azalia_t *az;
+	azalia_t *az = (azalia_t*)self;
 	uint32_t gctl;
 	int i;
 
 	DPRINTF(("%s\n", __func__));
-	az = (azalia_t*)self;
+
+	/*
+	 * this function is called if the device could not be supported,
+	 * in which case az->detached == 1.  check if this function has
+	 * already cleaned up.
+	 */
+	if (az->detached > 1)
+		return 0;
+
 	if (az->audiodev != NULL) {
 		config_detach(az->audiodev, flags);
 		az->audiodev = NULL;
 	}
 
-	/* disable unsolicited response */
-	gctl = AZ_READ_4(az, GCTL);
-	AZ_WRITE_4(az, GCTL, gctl & ~(HDA_GCTL_UNSOL));
+	/* disable unsolicited responses if soft detaching */
+	if (az->detached == 1) {
+		gctl = AZ_READ_4(az, GCTL);
+		AZ_WRITE_4(az, GCTL, gctl &~(HDA_GCTL_UNSOL));
+	}
 
 	timeout_del(&az->unsol_to);
 
 	DPRINTF(("%s: delete streams\n", __func__));
-	azalia_stream_delete(&az->rstream, az);
-	azalia_stream_delete(&az->pstream, az);
+	if (az->rstream.bdlist.addr != NULL)
+		azalia_free_dmamem(az, &az->rstream.bdlist);
+	if (az->pstream.bdlist.addr != NULL)
+		azalia_free_dmamem(az, &az->pstream.bdlist);
 
 	DPRINTF(("%s: delete codecs\n", __func__));
 	for (i = 0; i < az->ncodecs; i++) {
@@ -586,16 +609,25 @@ azalia_pci_detach(struct device *self, int flags)
 	}
 
 	DPRINTF(("%s: delete CORB and RIRB\n", __func__));
-	azalia_delete_corb(az);
-	azalia_delete_rirb(az);
+	if (az->corb_dma.addr != NULL)
+		azalia_free_dmamem(az, &az->corb_dma);
+	if (az->rirb_dma.addr != NULL)
+		azalia_free_dmamem(az, &az->rirb_dma);
+	if (az->unsolq != NULL) {
+		free(az->unsolq, M_DEVBUF);
+		az->unsolq = NULL;
+	}
 
-	DPRINTF(("%s: disable interrupts\n", __func__));
-	AZ_WRITE_4(az, INTCTL, 0);
+	/* disable interrupts if soft detaching */
+	if (az->detached == 1) {
+		DPRINTF(("%s: disable interrupts\n", __func__));
+		AZ_WRITE_4(az, INTCTL, 0);
 
-	DPRINTF(("%s: clear interrupts\n", __func__));
-	AZ_WRITE_4(az, INTSTS, HDA_INTSTS_CIS | HDA_INTSTS_GIS);
-	AZ_WRITE_2(az, STATESTS, HDA_STATESTS_SDIWAKE);
-	AZ_WRITE_1(az, RIRBSTS, HDA_RIRBSTS_RINTFL | HDA_RIRBSTS_RIRBOIS);
+		DPRINTF(("%s: clear interrupts\n", __func__));
+		AZ_WRITE_4(az, INTSTS, HDA_INTSTS_CIS | HDA_INTSTS_GIS);
+		AZ_WRITE_2(az, STATESTS, HDA_STATESTS_SDIWAKE);
+		AZ_WRITE_1(az, RIRBSTS, HDA_RIRBSTS_RINTFL | HDA_RIRBSTS_RIRBOIS);
+	}
 
 	DPRINTF(("%s: delete PCI resources\n", __func__));
 	if (az->ih != NULL) {
@@ -606,6 +638,8 @@ azalia_pci_detach(struct device *self, int flags)
 		bus_space_unmap(az->iot, az->ioh, az->map_size);
 		az->map_size = 0;
 	}
+
+	az->detached = 2;
 	return 0;
 }
 
@@ -613,30 +647,33 @@ int
 azalia_intr(void *v)
 {
 	azalia_t *az = v;
-	int ret = 0;
 	uint32_t intsts;
-	uint8_t rirbsts, rirbctl;
+	int ret = 0;
 
 	intsts = AZ_READ_4(az, INTSTS);
-	if (intsts == 0)
-		return (0);
+	if (intsts == 0 || intsts == 0xffffffff)
+		return (ret);
 
 	AZ_WRITE_4(az, INTSTS, intsts);
 
-	ret += azalia_stream_intr(&az->pstream, intsts);
-	ret += azalia_stream_intr(&az->rstream, intsts);
-
-	rirbctl = AZ_READ_1(az, RIRBCTL);
-	rirbsts = AZ_READ_1(az, RIRBSTS);
-
-	if (intsts & HDA_INTSTS_CIS) {
-		if (rirbctl & HDA_RIRBCTL_RINTCTL) {
-			if (rirbsts & HDA_RIRBSTS_RINTFL)
-				azalia_rirb_intr(az);
-		}
+	if (intsts & az->pstream.intr_bit) {
+		azalia_stream_intr(&az->pstream);
+		ret = 1;
 	}
 
-	return (1);
+	if (intsts & az->rstream.intr_bit) {
+		azalia_stream_intr(&az->rstream);
+		ret = 1;
+	}
+
+	if ((intsts & HDA_INTSTS_CIS) &&
+	    (AZ_READ_1(az, RIRBCTL) & HDA_RIRBCTL_RINTCTL) &&
+	    (AZ_READ_1(az, RIRBSTS) & HDA_RIRBSTS_RINTFL)) {
+		azalia_rirb_intr(az);
+		ret = 1;
+	}
+
+	return (ret);
 }
 
 void
@@ -693,7 +730,7 @@ azalia_reset(azalia_t *az)
 	}
 	DPRINTF(("%s: reset counter = %d\n", __func__, i));
 	if (i <= 0) {
-		printf("%s: reset failure\n", XNAME(az));
+		DPRINTF(("%s: reset failure\n", XNAME(az)));
 		return(ETIMEDOUT);
 	}
 	DELAY(1000);
@@ -706,7 +743,7 @@ azalia_reset(azalia_t *az)
 	}
 	DPRINTF(("%s: reset counter = %d\n", __func__, i));
 	if (i <= 0) {
-		printf("%s: reset-exit failure\n", XNAME(az));
+		DPRINTF(("%s: reset-exit failure\n", XNAME(az)));
 		return(ETIMEDOUT);
 	}
 	DELAY(1000);
@@ -938,7 +975,7 @@ azalia_halt_corb(azalia_t *az)
 				break;
 		}
 		if (i <= 0) {
-			printf("%s: CORB is running\n", XNAME(az));
+			DPRINTF(("%s: CORB is running\n", XNAME(az)));
 			return EBUSY;
 		}
 	}
@@ -983,7 +1020,7 @@ azalia_init_corb(azalia_t *az, int resuming)
 			break;
 	}
 	if (i <= 0) {
-		printf("%s: CORBRP reset failure\n", XNAME(az));
+		DPRINTF(("%s: CORBRP reset failure\n", XNAME(az)));
 		return -1;
 	}
 	DPRINTF(("%s: CORBWP=%d; size=%d\n", __func__,
@@ -996,27 +1033,6 @@ azalia_init_corb(azalia_t *az, int resuming)
 	/* Run! */
 	corbctl = AZ_READ_1(az, CORBCTL);
 	AZ_WRITE_1(az, CORBCTL, corbctl | HDA_CORBCTL_CORBRUN);
-	return 0;
-}
-
-int
-azalia_delete_corb(azalia_t *az)
-{
-	int i;
-	uint8_t corbctl;
-
-	if (az->corb_dma.addr == NULL)
-		return 0;
-	/* stop the CORB */
-	corbctl = AZ_READ_1(az, CORBCTL);
-	AZ_WRITE_1(az, CORBCTL, corbctl & ~HDA_CORBCTL_CORBRUN);
-	for (i = 5000; i >= 0; i--) {
-		DELAY(10);
-		corbctl = AZ_READ_1(az, CORBCTL);
-		if ((corbctl & HDA_CORBCTL_CORBRUN) == 0)
-			break;
-	}
-	azalia_free_dmamem(az, &az->corb_dma);
 	return 0;
 }
 
@@ -1036,7 +1052,7 @@ azalia_halt_rirb(azalia_t *az)
 				break;
 		}
 		if (i <= 0) {
-			printf("%s: RIRB is running\n", XNAME(az));
+			DPRINTF(("%s: RIRB is running\n", XNAME(az)));
 			return(EBUSY);
 		}
 	}
@@ -1102,31 +1118,6 @@ azalia_init_rirb(azalia_t *az, int resuming)
 }
 
 int
-azalia_delete_rirb(azalia_t *az)
-{
-	int i;
-	uint8_t rirbctl;
-
-	if (az->unsolq != NULL) {
-		free(az->unsolq, M_DEVBUF);
-		az->unsolq = NULL;
-	}
-	if (az->rirb_dma.addr == NULL)
-		return 0;
-	/* stop the RIRB */
-	rirbctl = AZ_READ_1(az, RIRBCTL);
-	AZ_WRITE_1(az, RIRBCTL, rirbctl & ~HDA_RIRBCTL_RIRBDMAEN);
-	for (i = 5000; i >= 0; i--) {
-		DELAY(10);
-		rirbctl = AZ_READ_1(az, RIRBCTL);
-		if ((rirbctl & HDA_RIRBCTL_RIRBDMAEN) == 0)
-			break;
-	}
-	azalia_free_dmamem(az, &az->rirb_dma);
-	return 0;
-}
-
-int
 azalia_comresp(const codec_t *codec, nid_t nid, uint32_t control,
     uint32_t param, uint32_t* result)
 {
@@ -1155,7 +1146,7 @@ azalia_set_command(azalia_t *az, int caddr, nid_t nid, uint32_t control,
 
 #ifdef DIAGNOSTIC
 	if ((AZ_READ_1(az, CORBCTL) & HDA_CORBCTL_CORBRUN) == 0) {
-		printf("%s: CORB is not running.\n", XNAME(az));
+		DPRINTF(("%s: CORB is not running.\n", XNAME(az)));
 		return(-1);
 	}
 #endif
@@ -1181,7 +1172,7 @@ azalia_get_response(azalia_t *az, uint32_t *result)
 
 #ifdef DIAGNOSTIC
 	if ((AZ_READ_1(az, RIRBCTL) & HDA_RIRBCTL_RIRBDMAEN) == 0) {
-		printf("%s: RIRB is not running.\n", XNAME(az));
+		DPRINTF(("%s: RIRB is not running.\n", XNAME(az)));
 		return(-1);
 	}
 #endif
@@ -1197,7 +1188,7 @@ azalia_get_response(azalia_t *az, uint32_t *result)
 			i--;
 		}
 		if (i <= 0) {
-			printf("%s: RIRB time out\n", XNAME(az));
+			DPRINTF(("%s: RIRB time out\n", XNAME(az)));
 			return(ETIMEDOUT);
 		}
 		if (++az->rirb_rp >= az->rirb_entries)
@@ -1327,26 +1318,15 @@ azalia_suspend(azalia_t *az)
 {
 	int err;
 
+	if (az->detached)
+		return 0;
+
 	/* disable unsolicited responses */
 	AZ_WRITE_4(az, GCTL, AZ_READ_4(az, GCTL) & ~HDA_GCTL_UNSOL);
 
 	timeout_del(&az->unsol_to);
 
 	azalia_save_mixer(&az->codecs[az->codecno]);
-
-	/* azalia_stream_halt() always returns 0.
-	 * Set 'active' field back to 1 after halting, so azalia_resume()
-	 * knows to start it back up.
-	 */
-	if (az->rstream.active) {
-		azalia_stream_halt(&az->rstream);
-		az->rstream.active = 1;
-	}
-	if (az->pstream.active) {
-		azalia_stream_halt(&az->pstream);
-		az->pstream.active = 1;
-	}
-
 	/* azalia_halt_{corb,rirb}() only fail if the {CORB,RIRB} can't
 	 * be stopped and azalia_init_{corb,rirb}(), which starts the
 	 * {CORB,RIRB}, first calls azalia_halt_{corb,rirb}().  If halt
@@ -1371,11 +1351,6 @@ azalia_suspend(azalia_t *az)
 rirb_fail:
 	azalia_init_corb(az, 1);
 corb_fail:
-	if (az->pstream.active)
-		azalia_stream_start(&az->pstream);
-	if (az->rstream.active)
-		azalia_stream_start(&az->rstream);
-
 	AZ_WRITE_4(az, GCTL, AZ_READ_4(az, GCTL) | HDA_GCTL_UNSOL);
 
 	return err;
@@ -1391,8 +1366,8 @@ azalia_resume_codec(codec_t *this)
 	err = azalia_comresp(this, this->audiofunc, CORB_SET_POWER_STATE,
  	    CORB_PS_D0, &result);
 	if (err) {
-		printf("%s: power audio func error: result=0x%8.8x\n",
-		    __func__, result);
+		DPRINTF(("%s: power audio func error: result=0x%8.8x\n",
+		    __func__, result));
 	}
 	DELAY(100);
 
@@ -1405,6 +1380,8 @@ azalia_resume_codec(codec_t *this)
 		}
 		if (w->type == COP_AWTYPE_PIN_COMPLEX)
 			azalia_widget_init_pin(w, this);
+		if (this->qrks & AZ_QRK_WID_MASK)
+			azalia_codec_widget_quirks(this, w->nid);
 	}
 
 	if (this->qrks & AZ_QRK_GPIO_MASK) {
@@ -1421,18 +1398,12 @@ azalia_resume_codec(codec_t *this)
 int
 azalia_resume(azalia_t *az)
 {
-	pcireg_t v;
 	int err;
 
-	/* enable back-to-back */
-	v = pci_conf_read(az->pc, az->tag, PCI_COMMAND_STATUS_REG);
-	pci_conf_write(az->pc, az->tag, PCI_COMMAND_STATUS_REG,
-	    v | PCI_COMMAND_BACKTOBACK_ENABLE);
+	if (az->detached)
+		return 0;
 
-	/* traffic class select */
-	v = pci_conf_read(az->pc, az->tag, ICH_PCI_HDTCSEL);
-	pci_conf_write(az->pc, az->tag, ICH_PCI_HDTCSEL,
-	    v & ~(ICH_PCI_HDTCSEL_MASK));
+	azalia_configure_pci(az);
 
 	/* is this necessary? */
 	pci_conf_write(az->pc, az->tag, PCI_SUBSYS_ID_REG, az->subid);
@@ -1441,24 +1412,16 @@ azalia_resume(azalia_t *az)
 	if (err)
 		return err;
 
+	/* enable unsolicited responses on the controller */
+	AZ_WRITE_4(az, GCTL, AZ_READ_4(az, GCTL) | HDA_GCTL_UNSOL);
+
 	err = azalia_resume_codec(&az->codecs[az->codecno]);
 	if (err)
 		return err;
 
-	err = azalia_codec_enable_unsol(&az->codecs[az->codecno], 1);
+	err = azalia_codec_enable_unsol(&az->codecs[az->codecno]);
 	if (err)
 		return err;
-
-	if (az->pstream.active) {
-		err = azalia_stream_start(&az->pstream);
-		if (err)
-			return err;
-	}
-	if (az->rstream.active) {
-		err = azalia_stream_start(&az->rstream);
-		if (err)
-			return err;
-	}
 
 	return 0;
 }
@@ -1472,6 +1435,8 @@ azalia_save_mixer(codec_t *this)
 
 	for (i = 0; i < this->nmixers; i++) {
 		m = &this->mixers[i];
+		if (m->nid == this->playvols.master)
+			continue;
 		mc.dev = i;
 		mc.type = m->devinfo.type;
 		azalia_mixer_get(this, m->nid, m->target, &mc);
@@ -1488,8 +1453,8 @@ azalia_save_mixer(codec_t *this)
 		case AUDIO_MIXER_CLASS:
 			break;
 		default:
-			printf("%s: invalid mixer type in mixer %d\n",
-			    __func__, mc.dev);
+			DPRINTF(("%s: invalid mixer type in mixer %d\n",
+			    __func__, mc.dev));
 			break;
 		}
 	}
@@ -1504,6 +1469,8 @@ azalia_restore_mixer(codec_t *this)
 
 	for (i = 0; i < this->nmixers; i++) {
 		m = &this->mixers[i];
+		if (m->nid == this->playvols.master)
+			continue;
 		mc.dev = i;
 		mc.type = m->devinfo.type;
 		switch (mc.type) {
@@ -1519,8 +1486,8 @@ azalia_restore_mixer(codec_t *this)
 		case AUDIO_MIXER_CLASS:
 			break;
 		default:
-			printf("%s: invalid mixer type in mixer %d\n",
-			    __func__, mc.dev);
+			DPRINTF(("%s: invalid mixer type in mixer %d\n",
+			    __func__, mc.dev));
 			continue;
 		}
 		azalia_mixer_set(this, m->nid, m->target, &mc);
@@ -2260,7 +2227,7 @@ azalia_codec_select_spkrdac(codec_t *this)
 				}
 			}
 		}
-		if (conn != -1) {
+		if (conn != -1 && conv != -1) {
 			err = azalia_comresp(this, w->nid,
 			    CORB_SET_CONNECTION_SELECT_CONTROL, conn, 0);
 			if (err)
@@ -3343,7 +3310,7 @@ azalia_widget_init_connection(widget_t *this, const codec_t *codec)
 	uint32_t result;
 	int err;
 	int i, j, k;
-	int length, bits, conn, last;
+	int length, nconn, bits, conn, last;
 
 	this->selected = -1;
 	if ((this->widgetcap & COP_AWCAP_CONNLIST) == 0)
@@ -3362,12 +3329,13 @@ azalia_widget_init_connection(widget_t *this, const codec_t *codec)
 	if (length == 0)
 		return 0;
 
-	this->nconnections = length;
-	this->connections = malloc(sizeof(nid_t) * length, M_DEVBUF, M_NOWAIT);
-	if (this->connections == NULL) {
-		printf("%s: out of memory\n", XNAME(codec->az));
-		return ENOMEM;
-	}
+	/*
+	 * 'length' is the number of entries, not the number of
+	 * connections.  Find the number of connections, 'nconn', so
+	 * enough space can be allocated for the list of connected
+	 * nids.
+	 */
+	nconn = last = 0;
 	for (i = 0; i < length;) {
 		err = azalia_comresp(codec, this->nid,
 		    CORB_GET_CONNECTION_LIST_ENTRY, i, &result);
@@ -3378,16 +3346,42 @@ azalia_widget_init_connection(widget_t *this, const codec_t *codec)
 			/* If high bit is set, this is the end of a continuous
 			 * list that started with the last connection.
 			 */
+			if ((nconn > 0) && (conn & (1 << (bits - 1))))
+				nconn += (conn & ~(1 << (bits - 1))) - last;
+			else
+				nconn++;
+			last = conn;
+			i++;
+		}
+	}
+
+	this->connections = malloc(sizeof(nid_t) * nconn, M_DEVBUF, M_NOWAIT);
+	if (this->connections == NULL) {
+		printf("%s: out of memory\n", XNAME(codec->az));
+		return ENOMEM;
+	}
+	for (i = 0; i < nconn;) {
+		err = azalia_comresp(codec, this->nid,
+		    CORB_GET_CONNECTION_LIST_ENTRY, i, &result);
+		if (err)
+			return err;
+		for (k = 0; i < nconn && (k < 32 / bits); k++) {
+			conn = (result >> (k * bits)) & ((1 << bits) - 1);
+			/* If high bit is set, this is the end of a continuous
+			 * list that started with the last connection.
+			 */
 			if ((i > 0) && (conn & (1 << (bits - 1)))) {
-				last = this->connections[i - 1];
-				for (j = 1; i < length && j <= conn - last; j++)
+				for (j = 1; i < nconn && j <= conn - last; j++)
 					this->connections[i++] = last + j;
 			} else {
 				this->connections[i++] = conn;
 			}
+			last = conn;
 		}
 	}
-	if (length > 0) {
+	this->nconnections = nconn;
+
+	if (nconn > 0) {
 		err = azalia_comresp(codec, this->nid,
 		    CORB_GET_CONNECTION_SELECT_CONTROL, 0, &result);
 		if (err)
@@ -3619,7 +3613,8 @@ azalia_widget_print_pin(const widget_t *this) {}
  * ================================================================ */
 
 int
-azalia_stream_init(stream_t *this, azalia_t *az, int regindex, int strnum, int dir)
+azalia_stream_init(stream_t *this, azalia_t *az, int regindex, int strnum,
+    int dir)
 {
 	int err;
 
@@ -3628,7 +3623,7 @@ azalia_stream_init(stream_t *this, azalia_t *az, int regindex, int strnum, int d
 	this->intr_bit = 1 << regindex;
 	this->number = strnum;
 	this->dir = dir;
-	this->active = 0;
+	this->pos_offs = STR_READ_2(this, FIFOS) & 0xff;
 
 	/* setup BDL buffers */
 	err = azalia_alloc_dmamem(az, sizeof(bdlist_entry_t) * HDA_BDL_MAX,
@@ -3641,23 +3636,9 @@ azalia_stream_init(stream_t *this, azalia_t *az, int regindex, int strnum, int d
 }
 
 int
-azalia_stream_delete(stream_t *this, azalia_t *az)
-{
-	if (this->bdlist.addr == NULL)
-		return 0;
-
-	/* disable stream interrupts */
-	STR_WRITE_1(this, CTL, STR_READ_1(this, CTL) |
-	    ~(HDA_SD_CTL_DEIE | HDA_SD_CTL_FEIE | HDA_SD_CTL_IOCE));
-
-	azalia_free_dmamem(az, &this->bdlist);
-	return 0;
-}
-
-int
 azalia_stream_reset(stream_t *this)
 {
-	int i, skip;
+	int i;
 	uint16_t ctl;
 	uint8_t sts;
 
@@ -3677,7 +3658,7 @@ azalia_stream_reset(stream_t *this)
 			break;
 	}
 	if (i <= 0) {
-		printf("%s: stream reset failure 1\n", XNAME(this->az));
+		DPRINTF(("%s: stream reset failure 1\n", XNAME(this->az)));
 		return -1;
 	}
 
@@ -3690,29 +3671,13 @@ azalia_stream_reset(stream_t *this)
 			break;
 	}
 	if (i <= 0) {
-		printf("%s: stream reset failure 2\n", XNAME(this->az));
+		DPRINTF(("%s: stream reset failure 2\n", XNAME(this->az)));
 		return -1;
 	}
 
 	sts = STR_READ_1(this, STS);
 	sts |= HDA_SD_STS_DESE | HDA_SD_STS_FIFOE | HDA_SD_STS_BCIS;
 	STR_WRITE_1(this, STS, sts);
-
-	/* The hardware position pointer has been reset to the start
-	 * of the buffer.  Call our interrupt handler enough times
-	 * to advance the software position pointer to wrap to the
-	 * start of the buffer.
-	 */
-	if (this->active) {
-		skip = (this->bufsize - this->lpib) / this->blk + 1;
-		DPRINTF(("%s: dir=%d bufsize=%d blk=%d lpib=%d skip=%d\n",
-		    __func__, this->dir, this->bufsize, this->blk, this->lpib,
-		    skip));
-		for (i = 0; i < skip; i++)
-			this->intr(this->intr_arg);
-	}
-	this->active = 0;
-	this->lpib = 0;
 
 	return (0);
 }
@@ -3728,7 +3693,7 @@ azalia_stream_start(stream_t *this)
 
 	err = azalia_stream_reset(this);
 	if (err) {
-		printf("%s: stream reset failed\n", "azalia");
+		DPRINTF(("%s: stream reset failed\n", "azalia"));
 		return err;
 	}
 
@@ -3750,6 +3715,7 @@ azalia_stream_start(stream_t *this)
 			break;
 		}
 	}
+	this->nblks = index;
 
 	DPRINTFN(1, ("%s: size=%d fmt=0x%4.4x index=%d\n",
 	    __func__, this->bufsize, this->fmt, index));
@@ -3776,8 +3742,6 @@ azalia_stream_start(stream_t *this)
 	    HDA_SD_CTL_DEIE | HDA_SD_CTL_FEIE | HDA_SD_CTL_IOCE |
 	    HDA_SD_CTL_RUN);
 
-	this->active = 1;
-
 	return (0);
 }
 
@@ -3792,30 +3756,53 @@ azalia_stream_halt(stream_t *this)
 	AZ_WRITE_4(this->az, INTCTL,
 	    AZ_READ_4(this->az, INTCTL) & ~this->intr_bit);
 	azalia_codec_disconnect_stream(this);
-	this->lpib = STR_READ_4(this, LPIB);
-	this->active = 0;
+
 	return (0);
 }
 
 #define	HDA_SD_STS_BITS	"\20\3BCIS\4FIFOE\5DESE\6FIFORDY"
 
 int
-azalia_stream_intr(stream_t *this, uint32_t intsts)
+azalia_stream_intr(stream_t *this)
 {
+	u_long hwpos, swpos;
 	u_int8_t sts;
-
-	if ((intsts & this->intr_bit) == 0)
-		return (0);
 
 	sts = STR_READ_1(this, STS);
 	STR_WRITE_1(this, STS, sts |
 	    HDA_SD_STS_DESE | HDA_SD_STS_FIFOE | HDA_SD_STS_BCIS);
 
 	if (sts & (HDA_SD_STS_DESE | HDA_SD_STS_FIFOE))
-		printf("%s: stream %d: sts=%b\n", XNAME(this->az),
-		    this->number, sts, HDA_SD_STS_BITS);
-	if (sts & HDA_SD_STS_BCIS)
+		DPRINTF(("%s: stream %d: sts=%b\n", XNAME(this->az),
+		    this->number, sts, HDA_SD_STS_BITS));
+
+	if (sts & HDA_SD_STS_BCIS) {
+		hwpos = STR_READ_4(this, LPIB) + this->pos_offs;
+		if (hwpos < this->last_hwpos)
+			this->hw_base += this->blk * this->nblks;
+		this->last_hwpos = hwpos;
+		hwpos += this->hw_base;
+
+		/*
+		 * We got the interrupt, so we should advance our count.
+		 * But we might *not* advance the count if software is
+		 * ahead.
+		 */
+		swpos = this->swpos + this->blk;
+
+		if (hwpos >= swpos + this->blk) {
+			DPRINTF(("%s: stream %d: swpos %lu hwpos %lu, adding intr\n",
+			    __func__, this->number, swpos, hwpos));
+			this->intr(this->intr_arg);
+			this->swpos += this->blk;
+		} else if (swpos >= hwpos + this->blk) {
+			DPRINTF(("%s: stream %d: swpos %lu hwpos %lu, ignoring intr\n",
+			    __func__, this->number, swpos, hwpos));
+			return (1);
+		}
 		this->intr(this->intr_arg);
+		this->swpos += this->blk;
+	}
 	return (1);
 }
 
@@ -4231,6 +4218,10 @@ azalia_trigger_output(void *v, void *start, void *end, int blk,
 	az->pstream.intr = intr;
 	az->pstream.intr_arg = arg;
 
+	az->pstream.swpos = 0;
+	az->pstream.last_hwpos = 0;
+	az->pstream.hw_base = 0;
+
 	return azalia_stream_start(&az->pstream);
 }
 
@@ -4262,6 +4253,10 @@ azalia_trigger_input(void *v, void *start, void *end, int blk,
 	az->rstream.fmt = fmt;
 	az->rstream.intr = intr;
 	az->rstream.intr_arg = arg;
+
+	az->rstream.swpos = 0;
+	az->rstream.last_hwpos = 0;
+	az->rstream.hw_base = 0;
 
 	return azalia_stream_start(&az->rstream);
 }

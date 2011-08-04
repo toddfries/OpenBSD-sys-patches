@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vfsops.c,v 1.33 2010/06/29 04:09:32 tedu Exp $	*/
+/*	$OpenBSD: udf_vfsops.c,v 1.38 2011/07/04 20:35:35 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -65,8 +65,7 @@
 #include <sys/queue.h>
 #include <sys/vnode.h>
 #include <sys/endian.h>
-
-#include <miscfs/specfs/specdev.h>
+#include <sys/specdev.h>
 
 #include <isofs/udf/ecma167-udf.h>
 #include <isofs/udf/udf.h>
@@ -270,8 +269,7 @@ udf_mountfs(struct vnode *devvp, struct mount *mp, uint32_t lb, struct proc *p)
 	 * Should also check sector n - 256, n, and 512.
 	 */
 	sector = 256;
-	if ((error = bread(devvp, sector * btodb(bsize), bsize, NOCRED,
-			   &bp)) != 0)
+	if ((error = bread(devvp, sector * btodb(bsize), bsize, &bp)) != 0)
 		goto bail;
 	if ((error = udf_checktag((struct desc_tag *)bp->b_data, TAGID_ANCHOR)))
 		goto bail;
@@ -290,7 +288,7 @@ udf_mountfs(struct vnode *devvp, struct mount *mp, uint32_t lb, struct proc *p)
 	mvds_end = mvds_start + (letoh32(avdp.main_vds_ex.len) - 1) / bsize;
 	for (sector = mvds_start; sector < mvds_end; sector++) {
 		if ((error = bread(devvp, sector * btodb(bsize), bsize, 
-				   NOCRED, &bp)) != 0) {
+				   &bp)) != 0) {
 			printf("Can't read sector %d of VDS\n", sector);
 			goto bail;
 		}
@@ -685,7 +683,7 @@ udf_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 		 */
 		nvp->v_data = vp->v_data;
 		vp->v_data = NULL;
-		vp->v_op = spec_vnodeop_p;
+		vp->v_op = &spec_vops;
 		vrele(vp);
 		vgone(vp);
 		/*

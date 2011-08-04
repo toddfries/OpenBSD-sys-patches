@@ -1,4 +1,4 @@
-# $OpenBSD: RAMDISK,v 1.8 2010/07/03 03:59:16 krw Exp $
+# $OpenBSD: RAMDISK,v 1.10 2011/06/29 20:52:09 matthew Exp $
 #
 # GENERIC machine description file
 #
@@ -149,11 +149,12 @@ ommmc0		at ahb? addr 0x4809c000 intr 83
 # #uyap*		at uhub?		# Y@P firmware loader
 # udsbr*		at uhub?		# D-Link DSB-R100 radio
 # radio*		at udsbr?		# USB radio
-# #ubt*		at uhub?		# USB Bluetooth
+# #ubt*		at uhub? disable	# USB Bluetooth
 # ugen*		at uhub?		# USB Generic driver
 # 
 # ukphy*	at mii?				# "unknown" PHYs
 # 
+scsibus*	at scsi?
 sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?
@@ -172,10 +173,9 @@ com0	at ahb?	addr	0x49020000	size 0x400 intr 74 # UART3
 #wsdisplay*	at omdisplay? console ?
 
 sdmmc*	at ommmc?		# SD/MMC bus
-scsibus* at sdmmc?		# SCSI emulation
 
 # Bluetooth controllers
-#sbt*	at sdmmc?		# SDIO Bluetooth
+#sbt*	at sdmmc? disable	# SDIO Bluetooth
 
 # APM emulation
 #apm0		at pxaip?

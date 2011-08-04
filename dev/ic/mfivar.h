@@ -1,4 +1,4 @@
-/* $OpenBSD: mfivar.h,v 1.39 2010/06/30 19:10:05 mk Exp $ */
+/* $OpenBSD: mfivar.h,v 1.41 2011/04/09 20:23:31 marco Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -109,10 +109,11 @@ struct mfi_softc {
 	struct device		sc_dev;
 	void			*sc_ih;
 	struct scsi_link	sc_link;
+	struct scsi_iopool	sc_iopool;
 
 	const struct mfi_iop_ops *sc_iop;
 
-	u_int32_t		sc_flags;
+	int			sc_64bit_dma;
 
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
@@ -132,8 +133,12 @@ struct mfi_softc {
 	/* firmware determined max, totals and other information*/
 	uint32_t		sc_max_cmds;
 	uint32_t		sc_max_sgl;
+	uint32_t		sc_sgl_size;
 	uint32_t		sc_max_ld;
 	uint32_t		sc_ld_cnt;
+
+	uint16_t		sc_sgl_flags;
+	uint16_t		sc_reserved;
 
 	/* bio */
 	struct mfi_conf		*sc_cfg;

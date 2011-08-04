@@ -1,8 +1,8 @@
-/*	$OpenBSD: conf.h,v 1.6 2005/01/22 04:04:32 uwe Exp $	*/
+/*	$OpenBSD: conf.h,v 1.8 2011/03/23 16:54:37 pirofti Exp $	*/
 /*	$NetBSD: conf.h,v 1.8 2002/02/10 12:26:03 chris Exp $	*/
 
-#ifndef _ZAURUS_CONF_H
-#define	_ZAURUS_CONF_H
+#ifndef _MACHINE_CONF_H_
+#define	_MACHINE_CONF_H_
 
 #include <sys/conf.h>
 
@@ -11,9 +11,7 @@
  */
 
 #define CONF_HAVE_APM
-#define	CONF_HAVE_USB
-#define	CONF_HAVE_WSCONS
 
 #include <arm/conf.h>
 
-#endif	/* _ZAURUS_CONF_H */
+#endif	/* _MACHINE_CONF_H_ */

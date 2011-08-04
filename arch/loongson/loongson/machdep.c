@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.22 2010/06/27 13:24:39 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.33 2011/07/21 20:36:12 miod Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -63,6 +63,7 @@
 #include <sys/sem.h>
 #endif
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
@@ -75,6 +76,10 @@
 
 #include <dev/cons.h>
 
+#include <dev/pci/pcireg.h>
+#include <dev/pci/pcivar.h>
+#include <dev/pci/pcidevs.h>
+
 #include <mips64/archtype.h>
 
 /* The following is used externally (sysctl_hw) */
@@ -83,21 +88,9 @@ char	cpu_model[30];
 char	pmon_bootp[80];
 
 /*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5	/* Can be changed in config. */
-#endif
-#ifndef	BUFPAGES
-#define BUFPAGES 0		/* Can be changed in config. */
-#endif
-int	bufpages = BUFPAGES;
-int	bufcachepercent = BUFCACHEPERCENT;
-
-/*
  * Even though the system is 64bit, the hardware is constrained to up
  * to 2G of contigous physical memory (direct 2GB DMA area), so there
- * is no particular constraint. paddr_t is long so: 
+ * is no particular constraint. paddr_t is long so:
  */
 struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
@@ -117,7 +110,6 @@ vaddr_t	uncached_base;
 int	physmem;		/* Max supported memory, changes to actual. */
 int	ncpu = 1;		/* At least one CPU in the system. */
 struct	user *proc0paddr;
-int	kbd_reset;
 
 const struct platform *sys_platform;
 struct cpu_hwinfo bootcpu_hwinfo;
@@ -133,10 +125,10 @@ struct phys_mem_desc mem_layout[MAXMEMSEGS];
 static u_long atoi(const char *, uint);
 static void dobootopts(int);
 
-void	build_trampoline(vaddr_t, vaddr_t);
 void	dumpsys(void);
 void	dumpconf(void);
 extern	void parsepmonbp(void);
+const struct platform *loongson_identify(const char *);
 vaddr_t	mips_init(int32_t, int32_t, int32_t, int32_t, char *);
 
 extern	void loongson2e_setup(u_long, u_long);
@@ -165,6 +157,7 @@ struct bonito_flavour {
 	const struct platform *platform;
 };
 
+extern const struct platform ebenton_platform;
 extern const struct platform fuloong_platform;
 extern const struct platform gdium_platform;
 extern const struct platform generic2e_platform;
@@ -172,7 +165,11 @@ extern const struct platform lynloong_platform;
 extern const struct platform yeeloong_platform;
 
 const struct bonito_flavour bonito_flavours[] = {
+	/* eBenton EBT700 netbook */
+	{ "EBT700",	&ebenton_platform },	/* prefix added by user */
 	/* Lemote Fuloong 2F mini-PC */
+	{ "LM6002",	&fuloong_platform },	/* dual Ethernet,
+						   prefix added by user */
 	{ "LM6003",	&fuloong_platform },
 	{ "LM6004",	&fuloong_platform },
 	/* EMTEC Gdium Liberty 1000 */
@@ -188,6 +185,95 @@ const struct bonito_flavour bonito_flavours[] = {
 };
 
 /*
+ * Try to figure out what particular machine we run on, depending on the
+ * scarce PMON version information and whatever else we can figure.
+ */
+const struct platform *
+loongson_identify(const char *version)
+{
+	const struct bonito_flavour *f;
+
+	if (version == NULL) {
+		/*
+		 * If there is no `Version' variable, we expect to be running
+		 * on a 2E system, use the generic code and hope for the best.
+		 */
+		if (loongson_ver == 0x2e) {
+			return &generic2e_platform;
+		} else {
+			pmon_printf("Unable to figure out model!\n");
+			return NULL;
+		}
+	}
+
+	for (f = bonito_flavours; f->prefix != NULL; f++)
+		if (strncmp(version, f->prefix, strlen(f->prefix)) == 0)
+			return f->platform;
+
+	/*
+	 * Early Lemote designs shipped without a model prefix.
+	 *
+	 * We can reasonably expect these to be close enough to either the
+	 * first generation Fuloong 2F design (LM6002), or the 7 inch
+	 * first netbook model; we can tell them apart by looking at which
+	 * video chip they embed.
+	 *
+	 * Note that this is only worth doing if the version string is
+	 * 1.2.something (1.3 onwards are expected to have a model prefix,
+	 * and there are currently no reports of 1.1 and
+	 * below being 2F systems).
+	 *
+	 * LM6002 users are encouraged to add the system model prefix to
+	 * the `Version' variable.
+	 */
+	if (strncmp(version, "1.2.", 4) == 0) {
+		const struct platform *p = NULL;
+		pcitag_t tag;
+		pcireg_t id, class;
+		int dev;
+
+		pmon_printf("No model prefix in version string \"%s\".\n",
+		    version);
+
+		for (dev = 0; dev < 32; dev++) {
+			tag = pci_make_tag_early(0, dev, 0);
+			id = pci_conf_read_early(tag, PCI_ID_REG);
+			if (id == 0 || PCI_VENDOR(id) == PCI_VENDOR_INVALID)
+				continue;
+
+			/* no need to check for DEVICE_IS_VGA_PCI here
+			   since we expect a linear framebuffer */
+			class = pci_conf_read_early(tag, PCI_CLASS_REG);
+			if (PCI_CLASS(class) != PCI_CLASS_DISPLAY ||
+			    (PCI_SUBCLASS(class) != PCI_SUBCLASS_DISPLAY_VGA &&
+			     PCI_SUBCLASS(class) != PCI_SUBCLASS_DISPLAY_MISC))
+				continue;
+
+			switch (id) {
+			case PCI_ID_CODE(PCI_VENDOR_SIS,
+			    PCI_PRODUCT_SIS_315PRO_VGA):
+				p = &fuloong_platform;
+				break;
+			case PCI_ID_CODE(PCI_VENDOR_SMI,
+			    PCI_PRODUCT_SMI_SM712):
+				p = &ebenton_platform;
+				break;
+			}
+
+			if (p != NULL) {
+				pmon_printf("Attempting to match as %s %s\n",
+				    p->vendor, p->product);
+				return p;
+			}
+		}
+	}
+
+	pmon_printf("This kernel doesn't support model \"%s\"." "\n", version);
+	return NULL;
+}
+
+
+/*
  * Do all the stuff that locore normally does before calling main().
  * Reset mapping and set up mapping to hardware and init "wired" reg.
  */
@@ -201,12 +287,18 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 	vaddr_t xtlb_handler;
 	const char *envvar;
 	int i;
-	const struct bonito_flavour *f;
 
 	extern char start[], edata[], end[];
 	extern char exception[], e_exception[];
 	extern char *hw_vendor, *hw_prod;
 	extern void xtlb_miss;
+
+	/*
+	 * Make sure we can access the extended address space.
+	 * This is not necessary on real hardware, but some emulators
+	 * are not aware of this.
+	 */
+	setsr(getsr() | SR_KX | SR_UX);
 
 	/*
 	 * Clear the compiled BSS segment in OpenBSD code.
@@ -275,7 +367,20 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 	prid = cp0_get_prid();
 	switch ((prid >> 8) & 0xff) {
 	case MIPS_LOONGSON2:
-		loongson_ver = 0x2c + (prid & 0xff);
+		switch (prid & 0xff) {
+		case 0x00:
+			loongson_ver = 0x2c;
+			break;
+		case 0x02:
+			loongson_ver = 0x2e;
+			break;
+		case 0x03:
+			loongson_ver = 0x2f;
+			break;
+		case 0x05:
+			loongson_ver = 0x3a;
+			break;
+		}
 		if (loongson_ver == 0x2e || loongson_ver == 0x2f)
 			break;
 		/* FALLTHROUGH */
@@ -291,32 +396,8 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 	 * on the PMON version information.
 	 */
 
-	envvar = pmon_getenv("Version");
-	if (envvar == NULL) {
-		/*
-		 * If this is a 2E system, use the generic code and hope
-		 * for the best.
-		 */
-		if (loongson_ver == 0x2e) {
-			sys_platform = &generic2e_platform;
-		} else {
-			pmon_printf("Unable to figure out model!\n");
-			goto unsupported;
-		}
-	} else {
-		for (f = bonito_flavours; f->prefix != NULL; f++)
-			if (strncmp(envvar, f->prefix, strlen(f->prefix)) ==
-			    0) {
-				sys_platform = f->platform;
-				break;
-			}
-
-		if (sys_platform == NULL) {
-			pmon_printf("This kernel doesn't support model \"%s\"."
-			    "\n", envvar);
-			goto unsupported;
-		}
-	}
+	if ((sys_platform = loongson_identify(pmon_getenv("Version"))) == NULL)
+		goto unsupported;
 
 	hw_vendor = sys_platform->vendor;
 	hw_prod = sys_platform->product;
@@ -364,7 +445,8 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 		goto unsupported;
 	}
 
-	if (memlo == 256) {
+	/* 3A PMON only reports up to 240MB as low memory */
+	if (memlo >= 240) {
 		envvar = pmon_getenv("highmemsize");
 		if (envvar == NULL)
 			memhi = 0;
@@ -376,7 +458,8 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 			/* better expose the problem than limit to 256MB */
 			goto unsupported;
 		}
-	}
+	} else
+		memhi = 0;
 
 	uncached_base = PHYS_TO_XKPHYS(0, CCA_NC);
 
@@ -386,6 +469,7 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 		break;
 	default:
 	case 0x2f:
+	case 0x3a:
 		loongson2f_setup(memlo, memhi);
 		break;
 	}
@@ -408,7 +492,6 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_last_page != 0; i++) {
 		uint64_t fp, lp;
 		uint64_t firstkernpage, lastkernpage;
-		unsigned int freelist;
 		paddr_t firstkernpa, lastkernpa;
 
 		/* kernel is linked in CKSEG0 */
@@ -422,14 +505,13 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
-		freelist = mem_layout[i].mem_freelist;
 
 		/* Account for kernel and kernel symbol table. */
 		if (fp >= firstkernpage && lp < lastkernpage)
 			continue;	/* In kernel. */
 
 		if (lp < firstkernpage || fp > lastkernpage) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 			continue;	/* Outside kernel. */
 		}
 
@@ -439,11 +521,11 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 			lp = firstkernpage;
 		else { /* Need to split! */
 			uint64_t xp = firstkernpage;
-			uvm_page_physload(fp, xp, fp, xp, freelist);
+			uvm_page_physload(fp, xp, fp, xp, 0);
 			fp = lastkernpage;
 		}
 		if (lp > fp) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 		}
 	}
 
@@ -473,10 +555,40 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 	printf("Initial setup done, switching console.\n");
 
 	/*
-	 * Init message buffer.
+	 * Init message buffer. This is similar to pmap_steal_memory(), but
+	 * without zeroing the area, to keep the message buffer from the
+	 * previous kernel run intact, if any.
 	 */
+	for (i = 0; i < vm_nphysseg; i++) {
+		struct vm_physseg *vps = &vm_physmem[i];
+		uint npg = atop(round_page(MSGBUFSIZE));
+		int j;
 
-	msgbufbase = (caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL,NULL);
+		if (vps->avail_start != vps->start ||
+		    vps->avail_start >= vps->avail_end) {
+			continue;
+		}
+
+		if ((vps->avail_end - vps->avail_start) < npg)
+			continue;
+
+		msgbufbase = (caddr_t)PHYS_TO_XKPHYS(ptoa(vps->avail_start),
+		    CCA_CACHED);
+		vps->avail_start += npg;
+		vps->start += npg;
+
+		if (vps->avail_start == vps->end) {
+			/* don't bother panicing if nphysseg becomes zero, */
+			/* the next pmap_steal_memory() call will. */
+			vm_nphysseg--;
+			for (j = i; j < vm_nphysseg; j++)
+				vm_physmem[j] = vm_physmem[j + 1];
+		}
+
+		break;
+	}
+	if (msgbufbase == NULL)
+		panic("not enough contiguous memory for message buffer");
 	initmsgbuf(msgbufbase, MSGBUFSIZE);
 
 	/*
@@ -532,73 +644,6 @@ unsupported:
 	pmon_printf("Halting system.\nPress enter to return to PMON\n");
 	cngetc();
 	return 0;	/* causes us to return to pmon */
-}
-
-/*
- * Build a tlb trampoline
- */
-void
-build_trampoline(vaddr_t addr, vaddr_t dest)
-{
-	const uint32_t insns[] = {
-		0x3c1a0000,	/* lui k0, imm16 */
-		0x675a0000,	/* daddiu k0, k0, imm16 */
-		0x001ad438,	/* dsll k0, k0, 0x10 */
-		0x675a0000,	/* daddiu k0, k0, imm16 */
-		0x001ad438,	/* dsll k0, k0, 0x10 */
-		0x675a0000,	/* daddiu k0, k0, imm16 */
-		0x03400008,	/* jr k0 */
-		0x00000000	/* nop */
-	};
-	uint32_t *dst = (uint32_t *)addr;
-	const uint32_t *src = insns;
-	uint32_t a, b, c, d;
-
-	/*
-	 * Decompose the handler address in the four components which,
-	 * added with sign extension, will produce the correct address.
-	 */
-	d = dest & 0xffff;
-	dest >>= 16;
-	if (d & 0x8000)
-		dest++;
-	c = dest & 0xffff;
-	dest >>= 16;
-	if (c & 0x8000)
-		dest++;
-	b = dest & 0xffff;
-	dest >>= 16;
-	if (b & 0x8000)
-		dest++;
-	a = dest & 0xffff;
-
-	/*
-	 * Build the trampoline, skipping noop computations.
-	 */
-	*dst++ = *src++ | a;
-	if (b != 0)
-		*dst++ = *src++ | b;
-	else
-		src++;
-	*dst++ = *src++;
-	if (c != 0)
-		*dst++ = *src++ | c;
-	else
-		src++;
-	*dst++ = *src++;
-	if (d != 0)
-		*dst++ = *src++ | d;
-	else
-		src++;
-	*dst++ = *src++;
-	*dst++ = *src++;
-
-	/*
-	 * Note that we keep the delay slot instruction a nop, instead
-	 * of branching to the second instruction of the handler and
-	 * having its first instruction in the delay slot, so that the
-	 * tlb handler is free to use k0 immediately.
-	 */
 }
 
 /*
@@ -693,7 +738,7 @@ consinit()
 }
 
 /*
- * cpu_startup: allocate memory for variable-sized tables, initialize CPU, and 
+ * cpu_startup: allocate memory for variable-sized tables, initialize CPU, and
  * do auto-configuration.
  */
 void
@@ -757,46 +802,10 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return ENOTDIR;		/* Overloaded */
 
 	switch (name[0]) {
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return EOPNOTSUPP;
 	}
 }
-
-/*
- * Set registers on exec for native exec format. For o64/64.
- */
-void
-setregs(p, pack, stack, retval)
-	struct proc *p;
-	struct exec_package *pack;
-	u_long stack;
-	register_t *retval;
-{
-	struct cpu_info *ci = curcpu();
-
-	bzero((caddr_t)p->p_md.md_regs, sizeof(struct trap_frame));
-	p->p_md.md_regs->sp = stack;
-	p->p_md.md_regs->pc = pack->ep_entry & ~3;
-	p->p_md.md_regs->t9 = pack->ep_entry & ~3; /* abicall req */
-	p->p_md.md_regs->sr = SR_FR_32 | SR_XX | SR_KSU_USER | SR_KX | SR_UX |
-	    SR_EXL | SR_INT_ENAB;
-	p->p_md.md_regs->sr |= idle_mask & SR_INT_MASK;
-	p->p_md.md_regs->ic = (idle_mask << 8) & IC_INT_MASK;
-	p->p_md.md_flags &= ~MDP_FPUSED;
-	if (ci->ci_fpuproc == p)
-		ci->ci_fpuproc = NULL;
-	p->p_md.md_ss_addr = 0;
-	p->p_md.md_pc_ctrl = 0;
-	p->p_md.md_watch_1 = 0;
-	p->p_md.md_watch_2 = 0;
-
-	retval[1] = 0;
-}
-
 
 int	waittime = -1;
 
@@ -840,6 +849,7 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	(void) splhigh();		/* Extreme priority. */
@@ -898,7 +908,7 @@ dumpconf(void)
 		dumplo = nblks - btodb(ptoa(physmem));
 
 	/*
-	 * Don't dump on the first page in case the dump device includes a 
+	 * Don't dump on the first page in case the dump device includes a
 	 * disk label.
 	 */
 	if (dumplo < btodb(PAGE_SIZE))

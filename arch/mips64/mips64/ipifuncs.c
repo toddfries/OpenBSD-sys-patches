@@ -1,4 +1,4 @@
-/* $OpenBSD: ipifuncs.c,v 1.4 2010/04/28 16:20:28 syuu Exp $ */
+/* $OpenBSD: ipifuncs.c,v 1.8 2011/05/10 07:58:47 syuu Exp $ */
 /* $NetBSD: ipifuncs.c,v 1.40 2008/04/28 20:23:10 martin Exp $ */
 
 /*-
@@ -45,6 +45,7 @@
 static int	mips64_ipi_intr(void *);
 static void	mips64_ipi_nop(void);
 static void	smp_rendezvous_action(void);
+static void	mips64_ipi_ddb(void);
 static void	mips64_multicast_ipi(unsigned int, unsigned int);
 static unsigned int ipi_mailbox[MAXCPUS];
 
@@ -63,7 +64,8 @@ typedef void (*ipifunc_t)(void);
 
 ipifunc_t ipifuncs[MIPS64_NIPIS] = {
 	mips64_ipi_nop,
-	smp_rendezvous_action
+	smp_rendezvous_action,
+	mips64_ipi_ddb
 };
 
 /*
@@ -82,7 +84,7 @@ mips64_ipi_init(void)
 
 	error = hw_ipi_intr_establish(mips64_ipi_intr, cpuid);
 	if (error)
-		panic("hw_ipi_intr_establish failed:%d\n", error);
+		panic("hw_ipi_intr_establish failed:%d", error);
 }
 
 /*
@@ -222,4 +224,12 @@ smp_rendezvous_cpus(unsigned long map,
 		;
 	/* release lock */
 	mtx_leave(&smp_ipi_mtx);
+}
+
+static void
+mips64_ipi_ddb(void)
+{
+#ifdef DDB
+	Debugger();
+#endif
 }

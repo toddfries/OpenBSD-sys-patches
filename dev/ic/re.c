@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.123 2010/07/14 19:24:27 naddy Exp $	*/
+/*	$OpenBSD: re.c,v 1.136 2011/06/15 13:19:19 jsg Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -194,6 +194,9 @@ void	re_disable_hw_im(struct rl_softc *);
 void	re_disable_sim_im(struct rl_softc *);
 void	re_config_imtype(struct rl_softc *, int);
 void	re_setup_intr(struct rl_softc *, int, int);
+#ifndef SMALL_KERNEL
+int	re_wol(struct ifnet*, int);
+#endif
 
 #ifdef RE_DIAG
 int	re_diag(struct rl_softc *);
@@ -221,7 +224,9 @@ static const struct re_revision {
 	{ RL_HWREV_8101,	"RTL8101" },
 	{ RL_HWREV_8101E,	"RTL8101E" },
 	{ RL_HWREV_8102E,	"RTL8102E" },
+	{ RL_HWREV_8401E,	"RTL8401E" },
 	{ RL_HWREV_8102EL,	"RTL8102EL" },
+	{ RL_HWREV_8102EL_SPIN1, "RTL8102EL 1" },
 	{ RL_HWREV_8103E,       "RTL8103E" },
 	{ RL_HWREV_8110S,	"RTL8110S" },
 	{ RL_HWREV_8139CPLUS,	"RTL8139C+" },
@@ -231,9 +236,11 @@ static const struct re_revision {
 	{ RL_HWREV_8168C,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
+	{ RL_HWREV_8105E,	"RTL8105E" },
 	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
 	{ RL_HWREV_8168DP,      "RTL8168DP/8111DP" },
 	{ RL_HWREV_8168E,       "RTL8168E/8111E" },
+	{ RL_HWREV_8168E_VL,	"RTL8168E/8111E-VL" },
 	{ RL_HWREV_8169,	"RTL8169" },
 	{ RL_HWREV_8169_8110SB,	"RTL8169/8110SB" },
 	{ RL_HWREV_8169_8110SBL, "RTL8169SBL" },
@@ -773,7 +780,7 @@ done:
 	sc->rl_testmode = 0;
 	sc->rl_flags &= ~RL_FLAG_LINK;
 	ifp->if_flags &= ~IFF_PROMISC;
-	re_stop(ifp, 1);
+	re_stop(ifp);
 	if (m0 != NULL)
 		m_freem(m0);
 	DPRINTF(("leaving re_diag\n"));
@@ -827,8 +834,15 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		/* FALLTHROUGH */
 	case RL_HWREV_8102E:
 	case RL_HWREV_8102EL:
+	case RL_HWREV_8102EL_SPIN1:
 		sc->rl_flags |= RL_FLAG_NOJUMBO | RL_FLAG_INVMAR |
 		    RL_FLAG_PHYWAKE | RL_FLAG_PAR | RL_FLAG_DESCV2 |
+		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
+		break;
+	case RL_HWREV_8401E:
+	case RL_HWREV_8105E:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
 		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
 		break;
 	case RL_HWREV_8168_SPIN1:
@@ -864,6 +878,11 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
 		    RL_FLAG_MACSTAT | RL_FLAG_HWIM | RL_FLAG_CMDSTOP |
 		    RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8168E_VL:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
+		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
 		break;
 	case RL_HWREV_8169_8110SB:
 	case RL_HWREV_8169_8110SBL:
@@ -1104,7 +1123,6 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	ifp->if_ioctl = re_ioctl;
 	ifp->if_start = re_start;
 	ifp->if_watchdog = re_watchdog;
-	ifp->if_init = re_init;
 	if ((sc->rl_flags & RL_FLAG_NOJUMBO) == 0)
 		ifp->if_hardmtu = RL_JUMBO_MTU;
 	IFQ_SET_MAXLEN(&ifp->if_snd, RL_TX_QLEN);
@@ -1119,11 +1137,19 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
+#ifndef SMALL_KERNEL
+	ifp->if_capabilities |= IFCAP_WOL;
+	ifp->if_wol = re_wol;
+	re_wol(ifp, 0);
+#endif
 	timeout_set(&sc->timer_handle, re_tick, sc);
 
 	/* Take PHY out of power down mode. */
-	if (sc->rl_flags & RL_FLAG_PHYWAKE_PM)
+	if (sc->rl_flags & RL_FLAG_PHYWAKE_PM) {
 		CSR_WRITE_1(sc, RL_PMCH, CSR_READ_1(sc, RL_PMCH) | 0x80);
+		if (sc->sc_hwrev == RL_HWREV_8401E)
+			CSR_WRITE_1(sc, 0xD1, CSR_READ_1(sc, 0xD1) & ~0x08);
+	}
 	if (sc->rl_flags & RL_FLAG_PHYWAKE) {
 		re_gmii_writereg((struct device *)sc, 1, 0x1f, 0);
 		re_gmii_writereg((struct device *)sc, 1, 0x0e, 0);
@@ -1606,21 +1632,17 @@ re_intr(void *arg)
 		return (0);
 
 	rx = tx = 0;
-	for (;;) {
+	status = CSR_READ_2(sc, RL_ISR);
+	/* If the card has gone away the read returns 0xffff. */
+	if (status == 0xffff)
+		return (0);
+	if (status)
+		CSR_WRITE_2(sc, RL_ISR, status);
 
-		status = CSR_READ_2(sc, RL_ISR);
-		/* If the card has gone away the read returns 0xffff. */
-		if (status == 0xffff)
-			break;
-		if (status)
-			CSR_WRITE_2(sc, RL_ISR, status);
+	if (status & RL_ISR_TIMEOUT_EXPIRED)
+		claimed = 1;
 
-		if (status & RL_ISR_TIMEOUT_EXPIRED)
-			claimed = 1;
-
-		if ((status & RL_INTRS_CPLUS) == 0)
-			break;
-
+	if (status & RL_INTRS_CPLUS) {
 		if (status & (sc->rl_rx_ack | RL_ISR_RX_ERR)) {
 			rx |= re_rxeof(sc);
 			claimed = 1;
@@ -1704,18 +1726,18 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	 */
 
 	if ((m->m_pkthdr.csum_flags &
-	    (M_IPV4_CSUM_OUT|M_TCPV4_CSUM_OUT|M_UDPV4_CSUM_OUT)) != 0) {
+	    (M_IPV4_CSUM_OUT|M_TCP_CSUM_OUT|M_UDP_CSUM_OUT)) != 0) {
 		if (sc->rl_flags & RL_FLAG_DESCV2) {
 			vlanctl |= RL_TDESC_CMD_IPCSUMV2;
-			if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+			if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
 				vlanctl |= RL_TDESC_CMD_TCPCSUMV2;
-			if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+			if (m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
 				vlanctl |= RL_TDESC_CMD_UDPCSUMV2;
 		} else {
 			csum_flags |= RL_TDESC_CMD_IPCSUM;
-			if (m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+			if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
 				csum_flags |= RL_TDESC_CMD_TCPCSUM;
-			if (m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+			if (m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
 				csum_flags |= RL_TDESC_CMD_UDPCSUM;
 		}
 	}
@@ -1942,7 +1964,7 @@ re_init(struct ifnet *ifp)
 	/*
 	 * Cancel pending I/O and free all RX/TX buffers.
 	 */
-	re_stop(ifp, 0);
+	re_stop(ifp);
 
 	/*
 	 * Enable C+ RX and TX mode, as well as RX checksum offload.
@@ -2043,8 +2065,10 @@ re_init(struct ifnet *ifp)
 	if (sc->sc_hwrev != RL_HWREV_8139CPLUS)
 		CSR_WRITE_2(sc, RL_MAXRXPKTLEN, 16383);
 
-	if (sc->rl_testmode)
+	if (sc->rl_testmode) {
+		splx(s);
 		return (0);
+	}
 
 	mii_mediachg(&sc->sc_mii);
 
@@ -2118,7 +2142,7 @@ re_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 				re_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
-				re_stop(ifp, 1);
+				re_stop(ifp);
 		}
 		break;
 	case SIOCGIFMEDIA:
@@ -2163,7 +2187,7 @@ re_watchdog(struct ifnet *ifp)
  * RX and TX lists.
  */
 void
-re_stop(struct ifnet *ifp, int disable)
+re_stop(struct ifnet *ifp)
 {
 	struct rl_softc *sc;
 	int	i;
@@ -2178,12 +2202,7 @@ re_stop(struct ifnet *ifp, int disable)
 
 	mii_down(&sc->sc_mii);
 
-	if (sc->rl_flags & RL_FLAG_CMDSTOP)
-		CSR_WRITE_1(sc, RL_COMMAND, RL_CMD_STOPREQ | RL_CMD_TX_ENB |
-		    RL_CMD_RX_ENB);
-	else
-		CSR_WRITE_1(sc, RL_COMMAND, 0x00);
-	DELAY(1000);
+	CSR_WRITE_1(sc, RL_COMMAND, 0x00);
 	CSR_WRITE_2(sc, RL_IMR, 0x0000);
 	CSR_WRITE_2(sc, RL_ISR, 0xFFFF);
 
@@ -2306,7 +2325,7 @@ re_config_imtype(struct rl_softc *sc, int imtype)
 		break;
 
 	default:
-		panic("%s: unknown imtype %d\n",
+		panic("%s: unknown imtype %d",
 		      sc->sc_dev.dv_xname, imtype);
 	}
 }
@@ -2339,7 +2358,56 @@ re_setup_intr(struct rl_softc *sc, int enable_intrs, int imtype)
 		break;
 
 	default:
-		panic("%s: unknown imtype %d\n",
+		panic("%s: unknown imtype %d",
 		      sc->sc_dev.dv_xname, imtype);
 	}
 }
+
+#ifndef SMALL_KERNEL
+int
+re_wol(struct ifnet *ifp, int enable)
+{
+	struct rl_softc *sc = ifp->if_softc;
+	int i;
+	u_int8_t val;
+	struct re_wolcfg {
+		u_int8_t	enable;
+		u_int8_t	reg;
+		u_int8_t	bit;
+	} re_wolcfg[] = {
+		/* Always disable all wake events expect magic packet. */
+		{ 0,	RL_CFG5,	RL_CFG5_WOL_UCAST },
+		{ 0,	RL_CFG5,	RL_CFG5_WOL_MCAST },
+		{ 0,	RL_CFG5,	RL_CFG5_WOL_BCAST },
+		{ 1,	RL_CFG3,	RL_CFG3_WOL_MAGIC },
+		{ 0,	RL_CFG3,	RL_CFG3_WOL_LINK }
+	};
+
+	if (enable) {
+		if ((CSR_READ_1(sc, RL_CFG1) & RL_CFG1_PME) == 0) {
+			printf("%s: power management is disabled, "
+			    "cannot do WOL\n", sc->sc_dev.dv_xname);
+			return (ENOTSUP);
+		}
+		if ((CSR_READ_1(sc, RL_CFG2) & RL_CFG2_AUXPWR) == 0)
+			printf("%s: no auxiliary power, cannot do WOL from D3 "
+			    "(power-off) state\n", sc->sc_dev.dv_xname);
+	}
+
+	/* Temporarily enable write to configuration registers. */
+	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_WRITECFG);
+
+	for (i = 0; i < nitems(re_wolcfg); i++) {
+		val = CSR_READ_1(sc, re_wolcfg[i].reg);
+		if (enable && re_wolcfg[i].enable)
+			val |= re_wolcfg[i].bit;
+		else
+			val &= ~re_wolcfg[i].bit;
+		CSR_WRITE_1(sc, re_wolcfg[i].reg, val);
+	}
+
+	CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
+
+	return (0);
+}
+#endif

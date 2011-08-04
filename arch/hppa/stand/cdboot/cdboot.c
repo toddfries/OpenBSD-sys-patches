@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdboot.c,v 1.7 2004/06/14 00:32:31 deraadt Exp $	*/
+/*	$OpenBSD: cdboot.c,v 1.11 2011/04/17 09:49:48 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2003 Michael Shalayeff
@@ -40,18 +40,18 @@
 
 dev_t bootdev;
 int debug = 1;
-int bootprompt = 1;
+int boottimeout = 5;
 
 struct fs_ops file_system[] = {
 	{ cd9660_open, cd9660_close, cd9660_read, cd9660_write, cd9660_seek,
 	  cd9660_stat, cd9660_readdir },
 };
-int nfsys = NENTS(file_system);
+int nfsys = nitems(file_system);
 
 struct devsw devsw[] = {
 	{ "dk",	iodcstrategy, dkopen, dkclose, noioctl },
 };
-int	ndevs = NENTS(devsw);
+int	ndevs = nitems(devsw);
 
 struct consdev	constab[] = {
 	{ ite_probe, ite_init, ite_getc, ite_putc },
@@ -72,7 +72,7 @@ boot(dev_t dev)
 	cninit();
 	devboot(dev, path);
 	strncpy(path + strlen(path), ":/bsd.rd", 9);
-	printf(">> OpenBSD/" MACHINE " CDBOOT 0.1\n"
+	printf(">> OpenBSD/" MACHINE " CDBOOT 0.2\n"
 	    "booting %s: ", path);
 
 	marks[MARK_START] = (u_long)DEFAULT_KERNEL_ADDRESS;

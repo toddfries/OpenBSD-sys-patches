@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.54 2010/07/10 19:32:25 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.57 2011/07/04 22:53:53 tedu Exp $	*/
 /*	$NetBSD: trap.c,v 1.58 1997/09/12 08:55:01 pk Exp $ */
 
 /*
@@ -81,9 +81,6 @@
 #include <machine/db_machdep.h>
 #else
 #include <machine/frame.h>
-#endif
-#ifdef COMPAT_SVR4
-#include <machine/svr4_machdep.h>
 #endif
 
 #include <sparc/fpu/fpu_extern.h>
@@ -315,28 +312,12 @@ trap(type, psr, pc, tf)
 			trapsignal(p, SIGILL, type, ILL_ILLOPC, sv);
 			break;
 		}
-#if defined(COMPAT_SVR4)
-badtrap:
-#endif
 		/* the following message is gratuitous */
 		/* ... but leave it in until we find anything */
 		printf("%s[%d]: unimplemented software trap 0x%x\n",
 			p->p_comm, p->p_pid, type);
 		trapsignal(p, SIGILL, type, ILL_ILLOPC, sv);
 		break;
-
-#ifdef COMPAT_SVR4
-	case T_SVR4_GETCC:
-	case T_SVR4_SETCC:
-	case T_SVR4_GETPSR:
-	case T_SVR4_SETPSR:
-	case T_SVR4_GETHRTIME:
-	case T_SVR4_GETHRVTIME:
-	case T_SVR4_GETHRESTIME:
-		if (!svr4_trap(type, p))
-			goto badtrap;
-		break;
-#endif
 
 	case T_AST:
 		want_ast = 0;
@@ -461,11 +442,6 @@ badtrap:
 		break;
 
 	case T_ALIGN:
-		if ((p->p_md.md_flags & MDP_FIXALIGN) != 0 && 
-		    fixalign(p, tf) == 0) {
-			ADVANCE;
-			break;
-		}
 		trapsignal(p, SIGBUS, 0, BUS_ADRALN, sv);
 		break;
 
@@ -530,12 +506,9 @@ badtrap:
 		break;
 
 	case T_FIXALIGN:
-#ifdef DEBUG_ALIGN
 		uprintf("T_FIXALIGN\n");
-#endif
-		/* User wants us to fix alignment faults */
-		p->p_md.md_flags |= MDP_FIXALIGN;
 		ADVANCE;
+		trapsignal(p, SIGILL, 0, ILL_ILLOPN, sv);
 		break;
 
 	case T_INTOF:
@@ -1153,6 +1126,8 @@ child_return(arg)
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p,
-		    (p->p_flag & P_PPWAIT) ? SYS_vfork : SYS_fork, 0, 0);
+		    (p->p_flag & P_THREAD) ? SYS_rfork :
+		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
+		    0, 0);
 #endif
 }

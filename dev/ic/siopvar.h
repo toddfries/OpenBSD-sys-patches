@@ -1,4 +1,4 @@
-/*	$OpenBSD: siopvar.h,v 1.14 2010/04/06 01:12:17 dlg Exp $ */
+/*	$OpenBSD: siopvar.h,v 1.16 2011/04/05 22:37:39 dlg Exp $ */
 /*	$NetBSD: siopvar.h,v 1.22 2005/11/18 23:10:32 bouyer Exp $	*/
 
 /*
@@ -12,11 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -35,6 +30,19 @@
 
 /* Number of tag */
 #define SIOP_NTAG 16
+
+/*
+ * wrap up the bus_dma api.
+ */
+struct siop_dmamem {
+	bus_dmamap_t		sdm_map;
+	bus_dma_segment_t	sdm_seg;
+	size_t			sdm_size;
+	caddr_t			sdm_kva;
+};
+#define SIOP_DMA_MAP(_sdm)	((_sdm)->sdm_map)
+#define SIOP_DMA_DVA(_sdm)	((_sdm)->sdm_map->dm_segs[0].ds_addr)
+#define SIOP_DMA_KVA(_sdm)	((void *)(_sdm)->sdm_kva)
 
 /*
  * xfer description of the script: tables and reselect script
@@ -62,12 +70,12 @@ struct siop_cmd {
 };
 #define cmd_tables cmd_c.siop_tables
 
-/* command block descriptors: an array of siop_cmd + an array of siop_xfer */
+/* command block descriptors: an array of siop_cmd, siop_xfer, and sense */
 struct siop_cbd {
 	TAILQ_ENTRY (siop_cbd) next;
 	struct siop_cmd *cmds;
-	struct siop_xfer *xfers;
-	bus_dmamap_t xferdma; /* DMA map for this block of xfers */
+	struct siop_dmamem *xfers;
+	struct siop_dmamem *sense;
 };
 
 /* per-tag struct */

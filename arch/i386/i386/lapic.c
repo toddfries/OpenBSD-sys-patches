@@ -1,4 +1,4 @@
-/*	$OpenBSD: lapic.c,v 1.28 2010/06/26 23:24:43 guenther Exp $	*/
+/*	$OpenBSD: lapic.c,v 1.31 2010/09/20 06:33:47 matthew Exp $	*/
 /* $NetBSD: lapic.c,v 1.1.2.8 2000/02/23 06:10:50 sommerfeld Exp $ */
 
 /*-
@@ -57,7 +57,9 @@
 #include <dev/ic/i8253reg.h>
 
 struct evcount clk_count;
+#ifdef MULTIPROCESSOR
 struct evcount ipi_count;
+#endif
 
 void	lapic_delay(int);
 static u_int32_t lapic_gettick(void);
@@ -193,7 +195,9 @@ void
 lapic_boot_init(paddr_t lapic_base)
 {
 	static int clk_irq = 0;
+#ifdef MULTIPROCESSOR
 	static int ipi_irq = 0;
+#endif
 
 	lapic_map(lapic_base);
 
@@ -207,8 +211,10 @@ lapic_boot_init(paddr_t lapic_base)
 	idt_vec_set(LAPIC_SPURIOUS_VECTOR, Xintrspurious);
 	idt_vec_set(LAPIC_TIMER_VECTOR, Xintrltimer);
 
-	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
-	evcount_attach(&ipi_count, "ipi", (void *)&ipi_irq, &evcount_intr);
+	evcount_attach(&clk_count, "clock", &clk_irq);
+#ifdef MULTIPROCESSOR
+	evcount_attach(&ipi_count, "ipi", &ipi_irq);
+#endif
 }
 
 static __inline u_int32_t
@@ -241,7 +247,7 @@ lapic_clockintr(void *arg)
 }
 
 void
-lapic_initclocks(void)
+lapic_startclock(void)
 {
 	/*
 	 * Start local apic countdown timer running, in repeated mode.
@@ -256,8 +262,15 @@ lapic_initclocks(void)
 	i82489_writereg(LAPIC_LVTT, LAPIC_LVTT_TM|LAPIC_TIMER_VECTOR);
 }
 
+void
+lapic_initclocks(void)
+{
+	lapic_startclock();
+
+	i8254_inittimecounter_simple();
+}
+
 extern int gettick(void);	/* XXX put in header file */
-extern void (*initclock_func)(void); /* XXX put in header file */
 
 /*
  * Calibrate the local apic count-down timer (which is running at
@@ -420,6 +433,7 @@ i82489_icr_wait(void)
 	}
 }
 
+#ifdef MULTIPROCESSOR
 int
 i386_ipi_init(int target)
 {
@@ -465,3 +479,4 @@ i386_ipi(int vec, int target, int dl)
 
 	return result;
 }
+#endif /* MULTIPROCESSOR */

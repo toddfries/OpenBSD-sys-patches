@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiec.c,v 1.32 2010/07/20 12:15:24 deraadt Exp $ */
+/* $OpenBSD: acpiec.c,v 1.44 2011/01/09 22:27:21 jordan Exp $ */
 /*
  * Copyright (c) 2006 Can Erkin Acar <canacar@openbsd.org>
  *
@@ -184,7 +184,7 @@ acpiec_read_1(struct acpiec_softc *sc, u_int8_t addr)
 void
 acpiec_write_1(struct acpiec_softc *sc, u_int8_t addr, u_int8_t data)
 {
-	if ((acpiec_status(sc) & EC_STAT_SCI_EVT)  == EC_STAT_SCI_EVT)
+	if ((acpiec_status(sc) & EC_STAT_SCI_EVT) == EC_STAT_SCI_EVT)
 		sc->sc_gotsci = 1;
 
 	acpiec_write_cmd(sc, EC_CMD_WR);
@@ -217,10 +217,12 @@ acpiec_read(struct acpiec_softc *sc, u_int8_t addr, int len, u_int8_t *buffer)
 	 * transaction does not get interrupted.
 	 */
 	dnprintf(20, "%s: read %d, %d\n", DEVNAME(sc), (int)addr, len);
+	sc->sc_ecbusy = 1;
 	acpiec_burst_enable(sc);
 	for (reg = 0; reg < len; reg++)
 		buffer[reg] = acpiec_read_1(sc, addr + reg);
 	acpiec_burst_disable(sc);
+	sc->sc_ecbusy = 0;
 }
 
 void
@@ -234,10 +236,12 @@ acpiec_write(struct acpiec_softc *sc, u_int8_t addr, int len, u_int8_t *buffer)
 	 * transaction does not get interrupted.
 	 */
 	dnprintf(20, "%s: write %d, %d\n", DEVNAME(sc), (int)addr, len);
+	sc->sc_ecbusy = 1;
 	acpiec_burst_enable(sc);
 	for (reg = 0; reg < len; reg++)
 		acpiec_write_1(sc, addr + reg, buffer[reg]);
 	acpiec_burst_disable(sc);
+	sc->sc_ecbusy = 0;
 }
 
 int
@@ -245,6 +249,14 @@ acpiec_match(struct device *parent, void *match, void *aux)
 {
 	struct acpi_attach_args	*aa = aux;
 	struct cfdata		*cf = match;
+	struct acpi_ecdt	*ecdt = aa->aaa_table;
+	struct acpi_softc	*acpisc = (struct acpi_softc *)parent;
+
+	/* Check for early ECDT table attach */
+	if (ecdt && !memcmp(ecdt->hdr.signature, ECDT_SIG, sizeof(ECDT_SIG) - 1))
+		return (1);
+	if (acpisc->sc_ec)
+		return (0);
 
 	/* sanity */
 	return (acpi_matchhids(aa, acpiec_hids, cf->cf_driver->cd_name));
@@ -259,16 +271,12 @@ acpiec_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_acpi = (struct acpi_softc *)parent;
 	sc->sc_devnode = aa->aaa_node;
 
-	if (sc->sc_acpi->sc_ec != NULL) {
-		printf(": Only single EC is supported\n");
-		return;
-	}
-	sc->sc_acpi->sc_ec = sc;
-
 	if (acpiec_getcrs(sc, aa)) {
 		printf(": Failed to read resource settings\n");
 		return;
 	}
+
+	sc->sc_acpi->sc_ec = sc;
 
 	if (acpiec_reg(sc)) {
 		printf(": Failed to register address space\n");
@@ -309,6 +317,7 @@ acpiec_gpehandler(struct acpi_softc *acpi_sc, int gpe, void *arg)
 	u_int8_t		mask, stat, en;
 	int			s;
 
+	KASSERT(sc->sc_ecbusy == 0);
 	dnprintf(10, "ACPIEC: got gpe\n");
 
 	do {
@@ -327,9 +336,8 @@ acpiec_gpehandler(struct acpi_softc *acpi_sc, int gpe, void *arg)
 	/* Unmask the GPE which was blocked at interrupt time */
 	s = spltty();
 	mask = (1L << (gpe & 7));
-	acpi_write_pmreg(acpi_sc, ACPIREG_GPE_STS, gpe>>3, mask);
-	en = acpi_read_pmreg(acpi_sc, ACPIREG_GPE_EN,  gpe>>3);
-	acpi_write_pmreg(acpi_sc, ACPIREG_GPE_EN,  gpe>>3, en | mask);
+	en = acpi_read_pmreg(acpi_sc, ACPIREG_GPE_EN, gpe>>3);
+	acpi_write_pmreg(acpi_sc, ACPIREG_GPE_EN, gpe>>3, en | mask);
 	splx(s);
 
 	return (0);
@@ -380,10 +388,29 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 {
 	struct aml_value	res;
 	bus_size_t		ec_sc, ec_data;
-	int			type1, type2;
+	int			dtype, ctype;
 	char			*buf;
 	int			size, ret;
 	int64_t			gpe;
+	struct acpi_ecdt	*ecdt = aa->aaa_table;
+	extern struct aml_node	aml_root;
+
+	/* Check if this is ECDT initialization */
+	if (ecdt) {
+		/* Get GPE, Data and Control segments */
+		sc->sc_gpe = ecdt->gpe_bit;
+
+		ctype = ecdt->ec_control.address_space_id;
+		ec_sc = ecdt->ec_control.address;
+
+		dtype = ecdt->ec_data.address_space_id;
+		ec_data = ecdt->ec_data.address;
+
+		/* Get devnode from header */
+		sc->sc_devnode = aml_searchname(&aml_root, ecdt->ec_id);
+
+		goto ecdtdone;
+	}
 
 	if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode, "_GPE", 0, NULL, &gpe)) {
 		dnprintf(10, "%s: no _GPE\n", DEVNAME(sc));
@@ -409,7 +436,7 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 	size = res.length;
 	buf = res.v_buffer;
 
-	ret = acpiec_getregister(buf, size, &type1, &ec_data);
+	ret = acpiec_getregister(buf, size, &dtype, &ec_data);
 	if (ret <= 0) {
 		dnprintf(10, "%s: failed to read DATA from _CRS\n",
 		    DEVNAME(sc));
@@ -420,7 +447,7 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 	buf += ret;
 	size -= ret;
 
-	ret = acpiec_getregister(buf, size, &type2,  &ec_sc);
+	ret = acpiec_getregister(buf, size, &ctype, &ec_sc);
 	if (ret <= 0) {
 		dnprintf(10, "%s: failed to read S/C from _CRS\n",
 		    DEVNAME(sc));
@@ -439,11 +466,12 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 	aml_freevalue(&res);
 
 	/* XXX: todo - validate _CRS checksum? */
+ecdtdone:
 
 	dnprintf(10, "%s: Data: 0x%x, S/C: 0x%x\n",
 	    DEVNAME(sc), ec_data, ec_sc);
 
-	if (type1 == GAS_SYSTEM_IOSPACE)
+	if (ctype == GAS_SYSTEM_IOSPACE)
 		sc->sc_cmd_bt = aa->aaa_iot;
 	else
 		sc->sc_cmd_bt = aa->aaa_memt;
@@ -453,7 +481,7 @@ acpiec_getcrs(struct acpiec_softc *sc, struct acpi_attach_args *aa)
 		return (1);
 	}
 
-	if (type2 == GAS_SYSTEM_IOSPACE)
+	if (dtype == GAS_SYSTEM_IOSPACE)
 		sc->sc_data_bt = aa->aaa_iot;
 	else
 		sc->sc_data_bt = aa->aaa_memt;
@@ -481,7 +509,7 @@ acpiec_reg(struct acpiec_softc *sc)
 	if (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_REG", 2,
 	    arg, NULL) != 0) {
 		dnprintf(10, "%s: eval method _REG failed\n", DEVNAME(sc));
-		return (1);
+		printf("acpiec _REG failed, broken BIOS\n");
 	}
 
 	return (0);

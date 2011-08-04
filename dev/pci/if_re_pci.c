@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.27 2009/11/26 00:12:31 kettenis Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.34 2011/06/09 19:34:42 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -119,7 +119,7 @@ re_pci_probe(struct device *parent, void *match, void *aux)
 		return (1);
 
 	return (pci_matchbyid((struct pci_attach_args *)aux, re_pci_devices,
-	    sizeof(re_pci_devices)/sizeof(re_pci_devices[0])));
+	    nitems(re_pci_devices)));
 }
 
 /*
@@ -162,6 +162,11 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 		pci_conf_write(pc, pa->pa_tag, RL_PCI_LOMEM, membase);
 		pci_conf_write(pc, pa->pa_tag, RL_PCI_INTLINE, irq);
 	}
+
+#ifndef SMALL_KERNEL
+	/* Enable power management for wake on lan. */
+	pci_conf_write(pc, pa->pa_tag, RL_PCI_PMCSR, RL_PME_EN);
+#endif
 
 	/*
 	 * Map control/status registers.
@@ -226,10 +231,6 @@ re_pci_detach(struct device *self, int flags)
 	ether_ifdetach(ifp);
 	if_detach(ifp);
 
-	/* No more hooks */
-	if (sc->sc_pwrhook != NULL)
-		powerhook_disestablish(sc->sc_pwrhook);
-
 	/* Disable interrupts */
 	if (psc->sc_ih != NULL)
 		pci_intr_disestablish(psc->sc_pc, psc->sc_ih);
@@ -247,12 +248,14 @@ re_pci_activate(struct device *self, int act)
 	struct rl_softc		*sc = &psc->sc_rl;
 	struct ifnet 		*ifp = &sc->sc_arpcom.ac_if;
 
-	switch(act) {
+	switch (act) {
 	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			re_stop(ifp);
 		break;
 	case DVACT_RESUME:
 		re_reset(sc);
-		if (ifp->if_flags & IFF_RUNNING)
+		if (ifp->if_flags & IFF_UP)
 			re_init(ifp);
 		break;
 	}

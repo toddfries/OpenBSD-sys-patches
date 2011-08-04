@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ah.c,v 1.97 2010/07/09 16:58:06 reyk Exp $ */
+/*	$OpenBSD: ip_ah.c,v 1.99 2011/01/11 15:42:05 deraadt Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -178,7 +178,7 @@ ah_zeroize(struct tdb *tdbp)
 	int err;
 
 	if (tdbp->tdb_amxkey) {
-		bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
+		explicit_bzero(tdbp->tdb_amxkey, tdbp->tdb_amxkeylen);
 		free(tdbp->tdb_amxkey, M_XDATA);
 		tdbp->tdb_amxkey = NULL;
 	}
@@ -815,7 +815,7 @@ ah_input_cb(void *op)
 		ptr = (caddr_t) (tc + 1);
 
 		/* Verify authenticator. */
-		if (bcmp(ptr + skip + rplen, calc, ahx->authsize)) {
+		if (timingsafe_bcmp(ptr + skip + rplen, calc, ahx->authsize)) {
 			free(tc, M_XDATA);
 
 			DPRINTF(("ah_input(): authentication failed for "

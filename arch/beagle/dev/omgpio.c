@@ -1,4 +1,4 @@
-/* $OpenBSD: omgpio.c,v 1.2 2010/05/09 15:46:17 jasper Exp $ */
+/* $OpenBSD: omgpio.c,v 1.4 2010/09/20 06:33:48 matthew Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -306,13 +306,13 @@ omgpio_intr_establish(unsigned int gpio, int level, int spl,
 	 */
 
 	if (GPIO_PIN_TO_INST(gpio) > NOMGPIO)
-		panic("omgpio_intr_establish: bogus irqnumber %d: %s\n",
+		panic("omgpio_intr_establish: bogus irqnumber %d: %s",
 		     gpio, name);
 
 	sc = omgpio_cd.cd_devs[GPIO_PIN_TO_INST(gpio)];
 
 	if (sc->sc_handlers[GPIO_PIN_TO_OFFSET(gpio)] != NULL)
-		panic("omgpio_intr_establish: gpio pin busy %d old %s new %s\n",
+		panic("omgpio_intr_establish: gpio pin busy %d old %s new %s",
 		    gpio, sc->sc_handlers[GPIO_PIN_TO_OFFSET(gpio)]->ih_name,
 		    name);
 
@@ -332,7 +332,7 @@ omgpio_intr_establish(unsigned int gpio, int level, int spl,
 
 	sc->sc_handlers[GPIO_PIN_TO_OFFSET(gpio)] = ih;
 
-	evcount_attach(&ih->ih_count, name, (void *)&ih->ih_irq, &evcount_intr);
+	evcount_attach(&ih->ih_count, name, &ih->ih_irq);
 
 	omgpio_intr_level(gpio, level);
 	omgpio_intr_unmask(gpio);
@@ -388,7 +388,7 @@ omgpio_irq(void *v)
 				ih->ih_count.ec_count++;
 			omgpio_clear_intr(ih->ih_gpio);
 		} else {
-			panic("omgpio: irq fired no handler, gpio %x %x %x\n",
+			panic("omgpio: irq fired no handler, gpio %x %x %x",
 				sc->sc_dev.dv_unit * 32 + bit, pending,
 	bus_space_read_4(sc->sc_iot, sc->sc_ioh, GPIO_IRQENABLE1)
 

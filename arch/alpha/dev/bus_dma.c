@@ -1,4 +1,4 @@
-/* $OpenBSD: bus_dma.c,v 1.28 2010/04/10 13:46:12 oga Exp $ */
+/* $OpenBSD: bus_dma.c,v 1.31 2011/06/23 20:44:38 ariane Exp $ */
 /* $NetBSD: bus_dma.c,v 1.40 2000/07/17 04:47:56 thorpej Exp $ */
 
 /*-
@@ -48,8 +48,6 @@
 int	_bus_dmamap_load_buffer_direct(bus_dma_tag_t,
 	    bus_dmamap_t, void *, bus_size_t, struct proc *, int,
 	    paddr_t *, int *, int);
-
-extern paddr_t avail_start, avail_end;	/* from pmap.c */
 
 /*
  * Common function for DMA map creation.  May be called by bus-specific
@@ -516,7 +514,7 @@ _bus_dmamem_alloc_range(t, size, alignment, boundary, segs, nsegs, rsegs,
 	for (; m != TAILQ_END(&mlist); m = TAILQ_NEXT(m, pageq)) {
 		curaddr = VM_PAGE_TO_PHYS(m);
 #ifdef DIAGNOSTIC
-		if (curaddr < avail_start || curaddr >= high) {
+		if (curaddr < low || curaddr >= high) {
 			printf("uvm_pglistalloc returned non-sensical"
 			    " address 0x%lx\n", curaddr);
 			panic("_bus_dmamem_alloc");
@@ -616,12 +614,8 @@ _bus_dmamem_map(t, segs, nsegs, size, kvap, flags)
 			    VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ |
 			    VM_PROT_WRITE | PMAP_WIRED | PMAP_CANFAIL);
 			if (error) {
-				/*
-				 * Clean up after ourselves.
-				 * XXX uvm_wait on WAITOK
-				 */
 				pmap_update(pmap_kernel());
-				uvm_km_free(kernel_map, va, ssize);
+				uvm_km_free(kernel_map, sva, ssize);
 				return (error);
 			}
 		}
@@ -687,7 +681,7 @@ _bus_dmamem_mmap(t, segs, nsegs, off, prot, flags)
 			continue;
 		}
 
-		return (atop(segs[i].ds_addr + off));
+		return (segs[i].ds_addr + off);
 	}
 
 	/* Page not found. */

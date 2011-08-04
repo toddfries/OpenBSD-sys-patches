@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88410.h,v 1.12 2005/12/12 20:36:32 miod Exp $ */
+/*	$OpenBSD: m88410.h,v 1.14 2011/03/23 16:54:36 pirofti Exp $ */
 /*
  * Copyright (c) 2001 Steve Murphree, Jr.
  * All rights reserved.
@@ -30,8 +30,8 @@
  *
  */
 
-#ifndef	__M88410_H__
-#define	__M88410_H__
+#ifndef	_MACHINE_M88410_H_
+#define	_MACHINE_M88410_H_
 
 #ifdef _KERNEL
 
@@ -42,15 +42,15 @@
 
 #include <mvme88k/dev/busswreg.h>
 
-void	mc88410_flush_page(paddr_t);
-void	mc88410_flush(void);
-void	mc88410_inval(void);
+void	mc88410_wb_page(paddr_t);
+void	mc88410_wb(void);
+void	mc88410_inv(void);
 
 static __inline__ void
-mc88410_sync(void)
+mc88410_wbinv(void)
 {
-	mc88410_flush();
-	mc88410_inval();
+	mc88410_wb();
+	mc88410_inv();
 }
 
 static __inline__ int
@@ -61,4 +61,4 @@ mc88410_present(void)
 
 #endif	/* _KERNEL */
 
-#endif	/* __M88410_H__ */
+#endif	/* _MACHINE_M88410_H_ */

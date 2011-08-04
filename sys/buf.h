@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.70 2010/06/30 02:26:58 matthew Exp $	*/
+/*	$OpenBSD: buf.h,v 1.78 2011/07/04 04:30:41 tedu Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -42,6 +42,7 @@
 #include <sys/queue.h>
 #include <sys/tree.h>
 #include <sys/mutex.h>
+#include <sys/workq.h>
 
 #define NOLIST ((struct buf *)0x87654321)
 
@@ -67,6 +68,8 @@ LIST_HEAD(workhead, worklist);
 #define BUFQ_DEFAULT	BUFQ_DISKSORT
 #define BUFQ_HOWMANY	2
 
+struct bufq_impl;
+
 struct bufq {
 	SLIST_ENTRY(bufq)	 bufq_entries;
 	struct mutex	 	 bufq_mtx;
@@ -74,51 +77,48 @@ struct bufq {
 	u_int			 bufq_outstanding;
 	int			 bufq_stop;
 	int			 bufq_type;
+	const struct bufq_impl	*bufq_impl;
 };
 
-struct buf	*bufq_disksort_dequeue(struct bufq *, int);
-void		 bufq_disksort_queue(struct bufq *, struct buf *);
-void		 bufq_disksort_requeue(struct bufq *, struct buf *);
-int		 bufq_disksort_init(struct bufq *);
+int		 bufq_init(struct bufq *, int);
+int		 bufq_switch(struct bufq *, int);
+void		 bufq_destroy(struct bufq *);
+
+void		 bufq_queue(struct bufq *, struct buf *);
+struct buf	*bufq_dequeue(struct bufq *);
+void		 bufq_requeue(struct bufq *, struct buf *);
+int		 bufq_peek(struct bufq *);
+void		 bufq_drain(struct bufq *);
+
+void		 bufq_done(struct bufq *, struct buf *);
+void		 bufq_quiesce(void);
+void		 bufq_restart(void);
+
+/* disksort */
 struct bufq_disksort {
 	struct buf	 *bqd_actf;
 	struct buf	**bqd_actb;
 };
 
-struct buf	*bufq_fifo_dequeue(struct bufq *, int);
-void		 bufq_fifo_queue(struct bufq *, struct buf *);
-void		 bufq_fifo_requeue(struct bufq *, struct buf *);
-int		 bufq_fifo_init(struct bufq *);
+/* fifo */
 SIMPLEQ_HEAD(bufq_fifo_head, buf);
 struct bufq_fifo {
 	SIMPLEQ_ENTRY(buf)	bqf_entries;
 };
 
+/* Abuse bufq_fifo, for swapping to regular files. */
+struct bufq_swapreg {
+	SIMPLEQ_ENTRY(buf)	bqf_entries;
+	struct workq_task	bqf_wqtask;
+
+};
+
+/* bufq link in struct buf */
 union bufq_data {
 	struct bufq_disksort	bufq_data_disksort;
 	struct bufq_fifo	bufq_data_fifo;
+	struct bufq_swapreg	bufq_swapreg;
 };
-
-extern struct buf *(*bufq_dequeuev[BUFQ_HOWMANY])(struct bufq *, int);
-extern void (*bufq_queuev[BUFQ_HOWMANY])(struct bufq *, struct buf *);
-extern void (*bufq_requeuev[BUFQ_HOWMANY])(struct bufq *, struct buf *);
-
-#define	BUFQ_QUEUE(_bufq, _bp)	 bufq_queue(_bufq, _bp)
-#define BUFQ_REQUEUE(_bufq, _bp) bufq_requeue(_bufq, _bp)
-#define	BUFQ_DEQUEUE(_bufq)		\
-	    bufq_dequeuev[(_bufq)->bufq_type](_bufq, 0)
-#define	BUFQ_PEEK(_bufq)		\
-	bufq_dequeuev[(_bufq)->bufq_type](_bufq, 1)
-
-struct bufq	*bufq_init(int);
-void		 bufq_queue(struct bufq *, struct buf *);
-void		 bufq_requeue(struct bufq *, struct buf *);
-void		 bufq_destroy(struct bufq *);
-void		 bufq_drain(struct bufq *);
-void		 bufq_done(struct bufq *, struct buf *);
-void		 bufq_quiesce(void);
-void		 bufq_restart(void);
-
 
 /*
  * These are currently used only by the soft dependency code, hence
@@ -189,6 +189,7 @@ struct buf {
 /*
  * These flags are kept in b_flags.
  */
+#define	B_WRITE		0x00000000	/* Write buffer (pseudo flag). */
 #define	B_AGE		0x00000001	/* Move to age queue when I/O done. */
 #define	B_NEEDCOMMIT	0x00000002	/* Needs committing to stable storage */
 #define	B_ASYNC		0x00000004	/* Start I/O, do not wait. */
@@ -197,29 +198,28 @@ struct buf {
 #define	B_CACHE		0x00000020	/* Bread found us in the cache. */
 #define	B_CALL		0x00000040	/* Call b_iodone from biodone. */
 #define	B_DELWRI	0x00000080	/* Delay I/O until buffer reused. */
-#define	B_DONE		0x00000200	/* I/O completed. */
-#define	B_EINTR		0x00000400	/* I/O was interrupted */
-#define	B_ERROR		0x00000800	/* I/O error occurred. */
-#define	B_INVAL		0x00002000	/* Does not contain valid info. */
-#define	B_NOCACHE	0x00008000	/* Do not cache block after use. */
-#define	B_PHYS		0x00040000	/* I/O to user memory. */
-#define	B_RAW		0x00080000	/* Set by physio for raw transfers. */
-#define	B_READ		0x00100000	/* Read buffer. */
-#define	B_WANTED	0x00800000	/* Process wants this buffer. */
-#define	B_WRITE		0x00000000	/* Write buffer (pseudo flag). */
-#define	B_WRITEINPROG	0x01000000	/* Write in progress. */
-#define	B_XXX		0x02000000	/* Debugging flag. */
-#define	B_DEFERRED	0x04000000	/* Skipped over for cleaning */
-#define	B_SCANNED	0x08000000	/* Block already pushed during sync */
-#define	B_PDAEMON	0x10000000	/* I/O started by pagedaemon */
-#define B_RELEASED	0x20000000	/* free this buffer after its kvm */
-#define B_NOTMAPPED	0x40000000	/* BUSY, but not necessarily mapped */
+#define	B_DONE		0x00000100	/* I/O completed. */
+#define	B_EINTR		0x00000200	/* I/O was interrupted */
+#define	B_ERROR		0x00000400	/* I/O error occurred. */
+#define	B_INVAL		0x00000800	/* Does not contain valid info. */
+#define	B_NOCACHE	0x00001000	/* Do not cache block after use. */
+#define	B_PHYS		0x00002000	/* I/O to user memory. */
+#define	B_RAW		0x00004000	/* Set by physio for raw transfers. */
+#define	B_READ		0x00008000	/* Read buffer. */
+#define	B_WANTED	0x00010000	/* Process wants this buffer. */
+#define	B_WRITEINPROG	0x00020000	/* Write in progress. */
+#define	B_XXX		0x00040000	/* Debugging flag. */
+#define	B_DEFERRED	0x00080000	/* Skipped over for cleaning */
+#define	B_SCANNED	0x00100000	/* Block already pushed during sync */
+#define	B_PDAEMON	0x00200000	/* I/O started by pagedaemon */
+#define	B_RELEASED	0x00400000	/* free this buffer after its kvm */
+#define	B_NOTMAPPED	0x00800000	/* BUSY, but not necessarily mapped */
 
-#define	B_BITS	"\010\001AGE\002NEEDCOMMIT\003ASYNC\004BAD\005BUSY\006CACHE" \
-    "\007CALL\010DELWRI\012DONE\013EINTR\014ERROR" \
-    "\016INVAL\020NOCACHE\023PHYS\024RAW\025READ" \
-    "\030WANTED\031WRITEINPROG\032XXX\033DEFERRED" \
-    "\034SCANNED\035PDAEMON"
+#define	B_BITS	"\20\001AGE\002NEEDCOMMIT\003ASYNC\004BAD\005BUSY" \
+    "\006CACHE\007CALL\010DELWRI\011DONE\012EINTR\013ERROR" \
+    "\014INVAL\015NOCACHE\016PHYS\017RAW\020READ" \
+    "\021WANTED\022WRITEINPROG\023XXX(FORMAT)\024DEFERRED" \
+    "\025SCANNED\026DAEMON\027RELEASED\030NOTMAPPED"
 
 /*
  * This structure describes a clustered I/O.  It is stored in the b_saveaddr
@@ -260,7 +260,7 @@ struct cluster_info {
 
 #ifdef _KERNEL
 __BEGIN_DECLS
-extern int bufpages;		/* Max number of pages for buffers' data */
+extern long bufpages;		/* Max number of pages for buffers' data */
 extern struct pool bufpool;
 extern struct bufhead bufhead;
 
@@ -268,9 +268,9 @@ void	bawrite(struct buf *);
 void	bdwrite(struct buf *);
 void	biodone(struct buf *);
 int	biowait(struct buf *);
-int bread(struct vnode *, daddr64_t, int, struct ucred *, struct buf **);
+int bread(struct vnode *, daddr64_t, int, struct buf **);
 int breadn(struct vnode *, daddr64_t, int, daddr64_t *, int *, int,
-    struct ucred *, struct buf **);
+    struct buf **);
 void	brelse(struct buf *);
 void	bremfree(struct buf *);
 void	bufinit(void);
@@ -295,14 +295,14 @@ void	buf_acquire_unmapped(struct buf *);
 void	buf_map(struct buf *);
 void	buf_release(struct buf *);
 int	buf_dealloc_mem(struct buf *);
-void	buf_shrink_mem(struct buf *, vsize_t);
+void	buf_fix_mapping(struct buf *, vsize_t);
 void	buf_alloc_pages(struct buf *, vsize_t);
 void	buf_free_pages(struct buf *);
 
 
 void	minphys(struct buf *bp);
-int	physio(void (*strategy)(struct buf *), struct buf *bp, dev_t dev,
-	    int flags, void (*minphys)(struct buf *), struct uio *uio);
+int	physio(void (*strategy)(struct buf *), dev_t dev, int flags,
+	    void (*minphys)(struct buf *), struct uio *uio);
 void  brelvp(struct buf *);
 void  reassignbuf(struct buf *);
 void  bgetvp(struct vnode *, struct buf *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.131 2010/07/13 00:30:30 krw Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.149 2011/07/17 22:46:48 matthew Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -233,6 +233,7 @@ _4ltol(u_int8_t *bytes)
 #define DEVID_NAA	1
 #define DEVID_EUI	2
 #define DEVID_T10	3
+#define DEVID_SERIAL	4
 
 struct devid {
 	u_int8_t	d_type;
@@ -309,24 +310,17 @@ struct scsi_adapter {
 	int		(*ioctl)(struct scsi_link *, u_long, caddr_t, int);
 };
 
-struct scsi_runq_entry {
-	TAILQ_ENTRY(scsi_runq_entry) e;
-	u_int state;
-#define RUNQ_IDLE	0
-#define RUNQ_LINKQ	1
-#define RUNQ_POOLQ	3
-};
-TAILQ_HEAD(scsi_runq, scsi_runq_entry);
-
 struct scsi_iopool;
 
 struct scsi_iohandler {
-	struct scsi_runq_entry entry; /* must be first */
+	TAILQ_ENTRY(scsi_iohandler) q_entry;
+	u_int q_state;
 
 	struct scsi_iopool *pool;
 	void (*handler)(void *, void *);
 	void *cookie;
 };
+TAILQ_HEAD(scsi_runq, scsi_iohandler);
 
 struct scsi_iopool {
 	/* access to the IOs */
@@ -341,10 +335,6 @@ struct scsi_iopool {
 	/* protection for the runqueue and its semaphore */
 	struct mutex mtx;
 };
-
-/*
- *
- */
 
 struct scsi_xshandler {
 	struct scsi_iohandler ioh; /* must be first */
@@ -378,6 +368,7 @@ struct scsi_link {
 	u_int16_t flags;		/* flags that all devices have */
 #define	SDEV_REMOVABLE	 	0x0001	/* media is removable */
 #define	SDEV_MEDIA_LOADED 	0x0002	/* device figures are still valid */
+#define	SDEV_READONLY		0x0004	/* device is read-only */
 #define	SDEV_OPEN	 	0x0008	/* at least 1 open session */
 #define	SDEV_DBX		0x00f0	/* debugging flags (scsi_debug.h) */
 #define	SDEV_EJECTING		0x0100	/* eject on device close */
@@ -407,6 +398,7 @@ struct scsi_link {
 
 	struct	scsi_runq queue;
 	u_int	running;
+	u_short	pending;
 
 	struct	scsi_iopool *pool;
 };
@@ -542,11 +534,12 @@ const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
     workq_add_task(NULL, (_fl), (_f), (_a1), (_a2))
 
 void	scsi_init(void);
-void	scsi_deinit(void);
 daddr64_t scsi_size(struct scsi_link *, int, u_int32_t *);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
 int	scsi_inquire_vpd(struct scsi_link *, void *, u_int, u_int8_t, int);
+void	scsi_init_inquiry(struct scsi_xfer *, u_int8_t, u_int8_t,
+	    void *, size_t);
 int	scsi_prevent(struct scsi_link *, int, int);
 int	scsi_start(struct scsi_link *, int, int);
 int	scsi_mode_sense(struct scsi_link *, int, int, struct scsi_mode_header *,
@@ -563,9 +556,6 @@ int	scsi_mode_select(struct scsi_link *, int, struct scsi_mode_header *,
 int	scsi_mode_select_big(struct scsi_link *, int,
 	    struct scsi_mode_header_big *, int, int);
 void	scsi_done(struct scsi_xfer *);
-int	scsi_scsi_cmd(struct scsi_link *, struct scsi_generic *,
-	    int cmdlen, u_char *data_addr, int datalen, int retries,
-	    int timeout, struct buf *bp, int flags);
 int	scsi_do_ioctl(struct scsi_link *, u_long, caddr_t, int);
 void	sc_print_addr(struct scsi_link *);
 int	scsi_report_luns(struct scsi_link *, int,
@@ -590,7 +580,7 @@ int	scsi_detach_lun(struct scsibus_softc *, int, int, int);
 int	scsi_req_probe(struct scsibus_softc *, int, int);
 int	scsi_req_detach(struct scsibus_softc *, int, int, int);
 
-void	scsi_activate(struct scsibus_softc *, int, int, int);
+int	scsi_activate(struct scsibus_softc *, int, int, int);
 
 struct scsi_link *	scsi_get_link(struct scsibus_softc *, int, int);
 void			scsi_add_link(struct scsibus_softc *,
@@ -599,7 +589,7 @@ void			scsi_remove_link(struct scsibus_softc *,
 			    struct scsi_link *);
 
 extern const u_int8_t version_to_spc[];
-#define SCSISPC(x)(version_to_spc[(x) & SID_ANSII])
+#define SCSISPC(x)	(version_to_spc[(x) & SID_ANSII])
 
 struct scsi_xfer *	scsi_xs_get(struct scsi_link *, int);
 void			scsi_xs_exec(struct scsi_xfer *);
@@ -614,6 +604,8 @@ void			scsi_sense_print_debug(struct scsi_xfer *);
  */
 void	scsi_iopool_init(struct scsi_iopool *, void *,
 	    void *(*)(void *), void (*)(void *, void *));
+void	scsi_iopool_destroy(struct scsi_iopool *);
+void	scsi_link_shutdown(struct scsi_link *);
 
 void *	scsi_io_get(struct scsi_iopool *, int);
 void	scsi_io_put(struct scsi_iopool *, void *);
@@ -638,13 +630,9 @@ void	scsi_xsh_add(struct scsi_xshandler *);
 void	scsi_xsh_del(struct scsi_xshandler *);
 
 /*
- * Entrypoints for multipathing
+ * Utility functions for SCSI HBA emulation.
  */
-int	mpath_path_attach(struct scsi_link *);
-int	mpath_path_detach(struct scsi_link *, int);
-
-void	mpath_path_activate(struct scsi_link *);
-void	mpath_path_deactivate(struct scsi_link *);
+void	scsi_cmd_rw_decode(struct scsi_generic *, u_int64_t *, u_int32_t *);
 
 #endif /* _KERNEL */
 #endif /* SCSI_SCSICONF_H */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vge.c,v 1.47 2010/02/24 21:44:12 kettenis Exp $	*/
+/*	$OpenBSD: if_vge.c,v 1.51 2011/06/22 16:44:27 tedu Exp $	*/
 /*	$FreeBSD: if_vge.c,v 1.3 2004/09/11 22:13:25 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -572,7 +572,7 @@ int
 vge_probe(struct device *dev, void *match, void *aux)
 {
 	return (pci_matchbyid((struct pci_attach_args *)aux, vge_devices,
-	    sizeof(vge_devices)/sizeof(vge_devices[0])));
+	    nitems(vge_devices)));
 }
 
 /*
@@ -771,7 +771,7 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	vge_read_eeprom(sc, eaddr, VGE_EE_EADDR, 3, 1);
 
-	bcopy(eaddr, (char *)&sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
+	bcopy(eaddr, &sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
 
 	printf(", address %s\n",
 	    ether_sprintf(sc->arpcom.ac_enaddr));
@@ -787,7 +787,6 @@ vge_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = vge_ioctl;
 	ifp->if_start = vge_start;
 	ifp->if_watchdog = vge_watchdog;
-	ifp->if_init = vge_init;
 	ifp->if_baudrate = 1000000000;
 #ifdef VGE_JUMBO
 	ifp->if_hardmtu = VGE_JUMBO_MTU;
@@ -938,8 +937,8 @@ out:
 int
 vge_tx_list_init(struct vge_softc *sc)
 {
-	bzero ((char *)sc->vge_ldata.vge_tx_list, VGE_TX_LIST_SZ);
-	bzero ((char *)&sc->vge_ldata.vge_tx_mbuf,
+	bzero(sc->vge_ldata.vge_tx_list, VGE_TX_LIST_SZ);
+	bzero(&sc->vge_ldata.vge_tx_mbuf,
 	    (VGE_TX_DESC_CNT * sizeof(struct mbuf *)));
 
 	bus_dmamap_sync(sc->sc_dmat,
@@ -960,8 +959,8 @@ vge_rx_list_init(struct vge_softc *sc)
 {
 	int			i;
 
-	bzero ((char *)sc->vge_ldata.vge_rx_list, VGE_RX_LIST_SZ);
-	bzero ((char *)&sc->vge_ldata.vge_rx_mbuf,
+	bzero(sc->vge_ldata.vge_rx_list, VGE_RX_LIST_SZ);
+	bzero(&sc->vge_ldata.vge_rx_mbuf,
 	    (VGE_RX_DESC_CNT * sizeof(struct mbuf *)));
 
 	sc->vge_rx_consumed = 0;
@@ -1124,8 +1123,7 @@ vge_rxeof(struct vge_softc *sc)
 			    (total_len - ETHER_CRC_LEN);
 
 #ifdef __STRICT_ALIGNMENT
-		bcopy(m->m_data, m->m_data + ETHER_ALIGN,
-		    total_len);
+		bcopy(m->m_data, m->m_data + ETHER_ALIGN, total_len);
 		m->m_data += ETHER_ALIGN;
 #endif
 		ifp->if_ipackets++;
@@ -1347,9 +1345,9 @@ vge_encap(struct vge_softc *sc, struct mbuf *m_head, int idx)
 
 	if (m_head->m_pkthdr.csum_flags & M_IPV4_CSUM_OUT)
 		vge_flags |= VGE_TDCTL_IPCSUM;
-	if (m_head->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT)
+	if (m_head->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
 		vge_flags |= VGE_TDCTL_TCPCSUM;
-	if (m_head->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT)
+	if (m_head->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
 		vge_flags |= VGE_TDCTL_UDPCSUM;
 
 	txmap = sc->vge_ldata.vge_tx_dmamap[idx];

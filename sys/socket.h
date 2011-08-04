@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.70 2010/07/05 22:20:22 tedu Exp $	*/
+/*	$OpenBSD: socket.h,v 1.76 2011/07/08 20:53:59 deraadt Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -87,6 +87,7 @@
 #define	SO_NETPROC	0x1020		/* multiplex; network processing */
 #define	SO_RTABLE	0x1021		/* routing table to be used */
 #define	SO_PEERCRED	0x1022		/* get connect-time credentials */
+#define	SO_SPLICE	0x1023		/* splice data to other socket */
 
 /*
  * Structure used for manipulating linger option.
@@ -95,6 +96,17 @@ struct	linger {
 	int	l_onoff;		/* option on/off */
 	int	l_linger;		/* linger time */
 };
+
+#if __BSD_VISIBLE
+/*
+ * Structure used for manipulating splice option.
+ */
+struct	splice {
+	int	sp_fd;			/* drain socket file descriptor */
+	off_t	sp_max;			/* if set, maximum bytes to splice */
+	struct	timeval	sp_idle;	/* idle timeout */
+};
+#endif /* __BSD_VISIBLE */
 
 /*
  * Level number for (get/set)sockopt() to apply to socket itself.
@@ -143,7 +155,8 @@ struct	linger {
 #define	AF_BLUETOOTH	32		/* Bluetooth */
 #define AF_MPLS         33              /* MPLS */
 #define pseudo_AF_PFLOW 34		/* pflow */
-#define AF_MAX          35
+#define pseudo_AF_PIPEX 35		/* PIPEX */
+#define AF_MAX          36
 
 /*
  * Structure used by kernel to store most
@@ -224,6 +237,7 @@ struct sockproto {
 #define	PF_BLUETOOTH	AF_BLUETOOTH
 #define PF_MPLS		AF_MPLS
 #define PF_PFLOW	pseudo_AF_PFLOW
+#define PF_PIPEX	pseudo_AF_PIPEX
 #define	PF_MAX		AF_MAX
 
 /*
@@ -306,6 +320,7 @@ struct sockpeercred {
 	{ "bluetooth", CTLTYPE_NODE }, \
 	{ "mpls", CTLTYPE_NODE }, \
 	{ "pflow", CTLTYPE_NODE }, \
+	{ "pipex", CTLTYPE_NODE }, \
 }
 
 /*
@@ -501,13 +516,8 @@ int	socketpair(int, int, int, int *);
 int	getrtable(void);
 int	setrtable(int);
 __END_DECLS
-#else
-# if defined(COMPAT_43) || defined(COMPAT_LINUX) || \
-     defined(COMPAT_FREEBSD)
-#  define COMPAT_OLDSOCK
-#  define MSG_COMPAT	0x8000
-# endif
 
+#else
 void	pfctlinput(int, struct sockaddr *);
 #endif /* !_KERNEL */
 

@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.30 2008/08/30 20:45:31 martin Exp $     */
+/*      $OpenBSD: pmap.h,v 1.32 2011/03/23 16:54:37 pirofti Exp $     */
 /*	$NetBSD: pmap.h,v 1.37 1999/08/01 13:48:07 ragge Exp $	   */
 
 /* 
@@ -40,8 +40,8 @@
  */
 
 
-#ifndef PMAP_H
-#define PMAP_H
+#ifndef _MACHINE_PMAP_H_
+#define _MACHINE_PMAP_H_
 
 #ifdef _KERNEL
 
@@ -113,7 +113,6 @@ extern	struct pmap kernel_pmap_store;
  */
 
 /* Routines that are best to define as macros */
-#define pmap_phys_address(phys)		((u_int)(phys) << PGSHIFT)
 #define pmap_copy(a,b,c,d,e)		/* Dont do anything */
 #define pmap_update(pm)			/* nothing */
 #define pmap_collect(pmap)		/* No need so far */
@@ -147,4 +146,4 @@ void	pmap_pinit(pmap_t);
 
 #endif	/* _KERNEL */
 
-#endif /* PMAP_H */
+#endif /* _MACHINE_PMAP_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pgtvar.h,v 1.11 2006/10/09 21:04:05 mglocker Exp $  */
+/*	$OpenBSD: pgtvar.h,v 1.14 2011/07/03 21:11:33 dhill Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -80,7 +80,7 @@ struct pgt_tx_radiotap_hdr {
  */
 struct pgt_desc {
 	TAILQ_ENTRY(pgt_desc)	pd_link;
-	void		       *pd_mem;
+	caddr_t		        pd_mem;
 	bus_addr_t		pd_dmaaddr;
 	bus_dmamap_t		pd_dmam;
 	bus_dma_segment_t	pd_dmas;
@@ -178,8 +178,6 @@ struct pgt_softc {
 	int			(*sc_enable)(struct pgt_softc *);
 	void			(*sc_disable)(struct pgt_softc *);
 	void			(*sc_power)(struct pgt_softc *, int);
-	void			*sc_shutdown_hook;	/* shutdown hook */
-	void			*sc_power_hook;		/* power mgmt hook */
 
 	struct pgt_mgmt_descq	sc_mgmtinprog;
 	struct pgt_descq	sc_freeq[PGT_QUEUE_COUNT];
@@ -210,11 +208,14 @@ struct pgt_softc {
 #define sc_txtap		sc_txtapu.th
 	int			sc_txtap_len;
 #endif
+
+	struct workq_task	sc_resume_wqt;
 };
 
 int	pgt_intr(void *);
 void	pgt_attach(void *);
 int	pgt_detach(struct pgt_softc *);
+int	pgt_activate(struct device *, int);
 
 static __inline int
 pgt_queue_is_rx(enum pgt_queue pq)

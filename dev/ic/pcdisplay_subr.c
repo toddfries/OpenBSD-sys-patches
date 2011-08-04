@@ -1,4 +1,4 @@
-/* $OpenBSD: pcdisplay_subr.c,v 1.8 2009/09/05 14:09:35 miod Exp $ */
+/* $OpenBSD: pcdisplay_subr.c,v 1.11 2011/04/11 19:11:01 matthew Exp $ */
 /* $NetBSD: pcdisplay_subr.c,v 1.16 2000/06/08 07:01:19 cgd Exp $ */
 
 /*
@@ -41,8 +41,7 @@
 #include <dev/wscons/wsdisplayvar.h>
 
 void
-pcdisplay_cursor_reset(scr)
-	struct pcdisplayscreen *scr;
+pcdisplay_cursor_reset(struct pcdisplayscreen *scr)
 {
 #ifdef PCDISPLAY_SOFTCURSOR
 	pcdisplay_6845_write(scr->hdl, curstart, 0x10);
@@ -51,9 +50,7 @@ pcdisplay_cursor_reset(scr)
 }
 
 void
-pcdisplay_cursor_init(scr, existing)
-	struct pcdisplayscreen *scr;
-	int existing;
+pcdisplay_cursor_init(struct pcdisplayscreen *scr, int existing)
 {
 #ifdef PCDISPLAY_SOFTCURSOR
 	bus_space_tag_t memt;
@@ -84,15 +81,14 @@ pcdisplay_cursor_init(scr, existing)
 }
 
 int
-pcdisplay_cursor(id, on, row, col)
-	void *id;
-	int on, row, col;
+pcdisplay_cursor(void *id, int on, int row, int col)
 {
 #ifdef PCDISPLAY_SOFTCURSOR
 	struct pcdisplayscreen *scr = id;
 	bus_space_tag_t memt = scr->hdl->ph_memt;
 	bus_space_handle_t memh = scr->hdl->ph_memh;
 	int off;
+	int s = spltty();
 
 	/* Remove old cursor image */
 	if (scr->cursoron) {
@@ -108,7 +104,7 @@ pcdisplay_cursor(id, on, row, col)
 	scr->vc_ccol = col;
 
 	if ((scr->cursoron = on) == 0)
-		return 0;
+		goto done;
 
 	off = (scr->vc_crow * scr->type->ncols + scr->vc_ccol);
 	if (scr->active) {
@@ -120,10 +116,13 @@ pcdisplay_cursor(id, on, row, col)
 		scr->mem[off] = scr->cursortmp ^ 0x7700;
 	}
 
+done:
+	splx(s);
 	return 0;
 #else 	/* PCDISPLAY_SOFTCURSOR */
 	struct pcdisplayscreen *scr = id;
 	int pos;
+	int s = spltty();
 
 	scr->vc_crow = row;
 	scr->vc_ccol = col;
@@ -140,15 +139,14 @@ pcdisplay_cursor(id, on, row, col)
 		pcdisplay_6845_write(scr->hdl, cursorl, pos);
 	}
 
+	splx(s);
 	return 0;
 #endif	/* PCDISPLAY_SOFTCURSOR */
 }
 
 #if 0
 unsigned int
-pcdisplay_mapchar_simple(id, uni)
-	void *id;
-	int uni;
+pcdisplay_mapchar_simple(void *id, int uni)
 {
 	if (uni < 128)
 		return (uni);
@@ -158,48 +156,47 @@ pcdisplay_mapchar_simple(id, uni)
 #endif
 
 int
-pcdisplay_putchar(id, row, col, c, attr)
-	void *id;
-	int row, col;
-	u_int c;
-	long attr;
+pcdisplay_putchar(void *id, int row, int col, u_int c, long attr)
 {
 	struct pcdisplayscreen *scr = id;
 	bus_space_tag_t memt = scr->hdl->ph_memt;
 	bus_space_handle_t memh = scr->hdl->ph_memh;
 	int off;
+	int s;
 
 	off = row * scr->type->ncols + col;
 
+	s = spltty();
 	if (scr->active)
 		bus_space_write_2(memt, memh, scr->dispoffset + off * 2,
 				  c | (attr << 8));
 	else
 		scr->mem[off] = c | (attr << 8);
+	splx(s);
 
 	return 0;
 }
 
 int
-pcdisplay_getchar(id, row, col, cell)
-	void *id;
-	int row, col;
-	struct wsdisplay_charcell *cell;
+pcdisplay_getchar(void *id, int row, int col, struct wsdisplay_charcell *cell)
 {
 	struct pcdisplayscreen *scr = id;
 	bus_space_tag_t memt = scr->hdl->ph_memt;
 	bus_space_handle_t memh = scr->hdl->ph_memh;
 	int off;
+	int s;
 	u_int16_t data;
 	
 	off = row * scr->type->ncols + col;
 	/* XXX bounds check? */
 	
+	s = spltty();
 	if (scr->active)
 		data = (bus_space_read_2(memt, memh, 
 					scr->dispoffset + off * 2));
 	else
 		data = (scr->mem[off]);
+	splx(s);
 
 	cell->uc = data & 0xff;
 	cell->attr = data >> 8;
@@ -208,19 +205,19 @@ pcdisplay_getchar(id, row, col, cell)
 }
 
 int
-pcdisplay_copycols(id, row, srccol, dstcol, ncols)
-	void *id;
-	int row, srccol, dstcol, ncols;
+pcdisplay_copycols(void *id, int row, int srccol, int dstcol, int ncols)
 {
 	struct pcdisplayscreen *scr = id;
 	bus_space_tag_t memt = scr->hdl->ph_memt;
 	bus_space_handle_t memh = scr->hdl->ph_memh;
 	bus_size_t srcoff, dstoff;
+	int s;
 
 	srcoff = dstoff = row * scr->type->ncols;
 	srcoff += srccol;
 	dstoff += dstcol;
 
+	s = spltty();
 	if (scr->active)
 		bus_space_copy_2(memt, memh,
 					scr->dispoffset + srcoff * 2,
@@ -228,15 +225,13 @@ pcdisplay_copycols(id, row, srccol, dstcol, ncols)
 					ncols);
 	else
 		bcopy(&scr->mem[srcoff], &scr->mem[dstoff], ncols * 2);
+	splx(s);
 
 	return 0;
 }
 
 int
-pcdisplay_erasecols(id, row, startcol, ncols, fillattr)
-	void *id;
-	int row, startcol, ncols;
-	long fillattr;
+pcdisplay_erasecols(void *id, int row, int startcol, int ncols, long fillattr)
 {
 	struct pcdisplayscreen *scr = id;
 	bus_space_tag_t memt = scr->hdl->ph_memt;
@@ -244,35 +239,37 @@ pcdisplay_erasecols(id, row, startcol, ncols, fillattr)
 	bus_size_t off;
 	u_int16_t val;
 	int i;
+	int s;
 
 	off = row * scr->type->ncols + startcol;
-
 	val = (fillattr << 8) | ' ';
 
+	s = spltty();
 	if (scr->active)
 		bus_space_set_region_2(memt, memh, scr->dispoffset + off * 2,
 				       val, ncols);
 	else
 		for (i = 0; i < ncols; i++)
 			scr->mem[off + i] = val;
+	splx(s);
 
 	return 0;
 }
 
 int
-pcdisplay_copyrows(id, srcrow, dstrow, nrows)
-	void *id;
-	int srcrow, dstrow, nrows;
+pcdisplay_copyrows(void *id, int srcrow, int dstrow, int nrows)
 {
 	struct pcdisplayscreen *scr = id;
 	bus_space_tag_t memt = scr->hdl->ph_memt;
 	bus_space_handle_t memh = scr->hdl->ph_memh;
 	int ncols = scr->type->ncols;
 	bus_size_t srcoff, dstoff;
+	int s;
 
 	srcoff = srcrow * ncols + 0;
 	dstoff = dstrow * ncols + 0;
 
+	s = spltty();
 	if (scr->active)
 		bus_space_copy_2(memt, memh,
 					scr->dispoffset + srcoff * 2,
@@ -281,33 +278,33 @@ pcdisplay_copyrows(id, srcrow, dstrow, nrows)
 	else
 		bcopy(&scr->mem[srcoff], &scr->mem[dstoff],
 		      nrows * ncols * 2);
+	splx(s);
 
 	return 0;
 }
 
 int
-pcdisplay_eraserows(id, startrow, nrows, fillattr)
-	void *id;
-	int startrow, nrows;
-	long fillattr;
+pcdisplay_eraserows(void *id, int startrow, int nrows, long fillattr)
 {
 	struct pcdisplayscreen *scr = id;
 	bus_space_tag_t memt = scr->hdl->ph_memt;
 	bus_space_handle_t memh = scr->hdl->ph_memh;
 	bus_size_t off, count, n;
 	u_int16_t val;
+	int s;
 
 	off = startrow * scr->type->ncols;
 	count = nrows * scr->type->ncols;
-
 	val = (fillattr << 8) | ' ';
 
+	s = spltty();
 	if (scr->active)
 		bus_space_set_region_2(memt, memh, scr->dispoffset + off * 2,
 				       val, count);
 	else
 		for (n = 0; n < count; n++)
 			scr->mem[off + n] = val;
+	splx(s);
 
 	return 0;
 }

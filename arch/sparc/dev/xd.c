@@ -1,4 +1,4 @@
-/*	$OpenBSD: xd.c,v 1.48 2010/05/23 10:49:19 dlg Exp $	*/
+/*	$OpenBSD: xd.c,v 1.56 2011/07/06 04:49:35 matthew Exp $	*/
 /*	$NetBSD: xd.c,v 1.37 1997/07/29 09:58:16 fair Exp $	*/
 
 /*
@@ -269,12 +269,6 @@ struct xdc_attach_args {	/* this is the "aux" args to xdattach */
 };
 
 /*
- * dkdriver
- */
-
-struct dkdriver xddkdriver = {xdstrategy};
-
-/*
  * start: disk label fix code (XXX)
  */
 
@@ -419,9 +413,8 @@ xdcattach(parent, self, aux)
 
 	xdc->dvmaiopb = (struct xd_iopb *)
 	    dvma_malloc(XDC_MAXIOPB * sizeof(struct xd_iopb), &xdc->iopbase,
-			M_NOWAIT);
+	      M_NOWAIT | M_ZERO);
 	xdc->iopbase = xdc->dvmaiopb; /* XXX TMP HACK */
-	bzero(xdc->iopbase, XDC_MAXIOPB * sizeof(struct xd_iopb));
 	/* Setup device view of DVMA address */
 	xdc->dvmaiopb = (struct xd_iopb *) ((u_long) xdc->iopbase - DVMA_BASE);
 
@@ -562,7 +555,6 @@ xdattach(parent, self, aux)
 	 * to start with a clean slate.
 	 */
 	bzero(&xd->sc_dk, sizeof(xd->sc_dk));
-	xd->sc_dk.dk_driver = &xddkdriver;
 	xd->sc_dk.dk_name = xd->sc_dev.dv_xname;
 
 	/* if booting, init the xd_softc */
@@ -663,7 +655,7 @@ xdattach(parent, self, aux)
 
 	xd->hw_spt = spt;
 	/* Attach the disk: must be before getdisklabel to malloc label */
-	disk_attach(&xd->sc_dk);
+	disk_attach(&xd->sc_dev, &xd->sc_dk);
 
 	if (xdgetdisklabel(xd, xa->buf) != XD_ERR_AOK)
 		goto done;
@@ -846,6 +838,7 @@ xdioctl(dev, command, addr, flag, p)
 		return 0;
 
 	case DIOCGDINFO:	/* get disk label */
+	case DIOCGPDINFO:	/* no separate 'physical' info available. */
 		bcopy(xd->sc_dk.dk_label, addr, sizeof(struct disklabel));
 		return 0;
 
@@ -853,15 +846,6 @@ xdioctl(dev, command, addr, flag, p)
 		((struct partinfo *) addr)->disklab = xd->sc_dk.dk_label;
 		((struct partinfo *) addr)->part =
 		    &xd->sc_dk.dk_label->d_partitions[DISKPART(dev)];
-		return 0;
-
-	case DIOCWLABEL:	/* change write status of disk label */
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-		if (*(int *) addr)
-			xd->flags |= XD_WLABEL;
-		else
-			xd->flags &= ~XD_WLABEL;
 		return 0;
 
 	case DIOCWDINFO:	/* write disk label */
@@ -961,7 +945,7 @@ xdread(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(xdstrategy, NULL, dev, B_READ, minphys, uio));
+	return (physio(xdstrategy, dev, B_READ, minphys, uio));
 }
 
 int
@@ -971,7 +955,7 @@ xdwrite(dev, uio, flags)
 	int flags;
 {
 
-	return (physio(xdstrategy, NULL, dev, B_WRITE, minphys, uio));
+	return (physio(xdstrategy, dev, B_WRITE, minphys, uio));
 }
 
 
@@ -1027,9 +1011,7 @@ xdstrategy(bp)
 
 	/* check for live device */
 
-	if (unit >= xd_cd.cd_ndevs || (xd = xd_cd.cd_devs[unit]) == 0 ||
-	    bp->b_blkno < 0 ||
-	    (bp->b_bcount % xd->sc_dk.dk_label->d_secsize) != 0) {
+	if (unit >= xd_cd.cd_ndevs || (xd = xd_cd.cd_devs[unit]) == 0) {
 		bp->b_error = EINVAL;
 		goto bad;
 	}
@@ -1052,18 +1034,9 @@ xdstrategy(bp)
 		bp->b_error = EIO;
 		goto bad;
 	}
-	/* short circuit zero length request */
 
-	if (bp->b_bcount == 0)
-		goto done;
-
-	/* check bounds with label (disksubr.c).  Determine the size of the
-	 * transfer, and make sure it is within the boundaries of the
-	 * partition. Adjust transfer if needed, and signal errors or early
-	 * completion. */
-
-	if (bounds_check_with_label(bp, xd->sc_dk.dk_label,
-	    (xd->flags & XD_WLABEL) != 0) <= 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, xd->sc_dk.dk_label) == -1)
 		goto done;
 
 	/*
@@ -1107,11 +1080,11 @@ xdstrategy(bp)
 	splx(s);
 	return;
 
-bad:				/* tells upper layers we have an error */
+ bad:				/* tells upper layers we have an error */
 	bp->b_flags |= B_ERROR;
-done:				/* tells upper layers we are done with this
-				 * buf */
 	bp->b_resid = bp->b_bcount;
+ done:				/* tells upper layers we are done with this
+				 * buf */
 	s = splbio();
 	biodone(bp);
 	splx(s);

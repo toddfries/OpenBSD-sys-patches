@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_subr.c,v 1.18 2009/08/13 16:00:53 jasper Exp $	*/
+/*	$OpenBSD: ntfs_subr.c,v 1.25 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ntfs_subr.c,v 1.4 2003/04/10 21:37:32 jdolecek Exp $	*/
 
 /*-
@@ -40,8 +40,7 @@
 #include <sys/file.h>
 #include <sys/malloc.h>
 #include <sys/rwlock.h>
-
-#include <miscfs/specfs/specdev.h>
+#include <sys/specdev.h>
 
 /* #define NTFS_DEBUG 1 */
 #include <ntfs/ntfs.h>
@@ -155,7 +154,7 @@ ntfs_findvattr(ntmp, ip, lvapp, vapp, type, name, namelen, vcn)
 /*
  * Search attribute specified in ntnode (load ntnode if necessary).
  * If not found but ATTR_A_ATTRLIST present, read it in and search through.
- * VOP_VGET node needed, and lookup through its ntnode (load if nessesary).
+ * VOP_VGET node needed, and lookup through its ntnode (load if necessary).
  *
  * ntnode should be locked
  */
@@ -204,7 +203,7 @@ ntfs_ntvattrget(
 	}
 	/* Scan $ATTRIBUTE_LIST for requested attribute */
 	len = lvap->va_datalen;
-	alpool = (caddr_t) malloc(len, M_TEMP, M_WAITOK);
+	alpool = malloc(len, M_TEMP, M_WAITOK);
 	error = ntfs_readntvattr_plain(ntmp, ip, lvap, 0, len, alpool, &len,
 			NULL);
 	if (error)
@@ -282,8 +281,7 @@ ntfs_loadntnode(
 
 	dprintf(("ntfs_loadntnode: loading ino: %d\n",ip->i_number));
 
-	mfrp = (struct filerec *) malloc(ntfs_bntob(ntmp->ntm_bpmftrec),
-	       M_TEMP, M_WAITOK);
+	mfrp = malloc(ntfs_bntob(ntmp->ntm_bpmftrec), M_TEMP, M_WAITOK);
 
 	if (ip->i_number < NTFS_SYSNODESNUM) {
 		struct buf     *bp;
@@ -293,16 +291,15 @@ ntfs_loadntnode(
 		bn = ntfs_cntobn(ntmp->ntm_mftcn) +
 			ntmp->ntm_bpmftrec * ip->i_number;
 
-		error = bread(ntmp->ntm_devvp,
-			      bn, ntfs_bntob(ntmp->ntm_bpmftrec),
-			      NOCRED, &bp);
+		error = bread(ntmp->ntm_devvp, bn,
+		    ntfs_bntob(ntmp->ntm_bpmftrec), &bp);
 		if (error) {
 			printf("ntfs_loadntnode: BREAD FAILED\n");
 			brelse(bp);
 			goto out;
 		}
 		memcpy(mfrp, bp->b_data, ntfs_bntob(ntmp->ntm_bpmftrec));
-		bqrelse(bp);
+		brelse(bp);
 	} else {
 		struct vnode   *vp;
 
@@ -584,8 +581,7 @@ ntfs_attrtontvattr(
 		vap->va_allocated = rap->a_r.a_datalen;
 		vap->va_vcnstart = 0;
 		vap->va_vcnend = ntfs_btocn(vap->va_allocated);
-		vap->va_datap = (caddr_t) malloc(vap->va_datalen,
-		       M_NTFSRDATA, M_WAITOK);
+		vap->va_datap = malloc(vap->va_datalen, M_NTFSRDATA, M_WAITOK);
 		memcpy(vap->va_datap, (caddr_t) rap + rap->a_r.a_dataoff,
 		       rap->a_r.a_datalen);
 	}
@@ -626,8 +622,8 @@ ntfs_runtovrun(
 		off += (run[off] & 0xF) + ((run[off] >> 4) & 0xF) + 1;
 		cnt++;
 	}
-	cn = (cn_t *) malloc(cnt * sizeof(cn_t), M_NTFSRUN, M_WAITOK);
-	cl = (cn_t *) malloc(cnt * sizeof(cn_t), M_NTFSRUN, M_WAITOK);
+	cn = malloc(cnt * sizeof(cn_t), M_NTFSRUN, M_WAITOK);
+	cl = malloc(cnt * sizeof(cn_t), M_NTFSRUN, M_WAITOK);
 
 	off = 0;
 	cnt = 0;
@@ -831,7 +827,7 @@ ntfs_ntlookupattr(
 		adp = ntmp->ntm_ad;
 		for (i = 0; i < ntmp->ntm_adnum; i++, adp++){
 			if (syslen != adp->ad_namelen || 
-			   strncmp(sys, adp->ad_name, syslen) != 0)
+			    strncmp(sys, adp->ad_name, syslen) != 0)
 				continue;
 
 			*attrtype = adp->ad_type;
@@ -842,8 +838,8 @@ ntfs_ntlookupattr(
 
     out:
 	if (namelen) {
-		*attrname = (char *) malloc(namelen, M_TEMP, M_WAITOK);
-		memcpy((*attrname), name, namelen);
+		*attrname = malloc(namelen + 1, M_TEMP, M_WAITOK);
+		memcpy(*attrname, name, namelen);
 		(*attrname)[namelen] = '\0';
 		*attrtype = NTFS_A_DATA;
 	}
@@ -910,7 +906,7 @@ ntfs_ntlookupfile(
 	blsize = vap->va_a_iroot->ir_size;
 	dprintf(("ntfs_ntlookupfile: blksz: %d\n", blsize));
 
-	rdbuf = (caddr_t) malloc(blsize, M_TEMP, M_WAITOK);
+	rdbuf = malloc(blsize, M_TEMP, M_WAITOK);
 
     loop:
 	rdsize = vap->va_datalen;
@@ -1188,8 +1184,8 @@ ntfs_ntreaddir(
 
 	if (fp->f_dirblbuf == NULL) {
 		fp->f_dirblsz = vap->va_a_iroot->ir_size;
-		fp->f_dirblbuf = (caddr_t) malloc(
-		       MAX(vap->va_datalen,fp->f_dirblsz), M_NTFSDIR, M_WAITOK);
+		fp->f_dirblbuf = malloc(MAX(vap->va_datalen,fp->f_dirblsz),
+		    M_NTFSDIR, M_WAITOK);
 	}
 
 	blsize = fp->f_dirblsz;
@@ -1204,7 +1200,7 @@ ntfs_ntreaddir(
 			error = ENOTDIR;
 			goto fail;
 		}
-		bmp = (u_int8_t *) malloc(bmvap->va_datalen, M_TEMP, M_WAITOK);
+		bmp = malloc(bmvap->va_datalen, M_TEMP, M_WAITOK);
 		error = ntfs_readattr(ntmp, ip, NTFS_A_INDXBITMAP, "$I30", 0,
 				       bmvap->va_datalen, bmp, NULL);
 		if (error)
@@ -1511,15 +1507,17 @@ ntfs_writentvattr_plain(
 				clrbuf(bp);
 			} else {
 				error = bread(ntmp->ntm_devvp, ntfs_cntobn(cn),
-					      ntfs_cntob(cl), NOCRED, &bp);
+					      ntfs_cntob(cl), &bp);
 				if (error) {
 					brelse(bp);
 					return (error);
 				}
 			}
-			if (uio)
-				uiomove(bp->b_data + off, tocopy, uio);
-			else
+			if (uio) {
+				error = uiomove(bp->b_data + off, tocopy, uio);
+				if (error != 0)
+					break;
+			} else
 				memcpy(bp->b_data + off, data, tocopy);
 			bawrite(bp);
 			data = data + tocopy;
@@ -1531,7 +1529,7 @@ ntfs_writentvattr_plain(
 		}
 	}
 
-	if (left) {
+	if (left && error == 0) {
 		printf("ntfs_writentvattr_plain: POSSIBLE RUN ERROR\n");
 		error = EINVAL;
 	}
@@ -1618,14 +1616,16 @@ ntfs_readntvattr_plain(
 					error = bread(ntmp->ntm_devvp,
 						      ntfs_cntobn(cn),
 						      ntfs_cntob(cl),
-						      NOCRED, &bp);
+						      &bp);
 					if (error) {
 						brelse(bp);
 						return (error);
 					}
 					if (uio) {
-						uiomove(bp->b_data + off,
+						error = uiomove(bp->b_data + off,
 							tocopy, uio);
+						if (error != 0)
+							break;
 					} else {
 						memcpy(data, bp->b_data + off,
 							tocopy);
@@ -1650,22 +1650,27 @@ ntfs_readntvattr_plain(
 				off = 0;
 				if (uio) {
 					size_t remains = tocopy;
-					for(; remains; remains--)
-						uiomove("", 1, uio);
+					for(; remains; remains--) {
+						error = uiomove("", 1, uio);
+						if (error != 0)
+							break;
+					}
 				} else 
 					bzero(data, tocopy);
 				data = data + tocopy;
 			}
 			cnt++;
+			if (error != 0)
+				break;
 		}
-		if (left) {
+		if (left && error == 0) {
 			printf("ntfs_readntvattr_plain: POSSIBLE RUN ERROR\n");
 			error = E2BIG;
 		}
 	} else {
 		ddprintf(("ntfs_readnvattr_plain: data is in mft record\n"));
 		if (uio) 
-			uiomove(vap->va_datap + roff, rsize, uio);
+			error = uiomove(vap->va_datap + roff, rsize, uio);
 		else
 			memcpy(rdata, vap->va_datap + roff, rsize);
 		*initp += rsize;
@@ -1792,14 +1797,17 @@ ntfs_readattr(
 
 			if (init == ntfs_cntob(NTFS_COMPUNIT_CL)) {
 				if (uio)
-					uiomove(cup + off, tocopy, uio);
+					error = uiomove(cup + off, tocopy, uio);
 				else
 					memcpy(data, cup + off, tocopy);
 			} else if (init == 0) {
 				if (uio) {
 					size_t remains = tocopy;
-					for(; remains; remains--)
-						uiomove("", 1, uio);
+					for(; remains; remains--) {
+						error = uiomove("", 1, uio);
+						if (error != 0)
+							break;
+					}
 				}
 				else
 					bzero(data, tocopy);
@@ -1808,10 +1816,12 @@ ntfs_readattr(
 				if (error)
 					break;
 				if (uio)
-					uiomove(uup + off, tocopy, uio);
+					error = uiomove(uup + off, tocopy, uio);
 				else
 					memcpy(data, uup + off, tocopy);
 			}
+			if (error)
+				break;
 
 			left -= tocopy;
 			data = data + tocopy;

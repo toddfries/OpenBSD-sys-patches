@@ -1,4 +1,4 @@
-/*	$OpenBSD: bthidev.c,v 1.7 2010/07/02 15:01:10 blambert Exp $	*/
+/*	$OpenBSD: bthidev.c,v 1.9 2011/06/17 07:06:46 mk Exp $	*/
 /*	$NetBSD: bthidev.c,v 1.16 2008/08/06 15:01:23 plunky Exp $	*/
 
 /*-
@@ -95,7 +95,7 @@ struct bthidev_softc {
 void	bthidev_timeout(void *);
 int	bthidev_listen(struct bthidev_softc *);
 int	bthidev_connect(struct bthidev_softc *);
-int	bthidev_output(struct bthidev *, uint8_t *, int);
+int	bthidev_output(struct bthidev *, uint8_t *, int, int);
 void	bthidev_null(struct bthidev *, uint8_t *, int);
 
 /* autoconf(9) glue */
@@ -228,7 +228,8 @@ bthidev_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	sc->sc_dlen = bda->bd_hid.hid_dlen;
-	sc->sc_desc = malloc(bda->bd_hid.hid_dlen, M_BTHIDEV, M_WAITOK);
+	sc->sc_desc = malloc(bda->bd_hid.hid_dlen, M_BTHIDEV,
+	    M_WAITOK | M_CANFAIL);
 	if (sc->sc_desc == NULL) {
 		printf(": no memory\n");
 		return;
@@ -856,7 +857,7 @@ bthidev_null(struct bthidev *hidev, uint8_t *report, int len)
 }
 
 int
-bthidev_output(struct bthidev *hidev, uint8_t *report, int rlen)
+bthidev_output(struct bthidev *hidev, uint8_t *report, int rlen, int nolock)
 {
 	struct bthidev_softc *sc = (struct bthidev_softc *)hidev->sc_parent;
 	struct mbuf *m;
@@ -892,9 +893,11 @@ bthidev_output(struct bthidev *hidev, uint8_t *report, int rlen)
 	memcpy(mtod(m, uint8_t *) + 2, report, rlen);
 	m->m_pkthdr.len = m->m_len = rlen + 2;
 
-	mutex_enter(&bt_lock);
+	if (!nolock)
+		mutex_enter(&bt_lock);
 	err = l2cap_send(sc->sc_int, m);
-	mutex_exit(&bt_lock);
+	if (!nolock)
+		mutex_exit(&bt_lock);
 
 	return err;
 }

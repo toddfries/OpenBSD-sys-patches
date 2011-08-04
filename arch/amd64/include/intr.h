@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.19 2010/05/31 21:39:56 deraadt Exp $	*/
+/*	$OpenBSD: intr.h,v 1.23 2011/04/16 00:40:58 deraadt Exp $	*/
 /*	$NetBSD: intr.h,v 1.2 2003/05/04 22:01:56 fvdl Exp $	*/
 
 /*-
@@ -30,8 +30,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _X86_INTR_H_
-#define _X86_INTR_H_
+#ifndef _MACHINE_INTR_H_
+#define _MACHINE_INTR_H_
 
 #include <machine/intrdefs.h>
 
@@ -172,11 +172,6 @@ void splassert_check(int, const char *);
 #define splsoftassert(wantipl)	do { /* nada */ } while (0)
 #endif
 
-/*
- * XXX
- */
-#define	setsoftnet()	softintr(SIR_NET)
-
 #define IPLSHIFT 4			/* The upper nibble of vectors is the IPL.      */
 #define IPL(level) ((level) >> IPLSHIFT)	/* Extract the IPL.    */
 
@@ -195,6 +190,8 @@ extern struct intrstub ioapic_edge_stubs[];
 extern struct intrstub ioapic_level_stubs[];
 
 struct cpu_info;
+
+extern int intr_shared_edge;
 
 extern char idt_allocmap[];
 
@@ -215,7 +212,6 @@ void intr_printconfig(void);
 int x86_send_ipi(struct cpu_info *, int);
 int x86_fast_ipi(struct cpu_info *, int);
 void x86_broadcast_ipi(int);
-void x86_multicast_ipi(int, int);
 void x86_ipi_handler(void);
 void x86_intlock(struct intrframe);
 void x86_intunlock(struct intrframe);
@@ -276,4 +272,4 @@ do {									\
 } while (/*CONSTCOND*/ 0)
 #endif /* _LOCORE */
 
-#endif /* !_X86_INTR_H_ */
+#endif /* !_MACHINE_INTR_H_ */

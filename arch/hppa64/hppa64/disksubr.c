@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.60 2009/08/13 15:23:10 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.67 2011/07/10 04:49:39 krw Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff
@@ -48,8 +48,6 @@ int	readliflabel(struct buf *, void (*)(struct buf *),
  * secpercyl, secsize and anything required for a block i/o read
  * operation in the driver's strategy/start routines
  * must be filled in before calling us.
- *
- * Returns null on success and an error string on failure.
  */
 int
 readdisklabel(dev_t dev, void (*strat)(struct buf *),
@@ -89,6 +87,7 @@ done:
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
+	disk_change = 1;
 	return (error);
 }
 
@@ -105,7 +104,8 @@ readliflabel(struct buf *bp, void (*strat)(struct buf *),
 	/* read LIF volume header */
 	bp->b_blkno = btodb(LIF_VOLSTART);
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 	if (biowait(bp))
 		return (bp->b_error);
@@ -122,7 +122,8 @@ readliflabel(struct buf *bp, void (*strat)(struct buf *),
 	/* read LIF directory */
 	dbp->b_blkno = lifstodb(lvp->vol_addr);
 	dbp->b_bcount = lp->d_secsize;
-	dbp->b_flags = B_BUSY | B_READ | B_RAW;
+	CLR(dbp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(dbp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(dbp);
 	if (biowait(dbp)) {
 		error = dbp->b_error;
@@ -154,7 +155,8 @@ readliflabel(struct buf *bp, void (*strat)(struct buf *),
 		/* read LIF directory */
 		dbp->b_blkno = lifstodb(p->dir_addr);
 		dbp->b_bcount = lp->d_secsize;
-		dbp->b_flags = B_BUSY | B_READ | B_RAW;
+		CLR(dbp->b_flags, B_READ | B_WRITE | B_DONE);
+		SET(dbp->b_flags, B_BUSY | B_READ | B_RAW);
 		(*strat)(dbp);
 
 		if (biowait(dbp)) {
@@ -224,15 +226,23 @@ finished:
 
 	bp->b_blkno = fsoff + LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 	if (biowait(bp)) {
 		error = bp->b_error;
 		goto done;
 	}
 
-	error = checkdisklabel(bp->b_data + LABELOFFSET, lp, openbsdstart,
-	    DL_GETDSIZE(lp));	/* XXX */
+	/*
+	 * Do OpenBSD disklabel validation/adjustment.
+	 *
+	 * N.B: No matter what the bits are on the disk, we now have the
+	 * OpenBSD disklabel for this lif disk. DO NOT proceed to
+	 * readdoslabel(), iso_spooflabel(), etc.
+	 */
+	checkdisklabel(bp->b_data, lp, openbsdstart, DL_GETDSIZE(lp));
+	error = 0;
 
 done:
 	if (dbp) {
@@ -249,6 +259,7 @@ int
 writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 {
 	int error = EIO, partoff = -1;
+	int offset;
 	struct disklabel *dlp;
 	struct buf *bp = NULL;
 
@@ -256,21 +267,29 @@ writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 	bp = geteblk((int)lp->d_secsize);
 	bp->b_dev = dev;
 
-	if (readliflabel(bp, strat, lp, &partoff, 1) != NULL &&
-	    readdoslabel(bp, strat, lp, &partoff, 1) != NULL)
+	if (readliflabel(bp, strat, lp, &partoff, 1) == 0) {
+		bp->b_blkno = partoff + LABELSECTOR;
+		offset = LABELOFFSET;
+	} else if (readdoslabel(bp, strat, lp, &partoff, 1) == 0) {
+		bp->b_blkno = DL_BLKTOSEC(lp, partoff + DOS_LABELSECTOR) *
+		    DL_BLKSPERSEC(lp);
+		offset = DL_BLKOFFSET(lp, partoff + DOS_LABELSECTOR);
+	} else
 		goto done;
 
 	/* Read it in, slap the new label in, and write it back out */
 	bp->b_blkno = partoff + LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
-	bp->b_flags = B_BUSY | B_READ | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 	(*strat)(bp);
 	if ((error = biowait(bp)) != 0)
 		goto done;
 
-	dlp = (struct disklabel *)(bp->b_data + LABELOFFSET);
+	dlp = (struct disklabel *)(bp->b_data + offset);
 	*dlp = *lp;
-	bp->b_flags = B_BUSY | B_WRITE | B_RAW;
+	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+	SET(bp->b_flags, B_BUSY | B_WRITE | B_RAW);
 	(*strat)(bp);
 	error = biowait(bp);
 
@@ -279,5 +298,6 @@ done:
 		bp->b_flags |= B_INVAL;
 		brelse(bp);
 	}
+	disk_change = 1;
 	return (error);
 }

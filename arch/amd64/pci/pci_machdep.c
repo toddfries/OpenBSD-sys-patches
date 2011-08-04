@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.35 2010/07/08 20:56:31 jordan Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.51 2011/06/18 17:28:18 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -96,6 +96,20 @@
 #include <machine/mpbiosvar.h>
 #endif
 
+/*
+ * Memory Mapped Configuration space access.
+ *
+ * Since mapping the whole configuration space will cost us up to
+ * 256MB of kernel virtual memory, we use seperate mappings per bus.
+ * The mappings are created on-demand, such that we only use kernel
+ * virtual memory for busses that are actually present.
+ */
+bus_addr_t pci_mcfg_addr;
+int pci_mcfg_min_bus, pci_mcfg_max_bus;
+bus_space_tag_t pci_mcfgt = X86_BUS_SPACE_MEM;
+bus_space_handle_t pci_mcfgh[256];
+void pci_mcfg_map_bus(int);
+
 struct mutex pci_conf_lock = MUTEX_INITIALIZER(IPL_HIGH);
 
 #define	PCI_CONF_LOCK()						\
@@ -125,7 +139,7 @@ struct bus_dma_tag pci_bus_dma_tag = {
 	_bus_dmamap_load_uio,
 	_bus_dmamap_load_raw,
 	_bus_dmamap_unload,
-	NULL,
+	_bus_dmamap_sync,
 	_bus_dmamem_alloc,
 	_bus_dmamem_free,
 	_bus_dmamem_map,
@@ -133,16 +147,68 @@ struct bus_dma_tag pci_bus_dma_tag = {
 	_bus_dmamem_mmap,
 };
 
-extern void amdgart_probe(struct pcibus_attach_args *);
-
 void
 pci_attach_hook(struct device *parent, struct device *self,
     struct pcibus_attach_args *pba)
 {
-#ifndef SMALL_KERNEL
-	if (pba->pba_bus == 0)
-		amdgart_probe(pba);
-#endif /* !SMALL_KERNEL */
+	pci_chipset_tag_t pc = pba->pba_pc;
+	pcitag_t tag;
+	pcireg_t id, class;
+
+	if (pba->pba_bus != 0)
+		return;
+
+	/*
+	 * In order to decide whether the system supports MSI we look
+	 * at the host bridge, which should be device 0 function 0 on
+	 * bus 0.  It is better to not enable MSI on systems that
+	 * support it than the other way around, so be conservative
+	 * here.  So we don't enable MSI if we don't find a host
+	 * bridge there.  We also deliberately don't enable MSI on
+	 * chipsets from low-end manifacturers like VIA and SiS.
+	 */
+	tag = pci_make_tag(pc, 0, 0, 0);
+	id = pci_conf_read(pc, tag, PCI_ID_REG);
+	class = pci_conf_read(pc, tag, PCI_CLASS_REG);
+
+	if (PCI_CLASS(class) != PCI_CLASS_BRIDGE ||
+	    PCI_SUBCLASS(class) != PCI_SUBCLASS_BRIDGE_HOST)
+		return;
+
+	switch (PCI_VENDOR(id)) {
+	case PCI_VENDOR_INTEL:
+		/*
+		 * In the wonderful world of virtualization you can
+		 * have the latest 64-bit AMD multicore CPU behind a
+		 * prehistoric Intel host bridge.  Give them what they
+		 * deserve.
+		 */
+		switch (PCI_PRODUCT(id)) {
+		case PCI_PRODUCT_INTEL_82441FX:	/* QEMU */
+		case PCI_PRODUCT_INTEL_82443BX:	/* VMWare */
+			break;
+		default:
+			pba->pba_flags |= PCI_FLAGS_MSI_ENABLED;
+			break;
+		}
+		break;
+	case PCI_VENDOR_NVIDIA:
+	case PCI_VENDOR_AMD:
+		pba->pba_flags |= PCI_FLAGS_MSI_ENABLED;
+		break;
+	}
+
+	/*
+	 * Don't enable MSI on a HyperTransport bus.  In order to
+	 * determine that bus 0 is a HyperTransport bus, we look at
+	 * device 24 function 0, which is the HyperTransport
+	 * host/primary interface integrated on most 64-bit AMD CPUs.
+	 * If that device has a HyperTransport capability, bus 0 must
+	 * be a HyperTransport bus and we disable MSI.
+	 */
+	tag = pci_make_tag(pc, 0, 24, 0);
+	if (pci_get_capability(pc, tag, PCI_CAP_HT, NULL, NULL))
+		pba->pba_flags &= ~PCI_FLAGS_MSI_ENABLED;
 }
 
 int
@@ -172,10 +238,46 @@ pci_decompose_tag(pci_chipset_tag_t pc, pcitag_t tag, int *bp, int *dp, int *fp)
 		*fp = (tag >> 8) & 0x7;
 }
 
+int
+pci_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	int bus;
+
+	if (pci_mcfg_addr) {
+		pci_decompose_tag(pc, tag, &bus, NULL, NULL);
+		if (bus >= pci_mcfg_min_bus && bus <= pci_mcfg_max_bus)
+			return PCIE_CONFIG_SPACE_SIZE;
+	}
+
+	return PCI_CONFIG_SPACE_SIZE;
+}
+
+void
+pci_mcfg_map_bus(int bus)
+{
+	if (pci_mcfgh[bus])
+		return;
+
+	if (bus_space_map(pci_mcfgt, pci_mcfg_addr + (bus << 20), 1 << 20,
+	    0, &pci_mcfgh[bus]))
+		panic("pci_conf_read: cannot map mcfg space");
+}
+
 pcireg_t
 pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
 	pcireg_t data;
+	int bus;
+
+	if (pci_mcfg_addr && reg >= PCI_CONFIG_SPACE_SIZE) {
+		pci_decompose_tag(pc, tag, &bus, NULL, NULL);
+		if (bus >= pci_mcfg_min_bus && bus <= pci_mcfg_max_bus) {
+			pci_mcfg_map_bus(bus);
+			data = bus_space_read_4(pci_mcfgt, pci_mcfgh[bus],
+			    (tag & 0x000ff00) << 4 | reg);
+			return data;
+		}
+	}
 
 	PCI_CONF_LOCK();
 	outl(PCI_MODE1_ADDRESS_REG, tag | reg);
@@ -189,11 +291,105 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 void
 pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
+	int bus;
+
+	if (pci_mcfg_addr && reg >= PCI_CONFIG_SPACE_SIZE) {
+		pci_decompose_tag(pc, tag, &bus, NULL, NULL);
+		if (bus >= pci_mcfg_min_bus && bus <= pci_mcfg_max_bus) {
+			pci_mcfg_map_bus(bus);
+			bus_space_write_4(pci_mcfgt, pci_mcfgh[bus],
+			    (tag & 0x000ff00) << 4 | reg, data);
+			return;
+		}
+	}
+
 	PCI_CONF_LOCK();
 	outl(PCI_MODE1_ADDRESS_REG, tag | reg);
 	outl(PCI_MODE1_DATA_REG, data);
 	outl(PCI_MODE1_ADDRESS_REG, 0);
 	PCI_CONF_UNLOCK();
+}
+
+void msi_hwmask(struct pic *, int);
+void msi_hwunmask(struct pic *, int);
+void msi_addroute(struct pic *, struct cpu_info *, int, int, int);
+void msi_delroute(struct pic *, struct cpu_info *, int, int, int);
+
+struct pic msi_pic = {
+	{0, {NULL}, NULL, 0, "msi", NULL, 0, 0},
+	PIC_MSI,
+#ifdef MULTIPROCESSOR
+	{},
+#endif
+	msi_hwmask,
+	msi_hwunmask,
+	msi_addroute,
+	msi_delroute,
+	NULL,
+	ioapic_edge_stubs
+};
+
+void
+msi_hwmask(struct pic *pic, int pin)
+{
+}
+
+void
+msi_hwunmask(struct pic *pic, int pin)
+{
+}
+
+void
+msi_addroute(struct pic *pic, struct cpu_info *ci, int pin, int vec, int type)
+{
+	pci_chipset_tag_t pc = NULL; /* XXX */
+	pcitag_t tag = pin;
+	pcireg_t reg, addr;
+	int off;
+
+	if (pci_get_capability(pc, tag, PCI_CAP_MSI, &off, &reg) == 0)
+		panic("%s: no msi capability", __func__);
+
+	addr = 0xfee00000UL | (ci->ci_apicid << 12);
+
+	if (reg & PCI_MSI_MC_C64) {
+		pci_conf_write(pc, tag, off + PCI_MSI_MA, addr);
+		pci_conf_write(pc, tag, off + PCI_MSI_MAU32, 0);
+		pci_conf_write(pc, tag, off + PCI_MSI_MD64, vec);
+	} else {
+		pci_conf_write(pc, tag, off + PCI_MSI_MA, addr);
+		pci_conf_write(pc, tag, off + PCI_MSI_MD32, vec);
+	}
+	pci_conf_write(pc, tag, off, reg | PCI_MSI_MC_MSIE);
+}
+
+void
+msi_delroute(struct pic *pic, struct cpu_info *ci, int pin, int vec, int type)
+{
+	pci_chipset_tag_t pc = NULL; /* XXX */
+	pcitag_t tag = pin;
+	pcireg_t reg;
+	int off;
+
+	if (pci_get_capability(pc, tag, PCI_CAP_MSI, &off, &reg) == 0)
+		panic("%s: no msi capability", __func__);
+	pci_conf_write(pc, tag, off, reg & ~PCI_MSI_MC_MSIE);
+}
+
+int
+pci_intr_map_msi(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
+{
+	pci_chipset_tag_t pc = pa->pa_pc;
+	pcitag_t tag = pa->pa_tag;
+
+	if ((pa->pa_flags & PCI_FLAGS_MSI_ENABLED) == 0 || mp_busses == NULL ||
+	    pci_get_capability(pc, tag, PCI_CAP_MSI, NULL, NULL) == 0)
+		return 1;
+
+	ihp->tag = tag;
+	ihp->line = APIC_INT_VIA_MSG;
+	ihp->pin = 0;
+	return 0;
 }
 
 int
@@ -304,12 +500,13 @@ pci_intr_string(pci_chipset_tag_t pc, pci_intr_handle_t ih)
 	if (ih.line == 0)
 		panic("pci_intr_string: bogus handle 0x%x", ih.line);
 
+	if (ih.line & APIC_INT_VIA_MSG)
+		return ("msi");
+
 #if NIOAPIC > 0
 	if (ih.line & APIC_INT_VIA_APIC)
-		snprintf(irqstr, sizeof(irqstr), "apic %d int %d (irq %d)",
-		    APIC_IRQ_APIC(ih.line),
-		    APIC_IRQ_PIN(ih.line),
-		    pci_intr_line(pc, ih));
+		snprintf(irqstr, sizeof(irqstr), "apic %d int %d",
+		    APIC_IRQ_APIC(ih.line), APIC_IRQ_PIN(ih.line));
 	else
 		snprintf(irqstr, sizeof(irqstr), "irq %d",
 		    pci_intr_line(pc, ih));
@@ -330,7 +527,13 @@ pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 {
 	int pin, irq;
 	int bus, dev;
+	pcitag_t tag = ih.tag;
 	struct pic *pic;
+
+	if (ih.line & APIC_INT_VIA_MSG) {
+		return intr_establish(-1, &msi_pic, tag, IST_PULSE, level,
+		    func, arg, what);
+	}
 
 	pci_decompose_tag(pc, ih.tag, &bus, &dev, NULL);
 #if NACPIPRT > 0
@@ -388,7 +591,13 @@ pci_init_extents(void)
 	}
 
 	if (pcimem_ex == NULL) {
-		pcimem_ex = extent_create("pcimem", 0, 0xffffffff, M_DEVBUF,
+		/*
+		 * Cover the 36-bit address space addressable by PAE
+		 * here.  As long as vendors continue to support
+		 * 32-bit operating systems, we should never see BARs
+		 * outside that region.
+		 */
+		pcimem_ex = extent_create("pcimem", 0, 0xfffffffff, M_DEVBUF,
 		    NULL, 0, EX_NOWAIT);
 		if (pcimem_ex == NULL)
 			return;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: crypto.c,v 1.56 2010/07/08 09:46:50 thib Exp $	*/
+/*	$OpenBSD: crypto.c,v 1.59 2011/01/11 15:42:05 deraadt Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -28,7 +28,7 @@
 
 #include <crypto/cryptodev.h>
 
-void init_crypto(void);
+void crypto_init(void);
 
 struct cryptocap *crypto_drivers = NULL;
 int crypto_drivers_num = 0;
@@ -201,7 +201,7 @@ crypto_freesession(u_int64_t sid)
 	 */
 	if ((crypto_drivers[hid].cc_flags & CRYPTOCAP_F_CLEANUP) &&
 	    crypto_drivers[hid].cc_sessions == 0)
-		bzero(&crypto_drivers[hid], sizeof(struct cryptocap));
+		explicit_bzero(&crypto_drivers[hid], sizeof(struct cryptocap));
 
 	splx(s);
 	return err;
@@ -617,13 +617,14 @@ crypto_getreq(int num)
 }
 
 void
-init_crypto(void)
+crypto_init(void)
 {
-	pool_init(&cryptop_pool, sizeof(struct cryptop), 0, 0, 0,
-	    "cryptop", NULL);
-	pool_init(&cryptodesc_pool, sizeof(struct cryptodesc), 0, 0, 0,
-	    "cryptodesc", NULL);
 	crypto_workq = workq_create("crypto", 1, IPL_HIGH);
+
+	pool_init(&cryptop_pool, sizeof(struct cryptop), 0, 0,
+	    0, "cryptop", NULL);
+	pool_init(&cryptodesc_pool, sizeof(struct cryptodesc), 0, 0,
+	    0, "cryptodesc", NULL);
 }
 
 /*

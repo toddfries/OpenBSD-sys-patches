@@ -1,4 +1,4 @@
-/*	$OpenBSD: psl.h,v 1.16 2004/06/28 01:41:53 aaron Exp $	*/
+/*	$OpenBSD: psl.h,v 1.19 2011/06/08 22:57:59 kettenis Exp $	*/
 /*	$NetBSD: psl.h,v 1.30 1996/05/13 01:28:05 mycroft Exp $	*/
 
 /*-
@@ -35,8 +35,8 @@
  *	@(#)psl.h	5.2 (Berkeley) 1/18/91
  */
 
-#ifndef _I386_PSL_H_
-#define _I386_PSL_H_
+#ifndef _MACHINE_PSL_H_
+#define _MACHINE_PSL_H_
 
 /*
  * 386 processor status longword.
@@ -85,13 +85,17 @@
 struct intrhand {
 	int		(*ih_fun)(void *);
 	void		*ih_arg;
-	struct intrhand	*ih_next;
 	int		ih_level;
+	struct intrhand	*ih_next;
+	int		ih_pin;
 	int		ih_irq;
 	struct evcount	ih_count;
+	int		ih_vec;
 };
+
+extern int intr_shared_edge;	/* This system has shared edge interrupts */
 
 #endif /* _LOCORE */
 #endif /* _KERNEL */
  
-#endif /* !_I386_PSL_H_ */
+#endif /* !_MACHINE_PSL_H_ */

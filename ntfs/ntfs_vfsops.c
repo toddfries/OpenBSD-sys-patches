@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_vfsops.c,v 1.17 2010/07/03 00:12:31 krw Exp $	*/
+/*	$OpenBSD: ntfs_vfsops.c,v 1.27 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: ntfs_vfsops.c,v 1.7 2003/04/24 07:50:19 christos Exp $	*/
 
 /*-
@@ -37,19 +37,19 @@
 #include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/buf.h>
+#include <sys/disk.h>
 #include <sys/fcntl.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/conf.h>
+#include <sys/specdev.h>
 
 #if defined(__NetBSD__) || defined(__OpenBSD__)
 #include <uvm/uvm_extern.h>
 #else
 #include <vm/vm.h>
 #endif
-
-#include <miscfs/specfs/specdev.h>
 
 /*#define NTFS_DEBUG 1*/
 #if defined(__FreeBSD__) || defined(__NetBSD__)
@@ -167,6 +167,7 @@ ntfs_mount(
 	struct ntfs_args args;
 	size_t size;
 	mode_t amode;
+	char *fspec = NULL;
 
 	/*
 	 ***
@@ -204,7 +205,13 @@ ntfs_mount(
 	 * Not an update, or updating the name: look up the name
 	 * and verify that it refers to a sensible block device.
 	 */
-	NDINIT(ndp, LOOKUP, FOLLOW, UIO_USERSPACE, args.fspec, p);
+	fspec = malloc(MNAMELEN, M_MOUNT, M_WAITOK);
+	err = copyinstr(args.fspec, fspec, MNAMELEN - 1, &size);
+	if (err)
+		goto error_1;
+	disk_map(fspec, fspec, MNAMELEN, DM_OPENBLCK);
+
+	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, p);
 	err = namei(ndp);
 	if (err) {
 		/* can't get devvp!*/
@@ -273,8 +280,8 @@ ntfs_mount(
 		(void) copyinstr(path, mp->mnt_stat.f_mntonname, MNAMELEN - 1,
 		           &size);
 		bzero(mp->mnt_stat.f_mntonname + size, MNAMELEN - size);
-		(void) copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, 
-		           MNAMELEN - 1, &size);
+
+		size = strlcpy(mp->mnt_stat.f_mntfromname, fspec, MNAMELEN - 1);
 		bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
 		bcopy(&args, &mp->mnt_stat.mount_info.ntfs_args, sizeof(args));
 		if ( !err) {
@@ -304,6 +311,9 @@ error_2:	/* error with devvp held*/
 error_1:	/* no state to back out*/
 
 success:
+	if (fspec)
+		free(fspec, M_MOUNT);
+
 	return(err);
 }
 
@@ -348,7 +358,7 @@ ntfs_mountfs(devvp, mp, argsp, p)
 
 	bp = NULL;
 
-	error = bread(devvp, BBLOCK, BBSIZE, NOCRED, &bp);
+	error = bread(devvp, BBLOCK, BBSIZE, &bp);
 	if (error)
 		goto out;
 	ntmp = malloc(sizeof *ntmp, M_NTFSMNT, M_WAITOK | M_ZERO);
@@ -436,11 +446,10 @@ ntfs_mountfs(devvp, mp, argsp, p)
 			goto out1;
 
 		/* Count valid entries */
-		for(num=0;;num++) {
+		for(num = 0; ; num++) {
 			error = ntfs_readattr(ntmp, VTONT(vp),
-					NTFS_A_DATA, NULL,
-					num * sizeof(ad), sizeof(ad),
-					&ad, NULL);
+			    NTFS_A_DATA, NULL, num * sizeof(ad), sizeof(ad),
+			    &ad, NULL);
 			if (error)
 				goto out1;
 			if (ad.ad_name[0] == 0)
@@ -448,18 +457,16 @@ ntfs_mountfs(devvp, mp, argsp, p)
 		}
 
 		/* Alloc memory for attribute definitions */
-		ntmp->ntm_ad = (struct ntvattrdef *) malloc(
-			num * sizeof(struct ntvattrdef),
-			M_NTFSMNT, M_WAITOK);
+		ntmp->ntm_ad = malloc(num * sizeof(struct ntvattrdef),
+		    M_NTFSMNT, M_WAITOK);
 
 		ntmp->ntm_adnum = num;
 
 		/* Read them and translate */
-		for(i=0;i<num;i++){
+		for(i = 0; i < num; i++){
 			error = ntfs_readattr(ntmp, VTONT(vp),
-					NTFS_A_DATA, NULL,
-					i * sizeof(ad), sizeof(ad),
-					&ad, NULL);
+			    NTFS_A_DATA, NULL, i * sizeof(ad), sizeof(ad),
+			    &ad, NULL);
 			if (error)
 				goto out1;
 			j = 0;
@@ -501,9 +508,9 @@ out:
 	}
 
 	/* lock the device vnode before calling VOP_CLOSE() */
-	VN_LOCK(devvp, LK_EXCLUSIVE | LK_RETRY, p);
+	vn_lock(devvp, LK_EXCLUSIVE | LK_RETRY, p);
 	(void)VOP_CLOSE(devvp, ronly ? FREAD : FREAD|FWRITE, NOCRED, p);
-	VOP__UNLOCK(devvp, 0, p);
+	VOP_UNLOCK(devvp, 0, p);
 	
 	return (error);
 }
@@ -569,14 +576,13 @@ ntfs_unmount(
 
 	error = VOP_CLOSE(ntmp->ntm_devvp, ronly ? FREAD : FREAD|FWRITE,
 		NOCRED, p);
-	VOP__UNLOCK(ntmp->ntm_devvp, 0, p);
 
 	vput(ntmp->ntm_devvp);
 
 	/* free the toupper table, if this has been last mounted ntfs volume */
 	ntfs_toupper_unuse(p);
 
-	dprintf(("ntfs_umount: freeing memory...\n"));
+	dprintf(("ntfs_unmount: freeing memory...\n"));
 	mp->mnt_data = NULL;
 	mp->mnt_flag &= ~MNT_LOCAL;
 	free(ntmp->ntm_ad, M_NTFSMNT);
@@ -635,7 +641,7 @@ ntfs_calccfree(
 
 	bmsize = VTOF(vp)->f_size;
 
-	tmp = (u_int8_t *) malloc(bmsize, M_TEMP, M_WAITOK);
+	tmp = malloc(bmsize, M_TEMP, M_WAITOK);
 
 	error = ntfs_readattr(ntmp, VTONT(vp), NTFS_A_DATA, NULL,
 			       0, bmsize, tmp, NULL);
@@ -829,13 +835,13 @@ ntfs_vgetex(
 
 	if (FTOV(fp)) {
 		/* vget() returns error if the vnode has been recycled */
-		if (VGET(FTOV(fp), lkflags, p) == 0) {
+		if (vget(FTOV(fp), lkflags, p) == 0) {
 			*vpp = FTOV(fp);
 			return (0);
 		}
 	}
 
-	error = getnewvnode(VT_NTFS, ntmp->ntm_mountp, ntfs_vnodeop_p, &vp);
+	error = getnewvnode(VT_NTFS, ntmp->ntm_mountp, &ntfs_vops, &vp);
 	if(error) {
 		ntfs_frele(fp);
 		ntfs_ntput(ip, p);
@@ -852,7 +858,7 @@ ntfs_vgetex(
 		vp->v_flag |= VROOT;
 
 	if (lkflags & LK_TYPE_MASK) {
-		error = VN_LOCK(vp, lkflags, p);
+		error = vn_lock(vp, lkflags, p);
 		if (error) {
 			vput(vp);
 			return (error);
@@ -872,13 +878,6 @@ ntfs_vget(
 	return ntfs_vgetex(mp, ino, NTFS_A_DATA, NULL,
 			LK_EXCLUSIVE | LK_RETRY, 0, curproc, vpp); /* XXX */
 }
-
-extern const struct vnodeopv_desc ntfs_vnodeop_opv_desc;
-
-const struct vnodeopv_desc * const ntfs_vnodeopv_descs[] = {
-	&ntfs_vnodeop_opv_desc,
-	NULL,
-};
 
 const struct vfsops ntfs_vfsops = {
 	ntfs_mount,

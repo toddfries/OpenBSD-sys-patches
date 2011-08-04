@@ -1,9 +1,8 @@
-#	$OpenBSD: RAMDISK,v 1.170 2010/07/09 07:50:33 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.177 2011/06/29 20:52:09 matthew Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
 option		SCSITERSE
-option		APM_NOPRINT
 
 option		SMALL_KERNEL
 option		NO_PROPOLICE
@@ -27,7 +26,7 @@ option		INET		# IP + ICMP + TCP + UDP
 option		BOOT_CONFIG	# boot-time kernel config
 
 option		RAMDISK_HOOKS
-option		MINIROOTSIZE=3800
+option		MINIROOTSIZE=3872
 
 config		bsd	root on rd0a swap on rd0b and wd0b and sd0b
 
@@ -55,10 +54,10 @@ pcibios0 at bios0 flags 0x0000
 
 isa0	at mainbus0
 isa0	at pcib?
-isa0	at amdpcib?
-isa0	at ichpcib?
-isa0	at gscpcib?
-isa0	at glxpcib?
+#isa0	at amdpcib?
+#isa0	at ichpcib?
+#isa0	at gscpcib?
+#isa0	at glxpcib?
 #eisa0	at mainbus0
 pci*	at mainbus0
 
@@ -70,11 +69,11 @@ ppb*	at pci?			# PCI-PCI bridges
 pci*	at ppb?
 pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
-ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
-gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
-amdpcib* at pci?		# AMD 8111 LPC bridge
+#ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
+#gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
+#amdpcib* at pci?		# AMD 8111 LPC bridge
 geodesc* at pci?		# Geode SC1100/SCx200 IAOC
-glxpcib* at pci?		# AMD CS5536 PCI-ISA bridge
+#glxpcib* at pci?		# AMD CS5536 PCI-ISA bridge
 
 # ISA PCMCIA controllers
 pcic0	at isa? port 0x3e0 iomem 0xd0000 iosiz 0x4000
@@ -129,43 +128,30 @@ com*	at isapnp?
 #bha2	at isa? disable
 #bha*	at pci?
 #bha*	at eisa?		# XXX eisa still runs in isa-compat
-#scsibus* at bha?
 #aha0	at isa? port 0x330	# Adaptec 154[02] SCSI controllers
 #aha1	at isa? port 0x334	# Adaptec 154[02] SCSI controllers
 #aha*	at isapnp?
-#scsibus* at aha?
 #ahb*	at eisa?		# Adaptec 174[024] SCSI controllers
-#scsibus* at ahb?
 #ahc0	at isa?			# Adaptec 284x SCSI controllers
 #ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
 ahc*	at pci?			# Adaptec 2940 SCSI controllers
-scsibus* at ahc?
 #ahd*	at pci?			# Adaptec 79?? SCSI controllers
-#scsibus* at ahd?
 #twe*	at pcu?			# 3ware Escalade RAID controllers
-#scsibus* at twe?
 #isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
-#scsibus* at isp?
 #aic0	at isa? port 0x340 irq 11 # Adaptec 152[02] SCSI controllers
 #aic*	at isapnp?
 #aic*	at pcmcia?		# PCMCIA based aic SCSI controllers
-#scsibus* at aic?
 siop*	at pci?			# NCR 538XX SCSI controllers(new)
-scsibus* at siop?
 #adv*	at pci?			# AdvanSys 1200A/B and ULTRA SCSI
-#scsibus* at adv?
 #adw*	at pci?			# AdvanSys ULTRA WIDE SCSI
-#scsibus* at adw?
 #sea0	at isa? iomem 0xc8000 irq 5 # Seagate ST0[12] SCSI controllers
-#scsibus* at sea?
 #uha0	at isa? port 0x330	# UltraStor [13]4f SCSI controllers
 #uha1	at isa? port 0x334	# UltraStor [13]4f SCSI controllers
 #uha*	at eisa?		# UltraStor 24f SCSI controllers
-#scsibus* at uha?
 #wds0	at isa? port 0x350 irq 15 drq 6	# WD7000 and TMC-7000 controllers
 #wds1	at isa? port 0x358 irq 11 drq 5
-#scsibus* at wds?
 
+scsibus* at scsi?
 sd*	at scsibus?		# SCSI disk drives
 st*	at scsibus?		# SCSI tape drives
 cd*	at scsibus?		# SCSI CD-ROM drives
@@ -175,8 +161,6 @@ cd*	at scsibus?		# SCSI CD-ROM drives
 fdc0	at isa? port 0x3f0 irq 6 drq 2	# standard PC floppy controllers
 #fdc1	at isa? port 0x370
 fd*	at fdc?
-
-#mcd0	at isa? port 0x300 irq 10	# Mitsumi CD-ROM drives
 
 # IDE controllers
 pciide* at pci? flags 0x0000
@@ -193,7 +177,6 @@ wd*	at pciide? flags 0x0000
 # ATAPI<->SCSI
 atapiscsi* at wdc?
 atapiscsi* at pciide?
-scsibus* at atapiscsi?
 
 we0	at isa? port 0x280 iomem 0xd0000 irq 9	# WD/SMC 80x3 ethernet series
 we1	at isa? port 0x300 iomem 0xcc000 irq 10	#
@@ -212,14 +195,12 @@ ep*	at isa?				# 3C509 ethernet cards
 #ie1	at isa? port 0x300 irq 10	# EtherExpress
 le0	at isa? port 0x360 irq 15 drq 6	# IsoLan, NE2100, and DEPCA
 #ex0	at isa? port 0x320 irq 5	# Intel EtherExpress PRO/10
-#ep0	at eisa?
 #ep*	at eisa?			# 3C579 ethernet cards
 #fea*	at eisa?			# DEC DEFEA FDDI cards
 ep*	at isapnp?			# 3C509 PnP ethernet cards
 le*	at isapnp?
 de*	at pci?				# DC21X4X-based ethernet cards
 fxp*	at pci?				# EtherExpress 10/100B ethernet cards
-ep0	at pci?				# 3C59x ethernet cards
 ep*	at pci?				# 3C59x ethernet cards
 ne*	at pci?				# NE2000-compat ethernet cards
 ne*	at pcmcia?			# PCMCIA based NE2000 cards
@@ -250,7 +231,7 @@ em*	at pci?				# Intel Pro/1000 ethernet
 re*	at pci?				# Realtek 8169/8169S/8110S
 vge*	at pci?				# VIA VT612x
 nfe*	at pci?				# NVIDIA nForce Ethernet
-pcn*	at pci?				# AMD PCnet-PCI Ethernet
+#pcn*	at pci?				# AMD PCnet-PCI Ethernet
 
 # Wireless network cards
 wi*	at pci?				# WaveLAN IEEE 802.11DS

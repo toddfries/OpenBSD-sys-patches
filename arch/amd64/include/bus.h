@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.23 2010/04/08 00:55:25 oga Exp $	*/
+/*	$OpenBSD: bus.h,v 1.25 2011/03/23 16:54:34 pirofti Exp $	*/
 /*	$NetBSD: bus.h,v 1.6 1996/11/10 03:19:25 thorpej Exp $	*/
 
 /*-
@@ -63,8 +63,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _X86_BUS_H_
-#define _X86_BUS_H_
+#ifndef _MACHINE_BUS_H_
+#define _MACHINE_BUS_H_
 
 #include <sys/mutex.h>
 #include <sys/tree.h>
@@ -543,8 +543,7 @@ struct bus_dma_tag {
 #define	bus_dmamap_unload(t, p)					\
 	(*(t)->_dmamap_unload)((t), (p))
 #define	bus_dmamap_sync(t, p, o, l, ops)			\
-	(void)((t)->_dmamap_sync ?				\
-	    (*(t)->_dmamap_sync)((t), (p), (o), (l), (ops)) : (void)0)
+	(*(t)->_dmamap_sync)((t), (p), (o), (l), (ops))
 
 #define	bus_dmamem_alloc(t, s, a, b, sg, n, r, f)		\
 	(*(t)->_dmamem_alloc)((t), (s), (a), (b), (sg), (n), (r), (f))
@@ -683,4 +682,4 @@ int	sg_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t, bus_size_t,
  
 paddr_t bus_space_mmap(bus_space_tag_t, bus_addr_t, off_t, int, int);
 
-#endif /* _X86_BUS_H_ */
+#endif /* _MACHINE_BUS_H_ */

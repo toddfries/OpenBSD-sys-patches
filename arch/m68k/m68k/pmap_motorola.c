@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_motorola.c,v 1.58 2010/06/29 20:30:32 guenther Exp $ */
+/*	$OpenBSD: pmap_motorola.c,v 1.62 2011/05/27 20:10:18 miod Exp $ */
 
 /*
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -276,9 +276,6 @@ vaddr_t		virtual_end;	/* VA of last avail page (end of kernel AS) */
 TAILQ_HEAD(pv_page_list, pv_page) pv_page_freelist;
 int		pv_nfree;
 
-#if defined(M68K_MMU_HP)
-extern int	pmap_aliasmask;	/* separation at which VA aliasing is ok */
-#endif
 #if defined(M68040) || defined(M68060)
 int		protostfree;	/* prototype (default) free ST map */
 #endif
@@ -313,6 +310,16 @@ void pmap_check_wiring(char *, vaddr_t);
 
 static struct pv_entry *pa_to_pvh(paddr_t);
 static struct pv_entry *pg_to_pvh(struct vm_page *);
+int pmap_largekva = 0;
+
+/*
+ * Allow the kernel to grow up to Sysmap, until pmap_init has initialized.
+ */
+vaddr_t
+pmap_growkernel(vaddr_t addr)
+{
+	return pmap_largekva ? VM_MAX_KERNEL_ADDRESS : (vaddr_t)Sysmap;
+}
 
 static __inline struct pv_entry *
 pa_to_pvh(paddr_t pa)
@@ -399,6 +406,8 @@ pmap_init()
 
 	PMAP_DPRINTF(PDB_FOLLOW, ("pmap_init()\n"));
 
+	TAILQ_INIT(&pv_page_freelist);
+
 #ifndef __HAVE_PMAP_DIRECT
 	/*
 	 * Before we do anything else, initialize the PTE pointers
@@ -413,23 +422,7 @@ pmap_init()
 	 * unavailable regions which we have mapped in pmap_bootstrap().
 	 */
 	PMAP_INIT_MD();
-	addr = (vaddr_t) Sysmap;
-	if (uvm_map(kernel_map, &addr, MACHINE_MAX_PTSIZE,
-		    NULL, UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE,
-				UVM_INH_NONE, UVM_ADV_RANDOM,
-				UVM_FLAG_FIXED))) {
-		/*
-		 * If this fails, it is probably because the static
-		 * portion of the kernel page table isn't big enough
-		 * and we overran the page table map.
-		 */
-		panic("pmap_init: bogons in the VM system!");
-	}
 
-	PMAP_DPRINTF(PDB_INIT,
-	    ("pmap_init: Sysseg %p, Sysmap %p, Sysptmap %p\n",
-	    Sysseg, Sysmap, Sysptmap));
 	PMAP_DPRINTF(PDB_INIT,
 	    ("  pstart %lx, pend %lx, vstart %lx, vend %lx\n",
 	    avail_start, avail_end, virtual_avail, virtual_end));
@@ -467,18 +460,6 @@ pmap_init()
 	 */
 	npages = min(atop(MACHINE_MAX_KPTSIZE), maxproc+16);
 	s = ptoa(npages) + round_page(npages * sizeof(struct kpt_page));
-
-	/*
-	 * Verify that space will be allocated in region for which
-	 * we already have kernel PT pages.
-	 */
-	addr = 0;
-	rv = uvm_map(kernel_map, &addr, s, NULL, UVM_UNKNOWN_OFFSET, 0,
-		     UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE, UVM_INH_NONE,
-				 UVM_ADV_RANDOM, UVM_FLAG_NOMERGE));
-	if (rv || (addr + s) >= (vaddr_t)Sysmap)
-		panic("pmap_init: kernel PT too small");
-	uvm_unmap(kernel_map, addr, addr + s);
 
 	/*
 	 * Now allocate the space and link the pages together to
@@ -521,6 +502,25 @@ pmap_init()
 	s = maxproc * MACHINE_STSIZE;
 	st_map = uvm_km_suballoc(kernel_map, &addr, &addr2, s, 0, FALSE,
 	    &st_map_store);
+
+	pmap_largekva = 1;
+
+	addr = (vaddr_t) Sysmap;
+	if (uvm_map(kernel_map, &addr, MACHINE_MAX_PTSIZE,
+		    NULL, UVM_UNKNOWN_OFFSET, 0,
+		    UVM_MAPFLAG(UVM_PROT_NONE, UVM_PROT_NONE,
+				UVM_INH_NONE, UVM_ADV_RANDOM,
+				UVM_FLAG_FIXED))) {
+		/*
+		 * If this fails, it is probably because the static
+		 * portion of the kernel page table isn't big enough
+		 * and we overran the page table map.
+		 */
+		panic("pmap_init: bogons in the VM system!");
+	}
+	PMAP_DPRINTF(PDB_INIT,
+	    ("pmap_init: Sysseg %p, Sysmap %p, Sysptmap %p\n",
+	    Sysseg, Sysmap, Sysptmap));
 
 	addr = MACHINE_PTBASE;
 	if ((MACHINE_PTMAXSIZE / MACHINE_MAX_PTSIZE) < maxproc) {
@@ -572,7 +572,7 @@ pmap_alloc_pv()
 		pvp->pvp_pgi.pgi_freelist = pv = &pvp->pvp_pv[1];
 		for (i = NPVPPG - 2; i; i--, pv++)
 			pv->pv_next = pv + 1;
-		pv->pv_next = 0;
+		pv->pv_next = NULL;
 		pv_nfree += pvp->pvp_pgi.pgi_nfree = NPVPPG - 1;
 		TAILQ_INSERT_HEAD(&pv_page_freelist, pvp, pvp_pgi.pgi_list);
 		pv = &pvp->pvp_pv[0];
@@ -584,7 +584,7 @@ pmap_alloc_pv()
 		}
 		pv = pvp->pvp_pgi.pgi_freelist;
 #ifdef DIAGNOSTIC
-		if (pv == 0)
+		if (pv == NULL)
 			panic("pmap_alloc_pv: pgi_nfree inconsistent");
 #endif
 		pvp->pvp_pgi.pgi_freelist = pv->pv_next;
@@ -2004,22 +2004,21 @@ pmap_is_modified(pg)
  *	Find the first virtual address >= *vap that does not
  *	cause a virtually-tagged cache alias problem.
  */
-void
-pmap_prefer(foff, vap)
-	vaddr_t foff, *vap;
+vaddr_t
+pmap_prefer(vaddr_t foff, vaddr_t va)
 {
-	vaddr_t va;
 	vsize_t d;
 
 #ifdef M68K_MMU_MOTOROLA
 	if (pmap_aliasmask)
 #endif
 	{
-		va = *vap;
 		d = foff - va;
 		d &= pmap_aliasmask;
-		*vap = va + d;
+		va += d;
 	}
+
+	return va;
 }
 #endif /* M68K_MMU_HP */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atw_cardbus.c,v 1.18 2010/03/27 21:40:13 jsg Exp $	*/
+/*	$OpenBSD: if_atw_cardbus.c,v 1.20 2011/04/02 17:47:04 jasper Exp $	*/
 /*	$NetBSD: if_atw_cardbus.c,v 1.9 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -129,8 +129,7 @@ int
 atw_cardbus_match(struct device *parent, void *match, void *aux)
 {
 	return (cardbus_matchbyid((struct cardbus_attach_args *)aux,
-	    atw_cardbus_devices,
-	    sizeof(atw_cardbus_devices)/sizeof(atw_cardbus_devices[0])));
+	    atw_cardbus_devices, nitems(atw_cardbus_devices)));
 }
 
 void
@@ -312,7 +311,7 @@ atw_cardbus_disable(struct atw_softc *sc)
 void
 atw_cardbus_power(struct atw_softc *sc, int why)
 {
-	if (why == PWR_RESUME)
+	if (why == DVACT_RESUME)
 		atw_enable(sc);
 }
 

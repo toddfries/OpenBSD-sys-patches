@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.c,v 1.64 2010/06/30 21:54:35 guenther Exp $	*/
+/*	$OpenBSD: linux_misc.c,v 1.72 2011/07/09 00:10:52 deraadt Exp $	*/
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*-
@@ -51,10 +51,12 @@
 #include <sys/mount.h>
 #include <sys/ptrace.h>
 #include <sys/resource.h>
+#include <sys/swap.h>
 #include <sys/resourcevar.h>
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 #include <sys/socket.h>
+#include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/times.h>
 #include <sys/vnode.h>
@@ -566,6 +568,20 @@ linux_sys_oldolduname(p, v, retval)
 	return copyout(&luts, SCARG(uap, up), sizeof(luts));
 }
 
+int
+linux_sys_sethostname(struct proc *p, void *v, register_t *retval)
+{
+	struct linux_sys_sethostname_args *uap = v;
+	int name;
+	int error;
+
+	if ((error = suser(p, 0)) != 0)
+		return (error);
+	name = KERN_HOSTNAME;
+	return (kern_sysctl(&name, 1, 0, 0, SCARG(uap, hostname),
+			    SCARG(uap, len), p));
+}
+
 /*
  * Linux wants to pass everything to a syscall in registers. However,
  * mmap() has 6 of them. Oops: out of register error. They just pass
@@ -746,52 +762,6 @@ linux_sys_times(p, v, retval)
 	microuptime(&t);
 
 	retval[0] = ((linux_clock_t)(CONVTCK(t)));
-	return 0;
-}
-
-/*
- * OpenBSD passes fd[0] in retval[0], and fd[1] in retval[1].
- * Linux directly passes the pointer.
- */
-int
-linux_sys_pipe(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_pipe_args /* {
-		syscallarg(int *) pfds;
-	} */ *uap = v;
-	int error;
-	int pfds[2];
-#ifdef __i386__
-	int reg_edx = retval[1];
-#endif /* __i386__ */
-
-	if ((error = sys_opipe(p, 0, retval))) {
-#ifdef __i386__
-		retval[1] = reg_edx;
-#endif /* __i386__ */
-		return error;
-	}
-
-	/* Assumes register_t is an int */
-
-	pfds[0] = retval[0];
-	pfds[1] = retval[1];
-	if ((error = copyout(pfds, SCARG(uap, pfds), 2 * sizeof (int)))) {
-#ifdef __i386__
-		retval[1] = reg_edx;
-#endif /* __i386__ */
-		fdrelease(p, retval[0]);
-		fdrelease(p, retval[1]);
-		return error;
-	}
-
-	retval[0] = 0;
-#ifdef __i386__
-	retval[1] = reg_edx;
-#endif /* __i386__ */
 	return 0;
 }
 
@@ -1223,16 +1193,16 @@ linux_sys_getpgid(p, v, retval)
 	struct linux_sys_getpgid_args /* {
 		syscallarg(int) pid;
 	} */ *uap = v;
-	struct proc *targp;
+	struct process *targpr;
 
-	if (SCARG(uap, pid) != 0 && SCARG(uap, pid) != p->p_pid) {
-		if ((targp = pfind(SCARG(uap, pid))) == 0)
+	if (SCARG(uap, pid) != 0 && SCARG(uap, pid) != p->p_p->ps_pid) {
+		if ((targpr = prfind(SCARG(uap, pid))) == 0)
 			return ESRCH;
 	}
 	else
-		targp = p;
+		targpr = p->p_p;
 
-	retval[0] = targp->p_pgid;
+	retval[0] = targpr->ps_pgid;
 	return 0;
 }
 
@@ -1409,7 +1379,7 @@ linux_sys_getpid(p, v, retval)
 	register_t *retval;
 {
 
-	*retval = p->p_pid;
+	*retval = p->p_p->ps_pid;
 	return (0);
 }
 
@@ -1451,7 +1421,7 @@ linux_sys_sysinfo(p, v, retval)
 	} */ *uap = v;
 	struct linux_sysinfo si;
 	struct loadavg *la;
-	extern int bufpages;
+	extern long bufpages;
 	struct timeval tv;
 
 	getmicrouptime(&tv);
@@ -1473,4 +1443,41 @@ linux_sys_sysinfo(p, v, retval)
 	si.mem_unit = 1;
 
 	return (copyout(&si, SCARG(uap, sysinfo), sizeof(si)));
+}
+
+int
+linux_sys_mprotect(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_mprotect_args *uap = v;
+
+	if (SCARG(uap, prot) & (PROT_WRITE | PROT_EXEC))
+		SCARG(uap, prot) |= PROT_READ;
+	return (sys_mprotect(p, uap, retval));
+}
+
+int
+linux_sys_setdomainname(struct proc *p, void *v, register_t *retval)
+{
+	struct linux_sys_setdomainname_args *uap = v;
+	int error, mib[1];
+	
+	if ((error = suser(p, 0)))
+		return (error);
+	mib[0] = KERN_DOMAINNAME;
+	return (kern_sysctl(mib, 1, NULL, NULL, SCARG(uap, name),
+	    SCARG(uap, len), p));
+}
+
+int
+linux_sys_swapon(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_swapctl_args ua;
+	struct linux_sys_swapon_args /* {
+		syscallarg(const char *) name;
+	} */ *uap = v;
+
+	SCARG(&ua, cmd) = SWAP_ON;
+	SCARG(&ua, arg) = (void *)SCARG(uap, name);
+	SCARG(&ua, misc) = 0;	/* priority */
+	return (sys_swapctl(p, &ua, retval));
 }

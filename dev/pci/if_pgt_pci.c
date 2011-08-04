@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pgt_pci.c,v 1.11 2009/06/02 04:03:39 jsg Exp $  */
+/*	$OpenBSD: if_pgt_pci.c,v 1.13 2010/08/27 20:06:39 deraadt Exp $  */
 
 /*
  * Copyright (c) 2006 Marcus Glocker <mglocker@openbsd.org>
@@ -31,6 +31,7 @@
 #include <sys/malloc.h>
 #include <sys/timeout.h>
 #include <sys/device.h>
+#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/intr.h>
@@ -69,7 +70,7 @@ struct pgt_pci_softc {
 
 struct cfattach pgt_pci_ca = {
 	sizeof(struct pgt_pci_softc), pgt_pci_match, pgt_pci_attach,
-	pgt_pci_detach
+	pgt_pci_detach, pgt_activate
 };
 
 const struct pci_matchid pgt_pci_devices[] = {
@@ -147,8 +148,13 @@ pgt_pci_detach(struct device *self, int flags)
 	struct pgt_pci_softc *psc = (struct pgt_pci_softc *)self;
 	struct pgt_softc *sc = &psc->sc_pgt;
 
-	pgt_detach(sc);
-	pci_intr_disestablish(psc->sc_pc, psc->sc_ih);
+	if (psc->sc_ih != NULL) {
+		pgt_detach(sc);
+		pci_intr_disestablish(psc->sc_pc, psc->sc_ih);
+	}
+	if (psc->sc_mapsize > 0)
+		bus_space_unmap(sc->sc_iotag, sc->sc_iohandle,
+		    psc->sc_mapsize);
 
 	return (0);
 }

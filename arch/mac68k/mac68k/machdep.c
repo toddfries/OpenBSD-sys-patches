@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.155 2010/07/02 19:57:14 tedu Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.159 2011/06/26 22:39:59 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.207 1998/07/08 04:39:34 thorpej Exp $	*/
 
 /*
@@ -109,6 +109,7 @@
 #include <machine/bus.h>
 #include <machine/pmap.h>
 
+#include <net/if.h>
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_swap.h>
 
@@ -135,9 +136,10 @@ u_long  IOBase;
 vaddr_t SCSIBase;
 
 /* These are used to map kernel space: */
+#define	NBMEMRANGES	8
 extern int numranges;
-extern u_long low[8];
-extern u_long high[8];
+extern u_long low[NBMEMRANGES];
+extern u_long high[NBMEMRANGES];
 
 /* These are used to map NuBus space: */
 #define	NBMAXRANGES	16
@@ -167,20 +169,6 @@ caddr_t	mac68k_bell_cookie;
 
 struct vm_map *exec_map = NULL;  
 struct vm_map *phys_map = NULL;
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
 
 int	physmem;		/* size of physical memory, in pages */
 
@@ -240,18 +228,14 @@ mac68k_init()
 
 	/*
 	 * Tell the VM system about available physical memory.
-	 * Notice that we don't need to worry about avail_end here
-	 * since it's equal to high[numranges-1].
 	 */
 	for (i = 0; i < numranges; i++) {
 		if (low[i] <= avail_start && avail_start < high[i])
 			uvm_page_physload(atop(avail_start), atop(high[i]),
-			    atop(avail_start), atop(high[i]),
-			    VM_FREELIST_DEFAULT);
+			    atop(avail_start), atop(high[i]), 0);
 		else
 			uvm_page_physload(atop(low[i]), atop(high[i]),
-			    atop(low[i]), atop(high[i]),
-			    VM_FREELIST_DEFAULT);
+			    atop(low[i]), atop(high[i]), 0);
 	}
 
 	/*
@@ -519,6 +503,7 @@ boot(howto)
 #endif
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();			/* Disable interrupts. */
@@ -1754,7 +1739,7 @@ get_mapping(void)
 	int i, last, same;
 
 	numranges = 0;
-	for (i = 0; i < 8; i++) {
+	for (i = 0; i < NBMEMRANGES; i++) {
 		low[i] = 0;
 		high[i] = 0;
 	}
@@ -1787,7 +1772,7 @@ get_mapping(void)
 		if (numranges > 0 && phys == high[last]) {
 			/* Common case: extend existing segment on high end */
 			high[last] += PAGE_SIZE;
-		} else {
+		} else if (numranges < NBMEMRANGES - 1) {
 			/* This is a new physical segment. */
 			for (last = 0; last < numranges; last++)
 				if (phys < low[last])
@@ -1804,6 +1789,9 @@ get_mapping(void)
 			numranges++;
 			low[last] = phys;
 			high[last] = phys + PAGE_SIZE;
+		} else {
+			/* Not enough ranges. Display a warning message? */
+			continue;
 		}
 
 		/* Coalesce adjoining segments as appropriate */

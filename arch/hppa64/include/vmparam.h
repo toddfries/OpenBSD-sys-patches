@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.4 2010/06/29 21:49:20 jsing Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.6 2011/05/30 22:25:21 oga Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -49,6 +49,9 @@
 #ifndef MAXDSIZ
 #define	MAXDSIZ		(1*1024*1024*1024)	/* max data size */
 #endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ			/* heap gap size */
+#endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		(512*1024)		/* initial stack size limit */
 #endif
@@ -83,10 +86,6 @@
 #define	VM_PHYSSEG_STRAT	VM_PSTRAT_RANDOM
 
 #define	VM_PHYSSEG_NOADD	/* XXX until uvm code is fixed */
-
-#define	VM_NFREELIST		2
-#define	VM_FREELIST_DEFAULT	0
-#define	VM_FREELIST_ARCH	1
 
 #if defined(_KERNEL) && !defined(_LOCORE)
 

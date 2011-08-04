@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_mmap.c,v 1.80 2010/05/21 23:22:33 oga Exp $	*/
+/*	$OpenBSD: uvm_mmap.c,v 1.87 2011/07/09 05:31:26 matthew Exp $	*/
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -62,10 +62,9 @@
 #include <sys/vnode.h>
 #include <sys/conf.h>
 #include <sys/stat.h>
+#include <sys/specdev.h>
 
 #include <machine/exec.h>	/* for __LDPGSZ */
-
-#include <miscfs/specfs/specdev.h>
 
 #include <sys/syscallargs.h>
 
@@ -90,44 +89,6 @@
 			return (EINVAL);	/* wraparound */	\
 	}								\
 } while (0)
-
-/*
- * unimplemented VM system calls:
- */
-
-/*
- * sys_sbrk: sbrk system call.
- */
-
-/* ARGSUSED */
-int
-sys_sbrk(struct proc *p, void *v, register_t *retval)
-{
-#if 0
-	struct sys_sbrk_args /* {
-		syscallarg(int) incr;
-	} */ *uap = v;
-#endif
-
-	return (ENOSYS);
-}
-
-/*
- * sys_sstk: sstk system call.
- */
-
-/* ARGSUSED */
-int
-sys_sstk(struct proc *p, void *v, register_t *retval)
-{
-#if 0
-	struct sys_sstk_args /* {
-		syscallarg(int) incr;
-	} */ *uap = v;
-#endif
-
-	return (ENOSYS);
-}
 
 /*
  * sys_mquery: provide mapping hints to applications that do fixed mappings
@@ -189,12 +150,12 @@ sys_mquery(struct proc *p, void *v, register_t *retval)
 
 	/* prevent a user requested address from falling in heap space */
 	if ((vaddr + size > (vaddr_t)p->p_vmspace->vm_daddr) &&
-	    (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ)) {
+	    (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ)) {
 		if (flags & UVM_FLAG_FIXED) {
 			error = EINVAL;
 			goto done;
 		}
-		vaddr = round_page((vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ);
+		vaddr = round_page((vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ);
 	}
 	vm_map_lock(&p->p_vmspace->vm_map);
 
@@ -208,9 +169,9 @@ again:
 	} else {
 		/* prevent a returned address from falling in heap space */
 		if ((vaddr + size > (vaddr_t)p->p_vmspace->vm_daddr)
-		    && (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + MAXDSIZ)) {
+		    && (vaddr < (vaddr_t)p->p_vmspace->vm_daddr + BRKSIZ)) {
 			vaddr = round_page((vaddr_t)p->p_vmspace->vm_daddr +
-			    MAXDSIZ);
+			    BRKSIZ);
 			goto again;
 		}
 		error = 0;
@@ -604,6 +565,13 @@ sys_mmap(struct proc *p, void *v, register_t *retval)
 
 	error = uvm_mmap(&p->p_vmspace->vm_map, &addr, size, prot, maxprot,
 	    flags, handle, pos, p->p_rlimit[RLIMIT_MEMLOCK].rlim_cur, p);
+	if (error == ENOMEM && !(flags & (MAP_FIXED | MAP_TRYFIXED))) {
+		/* once more, with feeling */
+		addr = uvm_map_hint1(p, prot, 0);
+		error = uvm_mmap(&p->p_vmspace->vm_map, &addr, size, prot,
+		    maxprot, flags, handle, pos,
+		    p->p_rlimit[RLIMIT_MEMLOCK].rlim_cur, p);
+	}
 
 	if (error == 0)
 		/* remember to add offset */
@@ -630,7 +598,7 @@ sys_msync(struct proc *p, void *v, register_t *retval)
 	vaddr_t addr;
 	vsize_t size, pageoff;
 	vm_map_t map;
-	int rv, flags, uvmflags;
+	int flags, uvmflags;
 
 	/*
 	 * extract syscall args from the uap
@@ -660,30 +628,6 @@ sys_msync(struct proc *p, void *v, register_t *retval)
 	 */
 
 	map = &p->p_vmspace->vm_map;
-
-	/*
-	 * XXXCDC: do we really need this semantic?
-	 *
-	 * XXX Gak!  If size is zero we are supposed to sync "all modified
-	 * pages with the region containing addr".  Unfortunately, we
-	 * don't really keep track of individual mmaps so we approximate
-	 * by flushing the range of the map entry containing addr.
-	 * This can be incorrect if the region splits or is coalesced
-	 * with a neighbor.
-	 */
-	if (size == 0) {
-		vm_map_entry_t entry;
-		
-		vm_map_lock_read(map);
-		rv = uvm_map_lookup_entry(map, addr, &entry);
-		if (rv == TRUE) {
-			addr = entry->start;
-			size = entry->end - entry->start;
-		}
-		vm_map_unlock_read(map);
-		if (rv == FALSE)
-			return (EINVAL);
-	}
 
 	/*
 	 * translate MS_ flags into PGO_ flags

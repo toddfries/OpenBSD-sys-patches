@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.h,v 1.60 2010/06/27 21:47:07 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.h,v 1.62 2010/09/10 15:11:23 jakemsr Exp $	*/
 /*	$NetBSD: azalia.h,v 1.6 2006/01/16 14:15:26 kent Exp $	*/
 
 /*-
@@ -698,6 +698,7 @@ typedef struct codec_t {
 	nid_t fhp_dac;
 	int nout_jacks;		/* number of default output jacks */
 
+	int spkr_muted;
 	int spkr_muters;
 	int spkr_mute_method;
 #define	AZ_SPKR_MUTE_NONE	0
@@ -727,4 +728,4 @@ int	azalia_comresp(const codec_t *, nid_t, uint32_t, uint32_t, uint32_t *);
 int	azalia_mixer_get(const codec_t *, nid_t, int, mixer_ctrl_t *);
 int	azalia_mixer_set(codec_t *, nid_t, int, const mixer_ctrl_t *);
 
-int	azalia_codec_enable_unsol(codec_t *, int);
+int	azalia_codec_enable_unsol(codec_t *);

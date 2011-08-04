@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_fxp_cardbus.c,v 1.27 2010/03/27 21:40:13 jsg Exp $ */
+/*	$OpenBSD: if_fxp_cardbus.c,v 1.29 2011/04/02 17:47:04 jasper Exp $ */
 /*	$NetBSD: if_fxp_cardbus.c,v 1.12 2000/05/08 18:23:36 thorpej Exp $	*/
 
 /*
@@ -46,6 +46,7 @@
 #include <sys/kernel.h>
 #include <sys/timeout.h>
 #include <sys/device.h>
+#include <sys/workq.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -114,8 +115,7 @@ int
 fxp_cardbus_match(struct device *parent, void *match, void *aux)
 {
 	return (cardbus_matchbyid((struct cardbus_attach_args *)aux,
-	    fxp_cardbus_devices,
-	    sizeof(fxp_cardbus_devices)/sizeof(fxp_cardbus_devices[0])));
+	    fxp_cardbus_devices, nitems(fxp_cardbus_devices)));
 }
 
 void

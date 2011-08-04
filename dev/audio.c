@@ -1,4 +1,4 @@
-/*	$OpenBSD: audio.c,v 1.108 2010/07/15 03:43:11 jakemsr Exp $	*/
+/*	$OpenBSD: audio.c,v 1.114 2011/07/03 15:47:16 matthew Exp $	*/
 /*	$NetBSD: audio.c,v 1.119 1999/11/09 16:50:47 augustss Exp $	*/
 
 /*
@@ -61,9 +61,6 @@
  *   and silence fill.
  */
 
-#include "audio.h"
-#if NAUDIO > 0
-
 #include <sys/param.h>
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
@@ -79,6 +76,7 @@
 #include <sys/conf.h>
 #include <sys/audioio.h>
 #include <sys/device.h>
+#include <sys/workq.h>
 
 #include <dev/audio_if.h>
 #include <dev/audiovar.h>
@@ -142,6 +140,11 @@ void	audio_selwakeup(struct audio_softc *sc, int play);
 int	audio_drain(struct audio_softc *);
 void	audio_clear(struct audio_softc *);
 static __inline void audio_pint_silence(struct audio_softc *, struct audio_ringbuffer *, u_char *, int);
+
+int	audio_quiesce(struct audio_softc *);
+void	audio_resume(struct audio_softc *);
+void	audio_resume_to(void *);
+void	audio_resume_task(void *, void *);
 
 int	audio_alloc_ring(struct audio_softc *, struct audio_ringbuffer *, int, int);
 void	audio_free_ring(struct audio_softc *, struct audio_ringbuffer *);
@@ -241,7 +244,7 @@ struct filterops audioread_filtops =
 
 #if NWSKBD > 0
 /* Mixer manipulation using keyboard */
-int wskbd_set_mixervolume(long);
+int wskbd_set_mixervolume(long, int);
 #endif
 
 int
@@ -359,6 +362,8 @@ audioattach(struct device *parent, struct device *self, void *aux)
 	}
 	DPRINTF(("audio_attach: inputs ports=0x%x, output ports=0x%x\n",
 		 sc->sc_inports.allports, sc->sc_outports.allports));
+
+	timeout_set(&sc->sc_resume_to, audio_resume_to, sc);
 }
 
 int
@@ -367,9 +372,14 @@ audioactivate(struct device *self, int act)
 	struct audio_softc *sc = (struct audio_softc *)self;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
+	case DVACT_QUIESCE:
+		audio_quiesce(sc);
 		break;
-
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_RESUME:
+		audio_resume(sc);
+		break;
 	case DVACT_DEACTIVATE:
 		sc->sc_dying = 1;
 		break;
@@ -388,6 +398,8 @@ audiodetach(struct device *self, int flags)
 
 	sc->sc_dying = 1;
 
+	timeout_del(&sc->sc_resume_to);
+	wakeup(&sc->sc_quiesce);
 	wakeup(&sc->sc_wchan);
 	wakeup(&sc->sc_rchan);
 	s = splaudio();
@@ -519,7 +531,6 @@ audio_attach_mi(struct audio_hw_if *ahwp, void *hdlp, struct device *dev)
 	return config_found(dev, &arg, audioprint);
 }
 
-#if NAUDIO > 0
 int
 audioprint(void *aux, const char *pnp)
 {
@@ -544,8 +555,6 @@ audioprint(void *aux, const char *pnp)
 	}
 	return (UNCONF);
 }
-
-#endif /* NAUDIO > 0 */
 
 #ifdef AUDIO_DEBUG
 void	audio_printsc(struct audio_softc *);
@@ -1155,6 +1164,87 @@ audio_drain(struct audio_softc *sc)
 	return error;
 }
 
+int
+audio_quiesce(struct audio_softc *sc)
+{
+	sc->sc_quiesce = AUDIO_QUIESCE_START;
+
+	while (sc->sc_pbus && !sc->sc_pqui)
+		audio_sleep(&sc->sc_wchan, "audpqui");
+	while (sc->sc_rbus && !sc->sc_rqui)
+		audio_sleep(&sc->sc_rchan, "audrqui");
+
+	sc->sc_quiesce = AUDIO_QUIESCE_SILENT;
+
+	au_get_mute(sc, &sc->sc_outports, &sc->sc_mute);
+	au_set_mute(sc, &sc->sc_outports, 1);
+
+	if (sc->sc_pbus)
+		sc->hw_if->halt_output(sc->hw_hdl);
+	if (sc->sc_rbus)
+		sc->hw_if->halt_input(sc->hw_hdl);
+
+	return 0;
+}
+
+void
+audio_resume(struct audio_softc *sc)
+{
+	timeout_add_msec(&sc->sc_resume_to, 1500);
+}
+
+void
+audio_resume_to(void *v)
+{
+	struct audio_softc *sc = v;
+	workq_queue_task(NULL, &sc->sc_resume_task, 0,
+	    audio_resume_task, sc, 0);
+}
+
+void
+audio_resume_task(void *arg1, void *arg2)
+{
+	struct audio_softc *sc = arg1;
+	int setmode = 0;
+
+	sc->sc_pqui = sc->sc_rqui = 0;
+
+	au_set_mute(sc, &sc->sc_outports, sc->sc_mute);
+
+	if (sc->sc_pbus)
+		setmode |= AUMODE_PLAY;
+	if (sc->sc_rbus)
+		setmode |= AUMODE_RECORD;
+
+	if (setmode) {
+		sc->hw_if->set_params(sc->hw_hdl, setmode,
+		    sc->sc_mode & (AUMODE_PLAY | AUMODE_RECORD),
+		    &sc->sc_pparams, &sc->sc_rparams);
+	}
+
+	if (sc->sc_pbus) {
+		if (sc->hw_if->trigger_output)
+			sc->hw_if->trigger_output(sc->hw_hdl, sc->sc_pr.start,
+			    sc->sc_pr.end, sc->sc_pr.blksize,
+			    audio_pint, (void *)sc, &sc->sc_pparams);
+		else
+			sc->hw_if->start_output(sc->hw_hdl, sc->sc_pr.outp,
+			    sc->sc_pr.blksize, audio_pint, (void *)sc);
+	}
+	if (sc->sc_rbus) {
+		if (sc->hw_if->trigger_input)
+			sc->hw_if->trigger_input(sc->hw_hdl, sc->sc_rr.start,
+			    sc->sc_rr.end, sc->sc_rr.blksize,
+			    audio_rint, (void *)sc, &sc->sc_rparams);
+		else
+			sc->hw_if->start_input(sc->hw_hdl, sc->sc_rr.inp,
+			    sc->sc_rr.blksize, audio_rint, (void *)sc);
+	}
+
+	sc->sc_quiesce = 0;
+	wakeup(&sc->sc_quiesce);
+}
+
 /*
  * Close an audio chip.
  */
@@ -1234,6 +1324,14 @@ audio_read(dev_t dev, struct uio *uio, int ioflag)
 
 	DPRINTFN(1,("audio_read: cc=%d mode=%d\n",
 	    uio->uio_resid, sc->sc_mode));
+
+	/*
+	 * Block if fully quiesced.  Don't block when quiesce
+	 * has started, as the buffer position may still need
+	 * to advance.
+	 */
+	while (sc->sc_quiesce == AUDIO_QUIESCE_SILENT)
+		tsleep(&sc->sc_quiesce, 0, "aud_qrd", 0);
 
 	error = 0;
 	/*
@@ -1475,6 +1573,14 @@ audio_write(dev_t dev, struct uio *uio, int ioflag)
 	if (cb->mmapped)
 		return EINVAL;
 
+	/*
+	 * Block if fully quiesced.  Don't block when quiesce
+	 * has started, as the buffer position may still need
+	 * to advance.
+	 */
+	while (sc->sc_quiesce == AUDIO_QUIESCE_SILENT)
+		tsleep(&sc->sc_quiesce, 0, "aud_qwr", 0);
+
 	if (uio->uio_resid == 0) {
 		sc->sc_eof++;
 		return 0;
@@ -1572,6 +1678,15 @@ audio_ioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	struct audio_info ai;
 	int error = 0, s, offs, fd;
 	int rbus, pbus;
+
+	/*
+	 * Block if fully quiesced.  Don't block when quiesce
+	 * has started, as the buffer position may still need
+	 * to advance.  An ioctl may be used to determine how
+	 * much to read or write.
+	 */
+	while (sc->sc_quiesce == AUDIO_QUIESCE_SILENT)
+		tsleep(&sc->sc_quiesce, 0, "aud_qio", 0);
 
 	DPRINTF(("audio_ioctl(%d,'%c',%d)\n",
 	    IOCPARM_LEN(cmd), IOCGROUP(cmd), cmd&0xff));
@@ -2000,6 +2115,9 @@ audio_pint(void *v)
 	if (!sc->sc_open)
 		return;		/* ignore interrupt if not open */
 
+	if (sc->sc_pqui)
+		return;
+
 	blksize = cb->blksize;
 
 	add_audio_randomness((long)cb);
@@ -2086,6 +2204,17 @@ audio_pint(void *v)
 	/* Possible to return one or more "phantom blocks" now. */
 	if (!sc->sc_full_duplex && sc->sc_rchan)
 		audio_selwakeup(sc, 0);
+
+	/*
+	 * If quiesce requested, halt output when the ring buffer position
+	 * is at the beginning, because when the hardware is resumed, it's
+	 * buffer position is reset to the beginning.  This will put
+	 * hardware and software positions in sync across a suspend cycle.
+	 */
+	if (sc->sc_quiesce == AUDIO_QUIESCE_START && cb->outp == cb->start) {
+		sc->sc_pqui = 1;
+		audio_wakeup(&sc->sc_wchan);
+	}
 }
 
 /*
@@ -2104,6 +2233,9 @@ audio_rint(void *v)
 
 	if (!sc->sc_open)
 		return;		/* ignore interrupt if not open */
+
+	if (sc->sc_rqui)
+		return;
 
 	add_audio_randomness((long)cb);
 
@@ -2179,6 +2311,17 @@ audio_rint(void *v)
 	}
 
 	audio_selwakeup(sc, 0);
+
+	/*
+	 * If quiesce requested, halt input when the ring buffer position
+	 * is at the beginning, because when the hardware is resumed, it's
+	 * buffer position is reset to the beginning.  This will put
+	 * hardware and software positions in sync across a suspend cycle.
+	 */
+	if (sc->sc_quiesce == AUDIO_QUIESCE_START && cb->inp == cb->start) {
+		sc->sc_rqui = 1;
+		audio_wakeup(&sc->sc_rchan);
+	}
 }
 
 int
@@ -3092,6 +3235,10 @@ mixer_ioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	DPRINTF(("mixer_ioctl(%d,'%c',%d)\n",
 		 IOCPARM_LEN(cmd), IOCGROUP(cmd), cmd&0xff));
 
+	/* Block when fully quiesced.  No need to block earlier. */
+	while (sc->sc_quiesce == AUDIO_QUIESCE_SILENT)
+		tsleep(&sc->sc_quiesce, 0, "aud_qmi", 0);
+
 	switch (cmd) {
 	case FIOASYNC:
 		mixer_remove(sc, p); /* remove old entry */
@@ -3141,7 +3288,6 @@ mixer_ioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 		 IOCPARM_LEN(cmd), IOCGROUP(cmd), cmd&0xff, error));
 	return (error);
 }
-#endif
 
 int
 audiokqfilter(dev_t dev, struct knote *kn)
@@ -3161,7 +3307,7 @@ audiokqfilter(dev_t dev, struct knote *kn)
 		kn->kn_fop = &audiowrite_filtops;
 		break;
 	default:
-		return (1);
+		return (EINVAL);
 	}
 	kn->kn_hook = (void *)sc;
 
@@ -3208,22 +3354,25 @@ filt_audiowrite(struct knote *kn, long hint)
 	return AUDIO_FILTWRITE(sc);
 }
 
-#if NAUDIO > 0 && NWSKBD > 0
+#if NWSKBD > 0
 int
-wskbd_set_mixervolume(long dir)
+wskbd_set_mixervolume(long dir, int out)
 {
 	struct audio_softc *sc;
 	mixer_devinfo_t mi;
 	int error;
 	u_int gain;
 	u_char balance, mute;
+	struct au_mixer_ports *ports;
 
 	if (audio_cd.cd_ndevs == 0 || (sc = audio_cd.cd_devs[0]) == NULL) {
 		DPRINTF(("wskbd_set_mixervolume: audio_cd\n"));
 		return (ENXIO);
 	}
 
-	if (sc->sc_outports.master == -1) {
+	ports = out ? &sc->sc_outports : &sc->sc_inports;
+
+	if (ports->master == -1) {
 		DPRINTF(("wskbd_set_mixervolume: master == -1\n"));
 		return (ENXIO);
 	}
@@ -3231,7 +3380,7 @@ wskbd_set_mixervolume(long dir)
 	if (dir == 0) {
 		/* Mute */
 
-		error = au_get_mute(sc, &sc->sc_outports, &mute);
+		error = au_get_mute(sc, ports, &mute);
 		if (error != 0) {
 			DPRINTF(("wskbd_set_mixervolume:"
 			    " au_get_mute: %d\n", error));
@@ -3240,7 +3389,7 @@ wskbd_set_mixervolume(long dir)
 
 		mute = !mute;
 
-		error = au_set_mute(sc, &sc->sc_outports, mute);
+		error = au_set_mute(sc, ports, mute);
 		if (error != 0) {
 			DPRINTF(("wskbd_set_mixervolume:"
 			    " au_set_mute: %d\n", error));
@@ -3249,7 +3398,7 @@ wskbd_set_mixervolume(long dir)
 	} else {
 		/* Raise or lower volume */
 
-		mi.index = sc->sc_outports.master;
+		mi.index = ports->master;
 		error = sc->hw_if->query_devinfo(sc->hw_hdl, &mi);
 		if (error != 0) {
 			DPRINTF(("wskbd_set_mixervolume:"
@@ -3257,14 +3406,14 @@ wskbd_set_mixervolume(long dir)
 			return (error);
 		}
 
-		au_get_gain(sc, &sc->sc_outports, &gain, &balance);
+		au_get_gain(sc, ports, &gain, &balance);
 
 		if (dir > 0)
 			gain += mi.un.v.delta;
 		else
 			gain -= mi.un.v.delta;
 
-		error = au_set_gain(sc, &sc->sc_outports, gain, balance);
+		error = au_set_gain(sc, ports, gain, balance);
 		if (error != 0) {
 			DPRINTF(("wskbd_set_mixervolume:"
 			    " au_set_gain: %d\n", error));
@@ -3274,4 +3423,4 @@ wskbd_set_mixervolume(long dir)
 
 	return (0);
 }
-#endif /* NAUDIO > 0 && NWSKBD > 0 */
+#endif /* NWSKBD > 0 */

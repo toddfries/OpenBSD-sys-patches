@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.h,v 1.35 2010/03/01 23:35:56 mk Exp $ */
+/*	$OpenBSD: usb.h,v 1.37 2011/03/04 23:55:32 kettenis Exp $ */
 /*	$NetBSD: usb.h,v 1.69 2002/09/22 23:20:50 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.14 1999/11/17 22:33:46 n_hibma Exp $	*/
 
@@ -511,7 +511,7 @@ typedef struct {
 #else
 /* Allow for marginal (i.e. non-conforming) devices. */
 #define USB_PORT_RESET_DELAY	50  /* ms */
-#define USB_PORT_ROOT_RESET_DELAY 250  /* ms */
+#define USB_PORT_ROOT_RESET_DELAY 100  /* ms */
 #define USB_PORT_RESET_RECOVERY	250  /* ms */
 #define USB_PORT_POWERUP_DELAY	300 /* ms */
 #define USB_SET_ADDRESS_SETTLE	10  /* ms */
@@ -617,6 +617,29 @@ struct usb_device_info {
 #define USB_PORT_SUSPENDED 0xfe
 #define USB_PORT_POWERED 0xfd
 #define USB_PORT_DISABLED 0xfc
+	char		udi_serial[USB_MAX_STRING_LEN];
+};
+
+/* OpenBSD <= 4.8 version, to be removed eventually */
+struct usb_device_info_48 {
+	u_int8_t	udi_bus;
+	u_int8_t	udi_addr;	/* device address */
+	usb_event_cookie_t udi_cookie;
+	char		udi_product[USB_MAX_STRING_LEN];
+	char		udi_vendor[USB_MAX_STRING_LEN];
+	char		udi_release[8];
+	u_int16_t	udi_productNo;
+	u_int16_t	udi_vendorNo;
+	u_int16_t	udi_releaseNo;
+	u_int8_t	udi_class;
+	u_int8_t	udi_subclass;
+	u_int8_t	udi_protocol;
+	u_int8_t	udi_config;
+	u_int8_t	udi_speed;
+	int		udi_power;	/* power consumption in mA, 0 if selfpowered */
+	int		udi_nports;
+	char		udi_devnames[USB_MAX_DEVNAMES][USB_MAX_DEVNAMELEN];
+	u_int8_t	udi_ports[16];/* hub only: addresses of devices on ports */
 };
 
 struct usb_ctl_report {
@@ -657,6 +680,7 @@ struct usb_event {
 #define USB_SETDEBUG		_IOW ('U', 2, unsigned int)
 #define USB_DISCOVER		_IO  ('U', 3)
 #define USB_DEVICEINFO		_IOWR('U', 4, struct usb_device_info)
+#define USB_DEVICEINFO_48	_IOWR('U', 4, struct usb_device_info_48)
 #define USB_DEVICESTATS		_IOR ('U', 5, struct usb_device_stats)
 
 /* Generic HID device */

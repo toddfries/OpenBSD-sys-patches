@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.136 2010/07/09 16:58:06 reyk Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.145 2011/07/08 18:30:17 yasuoka Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -112,6 +112,11 @@ extern int ip6_defhlim;
 #include "pf.h"
 #if NPF > 0
 #include <net/pfvar.h>
+#endif
+
+#ifdef PIPEX 
+#include <netinet/if_ether.h>
+#include <net/pipex.h>
 #endif
 
 /*
@@ -347,7 +352,7 @@ udp_input(struct mbuf *m, ...)
 		 * to userland
 		 */
 		if (spi != 0) {
-			if ((m = m_pullup2(m, skip)) == NULL) {
+			if ((m = m_pullup(m, skip)) == NULL) {
 				udpstat.udps_hdrops++;
 				return;
 			}
@@ -407,10 +412,11 @@ udp_input(struct mbuf *m, ...)
 #ifdef INET6
 	if ((ip6 && IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) ||
 	    (ip && IN_MULTICAST(ip->ip_dst.s_addr)) ||
-	    (ip && in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif))) {
+	    (ip && in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif,
+	    m->m_pkthdr.rdomain))) {
 #else /* INET6 */
 	if (IN_MULTICAST(ip->ip_dst.s_addr) ||
-	    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif)) {
+	    in_broadcast(ip->ip_dst, m->m_pkthdr.rcvif, m->m_pkthdr.rdomain)) {
 #endif /* INET6 */
 		struct inpcb *last;
 		/*
@@ -437,6 +443,8 @@ udp_input(struct mbuf *m, ...)
 		 */
 		last = NULL;
 		CIRCLEQ_FOREACH(inp, &udbtable.inpt_queue, inp_queue) {
+			if (inp->inp_socket->so_state & SS_CANTRCVMORE)
+				continue;
 #ifdef INET6
 			/* don't accept it if AF does not match */
 			if (ip6 && !(inp->inp_flags & INP_IPV6))
@@ -683,6 +691,16 @@ udp_input(struct mbuf *m, ...)
 		*mp = sbcreatecontrol((caddr_t)&uh->uh_dport, sizeof(u_int16_t),
 		    IP_RECVDSTPORT, IPPROTO_IP);
 	}
+#ifdef PIPEX
+	if (pipex_enable && inp->inp_pipex) {
+		struct pipex_session *session;
+		int off = iphlen + sizeof(struct udphdr);
+		if ((session = pipex_l2tp_lookup_session(m, off)) != NULL) {
+			if ((m = pipex_l2tp_input(m, off, session)) == NULL)
+				return; /* the packet is handled by PIPEX */
+		}
+	}
+#endif
 
 	iphlen += sizeof(struct udphdr);
 	m_adj(m, iphlen);
@@ -1000,7 +1018,7 @@ udp_output(struct mbuf *m, ...)
 	 * until ip_output() or hardware (if it exists).
 	 */
 	if (udpcksum) {
-		m->m_pkthdr.csum_flags |= M_UDPV4_CSUM_OUT;
+		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
 		ui->ui_sum = in_cksum_phdr(ui->ui_src.s_addr,
 		    ui->ui_dst.s_addr, htons((u_int16_t)len +
 		    sizeof (struct udphdr) + IPPROTO_UDP));
@@ -1019,6 +1037,8 @@ udp_output(struct mbuf *m, ...)
 	    inp->inp_socket->so_options &
 	    (SO_DONTROUTE | SO_BROADCAST | SO_JUMBO),
 	    inp->inp_moptions, inp);
+	if (error == EACCES)	/* translate pf(4) error for userland */
+		error = EHOSTUNREACH;
 
 bail:
 	if (addr) {
@@ -1175,6 +1195,28 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 		break;
 
 	case PRU_SEND:
+#ifdef PIPEX
+		if (inp->inp_pipex) {
+			struct pipex_session *session;
+#ifdef INET6
+			if (inp->inp_flags & INP_IPV6)
+				session =
+				    pipex_l2tp_userland_lookup_session_ipv6(
+					m, inp->inp_faddr6);
+			else
+#endif
+				session =
+				    pipex_l2tp_userland_lookup_session_ipv4(
+					m, inp->inp_faddr);
+			if (session != NULL)
+				if ((m = pipex_l2tp_userland_output(
+				    m, session)) == NULL) {
+					error = ENOMEM;
+					goto release;
+				}
+		}
+#endif
+
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
 			return (udp6_output(inp, m, addr, control));

@@ -1,4 +1,4 @@
-/* $OpenBSD: acpibtn.c,v 1.27 2010/07/06 20:14:17 deraadt Exp $ */
+/* $OpenBSD: acpibtn.c,v 1.34 2011/01/02 04:56:57 jordan Exp $ */
 /*
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
  *
@@ -47,13 +47,21 @@ struct acpibtn_softc {
 	struct aml_node		*sc_devnode;
 
 	int			sc_btn_type;
-#define	ACPIBTN_UNKNOWN	-1
-#define ACPIBTN_LID	0
-#define ACPIBTN_POWER	1
-#define ACPIBTN_SLEEP	2
+#define	ACPIBTN_UNKNOWN	0
+#define ACPIBTN_LID	1
+#define ACPIBTN_POWER	2
+#define ACPIBTN_SLEEP	3
 };
 
 int	acpibtn_getsta(struct acpibtn_softc *);
+int	acpibtn_setpsw(struct acpibtn_softc *, int);
+
+struct acpi_lid {
+	struct acpibtn_softc	*abl_softc;
+	SLIST_ENTRY(acpi_lid)	abl_link;
+};
+SLIST_HEAD(acpi_lid_head, acpi_lid) acpibtn_lids =
+    SLIST_HEAD_INITIALIZER(acpibtn_lids);
 
 struct cfattach acpibtn_ca = {
 	sizeof(struct acpibtn_softc), acpibtn_match, acpibtn_attach
@@ -64,6 +72,40 @@ struct cfdriver acpibtn_cd = {
 };
 
 const char *acpibtn_hids[] = { ACPI_DEV_LD, ACPI_DEV_PBD, ACPI_DEV_SBD, 0 };
+
+int
+acpibtn_setpsw(struct acpibtn_softc *sc, int psw)
+{
+	struct aml_value	val;
+
+	bzero(&val, sizeof val);
+	val.type = AML_OBJTYPE_INTEGER;
+	val.v_integer = psw;
+	val.length = 1;
+
+	return (aml_evalname(sc->sc_acpi, sc->sc_devnode, "_PSW", 1, &val,
+	    NULL));
+}
+
+void
+acpibtn_disable_psw(void)
+{
+	struct acpi_lid *lid;
+
+	/* disable _LID for wakeup */
+	SLIST_FOREACH(lid, &acpibtn_lids, abl_link)
+		acpibtn_setpsw(lid->abl_softc, 0);
+}
+
+void
+acpibtn_enable_psw(void)
+{
+	struct acpi_lid		*lid;
+
+	/* enable _LID for wakeup */
+	SLIST_FOREACH(lid, &acpibtn_lids, abl_link)
+		acpibtn_setpsw(lid->abl_softc, 1);
+}
 
 int
 acpibtn_match(struct device *parent, void *match, void *aux)
@@ -80,18 +122,22 @@ acpibtn_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct acpibtn_softc	*sc = (struct acpibtn_softc *)self;
 	struct acpi_attach_args *aa = aux;
+	struct acpi_lid		*lid;
 
 	sc->sc_acpi = (struct acpi_softc *)parent;
 	sc->sc_devnode = aa->aaa_node;
 
-	if (!strcmp(aa->aaa_dev, ACPI_DEV_LD))
+	if (!strcmp(aa->aaa_dev, ACPI_DEV_LD)) {
 		sc->sc_btn_type = ACPIBTN_LID;
-	else if (!strcmp(aa->aaa_dev, ACPI_DEV_PBD))
+		if (acpibtn_setpsw(sc, 0) == 0) {
+			lid = malloc(sizeof(*lid), M_DEVBUF, M_WAITOK | M_ZERO);
+			lid->abl_softc = sc;
+			SLIST_INSERT_HEAD(&acpibtn_lids, lid, abl_link);
+		}
+	} else if (!strcmp(aa->aaa_dev, ACPI_DEV_PBD))
 		sc->sc_btn_type = ACPIBTN_POWER;
 	else if (!strcmp(aa->aaa_dev, ACPI_DEV_SBD))
 		sc->sc_btn_type = ACPIBTN_SLEEP;
-	else
-		sc->sc_btn_type = ACPIBTN_UNKNOWN;
 
 	acpibtn_getsta(sc);
 
@@ -112,14 +158,12 @@ acpibtn_getsta(struct acpibtn_softc *sc)
 	return (0);
 }
 
-/* XXX tie this to a sysctl later */
-int	acpi_lid_suspend = 0;
-
 int
 acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 {
 	struct acpibtn_softc	*sc = arg;
 #ifndef SMALL_KERNEL
+	extern int lid_suspend;
 	int64_t lid;
 #endif
 
@@ -135,15 +179,13 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 		 * _LID method.  0 means the lid is closed and we
 		 * should go to sleep.
 		 */
+		if (lid_suspend == 0)
+			break;
 		if (aml_evalinteger(sc->sc_acpi, sc->sc_devnode,
 		    "_LID", 0, NULL, &lid))
 			return (0);
-		if (acpi_lid_suspend && lid == 0) {
-			if (acpi_record_event(sc->sc_acpi, APM_USER_SUSPEND_REQ)) {
-				sc->sc_acpi->sc_sleepmode = ACPI_STATE_S3;
-				acpi_wakeup(sc->sc_acpi);
-			}
-		}
+		if (lid == 0)
+			goto sleep;
 #endif /* SMALL_KERNEL */
 		break;
 	case ACPIBTN_SLEEP:
@@ -153,18 +195,19 @@ acpibtn_notify(struct aml_node *node, int notify_type, void *arg)
 			/* "something" has been taken care of by the system */
 			break;
 		case 0x80:
+sleep:
 			/* Request to go to sleep */
-			if (acpi_record_event(sc->sc_acpi, APM_USER_SUSPEND_REQ)) {
-				sc->sc_acpi->sc_sleepmode = ACPI_STATE_S3;
-				acpi_wakeup(sc->sc_acpi);
-			}
+			if (acpi_record_event(sc->sc_acpi, APM_USER_SUSPEND_REQ))
+				acpi_addtask(sc->sc_acpi, acpi_sleep_task,
+				    sc->sc_acpi, ACPI_STATE_S3);
 			break;
 		}
 #endif /* SMALL_KERNEL */
 		break;
 	case ACPIBTN_POWER:
 		if (notify_type == 0x80)
-			psignal(initproc, SIGUSR2);
+			acpi_addtask(sc->sc_acpi, acpi_powerdown_task,
+			    sc->sc_acpi, 0);
 		break;
 	default:
 		printf("%s: spurious acpi button interrupt %i\n", DEVNAME(sc),

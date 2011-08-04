@@ -1,4 +1,4 @@
-#	$OpenBSD: genassym.cf,v 1.41 2010/07/01 05:33:32 jsing Exp $
+#	$OpenBSD: genassym.cf,v 1.43 2011/06/06 14:23:26 jsing Exp $
 
 #
 # Copyright (c) 1982, 1990, 1993
@@ -43,12 +43,13 @@ include <sys/user.h>
 include <uvm/uvm.h>
 
 include <machine/cpu.h>
-include <machine/psl.h>
-include <machine/reg.h>
-include <machine/pte.h>
 include <machine/frame.h>
-include <machine/pmap.h>
 include <machine/iomod.h>
+include <machine/mutex.h>
+include <machine/pmap.h>
+include <machine/psl.h>
+include <machine/pte.h>
+include <machine/reg.h>
 
 # general constants
 export	NBPG
@@ -164,6 +165,8 @@ member	ci_cpl
 member	ci_ipending
 member	ci_trap_save
 member	ci_fpu_state
+member	ci_ipi
+member	ci_hpa
 
 struct	hppa_fpstate
 member	hfp_regs

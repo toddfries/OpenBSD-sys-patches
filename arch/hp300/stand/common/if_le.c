@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_le.c,v 1.5 2006/08/17 06:31:10 miod Exp $	*/;
+/*	$OpenBSD: if_le.c,v 1.7 2010/12/06 18:44:49 jasper Exp $	*/;
 /*	$NetBSD: if_le.c,v 1.9 1997/01/30 10:32:54 thorpej Exp $	*/
 
 /*
@@ -80,10 +80,10 @@ extern struct netif_stats	le_stats[];
 
 struct netif_dif le_ifs[] = {
 /*	dif_unit	dif_nsel	dif_stats	dif_private	*/
-{	0,		NENTS(le0conf),	&le_stats[0],	le0conf,	},
+{	0,		nitems(le0conf),&le_stats[0],	le0conf,	},
 };
 
-struct netif_stats le_stats[NENTS(le_ifs)];
+struct netif_stats le_stats[nitems(le_ifs)];
 
 struct netif_driver le_driver = {
 	"le",			/* netif_bname */
@@ -94,7 +94,7 @@ struct netif_driver le_driver = {
 	le_put,			/* netif_put */
 	le_end,			/* netif_end */
 	le_ifs,			/* netif_ifs */
-	NENTS(le_ifs)		/* netif_nifs */
+	nitems(le_ifs)		/* netif_nifs */
 };
 
 struct le_softc {
@@ -249,7 +249,7 @@ le_error(int unit, char *str, u_short stat)
 	if (stat & LE_MISS)
 		le_stats[unit].missed++;
 	if (stat & LE_MERR) {
-		panic("le%d: memory error in '%s'\n", unit, str);
+		panic("le%d: memory error in '%s'", unit, str);
 	}
 }
 

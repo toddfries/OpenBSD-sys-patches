@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.33 2010/02/28 17:23:25 miod Exp $ */
+/*	$OpenBSD: clock.c,v 1.36 2011/07/10 17:47:41 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -55,6 +55,7 @@ struct cfattach clock_ca = {
 void	clock_calibrate(struct cpu_info *);
 uint32_t clock_int5(uint32_t, struct trap_frame *);
 
+#ifndef MULTIPROCESSOR
 u_int cp0_get_timecount(struct timecounter *);
 
 struct timecounter cp0_timecounter = {
@@ -65,6 +66,7 @@ struct timecounter cp0_timecounter = {
 	"CP0",			/* name */
 	0			/* quality */
 };
+#endif
 
 #define	SECMIN	(60)		/* seconds per minute */
 #define	SECHOUR	(60*SECMIN)	/* seconds per hour */
@@ -94,7 +96,7 @@ clockattach(struct device *parent, struct device *self, void *aux)
 	 * be computed correctly.
 	 */
 	set_intr(INTPRI_CLOCK, CR_INT_5, clock_int5);
-	evcount_attach(&clk_count, "clock", (void *)&clk_irq, &evcount_intr);
+	evcount_attach(&clk_count, "clock", &clk_irq);
 	/* try to avoid getting clock interrupts early */
 	cp0_set_compare(cp0_get_count() - 1);
 }
@@ -194,7 +196,11 @@ delay(int n)
 
 	delayconst = ci->ci_delayconst;
 	if (delayconst == 0)
+#if CPU_OCTEON
+		delayconst = bootcpu_hwinfo.clock;
+#else
 		delayconst = bootcpu_hwinfo.clock / 2;
+#endif
 	p = cp0_get_count();
 	dly = (delayconst / 1000000) * n;
 	while (dly > 0) {
@@ -262,8 +268,14 @@ cpu_initclocks()
 	tick = 1000000 / hz;	/* number of micro-seconds between interrupts */
 	tickadj = 240000 / (60 * hz);		/* can adjust 240ms in 60s */
 
+#ifndef MULTIPROCESSOR
+#ifdef CPU_OCTEON
+	cp0_timecounter.tc_frequency = (uint64_t)ci->ci_hw.clock;
+#else
 	cp0_timecounter.tc_frequency = (uint64_t)ci->ci_hw.clock / 2;
+#endif
 	tc_init(&cp0_timecounter);
+#endif
 	cpu_startclock(ci);
 }
 
@@ -285,7 +297,11 @@ cpu_startclock(struct cpu_info *ci)
 
 	/* Start the clock. */
 	s = splclock();
+#ifdef CPU_OCTEON
+	ci->ci_cpu_counter_interval = (ci->ci_hw.clock) / hz;
+#else
 	ci->ci_cpu_counter_interval = (ci->ci_hw.clock / 2) / hz;
+#endif
 	ci->ci_cpu_counter_last = cp0_get_count() + ci->ci_cpu_counter_interval;
 	cp0_set_compare(ci->ci_cpu_counter_last);
 	ci->ci_clock_started++;
@@ -428,9 +444,10 @@ resettodr()
 		(*cd->tod_set)(cd->tod_cookie, &c);
 }
 
+#ifndef MULTIPROCESSOR
 u_int
 cp0_get_timecount(struct timecounter *tc)
 {
-	/* XXX SMP */
 	return (cp0_get_count());
 }
+#endif

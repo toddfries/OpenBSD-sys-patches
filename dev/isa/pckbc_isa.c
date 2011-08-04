@@ -1,4 +1,4 @@
-/*	$OpenBSD: pckbc_isa.c,v 1.5 2007/10/01 15:34:48 krw Exp $	*/
+/*	$OpenBSD: pckbc_isa.c,v 1.10 2010/08/31 17:15:04 deraadt Exp $	*/
 /*	$NetBSD: pckbc_isa.c,v 1.2 2000/03/23 07:01:35 thorpej Exp $	*/
 
 /*
@@ -29,16 +29,12 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/device.h>
-#include <sys/malloc.h> 
-#include <sys/errno.h>
-#include <sys/queue.h>
-#include <sys/lock.h>
+#include <sys/malloc.h>
 
 #include <machine/bus.h>
 
-#include <dev/isa/isareg.h>  
+#include <dev/isa/isareg.h>
 #include <dev/isa/isavar.h>
 
 #include <dev/ic/i8042reg.h>
@@ -46,6 +42,7 @@
 
 int	pckbc_isa_match(struct device *, void *, void *);
 void	pckbc_isa_attach(struct device *, struct device *, void *);
+int	pckbc_isa_activate(struct device *, int);
 
 struct pckbc_isa_softc {
 	struct pckbc_softc sc_pckbc;
@@ -56,20 +53,18 @@ struct pckbc_isa_softc {
 
 struct cfattach pckbc_isa_ca = {
 	sizeof(struct pckbc_isa_softc), pckbc_isa_match, pckbc_isa_attach,
+	NULL, pckbc_isa_activate
 };
 
 void	pckbc_isa_intr_establish(struct pckbc_softc *, pckbc_slot_t);
 
 int
-pckbc_isa_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+pckbc_isa_match(struct device *parent, void *match, void *aux)
 {
 	struct isa_attach_args *ia = aux;
 	bus_space_tag_t iot = ia->ia_iot;
 	bus_space_handle_t ioh_d, ioh_c;
-	int res, ok = 1;
+	int res;
 
 	/* If values are hardwired to something that they can't be, punt. */
 	if ((ia->ia_iobase != IOBASEUNK && ia->ia_iobase != IO_KBD) ||
@@ -81,44 +76,64 @@ pckbc_isa_match(parent, match, aux)
 	if (pckbc_is_console(iot, IO_KBD) == 0) {
 		if (bus_space_map(iot, IO_KBD + KBDATAP, 1, 0, &ioh_d))
 			return (0);
-		if (bus_space_map(iot, IO_KBD + KBCMDP, 1, 0, &ioh_c)) {
-			bus_space_unmap(iot, ioh_d, 1);
-			return (0);
-		}
+		if (bus_space_map(iot, IO_KBD + KBCMDP, 1, 0, &ioh_c))
+			goto fail;
 
 		/* flush KBC */
 		(void) pckbc_poll_data1(iot, ioh_d, ioh_c, PCKBC_KBD_SLOT, 0);
 
 		/* KBC selftest */
-		if (pckbc_send_cmd(iot, ioh_c, KBC_SELFTEST) == 0) {
-			ok = 0;
-			goto out;
-		}
+		if (pckbc_send_cmd(iot, ioh_c, KBC_SELFTEST) == 0)
+			goto fail2;
 		res = pckbc_poll_data1(iot, ioh_d, ioh_c, PCKBC_KBD_SLOT, 0);
 		if (res != 0x55) {
 			printf("kbc selftest: %x\n", res);
-			ok = 0;
+			goto fail2;
 		}
- out:
-		bus_space_unmap(iot, ioh_d, 1);
 		bus_space_unmap(iot, ioh_c, 1);
+		bus_space_unmap(iot, ioh_d, 1);
 	}
 
-	if (ok) {
-		ia->ia_iobase = IO_KBD;
-		ia->ia_iosize = 5;
-		ia->ia_msize = 0x0;
+	ia->ia_iobase = IO_KBD;
+	ia->ia_iosize = 5;
+	ia->ia_msize = 0x0;
+
+	return (1);
+
+fail2:
+	bus_space_unmap(iot, ioh_c, 1);
+fail:
+	bus_space_unmap(iot, ioh_d, 1);
+	return (0);
+}
+
+int
+pckbc_isa_activate(struct device *self, int act)
+{
+	struct pckbc_isa_softc *isc = (struct pckbc_isa_softc *)self;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		pckbc_reset(&isc->sc_pckbc);
+		rv = config_activate_children(self, act);
+		break;
 	}
-	return (ok);
+	return (rv);
 }
 
 void
-pckbc_isa_attach(parent, self, aux)
-	struct device *parent, *self;
-	void *aux;
+pckbc_isa_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct pckbc_isa_softc *isc = (void *)self;
 	struct pckbc_softc *sc = &isc->sc_pckbc;
+	struct cfdata *cf = self->dv_cfdata;
 	struct isa_attach_args *ia = aux;
 	struct pckbc_internal *t;
 	bus_space_tag_t iot;
@@ -129,8 +144,6 @@ pckbc_isa_attach(parent, self, aux)
 
 	/*
 	 * Set up IRQs for "normal" ISA.
-	 *
-	 * XXX The "aux" slot is different (9) on the Alpha AXP150 Jensen.
 	 */
 	isc->sc_irq[PCKBC_KBD_SLOT] = 1;
 	isc->sc_irq[PCKBC_AUX_SLOT] = 12;
@@ -139,8 +152,6 @@ pckbc_isa_attach(parent, self, aux)
 
 	if (pckbc_is_console(iot, IO_KBD)) {
 		t = &pckbc_consdata;
-		ioh_d = t->t_ioh_d;
-		ioh_c = t->t_ioh_c;
 		pckbc_console_attached = 1;
 		/* t->t_cmdbyte was initialized by cnattach */
 	} else {
@@ -162,15 +173,13 @@ pckbc_isa_attach(parent, self, aux)
 	printf("\n");
 
 	/* Finish off the attach. */
-	pckbc_attach(sc);
+	pckbc_attach(sc, cf->cf_flags);
 }
 
 void
-pckbc_isa_intr_establish(sc, slot)
-	struct pckbc_softc *sc;
-	pckbc_slot_t slot;
+pckbc_isa_intr_establish(struct pckbc_softc *sc, pckbc_slot_t slot)
 {
-	struct pckbc_isa_softc *isc = (void *) sc;
+	struct pckbc_isa_softc *isc = (void *)sc;
 	void *rv;
 
 	rv = isa_intr_establish(isc->sc_ic, isc->sc_irq[slot], IST_EDGE,

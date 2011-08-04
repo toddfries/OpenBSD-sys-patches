@@ -1,4 +1,4 @@
-#	$OpenBSD: files.palm,v 1.2 2009/09/06 00:51:28 marex Exp $
+#	$OpenBSD: files.palm,v 1.4 2011/05/15 08:52:48 matthieu Exp $
 #
 # First try for arm-specific configuration info
 #
@@ -18,8 +18,8 @@ file	arch/palm/palm/palm_machdep.c
 #
 # Machine-independent SCSI drivers
 #
-include "../../../scsi/files.scsi"
-include "../../../dev/atapiscsi/files.atapiscsi"
+include "scsi/files.scsi"
+include "dev/atapiscsi/files.atapiscsi"
 
 # CPU support and integrated peripherals
 include "arch/arm/xscale/files.pxa2x0"
@@ -58,7 +58,6 @@ include "dev/i2o/files.i2o"
 include "dev/wscons/files.wscons"
 include "dev/rasops/files.rasops"
 include "dev/wsfont/files.wsfont"
-include "dev/pckbc/files.pckbc"
 
 # Include USB stuff
 include "dev/usb/files.usb"

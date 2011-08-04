@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.20 2010/02/02 02:49:57 syuu Exp $ */
+/*      $OpenBSD: pmap.h,v 1.26 2011/04/28 20:46:30 ariane Exp $ */
 
 /*
  * Copyright (c) 1987 Carnegie-Mellon University
@@ -35,29 +35,21 @@
  *	from: @(#)pmap.h	8.1 (Berkeley) 6/10/93
  */
 
-#ifndef	_MIPS_PMAP_H_
-#define	_MIPS_PMAP_H_
+#ifndef	_MIPS64_PMAP_H_
+#define	_MIPS64_PMAP_H_
 
 #ifdef	_KERNEL
 
 #include <machine/pte.h>
 
 /*
- * The user address space is 2Gb (0x0 - 0x80000000).
- * User programs are laid out in memory as follows:
- *			address
- *	USRTEXT		0x00400000
- *	USRDATA		0x10000000
- *	USRSTACK	0x7FFFFFFF
+ * The user address space is currently limited to 2Gb (0x0 - 0x80000000).
  *
  * The user address space is mapped using a two level structure where
  * virtual address bits 30..22 are used to index into a segment table which
  * points to a page worth of PTEs (4096 page can hold 1024 PTEs).
  * Bits 21..12 are then used to index a PTE which describes a page within
  * a segment.
- *
- * The wired entries in the TLB will contain the following:
- *	0-1	(UPAGES)	for curproc user struct and kernel stack.
  *
  * Note: The kernel doesn't use the same data structures as user programs.
  * All the PTE entries are stored in a single array in Sysmap which is
@@ -128,23 +120,28 @@ extern	struct pmap *const kernel_pmap_ptr;
 #define pmap_resident_count(pmap)       ((pmap)->pm_stats.resident_count)
 #define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
 #define pmap_kernel()			(kernel_pmap_ptr)
-#define	pmap_phys_address(ppn)		ptoa(ppn)
 
 #define	PMAP_STEAL_MEMORY		/* Enable 'stealing' during boot */
 
 #define PMAP_PREFER(pa, va)		pmap_prefer(pa, va)
+
+extern vaddr_t CpuCacheAliasMask;	/* from mips64/mips64/cpu.c */
+/* pmap prefer alignment */
+#define PMAP_PREFER_ALIGN()						\
+	(CpuCacheAliasMask ? CpuCacheAliasMask + 1 : 0)
+/* pmap prefer offset in alignment */
+#define PMAP_PREFER_OFFSET(of)		((of) & CpuCacheAliasMask)
 
 #define	pmap_update(x)			do { /* nothing */ } while (0)
 
 void	pmap_bootstrap(void);
 int	pmap_is_page_ro( pmap_t, vaddr_t, pt_entry_t);
 void	pmap_kenter_cache(vaddr_t va, paddr_t pa, vm_prot_t prot, int cache);
-void	pmap_prefer(vaddr_t, vaddr_t *);
+vaddr_t	pmap_prefer(vaddr_t, vaddr_t);
 void	pmap_set_modify(vm_page_t);
 void	pmap_page_cache(vm_page_t, int);
 
 #define	pmap_collect(x)			do { /* nothing */ } while (0)
-#define pmap_proc_iflush(p,va,len)	do { /* nothing yet (handled in trap now) */ } while (0)
 #define pmap_unuse_final(p)		do { /* nothing yet */ } while (0)
 #define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 
@@ -154,6 +151,23 @@ void pmap_update_kernel_page(vaddr_t, pt_entry_t);
 #else
 #define pmap_update_kernel_page(va, entry) tlb_update(va, entry)
 #endif
+
+/*
+ * Most R5000 processors (and related families) have a silicon bug preventing
+ * the ll/sc (and lld/scd) instructions from honouring the caching mode
+ * when accessing XKPHYS addresses.
+ *
+ * Since pool memory is allocated with pmap_map_direct() if __HAVE_PMAP_DIRECT,
+ * and many structures containing fields which will be used with
+ * <machine/atomic.h> routines are allocated from pools, __HAVE_PMAP_DIRECT can
+ * not be defined on systems which may use flawed processors.
+ */
+#if !defined(CPU_R5000) && !defined(CPU_RM7000)
+#define	__HAVE_PMAP_DIRECT
+vaddr_t	pmap_map_direct(vm_page_t);
+vm_page_t pmap_unmap_direct(vaddr_t);
+#endif
+
 #endif	/* _KERNEL */
 
-#endif	/* !_MIPS_PMAP_H_ */
+#endif	/* !_MIPS64_PMAP_H_ */

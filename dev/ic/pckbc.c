@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbc.c,v 1.21 2010/01/12 20:31:22 drahn Exp $ */
+/* $OpenBSD: pckbc.c,v 1.28 2010/12/03 18:29:56 shadchin Exp $ */
 /* $NetBSD: pckbc.c,v 1.5 2000/06/09 04:58:35 soda Exp $ */
 
 /*
@@ -69,10 +69,11 @@ struct pckbc_slotdata {
 	struct pckbc_devcmd cmds[NCMD];
 };
 
-#define CMD_IN_QUEUE(q) (TAILQ_FIRST(&(q)->cmdqueue) != NULL)
+#define CMD_IN_QUEUE(q) (!TAILQ_EMPTY(&(q)->cmdqueue))
 
 void pckbc_init_slotdata(struct pckbc_slotdata *);
-int pckbc_attach_slot(struct pckbc_softc *, pckbc_slot_t);
+int pckbc_attach_slot(struct pckbc_softc *, pckbc_slot_t, int);
+int pckbc_submatch_locators(struct device *, void *, void *);
 int pckbc_submatch(struct device *, void *, void *);
 int pckbcprint(void *, const char *);
 
@@ -107,9 +108,7 @@ const char *pckbc_slot_names[] = { "kbd", "aux" };
 #define	KBD_DELAY	DELAY(8)
 
 static inline int
-pckbc_wait_output(iot, ioh_c)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh_c;
+pckbc_wait_output(bus_space_tag_t iot, bus_space_handle_t ioh_c)
 {
 	u_int i;
 
@@ -122,10 +121,7 @@ pckbc_wait_output(iot, ioh_c)
 }
 
 int
-pckbc_send_cmd(iot, ioh_c, val)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh_c;
-	u_char val;
+pckbc_send_cmd(bus_space_tag_t iot, bus_space_handle_t ioh_c, u_char val)
 {
 	if (!pckbc_wait_output(iot, ioh_c))
 		return (0);
@@ -134,11 +130,8 @@ pckbc_send_cmd(iot, ioh_c, val)
 }
 
 int
-pckbc_poll_data1(iot, ioh_d, ioh_c, slot, checkaux)
-	bus_space_tag_t iot;
-	bus_space_handle_t ioh_d, ioh_c;
-	pckbc_slot_t slot;
-	int checkaux;
+pckbc_poll_data1(bus_space_tag_t iot, bus_space_handle_t ioh_d,
+    bus_space_handle_t ioh_c, pckbc_slot_t slot, int checkaux)
 {
 	int i;
 	u_char stat;
@@ -176,8 +169,7 @@ pckbc_poll_data1(iot, ioh_d, ioh_c, slot, checkaux)
  * Get the current command byte.
  */
 static int
-pckbc_get8042cmd(t)
-	struct pckbc_internal *t;
+pckbc_get8042cmd(struct pckbc_internal *t)
 {
 	bus_space_tag_t iot = t->t_iot;
 	bus_space_handle_t ioh_d = t->t_ioh_d;
@@ -198,8 +190,7 @@ pckbc_get8042cmd(t)
  * Pass command byte to keyboard controller (8042).
  */
 static int
-pckbc_put8042cmd(t)
-	struct pckbc_internal *t;
+pckbc_put8042cmd(struct pckbc_internal *t)
 {
 	bus_space_tag_t iot = t->t_iot;
 	bus_space_handle_t ioh_d = t->t_ioh_d;
@@ -214,10 +205,7 @@ pckbc_put8042cmd(t)
 }
 
 static int
-pckbc_send_devcmd(t, slot, val)
-	struct pckbc_internal *t;
-	pckbc_slot_t slot;
-	u_char val;
+pckbc_send_devcmd(struct pckbc_internal *t, pckbc_slot_t slot, u_char val)
 {
 	bus_space_tag_t iot = t->t_iot;
 	bus_space_handle_t ioh_d = t->t_ioh_d;
@@ -234,9 +222,7 @@ pckbc_send_devcmd(t, slot, val)
 }
 
 int
-pckbc_is_console(iot, addr)
-	bus_space_tag_t iot;
-	bus_addr_t addr;
+pckbc_is_console(bus_space_tag_t iot, bus_addr_t addr)
 {
 	if (pckbc_console && !pckbc_console_attached &&
 	    pckbc_consdata.t_iot == iot &&
@@ -246,10 +232,7 @@ pckbc_is_console(iot, addr)
 }
 
 int
-pckbc_submatch(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+pckbc_submatch_locators(struct device *parent, void *match, void *aux)
 {
 	struct cfdata *cf = match;
 	struct pckbc_attach_args *pa = aux;
@@ -257,13 +240,21 @@ pckbc_submatch(parent, match, aux)
 	if (cf->cf_loc[PCKBCCF_SLOT] != PCKBCCF_SLOT_DEFAULT &&
 	    cf->cf_loc[PCKBCCF_SLOT] != pa->pa_slot)
 		return (0);
+	return (1);
+}
+
+int
+pckbc_submatch(struct device *parent, void *match, void *aux)
+{
+	struct cfdata *cf = match;
+
+	if (pckbc_submatch_locators(parent, match, aux) == 0)
+		return (0);
 	return ((*cf->cf_attach->ca_match)(parent, cf, aux));
 }
 
 int
-pckbc_attach_slot(sc, slot)
-	struct pckbc_softc *sc;
-	pckbc_slot_t slot;
+pckbc_attach_slot(struct pckbc_softc *sc, pckbc_slot_t slot, int force)
 {
 	struct pckbc_internal *t = sc->id;
 	struct pckbc_attach_args pa;
@@ -271,8 +262,8 @@ pckbc_attach_slot(sc, slot)
 
 	pa.pa_tag = t;
 	pa.pa_slot = slot;
-	found = (config_found_sm((struct device *)sc, &pa,
-				 pckbcprint, pckbc_submatch) != NULL);
+	found = (config_found_sm((struct device *)sc, &pa, pckbcprint,
+	    force ? pckbc_submatch_locators : pckbc_submatch) != NULL);
 
 	if (found && !t->t_slotdata[slot]) {
 		t->t_slotdata[slot] = malloc(sizeof(struct pckbc_slotdata),
@@ -285,8 +276,7 @@ pckbc_attach_slot(sc, slot)
 }
 
 void
-pckbc_attach(sc)
-	struct pckbc_softc *sc;
+pckbc_attach(struct pckbc_softc *sc, int flags)
 {
 	struct pckbc_internal *t;
 	bus_space_tag_t iot;
@@ -334,7 +324,7 @@ pckbc_attach(sc)
 		if (res != 0)
 			printf("kbc: returned %x on kbd slot test\n", res);
 #endif
-		if (pckbc_attach_slot(sc, PCKBC_KBD_SLOT)) {
+		if (pckbc_attach_slot(sc, PCKBC_KBD_SLOT, 0)) {
 			cmdbits |= KC8_KENABLE;
 			haskbd = 1;
 		}
@@ -343,30 +333,11 @@ pckbc_attach(sc)
 		return;
 	}
 #else
-	if (pckbc_attach_slot(sc, PCKBC_KBD_SLOT)) {
+	if (pckbc_attach_slot(sc, PCKBC_KBD_SLOT, 0)) {
 		cmdbits |= KC8_KENABLE;
 		haskbd = 1;
 	}
 #endif /* 0 */
-	if (haskbd == 0) {
-#if defined(__i386__) || defined(__amd64__)
-		/*
-		 * If there is no keyboard present, yet we are the console,
-		 * we might be on a legacy-free PC where the PS/2 emulated
-		 * keyboard was elected as console, but went away as soon
-		 * as the USB controller drivers attached.
-		 *
-		 * In that case, we want to release ourselves from console
-		 * duties.
-		 */
-		if (pckbc_console != 0) {
-			extern void wscn_input_init(int);
-
-			pckbc_console = 0;
-			wscn_input_init(1);
-		}
-#endif
-	}
 
 	/*
 	 * Check aux port ok.
@@ -417,12 +388,40 @@ pckbc_attach(sc)
 		printf("kbc: aux echo: %x\n", res);
 #endif
 		t->t_haveaux = 1;
-		if (pckbc_attach_slot(sc, PCKBC_AUX_SLOT))
+		if (pckbc_attach_slot(sc, PCKBC_AUX_SLOT, 0))
 			cmdbits |= KC8_MENABLE;
 	}
 #ifdef PCKBCDEBUG
 	else
 		printf("kbc: aux echo test failed\n");
+#endif
+
+#if defined(__i386__) || defined(__amd64__)
+	if (haskbd == 0 && !ISSET(flags, PCKBCF_FORCE_KEYBOARD_PRESENT)) {
+		/*
+		 * If there is no keyboard present, yet we are the console,
+		 * we might be on a legacy-free PC where the PS/2 emulated
+		 * keyboard was elected as console, but went away as soon
+		 * as the USB controller drivers attached.
+		 *
+		 * In that case, we want to release ourselves from console
+		 * duties, unless we have been able to attach a mouse,
+		 * which would mean this is a real PS/2 controller
+		 * afterwards.
+		 */
+
+		if (t->t_haveaux) {
+			if (pckbc_attach_slot(sc, PCKBC_KBD_SLOT, 1))
+				cmdbits |= KC8_KENABLE;
+		} else {
+			if (pckbc_console != 0) {
+				extern void wscn_input_init(int);
+
+				pckbc_console = 0;
+				wscn_input_init(1);
+			}
+		}
+	}
 #endif
 
 nomouse:
@@ -433,9 +432,7 @@ nomouse:
 }
 
 int
-pckbcprint(aux, pnp)
-	void *aux;
-	const char *pnp;
+pckbcprint(void *aux, const char *pnp)
 {
 	struct pckbc_attach_args *pa = aux;
 
@@ -445,8 +442,7 @@ pckbcprint(aux, pnp)
 }
 
 void
-pckbc_init_slotdata(q)
-	struct pckbc_slotdata *q;
+pckbc_init_slotdata(struct pckbc_slotdata *q)
 {
 	int i;
 	TAILQ_INIT(&q->cmdqueue);
@@ -459,9 +455,7 @@ pckbc_init_slotdata(q)
 }
 
 void
-pckbc_flush(self, slot)
-	pckbc_tag_t self;
-	pckbc_slot_t slot;
+pckbc_flush(pckbc_tag_t self, pckbc_slot_t slot)
 {
 	struct pckbc_internal *t = self;
 
@@ -470,9 +464,7 @@ pckbc_flush(self, slot)
 }
 
 int
-pckbc_poll_data(self, slot)
-	pckbc_tag_t self;
-	pckbc_slot_t slot;
+pckbc_poll_data(pckbc_tag_t self, pckbc_slot_t slot)
 {
 	struct pckbc_internal *t = self;
 	struct pckbc_slotdata *q = t->t_slotdata[slot];
@@ -494,10 +486,7 @@ pckbc_poll_data(self, slot)
  * return nonzero on success
  */
 int
-pckbc_xt_translation(self, slot, on)
-	pckbc_tag_t self;
-	pckbc_slot_t slot;
-	int on;
+pckbc_xt_translation(pckbc_tag_t self, pckbc_slot_t slot, int on)
 {
 	struct pckbc_internal *t = self;
 	int ison;
@@ -540,10 +529,7 @@ static struct pckbc_portcmd {
 };
 
 void
-pckbc_slot_enable(self, slot, on)
-	pckbc_tag_t self;
-	pckbc_slot_t slot;
-	int on;
+pckbc_slot_enable(pckbc_tag_t self, pckbc_slot_t slot, int on)
 {
 	struct pckbc_internal *t = (struct pckbc_internal *)self;
 	struct pckbc_portcmd *cmd;
@@ -563,10 +549,7 @@ pckbc_slot_enable(self, slot, on)
 }
 
 void
-pckbc_set_poll(self, slot, on)
-	pckbc_tag_t self;
-	pckbc_slot_t slot;
-	int on;
+pckbc_set_poll(pckbc_tag_t self, pckbc_slot_t slot, int on)
 {
 	struct pckbc_internal *t = (struct pckbc_internal *)self;
 
@@ -594,10 +577,8 @@ pckbc_set_poll(self, slot, on)
  * to be called at spltty()
  */
 static void
-pckbc_poll_cmd1(t, slot, cmd)
-	struct pckbc_internal *t;
-	pckbc_slot_t slot;
-	struct pckbc_devcmd *cmd;
+pckbc_poll_cmd1(struct pckbc_internal *t, pckbc_slot_t slot,
+    struct pckbc_devcmd *cmd)
 {
 	bus_space_tag_t iot = t->t_iot;
 	bus_space_handle_t ioh_d = t->t_ioh_d;
@@ -676,13 +657,8 @@ pckbc_poll_cmd1(t, slot, cmd)
 
 /* for use in autoconfiguration */
 int
-pckbc_poll_cmd(self, slot, cmd, len, responselen, respbuf, slow)
-	pckbc_tag_t self;
-	pckbc_slot_t slot;
-	u_char *cmd;
-	int len, responselen;
-	u_char *respbuf;
-	int slow;
+pckbc_poll_cmd(pckbc_tag_t self, pckbc_slot_t slot, u_char *cmd, int len,
+    int responselen, u_char *respbuf, int slow)
 {
 	struct pckbc_devcmd nc;
 
@@ -707,8 +683,7 @@ pckbc_poll_cmd(self, slot, cmd, len, responselen, respbuf, slow)
  * Clean up a command queue, throw away everything.
  */
 void
-pckbc_cleanqueue(q)
-	struct pckbc_slotdata *q;
+pckbc_cleanqueue(struct pckbc_slotdata *q)
 {
 	struct pckbc_devcmd *cmd;
 #ifdef PCKBCDEBUG
@@ -732,8 +707,7 @@ pckbc_cleanqueue(q)
  * XXX could be less invasive.
  */
 void
-pckbc_cleanup(self)
-	void *self;
+pckbc_cleanup(void *self)
 {
 	struct pckbc_internal *t = self;
 	int s;
@@ -758,13 +732,31 @@ pckbc_cleanup(self)
 }
 
 /*
+ * Reset the keyboard controller in a violent fashion; normally done
+ * after suspend/resume when we do not trust the machine.
+ */
+void
+pckbc_reset(struct pckbc_softc *sc)
+{
+	struct pckbc_internal *t = sc->id;
+	bus_space_tag_t iot = t->t_iot;
+	bus_space_handle_t ioh_d = t->t_ioh_d, ioh_c = t->t_ioh_c;
+
+	pckbc_poll_data1(iot, ioh_d, ioh_c, PCKBC_KBD_SLOT, 0);
+	/* KBC selftest */
+	if (pckbc_send_cmd(iot, ioh_c, KBC_SELFTEST) == 0)
+		return;
+	pckbc_poll_data1(iot, ioh_d, ioh_c, PCKBC_KBD_SLOT, 0);
+	(void)pckbc_put8042cmd(t);
+	pckbcintr_internal(t->t_sc->id, t->t_sc);
+}
+
+/*
  * Pass command to device during normal operation.
  * to be called at spltty()
  */
 void
-pckbc_start(t, slot)
-	struct pckbc_internal *t;
-	pckbc_slot_t slot;
+pckbc_start(struct pckbc_internal *t, pckbc_slot_t slot)
 {
 	struct pckbc_slotdata *q = t->t_slotdata[slot];
 	struct pckbc_devcmd *cmd = TAILQ_FIRST(&q->cmdqueue);
@@ -775,14 +767,15 @@ pckbc_start(t, slot)
 			if (cmd->status)
 				printf("pckbc_start: command error\n");
 
-			TAILQ_REMOVE(&q->cmdqueue, cmd, next);
-			if (cmd->flags & KBC_CMDFLAG_SYNC)
+			if (cmd->flags & KBC_CMDFLAG_SYNC) {
 				wakeup(cmd);
-			else {
+				cmd = TAILQ_NEXT(cmd, next);
+			} else {
+				TAILQ_REMOVE(&q->cmdqueue, cmd, next);
 				timeout_del(&t->t_cleanup);
 				TAILQ_INSERT_TAIL(&q->freequeue, cmd, next);
+				cmd = TAILQ_FIRST(&q->cmdqueue);
 			}
-			cmd = TAILQ_FIRST(&q->cmdqueue);
 		} while (cmd);
 		return;
 	}
@@ -800,10 +793,7 @@ pckbc_start(t, slot)
  * to be called at spltty()
  */
 int
-pckbc_cmdresponse(t, slot, data)
-	struct pckbc_internal *t;
-	pckbc_slot_t slot;
-	u_char data;
+pckbc_cmdresponse(struct pckbc_internal *t, pckbc_slot_t slot, u_char data)
 {
 	struct pckbc_slotdata *q = t->t_slotdata[slot];
 	struct pckbc_devcmd *cmd = TAILQ_FIRST(&q->cmdqueue);
@@ -842,14 +832,16 @@ pckbc_cmdresponse(t, slot, data)
 		return (0);
 
 	/* dequeue: */
-	TAILQ_REMOVE(&q->cmdqueue, cmd, next);
-	if (cmd->flags & KBC_CMDFLAG_SYNC)
+	if (cmd->flags & KBC_CMDFLAG_SYNC) {
 		wakeup(cmd);
-	else {
+		cmd = TAILQ_NEXT(cmd, next);
+	} else {
+		TAILQ_REMOVE(&q->cmdqueue, cmd, next);
 		timeout_del(&t->t_cleanup);
 		TAILQ_INSERT_TAIL(&q->freequeue, cmd, next);
+		cmd = TAILQ_FIRST(&q->cmdqueue);
 	}
-	if (!CMD_IN_QUEUE(q))
+	if (cmd == NULL)
 		return (1);
 restart:
 	pckbc_start(t, slot);
@@ -860,12 +852,8 @@ restart:
  * Put command into the device's command queue, return zero or errno.
  */
 int
-pckbc_enqueue_cmd(self, slot, cmd, len, responselen, sync, respbuf)
-	pckbc_tag_t self;
-	pckbc_slot_t slot;
-	u_char *cmd;
-	int len, responselen, sync;
-	u_char *respbuf;
+pckbc_enqueue_cmd(pckbc_tag_t self, pckbc_slot_t slot, u_char *cmd, int len,
+    int responselen, int sync, u_char *respbuf)
 {
 	struct pckbc_internal *t = self;
 	struct pckbc_slotdata *q = t->t_slotdata[slot];
@@ -911,8 +899,10 @@ pckbc_enqueue_cmd(self, slot, cmd, len, responselen, sync, respbuf)
 		if ((res = tsleep(nc, 0, "kbccmd", 1*hz))) {
 			TAILQ_REMOVE(&q->cmdqueue, nc, next);
 			pckbc_cleanup(t);
-		} else
+		} else {
+			TAILQ_REMOVE(&q->cmdqueue, nc, next);
 			res = nc->status;
+		}
 	} else
 		timeout_add_sec(&t->t_cleanup, 1);
 
@@ -928,12 +918,8 @@ pckbc_enqueue_cmd(self, slot, cmd, len, responselen, sync, respbuf)
 }
 
 void
-pckbc_set_inputhandler(self, slot, func, arg, name)
-	pckbc_tag_t self;
-	pckbc_slot_t slot;
-	pckbc_inputfcn func;
-	void *arg;
-	char *name;
+pckbc_set_inputhandler(pckbc_tag_t self, pckbc_slot_t slot, pckbc_inputfcn func,
+    void *arg, char *name)
 {
 	struct pckbc_internal *t = (struct pckbc_internal *)self;
 	struct pckbc_softc *sc = t->t_sc;
@@ -952,8 +938,7 @@ pckbc_set_inputhandler(self, slot, func, arg, name)
 }
 
 void
-pckbc_poll(v)
-	void *v;
+pckbc_poll(void *v)
 {
 	struct pckbc_internal *t = v;
 	int s;
@@ -965,8 +950,7 @@ pckbc_poll(v)
 }
 
 int
-pckbcintr(vsc)
-	void *vsc;
+pckbcintr(void *vsc)
 {
 	struct pckbc_softc *sc = (struct pckbc_softc *)vsc;
 
@@ -974,9 +958,7 @@ pckbcintr(vsc)
 }
 
 int
-pckbcintr_internal(t, sc)
-	struct pckbc_internal *t;
-	struct pckbc_softc *sc;
+pckbcintr_internal(struct pckbc_internal *t, struct pckbc_softc *sc)
 {
 	u_char stat;
 	pckbc_slot_t slot;
@@ -1031,12 +1013,8 @@ pckbcintr_internal(t, sc)
 }
 
 int
-pckbc_cnattach(iot, addr, cmd_offset, slot, flags)
-	bus_space_tag_t iot;
-	bus_addr_t addr;
-	bus_size_t cmd_offset;
-	pckbc_slot_t slot;
-	int flags;
+pckbc_cnattach(bus_space_tag_t iot, bus_addr_t addr, bus_size_t cmd_offset,
+    int flags)
 {
 	bus_space_handle_t ioh_d, ioh_c;
 	int res = 0;
@@ -1070,7 +1048,7 @@ pckbc_cnattach(iot, addr, cmd_offset, slot, flags)
 
 	if (!res) {
 #if (NPCKBD > 0)
-		res = pckbd_cnattach(&pckbc_consdata, slot);
+		res = pckbd_cnattach(&pckbc_consdata);
 #else
 		res = ENXIO;
 #endif /* NPCKBD > 0 */
@@ -1080,7 +1058,7 @@ pckbc_cnattach(iot, addr, cmd_offset, slot, flags)
 		bus_space_unmap(iot, pckbc_consdata.t_ioh_d, 1);
 		bus_space_unmap(iot, pckbc_consdata.t_ioh_c, 1);
 	} else {
-		pckbc_consdata.t_slotdata[slot] = &pckbc_cons_slotdata;
+		pckbc_consdata.t_slotdata[PCKBC_KBD_SLOT] = &pckbc_cons_slotdata;
 		pckbc_init_slotdata(&pckbc_cons_slotdata);
 		pckbc_console = 1;
 	}

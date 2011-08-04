@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.127 2010/06/30 20:38:49 tedu Exp $ */
+/* $OpenBSD: machdep.c,v 1.134 2011/07/05 04:48:01 guenther Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -63,6 +63,7 @@
 #include <sys/signalvar.h>
 #include <sys/kernel.h>
 #include <sys/proc.h>
+#include <sys/socket.h>
 #include <sys/sched.h>
 #include <sys/buf.h>
 #include <sys/reboot.h>
@@ -78,10 +79,13 @@
 #include <sys/user.h>
 #include <sys/exec.h>
 #include <sys/exec_ecoff.h>
-#include <uvm/uvm.h>
 #include <sys/sysctl.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
+
+#include <net/if.h>
+#include <uvm/uvm.h>
+
 #include <machine/kcore.h>
 #ifndef NO_IEEE
 #include <machine/fpu.h>
@@ -128,20 +132,6 @@ void	identifycpu(void);
 void	regdump(struct trapframe *framep);
 void	printregs(struct reg *);
 
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 10
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
-
 struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
 struct uvm_constraint_range *uvm_md_constraints[] = {
@@ -180,7 +170,6 @@ int	bootdev_debug = 0;	/* patchable, or from DDB */
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
 char	cpu_model[128];
-char	root_device[17];
 
 struct	user *proc0paddr;
 
@@ -560,7 +549,7 @@ nobootinfo:
 				    "0x%lx / 0x%lx\n", pfn0, kernstartpfn);
 #endif
 				uvm_page_physload(pfn0, kernstartpfn,
-				    pfn0, kernstartpfn, VM_FREELIST_DEFAULT);
+				    pfn0, kernstartpfn, 0);
 			}
 #ifdef _PMAP_MAY_USE_PROM_CONSOLE
 		    }
@@ -574,7 +563,7 @@ nobootinfo:
 				    "0x%lx / 0x%lx\n", kernendpfn, pfn1);
 #endif
 				uvm_page_physload(kernendpfn, pfn1,
-				    kernendpfn, pfn1, VM_FREELIST_DEFAULT);
+				    kernendpfn, pfn1, 0);
 			}
 		} else {
 			/*
@@ -584,8 +573,7 @@ nobootinfo:
 			printf("Loading cluster %d: 0x%lx / 0x%lx\n", i,
 			    pfn0, pfn1);
 #endif
-			uvm_page_physload(pfn0, pfn1, pfn0, pfn1,
-			    VM_FREELIST_DEFAULT);
+			uvm_page_physload(pfn0, pfn1, pfn0, pfn1, 0);
 		}
 #ifdef _PMAP_MAY_USE_PROM_CONSOLE
 	    }
@@ -1029,6 +1017,7 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();		/* Disable interrupts. */
@@ -1438,7 +1427,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	siginfo_t *sip, ksi;
 
 	frame = p->p_md.md_tf;
-	oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 	fsize = sizeof ksc;
 	rndfsize = ((fsize + 15) / 16) * 16;
 	kscsize = rndfsize;
@@ -1454,11 +1443,11 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * will fail if the process has not already allocated
 	 * the space with a `brk'.
 	 */
-	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !oonstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		scp = (struct sigcontext *)(psp->ps_sigstk.ss_sp +
-		    psp->ps_sigstk.ss_size - rndfsize);
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		scp = (struct sigcontext *)(p->p_sigstk.ss_sp +
+		    p->p_sigstk.ss_size - rndfsize);
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		scp = (struct sigcontext *)(alpha_pal_rdusp() - rndfsize);
 	if ((u_long)scp <= USRSTACK - ptoa(p->p_vmspace->vm_ssize))
@@ -1591,9 +1580,9 @@ sys_sigreturn(p, v, retval)
 	 * Restore the user-supplied information
 	 */
 	if (ksc.sc_onstack)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = ksc.sc_mask &~ sigcantmask;
 
 	p->p_md.md_tf->tf_regs[FRAME_PC] = ksc.sc_pc;
@@ -1650,9 +1639,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &consdev,
 			sizeof consdev));
 
-	case CPU_ROOT_DEVICE:
-		return (sysctl_rdstring(oldp, oldlenp, newp,
-		    root_device));
 #ifndef SMALL_KERNEL
 	case CPU_UNALIGNED_PRINT:
 		return (sysctl_int(oldp, oldlenp, newp, newlen,

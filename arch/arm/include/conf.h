@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.6 2008/11/29 09:47:35 matthieu Exp $	*/
+/*	$OpenBSD: conf.h,v 1.10 2011/07/04 16:52:41 nicm Exp $	*/
 /*	$NetBSD: conf.h,v 1.7 2002/04/19 01:04:39 wiz Exp $	*/
 
 /*
@@ -40,8 +40,8 @@
  * Prototypes for device driver functions
  */
 
-#ifndef _ARM_CONF_H
-#define	_ARM_CONF_H
+#ifndef _ARM_CONF_H_
+#define	_ARM_CONF_H_
  
 
 #include <sys/conf.h>
@@ -57,71 +57,17 @@ cdev_decl(fd);
 
 /* Character device declarations */
 
-/* open, close, read, write, ioctl, tty, mmap -- XXX should be a tty */
-#define	cdev_physcon_init(c,n)	cdev__ttym_init(c,n,0)
-
-/* open, close, ioctl */
-#define	cdev_beep_init(c,n)	cdev__oci_init(c,n)
-
-/* open, close, read, ioctl */
-#define	cdev_kbd_init(c,n)	cdev__ocri_init(c,n)
-
-/* open, close, ioctl, mmap */
-#define	cdev_vidcvid_init(c,n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_noimpl(read,enodev), \
-	dev_noimpl(write,enodev), dev_init(c,n,ioctl), \
-	dev_noimpl(stop,enodev), 0, seltrue, dev_init(c,n,mmap), 0 }
-
-/* open, close, read, write, ioctl */
-#define	cdev_iic_init(c,n)	cdev__ocrwi_init(c,n)
-#define	cdev_rtc_init(c,n)	cdev__ocrwi_init(c,n)
-
-/* open, close, read, ioctl */
-#define	cdev_prof_init(c,n)	cdev__ocri_init(c,n)
-
 /* open, close, ioctl, kqueue */
 #define cdev_apm_init(c,n) { \
         dev_init(c,n,open), dev_init(c,n,close), (dev_type_read((*))) enodev, \
         (dev_type_write((*))) enodev, dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, (dev_type_poll((*))) enodev, \
-	(dev_type_mmap((*))) enodev, 0, D_KQFILTER, dev_init(c,n,kqfilter) }
+	(dev_type_stop((*))) enodev, 0, selfalse, \
+	(dev_type_mmap((*))) enodev, 0, 0, dev_init(c,n,kqfilter) }
 
-cdev_decl(physcon);
-cdev_decl(vidcconsole);
-cdev_decl(biconsdev);
 cdev_decl(com);
 cdev_decl(lpt);
-cdev_decl(qms);
-cdev_decl(opms);
-cdev_decl(beep);
-cdev_decl(kbd);
-cdev_decl(iic);
-cdev_decl(rtc);
-cdev_decl(fcom);
-cdev_decl(sscom);
-cdev_decl(pc);
-cdev_decl(ofcons_);
-cdev_decl(ofd);
-cdev_decl(ofrtc);
-cdev_decl(sacom);
-cdev_decl(scr);
-cdev_decl(prof);
-#define	ofromread  ofromrw
-#define	ofromwrite ofromrw
-cdev_decl(ofrom);
-cdev_decl(joy);
-cdev_decl(vc_nb_);
-cdev_decl(wsfont);
-cdev_decl(scsibus);
-cdev_decl(openfirm);
 cdev_decl(pci);
-cdev_decl(agp);
-cdev_decl(iop);
-cdev_decl(ld);
-cdev_decl(mlx);
-cdev_decl(mly);
-cdev_decl(plcom);
 cdev_decl(apm);
 cdev_decl(spkr);
 
-#endif	/* _ARM_CONF_H_ */
+#endif	/* _ARM_CONF_H__ */

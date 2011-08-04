@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcb.h,v 1.5 2008/06/26 05:42:09 ray Exp $	*/
+/*	$OpenBSD: pcb.h,v 1.12 2011/07/10 18:12:03 deraadt Exp $	*/
 /*	$NetBSD: pcb.h,v 1.1 2003/04/26 18:39:45 fvdl Exp $	*/
 
 /*-
@@ -64,48 +64,29 @@
  *	@(#)pcb.h	5.10 (Berkeley) 5/12/91
  */
 
-/*
- * XXXfvdl these copyrights don't really match anymore
- */
-
-#ifndef _AMD64_PCB_H_
-#define _AMD64_PCB_H_
+#ifndef _MACHINE_PCB_H_
+#define _MACHINE_PCB_H_
 
 #include <sys/signal.h>
 
-#include <machine/segments.h>
 #include <machine/tss.h>
 #include <machine/fpu.h>
-#include <machine/sysarch.h>
-
-#define	NIOPORTS	1024		/* # of ports we allow to be mapped */
 
 /*
  * Please note that the pcb_savefpu field in struct below must be
  * on a 16-byte boundary.
  */
 struct pcb {
-	/*
-	 * XXXfvdl
-	 * It's overkill to have a TSS here, as it's only needed
-	 * for compatibility processes who use an I/O permission map.
-	 * The pcb fields below are not in the TSS anymore (and there's
-	 * not enough room in the TSS to store them all)
-	 * Should just make this a pointer and allocate.
-	 */
-	struct	x86_64_tss pcb_tss;
-	u_int64_t pcb_cr3;
-	u_int64_t pcb_rsp;
-	u_int64_t pcb_rbp;
-	u_int64_t pcb_usersp;
-	u_int64_t pcb_ldt_sel;
 	struct	savefpu pcb_savefpu;	/* floating point state */
-	int	pcb_cr0;		/* saved image of CR0 */
-	int	pcb_flags;
+	u_int64_t	pcb_cr3;
+	u_int64_t	pcb_rsp;
+	u_int64_t	pcb_rbp;
+	u_int64_t	pcb_kstack;	/* kernel stack address */
+	u_int64_t	pcb_fsbase;	/* per-thread offset: %fs */
 	caddr_t	pcb_onfault;		/* copyin/out fault recovery */
-	struct cpu_info *pcb_fpcpu;	/* cpu holding our fp state. */
-	unsigned pcb_iomap[NIOPORTS/32];	/* I/O bitmap */
-	struct pmap *pcb_pmap;		/* back pointer to our pmap */
+	struct	cpu_info *pcb_fpcpu;	/* cpu holding our fp state. */
+	struct	pmap *pcb_pmap;		/* back pointer to our pmap */
+	int	pcb_cr0;		/* saved image of CR0 */
 };
 
 /*    
@@ -116,4 +97,4 @@ struct md_coredump {
 	long	md_pad[8];
 };    
 
-#endif /* _AMD64_PCB_H_ */
+#endif /* _MACHINE_PCB_H_ */

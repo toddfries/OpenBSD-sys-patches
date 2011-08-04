@@ -1,4 +1,4 @@
-/*	$OpenBSD: installboot.c,v 1.12 2008/01/30 02:13:04 krw Exp $ */
+/*	$OpenBSD: installboot.c,v 1.15 2011/03/13 00:13:53 deraadt Exp $ */
 /*	$NetBSD: installboot.c,v 1.5 1995/11/17 23:23:50 gwr Exp $ */
 
 /*
@@ -65,13 +65,13 @@ struct nlist nl[] = {
 
 int *block_size_p;		/* block size var. in prototype image */
 int *block_count_p;		/* block count var. in prototype image */
-daddr_t	*block_table;	/* block number array in prototype image */
+daddr32_t	*block_table;	/* block number array in prototype image */
 int	maxblocknum;		/* size of this array */
 
 
 char		*loadprotoblocks(char *, long *);
 int		loadblocknums(char *, int);
-static void	devread(int, void *, daddr_t, size_t, char *);
+static void	devread(int, void *, daddr32_t, size_t, char *);
 static void	usage(void);
 int 		main(int, char *[]);
 static void     vid_to_disklabel(char *, char *);
@@ -244,7 +244,7 @@ loadprotoblocks(fname, size)
 	off = N_DATOFF(eh) - N_DATADDR(eh) - (eh.a_entry - N_TXTADDR(eh));
 	block_size_p  =   (int *) (bp + nl[X_BLOCK_SIZE ].n_value + off);
 	block_count_p =   (int *) (bp + nl[X_BLOCK_COUNT].n_value + off);
-	block_table = (daddr_t *) (bp + nl[X_BLOCK_TABLE].n_value + off);
+	block_table = (daddr32_t *) (bp + nl[X_BLOCK_TABLE].n_value + off);
 	maxblocknum = *block_count_p;
 
 	if (verbose) {
@@ -268,7 +268,7 @@ loadprotoblocks(fname, size)
 }
 
 static void
-devread(int fd, void *buf, daddr_t blk, size_t size, char *msg)
+devread(int fd, void *buf, daddr32_t blk, size_t size, char *msg)
 {
 	if (lseek(fd, dbtob(blk), SEEK_SET) != dbtob(blk))
 		err(1, "%s: devread: lseek", msg);
@@ -287,7 +287,7 @@ loadblocknums(char *boot, int devfd)
 	struct	statfs	statfsbuf;
 	struct fs	*fs;
 	char		*buf;
-	daddr_t		blk, *ap;
+	daddr32_t		blk, *ap;
 	struct ufs1_dinode	*ip;
 	int		ndb;
 
@@ -369,7 +369,7 @@ loadblocknums(char *boot, int devfd)
 	 */
 	blk = fsbtodb(fs, ip->di_ib[0]);
 	devread(devfd, buf, blk, fs->fs_bsize, "indirect block");
-	ap = (daddr_t *)buf;
+	ap = (daddr32_t *)buf;
 	for (; i < NINDIR(fs) && *ap && ndb; i++, ap++, ndb--) {
 		blk = fsbtodb(fs, *ap);
 		if (verbose)
@@ -386,7 +386,7 @@ vid_to_disklabel(char *dkname, char *bootproto)
 	char *specname;
 	int exe_file, f;
 	struct mvmedisklabel *pcpul;
-	struct stat stat;
+	struct stat sb;
 	unsigned int exe_addr;
 	unsigned short exe_addr_u;
 	unsigned short exe_addr_l;
@@ -414,12 +414,15 @@ vid_to_disklabel(char *dkname, char *bootproto)
 	pcpul->version = 1;
 	strncpy(pcpul->vid_id, "M68K", 4);
 
-	fstat(exe_file, &stat);
+	if (fstat(exe_file, &sb) == -1)
+		err(1, "fstat: %s", bootproto);
+	if (sb.st_size < 0x20)
+		errx(1, "%s is too small", bootproto);
 
 	/* size in 256 byte blocks round up after a.out header removed */
 
 	pcpul->vid_oss = 2;
-	pcpul->vid_osl = (((stat.st_size -0x20) +511) / 512) *2;
+	pcpul->vid_osl = (((sb.st_size -0x20) +511) / 512) *2;
 
 	lseek(exe_file, 0x14, SEEK_SET);
 	read(exe_file, &exe_addr, 4);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_malloc.c,v 1.83 2010/07/02 01:25:05 art Exp $	*/
+/*	$OpenBSD: kern_malloc.c,v 1.89 2011/06/06 17:10:23 ariane Exp $	*/
 /*	$NetBSD: kern_malloc.c,v 1.15.4.2 1996/06/13 17:10:56 cgd Exp $	*/
 
 /*
@@ -107,7 +107,9 @@ u_int	nkmempages_min = 0;
 u_int	nkmempages_max = 0;
 
 struct kmembuckets bucket[MINBUCKET + 16];
+#ifdef KMEMSTATS
 struct kmemstats kmemstats[M_LAST];
+#endif
 struct kmemusage *kmemusage;
 char *kmembase, *kmemlimit;
 char buckstring[16 * sizeof("123456,")];
@@ -189,6 +191,11 @@ malloc(unsigned long size, int type, int flags)
 		panic("malloc - bogus type");
 #endif
 
+	KASSERT(flags & (M_WAITOK | M_NOWAIT));
+
+	if ((flags & M_NOWAIT) == 0)
+		assertwaitok();
+
 #ifdef MALLOC_DEBUG
 	if (debug_malloc(size, type, flags, (void **)&va)) {
 		if ((flags & M_ZERO) && va != NULL)
@@ -237,7 +244,7 @@ malloc(unsigned long size, int type, int flags)
 		    (vsize_t)ptoa(npg), 0,
 		    ((flags & M_NOWAIT) ? UVM_KMF_NOWAIT : 0) |
 		    ((flags & M_CANFAIL) ? UVM_KMF_CANFAIL : 0),
-		    dma_constraint.ucr_low, dma_constraint.ucr_high,
+		    no_constraint.ucr_low, no_constraint.ucr_high,
 		    0, 0, 0);
 		if (va == NULL) {
 			/*

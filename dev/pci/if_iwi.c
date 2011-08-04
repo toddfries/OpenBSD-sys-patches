@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwi.c,v 1.103 2010/05/19 15:27:35 oga Exp $	*/
+/*	$OpenBSD: if_iwi.c,v 1.111 2010/11/15 19:11:57 damien Exp $	*/
 
 /*-
  * Copyright (c) 2004-2008
@@ -31,6 +31,7 @@
 #include <sys/systm.h>
 #include <sys/conf.h>
 #include <sys/device.h>
+#include <sys/workq.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -73,7 +74,8 @@ const struct pci_matchid iwi_devices[] = {
 
 int		iwi_match(struct device *, void *, void *);
 void		iwi_attach(struct device *, struct device *, void *);
-void		iwi_power(int, void *);
+int		iwi_activate(struct device *, int);
+void		iwi_resume(void *, void *);
 int		iwi_alloc_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
 void		iwi_reset_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
 void		iwi_free_cmd_ring(struct iwi_softc *, struct iwi_cmd_ring *);
@@ -141,7 +143,8 @@ int iwi_debug = 0;
 #endif
 
 struct cfattach iwi_ca = {
-	sizeof (struct iwi_softc), iwi_match, iwi_attach
+	sizeof (struct iwi_softc), iwi_match, iwi_attach, NULL,
+	iwi_activate
 };
 
 int
@@ -295,7 +298,6 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = iwi_init;
 	ifp->if_ioctl = iwi_ioctl;
 	ifp->if_start = iwi_start;
 	ifp->if_watchdog = iwi_watchdog;
@@ -309,8 +311,6 @@ iwi_attach(struct device *parent, struct device *self, void *aux)
 	ic->ic_newstate = iwi_newstate;
 	ic->ic_send_mgmt = iwi_send_mgmt;
 	ieee80211_media_init(ifp, iwi_media_change, iwi_media_status);
-
-	sc->powerhook = powerhook_establish(iwi_power, sc);
 
 #if NBPFILTER > 0
 	bpfattach(&sc->sc_drvbpf, ifp, DLT_IEEE802_11_RADIO,
@@ -332,16 +332,33 @@ fail:	while (--ac >= 0)
 	iwi_free_cmd_ring(sc, &sc->cmdq);
 }
 
-void
-iwi_power(int why, void *arg)
+int
+iwi_activate(struct device *self, int act)
 {
-	struct iwi_softc *sc = arg;
-	struct ifnet *ifp;
+	struct iwi_softc *sc = (struct iwi_softc *)self;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
+
+	switch (act) {
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			iwi_stop(ifp, 0);
+		break;
+	case DVACT_RESUME:
+		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
+		    iwi_resume, sc, NULL);
+		break;
+	}
+
+	return 0;
+}
+
+void
+iwi_resume(void *arg1, void *arg2)
+{
+	struct iwi_softc *sc = arg1;
+	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	pcireg_t data;
 	int s;
-
-	if (why != PWR_RESUME)
-		return;
 
 	/* clear device specific PCI configuration register 0x41 */
 	data = pci_conf_read(sc->sc_pct, sc->sc_pcitag, 0x40);
@@ -349,12 +366,15 @@ iwi_power(int why, void *arg)
 	pci_conf_write(sc->sc_pct, sc->sc_pcitag, 0x40, data);
 
 	s = splnet();
-	ifp = &sc->sc_ic.ic_if;
-	if (ifp->if_flags & IFF_UP) {
-		ifp->if_init(ifp);
-		if (ifp->if_flags & IFF_RUNNING)
-			ifp->if_start(ifp);
-	}
+	while (sc->sc_flags & IWI_FLAG_BUSY)
+		tsleep(&sc->sc_flags, 0, "iwipwr", 0);
+	sc->sc_flags |= IWI_FLAG_BUSY;
+
+	if (ifp->if_flags & IFF_UP)
+		iwi_init(ifp);
+
+	sc->sc_flags &= ~IWI_FLAG_BUSY;
+	wakeup(&sc->sc_flags);
 	splx(s);
 }
 
@@ -1450,6 +1470,17 @@ iwi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	int s, error = 0;
 
 	s = splnet();
+	/*
+	 * Prevent processes from entering this function while another
+	 * process is tsleep'ing in it.
+	 */
+	while ((sc->sc_flags & IWI_FLAG_BUSY) && error == 0)
+		error = tsleep(&sc->sc_flags, PCATCH, "iwiioc", 0);
+	if (error != 0) {
+		splx(s);
+		return error;
+	}
+	sc->sc_flags |= IWI_FLAG_BUSY;
 
 	switch (cmd) {
 	case SIOCSIFADDR:
@@ -1503,6 +1534,8 @@ iwi_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		error = 0;
 	}
 
+	sc->sc_flags &= ~IWI_FLAG_BUSY;
+	wakeup(&sc->sc_flags);
 	splx(s);
 	return error;
 }
@@ -1530,7 +1563,7 @@ iwi_stop_master(struct iwi_softc *sc)
 	tmp = CSR_READ_4(sc, IWI_CSR_RST);
 	CSR_WRITE_4(sc, IWI_CSR_RST, tmp | IWI_RST_PRINCETON_RESET);
 
-	sc->flags &= ~IWI_FLAG_FW_INITED;
+	sc->sc_flags &= ~IWI_FLAG_FW_INITED;
 }
 
 int
@@ -2272,7 +2305,7 @@ iwi_init(struct ifnet *ifp)
 	}
 
 	free(data, M_DEVBUF);
-	sc->flags |= IWI_FLAG_FW_INITED;
+	sc->sc_flags |= IWI_FLAG_FW_INITED;
 
 	if ((error = iwi_config(sc)) != 0) {
 		printf("%s: device configuration failed\n",
@@ -2305,6 +2338,9 @@ iwi_stop(struct ifnet *ifp, int disable)
 	sc->sc_tx_timer = 0;
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
+
+	/* in case we were scanning, release the scan "lock" */
+	ic->ic_scan_lock = IEEE80211_SCAN_UNLOCKED;
 
 	ieee80211_new_state(ic, IEEE80211_S_INIT, -1);
 

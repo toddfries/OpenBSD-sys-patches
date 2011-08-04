@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.182 2010/07/09 16:58:06 reyk Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.195 2011/07/06 02:42:28 henning Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -144,6 +144,8 @@ struct pool ipq_pool;
 
 struct ipstat ipstat;
 
+int	in_ouraddr(struct in_addr, struct mbuf *);
+
 char *
 inet_ntoa(ina)
 	struct in_addr ina;
@@ -180,7 +182,7 @@ int ip_weadvertise(u_int32_t, u_int);
  * All protocols not implemented in kernel go to raw IP protocol handler.
  */
 void
-ip_init()
+ip_init(void)
 {
 	struct protosw *pr;
 	int i;
@@ -204,7 +206,7 @@ ip_init()
 		    pr->pr_protocol < IPPROTO_MAX)
 			ip_protox[pr->pr_protocol] = pr - inetsw;
 	LIST_INIT(&ipq);
-	ipintrq.ifq_maxlen = ipqmaxlen;
+	IFQ_SET_MAXLEN(&ipintrq, ipqmaxlen);
 	TAILQ_INIT(&in_ifaddr);
 	if (ip_mtudisc != 0)
 		ip_mtudisc_timeout_q =
@@ -226,7 +228,7 @@ struct	sockaddr_in ipaddr = { sizeof(ipaddr), AF_INET };
 struct	route ipforward_rt;
 
 void
-ipintr()
+ipintr(void)
 {
 	struct mbuf *m;
 	int s;
@@ -254,12 +256,10 @@ ipintr()
  * try to reassemble.  Process options.  Pass to next level.
  */
 void
-ipv4_input(m)
-	struct mbuf *m;
+ipv4_input(struct mbuf *m)
 {
 	struct ip *ip;
 	struct ipq *fp;
-	struct in_ifaddr *ia;
 	struct ipqent *ipqe;
 	int hlen, mff, len;
 	in_addr_t pfrdr = 0;
@@ -366,7 +366,7 @@ ipv4_input(m)
 	 * Packet filter
 	 */
 	pfrdr = ip->ip_dst.s_addr;
-	if (pf_test(PF_IN, m->m_pkthdr.rcvif, &m, NULL) != PF_PASS)
+	if (pf_test(AF_INET, PF_IN, m->m_pkthdr.rcvif, &m, NULL) != PF_PASS)
 		goto bad;
 	if (m == NULL)
 		return;
@@ -387,38 +387,22 @@ ipv4_input(m)
 	        return;
 	}
 
-	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED)
+	if (in_ouraddr(ip->ip_dst, m))
 		goto ours;
-
-#if NPF > 0
-	if (m->m_pkthdr.pf.statekey &&
-	    ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp)
-		goto ours;
-
-	/*
-	 * Check our list of addresses, to see if the packet is for us.
-	 * if we have linked state keys it is certainly to be forwarded.
-	 */
-	if (!m->m_pkthdr.pf.statekey ||
-	    !((struct pf_state_key *)m->m_pkthdr.pf.statekey)->reverse)
-#endif
-		if ((ia = in_iawithaddr(ip->ip_dst, m, m->m_pkthdr.rdomain)) !=
-		    NULL && (ia->ia_ifp->if_flags & IFF_UP))
-			goto ours;
 
 	if (IN_MULTICAST(ip->ip_dst.s_addr)) {
 		struct in_multi *inm;
 #ifdef MROUTING
 		extern struct socket *ip_mrouter;
 
-		if (m->m_flags & M_EXT) {
-			if ((m = m_pullup(m, hlen)) == NULL) {
-				ipstat.ips_toosmall++;
-				return;
-			}
-			ip = mtod(m, struct ip *);
-		}
 		if (ipmforwarding && ip_mrouter) {
+			if (m->m_flags & M_EXT) {
+				if ((m = m_pullup(m, hlen)) == NULL) {
+					ipstat.ips_toosmall++;
+					return;
+				}
+				ip = mtod(m, struct ip *);
+			}
 			/*
 			 * If we are acting as a multicast router, all
 			 * incoming multicast packets are passed to the
@@ -679,36 +663,94 @@ bad:
 	m_freem(m);
 }
 
-struct in_ifaddr *
-in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
+int
+in_ouraddr(struct in_addr ina, struct mbuf *m)
 {
-	struct in_ifaddr *ia;
+	struct in_ifaddr	*ia;
+	struct sockaddr_in	 sin;
+#if NPF > 0
+	struct pf_state_key	*key;
 
-	rdomain = rtable_l2(rdomain);
-	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-		if (ia->ia_ifp->if_rdomain != rdomain)
-			continue;
-		if ((ina.s_addr == ia->ia_addr.sin_addr.s_addr) ||
-		    ((ia->ia_ifp->if_flags & (IFF_LOOPBACK|IFF_LINK1)) ==
-			(IFF_LOOPBACK|IFF_LINK1) &&
-		     ia->ia_net == (ina.s_addr & ia->ia_netmask)))
-			return ia;
-		/* check ancient classful too, e. g. for rarp-based netboot */
-		if (((ip_directedbcast == 0) || (m && ip_directedbcast &&
-		    ia->ia_ifp == m->m_pkthdr.rcvif)) &&
-		    (ia->ia_ifp->if_flags & IFF_BROADCAST)) {
-			if (ina.s_addr == ia->ia_broadaddr.sin_addr.s_addr ||
+	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED)
+		return (1);
+
+	key = (struct pf_state_key *)m->m_pkthdr.pf.statekey;
+	if (key != NULL) {
+		if (key->inp != NULL)
+			return (1);
+
+		/* If we have linked state keys it is certainly forwarded. */
+		if (key->reverse != NULL)
+			return (0);
+	}
+#endif
+
+	bzero(&sin, sizeof(sin));
+	sin.sin_len = sizeof(sin);
+	sin.sin_family = AF_INET;
+	sin.sin_addr = ina;
+	ia = (struct in_ifaddr *)ifa_ifwithaddr(sintosa(&sin),
+	    m->m_pkthdr.rdomain);
+
+	if (ia == NULL) {
+		/*
+		 * No local address or broadcast address found, so check for
+		 * ancient classful broadcast addresses.
+		 * It must have been broadcast on the link layer, and for an
+		 * address on the interface it was received on.
+		 */
+		if (!ISSET(m->m_flags, M_BCAST) ||
+		    !IN_CLASSFULBROADCAST(ina.s_addr, ina.s_addr))
+			return (0);
+
+		/*
+		 * The check in the loop assumes you only rx a packet on an UP
+		 * interface, and that M_BCAST will only be set on a BROADCAST
+		 * interface.
+		 */
+		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
+			if (ia->ia_ifp == m->m_pkthdr.rcvif &&
+			    ia->ia_ifp->if_rdomain == m->m_pkthdr.rdomain &&
 			    IN_CLASSFULBROADCAST(ina.s_addr,
-			    ia->ia_addr.sin_addr.s_addr)) {
-				/* Make sure M_BCAST is set */
-				if (m)
-					m->m_flags |= M_BCAST;
-				return ia;
-			    }
+			    ia->ia_addr.sin_addr.s_addr))
+				return (1);
 		}
+
+		return (0);
 	}
 
-	return NULL;
+	if (ina.s_addr != ia->ia_addr.sin_addr.s_addr) {
+		/*
+		 * This matches a broadcast address on one of our interfaces.
+		 * If directedbcast is enabled we only consider it local if it
+		 * is received on the interface with that address.
+		 */
+		if (ip_directedbcast && ia->ia_ifp != m->m_pkthdr.rcvif)
+			return (0);
+
+		/* Make sure M_BCAST is set */
+		if (m)
+			m->m_flags |= M_BCAST;
+	}
+
+	return (ISSET(ia->ia_ifp->if_flags, IFF_UP));
+}
+
+struct in_ifaddr *
+in_iawithaddr(struct in_addr ina, u_int rdomain)
+{
+	struct in_ifaddr	*ia;
+	struct sockaddr_in	 sin;
+
+	bzero(&sin, sizeof(sin));
+	sin.sin_len = sizeof(sin);
+	sin.sin_family = AF_INET;
+	sin.sin_addr = ina;
+	ia = (struct in_ifaddr *)ifa_ifwithaddr(sintosa(&sin), rdomain);
+	if (ia == NULL || ina.s_addr == ia->ia_addr.sin_addr.s_addr)
+		return (ia);
+
+	return (NULL);
 }
 
 /*
@@ -718,9 +760,7 @@ in_iawithaddr(struct in_addr ina, struct mbuf *m, u_int rdomain)
  * is given as fp; otherwise have to make a chain.
  */
 struct mbuf *
-ip_reass(ipqe, fp)
-	struct ipqent *ipqe;
-	struct ipq *fp;
+ip_reass(struct ipqent *ipqe, struct ipq *fp)
 {
 	struct mbuf *m = ipqe->ipqe_m;
 	struct ipqent *nq, *p, *q;
@@ -903,8 +943,7 @@ dropfrag:
  * associated datagrams.
  */
 void
-ip_freef(fp)
-	struct ipq *fp;
+ip_freef(struct ipq *fp)
 {
 	struct ipqent *q, *p;
 
@@ -926,7 +965,7 @@ ip_freef(fp)
  * clear the forwarding cache, there might be a better route.
  */
 void
-ip_slowtimo()
+ip_slowtimo(void)
 {
 	struct ipq *fp, *nfp;
 	int s = splsoftnet();
@@ -949,9 +988,8 @@ ip_slowtimo()
  * Drain off all datagram fragments.
  */
 void
-ip_drain()
+ip_drain(void)
 {
-
 	while (!LIST_EMPTY(&ipq)) {
 		ipstat.ips_fragdropped++;
 		ip_freef(LIST_FIRST(&ipq));
@@ -962,7 +1000,7 @@ ip_drain()
  * Flush a bunch of datagram fragments, till we are down to 75%.
  */
 void
-ip_flush()
+ip_flush(void)
 {
 	int max = 50;
 
@@ -981,8 +1019,7 @@ ip_flush()
  * 0 if the packet should be processed further.
  */
 int
-ip_dooptions(m)
-	struct mbuf *m;
+ip_dooptions(struct mbuf *m)
 {
 	struct ip *ip = mtod(m, struct ip *);
 	u_char *cp;
@@ -1230,9 +1267,7 @@ ip_rtaddr(struct in_addr dst, u_int rtableid)
  * to be picked up later by ip_srcroute if the receiver is interested.
  */
 void
-save_rte(option, dst)
-	u_char *option;
-	struct in_addr dst;
+save_rte(u_char *option, struct in_addr dst)
 {
 	unsigned olen;
 
@@ -1301,7 +1336,7 @@ ip_weadvertise(u_int32_t addr, u_int rtableid)
  * The first hop is placed before the options, will be removed later.
  */
 struct mbuf *
-ip_srcroute()
+ip_srcroute(void)
 {
 	struct in_addr *p, *q;
 	struct mbuf *m;
@@ -1372,9 +1407,7 @@ ip_srcroute()
  * XXX should be deleted; last arg currently ignored.
  */
 void
-ip_stripoptions(m, mopt)
-	struct mbuf *m;
-	struct mbuf *mopt;
+ip_stripoptions(struct mbuf *m, struct mbuf *mopt)
 {
 	int i;
 	struct ip *ip = mtod(m, struct ip *);
@@ -1415,9 +1448,7 @@ int inetctlerrmap[PRC_NCMDS] = {
  * via a source route.
  */
 void
-ip_forward(m, srcrt)
-	struct mbuf *m;
-	int srcrt;
+ip_forward(struct mbuf *m, int srcrt)
 {
 	struct ip *ip = mtod(m, struct ip *);
 	struct sockaddr_in *sin;
@@ -1557,6 +1588,12 @@ ip_forward(m, srcrt)
 		ipstat.ips_cantfrag++;
 		break;
 
+	case EACCES:
+		/*
+		 * pf(4) blocked the packet. There is no need to send an ICMP
+		 * packet back since pf(4) takes care of it.
+		 */
+		goto freecopy;
 	case ENOBUFS:
 		/*
 		 * a router should not generate ICMP_SOURCEQUENCH as
@@ -1572,7 +1609,7 @@ ip_forward(m, srcrt)
 
  freecopy:
 	if (mcopy)
-		m_free(mcopy);
+		m_freem(mcopy);
  freert:
 #ifndef SMALL_KERNEL
 	if (ipmultipath && ipforward_rt.ro_rt &&
@@ -1585,13 +1622,8 @@ ip_forward(m, srcrt)
 }
 
 int
-ip_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
-	int *name;
-	u_int namelen;
-	void *oldp;
-	size_t *oldlenp;
-	void *newp;
-	size_t newlen;
+ip_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen) 
 {
 	int error;
 #ifdef MROUTING
@@ -1737,7 +1769,22 @@ ip_savecontrol(struct inpcb *inp, struct mbuf **mp, struct ip *ip,
 	}
 	if (inp->inp_flags & INP_RECVTTL) {
 		*mp = sbcreatecontrol((caddr_t) &ip->ip_ttl,
-		    sizeof(u_char), IP_RECVTTL, IPPROTO_IP);
+		    sizeof(u_int8_t), IP_RECVTTL, IPPROTO_IP);
+		if (*mp)
+			mp = &(*mp)->m_next;
+	}
+	if (inp->inp_flags & INP_RECVRTABLE) {
+		u_int rtableid = inp->inp_rtableid;
+#if NPF > 0
+		struct pf_divert *divert;
+
+		if (m && m->m_pkthdr.pf.flags & PF_TAG_DIVERTED &&
+		    (divert = pf_find_divert(m)) != NULL)
+			rtableid = divert->rdomain;
+#endif
+
+		*mp = sbcreatecontrol((caddr_t) &rtableid,
+		    sizeof(u_int), IP_RECVRTABLE, IPPROTO_IP);
 		if (*mp)
 			mp = &(*mp)->m_next;
 	}

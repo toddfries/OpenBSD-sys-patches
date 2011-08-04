@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdtvar.h,v 1.17 2009/08/12 17:51:33 jsg Exp $	*/
+/*	$OpenBSD: gdtvar.h,v 1.20 2011/07/08 08:26:41 jsg Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Niklas Hallqvist.  All rights reserved.
@@ -253,9 +253,7 @@ struct gdt_ccb {
 
 static inline int gdt_ccb_set_cmd(struct gdt_ccb *, int);
 static inline int
-gdt_ccb_set_cmd(ccb, flag)
-	struct gdt_ccb *ccb;
-	int flag;
+gdt_ccb_set_cmd(struct gdt_ccb *ccb, int flag)
 {
 	int rv = ccb->gc_flags & GDT_GCF_CMD_MASK;
 
@@ -268,7 +266,6 @@ struct gdt_softc {
 	struct	device sc_dev;
 	void   *sc_ih;
 	struct	scsi_link sc_link;	/* Virtual SCSI bus for cache devs */
-	struct	scsi_link *sc_raw_link;	/* Raw SCSI busses */
 
 	int	sc_class;		/* Controller class */
 #define GDT_ISA		0x01
@@ -297,6 +294,9 @@ struct gdt_softc {
 	TAILQ_HEAD(, gdt_ucmd) sc_ucmdq;
 	LIST_HEAD(, scsi_xfer) sc_queue;
 	struct scsi_xfer *sc_queuelast;
+
+	struct mutex		sc_ccb_mtx;
+	struct scsi_iopool	sc_iopool;
 
 	int	sc_ndevs;
 
@@ -410,38 +410,31 @@ static inline u_int16_t gdt_dec16(u_int8_t *);
 static inline u_int32_t gdt_dec32(u_int8_t *);
 
 static inline void
-gdt_enc16(addr, value)
-	u_int8_t *addr;
-	u_int16_t value;
+gdt_enc16(u_int8_t *addr, u_int16_t value)
 {
 	*(u_int16_t *)addr = htole16(value);
 }
 
 static inline void
-gdt_enc32(addr, value)
-	u_int8_t *addr;
-	u_int32_t value;
+gdt_enc32(u_int8_t *addr, u_int32_t value)
 {
 	*(u_int32_t *)addr = htole32(value);
 }
 
 static inline u_int8_t
-gdt_dec8(addr)
-	u_int8_t *addr;
+gdt_dec8(u_int8_t *addr)
 {
 	return *(u_int8_t *)addr;
 }
 
 static inline u_int16_t
-gdt_dec16(addr)
-	u_int8_t *addr;
+gdt_dec16(u_int8_t *addr)
 {
 	return letoh16(*(u_int16_t *)addr);
 }
 
 static inline u_int32_t
-gdt_dec32(addr)
-	u_int8_t *addr;
+gdt_dec32(u_int8_t *addr)
 {
 	return letoh32(*(u_int32_t *)addr);
 }

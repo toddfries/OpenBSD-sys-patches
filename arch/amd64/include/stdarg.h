@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdarg.h,v 1.6 2008/10/23 21:25:07 kettenis Exp $	*/
+/*	$OpenBSD: stdarg.h,v 1.8 2011/03/23 16:54:34 pirofti Exp $	*/
 /*	$NetBSD: stdarg.h,v 1.2 2003/04/28 23:16:17 bjh21 Exp $	*/
 
 /*-
@@ -32,8 +32,8 @@
  *	@(#)stdarg.h	8.1 (Berkeley) 6/10/93
  */
 
-#ifndef _AMD64_STDARG_H_
-#define	_AMD64_STDARG_H_
+#ifndef _MACHINE_STDARG_H_
+#define	_MACHINE_STDARG_H_
 
 #include <sys/cdefs.h>
 #include <machine/_types.h>		/* for __va_list */
@@ -49,6 +49,7 @@ typedef __va_list	va_list;
 
 #ifdef lint
 #define	va_start(ap,lastarg)	((ap) = (ap))
+#define	__va_copy(dst, src)	((dst) = (src))
 #else
 #define	va_start(ap, last) \
 	((ap) = (va_list)&(last) + __va_size(last))
@@ -59,4 +60,4 @@ typedef __va_list	va_list;
 
 #define	va_end(ap)	
 
-#endif /* !_AMD64_STDARG_H_ */
+#endif /* !_MACHINE_STDARG_H_ */

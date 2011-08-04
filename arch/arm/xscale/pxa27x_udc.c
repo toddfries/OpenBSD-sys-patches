@@ -1,4 +1,4 @@
-/*	$OpenBSD: pxa27x_udc.c,v 1.24 2010/06/07 16:34:20 drahn Exp $ */
+/*	$OpenBSD: pxa27x_udc.c,v 1.28 2011/04/07 15:30:15 miod Exp $ */
 
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
@@ -51,8 +51,6 @@ struct pxaudc_pipe {
 	struct usbf_pipe	 pipe;
 //	LIST_ENTRY(pxaudc_pipe)	 list;
 };
-
-void		 pxaudc_power(int, void *);
 
 void		 pxaudc_enable(struct pxaudc_softc *);
 void		 pxaudc_disable(struct pxaudc_softc *);
@@ -195,12 +193,10 @@ pxaudc_attach(struct pxaudc_softc *sc, void *aux)
 		printf(": unable to establish connect interrupt\n");
 		pxa2x0_intr_disestablish(sc->sc_ih);
 		bus_space_unmap(sc->sc_iot, sc->sc_ioh, sc->sc_size);
-		sc->sc_ioh = NULL;
+		sc->sc_ioh = 0;
 		sc->sc_size = 0;
 		return;
 	}
-
-	sc->sc_powerhook = powerhook_establish(pxaudc_power, sc);
 
 	/* Set up the bus struct. */
 	sc->sc_bus.methods = &pxaudc_bus_methods;
@@ -228,9 +224,6 @@ pxaudc_attach(struct pxaudc_softc *sc, void *aux)
 int
 pxaudc_detach(struct pxaudc_softc *sc, int flags)
 {
-	if (sc->sc_powerhook != NULL)
-		powerhook_disestablish(sc->sc_powerhook);
-
 	if (sc->sc_conn_ih != NULL)
 		pxa2x0_gpio_intr_disestablish(sc->sc_conn_ih);
 
@@ -245,21 +238,20 @@ pxaudc_detach(struct pxaudc_softc *sc, int flags)
 	return (0);
 }
 
-void
-pxaudc_power(int why, void *arg)
+int
+pxaudc_activate(struct pxaudc_softc *self, int act)
 {
-	struct pxaudc_softc		*sc = (struct pxaudc_softc *)arg;
+	struct pxaudc_softc *sc = (struct pxaudc_softc *)self;
 
-	switch (why) {
-	case PWR_SUSPEND:
-	case PWR_STANDBY:
+	switch (act) {
+	case DVACT_SUSPEND:
 		pxaudc_disable(sc);
 		break;
-
-	case PWR_RESUME:
+	case DVACT_RESUME:
 		pxaudc_enable(sc);
 		break;
 	}
+	return 0;
 }
 
 /*

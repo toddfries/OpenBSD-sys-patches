@@ -1,4 +1,4 @@
-/*	$OpenBSD: ti.c,v 1.2 2009/12/13 13:21:54 kettenis Exp $	*/
+/*	$OpenBSD: ti.c,v 1.4 2011/06/21 16:52:45 tedu Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -132,7 +132,6 @@ void ti_init(void *);
 void ti_init2(struct ti_softc *);
 void ti_stop(struct ti_softc *);
 void ti_watchdog(struct ifnet *);
-void ti_shutdown(void *);
 int ti_ifmedia_upd(struct ifnet *);
 void ti_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 
@@ -955,7 +954,7 @@ ti_free_rx_ring_std(struct ti_softc *sc)
 					   sc->ti_cdata.ti_rx_std_map[i]);
 			sc->ti_cdata.ti_rx_std_map[i] = 0;
 		}
-		bzero((char *)&sc->ti_rdata->ti_rx_std_ring[i],
+		bzero(&sc->ti_rdata->ti_rx_std_ring[i],
 		    sizeof(struct ti_rx_desc));
 	}
 }
@@ -987,7 +986,7 @@ ti_free_rx_ring_jumbo(struct ti_softc *sc)
 			m_freem(sc->ti_cdata.ti_rx_jumbo_chain[i]);
 			sc->ti_cdata.ti_rx_jumbo_chain[i] = NULL;
 		}
-		bzero((char *)&sc->ti_rdata->ti_rx_jumbo_ring[i],
+		bzero(&sc->ti_rdata->ti_rx_jumbo_ring[i],
 		    sizeof(struct ti_rx_desc));
 	}
 }
@@ -1021,7 +1020,7 @@ ti_free_rx_ring_mini(struct ti_softc *sc)
 					   sc->ti_cdata.ti_rx_mini_map[i]);
 			sc->ti_cdata.ti_rx_mini_map[i] = 0;
 		}
-		bzero((char *)&sc->ti_rdata->ti_rx_mini_ring[i],
+		bzero(&sc->ti_rdata->ti_rx_mini_ring[i],
 		    sizeof(struct ti_rx_desc));
 	}
 }
@@ -1043,7 +1042,7 @@ ti_free_tx_ring(struct ti_softc *sc)
 					    sc->ti_cdata.ti_tx_map[i], link);
 			sc->ti_cdata.ti_tx_map[i] = 0;
 		}
-		bzero((char *)&sc->ti_rdata->ti_tx_ring[i],
+		bzero(&sc->ti_rdata->ti_tx_ring[i],
 		    sizeof(struct ti_tx_desc));
 	}
 
@@ -1200,7 +1199,7 @@ ti_iff(struct ti_softc *sc)
 			if (mc == NULL)
 				panic("ti_iff");
 
-			bcopy(enm->enm_addrlo, (char *)&mc->mc_addr,
+			bcopy(enm->enm_addrlo, &mc->mc_addr,
 			    ETHER_ADDR_LEN);
 			SLIST_INSERT_HEAD(&sc->ti_mc_listhead, mc,
 			    mc_entries);
@@ -1511,7 +1510,7 @@ ti_gibinit(struct ti_softc *sc)
 	 * a Tigon 1 chip.
 	 */
 	CSR_WRITE_4(sc, TI_WINBASE, TI_TX_RING_BASE);
-	bzero((char *)sc->ti_rdata->ti_tx_ring,
+	bzero(sc->ti_rdata->ti_tx_ring,
 	    TI_TX_RING_CNT * sizeof(struct ti_tx_desc));
 	rcb = &sc->ti_rdata->ti_info.ti_tx_rcb;
 	if (sc->ti_hwrev == TI_HWREV_TIGON)
@@ -1686,7 +1685,6 @@ ti_attach(struct ti_softc *sc)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	shutdownhook_establish(ti_shutdown, sc);
 	return (0);
 
 fail_3:
@@ -2527,18 +2525,4 @@ ti_stop(struct ti_softc *sc)
 	sc->ti_return_prodidx.ti_idx = 0;
 	sc->ti_tx_considx.ti_idx = 0;
 	sc->ti_tx_saved_considx = TI_TXCONS_UNSET;
-}
-
-/*
- * Stop all chip I/O so that the kernel's probe routines don't
- * get confused by errant DMAs when rebooting.
- */
-void
-ti_shutdown(void *xsc)
-{
-	struct ti_softc		*sc;
-
-	sc = xsc;
-
-	ti_chipinit(sc);
 }

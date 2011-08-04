@@ -1,4 +1,4 @@
-/*      $OpenBSD: ata.c,v 1.29 2010/07/13 16:50:26 deraadt Exp $      */
+/*      $OpenBSD: ata.c,v 1.33 2011/06/22 14:17:01 krw Exp $      */
 /*      $NetBSD: ata.c,v 1.9 1999/04/15 09:41:09 bouyer Exp $      */
 /*
  * Copyright (c) 1998, 2001 Manuel Bouyer.  All rights reserved.
@@ -11,11 +11,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *  This product includes software developed by Manuel Bouyer.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -37,6 +32,7 @@
 #include <sys/malloc.h>
 #include <sys/device.h>
 #include <sys/syslog.h>
+#include <sys/pool.h>
 
 #include <machine/bus.h>
 
@@ -70,7 +66,7 @@ ata_get_params(struct ata_drive_datas *drvp, u_int8_t flags,
 	u_int16_t *p;
 	int ret;
 
-	WDCDEBUG_PRINT(("ata_get_parms\n"), DEBUG_FUNCS);
+	WDCDEBUG_PRINT(("ata_get_params\n"), DEBUG_FUNCS);
 
 	bzero(&wdc_c, sizeof(struct wdc_command));
 
@@ -85,12 +81,12 @@ ata_get_params(struct ata_drive_datas *drvp, u_int8_t flags,
 		wdc_c.r_st_pmask = 0;
 		wdc_c.timeout = 10000; /* 10s */
 	} else {
-		WDCDEBUG_PRINT(("wdc_ata_get_parms: no disks\n"),
+		WDCDEBUG_PRINT(("ata_get_params: no disks\n"),
 		    DEBUG_FUNCS|DEBUG_PROBE);
 		return CMD_ERR;
 	}
 
-	tb = malloc(ATAPARAMS_SIZE, M_DEVBUF, M_NOWAIT | M_ZERO); /* XXX dma reachable */
+	tb = dma_alloc(ATAPARAMS_SIZE, PR_NOWAIT | PR_ZERO);
 	if (tb == NULL)
 		return CMD_AGAIN;
 	wdc_c.flags = AT_READ | flags;
@@ -100,7 +96,7 @@ ata_get_params(struct ata_drive_datas *drvp, u_int8_t flags,
 	if ((ret = wdc_exec_command(drvp, &wdc_c)) != WDC_COMPLETE) {
 		WDCDEBUG_PRINT(("%s: wdc_exec_command failed: %d\n",
 		    __func__, ret), DEBUG_PROBE);
-		free(tb, M_DEVBUF);
+		dma_free(tb, ATAPARAMS_SIZE);
 		return CMD_AGAIN;
 	}
 
@@ -108,7 +104,7 @@ ata_get_params(struct ata_drive_datas *drvp, u_int8_t flags,
 		WDCDEBUG_PRINT(("%s: IDENTIFY failed: 0x%x\n", __func__,
 		    wdc_c.flags), DEBUG_PROBE);
 
-		free(tb, M_DEVBUF);
+		dma_free(tb, ATAPARAMS_SIZE);
 		return CMD_ERR;
 	} else {
 #if BYTE_ORDER == BIG_ENDIAN
@@ -139,7 +135,7 @@ ata_get_params(struct ata_drive_datas *drvp, u_int8_t flags,
 			prms->atap_model[1] == 'E') ||
 		     (prms->atap_model[0] == 'F' &&
 			 prms->atap_model[1] == 'X'))) {
-			free(tb, M_DEVBUF);
+			dma_free(tb, ATAPARAMS_SIZE);
 			return CMD_OK;
 		}
 		for (i = 0; i < sizeof(prms->atap_model); i += 2) {
@@ -155,7 +151,7 @@ ata_get_params(struct ata_drive_datas *drvp, u_int8_t flags,
 			*p = swap16(*p);
 		}
 
-		free(tb, M_DEVBUF);
+		dma_free(tb, ATAPARAMS_SIZE);
 		return CMD_OK;
 	}
 }

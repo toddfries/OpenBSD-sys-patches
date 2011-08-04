@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.124 2010/07/01 16:23:09 thib Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.133 2011/07/06 20:50:05 beck Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -56,10 +56,9 @@
 #include <sys/resourcevar.h>
 #include <sys/conf.h>
 #include <sys/kernel.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <miscfs/specfs/specdev.h>
 
 /*
  * Definitions for the buffer free lists.
@@ -113,9 +112,6 @@ long backoffpages;	/* backoff counter for page allocations */
 long buflowpages;	/* bufpages low water mark */
 long bufhighpages; 	/* bufpages high water mark */
 long bufbackpages; 	/* number of pages we back off when asked to shrink */
-
-/* XXX - should be defined here. */
-extern int bufcachepercent;
 
 vsize_t bufkvm;
 
@@ -191,19 +187,19 @@ buf_put(struct buf *bp)
 void
 bufinit(void)
 {
+	u_int64_t dmapages;
 	struct bqueues *dp;
 
-	/* XXX - for now */
-	bufhighpages = buflowpages = bufpages = bufcachepercent = bufkvm = 0;
+	dmapages = uvm_pagecount(&dma_constraint);
 
 	/*
 	 * If MD code doesn't say otherwise, use 10% of kvm for mappings and
-	 * 10% physmem for pages.
+	 * 10% of dmaable pages for cache pages.
 	 */
 	if (bufcachepercent == 0)
 		bufcachepercent = 10;
 	if (bufpages == 0)
-		bufpages = physmem * bufcachepercent / 100;
+		bufpages = dmapages * bufcachepercent / 100;
 
 	bufhighpages = bufpages;
 
@@ -212,7 +208,7 @@ bufinit(void)
 	 * we will not allow uvm to steal back more than this number of
 	 * pages
 	 */
-	buflowpages = physmem * 10 / 100;
+	buflowpages = dmapages * 10 / 100;
 
 	/*
 	 * set bufbackpages to 100 pages, or 10 percent of the low water mark
@@ -331,7 +327,7 @@ bufadjust(int newbufpages)
  * Make the buffer cache back off from cachepct.
  */
 int
-bufbackoff()
+bufbackoff(struct uvm_constraint_range *range, long size)
 {
 	/*
 	 * Back off the amount of buffer cache pages. Called by the page
@@ -406,8 +402,7 @@ bio_doread(struct vnode *vp, daddr64_t blkno, int size, int async)
  * This algorithm described in Bach (p.54).
  */
 int
-bread(struct vnode *vp, daddr64_t blkno, int size, struct ucred *cred,
-    struct buf **bpp)
+bread(struct vnode *vp, daddr64_t blkno, int size, struct buf **bpp)
 {
 	struct buf *bp;
 
@@ -424,7 +419,7 @@ bread(struct vnode *vp, daddr64_t blkno, int size, struct ucred *cred,
  */
 int
 breadn(struct vnode *vp, daddr64_t blkno, int size, daddr64_t rablks[],
-    int rasizes[], int nrablks, struct ucred *cred, struct buf **bpp)
+    int rasizes[], int nrablks, struct buf **bpp)
 {
 	struct buf *bp;
 	int i;
@@ -460,9 +455,10 @@ bread_cluster_callback(struct buf *bp)
 		size_t newsize = xbpp[1]->b_bufsize;
 
 		/*
-		 * Shrink this buffer to only cover its part of the total I/O.
+		 * Shrink this buffer's mapping to only cover its part of
+		 * the total I/O.
 		 */
-		buf_shrink_mem(bp, newsize);
+		buf_fix_mapping(bp, newsize);
 		bp->b_bcount = newsize;
 	}
 
@@ -672,20 +668,10 @@ bdwrite(struct buf *bp)
 	 */
 	if (!ISSET(bp->b_flags, B_DELWRI)) {
 		SET(bp->b_flags, B_DELWRI);
-		bp->b_synctime = time_uptime + 35;
 		s = splbio();
 		reassignbuf(bp);
 		splx(s);
 		curproc->p_stats->p_ru.ru_oublock++;	/* XXX */
-	} else {
-		/*
-		 * see if this buffer has slacked through the syncer
-		 * and enforce an async write upon it.
-		 */
-		if (bp->b_synctime < time_uptime) {
-			bawrite(bp);
-			return;
-		}
 	}
 
 	/* If this is a tape block, write the block now. */
@@ -727,7 +713,6 @@ buf_dirty(struct buf *bp)
 
 	if (ISSET(bp->b_flags, B_DELWRI) == 0) {
 		SET(bp->b_flags, B_DELWRI);
-		bp->b_synctime = time_uptime + 35;
 		reassignbuf(bp);
 	}
 }
@@ -873,13 +858,18 @@ incore(struct vnode *vp, daddr64_t blkno)
 {
 	struct buf *bp;
 	struct buf b;
+	int s;
+
+	s = splbio();
 
 	/* Search buf lookup tree */
 	b.b_lblkno = blkno;
 	bp = RB_FIND(buf_rb_bufs, &vp->v_bufs_tree, &b);
-	if (bp && !ISSET(bp->b_flags, B_INVAL))
-		return(bp);
-	return(NULL);
+	if (bp != NULL && ISSET(bp->b_flags, B_INVAL))
+		bp = NULL;
+
+	splx(s);
+	return (bp);
 }
 
 /*
@@ -908,11 +898,10 @@ getblk(struct vnode *vp, daddr64_t blkno, int size, int slpflag, int slptimeo)
 	 * the block until the write is finished.
 	 */
 start:
+	s = splbio();
 	b.b_lblkno = blkno;
 	bp = RB_FIND(buf_rb_bufs, &vp->v_bufs_tree, &b);
 	if (bp != NULL) {
-
-		s = splbio();
 		if (ISSET(bp->b_flags, B_BUSY)) {
 			SET(bp->b_flags, B_WANTED);
 			error = tsleep(bp, slpflag | (PRIBIO + 1), "getblk",
@@ -931,8 +920,8 @@ start:
 			splx(s);
 			return (bp);
 		}
-		splx(s);
 	}
+	splx(s);
 
 	if ((bp = buf_get(vp, blkno, size)) == NULL)
 		goto start;

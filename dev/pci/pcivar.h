@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcivar.h,v 1.59 2009/05/05 14:16:17 kettenis Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.66 2011/05/30 19:09:46 kettenis Exp $	*/
 /*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -90,6 +90,7 @@ struct pcibus_attach_args {
 	bus_space_tag_t pba_memt;	/* pci mem space tag */
 	bus_dma_tag_t pba_dmat;		/* DMA tag */
 	pci_chipset_tag_t pba_pc;
+	int		pba_flags;	/* flags; see below */
 
 	struct extent	*pba_ioex;
 	struct extent	*pba_memex;
@@ -163,6 +164,8 @@ struct pci_attach_args {
 #define	PCI_FLAGS_MRM_OKAY	0x08		/* Memory Read Multiple okay */
 #define	PCI_FLAGS_MWI_OKAY	0x10		/* Memory Write and Invalidate
 						   okay */
+#define	PCI_FLAGS_MSI_ENABLED	0x20		/* Message Signaled Interrupt
+						   enabled */
 
 /*
  *
@@ -180,10 +183,10 @@ struct pci_softc {
 	bus_space_tag_t sc_iot, sc_memt;
 	bus_dma_tag_t sc_dmat;
 	pci_chipset_tag_t sc_pc;
+	int sc_flags;
 	struct extent *sc_ioex;
 	struct extent *sc_memex;
 	struct extent *sc_pmemex;
-	void *sc_powerhook;
 	LIST_HEAD(, pci_dev) sc_devs;
 	int sc_domain, sc_bus, sc_maxndevs;
 	pcitag_t *sc_bridgetag;
@@ -193,6 +196,7 @@ struct pci_softc {
 };
 
 extern int pci_ndomains;
+extern int pci_dopm;
 
 /*
  * Locators devices that attach to 'pcibus', as specified to config.
@@ -227,8 +231,10 @@ int	pci_io_find(pci_chipset_tag_t, pcitag_t, int, bus_addr_t *,
 int	pci_mem_find(pci_chipset_tag_t, pcitag_t, int, bus_addr_t *,
 	    bus_size_t *, int *);
 
-int pci_get_capability(pci_chipset_tag_t, pcitag_t, int,
-			    int *, pcireg_t *);
+int	pci_get_capability(pci_chipset_tag_t, pcitag_t, int,
+	    int *, pcireg_t *);
+int	pci_get_ht_capability(pci_chipset_tag_t, pcitag_t, int,
+	    int *, pcireg_t *);
 
 struct pci_matchid {
 	pci_vendor_id_t		pm_vid;
@@ -236,6 +242,7 @@ struct pci_matchid {
 };
 
 int pci_matchbyid(struct pci_attach_args *, const struct pci_matchid *, int);
+int pci_get_powerstate(pci_chipset_tag_t, pcitag_t);
 int pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int);
 
 /*
@@ -250,7 +257,7 @@ int pci_vpd_write(pci_chipset_tag_t, pcitag_t, int, int, pcireg_t *);
 const char *pci_findvendor(pcireg_t);
 const char *pci_findproduct(pcireg_t);
 int	pci_find_device(struct pci_attach_args *pa,
-			int (*match)(struct pci_attach_args *));
+	    int (*match)(struct pci_attach_args *));
 int	pci_probe_device(struct pci_softc *, pcitag_t tag,
 	    int (*)(struct pci_attach_args *), struct pci_attach_args *);
 int	pci_detach_devices(struct pci_softc *, int);

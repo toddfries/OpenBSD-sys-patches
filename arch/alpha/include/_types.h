@@ -1,4 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.11 2009/11/04 19:14:09 kettenis Exp $	*/
+/*	$OpenBSD: _types.h,v 1.13 2011/07/06 00:37:13 matthew Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -32,8 +32,8 @@
  *	@(#)ansi.h	8.2 (Berkeley) 1/4/94
  */
 
-#ifndef _ALPHA__TYPES_H_
-#define _ALPHA__TYPES_H_
+#ifndef _MACHINE__TYPES_H_
+#define _MACHINE__TYPES_H_
 
 #if defined(_KERNEL)
 typedef struct label_t {
@@ -95,7 +95,7 @@ typedef int			__clock_t;
 typedef int			__clockid_t;
 typedef double			__double_t;
 typedef float			__float_t;
-typedef long			__off_t;
+typedef long long		__off_t;
 typedef long			__ptrdiff_t;
 typedef	unsigned long		__size_t;
 typedef	long			__ssize_t;
@@ -123,4 +123,4 @@ typedef	void *			__wctype_t;
 /* Feature test macros */
 #define __HAVE_TIMECOUNTER
 
-#endif	/* _ALPHA__TYPES_H_ */
+#endif	/* _MACHINE__TYPES_H_ */

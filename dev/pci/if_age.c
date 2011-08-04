@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_age.c,v 1.11 2010/05/19 14:39:07 oga Exp $	*/
+/*	$OpenBSD: if_age.c,v 1.15 2011/06/17 07:14:35 kevlo Exp $	*/
 
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
@@ -103,7 +103,7 @@ int	age_init_rx_ring(struct age_softc *);
 void	age_init_rr_ring(struct age_softc *);
 void	age_init_cmb_block(struct age_softc *);
 void	age_init_smb_block(struct age_softc *);
-int	age_newbuf(struct age_softc *, struct age_rxdesc *, int);
+int	age_newbuf(struct age_softc *, struct age_rxdesc *);
 void	age_mac_config(struct age_softc *);
 void	age_txintr(struct age_softc *, int);
 void	age_rxeof(struct age_softc *sc, struct rx_rdesc *);
@@ -132,7 +132,7 @@ struct cfdriver age_cd = {
 int agedebug = 0;
 #define	DPRINTF(x)	do { if (agedebug) printf x; } while (0)
 
-#define AGE_CSUM_FEATURES	(M_TCPV4_CSUM_OUT | M_UDPV4_CSUM_OUT)
+#define AGE_CSUM_FEATURES	(M_TCP_CSUM_OUT | M_UDP_CSUM_OUT)
 
 int
 age_match(struct device *dev, void *match, void *aux)
@@ -163,7 +163,7 @@ age_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	if (pci_intr_map(pa, &ih) != 0) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": can't map interrupt\n");
 		goto fail;
 	}
@@ -228,7 +228,6 @@ age_attach(struct device *parent, struct device *self, void *aux)
 	ifp = &sc->sc_arpcom.ac_if;
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = age_init;
 	ifp->if_ioctl = age_ioctl;
 	ifp->if_start = age_start;
 	ifp->if_watchdog = age_watchdog;
@@ -1196,9 +1195,9 @@ age_encap(struct age_softc *sc, struct mbuf **m_head)
 	/* Configure Tx IP/TCP/UDP checksum offload. */
 	if ((m->m_pkthdr.csum_flags & AGE_CSUM_FEATURES) != 0) {
 		cflags |= AGE_TD_CSUM;
-		if ((m->m_pkthdr.csum_flags & M_TCPV4_CSUM_OUT) != 0)
+		if ((m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT) != 0)
 			cflags |= AGE_TD_TCPCSUM;
-		if ((m->m_pkthdr.csum_flags & M_UDPV4_CSUM_OUT) != 0)
+		if ((m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT) != 0)
 			cflags |= AGE_TD_UDPCSUM;
 		/* Set checksum start offset. */
 		cflags |= (poff << AGE_TD_CSUM_PLOADOFFSET_SHIFT);
@@ -1344,7 +1343,7 @@ age_rxeof(struct age_softc *sc, struct rx_rdesc *rxrd)
 		mp = rxd->rx_m;
 		desc = rxd->rx_desc;
 		/* Add a new receive buffer to the ring. */
-		if (age_newbuf(sc, rxd, 0) != 0) {
+		if (age_newbuf(sc, rxd) != 0) {
 			ifp->if_iqdrops++;
 			/* Reuse Rx buffers. */
 			if (sc->age_cdata.age_rxhead != NULL) {
@@ -2084,7 +2083,7 @@ age_init_rx_ring(struct age_softc *sc)
 		rxd = &sc->age_cdata.age_rxdesc[i];
 		rxd->rx_m = NULL;
 		rxd->rx_desc = &rd->age_rx_ring[i];
-		if (age_newbuf(sc, rxd, 1) != 0)
+		if (age_newbuf(sc, rxd) != 0)
 			return (ENOBUFS);
 	}
 
@@ -2131,17 +2130,17 @@ age_init_smb_block(struct age_softc *sc)
 }
 
 int
-age_newbuf(struct age_softc *sc, struct age_rxdesc *rxd, int init)
+age_newbuf(struct age_softc *sc, struct age_rxdesc *rxd)
 {
 	struct rx_desc *desc;
 	struct mbuf *m;
 	bus_dmamap_t map;
 	int error;
 
-	MGETHDR(m, init ? M_WAITOK : M_DONTWAIT, MT_DATA);
+	MGETHDR(m, M_DONTWAIT, MT_DATA);
 	if (m == NULL)
 		return (ENOBUFS);
-	MCLGET(m, init ? M_WAITOK : M_DONTWAIT);
+	MCLGET(m, M_DONTWAIT);
 	if (!(m->m_flags & M_EXT)) {
 		 m_freem(m);
 		 return (ENOBUFS);
@@ -2154,17 +2153,8 @@ age_newbuf(struct age_softc *sc, struct age_rxdesc *rxd, int init)
 	    sc->age_cdata.age_rx_sparemap, m, BUS_DMA_NOWAIT);
 
 	if (error != 0) {
-		if (!error) {
-			bus_dmamap_unload(sc->sc_dmat,
-			    sc->age_cdata.age_rx_sparemap);
-			error = EFBIG;
-			printf("%s: too many segments?!\n", 
-			    sc->sc_dev.dv_xname);
-		}
 		m_freem(m);
-
-		if (init)
-			printf("%s: can't load RX mbuf\n", sc->sc_dev.dv_xname);
+		printf("%s: can't load RX mbuf\n", sc->sc_dev.dv_xname);
 		return (error);
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.19 2010/06/29 22:08:28 jordan Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.22 2011/05/21 15:14:57 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.7 1997/06/06 23:29:18 thorpej Exp $	*/
 
 /*
@@ -75,6 +75,9 @@ struct {
  * NOT TO BE USED DIRECTLY BY MACHINE INDEPENDENT CODE.
  */
 extern int pci_mode;
+extern bus_addr_t pci_mcfg_addr;
+extern int pci_mcfg_min_bus, pci_mcfg_max_bus;
+
 int		pci_mode_detect(void);
 
 extern struct extent *pciio_ex;
@@ -88,12 +91,13 @@ void		pci_attach_hook(struct device *, struct device *,
 		    struct pcibus_attach_args *);
 int		pci_bus_maxdevs(pci_chipset_tag_t, int);
 pcitag_t	pci_make_tag(pci_chipset_tag_t, int, int, int);
+int		pci_conf_size(pci_chipset_tag_t, pcitag_t);
 pcireg_t	pci_conf_read(pci_chipset_tag_t, pcitag_t, int);
 void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
 		    pcireg_t);
 struct pci_attach_args;
-int		pci_intr_map(struct pci_attach_args *,
-		    pci_intr_handle_t *);
+int		pci_intr_map_msi(struct pci_attach_args *, pci_intr_handle_t *);
+int		pci_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
 #define		pci_intr_line(c, ih)	((ih).line)
 const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
 void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,

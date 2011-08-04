@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.17 2010/07/02 00:36:52 weingart Exp $	*/
+/*	$OpenBSD: conf.c,v 1.22 2011/03/08 17:24:31 krw Exp $	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove
@@ -27,6 +27,7 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <libsa.h>
@@ -45,7 +46,7 @@
 #include "pxeboot.h"
 #include "pxe_net.h"
 
-const char version[] = "3.14";
+const char version[] = "3.16";
 int	debug = 1;
 
 #undef _TEST
@@ -67,17 +68,17 @@ void (*i386_probe3[])(void) = {
 };
 
 struct i386_boot_probes probe_list[] = {
-	{ "probing", i386_probe1, NENTS(i386_probe1) },
-	{ "disk",    i386_probe2, NENTS(i386_probe2) },
-	{ "net",     i386_probe3, NENTS(i386_probe3) },
+	{ "probing", i386_probe1, nitems(i386_probe1) },
+	{ "disk",    i386_probe2, nitems(i386_probe2) },
+	{ "net",     i386_probe3, nitems(i386_probe3) },
 };
-int nibprobes = NENTS(probe_list);
+int nibprobes = nitems(probe_list);
 
 /* This next list must match file_system[]. */
 char *fs_name[] = {
 	NULL, "tftp", "nfs"
 };
-int nfsname = NENTS(fs_name);
+int nfsname = nitems(fs_name);
 
 struct fs_ops file_system[] = {
 	{ ufs_open,    ufs_close,    ufs_read,    ufs_write,    ufs_seek,
@@ -97,7 +98,7 @@ struct fs_ops file_system[] = {
 	  null_stat,   null_readdir   }
 #endif
 };
-int nfsys = NENTS(file_system);
+int nfsys = nitems(file_system);
 
 struct devsw	devsw[] = {
 #ifdef _TEST
@@ -106,7 +107,7 @@ struct devsw	devsw[] = {
 	{ "BIOS", biosstrategy, biosopen, biosclose, biosioctl },
 #endif
 };
-int ndevs = NENTS(devsw);
+int ndevs = nitems(devsw);
 
 struct devsw	netsw[] = {
 	{ "net",  net_strategy, net_open, net_close, net_ioctl },
@@ -114,7 +115,7 @@ struct devsw	netsw[] = {
 
 struct netif_driver	*netif_drivers[] = {
 };
-int n_netif_drivers = NENTS(netif_drivers);
+int n_netif_drivers = nitems(netif_drivers);
 
 struct consdev constab[] = {
 #ifdef _TEST

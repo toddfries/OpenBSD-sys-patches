@@ -1,4 +1,4 @@
-/*	$OpenBSD: socketvar.h,v 1.46 2009/08/10 16:49:38 thib Exp $	*/
+/*	$OpenBSD: socketvar.h,v 1.50 2011/07/04 22:53:53 tedu Exp $	*/
 /*	$NetBSD: socketvar.h,v 1.18 1996/02/09 18:25:38 christos Exp $	*/
 
 /*-
@@ -34,6 +34,7 @@
 
 #include <sys/selinfo.h>			/* for struct selinfo */
 #include <sys/queue.h>
+#include <sys/timeout.h>
 
 TAILQ_HEAD(soqhead, socket);
 
@@ -75,6 +76,15 @@ struct socket {
 	uid_t	so_siguid;		/* uid of process who set so_pgid */
 	uid_t	so_sigeuid;		/* euid of process who set so_pgid */
 	u_long	so_oobmark;		/* chars to oob mark */
+
+#if 1 /*def SOCKET_SPLICE*/
+	struct	socket *so_splice;	/* send data to drain socket */
+	struct	socket *so_spliceback;	/* back ref for notify and cleanup */
+	off_t	so_splicelen;		/* number of bytes spliced so far */
+	off_t	so_splicemax;		/* maximum number of bytes to splice */
+	struct	timeval so_idletv;	/* idle timeout */
+	struct	timeout so_idleto;
+#endif /* SOCKET_SPLICE */
 /*
  * Variables for socket buffering.
  */
@@ -82,6 +92,7 @@ struct socket {
 		u_long	sb_cc;		/* actual chars in buffer */
 		u_long	sb_datacc;	/* data only chars in buffer */
 		u_long	sb_hiwat;	/* max actual char count */
+		u_long  sb_wat;		/* default watermark */
 		u_long	sb_mbcnt;	/* chars of mbufs used */
 		u_long	sb_mbmax;	/* max chars of mbufs to use */
 		long	sb_lowat;	/* low water mark */
@@ -101,8 +112,8 @@ struct socket {
 #define	SB_ASYNC	0x10		/* ASYNC I/O, need signals */
 #define	SB_NOINTR	0x40		/* operations not interruptible */
 #define	SB_KNOTE	0x80		/* kernel note attached */
+#define	SB_SPLICE	0x0100		/* buffer is splice source or drain */
 
-	void	*so_internal;		/* Space for svr4 stream data */
 	void	(*so_upcall)(struct socket *so, caddr_t arg, int waitf);
 	caddr_t	so_upcallarg;		/* Arg for above */
 	uid_t	so_euid, so_ruid;	/* who opened the socket */
@@ -144,7 +155,7 @@ struct socket {
  * Do we need to notify the other side when I/O is possible?
  */
 #define	sb_notify(sb)	(((sb)->sb_flags & (SB_WAIT|SB_SEL|SB_ASYNC| \
-    SB_KNOTE)) != 0)
+    SB_KNOTE|SB_SPLICE)) != 0)
 
 /*
  * How much space is there in a socket buffer (so->so_snd or so->so_rcv)?
@@ -164,7 +175,7 @@ struct socket {
     ((so)->so_state & SS_ISSENDING)
 
 /* can we read something from so? */
-#define	soreadable(so) \
+#define	_soreadable(so) \
     ((so)->so_rcv.sb_cc >= (so)->so_rcv.sb_lowat || \
 	((so)->so_state & SS_CANTRCVMORE) || \
 	(so)->so_qlen || (so)->so_error)
@@ -214,18 +225,27 @@ struct socket {
 	}								\
 } while (/* CONSTCOND */ 0)
 
-#define	sorwakeup(so) do {						\
+#define	_sorwakeup(so) do {						\
 	sowakeup((so), &(so)->so_rcv);					\
 	if ((so)->so_upcall)						\
 		(*((so)->so_upcall))((so), (so)->so_upcallarg,		\
 		    M_DONTWAIT);					\
 } while (/* CONSTCOND */ 0)
 
-#define	sowwakeup(so)	sowakeup((so), &(so)->so_snd)
+#define	_sowwakeup(so)	sowakeup((so), &(so)->so_snd)
+
+#ifdef SOCKET_SPLICE
+#define	soreadable(so)	((so)->so_splice == NULL && _soreadable(so))
+void	sorwakeup(struct socket *);
+void	sowwakeup(struct socket *);
+#else /* SOCKET_SPLICE */
+#define	soreadable(so)	_soreadable(so)
+#define	sorwakeup(so)	_sorwakeup(so)
+#define	sowwakeup(so)	_sowwakeup(so)
+#endif /* SOCKET_SPLICE */
 
 #ifdef _KERNEL
 extern u_long sb_max;
-struct	socket *sonewconn(struct socket *head, int connstatus);
 
 extern struct pool	socket_pool;
 
@@ -268,6 +288,7 @@ void	sbflush(struct sockbuf *sb);
 void	sbinsertoob(struct sockbuf *sb, struct mbuf *m0);
 void	sbrelease(struct sockbuf *sb);
 int	sbcheckreserve(u_long cnt, u_long defcnt);
+int	sbchecklowmem(void);
 int	sbreserve(struct sockbuf *sb, u_long cc);
 int	sbwait(struct sockbuf *sb);
 int	sb_lock(struct sockbuf *sb);

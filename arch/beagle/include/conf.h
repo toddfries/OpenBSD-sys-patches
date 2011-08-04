@@ -1,8 +1,8 @@
-/*	$OpenBSD: conf.h,v 1.1 2009/05/08 03:13:26 drahn Exp $	*/
+/*	$OpenBSD: conf.h,v 1.3 2011/03/23 16:54:34 pirofti Exp $	*/
 /*	$NetBSD: conf.h,v 1.8 2002/02/10 12:26:03 chris Exp $	*/
 
-#ifndef _BEAGLEBOARD_CONF_H
-#define	_BEAGLEBOARD_CONF_H
+#ifndef _MACHINE_CONF_H_
+#define	_MACHINE_CONF_H_
 
 #include <sys/conf.h>
 
@@ -10,9 +10,8 @@
  * BEAGLEBOARD specific device includes go in here
  */
 
-#define	CONF_HAVE_USB
-//#define	CONF_HAVE_GPIO
+/*#define	CONF_HAVE_GPIO*/
 
 #include <arm/conf.h>
 
-#endif	/* _BEAGLEBOARD_CONF_H */
+#endif	/* _MACHINE_CONF_H_ */

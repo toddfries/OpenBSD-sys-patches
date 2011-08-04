@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdvar.h,v 1.12 2007/06/06 17:15:13 deraadt Exp $	*/
+/*	$OpenBSD: wdvar.h,v 1.17 2011/06/06 01:59:49 matthew Exp $	*/
 /*	$NetBSD: wdvar.h,v 1.3 1998/11/11 19:38:27 bouyer Exp $	*/
 
 /*
@@ -12,12 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Manuel Bouyer.
- * 4. Neither the name of the University nor the names of its contributors
- *    may be used to endorse or promote products derived from this software
- *    without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -62,8 +56,38 @@ struct ata_bio {
 #define TIMEOUT   4 /* device timed out */
 #define ERR_NODEV 5 /* device bas been detached */
     u_int8_t r_error; /* copy of error register */
-    daddr64_t badsect[127];    /* 126 plus trailing -1 marker */
     struct wd_softc *wd;
+};
+
+struct wd_softc {
+	/* General disk infos */
+	struct device sc_dev;
+	struct disk sc_dk;
+	struct bufq sc_bufq;
+
+	/* IDE disk soft states */
+	struct ata_bio sc_wdc_bio; /* current transfer */
+	struct buf *sc_bp; /* buf being transferred */
+	struct ata_drive_datas *drvp; /* Our controller's infos */
+	int openings;
+	struct ataparams sc_params;/* drive characteristics found */
+	int sc_flags;
+/*
+ * XXX Nothing resets this yet, but disk change sensing will when ATA-4 is
+ * more fully implemented.
+ */
+#define WDF_LOADED	0x10 /* parameters loaded */
+#define WDF_WAIT	0x20 /* waiting for resources */
+#define WDF_LBA		0x40 /* using LBA mode */
+#define WDF_LBA48	0x80 /* using 48-bit LBA mode */
+
+	u_int64_t sc_capacity;
+	int cyl; /* actual drive parameters */
+	int heads;
+	int sectors;
+	int retries; /* number of xfer retry */
+	struct timeout sc_restart_timeout;
+	void *sc_sdhook;
 };
 
 /* drive states stored in ata_drive_datas */
@@ -80,6 +104,8 @@ struct ata_bio {
 #define READY          10
 
 int wdc_ata_bio(struct ata_drive_datas*, struct ata_bio*);
+int wd_hibernate_io(dev_t dev, daddr_t blkno, caddr_t addr, size_t size,
+	    int wr, void *page);
 
 void wddone(void *);
 

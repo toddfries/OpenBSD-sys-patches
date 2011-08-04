@@ -1,4 +1,4 @@
-/*	$OpenBSD: safte.c,v 1.40 2009/01/20 21:46:42 kettenis Exp $ */
+/*	$OpenBSD: safte.c,v 1.48 2011/06/15 01:10:05 dlg Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -23,6 +23,7 @@
 #include <sys/device.h>
 #include <sys/scsiio.h>
 #include <sys/malloc.h>
+#include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/rwlock.h>
 #include <sys/queue.h>
@@ -108,12 +109,12 @@ int64_t	safte_temp2uK(u_int8_t, int);
 int
 safte_match(struct device *parent, void *match, void *aux)
 {
-	struct scsi_attach_args		*sa = aux;
-	struct scsi_inquiry_data	*inq = sa->sa_inqbuf;
-	struct scsi_inquiry_data	inqbuf;
-	struct scsi_inquiry		cmd;
-	struct safte_inq		*si = (struct safte_inq *)&inqbuf.extra;
-	int				length, flags;
+	struct scsi_inquiry_data *inqbuf;
+	struct scsi_attach_args	*sa = aux;
+	struct scsi_inquiry_data *inq = sa->sa_inqbuf;
+	struct scsi_xfer *xs;
+	struct safte_inq *si;
+	int error, flags = 0, length;
 
 	if (inq == NULL)
 		return (0);
@@ -123,7 +124,7 @@ safte_match(struct device *parent, void *match, void *aux)
 	    SCSISPC(inq->version) == 3)
 		return (2);
 
-	if ((inq->device & SID_TYPE) != T_PROCESSOR ||
+ 	if ((inq->device & SID_TYPE) != T_PROCESSOR ||
 	    SCSISPC(inq->version) != 2 ||
 	    (inq->response_format & SID_ANSII) != 2)
 		return (0);
@@ -131,28 +132,40 @@ safte_match(struct device *parent, void *match, void *aux)
 	length = inq->additional_length + SAFTE_EXTRA_OFFSET;
 	if (length < SAFTE_INQ_LEN)
 		return (0);
-	if (length > sizeof(inqbuf))
-		length = sizeof(inqbuf);
+	if (length > sizeof(*inqbuf))
+		length = sizeof(*inqbuf);
 
-	memset(&cmd, 0, sizeof(cmd));
-	cmd.opcode = INQUIRY;
-	_lto2b(length, cmd.length);
-
-	memset(&inqbuf, 0, sizeof(inqbuf));
-	memset(&inqbuf.extra, ' ', sizeof(inqbuf.extra));
-
-	flags = SCSI_DATA_IN;
-	if (cold)
-		flags |= SCSI_AUTOCONF;
-
-	if (scsi_scsi_cmd(sa->sa_sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), (u_char *)&inqbuf, length, 2, 10000, NULL,
-	    flags) != 0)
+	inqbuf = dma_alloc(sizeof(*inqbuf), PR_NOWAIT | PR_ZERO);
+	if (inqbuf == NULL)
 		return (0);
 
-	if (memcmp(si->ident, SAFTE_IDENT, sizeof(si->ident)) == 0)
-		return (2);
+	memset(inqbuf->extra, ' ', sizeof(inqbuf->extra));
 
+	if (cold)
+		flags |= SCSI_AUTOCONF;
+	xs = scsi_xs_get(sa->sa_sc_link, flags | SCSI_DATA_IN);
+	if (xs == NULL)
+		goto fail;
+
+	xs->retries = 2;
+	xs->timeout = 10000;
+
+	scsi_init_inquiry(xs, 0, 0, inqbuf, length);
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	if (error)
+		goto fail;
+
+	si = (struct safte_inq *)&inqbuf->extra;
+	if (memcmp(si->ident, SAFTE_IDENT, sizeof(si->ident)) == 0) {
+		dma_free(inqbuf, sizeof(*inqbuf));
+		return (2);
+	}
+
+fail:
+	dma_free(inqbuf, sizeof(*inqbuf));
 	return (0);
 }
 
@@ -209,7 +222,7 @@ safte_attach(struct device *parent, struct device *self, void *aux)
 	if (i) /* if we're doing something, then preinit encbuf and sensors */
 		safte_read_encstat(sc);
 	else {
-		free(sc->sc_encbuf, M_DEVBUF);
+		dma_free(sc->sc_encbuf, sc->sc_encbuflen);
 		sc->sc_encbuf = NULL;
 	}
 }
@@ -238,7 +251,7 @@ safte_detach(struct device *self, int flags)
 	}
 
 	if (sc->sc_encbuf != NULL)
-		free(sc->sc_encbuf, M_DEVBUF);
+		dma_free(sc->sc_encbuf, sc->sc_encbuflen);
 
 	rw_exit_write(&sc->sc_lock);
 
@@ -248,57 +261,74 @@ safte_detach(struct device *self, int flags)
 int
 safte_read_config(struct safte_softc *sc)
 {
-	struct safte_readbuf_cmd	cmd;
-	struct safte_config		config;
-	struct safte_sensor		*s;
-	int				flags, i, j;
+	struct safte_config *config = NULL;
+	struct safte_readbuf_cmd *cmd;
+	struct safte_sensor *s;
+	struct scsi_xfer *xs;
+	int error = 0, flags = 0, i, j;
 
-	memset(&cmd, 0, sizeof(cmd));
-	cmd.opcode = READ_BUFFER;
-	cmd.flags |= SAFTE_RD_MODE;
-	cmd.bufferid = SAFTE_RD_CONFIG;
-	cmd.length = htobe16(sizeof(config));
-	flags = SCSI_DATA_IN;
-#ifndef SCSIDEBUG
-	flags |= SCSI_SILENT;
-#endif
+	config = dma_alloc(sizeof(*config), PR_NOWAIT);
+	if (config == NULL)
+		return (1);
 
 	if (cold)
 		flags |= SCSI_AUTOCONF;
+	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
+	if (xs == NULL) {
+		error = 1;
+		goto done;
+	}
+	xs->cmdlen = sizeof(*cmd);
+	xs->data = (void *)config;
+	xs->datalen = sizeof(*config);
+	xs->retries = 2;
+	xs->timeout = 30000;
 
-	if (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), (u_char *)&config, sizeof(config), 2, 30000, NULL,
-	    flags) != 0)
-		return (1);
+	cmd = (struct safte_readbuf_cmd *)xs->cmd;
+	cmd->opcode = READ_BUFFER;
+	cmd->flags |= SAFTE_RD_MODE;
+	cmd->bufferid = SAFTE_RD_CONFIG;
+	cmd->length = htobe16(sizeof(*config));
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	if (error != 0) {
+		error = 1;
+		goto done;
+	}
 
 	DPRINTF(("%s: nfans: %d npwrsup: %d nslots: %d doorlock: %d ntemps: %d"
-	    " alarm: %d celsius: %d ntherm: %d\n", DEVNAME(sc), config.nfans,
-	    config.npwrsup, config.nslots, config.doorlock, config.ntemps,
-	    config.alarm, SAFTE_CFG_CELSIUS(config.therm),
-	    SAFTE_CFG_NTHERM(config.therm)));
+	    " alarm: %d celsius: %d ntherm: %d\n", DEVNAME(sc), config->nfans,
+	    config->npwrsup, config->nslots, config->doorlock, config->ntemps,
+	    config->alarm, SAFTE_CFG_CELSIUS(config->therm),
+	    SAFTE_CFG_NTHERM(config->therm)));
 
-	sc->sc_encbuflen = config.nfans * sizeof(u_int8_t) + /* fan status */
-	    config.npwrsup * sizeof(u_int8_t) + /* power supply status */
-	    config.nslots * sizeof(u_int8_t) + /* device scsi id (lun) */
+	sc->sc_encbuflen = config->nfans * sizeof(u_int8_t) + /* fan status */
+	    config->npwrsup * sizeof(u_int8_t) + /* power supply status */
+	    config->nslots * sizeof(u_int8_t) + /* device scsi id (lun) */
 	    sizeof(u_int8_t) + /* door lock status */
 	    sizeof(u_int8_t) + /* speaker status */
-	    config.ntemps * sizeof(u_int8_t) + /* temp sensors */
+	    config->ntemps * sizeof(u_int8_t) + /* temp sensors */
 	    sizeof(u_int16_t); /* temp out of range sensors */
 
-	sc->sc_encbuf = malloc(sc->sc_encbuflen, M_DEVBUF, M_NOWAIT);
-	if (sc->sc_encbuf == NULL)
-		return (1);
+	sc->sc_encbuf = dma_alloc(sc->sc_encbuflen, PR_NOWAIT);
+	if (sc->sc_encbuf == NULL) {
+		error = 1;
+		goto done;
+	}
 
-	sc->sc_nsensors = config.nfans + config.npwrsup + config.ntemps + 
-		(config.doorlock ? 1 : 0) + (config.alarm ? 1 : 0);
+	sc->sc_nsensors = config->nfans + config->npwrsup + config->ntemps + 
+		(config->doorlock ? 1 : 0) + (config->alarm ? 1 : 0);
 
 	sc->sc_sensors = malloc(sc->sc_nsensors * sizeof(struct safte_sensor),
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sc_sensors == NULL) {
-		free(sc->sc_encbuf, M_DEVBUF);
+		dma_free(sc->sc_encbuf, sc->sc_encbuflen);
 		sc->sc_encbuf = NULL;
 		sc->sc_nsensors = 0;
-		return (1);
+		error = 1;
+		goto done;
 	}
 
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
@@ -306,7 +336,7 @@ safte_read_config(struct safte_softc *sc)
 
 	s = sc->sc_sensors;
 
-	for (i = 0; i < config.nfans; i++) {
+	for (i = 0; i < config->nfans; i++) {
 		s->se_type = SAFTE_T_FAN;
 		s->se_field = (u_int8_t *)(sc->sc_encbuf + i);
 		s->se_sensor.type = SENSOR_INDICATOR;
@@ -315,9 +345,9 @@ safte_read_config(struct safte_softc *sc)
 
 		s++;
 	}
-	j = config.nfans;
+	j = config->nfans;
 
-	for (i = 0; i < config.npwrsup; i++) {
+	for (i = 0; i < config->npwrsup; i++) {
 		s->se_type = SAFTE_T_PWRSUP;
 		s->se_field = (u_int8_t *)(sc->sc_encbuf + j + i);
 		s->se_sensor.type = SENSOR_INDICATOR;
@@ -326,15 +356,15 @@ safte_read_config(struct safte_softc *sc)
 
 		s++;
 	}
-	j += config.npwrsup;
+	j += config->npwrsup;
 
 #if NBIO > 0
-	sc->sc_nslots = config.nslots;
+	sc->sc_nslots = config->nslots;
 	sc->sc_slots = (u_int8_t *)(sc->sc_encbuf + j);
 #endif
-	j += config.nslots;
+	j += config->nslots;
 
-	if (config.doorlock) {
+	if (config->doorlock) {
 		s->se_type = SAFTE_T_DOORLOCK;
 		s->se_field = (u_int8_t *)(sc->sc_encbuf + j);
 		s->se_sensor.type = SENSOR_INDICATOR;
@@ -345,7 +375,7 @@ safte_read_config(struct safte_softc *sc)
 	}
 	j++;
 
-	if (config.alarm) {
+	if (config->alarm) {
 		s->se_type = SAFTE_T_ALARM;
 		s->se_field = (u_int8_t *)(sc->sc_encbuf + j);
 		s->se_sensor.type = SENSOR_INDICATOR;
@@ -359,50 +389,59 @@ safte_read_config(struct safte_softc *sc)
 	 * stash the temp info so we can get out of range status. limit the
 	 * number so the out of temp checks cant go into memory it doesnt own
 	 */
-	sc->sc_ntemps = (config.ntemps > 15) ? 15 : config.ntemps;
+	sc->sc_ntemps = (config->ntemps > 15) ? 15 : config->ntemps;
 	sc->sc_temps = s;
-	sc->sc_celsius = SAFTE_CFG_CELSIUS(config.therm);
-	for (i = 0; i < config.ntemps; i++) {
+	sc->sc_celsius = SAFTE_CFG_CELSIUS(config->therm);
+	for (i = 0; i < config->ntemps; i++) {
 		s->se_type = SAFTE_T_TEMP;
 		s->se_field = (u_int8_t *)(sc->sc_encbuf + j + i);
 		s->se_sensor.type = SENSOR_TEMP;
 
 		s++;
 	}
-	j += config.ntemps;
+	j += config->ntemps;
 
 	sc->sc_temperrs = (u_int8_t *)(sc->sc_encbuf + j);
-
-	return (0);
+done:
+	dma_free(config, sizeof(*config));
+	return (error);
 }
 
 void
 safte_read_encstat(void *arg)
 {
-	struct safte_softc		*sc = (struct safte_softc *)arg;
-	struct safte_readbuf_cmd	cmd;
-	int				flags, i;
-	struct safte_sensor		*s;
-	u_int16_t			oot;
+	struct safte_readbuf_cmd *cmd;
+	struct safte_sensor *s;
+	struct safte_softc *sc = (struct safte_softc *)arg;
+	struct scsi_xfer *xs;
+	int error, i, flags = 0;
+	u_int16_t oot;
 
 	rw_enter_write(&sc->sc_lock);
 
-	memset(&cmd, 0, sizeof(cmd));
-	cmd.opcode = READ_BUFFER;
-	cmd.flags |= SAFTE_RD_MODE;
-	cmd.bufferid = SAFTE_RD_ENCSTAT;
-	cmd.length = htobe16(sc->sc_encbuflen);
-	flags = SCSI_DATA_IN;
-#ifndef SCSIDEBUG
-	flags |= SCSI_SILENT;
-#endif
-
 	if (cold)
 		flags |= SCSI_AUTOCONF;
+	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
+	if (xs == NULL) {
+		rw_exit_write(&sc->sc_lock);
+		return;
+	}
+	xs->cmdlen = sizeof(*cmd);
+	xs->data = sc->sc_encbuf;
+	xs->datalen = sc->sc_encbuflen;
+	xs->retries = 2;
+	xs->timeout = 30000;
 
-	if (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), sc->sc_encbuf, sc->sc_encbuflen, 2, 30000, NULL,
-	    flags) != 0) {
+	cmd = (struct safte_readbuf_cmd *)xs->cmd;
+	cmd->opcode = READ_BUFFER;
+	cmd->flags |= SAFTE_RD_MODE;
+	cmd->bufferid = SAFTE_RD_ENCSTAT;
+	cmd->length = htobe16(sc->sc_encbuflen);
+
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	if (error != 0) {
 		rw_exit_write(&sc->sc_lock);
 		return;
 	}
@@ -532,11 +571,10 @@ safte_ioctl(struct device *dev, u_long cmd, caddr_t addr)
 int
 safte_bio_blink(struct safte_softc *sc, struct bioc_blink *blink)
 {
-	struct safte_writebuf_cmd	cmd;
-	struct safte_slotop		*op;
-	int				slot;
-	int				flags;
-	int				wantblink;
+	struct safte_writebuf_cmd *cmd;
+	struct safte_slotop *op;
+	struct scsi_xfer *xs;
+	int error, slot, flags = 0, wantblink;
 
 	switch (blink->bb_status) {
 	case BIOC_SBBLINK:
@@ -559,33 +597,39 @@ safte_bio_blink(struct safte_softc *sc, struct bioc_blink *blink)
 	if (slot >= sc->sc_nslots)
 		return (ENODEV);
 
-	op = malloc(sizeof(*op), M_TEMP, M_ZERO);
+	op = dma_alloc(sizeof(*op), PR_WAITOK | PR_ZERO);
 
 	op->opcode = SAFTE_WRITE_SLOTOP;
 	op->slot = slot;
 	op->flags |= wantblink ? SAFTE_SLOTOP_IDENTIFY : 0;
 
-	memset(&cmd, 0, sizeof(cmd));
-	cmd.opcode = WRITE_BUFFER;
-	cmd.flags |= SAFTE_WR_MODE;
-	cmd.length = htobe16(sizeof(struct safte_slotop));
-	flags = SCSI_DATA_OUT;
-#ifndef SCSIDEBUG
-	flags |= SCSI_SILENT;
-#endif
 	if (cold)
 		flags |= SCSI_AUTOCONF;
-
-	if (scsi_scsi_cmd(sc->sc_link, (struct scsi_generic *)&cmd,
-	    sizeof(cmd), (u_char *)op, sizeof(struct safte_slotop),
-	    2, 30000, NULL, flags) != 0) {
-		free(op, M_TEMP);
-		return (EIO);
+	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_OUT | SCSI_SILENT);
+	if (xs == NULL) {
+		dma_free(op, sizeof(*op));
+		return (ENOMEM);
 	}
+	xs->cmdlen = sizeof(*cmd);
+	xs->data = (void *)op;
+	xs->datalen = sizeof(*op);
+	xs->retries = 2; 
+	xs->timeout = 30000;
 
-	free(op, M_TEMP);
+	cmd = (struct safte_writebuf_cmd *)xs->cmd;
+	cmd->opcode = WRITE_BUFFER;
+	cmd->flags |= SAFTE_WR_MODE;
+	cmd->length = htobe16(sizeof(struct safte_slotop));
 
-	return (0);
+	error = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	if (error != 0) {
+		error = EIO;
+	}
+	dma_free(op, sizeof(*op));
+
+	return (error);
 }
 #endif /* NBIO > 0 */
 

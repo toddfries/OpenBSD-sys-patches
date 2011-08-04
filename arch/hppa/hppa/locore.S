@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.177 2010/07/01 23:20:13 jsing Exp $	*/
+/*	$OpenBSD: locore.S,v 1.186 2011/05/05 20:50:43 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -93,22 +93,15 @@
 	.import	bootdev, data
 	.import	esym, data
 	.import cpu_info, data
-	.import virtual_avail, data
 	.import	proc0, data
 	.import	proc0paddr, data
+	.import proc0fpstate, data
 	.import	panic, code
 
 #define	EMRG_STACKSIZE	(1*NBPG)
 #define	FPEMU_STACKSIZE	(1*NBPG)
 
 	.data
-
-	.export netisr, data
-	.align 16
-netisr
-	.word	0
-	.size	netisr, .-netisr
-	.align	16
 
 	BSS(pdc_stack, 4)	/* temp stack for PDC call */
 	BSS(emrg_stack, 4)	/* stack for HPMC/TOC/PWRF */
@@ -183,7 +176,6 @@ $start_zero_tf
 	 * arg0 will be available space for hppa_init()
 	 */
 	ldo	NBPG+TRAPFRAME_SIZEOF(arg3), sp
-	mtctl	arg3, cr30
 	stw	r0, U_PCB+PCB_ONFAULT(arg3)
 	stw	r0, U_PCB+PCB_SPACE(arg3)	/* XXX HPPA_SID_KERNEL == 0 */
 	ldil	L%(USPACE+NBPG), arg0		/* normal U plus red zone */
@@ -197,7 +189,10 @@ $start_zero_tf
 
 	ldil	L%TFF_LAST, t1
 	stw	t1, TF_FLAGS-TRAPFRAME_SIZEOF(sp)
-	stw	arg3, TF_CR30-TRAPFRAME_SIZEOF(sp)
+	ldil	L%proc0fpstate, t1
+	ldo	R%proc0fpstate(t1), t1
+	stw	t1, TF_CR30-TRAPFRAME_SIZEOF(sp)
+	mtctl	t1, cr30
 
 	/*
 	 * disable all coprocessors
@@ -688,6 +683,10 @@ $syscall_return
 	/* t3 == VA trapframe */
 
 	/* disable interrupts, just in case */
+#ifdef MULTIPROCESSOR
+	mfctl	eiem, t1
+	stw	t1, TF_CR15(t3)
+#endif
 	mtctl	r0, eiem
 
 	/*
@@ -1095,6 +1094,29 @@ $fpusw_set
 	sync
 
 $fpusw_nosave
+
+#ifdef MULTIPROCESSOR
+	/* See if this process has FPU context on another CPU. */
+	ldw	HFP_CPU(r9), r1
+	comb,=,n r1, r0, $fpusw_noshoot
+
+	/* Perform FPU shootdown. */
+	ldi	(1 << HPPA_IPI_FPU_SAVE), r1
+	ldw	HFP_CPU(r9), r16
+	stw	r1, CI_IPI(r16)
+	ldi	1, r1
+	ldw	CI_HPA(r16), r16
+	stw	r1, 0(r16)
+
+$fpusw_spin
+	/* Wait for shootdown to complete. */
+	sync
+	ldw	HFP_CPU(r9), r1
+	comb,<>,n r1, r0, $fpusw_spin
+
+$fpusw_noshoot
+#endif
+
 	/* count switches */
 	.import	uvmexp, data
 	ldil	L%(uvmexp+FPSWTCH), r1
@@ -1137,9 +1159,8 @@ $fpusw_nosave
 	fldds     0(r17), fr0	/* fr0 must be restored last */
 
 	mfctl	cr29, r1
-	stw	r17, CI_FPU_STATE(r1)
-	mfctl	cr30, r17
-	stw	r1, HFP_CPU(r17)
+	stw	r9, CI_FPU_STATE(r1)
+	stw	r1, HFP_CPU(r9)
 	sync
 
 $fpusw_done
@@ -1228,7 +1249,7 @@ LEAF_ENTRY($itlb_s)
 ALTENTRY($itlb_t)
 	TLB_STATS_PRE(itlb)
 	TLB_PULL(0, TLABEL(all))
-	extru,=	r25, 5, 1, r0	/* gate needs a kernel pid */
+	extru,=	r25, 5, 1, r0	/* gateway page needs to be public */
 	depi	0, 30, 15, r25
 	mfsp	sr1, r16
 	mtsp	r8, sr1
@@ -1356,7 +1377,7 @@ EXIT($tlbd_l)
 LEAF_ENTRY($itlb_l)
 	TLB_STATS_PRE(itlb)
 	TLB_PULL_L(0, TLABEL(all))
-	extru,=	r25, 5, 1, r0	/* gate needs a kernel pid */
+	extru,=	r25, 5, 1, r0	/* gateway page needs to be public */
 	depi	0, 30, 15, r25
 	IITLBAF(17)
 	IITLBPF(25)
@@ -1479,7 +1500,7 @@ EXIT($tlbd_u)
 LEAF_ENTRY($itlb_u)
 	TLB_STATS_PRE(itlb)
 	TLB_PULL_L(0, TLABEL(all))
-	extru,=	r25, 5, 1, r0	/* gate needs a kernel pid */
+	extru,=	r25, 5, 1, r0	/* gateway page needs to be public */
 	depi	0, 30, 15, r25
 	TLB_PCX2PCXU
 	iitlbt	r17, r25
@@ -2329,16 +2350,6 @@ LEAF_ENTRY(fpu_save)
 	fstds,ma %fr29, 8(arg0)
 	fstds,ma %fr30, 8(arg0)
 	fstds    %fr31, 0(arg0)
-	ldo	-24(arg0), arg0
-	ldi	-32, r25	/* gotta be free for all callers */
-	fdc,m	r25(arg0)
-	fdc,m	r25(arg0)
-	fdc,m	r25(arg0)
-	fdc,m	r25(arg0)
-	fdc,m	r25(arg0)
-	fdc,m	r25(arg0)
-	fdc,m	r25(arg0)
-	fdc,m	r25(arg0)
 	bv	r0(rp)
 	sync
 EXIT(fpu_save)
@@ -2414,16 +2425,6 @@ ENTRY($fpu_emulate,320)
 	ldw	4(r25), r17	/* fpu exception reg 0 */
 	zdep	ret0, 5, 6, r17	/* intentionally zero the insn */
 	stw	r17, 4(r25)
-
-	fdc,m	r1(r25)
-	fdc,m	r1(r25)
-	fdc,m	r1(r25)
-	fdc,m	r1(r25)
-	fdc,m	r1(r25)
-	fdc,m	r1(r25)
-	fdc,m	r1(r25)
-	fdc	r0(r25)
-	sync
 
 	mfctl	cr29, r31
 	ldw	CI_STACK(r31), r31
@@ -3059,16 +3060,5 @@ sigcode_call
 	ldi	SYS_exit, t1
 ALTENTRY(esigcode)
 EXIT(sigcode)
-
-
-#ifdef COMPAT_LINUX
-ENTRY(linux_sigcode,0)
-
-	/* TODO linux signal trampoline */
-	bv	0(rp)
-	nop
-ALTENTRY(linux_esigcode)
-EXIT(linux_sigcode)
-#endif /* COMPAT_LINUX */
 
 	.end

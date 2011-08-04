@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.273 2010/07/03 01:02:25 mlarkin Exp $
+#	$OpenBSD: files.pci,v 1.279 2011/05/18 14:21:21 sthen Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -116,9 +116,6 @@ device	eso {}: audio, auconv, mulaw, midibus
 attach	eso at pci
 file	dev/pci/eso.c			eso
 
-attach	opl at eso with opl_eso
-file	dev/pci/opl_eso.c		opl_eso
-
 # Acer Labs M5455
 device	auacer: audio, auconv, mulaw, ac97
 attach	auacer at pci
@@ -136,7 +133,7 @@ file	dev/pci/azalia.c		azalia
 file	dev/pci/azalia_codec.c		azalia
 
 # VIA Envy24 (aka ICE1712)
-device	envy: audio, auconv, mulaw, ac97
+device	envy: audio, ac97, midibus
 attach	envy at pci
 file	dev/pci/envy.c			envy
 
@@ -179,9 +176,6 @@ file	dev/pci/esa.c			esa
 device	yds {}: audio, auconv, mulaw, ac97, firmload
 attach	yds at pci
 file	dev/pci/yds.c			yds
-
-attach	opl at yds with opl_yds
-file	dev/pci/opl_yds.c		opl_yds
 
 # Forte Media FM801
 device	fms: audio, auconv, mulaw, ac97, midibus, tea5757, radiobus
@@ -313,6 +307,11 @@ file	dev/pci/if_re_pci.c		re_pci
 device	vr: ether, ifnet, mii, ifmedia
 attach	vr at pci
 file	dev/pci/if_vr.c			vr
+
+# RDC R6040
+device	vte: ether, ifnet, mii, ifmedia, mii_phy
+attach	vte at pci
+file	dev/pci/if_vte.c		vte
 
 # Texas Instruments ThunderLAN
 device	tl: ether, ifnet, mii, ifmedia
@@ -571,9 +570,6 @@ device	cmpci {}: audio, auconv, mulaw
 attach	cmpci at pci
 file	dev/pci/cmpci.c			cmpci
 
-attach	opl at cmpci with opl_cmpci
-file	dev/pci/opl_cmpci.c		opl_cmpci
-
 # Initio ULTRA WIDE/ULTRA2 WIDE SCSI Controllers
 attach	iha at pci with iha_pci
 file	dev/pci/iha_pci.c		iha_pci
@@ -647,7 +643,7 @@ device	age: ether, ifnet, mii, ifmedia, mii_phy
 attach	age at pci
 file	dev/pci/if_age.c		age
 
-# Attansic/Atheros L1C/L2C Gigabit Ethernet
+# Attansic/Atheros L1C/L1D/L2C Gigabit Ethernet
 device	alc: ether, ifnet, mii, ifmedia, mii_phy
 attach	alc at pci
 file	dev/pci/if_alc.c		alc
@@ -661,11 +657,6 @@ file	dev/pci/if_ale.c		ale
 device	amdpm: i2cbus
 attach	amdpm at pci
 file	dev/pci/amdpm.c			amdpm
-
-# VIA VT82C686A hardware monitor
-device	viaenv
-attach	viaenv at pci
-file	dev/pci/viaenv.c		viaenv
 
 # Broadcom BCM4401 gigabit ethernet
 device	bce: ether, ifnet, mii, ifmedia, mii_phy
@@ -811,3 +802,7 @@ device	itherm
 attach	itherm at pci
 file	dev/pci/itherm.c		itherm
 
+# AMD Geode CS5536 PCI-ISA bridge
+device	glxpcib: isabus, gpiobus
+attach	glxpcib at pci
+file	dev/pci/glxpcib.c		glxpcib

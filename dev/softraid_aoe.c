@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_aoe.c,v 1.17 2010/07/02 15:49:25 krw Exp $ */
+/* $OpenBSD: softraid_aoe.c,v 1.23 2011/07/07 00:18:06 tedu Exp $ */
 /*
  * Copyright (c) 2008 Ted Unangst <tedu@openbsd.org>
  * Copyright (c) 2008 Marco Peereboom <marco@openbsd.org>
@@ -72,6 +72,7 @@ int	sr_aoe_server_alloc_resources(struct sr_discipline *);
 int	sr_aoe_server_free_resources(struct sr_discipline *);
 int	sr_aoe_server_start(struct sr_discipline *);
 
+void	sr_aoe_request_done(struct aoe_req *, struct aoe_packet *);
 void	sr_aoe_input(struct aoe_handler *, struct mbuf *);
 void	sr_aoe_setup(struct aoe_handler *, struct mbuf *);
 void	sr_aoe_timeout(void *);
@@ -150,72 +151,35 @@ int
 sr_aoe_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk)
 {
-
-	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
-
-	return 0;
-}
-
-void
-sr_aoe_setup(struct aoe_handler *ah, struct mbuf *m)
-{
-	struct aoe_packet *ap;
-	int s;
-
-	ap = mtod(m, struct aoe_packet *);
-	if (ap->command != 1)
-		goto out;
-	if (ap->tag != 0)
-		goto out;
-	s = splnet();
-	ah->fn = (workq_fn)sr_aoe_input;
-	wakeup(ah);
-	splx(s);
-
-out:
-	m_freem(m);
-}
-
-int
-sr_aoe_alloc_resources(struct sr_discipline *sd)
-{
-	struct ifnet *ifp;
-	struct aoe_handler *ah;
-	unsigned char slot;
-	unsigned short shelf;
-	const char *nic;
+	struct ifnet		*ifp;
+	struct aoe_handler	*ah;
+	struct sr_aoe_config	sri;
+	int			rv, s;
 #if 0
 	struct mbuf *m;
 	struct ether_header *eh;
 	struct aoe_packet *ap;
 	int rv;
 #endif
-	int s;
 
-	if (!sd)
+	if (!(bc->bc_opaque_flags & BIOC_SOIN))
 		return (EINVAL);
-
-	DNPRINTF(SR_D_DIS, "%s: sr_aoe_alloc_resources\n",
-	    DEVNAME(sd->sd_sc));
-
-	sr_wu_alloc(sd);
-	sr_ccb_alloc(sd);
-
-	/* where do these come from */
-	slot = 3;
-	shelf = 4;
-	nic = "ne0";
-
-	ifp = ifunit(nic);
-	if (!ifp) {
+	if (bc->bc_opaque_size != sizeof(sri))
 		return (EINVAL);
-	}
-	shelf = htons(shelf);
+	if ((rv = copyin(bc->bc_opaque, &sri, sizeof(sri))))
+	    return (rv);
+	sri.nic[sizeof(sri.nic) - 1] = 0;
+
+	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
+
+	ifp = ifunit(sri.nic);
+	if (!ifp)
+		return (EINVAL);
 
 	ah = malloc(sizeof(*ah), M_DEVBUF, M_WAITOK | M_ZERO);
 	ah->ifp = ifp;
-	ah->major = shelf;
-	ah->minor = slot;
+	ah->major = sri.shelf;
+	ah->minor = sri.slot;
 	ah->fn = (workq_fn)sr_aoe_input;
 	TAILQ_INIT(&ah->reqs);
 
@@ -224,12 +188,7 @@ sr_aoe_alloc_resources(struct sr_discipline *sd)
 	splx(s);
 
 	sd->mds.mdd_aoe.sra_ah = ah;
-	sd->mds.mdd_aoe.sra_eaddr[0] = 0xff;
-	sd->mds.mdd_aoe.sra_eaddr[1] = 0xff;
-	sd->mds.mdd_aoe.sra_eaddr[2] = 0xff;
-	sd->mds.mdd_aoe.sra_eaddr[3] = 0xff;
-	sd->mds.mdd_aoe.sra_eaddr[4] = 0xff;
-	sd->mds.mdd_aoe.sra_eaddr[5] = 0xff;
+	sd->mds.mdd_aoe.sra_eaddr = sri.dsteaddr;
 
 #if 0
 	MGETHDR(m, M_WAIT, MT_HEADER);
@@ -241,8 +200,8 @@ sr_aoe_alloc_resources(struct sr_discipline *sd)
 	ap->vers = 1;
 	ap->flags = 0;
 	ap->error = 0;
-	ap->major = shelf;
-	ap->minor = slot;
+	ap->major = sri.shelf;
+	ap->minor = sri.slot;
 	ap->command = 1;
 	ap->tag = 0;
 	ap->buffercnt = 0;
@@ -266,6 +225,41 @@ sr_aoe_alloc_resources(struct sr_discipline *sd)
 		return rv;
 	}
 #endif
+	return 0;
+}
+
+void
+sr_aoe_setup(struct aoe_handler *ah, struct mbuf *m)
+{
+	struct aoe_packet	*ap;
+	int			s;
+
+	ap = mtod(m, struct aoe_packet *);
+	if (ap->command != 1)
+		goto out;
+	if (ap->tag != 0)
+		goto out;
+	s = splnet();
+	ah->fn = (workq_fn)sr_aoe_input;
+	wakeup(ah);
+	splx(s);
+
+out:
+	m_freem(m);
+}
+
+int
+sr_aoe_alloc_resources(struct sr_discipline *sd)
+{
+	if (!sd)
+		return (EINVAL);
+
+	DNPRINTF(SR_D_DIS, "%s: sr_aoe_alloc_resources\n",
+	    DEVNAME(sd->sd_sc));
+
+	sr_wu_alloc(sd);
+	sr_ccb_alloc(sd);
+
 	return 0;
 }
 
@@ -354,8 +348,9 @@ sr_send_aoe_chunk(struct sr_workunit *wu, daddr64_t blk, int i)
 	}
 
 	eh = mtod(m, struct ether_header *);
-	memcpy(eh->ether_dhost, sd->mds.mdd_aoe.sra_eaddr, 6);
-	memcpy(eh->ether_shost, ((struct arpcom *)ifp)->ac_enaddr, 6);
+	memcpy(eh->ether_dhost, &sd->mds.mdd_aoe.sra_eaddr, ETHER_ADDR_LEN);
+	memcpy(eh->ether_shost, ((struct arpcom *)ifp)->ac_enaddr,
+	    ETHER_ADDR_LEN);
 	eh->ether_type = htons(ETHERTYPE_AOE);
 	ap = (struct aoe_packet *)&eh[1];
 	ap->vers = 1;
@@ -401,7 +396,6 @@ sr_aoe_rw(struct sr_workunit *wu)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
-	struct sr_workunit	*wup;
 	struct sr_chunk		*scp;
 	daddr64_t		blk;
 	int			s, ios, rt;
@@ -428,26 +422,7 @@ sr_aoe_rw(struct sr_workunit *wu)
 	if (xs->flags & SCSI_POLL)
 		panic("can't AOE poll");
 
-	/* walk queue backwards and fill in collider if we have one */
 	s = splbio();
-	if (0) /* XXX */ TAILQ_FOREACH_REVERSE(wup, &sd->sd_wu_pendq, sr_wu_list, swu_link) {
-		if (wu->swu_blk_end < wup->swu_blk_start ||
-		    wup->swu_blk_end < wu->swu_blk_start)
-			continue;
-
-		/* we have an LBA collision, defer wu */
-		wu->swu_state = SR_WU_DEFERRED;
-		if (wup->swu_collider)
-			/* wu is on deferred queue, append to last wu */
-			while (wup->swu_collider)
-				wup = wup->swu_collider;
-
-		wup->swu_collider = wu;
-		TAILQ_INSERT_TAIL(&sd->sd_wu_defq, wu, swu_link);
-		sd->sd_wu_collisions++;
-		splx(s);
-		return (0);
-	}
 	for (i = 0; i < ios; i++) {
 		if (xs->flags & SCSI_DATA_IN) {
 			rt = 0;
@@ -503,40 +478,20 @@ bad:
 }
 
 void
-sr_aoe_input(struct aoe_handler *ah, struct mbuf *m)
+sr_aoe_request_done(struct aoe_req *ar, struct aoe_packet *ap)
 {
 	struct sr_discipline	*sd;
 	struct scsi_xfer	*xs;
-	struct aoe_req *ar;
-	struct aoe_packet *ap;
-	struct sr_workunit *wu, *wup;
-	daddr64_t blk, offset;
-	int len, s;
-	int tag;
+	struct sr_workunit	*wu;
+	daddr64_t		blk, offset;
+	int			len, s;
 
-	ap = mtod(m, struct aoe_packet *);
-	tag = ap->tag;
-
-	s = splnet();
-	TAILQ_FOREACH(ar, &ah->reqs, next) {
-		if (ar->tag == tag) {
-			TAILQ_REMOVE(&ah->reqs, ar, next);
-			break;
-		}
-	}
-	splx(s);
-	if (!ar) {
-		goto out;
-	}
-	timeout_del(&ar->to);
 	wu = ar->v;
 	sd = wu->swu_dis;
 	xs = wu->swu_xs;
 
-
-	if (ap->flags & AOE_F_ERROR) {
+	if (!ap || ap->flags & AOE_F_ERROR) {
 		wu->swu_ios_failed++;
-		goto out;
 	} else {
 		wu->swu_ios_succeeded++;
 		len = ar->len; /* XXX check against sector count */
@@ -551,7 +506,6 @@ sr_aoe_input(struct aoe_handler *ah, struct mbuf *m)
 	wu->swu_ios_complete++;
 
 	s = splbio();
-
 	if (wu->swu_ios_complete == wu->swu_io_count) {
 		if (wu->swu_ios_failed == wu->swu_ios_complete)
 			xs->error = XS_DRIVER_STUFFUP;
@@ -560,28 +514,38 @@ sr_aoe_input(struct aoe_handler *ah, struct mbuf *m)
 
 		xs->resid = 0;
 
-		if (0) /* XXX */ TAILQ_FOREACH(wup, &sd->sd_wu_pendq, swu_link) {
-			if (wu == wup) {
-				/* wu on pendq, remove */
-				TAILQ_REMOVE(&sd->sd_wu_pendq, wu, swu_link);
-
-				if (wu->swu_collider) {
-					/* restart deferred wu */
-					wu->swu_collider->swu_state =
-					    SR_WU_INPROGRESS;
-					TAILQ_REMOVE(&sd->sd_wu_defq,
-					    wu->swu_collider, swu_link);
-					/* sr_raid_startwu(wu->swu_collider); */
-				}
-				break;
-			}
-		}
-
-		/* do not change the order of these 2 functions */
-		sr_wu_put(wu);
 		sr_scsi_done(sd, xs);
 	}
+	splx(s);
 
+	free(ar, M_DEVBUF);
+}
+
+void
+sr_aoe_input(struct aoe_handler *ah, struct mbuf *m)
+{
+	struct aoe_packet	*ap;
+	struct aoe_req		*ar;
+	int			tag;
+	int			s;
+
+	ap = mtod(m, struct aoe_packet *);
+	tag = ap->tag;
+
+	s = splnet();
+	TAILQ_FOREACH(ar, &ah->reqs, next) {
+		if (ar->tag == tag) {
+			timeout_del(&ar->to);
+			TAILQ_REMOVE(&ah->reqs, ar, next);
+			break;
+		}
+	}
+	splx(s);
+	if (!ar)
+		goto out;
+
+	ap = mtod(m, struct aoe_packet *);
+	sr_aoe_request_done(ar, ap);
 out:
 	m_freem(m);
 }
@@ -589,13 +553,12 @@ out:
 void
 sr_aoe_timeout(void *v)
 {
-	struct aoe_req *ar = v;
+	struct aoe_req		*ar = v;
 	struct sr_discipline	*sd;
 	struct scsi_xfer	*xs;
-	struct aoe_handler *ah;
-	struct aoe_req *ar2;
-	struct sr_workunit *wu;
-	int s;
+	struct aoe_handler	*ah;
+	struct sr_workunit	*wu;
+	int			s;
 
 	wu = ar->v;
 	sd = wu->swu_dis;
@@ -603,19 +566,10 @@ sr_aoe_timeout(void *v)
 	ah = sd->mds.mdd_aoe.sra_ah;
 
 	s = splnet();
-	TAILQ_FOREACH(ar2, &ah->reqs, next) {
-		if (ar2->tag == ar->tag) {
-			TAILQ_REMOVE(&ah->reqs, ar, next);
-			break;
-		}
-	}
+	TAILQ_REMOVE(&ah->reqs, ar, next);
 	splx(s);
-	if (!ar2)
-		return;
-	free(ar, M_DEVBUF);
-	/* give it another go */
-	/* XXX this is going to repeat the whole workunit */
-	sr_aoe_rw(wu);
+
+	sr_aoe_request_done(ar, NULL);
 }
 
 /* AOE target */
@@ -692,12 +646,8 @@ sr_aoe_server_alloc_resources(struct sr_discipline *sd)
 	splx(s);
 
 	sd->mds.mdd_aoe.sra_ah = ah;
-	sd->mds.mdd_aoe.sra_eaddr[0] = 0xff;
-	sd->mds.mdd_aoe.sra_eaddr[1] = 0xff;
-	sd->mds.mdd_aoe.sra_eaddr[2] = 0xff;
-	sd->mds.mdd_aoe.sra_eaddr[3] = 0xff;
-	sd->mds.mdd_aoe.sra_eaddr[4] = 0xff;
-	sd->mds.mdd_aoe.sra_eaddr[5] = 0xff;
+	memset(&sd->mds.mdd_aoe.sra_eaddr, 0xff,
+	    sizeof(sd->mds.mdd_aoe.sra_eaddr));
 	sd->mds.mdd_aoe.sra_ifp = ifp;
 
 	if (sr_wu_alloc(sd))
@@ -759,18 +709,17 @@ sr_aoe_server_create_thread(void *arg)
 void
 sr_aoe_server_thread(void *arg)
 {
-	struct mbuf *m, *m2;
-	struct ether_header *eh;
-	struct aoe_packet *rp, *ap;
-	struct aoe_req *ar;
-	int len;
-	struct buf buf;
-	daddr64_t blk;
-
+	struct sr_discipline	*sd = arg;
 	struct ifnet		*ifp;
 	struct aoe_handler	*ah;
+	struct aoe_req		*ar;
+	struct aoe_packet	*rp, *ap;
+	struct mbuf		*m, *m2;
+	struct ether_header	*eh;
+	struct buf		buf;
+	daddr64_t		blk;
+	int			len;
 	int			rv, s;
-	struct sr_discipline	*sd = arg;
 
 	/* sanity */
 	if (!sd)
@@ -811,9 +760,10 @@ resleep:
 			len = rp->sectorcnt * 512;
 
 			eh = mtod(m, struct ether_header *);
-			memcpy(eh->ether_dhost, sd->mds.mdd_aoe.sra_eaddr, 6);
+			memcpy(eh->ether_dhost, &sd->mds.mdd_aoe.sra_eaddr,
+			    ETHER_ADDR_LEN);
 			memcpy(eh->ether_shost,
-			    ((struct arpcom *)ifp)->ac_enaddr, 6);
+			    ((struct arpcom *)ifp)->ac_enaddr, ETHER_ADDR_LEN);
 			eh->ether_type = htons(ETHERTYPE_AOE);
 			ap = (struct aoe_packet *)&eh[1];
 			AOE_HDR2BLK(ap, blk);
@@ -877,9 +827,10 @@ resleep:
 			len = rp->sectorcnt * 512;
 
 			eh = mtod(m, struct ether_header *);
-			memcpy(eh->ether_dhost, sd->mds.mdd_aoe.sra_eaddr, 6);
+			memcpy(eh->ether_dhost, &sd->mds.mdd_aoe.sra_eaddr,
+			    ETHER_ADDR_LEN);
 			memcpy(eh->ether_shost,
-			    ((struct arpcom *)ifp)->ac_enaddr, 6);
+			    ((struct arpcom *)ifp)->ac_enaddr, ETHER_ADDR_LEN);
 			eh->ether_type = htons(ETHERTYPE_AOE);
 			ap = (struct aoe_packet *)&eh[1];
 			AOE_HDR2BLK(ap, blk);

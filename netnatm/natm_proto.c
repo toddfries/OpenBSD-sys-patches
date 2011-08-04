@@ -1,4 +1,4 @@
-/*	$OpenBSD: natm_proto.c,v 1.4 2002/03/14 01:27:12 millert Exp $	*/
+/*	$OpenBSD: natm_proto.c,v 1.6 2011/07/06 02:42:28 henning Exp $	*/
 
 /*
  *
@@ -86,7 +86,7 @@ struct protosw natmsw[] = {
 
 struct domain natmdomain =
     { AF_NATM, "natm", natm_init, 0, 0, 
-      natmsw, &natmsw[sizeof(natmsw)/sizeof(natmsw[0])], 0,
+      natmsw, &natmsw[nitems(natmsw)], 0,
       0, 0, 0};
 
 struct	ifqueue natmintrq;       	/* natm packet input queue */
@@ -105,7 +105,7 @@ void natm_init()
 {
   LIST_INIT(&natm_pcbs);
   bzero(&natmintrq, sizeof(natmintrq));
-  natmintrq.ifq_maxlen = natmqmaxlen;
+  IFQ_SET_MAXLEN(&natmintrq, natmqmaxlen);
 }
 
 #if defined(__FreeBSD__)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mkbc.c,v 1.9 2009/10/26 18:00:06 miod Exp $  */
+/*	$OpenBSD: mkbc.c,v 1.11 2011/04/07 15:30:16 miod Exp $  */
 
 /*
  * Copyright (c) 2006, 2007, Joel Sing
@@ -267,8 +267,8 @@ mkbc_attach(struct device *parent, struct device *self, void *aux)
 		t = malloc(sizeof(struct pckbc_internal), M_DEVBUF,
 		    M_WAITOK | M_ZERO);
 		t->t_iot = msc->iot;
-		t->t_ioh_d = NULL;
-		t->t_ioh_c = NULL;
+		t->t_ioh_d = 0;
+		t->t_ioh_c = 0;
 		t->t_addr = maa->maa_baseaddr;
 		t->t_sc = (struct pckbc_softc *)msc;
 		sc->id = t;
@@ -862,7 +862,7 @@ pckbc_set_poll(pckbc_tag_t self, pckbc_slot_t slot, int on)
 }
 
 int
-mkbc_cnattach(bus_space_tag_t iot, bus_addr_t addr, pckbc_slot_t slot)
+mkbc_cnattach(bus_space_tag_t iot, bus_addr_t addr)
 {
 	bus_space_handle_t ioh, slot_ioh;
 	int res = 0;
@@ -879,15 +879,14 @@ mkbc_cnattach(bus_space_tag_t iot, bus_addr_t addr, pckbc_slot_t slot)
 	mkbc_consdata.t_ioh_d = ioh;
 
 	/* Map subregion of bus space for this "slot". */
-	if (bus_space_subregion(iot, ioh, MKBC_PORTSIZE * slot, MKBC_PORTSIZE,
-	    &slot_ioh)) {
+	if (bus_space_subregion(iot, ioh, 0, MKBC_PORTSIZE, &slot_ioh)) {
 		bus_space_unmap(iot, ioh, MKBC_PORTSIZE * 2);
 		return (ENXIO);
 	}
 
 	mkbc_cons_slotdata.ioh = slot_ioh;
 	mkbc_init_slotdata(&mkbc_cons_slotdata);
-	mkbc_consdata.t_slotdata[slot] = &mkbc_cons_slotdata;
+	mkbc_consdata.t_slotdata[PCKBC_KBD_SLOT] = &mkbc_cons_slotdata;
 
 	/* Initialise controller. */
 	bus_space_write_8(iot, slot_ioh, MKBC_CONTROL,
@@ -905,7 +904,7 @@ mkbc_cnattach(bus_space_tag_t iot, bus_addr_t addr, pckbc_slot_t slot)
 	/* Flush input buffer. */
 	(void) mkbc_poll_read(iot, slot_ioh);
 
-	res = pckbd_cnattach(&mkbc_consdata, slot);
+	res = pckbd_cnattach(&mkbc_consdata);
 
 	if (res) {
 		bus_space_unmap(iot, ioh, MKBC_PORTSIZE * 2);

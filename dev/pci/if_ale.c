@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ale.c,v 1.13 2010/05/19 14:39:07 oga Exp $	*/
+/*	$OpenBSD: if_ale.c,v 1.17 2011/04/05 18:01:21 henning Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -81,6 +81,7 @@
 int	ale_match(struct device *, void *, void *);
 void	ale_attach(struct device *, struct device *, void *);
 int	ale_detach(struct device *, int);
+int	ale_activate(struct device *, int);
 
 int	ale_miibus_readreg(struct device *, int, int);
 void	ale_miibus_writereg(struct device *, int, int, int);
@@ -123,7 +124,8 @@ const struct pci_matchid ale_devices[] = {
 };
 
 struct cfattach ale_ca = {
-	sizeof (struct ale_softc), ale_match, ale_attach
+	sizeof (struct ale_softc), ale_match, ale_attach, NULL,
+	ale_activate
 };
 
 struct cfdriver ale_cd = {
@@ -133,7 +135,7 @@ struct cfdriver ale_cd = {
 int aledebug = 0;
 #define DPRINTF(x)	do { if (aledebug) printf x; } while (0)
 
-#define ALE_CSUM_FEATURES	(M_TCPV4_CSUM_OUT | M_UDPV4_CSUM_OUT)
+#define ALE_CSUM_FEATURES	(M_TCP_CSUM_OUT | M_UDP_CSUM_OUT)
 
 int
 ale_miibus_readreg(struct device *dev, int phy, int reg)
@@ -510,7 +512,6 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 	ifp = &sc->sc_arpcom.ac_if;
 	ifp->if_softc = sc;
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_init = ale_init;
 	ifp->if_ioctl = ale_ioctl;
 	ifp->if_start = ale_start;
 	ifp->if_watchdog = ale_watchdog;
@@ -597,6 +598,30 @@ ale_detach(struct device *self, int flags)
 	return (0);
 }
 
+int
+ale_activate(struct device *self, int act)
+{
+	struct ale_softc *sc = (struct ale_softc *)self;
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		if (ifp->if_flags & IFF_RUNNING)
+			ale_stop(sc);
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_RESUME:
+		rv = config_activate_children(self, act);
+		if (ifp->if_flags & IFF_UP)
+			ale_init(ifp);
+		break;
+	}
+	return (rv);
+}
 
 int
 ale_dma_alloc(struct ale_softc *sc)

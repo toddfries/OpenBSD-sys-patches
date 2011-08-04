@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.40 2010/07/02 00:36:52 weingart Exp $	*/
+/*	$OpenBSD: conf.c,v 1.46 2011/04/26 17:33:17 jsing Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -26,6 +26,7 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/param.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <libsa.h>
@@ -42,7 +43,7 @@
 #include <dev/cons.h>
 #include "debug.h"
 
-const char version[] = "3.14";
+const char version[] = "3.17";
 int	debug = 1;
 
 
@@ -58,10 +59,10 @@ void (*i386_probe2[])(void) = {
 };
 
 struct i386_boot_probes probe_list[] = {
-	{ "probing", i386_probe1, NENTS(i386_probe1) },
-	{ "disk",    i386_probe2, NENTS(i386_probe2) }
+	{ "probing", i386_probe1, nitems(i386_probe1) },
+	{ "disk",    i386_probe2, nitems(i386_probe2) }
 };
-int nibprobes = NENTS(probe_list);
+int nibprobes = nitems(probe_list);
 
 
 struct fs_ops file_system[] = {
@@ -80,7 +81,7 @@ struct fs_ops file_system[] = {
 	  null_stat,   null_readdir   }
 #endif
 };
-int nfsys = NENTS(file_system);
+int nfsys = nitems(file_system);
 
 struct devsw	devsw[] = {
 #ifdef _TEST
@@ -92,13 +93,13 @@ struct devsw	devsw[] = {
 	{ "TFTP", tftpstrategy, tftpopen, tftpclose, tftpioctl },
 #endif
 };
-int ndevs = NENTS(devsw);
+int ndevs = nitems(devsw);
 
 #ifdef notdef
 struct netif_driver	*netif_drivers[] = {
 	NULL
 };
-int n_netif_drivers = NENTS(netif_drivers);
+int n_netif_drivers = nitems(netif_drivers);
 #endif
 
 struct consdev constab[] = {

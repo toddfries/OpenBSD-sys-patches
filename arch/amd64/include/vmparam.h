@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.12 2009/06/16 16:42:40 ariane Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.15 2011/05/30 22:25:20 oga Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.1 2003/04/26 18:39:49 fvdl Exp $	*/
 
 /*-
@@ -35,8 +35,8 @@
  *	@(#)vmparam.h	5.9 (Berkeley) 5/12/91
  */
 
-#ifndef _VMPARAM_H_
-#define _VMPARAM_H_
+#ifndef _MACHINE_VMPARAM_H_
+#define _MACHINE_VMPARAM_H_
 
 /*
  * Machine dependent constants for amd64.
@@ -61,6 +61,9 @@
 #endif
 #ifndef MAXDSIZ
 #define	MAXDSIZ		((paddr_t)8*1024*1024*1024)	/* max data size */
+#endif
+#ifndef BRKSIZ
+#define	BRKSIZ		MAXDSIZ				/* heap gap size */
 #endif
 #ifndef	DFLSSIZ
 #define	DFLSSIZ		((paddr_t)2*1024*1024)		/* initial stack size limit */
@@ -107,11 +110,6 @@
 #define VM_PHYSSEG_STRAT	VM_PSTRAT_BIGFIRST
 #define VM_PHYSSEG_NOADD		/* can't add RAM after vm_mem_init */
 
-#define	VM_NFREELIST		3
-#define	VM_FREELIST_DEFAULT	0
-#define	VM_FREELIST_LOW	1
-#define	VM_FREELIST_HIGH	2
-
 #define __HAVE_VM_PAGE_MD
 struct pv_entry;
 struct vm_page_md {
@@ -122,4 +120,4 @@ struct vm_page_md {
 	(pg)->mdpage.pv_list = NULL;	\
 } while (0)
 
-#endif /* _VMPARAM_H_ */
+#endif /* _MACHINE_VMPARAM_H_ */

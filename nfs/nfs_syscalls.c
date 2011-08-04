@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_syscalls.c,v 1.89 2010/04/12 16:37:38 beck Exp $	*/
+/*	$OpenBSD: nfs_syscalls.c,v 1.92 2010/12/05 12:18:00 kettenis Exp $	*/
 /*	$NetBSD: nfs_syscalls.c,v 1.19 1996/02/18 11:53:52 fvdl Exp $	*/
 
 /*
@@ -42,6 +42,7 @@
 #include <sys/stat.h>
 #include <sys/vnode.h>
 #include <sys/mount.h>
+#include <sys/pool.h>
 #include <sys/proc.h>
 #include <sys/uio.h>
 #include <sys/malloc.h>
@@ -397,7 +398,7 @@ loop:
 		}
 
 		if (siz <= 0 || siz > NFS_MAXPACKET)
-			panic("bad nfs svc reply, siz = %i\n", siz);
+			panic("bad nfs svc reply, siz = %i", siz);
 
 		m = mreq;
 		m->m_pkthdr.len = siz;
@@ -548,8 +549,9 @@ nfsrv_init(int terminating)
 	    M_WAITOK|M_ZERO);
 	TAILQ_INSERT_HEAD(&nfssvc_sockhead, nfs_udpsock, ns_chain);
 
-	pool_init(&nfsrv_descript_pl, sizeof(struct nfsrv_descript), 0, 0, 0,
-	    "ndscpl", &pool_allocator_nointr);
+	if (!terminating)
+		pool_init(&nfsrv_descript_pl, sizeof(struct nfsrv_descript),
+		    0, 0, 0, "ndscpl", &pool_allocator_nointr);
 }
 #endif /* NFSSERVER */
 

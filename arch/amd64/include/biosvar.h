@@ -1,5 +1,5 @@
 /* XXX - DSR */
-/*	$OpenBSD: biosvar.h,v 1.10 2009/04/30 01:16:56 dlg Exp $	*/
+/*	$OpenBSD: biosvar.h,v 1.14 2011/04/26 17:33:17 jsing Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff
@@ -29,13 +29,14 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef _I386_BIOSVAR_H_
-#define _I386_BIOSVAR_H_
+#ifndef _MACHINE_BIOSVAR_H_
+#define _MACHINE_BIOSVAR_H_
 
 	/* some boxes put apm data seg in the 2nd page */
 #define	BOOTARG_OFF	(NBPG*2)
 #define	BOOTARG_LEN	(NBPG*1)
 #define	BOOTBIOS_ADDR	(0x7c00)
+#define	BOOTBIOS_MAXSEC	((1 << 28) - 1)
 
 	/* BIOS configure flags */
 #define	BIOSF_BIOS32	0x0001
@@ -207,6 +208,11 @@ typedef struct _bios_ddb {
 	int	db_console;
 } __packed bios_ddb_t;
 
+#define BOOTARG_ROOTDUID 9
+typedef struct _bios_rootduid {
+	u_char	duid[8];
+} __packed bios_rootduid_t;
+
 #if defined(_KERNEL) || defined (_STANDALONE)
 
 #ifdef _LOCORE
@@ -249,11 +255,6 @@ struct proc;
 
 int bios_sysctl(int *, u_int, void *, size_t *, void *, size_t, struct proc *);
 
-void bioscnprobe(struct consdev *);
-void bioscninit(struct consdev *);
-void bioscnputc(dev_t, int);
-int bioscngetc(dev_t);
-void bioscnpollc(dev_t, int);
 void bios_getopt(void);
 bios_diskinfo_t *bios_getdiskinfo(dev_t);
 
@@ -267,4 +268,4 @@ extern bios_memmap_t *bios_memmap;
 #endif /* _LOCORE */
 #endif /* _KERNEL || _STANDALONE */
 
-#endif /* _I386_BIOSVAR_H_ */
+#endif /* _MACHINE_BIOSVAR_H_ */

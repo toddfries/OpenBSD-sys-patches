@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vfsops.c,v 1.53 2009/12/19 00:27:17 krw Exp $	*/
+/*	$OpenBSD: cd9660_vfsops.c,v 1.60 2011/07/04 20:35:35 deraadt Exp $	*/
 /*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-
@@ -43,7 +43,7 @@
 #include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
-#include <miscfs/specfs/specdev.h>
+#include <sys/specdev.h>
 #include <sys/mount.h>
 #include <sys/buf.h>
 #include <sys/file.h>
@@ -283,7 +283,7 @@ iso_mountfs(devvp, mp, p, argp)
 	for (iso_blknum = 16; iso_blknum < 100; iso_blknum++) {
 		if ((error = bread(devvp,
 		    (iso_blknum + sess) * btodb(iso_bsize),
-		    iso_bsize, NOCRED, &bp)) != 0)
+		    iso_bsize, &bp)) != 0)
 			goto out;
 		
 		vdp = (struct iso_volume_descriptor *)bp->b_data;
@@ -386,7 +386,7 @@ iso_mountfs(devvp, mp, p, argp)
 		if ((error = bread(isomp->im_devvp, (isomp->root_extent +
 		    isonum_711(rootp->ext_attr_length)) <<
 		    (isomp->im_bshift - DEV_BSHIFT),
-		    isomp->logical_block_size, NOCRED, &bp)) != 0)
+		    isomp->logical_block_size, &bp)) != 0)
 			goto out;
 		
 		rootp = (struct iso_directory_record *)bp->b_data;
@@ -479,7 +479,8 @@ iso_disklabelspoof(dev, strat, lp)
 	for (iso_blknum = 16; iso_blknum < 100; iso_blknum++) {
 		bp->b_blkno = iso_blknum * btodb(ISO_DEFAULT_BLOCK_SIZE);
 		bp->b_bcount = ISO_DEFAULT_BLOCK_SIZE;
-		bp->b_flags = B_BUSY | B_READ | B_RAW;
+		CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+		SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
 		bp->b_cylinder = bp->b_blkno / lp->d_secpercyl;
 
 		/*printf("d_secsize %d iso_blknum %d b_blkno %d bcount %d\n",
@@ -765,7 +766,7 @@ retry:
 		return (0);
 
 	/* Allocate a new vnode/iso_node. */
-	if ((error = getnewvnode(VT_ISOFS, mp, cd9660_vnodeop_p, &vp)) != 0) {
+	if ((error = getnewvnode(VT_ISOFS, mp, &cd9660_vops, &vp)) != 0) {
 		*vpp = NULLVP;
 		return (error);
 	}
@@ -814,7 +815,7 @@ retry:
 	
 		error = bread(imp->im_devvp,
 			      lbn << (imp->im_bshift - DEV_BSHIFT),
-			      imp->logical_block_size, NOCRED, &bp);
+			      imp->logical_block_size, &bp);
 		if (error) {
 			vput(vp);
 			brelse(bp);
@@ -907,7 +908,7 @@ retry:
 	switch (vp->v_type = IFTOVT(ip->inode.iso_mode)) {
 	case VFIFO:
 #ifdef	FIFO
-		vp->v_op = cd9660_fifoop_p;
+		vp->v_op = &cd9660_fifovops;
 		break;
 #else
 		vput(vp);
@@ -922,7 +923,7 @@ retry:
 		if (dp = iso_dmap(dev, ino, 0))
 			ip->inode.iso_rdev = dp->d_dev;
 #endif
-		vp->v_op = cd9660_specop_p;
+		vp->v_op = &cd9660_specvops;
 		if ((nvp = checkalias(vp, ip->inode.iso_rdev, mp)) != NULL) {
 			/*
 			 * Discard unneeded vnode, but save its iso_node.
@@ -930,7 +931,7 @@ retry:
 			 */
 			nvp->v_data = vp->v_data;
 			vp->v_data = NULL;
-			vp->v_op = spec_vnodeop_p;
+			vp->v_op = &spec_vops;
 			vrele(vp);
 			vgone(vp);
 			/*

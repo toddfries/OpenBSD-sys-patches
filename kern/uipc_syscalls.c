@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_syscalls.c,v 1.76 2010/07/03 04:44:51 guenther Exp $	*/
+/*	$OpenBSD: uipc_syscalls.c,v 1.82 2011/07/08 20:54:03 deraadt Exp $	*/
 /*	$NetBSD: uipc_syscalls.c,v 1.19 1996/02/09 19:00:48 christos Exp $	*/
 
 /*
@@ -114,6 +114,10 @@ sys_bind(struct proc *p, void *v, register_t *retval)
 	error = sockargs(&nam, SCARG(uap, name), SCARG(uap, namelen),
 			 MT_SONAME);
 	if (error == 0) {
+#ifdef KTRACE
+	if (KTRPOINT(p, KTR_STRUCT))
+		ktrsockaddr(p, mtod(nam, caddr_t), SCARG(uap, namelen));
+#endif
 		error = sobind(fp->f_data, nam, p);
 		m_freem(nam);
 	}
@@ -213,7 +217,7 @@ sys_accept(struct proc *p, void *v, register_t *retval)
 		 */
 		soqinsque(head, so, 1);
 		wakeup_one(&head->so_timeo);
-		goto bad;
+		goto unlock;
 	}
 	*retval = tmpfd;
 
@@ -231,9 +235,14 @@ sys_accept(struct proc *p, void *v, register_t *retval)
 			namelen = nam->m_len;
 		/* SHOULD COPY OUT A CHAIN HERE */
 		if ((error = copyout(mtod(nam, caddr_t),
-		    SCARG(uap, name), namelen)) == 0)
+		    SCARG(uap, name), namelen)) == 0) {
+#ifdef KTRACE
+			if (KTRPOINT(p, KTR_STRUCT))
+				ktrsockaddr(p, mtod(nam, caddr_t), namelen);
+#endif
 			error = copyout(&namelen, SCARG(uap, anamelen),
 			    sizeof (*SCARG(uap, anamelen)));
+		}
 	}
 	/* if an error occurred, free the file descriptor */
 	if (error) {
@@ -243,8 +252,9 @@ sys_accept(struct proc *p, void *v, register_t *retval)
 		FILE_SET_MATURE(fp);
 	}
 	m_freem(nam);
-bad:
+unlock:
 	fdpunlock(p->p_fd);
+bad:
 	splx(s);
 	FRELE(headfp);
 	return (error);
@@ -275,6 +285,10 @@ sys_connect(struct proc *p, void *v, register_t *retval)
 			 MT_SONAME);
 	if (error)
 		goto bad;
+#ifdef KTRACE
+	if (KTRPOINT(p, KTR_STRUCT))
+		ktrsockaddr(p, mtod(nam, caddr_t), SCARG(uap, namelen));
+#endif
 	error = soconnect(so, nam);
 	if (error)
 		goto bad;
@@ -396,9 +410,7 @@ sys_sendto(struct proc *p, void *v, register_t *retval)
 	msg.msg_iov = &aiov;
 	msg.msg_iovlen = 1;
 	msg.msg_control = 0;
-#ifdef COMPAT_OLDSOCK
 	msg.msg_flags = 0;
-#endif
 	aiov.iov_base = (char *)SCARG(uap, buf);
 	aiov.iov_len = SCARG(uap, len);
 	return (sendit(p, SCARG(uap, s), &msg, SCARG(uap, flags), retval));
@@ -431,9 +443,7 @@ sys_sendmsg(struct proc *p, void *v, register_t *retval)
 		    (unsigned)(msg.msg_iovlen * sizeof (struct iovec)))))
 		goto done;
 	msg.msg_iov = iov;
-#ifdef COMPAT_OLDSOCK
 	msg.msg_flags = 0;
-#endif
 	error = sendit(p, SCARG(uap, s), &msg, SCARG(uap, flags), retval);
 done:
 	if (iov != aiov)
@@ -480,13 +490,13 @@ sendit(struct proc *p, int s, struct msghdr *mp, int flags, register_t *retsize)
 				 MT_SONAME);
 		if (error)
 			goto bad;
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+		 	ktrsockaddr(p, mtod(to, caddr_t), mp->msg_namelen);
+#endif
 	}
 	if (mp->msg_control) {
-		if (mp->msg_controllen < CMSG_ALIGN(sizeof(struct cmsghdr))
-#ifdef COMPAT_OLDSOCK
-		    && mp->msg_flags != MSG_COMPAT
-#endif
-		) {
+		if (mp->msg_controllen < CMSG_ALIGN(sizeof(struct cmsghdr))) {
 			error = EINVAL;
 			goto bad;
 		}
@@ -494,17 +504,6 @@ sendit(struct proc *p, int s, struct msghdr *mp, int flags, register_t *retsize)
 				 mp->msg_controllen, MT_CONTROL);
 		if (error)
 			goto bad;
-#ifdef COMPAT_OLDSOCK
-		if (mp->msg_flags == MSG_COMPAT) {
-			struct cmsghdr *cm;
-
-			M_PREPEND(control, sizeof(*cm), M_WAIT);
-			cm = mtod(control, struct cmsghdr *);
-			cm->cmsg_len = control->m_len;
-			cm->cmsg_level = SOL_SOCKET;
-			cm->cmsg_type = SCM_RIGHTS;
-		}
-#endif
 	} else
 		control = 0;
 #ifdef KTRACE
@@ -598,11 +597,7 @@ sys_recvmsg(struct proc *p, void *v, register_t *retval)
 		    M_IOV, M_WAITOK);
 	else
 		iov = aiov;
-#ifdef COMPAT_OLDSOCK
-	msg.msg_flags = SCARG(uap, flags) &~ MSG_COMPAT;
-#else
 	msg.msg_flags = SCARG(uap, flags);
-#endif
 	if (msg.msg_iovlen > 0) {
 		error = copyin(msg.msg_iov, iov,
 		    (unsigned)(msg.msg_iovlen * sizeof (struct iovec)));
@@ -689,52 +684,24 @@ recvit(struct proc *p, int s, struct msghdr *mp, caddr_t namelenp,
 		if (from == NULL)
 			alen = 0;
 		else {
-			/* save sa_len before it is destroyed by MSG_COMPAT */
-			alen = mp->msg_namelen;
-			if (alen > from->m_len)
-				alen = from->m_len;
-			/* else if alen < from->m_len ??? */
-#ifdef COMPAT_OLDSOCK
-			if (mp->msg_flags & MSG_COMPAT)
-				mtod(from, struct osockaddr *)->sa_family =
-				    mtod(from, struct sockaddr *)->sa_family;
-#endif
-			error = copyout(mtod(from, caddr_t), mp->msg_name, alen);
+			alen = MIN(from->m_len, mp->msg_namelen);
+			error = copyout(mtod(from, caddr_t), mp->msg_name,
+			    alen);
 			if (error)
 				goto out;
+#ifdef KTRACE
+			if (KTRPOINT(p, KTR_STRUCT))
+				ktrsockaddr(p, mtod(from, caddr_t), alen);
+#endif
+
 		}
 		mp->msg_namelen = alen;
 		if (namelenp &&
 		    (error = copyout(&alen, namelenp, sizeof(alen)))) {
-#ifdef COMPAT_OLDSOCK
-			if (mp->msg_flags & MSG_COMPAT)
-				error = 0;	/* old recvfrom didn't check */
-			else
-#endif
 			goto out;
 		}
 	}
 	if (mp->msg_control) {
-#ifdef COMPAT_OLDSOCK
-		/*
-		 * We assume that old recvmsg calls won't receive access
-		 * rights and other control info, esp. as control info
-		 * is always optional and those options didn't exist in 4.3.
-		 * If we receive rights, trim the cmsghdr; anything else
-		 * is tossed.
-		 */
-		if (control && mp->msg_flags & MSG_COMPAT) {
-			if (mtod(control, struct cmsghdr *)->cmsg_level !=
-			    SOL_SOCKET ||
-			    mtod(control, struct cmsghdr *)->cmsg_type !=
-			    SCM_RIGHTS) {
-				mp->msg_controllen = 0;
-				goto out;
-			}
-			control->m_len -= sizeof (struct cmsghdr);
-			control->m_data += sizeof (struct cmsghdr);
-		}
-#endif
 		len = mp->msg_controllen;
 		if (len <= 0 || control == NULL)
 			len = 0;
@@ -885,30 +852,6 @@ out:
 	return (error);
 }
 
-int
-sys_pipe(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_pipe_args /* {
-		syscallarg(int *) fdp;
-	} */ *uap = v;
-	int error, fds[2];
-	register_t rval[2];
-
-	if ((error = sys_opipe(p, v, rval)) != 0)
-		return (error);
-
-	fds[0] = rval[0];
-	fds[1] = rval[1];
-	error = copyout(fds, SCARG(uap, fdp), 2 * sizeof (int));
-	if (error) {
-		fdplock(p->p_fd);
-		fdrelease(p, fds[0]);
-		fdrelease(p, fds[1]);
-		fdpunlock(p->p_fd);
-	}
-	return (error);
-}
-
 /*
  * Get socket name.
  */
@@ -940,8 +883,13 @@ sys_getsockname(struct proc *p, void *v, register_t *retval)
 	if (len > m->m_len)
 		len = m->m_len;
 	error = copyout(mtod(m, caddr_t), SCARG(uap, asa), len);
-	if (error == 0)
+	if (error == 0) {
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktrsockaddr(p, mtod(m, caddr_t), len);
+#endif
 		error = copyout(&len, SCARG(uap, alen), sizeof (len));
+	}
 bad:
 	FRELE(fp);
 	if (m)
@@ -984,53 +932,13 @@ sys_getpeername(struct proc *p, void *v, register_t *retval)
 	if (len > m->m_len)
 		len = m->m_len;
 	error = copyout(mtod(m, caddr_t), SCARG(uap, asa), len);
-	if (error == 0)
+	if (error == 0) {
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktrsockaddr(p, mtod(m, caddr_t), len);
+#endif
 		error = copyout(&len, SCARG(uap, alen), sizeof (len));
-bad:
-	FRELE(fp);
-	m_freem(m);
-	return (error);
-}
-
-/*
- * Get eid of peer for connected socket.
- */
-/* ARGSUSED */
-int
-sys_getpeereid(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_getpeereid_args /* {
-		syscallarg(int) fdes;
-		syscallarg(uid_t *) euid;
-		syscallarg(gid_t *) egid;
-	} */ *uap = v;
-	struct file *fp;
-	struct socket *so;
-	struct mbuf *m = NULL;
-	struct sockpeercred *id;
-	int error;
-
-	if ((error = getsock(p->p_fd, SCARG(uap, fdes), &fp)) != 0)
-		return (error);
-	so = fp->f_data;
-	if (so->so_proto != pffindtype(AF_LOCAL, SOCK_STREAM)) {
-		FRELE(fp);
-		return (EOPNOTSUPP);
 	}
-	m = m_getclr(M_WAIT, MT_SONAME);
-	if (m == NULL) {
-		error = ENOBUFS;
-		goto bad;
-	}	
-	error = (*so->so_proto->pr_usrreq)(so, PRU_PEEREID, 0, m, 0, p);
-	if (!error && m->m_len != sizeof(struct sockpeercred))
-		error = EOPNOTSUPP;
-	if (error)
-		goto bad;
-	id = mtod(m, struct sockpeercred *);
-	error = copyout(&(id->uid), SCARG(uap, euid), sizeof(uid_t));
-	if (error == 0)
-		error = copyout(&(id->gid), SCARG(uap, egid), sizeof(gid_t));
 bad:
 	FRELE(fp);
 	m_freem(m);
@@ -1070,7 +978,7 @@ sockargs(struct mbuf **mp, const void *buf, size_t buflen, int type)
 	*mp = m;
 	if (type == MT_SONAME) {
 		sa = mtod(m, struct sockaddr *);
-#if defined(COMPAT_OLDSOCK) && BYTE_ORDER != BIG_ENDIAN
+#if BYTE_ORDER != BIG_ENDIAN
 		if (sa->sa_family == 0 && sa->sa_len < AF_MAX)
 			sa->sa_family = sa->sa_len;
 #endif

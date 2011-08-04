@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.1 2009/04/10 20:53:54 miod Exp $	*/
+/*	$OpenBSD: intr.h,v 1.3 2011/03/23 16:54:37 pirofti Exp $	*/
 /*	$NetBSD: cpu.h,v 1.24 1997/03/15 22:25:15 pk Exp $ */
 
 /*
@@ -41,8 +41,8 @@
  *	@(#)cpu.h	8.4 (Berkeley) 1/5/94
  */
 
-#ifndef _SPARC_INTR_H_
-#define _SPARC_INTR_H_
+#ifndef _MACHINE_INTR_H_
+#define _MACHINE_INTR_H_
 
 #ifdef _KERNEL
 #include <sys/evcount.h>
@@ -94,9 +94,5 @@ void	 softintr_disestablish(void *);
 void	*softintr_establish(int, void (*)(void *), void *);
 void	 softintr_schedule(void *);
 
-/* XXX legacy software interrupts */
-extern void *softnet_ih;
-#define	 setsoftnet()	softintr_schedule(softnet_ih)
-
 #endif /* _KERNEL */
-#endif /* _SPARC_INTR_H_ */
+#endif /* _MACHINE_INTR_H_ */
