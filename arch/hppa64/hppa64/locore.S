@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.31 2011/07/08 22:26:43 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.33 2011/08/07 22:35:53 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -400,14 +400,13 @@ $bsd_syscall
 	mfctl	%eiem, %ret1
 	mtctl	%r0, %eiem
 	mtsp	%r0, %sr1
-	mfctl	%pidr1, %ret0
-	ldi	HPPA_PID_KERNEL, arg7
-	mtctl	arg7, %pidr1
+	ldi	HPPA_PID_KERNEL, %ret0
+	mtctl	%ret0, %pidr1
 
 	.import $syscall, code
 	.call
-	ldil	L%$syscall, arg7
-	be	R%$syscall(%sr1, arg7)
+	ldil	L%$syscall, %ret0
+	be	R%$syscall(%sr1, %ret0)
 	nop ! nop ! nop ! nop
 	
 gateway_end
@@ -417,7 +416,7 @@ gateway_end
 	.export $syscall, entry
 $syscall
 
-	mfsp	%sr0, arg7
+	mfsp	%sr0, %ret0
 	mtsp	%r0, %sr0
 	mtsp	%r0, %sr1
 	mtsp	%r0, %sr2
@@ -426,31 +425,35 @@ $syscall
 	mtsp	%r0, %sr5
 	mtsp	%r0, %sr6
 	mtsp	%r0, %sr7
+	mtctl	%ret0, %cr28
+	mtctl	%ret1, %cr29
 
-	copy	%sp, arg6
+	copy	%sp, %ret1
 
-	mfctl	%cr24, %r9
-	ldd	CI_CURPROC(%r9), %r9
-	ldd	P_ADDR(%r9), %sp
+	mfctl	%cr24, %ret0
+	ldd	CI_CURPROC(%ret0), %ret0
+	ldd	P_ADDR(%ret0), %sp
 	ldo	PAGE_SIZE-TRAPFRAME_SIZEOF(%sp), %sp
-	std	%sp, P_MD_REGS(%r9)
+	std	%sp, P_MD_REGS(%ret0)
 	ldo	TRAPFRAME_SIZEOF(%sp), %sp
 
-	std	arg6, TF_SP-TRAPFRAME_SIZEOF(%sp)
-	std	arg7, TF_SR0-TRAPFRAME_SIZEOF(%sp)
-	std	arg7, TF_SR1-TRAPFRAME_SIZEOF(%sp)
-	std	arg7, TF_SR2-TRAPFRAME_SIZEOF(%sp)
-	std	arg7, TF_SR3-TRAPFRAME_SIZEOF(%sp)
-	std	arg7, TF_SR4-TRAPFRAME_SIZEOF(%sp)
-	std	arg7, TF_SR5-TRAPFRAME_SIZEOF(%sp)
-	std	arg7, TF_SR6-TRAPFRAME_SIZEOF(%sp)
+	std	%ret1, TF_SP-TRAPFRAME_SIZEOF(%sp)
+	mfctl	%cr28, %ret0
+	mfctl	%cr29, %ret1
+	std	%ret0, TF_SR0-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR1-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR2-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR3-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR4-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR5-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR6-TRAPFRAME_SIZEOF(%sp)
 	std	%r0, TF_SR7-TRAPFRAME_SIZEOF(%sp)
-	std	arg7, TF_IISQ-TRAPFRAME_SIZEOF(%sp)
-	std	arg7, TF_IISQ+8-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_IISQ-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_IISQ+8-TRAPFRAME_SIZEOF(%sp)
 
-	ldo	4(%r31), arg7
+	ldo	4(%r31), %ret0
 	std	%r31, TF_IIOQ-TRAPFRAME_SIZEOF(%sp)
-	std	arg7, TF_IIOQ+8-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_IIOQ+8-TRAPFRAME_SIZEOF(%sp)
 	std	%r1, TF_R1-TRAPFRAME_SIZEOF(%sp)
 	std	%arg0, TF_ARGS+(0*8)-TRAPFRAME_SIZEOF(%sp)
 	std	%arg1, TF_ARGS+(1*8)-TRAPFRAME_SIZEOF(%sp)
@@ -464,7 +467,7 @@ $syscall
 	std	%dp, TF_DP-TRAPFRAME_SIZEOF(%sp)
 
 	mfctl	%pidr2, arg7
-	std	%ret0, TF_PIDR1-TRAPFRAME_SIZEOF(%sp)
+	std	arg7, TF_PIDR1-TRAPFRAME_SIZEOF(%sp)
 	std	arg7, TF_PIDR2-TRAPFRAME_SIZEOF(%sp)
 
 	mfctl	%sar, %arg2
@@ -1175,7 +1178,7 @@ ENTRY(TLABEL(excpt),0)
 	copy	%rp, %r1
 	copy	%arg0, %r8
 	mfctl	%cr30, %r9
-#if FP_REGS != 0
+#if HFP_REGS != 0
 	ldo	HFP_REGS(%r9), %r9
 #endif
 	.import	fpu_save, code
@@ -1184,9 +1187,12 @@ ENTRY(TLABEL(excpt),0)
 	copy	%r9, %arg0
 	copy	%r1, %rp
 	copy	%r8, %arg0
+	mfctl	%cr24, %r1
 	mtctl	%r0, %cr10	/* reset ccr: cause a reload after exception */
-	ldil	L%fpu_curpcb, %r1
-	std	%r0, R%fpu_curpcb(%r1)
+	ldd	CI_FPU_STATE(%r1), %r16
+	std	%r0, CI_FPU_STATE(%r1)
+	std	%r0, HFP_CPU(%r16)
+	sync
 
 	/* now, check for trap */
 	ldw	0(%r9), %r1
@@ -1250,13 +1256,17 @@ ENTRY(TLABEL(emu),0)
 
 	/* if we are already enabled and hit again, emulate */
 	mfctl	%cr10, %r1	/* ccr */
-	extru,<> %r1, 25, 2, %r0
+	extrd,u,*<> %r1, 57, 2, %r0
 	b,n	$fpusw_set
 	nop
 
 $fpusw_emu
+	mfctl	%cr24, %r1
 	mtctl	%r0, %cr10	/* reset ccr: cause a reload after exception */
-	std	%r0, R%fpu_curpcb(%r1)
+	ldd	CI_FPU_STATE(%r1), %r16
+	std	%r0, CI_FPU_STATE(%r1)
+	std	%r0, HFP_CPU(%r16)
+	sync
 #if TODO_emulate
 	/* here we emulate the fld/fst */
 	mfctl	%iir, %r1
@@ -1277,9 +1287,10 @@ $fpusw_emu
 	b	TLABEL(all)
 	ldi	T_ILLEGAL, %r1
 #endif
+
 $fpusw_set
 	/* enable coprocessor */
-	depdi	3, 37, 2, %r1
+	depdi	3, 57, 2, %r1
 	mtctl	%r1, %cr10	/* ccr */
 
 	mfctl	%cr24, %r16
@@ -1349,13 +1360,13 @@ $fpusw_nosave
 	sync
 
 $fpusw_done
-	rfir
+	rfi,r
 	nop
 EXIT(TLABEL(emu))
 
 LEAF_ENTRY(fpu_exit)
 	/* enable coprocessor XXX */
-	depi    3, 25, 2, %r1
+	depdi	3, 57, 2, %r1
 	mtctl   %r1, %cr10
 
 	ldil    L%fpu_scratch, %r25
@@ -1399,16 +1410,6 @@ LEAF_ENTRY(fpu_save)
 	fstds,ma %fr29, 8(%arg0)
 	fstds,ma %fr30, 8(%arg0)
 	fstds    %fr31, 0(%arg0)
-	ldo	-24(%arg0), %arg0
-	ldi	-32, %r25	/* gotta be free for all callers */
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
 	bv	%r0(%rp)
 	sync
 EXIT(fpu_save)
