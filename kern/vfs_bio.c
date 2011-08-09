@@ -189,6 +189,7 @@ bufinit(void)
 {
 	u_int64_t dmapages;
 	struct bqueues *dp;
+	vsize_t mapmax;
 
 	dmapages = uvm_pagecount(&dma_constraint);
 
@@ -245,8 +246,17 @@ bufinit(void)
  	 */
 	buf_mem_init(bufkvm);
 
-	hidirtypages = (bufpages / 4) * 3;
-	lodirtypages = bufpages / 2;
+	/* 
+	 * Ensure we don't allow dirty buffers to consume all our
+	 * available kvm.  bufs are mapped sparsely (see vfs_biomem.c)
+	 * so we could in the worst case map one page consuming one
+	 * MAXPHYS size chunk of kva as we allocate kvm for buffers in
+	 * MAXPHYS size chunks
+	 */
+	mapmax = bufkvm / MAXPHYS;
+
+	hidirtypages = (mapmax / 4) * 3;
+	lodirtypages = mapmax / 2;
 
 	/*
 	 * When we hit 95% of pages being clean, we bring them down to
@@ -273,9 +283,6 @@ bufadjust(int newbufpages)
 
 	s = splbio();
 	bufpages = newbufpages;
-
-	hidirtypages = (bufpages / 4) * 3;
-	lodirtypages = bufpages / 2;
 
 	/*
 	 * When we hit 95% of pages being clean, we bring them down to
