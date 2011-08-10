@@ -1140,7 +1140,7 @@ top:
 void 
 softdep_initialize(void)
 {
-
+	extern long lodirtypages; /* XXX */
 	bioops.io_start = softdep_disk_io_initiation;
 	bioops.io_complete = softdep_disk_write_complete;
 	bioops.io_deallocate = softdep_deallocate_dependencies;
@@ -1155,6 +1155,7 @@ softdep_initialize(void)
 #else
 	max_softdeps = desiredvnodes * 4;
 #endif
+	max_softdeps = min (lodirtypages, max_softdeps);
 	pagedep_hashtbl = hashinit(desiredvnodes / 5, M_PAGEDEP, M_WAITOK,
 	    &pagedep_hash);
 	sema_init(&pagedep_in_progress, "pagedep", PRIBIO, 0);
