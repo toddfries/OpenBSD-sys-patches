@@ -33,6 +33,8 @@ TAILQ_HEAD(,buf) buf_valist;
 int buf_nkvmsleep;
 
 extern struct bcachestats bcstats;
+extern struct proc *cleanerproc;
+extern int cleaneractive;
 
 /*
  * Pages are allocated from a uvm object (we only use it for page storage,
@@ -120,6 +122,11 @@ buf_map(struct buf *bp)
 			buf_kva_start += MAXPHYS;
 		} else {
 			struct buf *vbp;
+
+			/* XXX this is fucking horrible and should be fixed */
+			if (cleaneractive && (curproc != cleanerproc)) {
+				tsleep(&cleaneractive, PRIBIO, "bcleaner", 0);
+			}
 
 			/*
 			 * Find some buffer we can steal the space from.
