@@ -1155,7 +1155,7 @@ softdep_initialize(void)
 #else
 	max_softdeps = desiredvnodes * 4;
 #endif
-	max_softdeps = min (lodirtypages, max_softdeps);
+	max_softdeps = min(lodirtypages, max_softdeps);
 	pagedep_hashtbl = hashinit(desiredvnodes / 5, M_PAGEDEP, M_WAITOK,
 	    &pagedep_hash);
 	sema_init(&pagedep_in_progress, "pagedep", PRIBIO, 0);

@@ -116,6 +116,7 @@ long bufbackpages; 	/* number of pages we back off when asked to shrink */
 vsize_t bufkvm;
 
 struct proc *cleanerproc;
+int cleaneractive;
 int bd_req;			/* Sleep point for cleaner daemon. */
 
 void
@@ -246,17 +247,16 @@ bufinit(void)
  	 */
 	buf_mem_init(bufkvm);
 
-	/* 
+	/* XXX this is awful - needs fixing
 	 * Ensure we don't allow dirty buffers to consume all our
-	 * available kvm.  bufs are mapped sparsely (see vfs_biomem.c)
+	 * available kvm.  bufs are mapped stupidly (see vfs_biomem.c)
 	 * so we could in the worst case map one page consuming one
 	 * MAXPHYS size chunk of kva as we allocate kvm for buffers in
 	 * MAXPHYS size chunks
 	 */
 	mapmax = bufkvm / MAXPHYS;
-
-	hidirtypages = (mapmax / 4) * 3;
-	lodirtypages = mapmax / 2;
+	hidirtypages = mapmax - (mapmax / 10); /* 90% */
+	lodirtypages = mapmax - (mapmax / 4);  /* 75% */
 
 	/*
 	 * When we hit 95% of pages being clean, we bring them down to
@@ -1100,6 +1100,7 @@ buf_daemon(struct proc *p)
 
 		getmicrouptime(&starttime);
 
+		cleaneractive = 1;
 		while ((bp = TAILQ_FIRST(&bufqueues[BQ_DIRTY]))) {
 			struct timeval tv;
 
@@ -1141,6 +1142,8 @@ buf_daemon(struct proc *p)
 				break;
 
 		}
+		cleaneractive = 0;
+		wakeup(&cleaneractive);
 	}
 }
 
