@@ -1,4 +1,4 @@
-/*	$OpenBSD: dio.c,v 1.14 2010/04/15 20:38:09 miod Exp $	*/
+/*	$OpenBSD: dio.c,v 1.16 2011/08/18 20:02:57 miod Exp $	*/
 /*	$NetBSD: dio.c,v 1.7 1997/05/05 21:00:32 thorpej Exp $	*/
 
 /*-
@@ -110,10 +110,13 @@ dioattach(parent, self, aux)
 		 * Temporarily map the space corresponding to
 		 * the current select code unless:
 		 *	- this is the internal hpib select code,
-		 *	- this is the console select code.
+		 *	- this is the console select code, and
+		 *	  the console driver actually has a mapping
+		 *	  of the beginning of the select code space
+		 *	  (sti@dio doesn't).
 		 */
 		pa = dio_scodetopa(scode);
-		if (scode == conscode)
+		if (scode == conscode && conaddr != 0)
 			va = conaddr;
 		else if ((scode == 7) && internalhpib)
 			va = internalhpib = (caddr_t)IIOV(pa);
@@ -358,16 +361,6 @@ dio_inhole(int scode)
 	/* unconditionnaly skip the DIO-II hole */
 	if (scode >= 32 && scode < DIOII_SCBASE)
 		return DIOII_SCBASE;
-
-	/* skip the frame buffer memory on 3x2 systems */
-	switch (machineid) {
-	case HP_362:
-	case HP_382:
-		if (scode >= DIOII_SCBASE && scode < DIOII_SCBASE + 4)
-			return DIOII_SCBASE + 4;
-	default:
-		break;
-	}
 
 	return 0;
 }
