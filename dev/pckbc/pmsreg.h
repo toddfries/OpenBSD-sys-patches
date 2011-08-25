@@ -1,4 +1,4 @@
-/* $OpenBSD: pmsreg.h,v 1.2 2011/08/17 16:10:27 shadchin Exp $ */
+/* $OpenBSD: pmsreg.h,v 1.4 2011/08/24 15:34:25 shadchin Exp $ */
 /* $NetBSD: psmreg.h,v 1.1 1998/03/22 15:41:28 drochner Exp $ */
 
 #ifndef SYS_DEV_PCKBC_PMSREG_H
