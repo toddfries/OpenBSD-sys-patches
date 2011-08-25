@@ -802,7 +802,7 @@ pms_enable_synaptics(struct pms_softc *sc)
 		    SYNAPTICS_ID_MINOR(syn->identify));
 	}
 
-	mode = SYNAPTICS_ABSOLUTE_MODE | SYNAPTICS_HIGH_RATE;
+	mode = SYNAPTICS_ABSOLUTE_MODE;
 	if (SYNAPTICS_ID_MAJOR(syn->identify) >= 4)
 		mode |= SYNAPTICS_DISABLE_GESTURE;
 	if (syn->capabilities & SYNAPTICS_CAP_EXTENDED)
