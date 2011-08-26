@@ -19,10 +19,11 @@ option		DST=0		# daylight saving time used by RTC
 option		SMALL_KERNEL
 option		NO_PROPOLICE
 option		FFS		# UFS
+option		FFS2		# UFS2
 #option		NFSCLIENT	# Network File System client
 option		CD9660		# ISO 9660 + Rock Ridge file system
 option		INET		# IP + ICMP + TCP + UDP
-#option		INET6		# IPv6 (needs INET)
+option		INET6		# IPv6 (needs INET)
 option		BOOT_CONFIG	# add support for boot -c
 option		CRYPTO		# Cryptographic framework
 
@@ -48,6 +49,8 @@ config		bsd	root on rd0a
 # Main bus and CPU .. all systems.
 mainbus0 at root
 cpu0	at mainbus0
+
+softraid0 at root	# Software RAID
 
 # Bus types found on SPARC systems.
 sbus0	at mainbus0				# sun4c and sun4e
@@ -313,6 +316,7 @@ wsdisplay* at rfx?
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
 scsibus* at scsi?
+scsibus* at softraid?
 sd*	at scsibus?		# SCSI disks
 st*	at scsibus?		# SCSI tapes
 cd*	at scsibus?		# SCSI CD-ROMs
