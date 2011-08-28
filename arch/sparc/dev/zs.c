@@ -633,8 +633,10 @@ int
 zs_enable(struct zs_chanstate *cs)
 {
 	if (cs->enabled == 0) {
+#if NAUXREG > 0
 		if (zs_sb_enable == 0)
 			sb_auxregbisc(1, AUXIO2_SERIAL, 0);
+#endif
 		zs_sb_enable ^= (vaddr_t)cs;
 		cs->enabled = 1;
 	}
@@ -647,8 +649,10 @@ zs_disable(struct zs_chanstate *cs)
 	if (cs->enabled != 0) {
 		cs->enabled = 0;
 		zs_sb_enable ^= (vaddr_t)cs;
+#if NAUXREG > 0
 		if (zs_sb_enable == 0)
 			sb_auxregbisc(1, 0, AUXIO2_SERIAL);
+#endif
 	}
 }
 

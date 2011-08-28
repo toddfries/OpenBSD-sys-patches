@@ -317,8 +317,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 {
 #if (NLED > 0) || (NAUXREG > 0) || (NSCF > 0)
 	int oldval;
-#endif
 	int ret;
+#endif
 	extern int v8mul;
 
 	/* all sysctl names are this level are terminal */
