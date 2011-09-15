@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1617 2011/07/31 15:31:22 kettenis Exp 
+ *	OpenBSD: pcidevs,v 1.1621 2011/09/04 15:39:15 kettenis Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -5780,6 +5780,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "DGE-528T",
 	},
 	{
+	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE530T_C1,
+	    "DGE-530T C1",
+	},
+	{
 	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE560T,
 	    "DGE-560T",
 	},
@@ -6817,7 +6821,7 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6005_1,
-	    "Centrino Advanced-N 6005",
+	    "Centrino Advanced-N 6205",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1000_1,
@@ -8032,6 +8036,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "6 Series KT",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_Z68_LPC,
+	    "Z68 LPC",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_P67_LPC,
 	    "P67 LPC",
 	},
@@ -8072,10 +8080,6 @@ static const struct pci_known_product pci_known_products[] = {
 	    "B65 LPC",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_H61_LPC,
-	    "H61 LPC",
-	},
-	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_C202_LPC,
 	    "C202 LPC",
 	},
@@ -8086,6 +8090,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_C206_LPC,
 	    "C206 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_H61_LPC,
+	    "H61 LPC",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801AA_LPC,
@@ -14384,7 +14392,7 @@ static const struct pci_known_product pci_known_products[] = {
 	    "GeForce 8500 GT",
 	},
 	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE8400_GS,
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE8400_GS_0,
 	    "GeForce 8400 GS",
 	},
 	{
@@ -14686,6 +14694,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE_9600_GT,
 	    "GeForce 9600 GT",
+	},
+	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE8400_GS_1,
+	    "GeForce 8400 GS",
 	},
 	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_GEFORCE9300M_GS,
@@ -15758,6 +15770,14 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_RCC, PCI_PRODUCT_RCC_HT_1100,
 	    "HT-1100",
+	},
+	{
+	    PCI_VENDOR_RCC, PCI_PRODUCT_RCC_HT_1100_SATA_1,
+	    "HT-1100 SATA",
+	},
+	{
+	    PCI_VENDOR_RCC, PCI_PRODUCT_RCC_HT_1100_SATA_2,
+	    "HT-1100 SATA",
 	},
 	{
 	    PCI_VENDOR_RENDITION, PCI_PRODUCT_RENDITION_V1000,
