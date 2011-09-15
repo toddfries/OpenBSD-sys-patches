@@ -168,6 +168,7 @@ static const struct udav_type {
 	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ZT6688 }, 0 },
 	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ADM8515 }, 0 },
 	{{ USB_VENDOR_UNKNOWN4, USB_PRODUCT_UNKNOWN4_DM9601 }, 0 }
+	{{ USB_VENDOR_UNKNOWN4, USB_PRODUCT_UNKNOWN4_DM9601B }, 0 }
 };
 #define udav_lookup(v, p) ((struct udav_type *)usb_lookup(udav_devs, v, p))
 

@@ -3783,6 +3783,7 @@ product UNKNOWN3 ZD1211B	0x1233 ZD1211B
 
 /* Unknown vendor 4 */
 product UNKNOWN4 DM9601		0x8101 DM9601
+product UNKNOWN4 DM9601B	0x9700 DM9601B
 
 /* Unknown vendor 5 */
 product UNKNOWN5 NF_RIC		0x0001	NF RIC
