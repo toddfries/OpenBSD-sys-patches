@@ -1,4 +1,4 @@
-/*	$OpenBSD: ka48.c,v 1.11 2011/07/06 20:42:05 miod Exp $	*/
+/*	$OpenBSD: ka48.c,v 1.13 2011/09/15 00:48:24 miod Exp $	*/
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -61,6 +61,7 @@ static	int	ka48_mchk(caddr_t);
 static	void	ka48_halt(void);
 static	void	ka48_reboot(int);
 static	void	ka48_cache_enable(void);
+static	void	ka48_hardclock(struct clockframe *);
 
 struct	vs_cpu *ka48_cpu;
 
@@ -79,7 +80,7 @@ struct	cpu_dep ka48_calls = {
 	ka48_halt,
 	ka48_reboot,
 	NULL,
-	hardclock
+	ka48_hardclock
 };
 
 
@@ -99,8 +100,6 @@ ka48_conf()
 	}
 	printf("cpu: %s\n", cpuname);
 	ka48_cpu = (void *)vax_map_physmem(VS_REGS, 1);
-	printf("cpu: turning on floating point chip\n");
-	mtpr(2, PR_ACCS); /* Enable floating points */
 	/*
 	 * Setup parameters necessary to read time from clock chip.
 	 */
@@ -171,4 +170,11 @@ ka48_reboot(arg)
 	if (((u_int8_t *) clk_page)[KA48_CPMBX] != KA48_HLT_BOOT)
 		((u_int8_t *) clk_page)[KA48_CPMBX] = KA48_HLT_BOOT;
 	asm("halt");
+}
+
+static void
+ka48_hardclock(struct clockframe *cf)
+{
+	ka48_cpu->vc_diagtimu = 0;
+	hardclock(cf);
 }
