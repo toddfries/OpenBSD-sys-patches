@@ -1,4 +1,4 @@
-/*	$OpenBSD: vxt.c,v 1.6 2011/07/06 20:42:05 miod Exp $	*/
+/*	$OpenBSD: vxt.c,v 1.8 2011/09/15 00:48:24 miod Exp $	*/
 /*
  * Copyright (c) 1998 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -52,7 +52,7 @@ static	int	vxt_mchk(caddr_t);
 static	void	vxt_halt(void);
 static	void	vxt_reboot(int);
 static	void	vxt_cache_enable(void);
-static	int	missing_clkread(time_t);
+static	int	missing_clkread(struct timespec *, time_t);
 static	void	missing_clkwrite(void);
 
 /* 
@@ -77,7 +77,7 @@ struct	cpu_dep vxt_calls = {
 void
 vxt_conf()
 {
-	printf("cpu: KA48\n");
+	printf("cpu: VXT\n");
 }
 
 void
@@ -137,11 +137,10 @@ vxt_reboot(arg)
 }
 
 int
-missing_clkread(base)
-	time_t base;
+missing_clkread(struct timespec *ts, time_t base)
 {
 	printf("WARNING: no TOY clock");
-	return CLKREAD_BAD;
+	return EINVAL;
 }
 
 void
