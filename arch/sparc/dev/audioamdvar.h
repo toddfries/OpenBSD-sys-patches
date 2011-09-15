@@ -1,7 +1,8 @@
-/*	$OpenBSD: clock.h,v 1.9 2011/09/15 00:48:24 miod Exp $ */
-/*	$NetBSD: clock.h,v 1.4 1999/09/06 19:52:53 ragge Exp $ */
+/*	$OpenBSD: audioamdvar.h,v 1.1 2011/09/03 20:04:02 miod Exp $	*/
+/*	$NetBSD: audioamdvar.h,v 1.4 2005/12/11 12:19:05 christos Exp $	*/
+
 /*
- * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
+ * Copyright (c) 1995 Rolf Grossmann
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -14,8 +15,7 @@
  *    documentation and/or other materials provided with the distribution.
  * 3. All advertising materials mentioning features or use of this software
  *    must display the following acknowledgement:
- *	This product includes software developed at Ludd, University of 
- *	Lule}, Sweden and its contributors.
+ *      This product includes software developed by Rolf Grossmann.
  * 4. The name of the author may not be used to endorse or promote products
  *    derived from this software without specific prior written permission
  *
@@ -32,45 +32,17 @@
  */
 
 /*
- * Time constants. These are unlikely to change.
+ * pdma state
  */
-#define IS_LEAPYEAR(y) (((y % 4) == 0) && (y % 100))
+struct auio {
+	volatile uint8_t *au_amd;	/* chip registers */
 
-#define SEC_PER_MIN	(60)
-#define SEC_PER_HOUR	(SEC_PER_MIN * 60)
-#define SEC_PER_DAY	(SEC_PER_HOUR * 24)
-#define DAYSPERYEAR(y)	(IS_LEAPYEAR(y) ? 366 : 365)
-#define SECPERYEAR(y)	(DAYSPERYEAR(y) * SEC_PER_DAY)
+	uint8_t		*au_rdata;	/* record data */
+	uint8_t		*au_rend;	/* end of record data */
+	uint8_t		*au_pdata;	/* play data */
+	uint8_t		*au_pend;	/* end of play data */
 
-#define TODRBASE	(1 << 28) /* Rumours say it comes from VMS */
-
-#define	SEC_OFF		0
-#define	MIN_OFF		2
-#define	HR_OFF		4
-#define	WDAY_OFF	6
-#define	DAY_OFF		7
-#define	MON_OFF		8
-#define	YR_OFF		9
-#define	CSRA_OFF	10
-#define	CSRB_OFF	11
-#define	CSRD_OFF	13
-
-#define	CSRA_UIP	0200
-#define	CSRB_SET	0200
-#define	CSRB_24		0002
-#define	CSRB_DM		0004
-#define	CSRD_VRT	0200
-
-/* Var's used when dealing with clock chip */
-extern	volatile short *clk_page;
-extern	int clk_adrshift, clk_tweak;
-
-/* Prototypes */
-void	icr_hardclock(struct clockframe *);
-int	generic_clkread(struct timespec *, time_t);
-void	generic_clkwrite(void);
-int	chip_clkread(struct timespec *, time_t);
-void	chip_clkwrite(void);
-
-int	yeartonum(int);
-int	numtoyear(int);
+	void		*au_sc;
+	struct intrhand	 au_ih;
+	void		*au_swih;	/* software interrupt cookie */
+};

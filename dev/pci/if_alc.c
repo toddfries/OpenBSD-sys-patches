@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_alc.c,v 1.17 2011/08/26 07:49:04 kevlo Exp $	*/
+/*	$OpenBSD: if_alc.c,v 1.19 2011/09/13 08:12:51 kevlo Exp $	*/
 /*-
  * Copyright (c) 2009, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -420,13 +420,11 @@ alc_phy_reset(struct alc_softc *sc)
 	uint16_t data;
 
 	/* Reset magic from Linux. */
-	CSR_WRITE_2(sc, ALC_GPHY_CFG,
-	    GPHY_CFG_HIB_EN | GPHY_CFG_HIB_PULSE | GPHY_CFG_SEL_ANA_RESET);
+	CSR_WRITE_2(sc, ALC_GPHY_CFG, GPHY_CFG_SEL_ANA_RESET);
 	CSR_READ_2(sc, ALC_GPHY_CFG);
 	DELAY(10 * 1000);
 
-	CSR_WRITE_2(sc, ALC_GPHY_CFG,
-	    GPHY_CFG_EXT_RESET | GPHY_CFG_HIB_EN | GPHY_CFG_HIB_PULSE |
+	CSR_WRITE_2(sc, ALC_GPHY_CFG, GPHY_CFG_EXT_RESET |
 	    GPHY_CFG_SEL_ANA_RESET);
 	CSR_READ_2(sc, ALC_GPHY_CFG);
 	DELAY(10 * 1000);
@@ -511,6 +509,23 @@ alc_phy_reset(struct alc_softc *sc)
 	alc_miibus_writereg(&sc->sc_dev, sc->alc_phyaddr,
 	    ALC_MII_DBG_DATA, data);
 	DELAY(1000);
+
+	/* Disable hibernation. */
+	alc_miibus_writereg(&sc->sc_dev, sc->alc_phyaddr, ALC_MII_DBG_ADDR,
+	    0x0029);
+	data = alc_miibus_readreg(&sc->sc_dev, sc->alc_phyaddr,
+	    ALC_MII_DBG_DATA);
+	data &= ~0x8000;
+	alc_miibus_writereg(&sc->sc_dev, sc->alc_phyaddr, ALC_MII_DBG_DATA,
+	    data);
+
+	alc_miibus_writereg(&sc->sc_dev, sc->alc_phyaddr, ALC_MII_DBG_ADDR,
+	    0x000B);
+	data = alc_miibus_readreg(&sc->sc_dev, sc->alc_phyaddr,
+	    ALC_MII_DBG_DATA);
+	data &= ~0x8000;
+	alc_miibus_writereg(&sc->sc_dev, sc->alc_phyaddr, ALC_MII_DBG_DATA,
+	    data);
 }
 
 void
@@ -535,8 +550,7 @@ alc_phy_down(struct alc_softc *sc)
 		break;
 	default:
 		/* Force PHY down. */
-		CSR_WRITE_2(sc, ALC_GPHY_CFG,
-		    GPHY_CFG_EXT_RESET | GPHY_CFG_HIB_EN | GPHY_CFG_HIB_PULSE |
+		CSR_WRITE_2(sc, ALC_GPHY_CFG, GPHY_CFG_EXT_RESET |
 		    GPHY_CFG_SEL_ANA_RESET | GPHY_CFG_PHY_IDDQ | 
 		    GPHY_CFG_PWDOWN_HW);
 		DELAY(1000);
@@ -1269,7 +1283,7 @@ alc_encap(struct alc_softc *sc, struct mbuf **m_head)
 	struct mbuf *m;
 	bus_dmamap_t map;
 	uint32_t cflags, poff, vtag;
-	int error, idx, nsegs, prod;
+	int error, idx, prod;
 
 	m = *m_head;
 	cflags = vtag = 0;
@@ -1281,46 +1295,25 @@ alc_encap(struct alc_softc *sc, struct mbuf **m_head)
 	map = txd->tx_dmamap;
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, map, *m_head, BUS_DMA_NOWAIT);
-
+	if (error != 0 && error != EFBIG)
+		goto drop;
 	if (error != 0) {
-		bus_dmamap_unload(sc->sc_dmat, map);
-		error = EFBIG;
-	}
-	if (error == EFBIG) {
 		if (m_defrag(*m_head, M_DONTWAIT)) {
-			printf("%s: can't defrag TX mbuf\n",
-			    sc->sc_dev.dv_xname);
-			m_freem(*m_head);
-			*m_head = NULL;
-			return (ENOBUFS);
+			error = ENOBUFS;
+			goto drop;
 		}
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, map, *m_head,
 		    BUS_DMA_NOWAIT);
-		if (error != 0) {
-			printf("%s: could not load defragged TX mbuf\n",
-			    sc->sc_dev.dv_xname);
-			m_freem(*m_head);
-			*m_head = NULL;
-			return (error);
-		}
-	} else if (error) {
-		printf("%s: could not load TX mbuf\n", sc->sc_dev.dv_xname);
-		return (error);
-	}
-
-	nsegs = map->dm_nsegs;
-
-	if (nsegs == 0) {
-		m_freem(*m_head);
-		*m_head = NULL;
-		return (EIO);
+		if (error != 0)
+			goto drop;
 	}
 
 	/* Check descriptor overrun. */
-	if (sc->alc_cdata.alc_tx_cnt + nsegs >= ALC_TX_RING_CNT - 3) {
+	if (sc->alc_cdata.alc_tx_cnt + map->dm_nsegs >= ALC_TX_RING_CNT - 3) {
 		bus_dmamap_unload(sc->sc_dmat, map);
 		return (ENOBUFS);
 	}
+
 	bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
 
@@ -1341,8 +1334,9 @@ alc_encap(struct alc_softc *sc, struct mbuf **m_head)
 		/* Set checksum start offset. */
 		cflags |= ((poff >> 1) << TD_PLOAD_OFFSET_SHIFT) &
 		    TD_PLOAD_OFFSET_MASK;
-	} 
-	for (; idx < nsegs; idx++) {
+	}
+
+	for (; idx < map->dm_nsegs; idx++) {
 		desc = &sc->alc_rdata.alc_tx_ring[prod];
 		desc->len =
 		    htole32(TX_BYTES(map->dm_segs[idx].ds_len) | vtag);
@@ -1351,6 +1345,7 @@ alc_encap(struct alc_softc *sc, struct mbuf **m_head)
 		sc->alc_cdata.alc_tx_cnt++;
 		ALC_DESC_INC(prod, ALC_TX_RING_CNT);
 	}
+
 	/* Update producer index. */
 	sc->alc_cdata.alc_tx_prod = prod;
 
@@ -1367,6 +1362,11 @@ alc_encap(struct alc_softc *sc, struct mbuf **m_head)
 	txd->tx_m = m;
 
 	return (0);
+
+ drop:
+	m_freem(*m_head);
+	*m_head = NULL;
+	return (error);
 }
 
 void
@@ -1398,8 +1398,11 @@ alc_start(struct ifnet *ifp)
 		 * for the NIC to drain the ring.
 		 */
 		if (alc_encap(sc, &m_head)) {
-			if (m_head == NULL)
+			if (m_head == NULL) {
+				ifp->if_oerrors++;
 				break;
+			}
+			IF_PREPEND(&ifp->if_snd, m_head);
 			ifp->if_flags |= IFF_OACTIVE;
 			break;
 		}
