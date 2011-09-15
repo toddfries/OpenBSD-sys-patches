@@ -61,7 +61,7 @@ struct ip6_hdr;
 enum	{ PF_INOUT, PF_IN, PF_OUT, PF_FWD };
 enum	{ PF_PASS, PF_DROP, PF_SCRUB, PF_NOSCRUB, PF_NAT, PF_NONAT,
 	  PF_BINAT, PF_NOBINAT, PF_RDR, PF_NORDR, PF_SYNPROXY_DROP, PF_DEFER,
-	  PF_MATCH, PF_DIVERT, PF_RT, PF_AFRT };
+	  PF_MATCH, PF_DIVERT, PF_RT };
 enum	{ PF_TRANS_RULESET, PF_TRANS_ALTQ, PF_TRANS_TABLE };
 enum	{ PF_OP_NONE, PF_OP_IRG, PF_OP_EQ, PF_OP_NE, PF_OP_LT,
 	  PF_OP_LE, PF_OP_GT, PF_OP_GE, PF_OP_XRG, PF_OP_RRG };
@@ -651,7 +651,7 @@ struct pf_rule {
 	u_int8_t		 flush;
 #define PF_PRIO_NOTSET		0xff
 	u_int8_t		 prio[2];
-	sa_family_t		 naf;
+	u_int8_t		 pad;
 
 	struct {
 		struct pf_addr		addr;
@@ -712,7 +712,6 @@ struct pf_src_node {
 	u_int32_t		 creation;
 	u_int32_t		 expire;
 	sa_family_t		 af;
-	sa_family_t		 naf;
 	u_int8_t		 type;
 };
 
@@ -790,9 +789,6 @@ struct pf_state_key {
 	struct pf_state_key	*reverse;
 	struct inpcb		*inp;
 };
-#define PF_REVERSED_KEY(key, family)				\
-	((key[PF_SK_WIRE]->af != key[PF_SK_STACK]->af) &&	\
-	 (key[PF_SK_WIRE]->af != (family)))
 
 /* keep synced with struct pf_state, used in RB_FIND */
 struct pf_state_cmp {
@@ -1259,10 +1255,8 @@ struct pf_pdesc {
 	u_int16_t	 virtual_proto;
 #define PF_VPROTO_FRAGMENT	256
 	sa_family_t	 af;
-	sa_family_t	 naf;
 	u_int8_t	 proto;
 	u_int8_t	 tos;
-	u_int8_t	 ttl;
 	u_int8_t	 dir;		/* direction */
 	u_int8_t	 sidx;		/* key index for source */
 	u_int8_t	 didx;		/* key index for destination */
@@ -1799,8 +1793,7 @@ void   *pf_pull_hdr(struct mbuf *, int, void *, int, u_short *, u_short *,
 void	pf_change_a(void *, u_int16_t *, u_int32_t, u_int8_t);
 int	pflog_packet(struct pfi_kif *, struct mbuf *, u_int8_t,
 	    u_int8_t, struct pf_rule *, struct pf_rule *, struct pf_ruleset *,
- 	    struct pf_pdesc *);
-
+	    struct pf_pdesc *);
 void	pf_send_deferred_syn(struct pf_state *);
 int	pf_match_addr(u_int8_t, struct pf_addr *, struct pf_addr *,
 	    struct pf_addr *, sa_family_t);
@@ -1837,7 +1830,6 @@ void	pf_pkt_addr_changed(struct mbuf *);
 int	pf_state_key_attach(struct pf_state_key *, struct pf_state *, int);
 int	pf_translate(struct pf_pdesc *, struct pf_addr *, u_int16_t,
 	    struct pf_addr *, u_int16_t, u_int16_t, int);
-int	pf_translate_af(int, struct mbuf **, int, struct pf_pdesc *);
 
 void	pfr_initialize(void);
 int	pfr_match_addr(struct pfr_ktable *, struct pf_addr *, sa_family_t);
