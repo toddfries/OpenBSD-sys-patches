@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ale.c,v 1.17 2011/04/05 18:01:21 henning Exp $	*/
+/*	$OpenBSD: if_ale.c,v 1.20 2011/09/13 08:15:35 kevlo Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -147,11 +147,10 @@ ale_miibus_readreg(struct device *dev, int phy, int reg)
 	if (phy != sc->ale_phyaddr)
 		return (0);
 
-	if (sc->ale_flags & ALE_FLAG_FASTETHER) {
-		if (reg == MII_100T2CR || reg == MII_100T2SR ||
-		    reg == MII_EXTSR)
-			return (0);
-	}
+	if ((sc->ale_flags & ALE_FLAG_FASTETHER) != 0 &&
+	    reg == MII_EXTSR)
+		return (0);
+
 	CSR_WRITE_4(sc, ALE_MDIO, MDIO_OP_EXECUTE | MDIO_OP_READ |
 	    MDIO_SUP_PREAMBLE | MDIO_CLK_25_4 | MDIO_REG_ADDR(reg));
 	for (i = ALE_PHY_TIMEOUT; i > 0; i--) {
@@ -180,12 +179,6 @@ ale_miibus_writereg(struct device *dev, int phy, int reg, int val)
 	if (phy != sc->ale_phyaddr)
 		return;
 
-	if (sc->ale_flags & ALE_FLAG_FASTETHER) {
-		if (reg == MII_100T2CR || reg == MII_100T2SR ||
-		    reg == MII_EXTSR)
-			return;
-	}
-
 	CSR_WRITE_4(sc, ALE_MDIO, MDIO_OP_EXECUTE | MDIO_OP_WRITE |
 	    (val & MDIO_DATA_MASK) << MDIO_DATA_SHIFT |
 	    MDIO_SUP_PREAMBLE | MDIO_CLK_25_4 | MDIO_REG_ADDR(reg));
@@ -206,13 +199,11 @@ ale_miibus_statchg(struct device *dev)
 {
 	struct ale_softc *sc = (struct ale_softc *)dev;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	struct mii_data *mii;
+	struct mii_data *mii = &sc->sc_miibus;
 	uint32_t reg;
 
 	if ((ifp->if_flags & IFF_RUNNING) == 0)
 		return;
-
-	mii = &sc->sc_miibus;
 
 	sc->ale_flags &= ~ALE_FLAG_LINK;
 	if ((mii->mii_media_status & (IFM_ACTIVE | IFM_AVALID)) ==
@@ -398,7 +389,7 @@ ale_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	if (pci_intr_map(pa, &ih) != 0) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": can't map interrupt\n");
 		goto fail;
 	}
@@ -888,7 +879,7 @@ ale_encap(struct ale_softc *sc, struct mbuf **m_head)
 	struct mbuf *m;
 	bus_dmamap_t map;
 	uint32_t cflags, poff, vtag;
-	int error, i, nsegs, prod;
+	int error, i, prod;
 
 	m = *m_head;
 	cflags = vtag = 0;
@@ -900,46 +891,25 @@ ale_encap(struct ale_softc *sc, struct mbuf **m_head)
 	map = txd->tx_dmamap;
 
 	error = bus_dmamap_load_mbuf(sc->sc_dmat, map, *m_head, BUS_DMA_NOWAIT);
-
+	if (error != 0 && error != EFBIG)
+		goto drop;
 	if (error != 0) {
-		bus_dmamap_unload(sc->sc_dmat, map);
-		error = EFBIG;
-	}
-	if (error == EFBIG) {
 		if (m_defrag(*m_head, M_DONTWAIT)) {
-			printf("%s: can't defrag TX mbuf\n",
-			    sc->sc_dev.dv_xname);
-			m_freem(*m_head);
-			*m_head = NULL;
-			return (ENOBUFS);
+			error = ENOBUFS;
+			goto drop;
 		}
 		error = bus_dmamap_load_mbuf(sc->sc_dmat, map, *m_head,
 		    BUS_DMA_NOWAIT);
-		if (error != 0) {
-			printf("%s: could not load defragged TX mbuf\n",
-			    sc->sc_dev.dv_xname);
-			m_freem(*m_head);
-			*m_head = NULL;
-			return (error);
-		}
-	} else if (error) {
-		printf("%s: could not load TX mbuf\n", sc->sc_dev.dv_xname);
-		return (error);
-	}
-
-	nsegs = map->dm_nsegs;
-
-	if (nsegs == 0) {
-		m_freem(*m_head);
-		*m_head = NULL;
-		return (EIO);
+		if (error != 0)
+			goto drop;
 	}
 
 	/* Check descriptor overrun. */
-	if (sc->ale_cdata.ale_tx_cnt + nsegs >= ALE_TX_RING_CNT - 2) {
+	if (sc->ale_cdata.ale_tx_cnt + map->dm_nsegs >= ALE_TX_RING_CNT - 2) {
 		bus_dmamap_unload(sc->sc_dmat, map);
 		return (ENOBUFS);
 	}
+
 	bus_dmamap_sync(sc->sc_dmat, map, 0, map->dm_mapsize,
 	    BUS_DMASYNC_PREWRITE);
 
@@ -983,7 +953,7 @@ ale_encap(struct ale_softc *sc, struct mbuf **m_head)
 #endif
 
 	desc = NULL;
-	for (i = 0; i < nsegs; i++) {
+	for (i = 0; i < map->dm_nsegs; i++) {
 		desc = &sc->ale_cdata.ale_tx_ring[prod];
 		desc->addr = htole64(map->dm_segs[i].ds_addr);
 		desc->len = 
@@ -992,6 +962,7 @@ ale_encap(struct ale_softc *sc, struct mbuf **m_head)
 		sc->ale_cdata.ale_tx_cnt++;
 		ALE_DESC_INC(prod, ALE_TX_RING_CNT);
 	}
+
 	/* Update producer index. */
 	sc->ale_cdata.ale_tx_prod = prod;
 
@@ -1012,6 +983,11 @@ ale_encap(struct ale_softc *sc, struct mbuf **m_head)
 	    sc->ale_cdata.ale_tx_ring_map->dm_mapsize, BUS_DMASYNC_PREWRITE);
 
 	return (0);
+
+ drop:
+	m_freem(*m_head);
+	*m_head = NULL;
+	return (error);
 }
 
 void
@@ -1021,12 +997,16 @@ ale_start(struct ifnet *ifp)
 	struct mbuf *m_head;
 	int enq;
 
-	if ((ifp->if_flags & (IFF_RUNNING | IFF_OACTIVE)) != IFF_RUNNING)
-		return;
-
 	/* Reclaim transmitted frames. */
 	if (sc->ale_cdata.ale_tx_cnt >= ALE_TX_DESC_HIWAT)
 		ale_txeof(sc);
+
+	if ((ifp->if_flags & (IFF_RUNNING | IFF_OACTIVE)) != IFF_RUNNING)
+		return;
+	if ((sc->ale_flags & ALE_FLAG_LINK) == 0)
+		return;
+	if (IFQ_IS_EMPTY(&ifp->if_snd))
+		return;
 
 	enq = 0;
 	for (;;) {
@@ -1040,11 +1020,15 @@ ale_start(struct ifnet *ifp)
 		 * for the NIC to drain the ring.
 		 */
 		if (ale_encap(sc, &m_head)) {
-			if (m_head == NULL)
-				break;
+			if (m_head == NULL) {
+				ifp->if_oerrors++;
+				break; 
+			}
+			IF_PREPEND(&ifp->if_snd, m_head);
 			ifp->if_flags |= IFF_OACTIVE;
 			break;
 		}
+
 		enq = 1;
 
 #if NBPFILTER > 0
@@ -1083,9 +1067,7 @@ ale_watchdog(struct ifnet *ifp)
 	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
 	ifp->if_oerrors++;
 	ale_init(ifp);
-
-	if (!IFQ_IS_EMPTY(&ifp->if_snd))
-		ale_start(ifp);
+	ale_start(ifp);
 }
 
 int
@@ -1328,8 +1310,7 @@ ale_intr(void *xsc)
 		}
 
 		ale_txeof(sc);
-		if (!IFQ_IS_EMPTY(&ifp->if_snd))
-			ale_start(ifp);
+		ale_start(ifp);
 	}
 
 	/* Re-enable interrupts. */
