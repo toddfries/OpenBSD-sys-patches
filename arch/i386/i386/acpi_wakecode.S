@@ -53,7 +53,10 @@
 #define _ACPI_TRMP_LABEL(a) a = . - _C_LABEL(acpi_real_mode_resume) + ACPI_TRAMPOLINE
 #define _ACPI_TRMP_OFFSET(a) a = . - _C_LABEL(acpi_real_mode_resume)
 #define _ACPI_RM_SEGMENT (ACPI_TRAMPOLINE >> 4)
+
+#ifdef HIBERNATE
 #define HIBERNATE_STACK_OFFSET 0x0F00
+#endif
 
 /*
  * On wakeup, we'll start executing at acpi_real_mode_resume.
@@ -61,7 +64,7 @@
  * ACPI before we went to sleep. ACPI's wakeup vector is a
  * physical address - in our case, it's calculated and mapped
  * by the kernel and stuffed into a low page early in the boot
- * process. 
+ * process.
  *
  * We wakeup in real mode, at some phys addr based on the ACPI
  * specification (cs = phys>>8, ip = phys & 0xF). For example,
@@ -88,7 +91,7 @@ _ACPI_TRMP_OFFSET(acpi_s3_vector_real)
 	cld
 
 	/*
-	 * Set up segment registers for real mode. 
+	 * Set up segment registers for real mode.
 	 * We'll only be in real mode for a moment, and we don't have
 	 * want real dependencies on data or stack, so we'll just use
 	 * the code segment for data and stack (eg, a 64k memory space).
@@ -101,8 +104,8 @@ _ACPI_TRMP_OFFSET(acpi_s3_vector_real)
 
 	/*
 	 * Set up stack to grow down from offset 0x0FFE.
-	 * We will only be doing a few push/pops and no calls in real 
-	 * mode, so as long as the real mode code in the segment 
+	 * We will only be doing a few push/pops and no calls in real
+	 * mode, so as long as the real mode code in the segment
 	 * plus stack doesn't exceed 0x0FFE (4094) bytes, we'll be ok.
 	 */
 	movw	$0x0FFE,%sp
@@ -117,7 +120,7 @@ _ACPI_TRMP_OFFSET(acpi_s3_vector_real)
 	 * Reset the video hardware (as best as we can).
 	 * We call the video bios at c000:0003, similar to
 	 * what the BIOS does on a machine restart.
-	 * Note that this will only reset the video card, 
+	 * Note that this will only reset the video card,
 	 * and may not enable LCDs or other attached displays.
 	 *
 	 * This will also put the hardware in "factory default"
@@ -131,7 +134,7 @@ _ACPI_TRMP_OFFSET(acpi_s3_vector_real)
 	lcall	$0xc000,$3
 
 	/*
-	 * Restore our segment registers in case the call to 
+	 * Restore our segment registers in case the call to
 	 * reset the video hardware clobbered them.
 	 */
 	movw	%cs,%ax
@@ -149,8 +152,8 @@ nobiosreset:
 	/*
 	 * Flush instruction prefetch queue
 	 */
-	jmp     1f
-1:	jmp     1f
+	jmp	1f
+1:	jmp	1f
 1:
 
 	/*
@@ -161,7 +164,7 @@ nobiosreset:
 	 * time, until we restore the saved GDT that we had when we went
 	 * to sleep (although on i386, the saved GDT will most likely
 	 * represent something similar based on machine/segment.h).
-	 */ 
+	 */
 	data32 addr32 lgdt	tmp_gdt
 
 	/*
@@ -172,10 +175,10 @@ nobiosreset:
 	mov	%eax,%cr0
 
 	/*
-	 * Force CPU into protected mode 
+	 * Force CPU into protected mode
 	 * by making an intersegment jump (to ourselves, just a few lines
 	 * down from here. We rely on the kernel to fixup the jump
-	 * target addres previously. 
+	 * target addres previously.
 	 *
 	 */
 	ljmpl	$0x8, $acpi_protected_mode_trampoline
@@ -191,7 +194,7 @@ _C_LABEL(acpi_protected_mode_resume):
 	 *
 	 * Set up segment selectors for protected mode.
 	 * We've already set up our cs via the intersegment jump earlier,
-	 * but we need to set ds,es,fs,gs,ss to all point to the 
+	 * but we need to set ds,es,fs,gs,ss to all point to the
 	 * 4GB flat data segment we defined earlier.
 	 */
 	movw	$GSEL(GDATA_SEL,SEL_KPL),%ax
@@ -211,8 +214,8 @@ _C_LABEL(acpi_protected_mode_resume):
 
 
 	/*
-	 * Reset our page size extension (via restoring cr4) to what 
-	 * it was before we suspended. If we don't do this, cr4 might 
+	 * Reset our page size extension (via restoring cr4) to what
+	 * it was before we suspended. If we don't do this, cr4 might
 	 * contain garbage in the PSE bit, leading to pages that
 	 * are incorrectly interpreted as the wrong size
 	 * CR4 was added in i586, so there is
@@ -241,7 +244,7 @@ _C_LABEL(acpi_protected_mode_resume):
 1:
 	nop
 
-	/* 
+	/*
 	 * Restore CPU segment descriptor registers
 	 */
 	lgdt	acpi_saved_gdt
@@ -273,14 +276,14 @@ _C_LABEL(acpi_protected_mode_resume):
 	 * running task, it's TSS busy flag will have been set. We need
 	 * to clear that bit (since we're effectively "restarting" the OS)
 	 * in order to convince the processor that the task is no longer
-	 * running (which is true, now). If we don't do this, when the 
+	 * running (which is true, now). If we don't do this, when the
 	 * OS resumes and resumes this task, it will assume we're trying
 	 * to recurse into an already active task, which would cause
 	 * a GP violation (and probably, a crash).
 	 *
 	 * We accomplish this by changing the TSS descriptor from
 	 * BUSY (0x0B) to AVAILABLE (0x09). We keep the other
-	 * high 4 bits intact. 
+	 * high 4 bits intact.
 	 */
 	movl	acpi_saved_gdt+2,%ebx
 	xorl	%ecx, %ecx
@@ -288,14 +291,14 @@ _C_LABEL(acpi_protected_mode_resume):
 	leal	(%ebx,%ecx),%eax
 	andb	$0xF9,5(%eax)
 
-	ltr	acpi_saved_tr 
+	ltr	acpi_saved_tr
 
-	/* 
+	/*
 	 * Everything is almost reset back to the way it was immediately before
-	 * suspend. There are a few more registers to restore - this is 
+	 * suspend. There are a few more registers to restore - this is
 	 * done in acpi_restorecpu. We'll jump to that routine, and after
 	 * that, jump back to the OS. There's still some things
-	 * to do there, like re-enable interrupts, resume devices, APICs, 
+	 * to do there, like re-enable interrupts, resume devices, APICs,
 	 * etc.
 	 */
 	movl	acpi_saved_ebx, %ebx
@@ -320,12 +323,13 @@ _C_LABEL(acpi_protected_mode_resume):
 	xorl  %eax, %eax
 	jmp	*acpi_saved_ret
 
+#ifdef HIBERNATE
 	/*
-	 * hibernate_resume_machine drops to real mode and
+	 * hibernate_resume_machdep drops to real mode and
 	 * restarts the OS using the saved S3 resume vector
 	 */
 	.code32
-NENTRY(hibernate_resume_machine)
+NENTRY(hibernate_resume_machdep)
 	cli
 	/* Jump to the identity mapped version of ourself */
 	mov	$hibernate_resume_vector_2, %eax
@@ -363,32 +367,37 @@ _ACPI_TRMP_LABEL(hibernate_resume_vector_3)
 
 	.code32
 	/* Switch to hibernate resume pagetable */
-NENTRY(hibernate_activate_resume_pt)
+NENTRY(hibernate_activate_resume_pt_machdep)
 	/* Enable large pages */
 	movl	%eax, %cr4
 	orl	$(CR4_PSE), %eax
 	movl	%eax, %cr4
 
-	movl	$HIBERNATE_PT_PAGE, %eax
+	movl	$HIBERNATE_PD_PAGE, %eax
 	movl	%eax,	%cr3
 	jmp	1f
 
 1:	nop
 	ret
 
-NENTRY(hibernate_switch_stack)
+	/*
+	 * Switch to the private resume-time hibernate stack
+	 */
+NENTRY(hibernate_switch_stack_machdep)
 	movl	(%esp), %eax
-	movl	%eax, HIBERNATE_STACK_PAGE + HIBERNATE_STACK_OFFSET
-	movl	$(HIBERNATE_STACK_PAGE + HIBERNATE_STACK_OFFSET), %eax
-	movl	%eax, %esp
+	movl    %eax, HIBERNATE_STACK_PAGE + HIBERNATE_STACK_OFFSET
+	movl    $(HIBERNATE_STACK_PAGE + HIBERNATE_STACK_OFFSET), %eax
+	movl    %eax, %esp
 
 	/* On our own stack from here onward */
 	ret
 
 NENTRY(hibernate_flush)
 	wbinvd
-	invlpg  HIBERNATE_TEMP_PAGE
+	movl	$hibernate_inflate_page, %eax
+	invlpg  (%eax)
 	ret
+#endif /* HIBERNATE */
 
 	.code16
 	.align 8
@@ -408,14 +417,14 @@ _ACPI_TRMP_LABEL(tmp_gdtable)
 	 * Limit: 0xffffffff
 	 * Base: 0x00000000
 	 * Descriptor Type: Code
-	 * Segment Type: CRA 
+	 * Segment Type: CRA
 	 * Present: True
 	 * Priv: 0
 	 * AVL: False
 	 * 64-bit: False
 	 * 32-bit: True
 	 *
-	 */ 
+	 */
 	.word	0xffff, 0
 	.byte	0, 0x9f, 0xcf, 0
 
@@ -423,7 +432,7 @@ _ACPI_TRMP_LABEL(tmp_gdtable)
 	 * Data
 	 * Limit: 0xffffffff
 	 * Base: 0x00000000
-	 * Descriptor Type: 
+	 * Descriptor Type:
 	 * Segment Type: W
 	 * Present: True
 	 * Priv: 0
@@ -431,7 +440,7 @@ _ACPI_TRMP_LABEL(tmp_gdtable)
 	 * 64-bit: False
 	 * 32-bit: True
 	 *
-	 */ 
+	 */
 	.word	0xffff, 0
 	.byte	0, 0x93, 0xcf, 0
 _ACPI_TRMP_LABEL(tmp_gdt_end)
@@ -466,7 +475,7 @@ _ACPI_TRMP_LABEL(gdt_16_table)
 	 * Segment Type: CRA
 	 * Present: True
 	 * Priv: 0
- 	 * AVL: False
+	 * AVL: False
 	 * 64-bit: False
 	 * 32-bit: False
 	 *
@@ -534,7 +543,7 @@ _ACPI_TRMP_LABEL(acpi_saved_gdt)
 	.space 6
 
 	.align 16
-_ACPI_TRMP_LABEL(acpi_saved_ldt)	
+_ACPI_TRMP_LABEL(acpi_saved_ldt)
 	.short 0
 _ACPI_TRMP_LABEL(acpi_saved_cs)
 	.short 0
@@ -542,7 +551,7 @@ _ACPI_TRMP_LABEL(acpi_saved_ds)
 	.short 0
 _ACPI_TRMP_LABEL(acpi_saved_es)
 	.short 0
-_ACPI_TRMP_LABEL(acpi_saved_fs)	
+_ACPI_TRMP_LABEL(acpi_saved_fs)
 	.short 0
 _ACPI_TRMP_LABEL(acpi_saved_gs)
 	.short 0
