@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.106 2011/07/07 03:50:00 tedu Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.109 2011/09/19 21:39:31 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -28,7 +28,7 @@
 
 #include <crypto/md5.h>
 
-#define SR_META_VERSION		4	/* bump when sr_metadata changes */
+#define SR_META_VERSION		5	/* bump when sr_metadata changes */
 #define SR_META_SIZE		64	/* save space at chunk beginning */
 #define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
 
@@ -134,7 +134,19 @@ struct sr_crypto_chk_hmac_sha1 {
 	u_int8_t	sch_mac[20];
 } __packed;
 
+#define SR_OPT_INVALID		0x00
+#define SR_OPT_CRYPTO		0x01
+#define SR_OPT_BOOT		0x02
+#define SR_OPT_KEYDISK		0x03
+
+struct sr_meta_opt_hdr {
+	u_int32_t	som_type;	/* optional metadata type. */
+	u_int32_t	som_length;	/* optional metadata length. */
+	u_int8_t	som_checksum[MD5_DIGEST_LENGTH];
+} __packed;
+
 struct sr_meta_crypto {
+	struct sr_meta_opt_hdr	scm_hdr;
 	u_int32_t		scm_alg;	/* vol crypto algorithm */
 #define SR_CRYPTOA_AES_XTS_128	1
 #define SR_CRYPTOA_AES_XTS_256	2
@@ -162,39 +174,26 @@ struct sr_meta_crypto {
 #define	chk_hmac_sha1	_scm_chk.chk_hmac_sha1
 } __packed;
 
+#define SR_MAX_BOOT_DISKS 16
 struct sr_meta_boot {
-	u_int64_t		sbm_root_uid;
+	struct sr_meta_opt_hdr	sbm_hdr;
 	u_int32_t		sbm_bootblk_size;
 	u_int32_t		sbm_bootldr_size;
+	u_char			sbm_root_duid[8];
+	u_char			sbm_boot_duid[SR_MAX_BOOT_DISKS][8];
 } __packed;
 
 struct sr_meta_keydisk {
+	struct sr_meta_opt_hdr	skm_hdr;
 	u_int8_t		skm_maskkey[SR_CRYPTO_MAXKEYBYTES];
 } __packed;
 
-struct sr_meta_opt {
-	struct sr_meta_opt_invariant {
-		u_int32_t	som_type;	/* optional type */
-#define SR_OPT_INVALID		0x00
-#define SR_OPT_CRYPTO		0x01
-#define SR_OPT_BOOT		0x02
-#define SR_OPT_KEYDISK		0x03
-		u_int32_t	som_pad;
-		union {
-			struct sr_meta_crypto smm_crypto;
-			struct sr_meta_boot smm_boot;
-			struct sr_meta_keydisk smm_keydisk;
-		}		som_meta;
-	} _som_invariant;
-#define somi			_som_invariant
-#define somi_crypto		_som_invariant.smm_crypto
-#define somi_boot		_som_invariant.smm_boot
-	/* MD5 of invariant optional metadata */
-	u_int8_t		som_checksum[MD5_DIGEST_LENGTH];
-} __packed;
+#define SR_OLD_META_OPT_SIZE	2480
+#define SR_OLD_META_OPT_OFFSET	8
+#define SR_OLD_META_OPT_MD5	(SR_OLD_META_OPT_SIZE - MD5_DIGEST_LENGTH)
 
 struct sr_meta_opt_item {
-	struct sr_meta_opt	omi_om;
+	struct sr_meta_opt_hdr	*omi_som;
 	SLIST_ENTRY(sr_meta_opt_item) omi_link;
 };
 
@@ -454,6 +453,7 @@ struct sr_chunk {
 	/* helper members before metadata makes it onto the chunk  */
 	int			src_meta_ondisk;/* set when meta is on disk */
 	char			src_devname[32];
+	u_char			src_duid[8];	/* Chunk disklabel UID. */
 	int64_t			src_size;	/* in blocks */
 
 	SLIST_ENTRY(sr_chunk)	src_link;
@@ -559,8 +559,8 @@ struct sr_discipline {
 				    int, int);
 	void			(*sd_set_vol_state)(struct sr_discipline *);
 	int			(*sd_openings)(struct sr_discipline *);
-	int			(*sd_meta_opt_load)(struct sr_discipline *,
-				    struct sr_meta_opt *);
+	int			(*sd_meta_opt_handler)(struct sr_discipline *,
+				    struct sr_meta_opt_hdr *);
 
 	/* SCSI emulation */
 	struct scsi_sense_data	sd_scsi_sense;
@@ -630,6 +630,8 @@ void			sr_meta_save_callback(void *, void *);
 int			sr_meta_save(struct sr_discipline *, u_int32_t);
 void			sr_meta_getdevname(struct sr_softc *, dev_t, char *,
 			    int);
+void			sr_meta_opt_load(struct sr_softc *,
+			    struct sr_metadata *, struct sr_meta_opt_head *);
 void			sr_checksum(struct sr_softc *, void *, void *,
 			    u_int32_t);
 int			sr_validate_io(struct sr_workunit *, daddr64_t *,

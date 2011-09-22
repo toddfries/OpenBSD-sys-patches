@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.9 2009/01/28 08:02:02 grange Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.11 2011/09/21 15:34:47 miod Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.31 2004/01/04 11:33:29 jdolecek Exp $	*/
 
 /*
@@ -64,10 +64,6 @@
 #include <machine/reg.h>
 #include <machine/vmparam.h>
 
-#ifdef ARMFPE
-#include <arm/fpe-arm/armfpe.h>
-#endif
-
 extern pv_addr_t systempage;
 
 int process_read_regs	(struct proc *p, struct reg *regs);
@@ -116,15 +112,13 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 
 #ifdef PMAP_DEBUG
 	if (pmap_debug_level >= 0)
-		printf("cpu_fork: %p %p %p %p\n", p1, p2, curlwp, &proc0);
+		printf("cpu_fork: %p %p %p\n", p1, p2, &proc0);
 #endif	/* PMAP_DEBUG */
 
-#if 0 /* XXX */
-	if (l1 == curlwp) {
+	if (p1 == curproc) {
 		/* Sync the PCB before we copy it. */
 		savectx(curpcb);
 	}
-#endif
 
 	/* Copy the pcb */
 	*pcb = p1->p_addr->u_pcb;
@@ -149,21 +143,15 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 #ifdef PMAP_DEBUG
 	if (pmap_debug_level >= 0) {
 		printf("p1->procaddr=%p p1->procaddr->u_pcb=%p pid=%d pmap=%p\n",
-		    p1->p_addr, &p1->p_addr->u_pcb, p1->p_lid,
-		    p1->p_proc->p_vmspace->vm_map.pmap);
+		    p1->p_addr, &p1->p_addr->u_pcb, p1->p_pid,
+		    p1->p_vmspace->vm_map.pmap);
 		printf("p2->procaddr=%p p2->procaddr->u_pcb=%p pid=%d pmap=%p\n",
-		    p2->p_addr, &p2->p_addr->u_pcb, p2->p_lid,
-		    p2->p_proc->p_vmspace->vm_map.pmap);
+		    p2->p_addr, &p2->p_addr->u_pcb, p2->p_pid,
+		    p2->p_vmspace->vm_map.pmap);
 	}
 #endif	/* PMAP_DEBUG */
 
 	pmap_activate(p2);
-
-#ifdef ARMFPE
-	/* Initialise a new FP context for p2 and copy the context from p1 */
-	arm_fpe_core_initcontext(FP_CONTEXT(p2));
-	arm_fpe_copycontext(FP_CONTEXT(p1), FP_CONTEXT(p2));
-#endif	/* ARMFPE */
 
 	p2->p_addr->u_pcb.pcb_tf = tf =
 	    (struct trapframe *)pcb->pcb_un.un_32.pcb32_sp - 1;
