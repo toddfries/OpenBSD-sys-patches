@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.206 2011/07/05 04:48:02 guenther Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.208 2011/09/18 13:23:38 miod Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -905,7 +905,6 @@ sysctl__string(void *oldp, size_t *oldlenp, void *newp, size_t newlen,
     char *str, int maxlen, int trunc)
 {
 	int len, error = 0;
-	char c;
 
 	len = strlen(str) + 1;
 	if (oldp && *oldlenp < len) {
@@ -916,16 +915,15 @@ sysctl__string(void *oldp, size_t *oldlenp, void *newp, size_t newlen,
 		return (EINVAL);
 	if (oldp) {
 		if (trunc && *oldlenp < len) {
-			/* save & zap NUL terminator while copying */
-			c = str[*oldlenp-1];
-			str[*oldlenp-1] = '\0';
-			error = copyout(str, oldp, *oldlenp);
-			str[*oldlenp-1] = c;
+			len = *oldlenp;
+			error = copyout(str, oldp, len - 1);
+			if (error == 0)
+				error = copyout("", (char *)oldp + len - 1, 1);
 		} else {
-			*oldlenp = len;
 			error = copyout(str, oldp, len);
 		}
 	}
+	*oldlenp = len;
 	if (error == 0 && newp) {
 		error = copyin(newp, str, newlen);
 		str[newlen] = 0;
@@ -1766,8 +1764,8 @@ sysctl_diskinit(int update, struct proc *p)
 			bzero(duid, sizeof(duid));
 			if (dl && bcmp(dl->d_uid, &uid, sizeof(dl->d_uid))) {
 				snprintf(duid, sizeof(duid), 
-				    "%02hhx%02hhx%02hhx%02hhx"
-				    "%02hhx%02hhx%02hhx%02hhx",
+				    "%02hx%02hx%02hx%02hx"
+				    "%02hx%02hx%02hx%02hx",
 				    dl->d_uid[0], dl->d_uid[1], dl->d_uid[2],
 				    dl->d_uid[3], dl->d_uid[4], dl->d_uid[5],
 				    dl->d_uid[6], dl->d_uid[7]);
