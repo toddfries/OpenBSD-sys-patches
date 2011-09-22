@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.22 2011/08/07 15:49:34 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.26 2011/09/20 16:44:28 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -17,7 +17,7 @@
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define TRAPDEBUG
+#undef TRAPDEBUG
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -190,7 +190,8 @@ trap(int type, struct trapframe *frame)
 	opcode = frame->tf_iir;
 	if (trapnum <= T_EXCEPTION || trapnum == T_HIGHERPL ||
 	    trapnum == T_LOWERPL || trapnum == T_TAKENBR ||
-	    trapnum == T_IDEBUG || trapnum == T_PERFMON) {
+	    trapnum == T_IDEBUG || trapnum == T_PERFMON ||
+	    trapnum == T_IPROT) {
 		va = frame->tf_iioq[0];
 		space = frame->tf_iisq[0];
 		vftype = UVM_PROT_EXEC;
@@ -366,7 +367,6 @@ trap(int type, struct trapframe *frame)
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
 		break;
 
-	case T_IPROT | T_USER:
 	case T_DPROT | T_USER:
 		sv.sival_int = va;
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
@@ -414,6 +414,7 @@ trap(int type, struct trapframe *frame)
 	case T_TLB_DIRTY | T_USER:
 	case T_DATACC:
 	case T_DATACC | T_USER:
+	case T_IPROT | T_USER:
 		fault = VM_FAULT_PROTECT;
 	case T_ITLBMISS:
 	case T_ITLBMISS | T_USER:
@@ -444,7 +445,6 @@ trap(int type, struct trapframe *frame)
 			break;
 		}
 
-printf("here\n");
 		ret = uvm_fault(map, trunc_page(va), fault, vftype);
 
 		/*
@@ -659,8 +659,8 @@ syscall(struct trapframe *frame)
 		frame->tf_r1 = 0;
 		break;
 	case ERESTART:
-		frame->tf_iioq[0] -= 12;
-		frame->tf_iioq[1] -= 12;
+		frame->tf_iioq[0] -= 16;
+		frame->tf_iioq[1] -= 16;
 	case EJUSTRETURN:
 		break;
 	default:
