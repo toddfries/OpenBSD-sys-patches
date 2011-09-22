@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_norm.c,v 1.140 2011/07/18 21:03:10 mikeb Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.145 2011/09/22 14:57:12 bluhm Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
@@ -808,7 +808,7 @@ pf_normalize_ip6(struct mbuf **m0, int dir, int off, int extoff,
 #endif /* INET6 */
 
 int
-pf_normalize_tcp(int dir, struct mbuf *m, int off, struct pf_pdesc *pd)
+pf_normalize_tcp(struct mbuf *m, struct pf_pdesc *pd)
 {
 	struct tcphdr	*th = pd->hdr.tcp;
 	u_short		 reason;
@@ -835,10 +835,6 @@ pf_normalize_tcp(int dir, struct mbuf *m, int off, struct pf_pdesc *pd)
 			goto tcp_drop;
 	}
 
-	/* Check for illegal header length */
-	if (th->th_off < (sizeof(struct tcphdr) >> 2))
-		goto tcp_drop;
-
 	/* If flags changed, or reserved data set, then adjust */
 	if (flags != th->th_flags || th->th_x2 != 0) {
 		u_int16_t	ov, nv;
@@ -861,7 +857,7 @@ pf_normalize_tcp(int dir, struct mbuf *m, int off, struct pf_pdesc *pd)
 
 	/* copy back packet headers if we sanitized */
 	if (rewrite)
-		m_copyback(m, off, sizeof(*th), th, M_NOWAIT);
+		m_copyback(m, pd->off, sizeof(*th), th, M_NOWAIT);
 
 	return (PF_PASS);
 
@@ -871,12 +867,13 @@ pf_normalize_tcp(int dir, struct mbuf *m, int off, struct pf_pdesc *pd)
 }
 
 int
-pf_normalize_tcp_init(struct mbuf *m, int off, struct pf_pdesc *pd,
-    struct tcphdr *th, struct pf_state_peer *src, struct pf_state_peer *dst)
+pf_normalize_tcp_init(struct mbuf *m, struct pf_pdesc *pd,
+    struct pf_state_peer *src, struct pf_state_peer *dst)
 {
-	u_int32_t tsval, tsecr;
-	u_int8_t hdr[60];
-	u_int8_t *opt;
+	struct tcphdr	*th = pd->hdr.tcp;
+	u_int32_t	 tsval, tsecr;
+	u_int8_t	 hdr[60];
+	u_int8_t	*opt;
 
 	KASSERT(src->scrub == NULL);
 
@@ -912,7 +909,7 @@ pf_normalize_tcp_init(struct mbuf *m, int off, struct pf_pdesc *pd,
 
 
 	if (th->th_off > (sizeof(struct tcphdr) >> 2) && src->scrub &&
-	    pf_pull_hdr(m, off, hdr, th->th_off << 2, NULL, NULL, pd->af)) {
+	    pf_pull_hdr(m, pd->off, hdr, th->th_off << 2, NULL, NULL, pd->af)) {
 		/* Diddle with TCP options */
 		int hlen;
 		opt = hdr + sizeof(struct tcphdr);
@@ -965,17 +962,18 @@ pf_normalize_tcp_cleanup(struct pf_state *state)
 }
 
 int
-pf_normalize_tcp_stateful(struct mbuf *m, int off, struct pf_pdesc *pd,
-    u_short *reason, struct tcphdr *th, struct pf_state *state,
+pf_normalize_tcp_stateful(struct mbuf *m, struct pf_pdesc *pd,
+    u_short *reason, struct pf_state *state,
     struct pf_state_peer *src, struct pf_state_peer *dst, int *writeback)
 {
-	struct timeval uptime;
-	u_int32_t tsval, tsecr;
-	u_int tsval_from_last;
-	u_int8_t hdr[60];
-	u_int8_t *opt;
-	int copyback = 0;
-	int got_ts = 0;
+	struct tcphdr	*th = pd->hdr.tcp;
+	struct timeval	 uptime;
+	u_int32_t	 tsval, tsecr;
+	u_int		 tsval_from_last;
+	u_int8_t	 hdr[60];
+	u_int8_t	*opt;
+	int		 copyback = 0;
+	int		 got_ts = 0;
 
 	KASSERT(src->scrub || dst->scrub);
 
@@ -1012,7 +1010,7 @@ pf_normalize_tcp_stateful(struct mbuf *m, int off, struct pf_pdesc *pd,
 	if (th->th_off > (sizeof(struct tcphdr) >> 2) &&
 	    ((src->scrub && (src->scrub->pfss_flags & PFSS_TIMESTAMP)) ||
 	    (dst->scrub && (dst->scrub->pfss_flags & PFSS_TIMESTAMP))) &&
-	    pf_pull_hdr(m, off, hdr, th->th_off << 2, NULL, NULL, pd->af)) {
+	    pf_pull_hdr(m, pd->off, hdr, th->th_off << 2, NULL, NULL, pd->af)) {
 		/* Diddle with TCP options */
 		int hlen;
 		opt = hdr + sizeof(struct tcphdr);
@@ -1082,7 +1080,7 @@ pf_normalize_tcp_stateful(struct mbuf *m, int off, struct pf_pdesc *pd,
 		if (copyback) {
 			/* Copyback the options, caller copys back header */
 			*writeback = 1;
-			m_copyback(m, off + sizeof(struct tcphdr),
+			m_copyback(m, pd->off + sizeof(struct tcphdr),
 			    (th->th_off << 2) - sizeof(struct tcphdr), hdr +
 			    sizeof(struct tcphdr), M_NOWAIT);
 		}
@@ -1130,7 +1128,7 @@ pf_normalize_tcp_stateful(struct mbuf *m, int off, struct pf_pdesc *pd,
 		 * measurement of RTT (round trip time) and PAWS
 		 * (protection against wrapped sequence numbers).  PAWS
 		 * gives us a set of rules for rejecting packets on
-		 * long fat pipes (packets that were somehow delayed 
+		 * long fat pipes (packets that were somehow delayed
 		 * in transit longer than the time it took to send the
 		 * full TCP sequence space of 4Gb).  We can use these
 		 * rules and infer a few others that will let us treat
@@ -1228,15 +1226,15 @@ pf_normalize_tcp_stateful(struct mbuf *m, int off, struct pf_pdesc *pd,
 			    SEQ_GT(tsecr, dst->scrub->pfss_tsval) ? '2' : ' ',
 			    SEQ_LT(tsecr, dst->scrub->pfss_tsval0)? '3' : ' ');
 			DPFPRINTF(LOG_NOTICE,
-			    " tsval: %lu  tsecr: %lu  +ticks: %lu  "
+			    " tsval: %u  tsecr: %u  +ticks: %u  "
 			    "idle: %lus %lums",
 			    tsval, tsecr, tsval_from_last, delta_ts.tv_sec,
 			    delta_ts.tv_usec / 1000);
 			DPFPRINTF(LOG_NOTICE,
-			    " src->tsval: %lu  tsecr: %lu",
+			    " src->tsval: %u  tsecr: %u",
 			    src->scrub->pfss_tsval, src->scrub->pfss_tsecr);
 			DPFPRINTF(LOG_NOTICE,
-			    " dst->tsval: %lu  tsecr: %lu  tsval0: %lu",
+			    " dst->tsval: %u  tsecr: %u  tsval0: %u",
 			    dst->scrub->pfss_tsval, dst->scrub->pfss_tsecr,
 			    dst->scrub->pfss_tsval0);
 			if (pf_status.debug >= LOG_NOTICE) {
@@ -1364,7 +1362,7 @@ pf_normalize_tcp_stateful(struct mbuf *m, int off, struct pf_pdesc *pd,
 }
 
 int
-pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
+pf_normalize_mss(struct mbuf *m, struct pf_pdesc *pd, u_int16_t maxmss)
 {
 	struct tcphdr	*th = pd->hdr.tcp;
 	u_int16_t	 mss;
@@ -1376,7 +1374,7 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 	thoff = th->th_off << 2;
 	cnt = thoff - sizeof(struct tcphdr);
 
-	if (cnt > 0 && !pf_pull_hdr(m, off + sizeof(*th), opts, cnt,
+	if (cnt > 0 && !pf_pull_hdr(m, pd->off + sizeof(*th), opts, cnt,
 	    NULL, NULL, pd->af))
 		return (0);
 
@@ -1401,9 +1399,10 @@ pf_normalize_mss(struct mbuf *m, int off, struct pf_pdesc *pd, u_int16_t maxmss)
 				    mss, htons(maxmss), 0);
 				mss = htons(maxmss);
 				m_copyback(m,
-				    off + sizeof(*th) + optp + 2 - opts,
+				    pd->off + sizeof(*th) + optp + 2 - opts,
 				    2, &mss, M_NOWAIT);
-				m_copyback(m, off, sizeof(*th), th, M_NOWAIT);
+				m_copyback(m, pd->off, sizeof(*th), th,
+				    M_NOWAIT);
 			}
 			break;
 		default:
