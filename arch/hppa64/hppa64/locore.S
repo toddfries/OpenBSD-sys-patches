@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.37 2011/08/17 20:49:07 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.40 2011/09/18 14:14:48 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -59,6 +59,9 @@
 
 	.text
 
+#define MFCPU(r,x)    .word   0x140008a0 | ((r) << 21) | ((x))
+#define MTCPU(x,r)    .word   0x14001840 | ((r) << 21) | ((x) << 16)
+		
 /*
  * $start(pdc, boothowto, bootdev, esym)
  */
@@ -89,6 +92,11 @@ $start
 	mtctl	%r0, %eiem
 	mtctl	%r1, %eirr
 	mtctl	%r0, %cr10	/* ccr */
+
+	/* disable space-ID hashing */
+	MFCPU(2,28)
+	depdi	0, 54, 1, %r28
+	MTCPU(28,2)
 
 	ldil	L%cpu0_info, %r1
 	ldo	R%cpu0_info(%r1), %r1
@@ -611,11 +619,6 @@ $syscall_return
 	mtctl	%arg2, %cr0
 	mtctl	%arg3, %cr10
 
-	ldd	TF_IOR(%arg0), %arg2		/* ior */
-	ldd	TF_ISR(%arg0), %arg3		/* isr */
-	mtctl	%arg2, %cr27
-	mtsp	%arg3, %sr6
-
 	ldd	TF_SAR(%arg0), %arg2		/* sar */
 	ldd	TF_VTOP(%arg0), %arg3		/* vtop */
 	mtctl	%arg2, %sar
@@ -892,8 +895,11 @@ ENTRY(TLABEL(all),0)
 	extrd,u	%r8, 63, SID_SHIFT, %r16
 	depd	%r16, 31, SID_SHIFT, %r9
 	depd	%r0, 63, SID_SHIFT, %r8
-	mtsp	%r8, %sr6
-	mtctl	%r9, %cr27
+
+	mfctl	%cr24, %r24
+	ldo	CI_TRAP_SAVE(%r24), %r24
+	std	%r9, 2*8(%r24)		/* ior */
+	std	%r8, 3*8(%r24)		/* isr */
 
 	mfctl	%pcsq, %r24
 	mtctl	%r0, %pcsq
@@ -992,7 +998,7 @@ TLABEL(all_virt)
 	std,ma	%arg3, 8(%sr3,%sp)	/* %sr1 */
 
 	mfsp	%sr2, %arg2
-	mfsp	%sr3, %arg3
+	mfsp	%sr2, %arg3		/* XXX */
 	std,ma	%arg2, 8(%sr3,%sp)	/* %sr2 */
 	std,ma	%arg3, 8(%sr3,%sp)	/* %sr3 */
 
@@ -1035,12 +1041,7 @@ TLABEL(all_virt)
 	std,ma	%arg2, 8(%sr3,%sp)	/* eiem */
 	std,ma	%arg3, 8(%sr3,%sp)	/* eirr */
 
-	mfctl	%cr27, %arg2
-	mfsp	%sr6, %arg3
-	std,ma	%arg2, 8(%sr3,%sp)	/* ior */
-	std,ma	%arg3, 8(%sr3,%sp)	/* isr */
-
-	ldo	8(%sp), %sp		/* iir */
+	ldo	24(%sp), %sp		/* ior, isr, iir */
 	mfctl	%cr31, %arg3
 	std,ma	%arg3, 8(%sr3,%sp)	/* ipsw */
 
@@ -1073,6 +1074,10 @@ TLABEL(all_virt)
 	ldd	1*8(%r1), %arg3
 	std	%arg2, TF_SP(%arg1)
 	std	%arg3, TF_IIR(%arg1)
+	ldd	2*8(%r1), %arg2
+	ldd	3*8(%r1), %arg3
+	std	%arg2, TF_IOR(%arg1)
+	std	%arg3, TF_ISR(%arg1)
 
 	ldo	TRAPFRAME_SIZEOF(%arg1), %sp
 	copy	%sp, %r3
@@ -1966,12 +1971,14 @@ ENTRY(sigcode,0)
 	copy	%r31, %rp
 
 	ldil	L%SYSCALLGATE, %r1
+	depd	%r0, 31, 32, %r1
 	copy	%r4, %arg0
 	.call
 	ble	4(%sr7, %r1)
 	ldi	SYS_sigreturn, %r1
 
 	ldil	L%SYSCALLGATE, %r1
+	depd	%r0, 31, 32, %r1
 	copy	%ret0, %arg0
 	.call
 	ble	4(%sr7, %r1)
