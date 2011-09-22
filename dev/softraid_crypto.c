@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.71 2011/07/07 00:17:14 tedu Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.75 2011/09/20 12:20:44 jsing Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -57,10 +57,9 @@
 #include <dev/rndvar.h>
 
 /*
- * the per-io data that we need to preallocate. We can't afford to allow io
- * to start failing when memory pressure kicks in.
- * We can store this in the WU because we assert that only one
- * ccb per WU will ever be active.
+ * The per-I/O data that we need to preallocate. We cannot afford to allow I/O
+ * to start failing when memory pressure kicks in. We can store this in the WU
+ * because we assert that only one ccb per WU will ever be active.
  */
 struct sr_crypto_wu {
 	TAILQ_ENTRY(sr_crypto_wu)	 cr_link;
@@ -91,8 +90,8 @@ int		sr_crypto_alloc_resources(struct sr_discipline *);
 int		sr_crypto_free_resources(struct sr_discipline *);
 int		sr_crypto_ioctl(struct sr_discipline *,
 		    struct bioc_discipline *);
-int		sr_crypto_meta_opt_load(struct sr_discipline *,
-		    struct sr_meta_opt *);
+int		sr_crypto_meta_opt_handler(struct sr_discipline *,
+		    struct sr_meta_opt_hdr *);
 int		sr_crypto_write(struct cryptop *);
 int		sr_crypto_rw(struct sr_workunit *);
 int		sr_crypto_rw2(struct sr_workunit *, struct sr_crypto_wu *);
@@ -115,7 +114,7 @@ sr_crypto_discipline_init(struct sr_discipline *sd)
 
 	/* Fill out discipline members. */
 	sd->sd_type = SR_MD_CRYPTO;
-	sd->sd_capabilities = SR_CAP_SYSTEM_DISK;
+	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE;
 	sd->sd_max_wu = SR_CRYPTO_NOWU;
 
 	for (i = 0; i < SR_CRYPTO_MAXKEYS; i++)
@@ -128,7 +127,7 @@ sr_crypto_discipline_init(struct sr_discipline *sd)
 	sd->sd_free_resources = sr_crypto_free_resources;
 	sd->sd_start_discipline = NULL;
 	sd->sd_ioctl_handler = sr_crypto_ioctl;
-	sd->sd_meta_opt_load = sr_crypto_meta_opt_load;
+	sd->sd_meta_opt_handler = sr_crypto_meta_opt_handler;
 	sd->sd_scsi_inquiry = sr_raid_inquiry;
 	sd->sd_scsi_read_cap = sr_raid_read_cap;
 	sd->sd_scsi_tur = sr_raid_tur;
@@ -154,9 +153,12 @@ sr_crypto_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 	/* Create crypto optional metadata. */
 	omi = malloc(sizeof(struct sr_meta_opt_item), M_DEVBUF,
 	    M_WAITOK | M_ZERO);
-	omi->omi_om.somi.som_type = SR_OPT_CRYPTO;
+	omi->omi_som = malloc(sizeof(struct sr_meta_crypto), M_DEVBUF,
+	    M_WAITOK | M_ZERO);
+	omi->omi_som->som_type = SR_OPT_CRYPTO;
+	omi->omi_som->som_length = sizeof(struct sr_meta_crypto);
 	SLIST_INSERT_HEAD(&sd->sd_meta_opt, omi, omi_link);
-	sd->mds.mdd_crypto.scr_meta = &omi->omi_om.somi.som_meta.smm_crypto;
+	sd->mds.mdd_crypto.scr_meta = (struct sr_meta_crypto *)omi->omi_som;
 	sd->sd_meta->ssdi.ssd_opt_no++;
 
 	sd->mds.mdd_crypto.key_disk = NULL;
@@ -247,7 +249,6 @@ done:
 	return (rv);
 }
 
-
 struct sr_crypto_wu *
 sr_crypto_wu_get(struct sr_workunit *wu, int encrypt)
 {
@@ -287,22 +288,16 @@ sr_crypto_wu_get(struct sr_workunit *wu, int encrypt)
 	n = xs->datalen >> DEV_BSHIFT;
 
 	/*
-	 * we preallocated enough crypto descs for up to MAXPHYS of io.
-	 * since ios may be less than that we need to tweak the linked list
+	 * We preallocated enough crypto descs for up to MAXPHYS of I/O.
+	 * Since there may be less than that we need to tweak the linked list
 	 * of crypto desc structures to be just long enough for our needs.
-	 * Otherwise crypto will get upset with us. So put n descs on the crp
-	 * and keep the rest.
 	 */
 	crd = crwu->cr_descs;
-	i = 0;
-	while (++i < n) {
+	for (i = 0; i < ((MAXPHYS >> DEV_BSHIFT) - n); i++) {
 		crd = crd->crd_next;
 		KASSERT(crd);
 	}
-	crwu->cr_crp->crp_desc = crwu->cr_descs;
-	crwu->cr_descs = crd->crd_next;
-	crd->crd_next = NULL;
-
+	crwu->cr_crp->crp_desc = crd;
 	flags = (encrypt ? CRD_F_ENCRYPT : 0) |
 	    CRD_F_IV_PRESENT | CRD_F_IV_EXPLICIT;
 
@@ -342,16 +337,11 @@ sr_crypto_wu_get(struct sr_workunit *wu, int encrypt)
 	crwu->cr_crp->crp_opaque = crwu;
 
 	return (crwu);
+
 unwind:
 	/* steal the descriptors back from the cryptop */
-	crd = crwu->cr_crp->crp_desc;
-	while (crd->crd_next != NULL)
-		crd = crd->crd_next;
-
-	/* join the lists back again */
-	crd->crd_next = crwu->cr_descs;
-	crwu->cr_descs = crwu->cr_crp->crp_desc;
 	crwu->cr_crp->crp_desc = NULL;
+
 	return (NULL);
 }
 
@@ -361,20 +351,11 @@ sr_crypto_wu_put(struct sr_crypto_wu *crwu)
 	struct cryptop		*crp = crwu->cr_crp;
 	struct sr_workunit	*wu = crwu->cr_wu;
 	struct sr_discipline	*sd = wu->swu_dis;
-	struct cryptodesc	*crd;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_wu_put crwu: %p\n",
 	    DEVNAME(wu->swu_dis->sd_sc), crwu);
 
-	/* steal the descrptions back from the cryptop */
-	crd = crp->crp_desc;
-	KASSERT(crd);
-	while (crd->crd_next != NULL)
-		crd = crd->crd_next;
-
-	/* join the lists back again */
-	crd->crd_next = crwu->cr_descs;
-	crwu->cr_descs = crp->crp_desc;
+	/* steal the descriptors back from the cryptop */
 	crp->crp_desc = NULL;
 
 	mtx_enter(&sd->mds.mdd_crypto.scr_mutex);
@@ -676,6 +657,7 @@ sr_crypto_create_key_disk(struct sr_discipline *sd, dev_t dev)
 	struct sr_metadata	*sm = NULL;
 	struct sr_meta_chunk    *km;
 	struct sr_meta_opt_item *omi = NULL;
+	struct sr_meta_keydisk	*skm;
 	struct sr_chunk		*key_disk = NULL;
 	struct disklabel	label;
 	struct vnode		*vn;
@@ -793,14 +775,17 @@ sr_crypto_create_key_disk(struct sr_discipline *sd, dev_t dev)
 	    sizeof(sd->mds.mdd_crypto.scr_maskkey));
 
 	/* Copy mask key to optional metadata area. */
-	sm->ssdi.ssd_opt_no = 1;
 	omi = malloc(sizeof(struct sr_meta_opt_item), M_DEVBUF,
 	    M_WAITOK | M_ZERO);
-	omi->omi_om.somi.som_type = SR_OPT_KEYDISK;
-	bcopy(sd->mds.mdd_crypto.scr_maskkey,
-	    omi->omi_om.somi.som_meta.smm_keydisk.skm_maskkey,
-	    sizeof(omi->omi_om.somi.som_meta.smm_keydisk.skm_maskkey));
+	omi->omi_som = malloc(sizeof(struct sr_meta_keydisk), M_DEVBUF,
+	    M_WAITOK | M_ZERO);
+	omi->omi_som->som_type = SR_OPT_KEYDISK;
+	omi->omi_som->som_length = sizeof(struct sr_meta_keydisk);
+	skm = (struct sr_meta_keydisk *)omi->omi_som;
+	bcopy(sd->mds.mdd_crypto.scr_maskkey, &skm->skm_maskkey,
+	    sizeof(skm->skm_maskkey));
 	SLIST_INSERT_HEAD(&fakesd->sd_meta_opt, omi, omi_link);
+	fakesd->sd_meta->ssdi.ssd_opt_no++;
 
 	/* Save metadata. */
 	if (sr_meta_save(fakesd, SR_META_DIRTY)) {
@@ -838,7 +823,10 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 {
 	struct sr_softc		*sc = sd->sd_sc;
 	struct sr_metadata	*sm = NULL;
-	struct sr_meta_opt      *om;
+	struct sr_meta_opt_item *omi, *omi_next;
+	struct sr_meta_opt_hdr	*omh;
+	struct sr_meta_keydisk	*skm;
+	struct sr_meta_opt_head som;
 	struct sr_chunk		*key_disk = NULL;
 	struct disklabel	label;
 	struct vnode		*vn = NULL;
@@ -920,26 +908,33 @@ sr_crypto_read_key_disk(struct sr_discipline *sd, dev_t dev)
 	    sizeof(key_disk->src_meta));
 
 	/* Read mask key from optional metadata. */
-	om = (struct sr_meta_opt *)((u_int8_t *)(sm + 1) +
-	    sizeof(struct sr_meta_chunk) * sm->ssdi.ssd_chunk_no);
-	for (c = 0; c < sm->ssdi.ssd_opt_no; c++) {
-		if (om->somi.som_type == SR_OPT_KEYDISK) {
-			bcopy(&om->somi.som_meta.smm_keydisk.skm_maskkey,
+	SLIST_INIT(&som);
+	sr_meta_opt_load(sc, sm, &som);
+	SLIST_FOREACH(omi, &som, omi_link) {
+		omh = omi->omi_som;
+		if (omh->som_type == SR_OPT_KEYDISK) {
+			skm = (struct sr_meta_keydisk *)omh;
+			bcopy(&skm->skm_maskkey,
 			    sd->mds.mdd_crypto.scr_maskkey,
 			    sizeof(sd->mds.mdd_crypto.scr_maskkey));
-			break;
-		} else if (om->somi.som_type == SR_OPT_CRYPTO) {
-			bcopy(&om->somi.som_meta.smm_crypto,
+		} else if (omh->som_type == SR_OPT_CRYPTO) {
+			/* Original keydisk format with key in crypto area. */
+			bcopy(omh + sizeof(struct sr_meta_opt_hdr),
 			    sd->mds.mdd_crypto.scr_maskkey,
 			    sizeof(sd->mds.mdd_crypto.scr_maskkey));
-			break;
 		}
-		om++;
 	}
 
 	open = 0;
 
 done:
+	for (omi = SLIST_FIRST(&som); omi != SLIST_END(&som); omi = omi_next) {
+		omi_next = SLIST_NEXT(omi, omi_link);
+		if (omi->omi_som)
+			free(omi->omi_som, M_DEVBUF);
+		free(omi, M_DEVBUF);
+	}
+
 	if (sm)
 		free(sm, M_DEVBUF);
 
@@ -1070,8 +1065,8 @@ sr_crypto_free_resources(struct sr_discipline *sd)
 
 		if (crwu->cr_dmabuf != NULL)
 			dma_free(crwu->cr_dmabuf, MAXPHYS);
-		/* twiddle cryptoreq back */
 		if (crwu->cr_crp) {
+			/* twiddle cryptoreq back */
 			crwu->cr_crp->crp_desc = crwu->cr_descs;
 			crypto_freereq(crwu->cr_crp);
 		}
@@ -1150,12 +1145,12 @@ bad:
 }
 
 int
-sr_crypto_meta_opt_load(struct sr_discipline *sd, struct sr_meta_opt *om)
+sr_crypto_meta_opt_handler(struct sr_discipline *sd, struct sr_meta_opt_hdr *om)
 {
 	int rv = EINVAL;
 
-	if (om->somi.som_type == SR_OPT_CRYPTO) {
-		sd->mds.mdd_crypto.scr_meta =  &om->somi.som_meta.smm_crypto;
+	if (om->som_type == SR_OPT_CRYPTO) {
+		sd->mds.mdd_crypto.scr_meta = (struct sr_meta_crypto *)om;
 		rv = 0;
 	}
 
