@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.131 2011/07/26 12:32:14 krw Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.133 2011/09/21 21:43:57 deraadt Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -83,7 +83,6 @@ u_char	rootduid[8];		/* DUID of root disk. */
 /* softraid callback, do not use! */
 void (*softraid_disk_attach)(struct disk *, int);
 
-char *disk_readlabel(struct disklabel *, dev_t, char *, size_t);
 void disk_attach_callback(void *, void *);
 
 /*
@@ -1269,8 +1268,8 @@ gotswap:
 				    &rootduid, sizeof(rootduid)) == 0)
 					break;
 			if (dk == NULL)
-				panic("root device (%02hhx%02hhx%02hhx%02hhx"
-				    "%02hhx%02hhx%02hhx%02hhx) not found",
+				panic("root device (%02hx%02hx%02hx%02hx"
+				    "%02hx%02hx%02hx%02hx) not found",
 				    rootduid[0], rootduid[1], rootduid[2],
 				    rootduid[3], rootduid[4], rootduid[5],
 				    rootduid[6], rootduid[7]);
@@ -1336,7 +1335,7 @@ gotswap:
 	printf("root on %s%c", rootdv->dv_xname, 'a' + part);
 
 	if (dk != NULL && bcmp(rootduid, &duid, sizeof(rootduid)) == 0)
-		printf(" (%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx%02hhx.%c)",
+		printf(" (%02hx%02hx%02hx%02hx%02hx%02hx%02hx%02hx.%c)",
 		    rootduid[0], rootduid[1], rootduid[2], rootduid[3],
 		    rootduid[4], rootduid[5], rootduid[6], rootduid[7],
 		    'a' + part);
