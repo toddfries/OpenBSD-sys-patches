@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate.h,v 1.12 2011/07/11 03:30:32 mlarkin Exp $	*/
+/*	$OpenBSD: hibernate.h,v 1.14 2011/09/22 22:12:43 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -31,29 +31,21 @@
 struct hiballoc_entry;
 
 /*
- * Hibernate allocator.
- *
  * Allocator operates from an arena, that is pre-allocated by the caller.
  */
-struct hiballoc_arena
-{
-	RB_HEAD(hiballoc_addr, hiballoc_entry)
-				hib_addrs;
+struct hiballoc_arena {
+	RB_HEAD(hiballoc_addr, hiballoc_entry)	hib_addrs;
 };
 
 /*
- * struct hibernate_state
- *
  * Describes a zlib compression stream and its associated hiballoc area
  */
-struct hibernate_state {
+struct hibernate_zlib_state {
         z_stream hib_stream;
         struct hiballoc_arena hiballoc_arena;
 };
 
 /*
- * struct hibernate_memory_range
- *
  * Describes a range of physical memory on the machine
  */
 struct hibernate_memory_range {
@@ -62,40 +54,39 @@ struct hibernate_memory_range {
 };
 
 /*
- * struct hibernate_disk_chunk
- *
  * Describes a hibernate chunk structure, used when splitting the memory
  * image of the machine into easy-to-manage pieces.
  */
 struct hibernate_disk_chunk {
 	paddr_t		base;		/* Base of chunk */
-	paddr_t		end; 		/* End of chunk */		
-	size_t		offset;		/* Abs. disk block locating chunk */
+	paddr_t		end;		/* End of chunk */		
+	daddr_t		offset;		/* Abs. disk block locating chunk */
 	size_t		compressed_size; /* Compressed size on disk */
 	short		flags;		/* Flags */
 };
 
+typedef	int (*hibio_fn)(dev_t, daddr_t, vaddr_t, size_t, int, void *);
+
 /*
- * union hibernate_info
- *
- * Used to store information about the hibernation state of the machine, 
+ * Used to store information about the hibernation state of the machine,
  * such as memory range count and extents, disk sector size, and various
  * offsets where things are located on disk.
  */
 union hibernate_info {
 	struct {
-		size_t 		nranges;		
-		size_t		image_size;
-		size_t		chunk_ctr;
-		u_int32_t	secsize;
-		dev_t		device;
-		daddr_t		swap_offset;
-		daddr_t		sig_offset;
-		daddr_t		image_offset;
-		paddr_t		piglet_base;
-		struct hibernate_memory_range ranges[VM_PHYSSEG_MAX];
-		char		kernel_version[128];
-		int (*io_func)(dev_t, daddr_t, vaddr_t, size_t, int, void *);
+		size_t				nranges;
+		struct hibernate_memory_range	ranges[VM_PHYSSEG_MAX];
+		size_t				image_size;
+		size_t				chunk_ctr;
+		u_int32_t			secsize;
+		dev_t				device;
+		daddr_t				swap_offset;
+		daddr_t				sig_offset;
+		daddr_t				image_offset;
+		paddr_t				piglet_pa;
+		vaddr_t				piglet_va;
+		char				kernel_version[128];
+		hibio_fn			io_func;
 	};
 
 	/* XXX - remove restriction to have this union fit in a single block */
@@ -108,22 +99,32 @@ int	 hiballoc_init(struct hiballoc_arena*, void*, size_t len);
 void	 uvm_pmr_zero_everything(void);
 void	 uvm_pmr_dirty_everything(void);
 int	 uvm_pmr_alloc_pig(paddr_t*, psize_t);
-int	 uvm_pmr_alloc_piglet(paddr_t*, psize_t, paddr_t);
+int	 uvm_pmr_alloc_piglet(vaddr_t*, paddr_t*, vsize_t, paddr_t);
+void	 uvm_pmr_free_piglet(vaddr_t, vsize_t);
 psize_t	 uvm_page_rle(paddr_t);
 
-void	*get_hibernate_io_function(void);
-int	get_hibernate_info(union hibernate_info *);
+hibio_fn get_hibernate_io_function(void);
+int	get_hibernate_info(union hibernate_info *, int);
 
+int	hibernate_zlib_reset(union hibernate_info *, int);
 void	*hibernate_zlib_alloc(void *, int, int);
 void	hibernate_zlib_free(void *, void *);
-void	hibernate_inflate(paddr_t, paddr_t, size_t);
-size_t	hibernate_deflate(paddr_t, size_t *);
+void	hibernate_inflate(union hibernate_info *, paddr_t, paddr_t, size_t);
+size_t	hibernate_deflate(union hibernate_info *, paddr_t, size_t *);
 
 int	hibernate_read_block(union hibernate_info *, daddr_t, size_t, vaddr_t);
 int	hibernate_write_signature(union hibernate_info *);
+int	hibernate_write_chunktable(union hibernate_info *);
+int	hibernate_write_chunks(union hibernate_info *);
 int	hibernate_clear_signature(void);
 int	hibernate_compare_signature(union hibernate_info *,
 		union hibernate_info *);
+void	hibernate_resume(void);
+int	hibernate_suspend(void);
+int	hibernate_read_image(union hibernate_info *);
+int	hibernate_read_chunks(union hibernate_info *, paddr_t, paddr_t, size_t);
+void	hibernate_unpack_image(union hibernate_info *);
+void	hibernate_populate_resume_pt(union hibernate_info *, paddr_t, paddr_t);
 
 int	hibernate_check_overlap(paddr_t, paddr_t, paddr_t, paddr_t);
 
