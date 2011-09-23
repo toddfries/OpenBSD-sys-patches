@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflog.c,v 1.38 2011/07/07 00:47:18 mcbride Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.42 2011/09/20 10:51:18 bluhm Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -210,15 +210,14 @@ pflogioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 }
 
 int
-pflog_packet(struct pfi_kif *kif, struct mbuf *m, u_int8_t dir,
-    u_int8_t reason, struct pf_rule *rm, struct pf_rule *am,
-    struct pf_ruleset *ruleset, struct pf_pdesc *pd)
+pflog_packet(struct mbuf *m, u_int8_t reason, struct pf_rule *rm,
+    struct pf_rule *am, struct pf_ruleset *ruleset, struct pf_pdesc *pd)
 {
 #if NBPFILTER > 0
 	struct ifnet *ifn;
 	struct pfloghdr hdr;
 
-	if (kif == NULL || m == NULL || rm == NULL || pd == NULL)
+	if (m == NULL || rm == NULL || pd == NULL || pd->kif == NULL)
 		return (-1);
 
 	if ((ifn = pflogifs[rm->logif]) == NULL || !ifn->if_bpf)
@@ -229,7 +228,7 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, u_int8_t dir,
 	hdr.af = pd->af;
 	hdr.action = rm->action;
 	hdr.reason = reason;
-	memcpy(hdr.ifname, kif->pfik_name, sizeof(hdr.ifname));
+	memcpy(hdr.ifname, pd->kif->pfik_name, sizeof(hdr.ifname));
 
 	if (am == NULL) {
 		hdr.rulenr = htonl(rm->nr);
@@ -242,7 +241,7 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, u_int8_t dir,
 			    sizeof(hdr.ruleset));
 	}
 	if (rm->log & PF_LOG_SOCKET_LOOKUP && !pd->lookup.done)
-		pd->lookup.done = pf_socket_lookup(dir, pd);
+		pd->lookup.done = pf_socket_lookup(pd);
 	if (pd->lookup.done > 0) {
 		hdr.uid = pd->lookup.uid;
 		hdr.pid = pd->lookup.pid;
@@ -252,7 +251,7 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, u_int8_t dir,
 	}
 	hdr.rule_uid = rm->cuid;
 	hdr.rule_pid = rm->cpid;
-	hdr.dir = dir;
+	hdr.dir = pd->dir;
 
 	PF_ACPY(&hdr.saddr, &pd->nsaddr, pd->af);
 	PF_ACPY(&hdr.daddr, &pd->ndaddr, pd->af);
@@ -273,12 +272,10 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 {
 	const struct mbuf	*m;
 	struct pfloghdr		*pfloghdr;
-	struct pf_state		*s = NULL;
 	u_int			 count;
 	u_char			*dst;
 	u_short			 action, reason;
-	int			 off = 0, hdrlen = 0;
-	union {
+	union pf_headers {
 		struct tcphdr		tcp;
 		struct udphdr		udp;
 		struct icmp		icmp;
@@ -287,7 +284,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 		struct mld_hdr		mld;
 		struct nd_neighbor_solicit nd_ns;
 #endif /* INET6 */
-	} pf_hdrs;
+	} pdhdrs;
 
 	struct pf_pdesc		 pd;
 	struct pf_addr		 osaddr, odaddr;
@@ -335,10 +332,8 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 		mfake->m_pkthdr.len = min(mfake->m_pkthdr.len, mfake->m_len);
 
 	/* rewrite addresses if needed */
-	memset(&pd, 0, sizeof(pd));
-	pd.hdr.any = &pf_hdrs;
-	if (pf_setup_pdesc(pfloghdr->af, pfloghdr->dir, &pd, &mfake, &action,
-	    &reason, NULL, NULL, NULL, &s, NULL, &off, &hdrlen) == -1)
+	if (pf_setup_pdesc(pfloghdr->af, pfloghdr->dir, NULL, &pd, &pdhdrs,
+	    &mfake, &action, &reason) == -1)
 		return;
 
 	PF_ACPY(&osaddr, pd.src, pd.af);
@@ -351,8 +346,8 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	if ((pfloghdr->rewritten = pf_translate(&pd, &pfloghdr->saddr,
 	    pfloghdr->sport, &pfloghdr->daddr, pfloghdr->dport, 0,
 	    pfloghdr->dir))) {
-		m_copyback(mfake, off, min(mfake->m_len - off, hdrlen),
-		    pd.hdr.any, M_NOWAIT);
+		m_copyback(mfake, pd.off, min(mfake->m_len - pd.off,
+		    pd.hdrlen), pd.hdr.any, M_NOWAIT);
 		PF_ACPY(&pfloghdr->saddr, &osaddr, pd.af);
 		PF_ACPY(&pfloghdr->daddr, &odaddr, pd.af);
 		pfloghdr->sport = osport;
