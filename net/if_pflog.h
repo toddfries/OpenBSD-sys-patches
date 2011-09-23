@@ -54,7 +54,8 @@ struct pfloghdr {
 	pid_t		rule_pid;
 	u_int8_t	dir;
 	u_int8_t	rewritten;
-	u_int8_t	pad[2];
+	sa_family_t	naf;
+	u_int8_t	pad[1];
 	struct pf_addr	saddr;
 	struct pf_addr	daddr;
 	u_int16_t	sport;
