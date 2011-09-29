@@ -2517,6 +2517,8 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	pf_pool_copyin(&from->rdr, &to->rdr);
 	pf_pool_copyin(&from->route, &to->route);
 
+	to->naf = from->naf;
+
 	if (pf_kif_setup(to->ifname, &to->kif))
 		return (EINVAL);
 	if (pf_kif_setup(to->rcv_ifname, &to->rcv_kif))
