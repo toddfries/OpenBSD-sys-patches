@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.63 2011/01/05 22:20:22 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.67 2011/10/09 17:08:22 miod Exp $	*/
 
 /*
  * Copyright (c) 2001-2004, 2010, Miodrag Vallat.
@@ -129,8 +129,20 @@ do { \
 struct pool pmappool, pvpool;
 struct pmap kernel_pmap_store;
 
-apr_t	kernel_apr_cmode = CACHE_WT;	/* XXX CACHE_DFL does not work yet */
-apr_t	userland_apr_cmode = CACHE_DFL;
+/*
+ * Cacheability settings for page tables and kernel data.
+ */
+
+/* #define	CACHE_PT	(CPU_IS88100 ? CACHE_INH : CACHE_WT) */
+#define	CACHE_PT	CACHE_WT
+
+#if defined(M88110) && defined(MULTIPROCESSOR)
+apr_t	kernel_apr_cmode = CACHE_DFL;		/* might be downgraded to WT */
+#define	KERNEL_APR_CMODE	kernel_apr_cmode
+#else
+#define	KERNEL_APR_CMODE	CACHE_DFL
+#endif
+#define	USERLAND_APR_CMODE	CACHE_DFL
 apr_t	default_apr = CACHE_GLOBAL | APR_V;
 
 /*
@@ -146,8 +158,6 @@ void		 pmap_remove_pte(pmap_t, vaddr_t, pt_entry_t *,
 		    struct vm_page *, boolean_t);
 void		 pmap_remove_range(pmap_t, vaddr_t, vaddr_t);
 boolean_t	 pmap_testbit(struct vm_page *, int);
-void		 tlb_flush(pmap_t, vaddr_t);
-void		 tlb_kflush(vaddr_t);
 
 static __inline pv_entry_t
 pg_to_pvh(struct vm_page *pg)
@@ -192,66 +202,6 @@ pmap_pte(pmap_t pmap, vaddr_t va)
 		return NULL;
 
 	return sdt_pte(sdt, va);
-}
-
-/*
- * [MD PUBLIC]
- * Change the cache control bits of the address range `sva'..`eva' in
- * pmap_kernel to `mode'.
- */
-void
-pmap_cache_ctrl(vaddr_t sva, vaddr_t eva, u_int mode)
-{
-	int s;
-	pt_entry_t opte, *pte;
-	vaddr_t va;
-	paddr_t pa;
-	cpuid_t cpu;
-
-	DPRINTF(CD_CACHE, ("pmap_cache_ctrl(%p, %p, %x)\n",
-	    sva, eva, mode));
-
-	s = splvm();
-	for (va = sva; va != eva; va += PAGE_SIZE) {
-		if ((pte = pmap_pte(pmap_kernel(), va)) == NULL)
-			continue;
-		DPRINTF(CD_CACHE, ("cache_ctrl: pte@%p\n", pte));
-
-		/*
-		 * Data cache should be copied back and invalidated if
-		 * the old mapping was cached and the new isn't, or if
-		 * we are downgrading from writeback to writethrough.
-		 */
-		if (((*pte & CACHE_INH) == 0 && (mode & CACHE_INH) != 0) ||
-		    ((*pte & CACHE_WT) == 0 && (mode & CACHE_WT) != 0)) {
-			pa = ptoa(PG_PFNUM(*pte));
-#ifdef MULTIPROCESSOR
-			for (cpu = 0; cpu < MAX_CPUS; cpu++)
-				if (ISSET(m88k_cpus[cpu].ci_flags, CIF_ALIVE)) {
-#else
-			cpu = cpu_number();
-#endif
-					if (mode & CACHE_INH)
-						cmmu_cache_wbinv(cpu,
-						    pa, PAGE_SIZE);
-					else
-						cmmu_dcache_wb(cpu,
-						    pa, PAGE_SIZE);
-#ifdef MULTIPROCESSOR
-				}
-#endif
-		}
-
-		/*
-		 * Invalidate pte temporarily to avoid being written back
-		 * the modified bit and/or the reference bit by any other cpu.
-		 */
-
-		opte = invalidate_pte(pte);
-		*pte = (opte & ~CACHE_MASK) | mode;
-		tlb_kflush(va);
-	}
-	splx(s);
 }
 
 /*
@@ -335,81 +285,130 @@ pmap_translation_info(pmap_t pmap, vaddr_t va, paddr_t *pap, uint32_t *ti)
  * TLB (ATC) routines
  */
 
+#ifdef M88100
+void		 tlb_flush_88100(pmap_t, vaddr_t, pt_entry_t);
+void		 tlb_kflush_88100(vaddr_t, pt_entry_t);
+#endif
+#ifdef M88110
+void		 tlb_flush_88110(pmap_t, vaddr_t, pt_entry_t);
+void		 tlb_kflush_88110(vaddr_t, pt_entry_t);
+#endif
+#if defined(M88100) && defined(M88110)
+void		 (*tlb_flush_fnptr)(pmap_t, vaddr_t, pt_entry_t);
+void		 (*tlb_kflush_fnptr)(vaddr_t, pt_entry_t);
+#define		tlb_flush(pm,va,pte)	(*tlb_flush_fnptr)(pm,va,pte)
+#define		tlb_kflush(va,pte)	(*tlb_kflush_fnptr)(va,pte)
+#else
+#ifdef M88100
+#define		tlb_flush	tlb_flush_88100
+#define		tlb_kflush	tlb_kflush_88100
+#else
+#define		tlb_flush	tlb_flush_88110
+#define		tlb_kflush	tlb_kflush_88110
+#endif
+#endif
+
 /*
  * [INTERNAL]
  * Flush translation cache entry for `va' in `pmap'. May act lazily.
  */
+#ifdef M88100
 void
-tlb_flush(pmap_t pmap, vaddr_t va)
+tlb_flush_88100(pmap_t pmap, vaddr_t va, pt_entry_t pte)
 {
 	struct cpu_info *ci;
 	boolean_t kernel = pmap == pmap_kernel();
-
-#ifdef MULTIPROCESSOR	/* { */
+#ifdef MULTIPROCESSOR
 	CPU_INFO_ITERATOR cpu;
+#endif
 
 	/*
 	 * On 88100, we take action immediately.
 	 */
-	if (CPU_IS88100) {
-		CPU_INFO_FOREACH(cpu, ci) {
-			if (kernel || pmap == ci->ci_curpmap)
-				cmmu_tlb_inv(ci->ci_cpuid, kernel, va);
-		}
+#ifdef MULTIPROCESSOR
+	CPU_INFO_FOREACH(cpu, ci)
+#else
+	ci = curcpu();
+#endif
+	{
+		if (kernel || pmap == ci->ci_curpmap)
+			cmmu_tlb_inv(ci->ci_cpuid, kernel, va);
 	}
+}
+#endif
+#ifdef M88110
+void
+tlb_flush_88110(pmap_t pmap, vaddr_t va, pt_entry_t pte)
+{
+	struct cpu_info *ci;
+	boolean_t kernel = pmap == pmap_kernel();
+#ifdef MULTIPROCESSOR
+	CPU_INFO_ITERATOR cpu;
+#endif
 
 	/*
 	 * On 88110, we only remember which tlb need to be invalidated,
 	 * and wait for pmap_update() to do it.
 	 */
-	if (CPU_IS88110) {
-		CPU_INFO_FOREACH(cpu, ci) {
-			if (kernel)
-				ci->ci_pmap_ipi |= CI_IPI_TLB_FLUSH_KERNEL;
-			else if (pmap == ci->ci_curpmap)
-				ci->ci_pmap_ipi |= CI_IPI_TLB_FLUSH_USER;
-		}
+#ifdef MULTIPROCESSOR		/* { */
+	CPU_INFO_FOREACH(cpu, ci) {
+		if (kernel)
+			ci->ci_pmap_ipi |= CI_IPI_TLB_FLUSH_KERNEL;
+		else if (pmap == ci->ci_curpmap)
+			ci->ci_pmap_ipi |= CI_IPI_TLB_FLUSH_USER;
 	}
 #else	/* MULTIPROCESSOR */	/* } { */
 	ci = curcpu();
-
-	if (kernel || pmap == ci->ci_curpmap) {
-		if (CPU_IS88100)
-			cmmu_tlb_inv(ci->ci_cpuid, kernel, va);
-		if (CPU_IS88110)
-			ci->ci_pmap_ipi |= kernel ?
-			    CI_IPI_TLB_FLUSH_KERNEL : CI_IPI_TLB_FLUSH_USER;
-	}
+	if (kernel)
+		ci->ci_pmap_ipi |= CI_IPI_TLB_FLUSH_KERNEL;
+	else if (pmap == ci->ci_curpmap)
+		ci->ci_pmap_ipi |= CI_IPI_TLB_FLUSH_USER;
 #endif	/* MULTIPROCESSOR */	/* } */
 }
+#endif
 
 /*
  * [INTERNAL]
  * Flush translation cache entry for `va' in pmap_kernel(). Acts immediately.
  */
+#ifdef M88100
 void
-tlb_kflush(vaddr_t va)
+tlb_kflush_88100(vaddr_t va, pt_entry_t pte)
 {
 	struct cpu_info *ci;
-
-#ifdef MULTIPROCESSOR	/* { */
+#ifdef MULTIPROCESSOR
 	CPU_INFO_ITERATOR cpu;
+#endif
 
-	if (CPU_IS88100)
-		CPU_INFO_FOREACH(cpu, ci)
-			cmmu_tlb_inv(ci->ci_cpuid, TRUE, va);
-	if (CPU_IS88110)
-		CPU_INFO_FOREACH(cpu, ci)
-			cmmu_tlb_inv(ci->ci_cpuid, TRUE, 0);
+#ifdef MULTIPROCESSOR
+	CPU_INFO_FOREACH(cpu, ci)
+#else
+	ci = curcpu();
+#endif
+	{
+		cmmu_tlb_inv(ci->ci_cpuid, TRUE, va);
+	}
+}
+#endif
+#ifdef M88110
+void
+tlb_kflush_88110(vaddr_t va, pt_entry_t pte)
+{
+	struct cpu_info *ci;
+#ifdef MULTIPROCESSOR
+	CPU_INFO_ITERATOR cpu;
+#endif
+
+#ifdef MULTIPROCESSOR		/* { */
+	CPU_INFO_FOREACH(cpu, ci) {
+		cmmu_tlb_inv(ci->ci_cpuid, TRUE, 0);
+	}
 #else	/* MULTIPROCESSOR */	/* } { */
 	ci = curcpu();
-
-	if (CPU_IS88100)
-		cmmu_tlb_inv(ci->ci_cpuid, TRUE, va);
-	if (CPU_IS88110)
-		cmmu_tlb_inv(ci->ci_cpuid, TRUE, 0);
+	cmmu_tlb_inv(ci->ci_cpuid, TRUE, 0);
 #endif	/* MULTIPROCESSOR */	/* } */
 }
+#endif
 
 #ifdef M88110
 /*
@@ -426,15 +425,17 @@ pmap_update(pmap_t pm)
 	if (CPU_IS88110) {
 #endif
 		u_int ipi;
-#ifdef MULTIPROCESSOR
 		struct cpu_info *ci;
+#ifdef MULTIPROCESSOR
 		CPU_INFO_ITERATOR cpu;
+#endif
 
+#ifdef MULTIPROCESSOR
 		CPU_INFO_FOREACH(cpu, ci)
 #else
-		struct cpu_info *ci = curcpu();
+		ci = curcpu();
 #endif
-		/* CPU_INFO_FOREACH(cpu, ci) */ {
+		{
 			ipi = atomic_clear_int(&ci->ci_pmap_ipi);
 			if (ipi & CI_IPI_TLB_FLUSH_KERNEL)
 				cmmu_tlb_inv(ci->ci_cpuid, TRUE, 0);
@@ -523,7 +524,7 @@ pmap_expand_kmap(vaddr_t va, int canfail)
 	}
 
 	/* memory for page tables should not be writeback */
-	pmap_cache_ctrl(pa, pa + PAGE_SIZE, CPU_IS88100 ? CACHE_INH : CACHE_WT);
+	pmap_cache_ctrl(pa, pa + PAGE_SIZE, CACHE_PT);
 	sdt = SDTENT(pmap_kernel(), va);
 	*sdt = pa | SG_SO | SG_RW | PG_M | SG_V;
 	return sdt_pte(sdt, va);
@@ -559,7 +560,7 @@ pmap_expand(pmap_t pmap, vaddr_t va, int canfail)
 
 	pa = VM_PAGE_TO_PHYS(pg);
 	/* memory for page tables should not be writeback */
-	pmap_cache_ctrl(pa, pa + PAGE_SIZE, CPU_IS88100 ? CACHE_INH : CACHE_WT);
+	pmap_cache_ctrl(pa, pa + PAGE_SIZE, CACHE_PT);
 
 	*sdt = pa | SG_RW | PG_M | SG_V;
 
@@ -612,7 +613,7 @@ pmap_steal_memory(vsize_t size, vaddr_t *vstartp, vaddr_t *vendp)
 void
 pmap_map(paddr_t pa, psize_t sz, vm_prot_t prot, u_int cmode)
 {
-	pt_entry_t template, *pte;
+	pt_entry_t *pte, npte;
 
 	DPRINTF(CD_MAP, ("pmap_map(%p, %p, %x, %x)\n",
 	    pa, sz, prot, cmode));
@@ -622,10 +623,10 @@ pmap_map(paddr_t pa, psize_t sz, vm_prot_t prot, u_int cmode)
 		    pa, pa + sz);
 #endif
 
-	template = m88k_protection(prot) | cmode | PG_W | PG_V;
+	npte = m88k_protection(prot) | cmode | PG_W | PG_V;
 #ifdef M88110
 	if (CPU_IS88110 && m88k_protection(prot) != PG_RO)
-		template |= PG_M;
+		npte |= PG_M;
 #endif
 
 	sz = atop(round_page(pa + sz) - trunc_page(pa));
@@ -634,7 +635,7 @@ pmap_map(paddr_t pa, psize_t sz, vm_prot_t prot, u_int cmode)
 		if ((pte = pmap_pte(pmap_kernel(), pa)) == NULL)
 			pte = pmap_expand_kmap(pa, 0);
 
-		*pte = template | pa;
+		*pte = npte | pa;
 		pa += PAGE_SIZE;
 		pmap_kernel()->pm_stats.resident_count++;
 		pmap_kernel()->pm_stats.wired_count++;
@@ -657,6 +658,19 @@ pmap_bootstrap(paddr_t s_rom, paddr_t e_rom)
 	const struct pmap_table *ptable;
 	extern void *kernelstart;
 	extern void *etext;
+
+	/*
+	 * Initialize function pointers depending on the CPU type
+	 */
+#if defined(M88100) && defined(M88110)
+	if (CPU_IS88100) {
+		tlb_flush_fnptr = tlb_flush_88100;
+		tlb_kflush_fnptr = tlb_kflush_88100;
+	} else {
+		tlb_flush_fnptr = tlb_flush_88110;
+		tlb_kflush_fnptr = tlb_kflush_88110;
+	}
+#endif
 
 	virtual_avail = (vaddr_t)avail_end;
 
@@ -704,14 +718,17 @@ pmap_bootstrap(paddr_t s_rom, paddr_t e_rom)
 		*pdt++ = pa | PG_SO | PG_RO | PG_W | PG_V;
 		pa += PAGE_SIZE;
 	}
-	/* kernel data */
+	/* kernel data and symbols */
 	for (i = atop(sptpa) - atop(pa); i != 0; i--) {
+#ifdef MULTIPROCESSOR
+		*pdt++ = pa | PG_SO | PG_RW | PG_M_U | PG_W | PG_V | CACHE_WT;
+#else
 		*pdt++ = pa | PG_SO | PG_RW | PG_M_U | PG_W | PG_V;
+#endif
 		pa += PAGE_SIZE;
 	}
 	/* kernel page tables */
-	template = PG_SO | PG_RW | PG_M_U | PG_W | PG_V |
-	    (CPU_IS88100 ? CACHE_INH : CACHE_WT);
+	template = PG_SO | PG_RW | PG_M_U | PG_W | PG_V | CACHE_PT;
 	for (i = atop(eptpa) - atop(pa); i != 0; i--) {
 		*pdt++ = pa | template;
 		pa += PAGE_SIZE;
@@ -743,12 +760,19 @@ pmap_bootstrap(paddr_t s_rom, paddr_t e_rom)
 	 * Switch to using new page tables
 	 */
 
-#if !defined(MULTIPROCESSOR) && defined(M88110)
-	if (CPU_IS88110)
+#if defined(M88110)
+	if (CPU_IS88110) {
+#ifdef MULTIPROCESSOR
+		/* XXX until whatever causes the kernel to hang without
+		   XXX is understood and fixed */
+		kernel_apr_cmode = CACHE_WT;
+#else
 		default_apr &= ~CACHE_GLOBAL;
 #endif
+	}
+#endif
 	pmap_kernel()->pm_count = 1;
-	pmap_kernel()->pm_apr = sptpa | default_apr | kernel_apr_cmode;
+	pmap_kernel()->pm_apr = sptpa | default_apr | KERNEL_APR_CMODE;
 
 	DPRINTF(CD_BOOT, ("default apr %08x kernel apr %08x\n",
 	    default_apr, sptpa));
@@ -763,12 +787,6 @@ pmap_bootstrap(paddr_t s_rom, paddr_t e_rom)
 void
 pmap_bootstrap_cpu(cpuid_t cpu)
 {
-	/* Invalidate entire kernel TLB and get ready for address translation */
-#ifdef MULTIPROCESSOR
-	if (cpu != master_cpu)
-		cmmu_initialize_cpu(cpu);
-#endif
-
 	/* Load supervisor pointer to segment table. */
 	cmmu_set_sapr(pmap_kernel()->pm_apr);
 #ifdef PMAPDEBUG
@@ -818,10 +836,10 @@ pmap_create(void)
 
 	pa = VM_PAGE_TO_PHYS(pg);
 	/* memory for page tables should not be writeback */
-	pmap_cache_ctrl(pa, pa + PAGE_SIZE, CPU_IS88100 ? CACHE_INH : CACHE_WT);
+	pmap_cache_ctrl(pa, pa + PAGE_SIZE, CACHE_PT);
 
 	pmap->pm_stab = (sdt_entry_t *)pa;
-	pmap->pm_apr = pa | default_apr | userland_apr_cmode;
+	pmap->pm_apr = pa | default_apr | USERLAND_APR_CMODE;
 	pmap->pm_count = 1;
 
 	DPRINTF(CD_CREAT, ("pmap_create() -> pmap %p, pm_stab %p\n", pmap, pa));
@@ -921,7 +939,7 @@ int
 pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 {
 	int s;
-	pt_entry_t *pte, template;
+	pt_entry_t *pte, npte;
 	paddr_t old_pa;
 	pv_entry_t pv_e, pvl;
 	boolean_t wired = (flags & PMAP_WIRED) != 0;
@@ -930,7 +948,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	DPRINTF(CD_ENT, ("pmap_enter(%p, %p, %p, %x, %x)\n",
 	    pmap, va, pa, prot, flags));
 
-	template = m88k_protection(prot);
+	npte = m88k_protection(prot);
 
 	/*
 	 * Expand pmap to include this pte.
@@ -992,7 +1010,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 				pv_e = pool_get(&pvpool, PR_NOWAIT);
 				if (pv_e == NULL) {
 					/* Invalidate the old pte anyway */
-					tlb_flush(pmap, va);
+					tlb_flush(pmap, va, PG_NV);
 
 					if (flags & PMAP_CANFAIL) {
 						splx(s);
@@ -1017,9 +1035,9 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 			pmap->pm_stats.wired_count++;
 	} /* if (pa == old_pa) ... else */
 
-	template |= PG_V;
+	npte |= PG_V;
 	if (wired)
-		template |= PG_W;
+		npte |= PG_W;
 
 	if (prot & VM_PROT_WRITE) {
 		/*
@@ -1028,27 +1046,28 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 		 */
 		if (CPU_IS88110 && pmap != pmap_kernel() &&
 		    pg != NULL && (pvl->pv_flags & PG_M) == 0)
-			template |= PG_U;
+			npte |= PG_U;
 		else
-			template |= PG_M_U;
+			npte |= PG_M_U;
 	} else if (prot & VM_PROT_ALL)
-		template |= PG_U;
+		npte |= PG_U;
 
 	/*
 	 * If outside physical memory, disable cache on this (device) page.
 	 */
 	if (pa >= last_addr)
-		template |= CACHE_INH;
+		npte |= CACHE_INH;
 
 	/*
 	 * Invalidate pte temporarily to avoid being written
 	 * back the modified bit and/or the reference bit by
 	 * any other cpu.
 	 */
-	template |= invalidate_pte(pte) & PG_M_U;
-	*pte = template | pa;
-	tlb_flush(pmap, va);
-	DPRINTF(CD_ENT, ("pmap_enter: new pte %p\n", *pte));
+	npte |= invalidate_pte(pte) & PG_M_U;
+	npte |= pa;
+	*pte = npte;
+	tlb_flush(pmap, va, npte);
+	DPRINTF(CD_ENT, ("pmap_enter: new pte %p\n", npte));
 
 	/*
 	 * Cache attribute flags
@@ -1075,20 +1094,20 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 void
 pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 {
-	pt_entry_t template, *pte;
+	pt_entry_t *pte, npte;
 
 	DPRINTF(CD_ENT, ("pmap_kenter_pa(%p, %p, %x)\n", va, pa, prot));
 
-	template = m88k_protection(prot) | PG_W | PG_V;
+	npte = m88k_protection(prot) | PG_W | PG_V;
 #ifdef M88110
 	if (CPU_IS88110 && m88k_protection(prot) != PG_RO)
-		template |= PG_M;
+		npte |= PG_M;
 #endif
 	/*
 	 * If outside physical memory, disable cache on this (device) page.
 	 */
 	if (pa >= last_addr)
-		template |= CACHE_INH;
+		npte |= CACHE_INH;
 
 	/*
 	 * Expand pmap to include this pte.
@@ -1103,8 +1122,9 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 	pmap_kernel()->pm_stats.wired_count++;
 
 	invalidate_pte(pte);
-	*pte = template | pa;
-	tlb_kflush(va);
+	npte |= pa;
+	*pte = npte;
+	tlb_kflush(va, npte);
 }
 
 /*
@@ -1139,7 +1159,7 @@ pmap_remove_pte(pmap_t pmap, vaddr_t va, pt_entry_t *pte, struct vm_page *pg,
 
 	opte = invalidate_pte(pte) & PG_M_U;
 	if (flush)
-		tlb_flush(pmap, va);
+		tlb_flush(pmap, va, PG_NV);
 
 	if (pg == NULL) {
 		pg = PHYS_TO_VM_PAGE(pa);
@@ -1185,18 +1205,17 @@ pmap_remove_pte(pmap_t pmap, vaddr_t va, pt_entry_t *pte, struct vm_page *pg,
 			pool_put(&pvpool, cur);
 		} else {
 			pvl->pv_pmap = NULL;
-#ifdef M88100
-			if (CPU_IS88100 &&
-			    kernel_apr_cmode != userland_apr_cmode) {
-				/* XXX Why isn't cmmu_dcache_wb() enough? */
-				if (0)
-					cmmu_dcache_wb(cpu_number(),
-					    pa, PAGE_SIZE);
-				else
-					cmmu_cache_wbinv(cpu_number(),
-					    pa, PAGE_SIZE);
-			}
-#endif
+			/*
+			 * This page is no longer in use, and is likely
+			 * to be reused soon; since it may still have
+			 * dirty cache lines and may be used for I/O
+			 * (and risk being invalidated by the bus_dma
+			 * code without getting a chance of writeback),
+			 * we make sure the page gets written back.
+			 */
+			if (KERNEL_APR_CMODE == CACHE_DFL ||
+			    USERLAND_APR_CMODE == CACHE_DFL)
+				cmmu_dcache_wb(cpu_number(), pa, PAGE_SIZE);
 		}
 	} else {
 		prev->pv_next = cur->pv_next;
@@ -1275,7 +1294,7 @@ pmap_kremove(vaddr_t va, vsize_t len)
 	e = va + len;
 	while (va != e) {
 		sdt_entry_t *sdt;
-		pt_entry_t *pte;
+		pt_entry_t *pte, opte;
 
 		eseg = (va & SDT_MASK) + (1 << SDT_SHIFT);
 		if (eseg > e || eseg == 0)
@@ -1294,8 +1313,20 @@ pmap_kremove(vaddr_t va, vsize_t len)
 					pmap_kernel()->pm_stats.resident_count--;
 					pmap_kernel()->pm_stats.wired_count--;
 
-					invalidate_pte(pte);
-					tlb_kflush(va);
+					opte = invalidate_pte(pte);
+					tlb_kflush(va, PG_NV);
+
+					/*
+					 * Make sure the page is written back
+					 * if it was cached.
+					 */
+					if (KERNEL_APR_CMODE == CACHE_DFL &&
+					    (opte & (CACHE_INH | CACHE_WT)) ==
+					    0) {
+						cmmu_dcache_wb(cpu_number(),
+						    ptoa(PG_PFNUM(opte)),
+						    PAGE_SIZE);
+					}
 				}
 				va += PAGE_SIZE;
 				pte++;
@@ -1356,7 +1387,7 @@ void
 pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 {
 	int s;
-	pt_entry_t *pte, ap;
+	pt_entry_t *pte, ap, opte, npte;
 	vaddr_t va, eseg;
 
 	if ((prot & VM_PROT_READ) == 0) {
@@ -1392,9 +1423,10 @@ pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 					 * reference bit being written back by
 					 * any other cpu.
 					 */
-					*pte = ap |
-					    (invalidate_pte(pte) & ~PG_PROT);
-					tlb_flush(pmap, va);
+					opte = invalidate_pte(pte);
+					npte = ap | (opte & ~PG_PROT);
+					*pte = npte;
+					tlb_flush(pmap, va, npte);
 				}
 				va += PAGE_SIZE;
 				pte++;
@@ -1436,12 +1468,10 @@ pmap_copy_page(struct vm_page *srcpg, struct vm_page *dstpg)
 
 	DPRINTF(CD_COPY, ("pmap_copy_page(%p,%p) pa %p %p\n",
 	    srcpg, dstpg, src, dst));
-#ifdef M88100
-	if (CPU_IS88100 &&
-	    kernel_apr_cmode != userland_apr_cmode)
-		cmmu_dcache_wb(cpu_number(), src, PAGE_SIZE);
-#endif
 	curcpu()->ci_copypage((vaddr_t)src, (vaddr_t)dst);
+
+	if (KERNEL_APR_CMODE == CACHE_DFL)
+		cmmu_dcache_wb(cpu_number(), dst, PAGE_SIZE);
 }
 
 /*
@@ -1455,6 +1485,9 @@ pmap_zero_page(struct vm_page *pg)
 
 	DPRINTF(CD_ZERO, ("pmap_zero_page(%p) pa %p\n", pg, pa));
 	curcpu()->ci_zeropage((vaddr_t)pa);
+
+	if (KERNEL_APR_CMODE == CACHE_DFL)
+		cmmu_dcache_wb(cpu_number(), pa, PAGE_SIZE);
 }
 
 /*
@@ -1514,7 +1547,7 @@ pmap_changebit(struct vm_page *pg, int set, int mask)
 			if (npte != opte) {
 				invalidate_pte(pte);
 				*pte = npte;
-				tlb_flush(pmap, va);
+				tlb_flush(pmap, va, npte);
 			}
 		}
 	}
@@ -1591,7 +1624,7 @@ pmap_unsetbit(struct vm_page *pg, int bit)
 {
 	boolean_t rv = FALSE;
 	pv_entry_t pvl, pvep;
-	pt_entry_t *pte, opte;
+	pt_entry_t *pte, opte, npte;
 	pmap_t pmap;
 	int s;
 	vaddr_t va;
@@ -1639,8 +1672,9 @@ pmap_unsetbit(struct vm_page *pg, int bit)
 				 * other cpu.
 				 */
 				invalidate_pte(pte);
-				*pte = opte ^ bit;
-				tlb_flush(pmap, va);
+				npte = opte ^ bit;
+				*pte = npte;
+				tlb_flush(pmap, va, npte);
 				rv = TRUE;
 			}
 		}
@@ -1788,3 +1822,113 @@ pmap_set_modify(pmap_t pmap, vaddr_t va)
 	return (TRUE);
 }
 #endif
+
+/*
+ * [MD PUBLIC]
+ * Change the cache control bits of the address range `sva'..`eva' in
+ * pmap_kernel to `mode'.
+ */
+void
+pmap_cache_ctrl(vaddr_t sva, vaddr_t eva, u_int mode)
+{
+	int s;
+	pt_entry_t *pte, opte, npte;
+	vaddr_t va;
+	paddr_t pa;
+	cpuid_t cpu;
+
+	DPRINTF(CD_CACHE, ("pmap_cache_ctrl(%p, %p, %x)\n",
+	    sva, eva, mode));
+
+	s = splvm();
+	for (va = sva; va != eva; va += PAGE_SIZE) {
+		if ((pte = pmap_pte(pmap_kernel(), va)) == NULL)
+			continue;
+		DPRINTF(CD_CACHE, ("cache_ctrl: pte@%p\n", pte));
+
+		/*
+		 * Data cache should be copied back and invalidated if
+		 * the old mapping was cached and the new isn't, or if
+		 * we are downgrading from writeback to writethrough.
+		 */
+		if (((*pte & CACHE_INH) == 0 && (mode & CACHE_INH) != 0) ||
+		    ((*pte & CACHE_WT) == 0 && (mode & CACHE_WT) != 0)) {
+			pa = ptoa(PG_PFNUM(*pte));
+#ifdef MULTIPROCESSOR
+			for (cpu = 0; cpu < MAX_CPUS; cpu++)
+				if (ISSET(m88k_cpus[cpu].ci_flags, CIF_ALIVE)) {
+#else
+			cpu = cpu_number();
+#endif
+					if (mode & CACHE_INH)
+						cmmu_cache_wbinv(cpu,
+						    pa, PAGE_SIZE);
+					else if (KERNEL_APR_CMODE == CACHE_DFL)
+						cmmu_dcache_wb(cpu,
+						    pa, PAGE_SIZE);
+#ifdef MULTIPROCESSOR
+				}
+#endif
+		}
+
+		/*
+		 * Invalidate pte temporarily to avoid being written back
+		 * the modified bit and/or the reference bit by any other cpu.
+		 */
+
+		opte = invalidate_pte(pte);
+		npte = (opte & ~CACHE_MASK) | mode;
+		*pte = npte;
+		tlb_kflush(va, npte);
+	}
+	splx(s);
+}
+
+/*
+ * [MD PUBLIC]
+ * Change the cache control bits of all mappings of the given physical page to
+ * disable cached accesses.
+ */
+void
+pmap_page_uncache(paddr_t pa)
+{
+	struct vm_page *pg = PHYS_TO_VM_PAGE(pa);
+	struct pmap *pmap;
+	pv_entry_t pvl, pvep;
+	pt_entry_t *pte, opte, npte;
+	vaddr_t va;
+	int s;
+
+	s = splvm();
+	pvl = pg_to_pvh(pg);
+	if (pvl->pv_pmap != NULL) {
+		for (pvep = pvl; pvep != NULL; pvep = pvep->pv_next) {
+			pmap = pvep->pv_pmap;
+			va = pvep->pv_va;
+			pte = pmap_pte(pmap, va);
+
+			if (pte == NULL || !PDT_VALID(pte))
+				continue;	 /* no page mapping */
+			opte = *pte;
+			if ((opte & CACHE_MASK) != CACHE_INH) {
+				/*
+				 * Skip the direct mapping; it will be changed
+				 * by the pmap_cache_ctrl() call below.
+				 */
+				if (pmap == pmap_kernel() && va == pa)
+					continue;
+				/*
+				 * Invalidate pte temporarily to avoid the
+				 * specified bit being written back by any
+				 * other cpu.
+				 */
+				invalidate_pte(pte);
+				npte = (opte & ~CACHE_MASK) | CACHE_INH;
+				*pte = npte;
+				tlb_flush(pmap, va, npte);
+			}
+		}
+	}
+	splx(s);
+	pmap_cache_ctrl(pa, pa + PAGE_SIZE, CACHE_INH);
+}
