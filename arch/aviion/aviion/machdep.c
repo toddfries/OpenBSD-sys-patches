@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.45 2011/06/26 22:39:59 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.47 2011/10/09 17:09:27 miod Exp $	*/
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -517,7 +517,17 @@ secondary_pre_main()
 	struct cpu_info *ci;
 	vaddr_t init_stack;
 
-	set_cpu_number(cmmu_cpu_number()); /* Determine cpu number by CMMU */
+	/*
+	 * Invoke the CMMU initialization routine as early as possible,
+	 * so that we do not risk any memory writes to be lost during
+	 * cache setup.
+	 */
+	cmmu_initialize_cpu(cmmu_cpu_number());
+
+	/*
+	 * Now initialize your cpu_info structure.
+	 */
+	set_cpu_number(cmmu_cpu_number());
 	ci = curcpu();
 	ci->ci_curproc = &proc0;
 	platform->smp_setup(ci);
@@ -525,7 +535,7 @@ secondary_pre_main()
 	splhigh();
 
 	/*
-	 * Setup CMMUs and translation tables (shared with the master cpu).
+	 * Enable MMU on this processor.
 	 */
 	pmap_bootstrap_cpu(ci->ci_cpuid);
 
@@ -566,7 +576,6 @@ secondary_main()
 	microuptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
 	ci->ci_randseed = random();
-	SET(ci->ci_flags, CIF_ALIVE);
 
 	/*
 	 * Release cpu_hatch_mutex to let other secondary processors
@@ -582,6 +591,9 @@ secondary_main()
 	spl0();
 	SCHED_LOCK(s);
 	set_psr(get_psr() & ~PSR_IND);
+
+	SET(ci->ci_flags, CIF_ALIVE);
+
 	cpu_switchto(NULL, sched_chooseproc());
 }
 
@@ -753,7 +765,10 @@ aviion_bootstrap()
 	initmsgbuf((caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL, NULL),
 	    MSGBUFSIZE);
 
-	pmap_bootstrap(0, 0);	/* ROM image is on top of physical memory */
+	/* ROM work area is on top of physical memory */
+	/* but we need to make VBR page readable */
+	/* XXX relocate VBR as done on mvme88k */
+	pmap_bootstrap(0, PAGE_SIZE);
 
 	/* Initialize the "u-area" pages. */
 	bzero((caddr_t)curpcb, USPACE);
@@ -776,22 +791,24 @@ cpu_hatch_secondary_processors()
 	if (platform->send_ipi == NULL)
 		return;
 
-	for (cpu = 0; cpu < ncpusfound; cpu++) {
+	for (cpu = 0; cpu < MAX_CPUS; cpu++) {
 		if (cpu != ci->ci_cpuid) {
+			hatch_pending_count++;
 			rc = scm_jpstart(cpu, (vaddr_t)secondary_start);
 			switch (rc) {
 			case JPSTART_OK:
-				hatch_pending_count++;
-				break;
-			case JPSTART_NO_JP:
 				break;
 			case JPSTART_SINGLE_JP:
 				/* this should never happen, but just in case */
+				hatch_pending_count = 0;
 				ncpusfound = 1;
 				return;
 			default:
 				printf("CPU%d failed to start, error %d\n",
 				    cpu, rc);
+				/* FALLTHROUGH */
+			case JPSTART_NO_JP:
+				hatch_pending_count--;
 				break;
 			}
 		}
@@ -806,7 +823,7 @@ cpu_setup_secondary_processors()
 {
 	__cpu_simple_unlock(&cpu_hatch_mutex);
 	while (hatch_pending_count != 0)
-		delay(100000);
+		delay(10000);	/* 10ms */
 }
 
 /*
@@ -951,11 +968,6 @@ myetheraddr(u_char *cp)
 
 /*
  * Attempt to identify which AViiON flavour we are running on.
- * The only thing we can do at this point is peek at random addresses and
- * see if they cause bus errors, or not.
- *
- * These heuristics are probably not the best; feel free to come with better
- * ones...
  */
 
 struct aviion_system {
@@ -1042,11 +1054,10 @@ aviion_identify()
 		if (system->cpuid != 0 && system->cpuid != cpuid)
 			continue;
 
-		hw_vendor = "Data General";
-		hw_prod = "AViiON";
-		strlcpy(cpu_model, system->model, sizeof cpu_model);
-
 		if (system->platform != NULL) {
+			hw_vendor = "Data General";
+			hw_prod = "AViiON";
+			strlcpy(cpu_model, system->model, sizeof cpu_model);
 			platform = system->platform;
 			return;
 		}
@@ -1076,8 +1087,9 @@ aviion_identify()
 			    "Please contact <m88k@openbsd.org>\n",
 			    cpuid);
 		}
-	}
 
-	scm_printf(excuse);
-	scm_halt();
+		scm_printf(excuse);
+		scm_halt();
+	}
+	/* NOTREACHED */
 }
