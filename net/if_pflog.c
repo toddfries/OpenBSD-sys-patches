@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflog.c,v 1.43 2011/09/28 17:15:45 bluhm Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.44 2011/10/13 18:23:39 claudio Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -328,8 +328,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	 * of the protocol header
 	 */
 	m_inithdr(mhdr);
-	mhdr->m_len = 0;
-	mhdr->m_pkthdr.len = 0;
+	mhdr->m_len = 0;	/* XXX not done in m_inithdr() */
 
 	/* offset for a new header */
 	if (afto && pfloghdr->af == AF_INET)
@@ -411,7 +410,4 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 
 	mlen = min(pd.m->m_pkthdr.len, len);
 	m_copydata(pd.m, 0, mlen, dst);
-	len -= mlen;
-	if (len > 0)
-		bzero(dst + mlen, len);
 }
