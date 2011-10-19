@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.190 2011/06/29 20:52:09 matthew Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.192 2011/10/10 12:34:23 jsg Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -381,6 +381,7 @@ nsphyter*	at mii?			# NS and compatible PHYs
 qsphy*	at mii?				# Quality Semi QS6612 PHYs
 luphy*	at mii?				# Lucent LU6612 PHY
 sqphy*	at mii?				# Seeq 8x220 PHYs
+tlphy*	at mii?				# ThunderLAN PHYs
 rlphy* at mii?				# RealTek 8139 internal PHYs
 mtdphy*	at mii?				# Myson MTD972 PHYs
 dcphy*	at mii?				# Digital Clone PHYs
@@ -408,6 +409,5 @@ pseudo-device	loop	1		# network loopback
 pseudo-device	vlan			# IEEE 802.1Q VLAN 
 pseudo-device	bpfilter 1		# packet filter
 pseudo-device	rd	1		# ramdisk
-pseudo-device	ccd	4		# concatenated disk devices
 pseudo-device	wsmux	2
 pseudo-device	bio	1		# ioctl multiplexing device
