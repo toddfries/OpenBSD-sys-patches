@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_nbr.c,v 1.57 2011/07/26 21:19:51 bluhm Exp $	*/
+/*	$OpenBSD: nd6_nbr.c,v 1.59 2011/10/15 10:29:06 nigel Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -869,6 +869,9 @@ nd6_na_output(struct ifnet *ifp, struct in6_addr *daddr6,
 	int icmp6len, maxlen, error;
 	caddr_t mac;
 	struct route_in6 ro;
+#if NCARP > 0
+	struct sockaddr_dl *proxydl = NULL;
+#endif
 
 	mac = NULL;
 	bzero(&ro, sizeof(ro));
@@ -989,6 +992,12 @@ nd6_na_output(struct ifnet *ifp, struct in6_addr *daddr6,
 		bcopy(mac, (caddr_t)(nd_opt + 1), ifp->if_addrlen);
 	} else
 		flags &= ~ND_NA_FLAG_OVERRIDE;
+
+#if NCARP > 0
+	/* Do not send NAs for carp addresses if we're not the CARP master. */
+	if (ifp->if_type == IFT_CARP && !carp_iamatch6(ifp, mac, &proxydl))
+	    	goto bad;
+#endif
 
 	ip6->ip6_plen = htons((u_short)icmp6len);
 	nd_na->nd_na_flags_reserved = flags;
