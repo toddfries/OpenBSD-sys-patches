@@ -1,4 +1,4 @@
-/* $OpenBSD: if_pflog.h,v 1.21 2011/09/28 17:15:45 bluhm Exp $ */
+/* $OpenBSD: if_pflog.h,v 1.22 2011/10/13 18:23:39 claudio Exp $ */
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.

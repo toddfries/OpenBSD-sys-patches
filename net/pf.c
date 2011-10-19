@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.782 2011/09/28 17:15:45 bluhm Exp $ */
+/*	$OpenBSD: pf.c,v 1.784 2011/10/13 18:23:39 claudio Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -99,8 +99,6 @@
 /*
  * Global variables
  */
-
-/* state tables */
 struct pf_state_tree	 pf_statetbl;
 
 struct pf_altqqueue	 pf_altqs[2];
@@ -683,10 +681,11 @@ pf_state_key_attach(struct pf_state_key *sk, struct pf_state *s, int idx)
 		/* key exists. check for same kif, if none, add to key */
 		TAILQ_FOREACH(si, &cur->states, entry)
 			if (si->s->kif == s->kif &&
-			    ((si->s->key[0]->af == sk->af &&
+			    ((si->s->key[PF_SK_WIRE]->af == sk->af &&
 			     si->s->direction == s->direction) ||
-			    (si->s->key[0]->af != si->s->key[1]->af &&
-			     sk->af == si->s->key[1]->af &&
+			    (si->s->key[PF_SK_WIRE]->af !=
+			     si->s->key[PF_SK_STACK]->af &&
+			     sk->af == si->s->key[PF_SK_STACK]->af &&
 			     si->s->direction != s->direction))) {
 				if (sk->proto == IPPROTO_TCP &&
 				    si->s->src.state >= TCPS_FIN_WAIT_2 &&
@@ -3843,17 +3842,6 @@ pf_translate(struct pf_pdesc *pd, struct pf_addr *saddr, u_int16_t sport,
 				rewrite = 1;
 			}
 		}
-		if (virtual_type == htons(ICMP6_ECHO_REQUEST)) {
-			u_int16_t icmpid = (icmp_dir == PF_IN) ? sport : dport;
-
-			if (icmpid != pd->hdr.icmp6->icmp6_id) {
-				pd->hdr.icmp6->icmp6_cksum = pf_cksum_fixup(
-				    pd->hdr.icmp6->icmp6_cksum,
-				    pd->hdr.icmp6->icmp6_id, icmpid, 0);
-				pd->hdr.icmp6->icmp6_id = icmpid;
-				rewrite = 1;
-			}
-		}
 		break;
 #endif /* INET6 */
 
@@ -4753,17 +4741,6 @@ pf_test_state_icmp(struct pf_pdesc *pd, struct pf_state **state,
 					    &pd->hdr.icmp6->icmp6_cksum,
 					    &nk->addr[didx], 0);
 					pd->destchg = 1;
-				}
-
-				if (nk->port[iidx] !=
-				    pd->hdr.icmp6->icmp6_id) {
-					pd->hdr.icmp6->icmp6_cksum =
-					    pf_cksum_fixup(
-					    pd->hdr.icmp6->icmp6_cksum,
-					     pd->hdr.icmp6->icmp6_id,
-					    nk->port[iidx], 0);
-					pd->hdr.icmp6->icmp6_id =
-					    nk->port[iidx];
 				}
 
 				m_copyback(pd->m, pd->off,
