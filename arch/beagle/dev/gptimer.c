@@ -1,4 +1,4 @@
-/* $OpenBSD: gptimer.c,v 1.5 2011/04/07 15:30:15 miod Exp $ */
+/* $OpenBSD: gptimer.c,v 1.7 2011/10/24 22:49:07 drahn Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -141,6 +141,14 @@ struct cfdriver gptimer_cd = {
 int
 gptimer_match(struct device *parent, void *v, void *aux)
 {
+	switch (board_id) {
+	case BOARD_ID_OMAP3_BEAGLE:
+		break; /* continue trying */
+	case BOARD_ID_OMAP4_PANDA:
+		return 0; /* not ported yet ??? - different */
+	default:
+		return 0; /* unknown */
+	}
 	return (1);
 }
 
@@ -299,7 +307,7 @@ cpu_initclocks()
 	prcm_setclock(1, PRCM_CLK_SPEED_32);
 	prcm_setclock(2, PRCM_CLK_SPEED_32);
 	/* establish interrupts */
-	intc_intr_establish(gptimer_irq, IPL_CLOCK, gptimer_intr,
+	arm_intr_establish(gptimer_irq, IPL_CLOCK, gptimer_intr,
 	    NULL, "tick");
 
 	/* setup timer 0 (hardware timer 2) */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: omehci.c,v 1.5 2011/03/14 14:20:58 jasper Exp $ */
+/*	$OpenBSD: omehci.c,v 1.7 2011/10/24 22:49:07 drahn Exp $ */
 
 /*
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
@@ -62,6 +62,14 @@ omehci_match(struct device *parent, void *match, void *aux)
 {
 	struct ahb_attach_args	*aa = aux;
 
+	switch (board_id) {
+	case BOARD_ID_OMAP3_BEAGLE:
+		break; /* continue trying */
+	case BOARD_ID_OMAP4_PANDA:
+		return 0; /* not ported yet ??? - different */
+	default:
+		return 0; /* unknown */
+	}
 	if (aa->aa_addr != EHCI_HCPCAPBASE)
 		return 0;
 
@@ -103,7 +111,7 @@ omehci_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc.sc_offs = EREAD1(&sc->sc, EHCI_CAPLENGTH);
 	EOWRITE2(&sc->sc, EHCI_USBINTR, 0);
 
-	sc->sc_ih = intc_intr_establish(aa->aa_intr, IPL_USB,
+	sc->sc_ih = arm_intr_establish(aa->aa_intr, IPL_USB,
 	    ehci_intr, &sc->sc, devname);
 	if (sc->sc_ih == NULL) {
 		printf(": unable to establish interrupt\n");
@@ -125,7 +133,7 @@ omehci_attach(struct device *parent, struct device *self, void *aux)
 	if (r != USBD_NORMAL_COMPLETION) {
 		printf("%s: init failed, error=%d\n", devname);
 
-		intc_intr_disestablish(sc->sc_ih);
+		arm_intr_disestablish(sc->sc_ih);
 		sc->sc_ih = NULL;
 
 		bus_space_unmap(sc->sc.iot, sc->sc.ioh, sc->sc.sc_size);
@@ -154,7 +162,7 @@ omehci_detach(struct device *self, int flags)
 		return (rv);
 
 	if (sc->sc_ih != NULL) {
-		intc_intr_disestablish(sc->sc_ih);
+		arm_intr_disestablish(sc->sc_ih);
 		sc->sc_ih = NULL;
 	}
 
