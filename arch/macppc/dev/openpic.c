@@ -1,4 +1,4 @@
-/*	$OpenBSD: openpic.c,v 1.65 2011/08/29 20:21:44 drahn Exp $	*/
+/*	$OpenBSD: openpic.c,v 1.67 2011/10/24 13:01:07 drahn Exp $	*/
 
 /*-
  * Copyright (c) 2008 Dale Rahn <drahn@openbsd.org>
@@ -468,17 +468,17 @@ openpic_do_pending_int_dis(int pcpl, int s)
 	atomic_setbits_int(&ci->ci_iactive, CI_IACTIVE_PROCESSING_SOFT);
 
 	do {
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTCLOCK)) &&
+		if ((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTCLOCK)) &&
 		    (pcpl < IPL_SOFTCLOCK)) {
  			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTCLOCK);
 			softintr_dispatch(SI_SOFTCLOCK);
  		}
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTNET)) &&
+		if ((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTNET)) &&
 		    (pcpl < IPL_SOFTNET)) {
 			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTNET);
 			softintr_dispatch(SI_SOFTNET);
 		}
-		if((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) &&
+		if ((ci->ci_ipending & SI_TO_IRQBIT(SI_SOFTTTY)) &&
 		    (pcpl < IPL_SOFTTTY)) {
 			ci->ci_ipending &= ~SI_TO_IRQBIT(SI_SOFTTTY);
 			softintr_dispatch(SI_SOFTTTY);
