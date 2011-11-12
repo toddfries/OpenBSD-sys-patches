@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.178 2011/07/25 19:51:24 miod Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.180 2011/11/06 15:09:02 guenther Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -2876,7 +2876,8 @@ sys_pread(struct proc *p, void *v, register_t *retval)
 		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
-	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO) {
+	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO ||
+	    (vp->v_flag & VISTTY)) {
 		return (ESPIPE);
 	}
 
@@ -2884,6 +2885,8 @@ sys_pread(struct proc *p, void *v, register_t *retval)
 	iov.iov_len = SCARG(uap, nbyte);
 
 	offset = SCARG(uap, offset);
+	if (offset < 0 && vp->v_type != VCHR)
+		return (EINVAL);
 
 	FREF(fp);
 
@@ -2916,13 +2919,16 @@ sys_preadv(struct proc *p, void *v, register_t *retval)
 		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
-	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO) {
+	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO ||
+	    (vp->v_flag & VISTTY)) {
 		return (ESPIPE);
 	}
 
-	FREF(fp);
-
 	offset = SCARG(uap, offset);
+	if (offset < 0 && vp->v_type != VCHR)
+		return (EINVAL);
+
+	FREF(fp);
 
 	/* dofilereadv() will FRELE the descriptor for us */
 	return (dofilereadv(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt), 1,
@@ -2955,16 +2961,19 @@ sys_pwrite(struct proc *p, void *v, register_t *retval)
 		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
-	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO) {
+	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO ||
+	    (vp->v_flag & VISTTY)) {
 		return (ESPIPE);
 	}
 
 	iov.iov_base = (void *)SCARG(uap, buf);
 	iov.iov_len = SCARG(uap, nbyte);
 
-	FREF(fp);
-
 	offset = SCARG(uap, offset);
+	if (offset < 0 && vp->v_type != VCHR)
+		return (EINVAL);
+
+	FREF(fp);
 
 	/* dofilewrite() will FRELE the descriptor for us */
 	return (dofilewritev(p, fd, fp, &iov, 1, 0, &offset, retval));
@@ -2995,13 +3004,16 @@ sys_pwritev(struct proc *p, void *v, register_t *retval)
 		return (EBADF);
 
 	vp = (struct vnode *)fp->f_data;
-	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO) {
+	if (fp->f_type != DTYPE_VNODE || vp->v_type == VFIFO ||
+	    (vp->v_flag & VISTTY)) {
 		return (ESPIPE);
 	}
 
-	FREF(fp);
-
 	offset = SCARG(uap, offset);
+	if (offset < 0 && vp->v_type != VCHR)
+		return (EINVAL);
+
+	FREF(fp);
 
 	/* dofilewritev() will FRELE the descriptor for us */
 	return (dofilewritev(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt),
