@@ -1,4 +1,4 @@
-/*	$OpenBSD: beagle_machdep.c,v 1.10 2011/10/24 22:49:07 drahn Exp $ */
+/*	$OpenBSD: beagle_machdep.c,v 1.14 2011/11/10 19:37:01 uwe Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -145,8 +145,7 @@
 #include <arm/armv7/armv7var.h>
 
 #include <machine/machine_reg.h>
-#include "ahb.h"
-
+#include <beagle/dev/omapvar.h>
 
 #include "wsdisplay.h"
 
@@ -240,8 +239,6 @@ int   safepri = 0;
 
 void	omdog_reset(void);
 void	beagle_powerdown(void);
-
-#define	BOOT_STRING_MAGIC 0x4f425344
 
 char	bootargs[MAX_BOOT_STRING];
 void	process_kernel_args(char *);
@@ -503,7 +500,7 @@ initarm(void *arg0, void *arg1, void *arg2)
 	 * Examine the boot args string for options we need to know about
 	 * now.
 	 */
-	process_kernel_args("");
+	process_kernel_args(bootconfig.bootstring);
 #ifdef RAMDISK_HOOKS
         boothowto |= RB_DFLTROOT;
 #endif /* RAMDISK_HOOKS */
@@ -889,6 +886,9 @@ initarm(void *arg0, void *arg1, void *arg2)
 	case BOARD_ID_OMAP3_BEAGLE:
 		printf("board type: beagle\n");
 		break;
+	case BOARD_ID_OMAP3_OVERO:
+		printf("board type: overo\n");
+		break;
 	case BOARD_ID_OMAP4_PANDA:
 		printf("board type: panda\n");
 		break;
@@ -906,14 +906,10 @@ process_kernel_args(char *args)
 {
 	char *cp = args;
 
-	if (cp == NULL || *(int *)cp != BOOT_STRING_MAGIC) {
+	if (cp == NULL) {
 		boothowto = RB_AUTOBOOT;
 		return;
 	}
-
-	/* Eat the cookie */
-	*(int *)cp = 0;
-	cp += sizeof(int);
 
 	boothowto = 0;
 
@@ -985,6 +981,7 @@ consinit(void)
 #if NCOM > 0
 	switch (board_id) {
 	case BOARD_ID_OMAP3_BEAGLE:
+	case BOARD_ID_OMAP3_OVERO:
 		paddr = 0x49020000; 
 		break;
 	case BOARD_ID_OMAP4_PANDA:

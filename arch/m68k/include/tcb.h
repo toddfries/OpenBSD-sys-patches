@@ -1,6 +1,7 @@
-/* $OpenBSD: ahb.h,v 1.2 2011/10/21 22:55:01 drahn Exp $ */
+/*	$OpenBSD: tcb.h,v 1.1 2011/10/27 04:01:17 guenther Exp $	*/
+
 /*
- * Copyright (c) 2005,2008 Dale Rahn <drahn@drahn.com>
+ * Copyright (c) 2011 Philip Guenther <guenther@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -15,20 +16,18 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-struct ahb_attach_args {
-	int	aa_addr;
-	int	aa_size;
-	int	aa_intr;
-	bus_space_tag_t	aa_iot;
-	bus_dma_tag_t aa_dmat;
-	char	*aa_name;
-};
+#ifndef _MACHINE_TCB_H_
+#define _MACHINE_TCB_H_
 
-/* XXX */
-void *avic_intr_establish(int irqno, int level, int (*func)(void *),
-    void *arg, char *name);
+#ifdef _KERNEL
 
-/* board identification - from uboot */
-#define BOARD_ID_OMAP3_BEAGLE 1546
-#define BOARD_ID_OMAP4_PANDA 2791
-extern uint32_t board_id;
+#error "not yet"
+
+#else /* _KERNEL */
+
+/* Not ELF, so for now use a big TCB to save a memory reference for errno */
+#define TLS_VARIANT	2
+
+#endif /* _KERNEL */
+
+#endif /* _MACHINE_TCB_H_ */
