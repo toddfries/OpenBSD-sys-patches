@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.251 2011/09/19 21:47:37 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.256 2011/11/11 17:26:24 jsing Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -2470,7 +2470,7 @@ sr_ioctl_setstate(struct sr_softc *sc, struct bioc_setstate *bs)
 		}
 
 		/* XXX: check current state first */
-		sd->sd_set_chunk_state(sd, c, BIOC_SSOFFLINE);
+		sd->sd_set_chunk_state(sd, c, BIOC_SDOFFLINE);
 
 		if (sr_meta_save(sd, SR_META_DIRTY)) {
 			printf("%s: could not save metadata to %s\n",
@@ -2757,9 +2757,6 @@ sr_hotspare_rebuild(struct sr_discipline *sd)
 			busy = 0;
 
 			s = splbio();
-			if (wu->swu_cb_active == 1)
-				panic("%s: sr_hotspare_rebuild",
-				    DEVNAME(sd->sd_sc));
 			TAILQ_FOREACH(wu, &sd->sd_wu_pendq, swu_link) {
 				TAILQ_FOREACH(ccb, &wu->swu_ccb, ccb_link) {
 					if (ccb->ccb_target == chunk_no)
@@ -2848,10 +2845,10 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 		    BIOC_SDOFFLINE) {
 			found = c;
 			new = &sd->sd_vol.sv_chunks[c]->src_meta;
+			csize = new->scmi.scm_coerced_size;
 			if (c > 0)
 				break; /* roll at least once over the for */
 		} else {
-			csize = sd->sd_vol.sv_chunks[c]->src_meta.scmi.scm_size;
 			old = &sd->sd_vol.sv_chunks[c]->src_meta;
 			if (found != -1)
 				break;
@@ -3253,8 +3250,6 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 		if (sr_sensors_create(sd))
 			printf("%s: unable to create sensor for %s\n",
 			    DEVNAME(sc), dev->dv_xname);
-		else
-			sd->sd_vol.sv_sensor_valid = 1;
 #endif /* SMALL_KERNEL */
 	} else {
 		/* we are not an os disk */
@@ -3444,6 +3439,10 @@ sr_ioctl_installboot(struct sr_softc *sc, struct bioc_installboot *bb)
 	for (i = 0; i < sd->sd_meta->ssdi.ssd_chunk_no; i++) {
 
 		chunk = sd->sd_vol.sv_chunks[i];
+		if (chunk->src_meta.scm_status != BIOC_SDONLINE &&
+		    chunk->src_meta.scm_status != BIOC_SDREBUILD)
+			continue;
+
 		if (i < SR_MAX_BOOT_DISKS)
 			bcopy(chunk->src_duid, &sbm->sbm_boot_duid[i],
 			    sizeof(sbm->sbm_boot_duid[i]));

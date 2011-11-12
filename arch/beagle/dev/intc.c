@@ -1,4 +1,4 @@
-/* $OpenBSD: intc.c,v 1.6 2011/09/21 10:09:07 miod Exp $ */
+/* $OpenBSD: intc.c,v 1.10 2011/11/10 19:37:01 uwe Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -22,7 +22,8 @@
 #include <sys/device.h>
 #include <sys/evcount.h>
 #include <machine/bus.h>
-#include <arch/beagle/beagle/ahb.h>
+#include <beagle/dev/omapvar.h>
+#include "intc.h"
 
 /* registers */
 #define	INTC_REVISION		0x00	/* R */
@@ -88,8 +89,6 @@
 #define		INTC_STD_PRI	32
 #define		INTC_MAX_PRI	0
 
-#define	INTC_SIZE		0x200
-
 #define NIRQ	INTC_NUM_IRQ
 
 struct intrhand {
@@ -109,7 +108,6 @@ struct intrq {
 	int iq_ist;			/* share type */
 };
 
-volatile int current_ipl_level = IPL_HIGH;
 volatile int softint_pending;
 
 struct intrq intc_handler[NIRQ];
@@ -119,16 +117,14 @@ u_int32_t intc_imask[3][NIPL];
 bus_space_tag_t		intc_iot;
 bus_space_handle_t	intc_ioh;
 
-int	intc_match(struct device *, void *, void *);
 void	intc_attach(struct device *, struct device *, void *);
-int	_spllower(int new);
-int	_splraise(int new);
+int	intc_spllower(int new);
+int	intc_splraise(int new);
 void	intc_setipl(int new);
 void	intc_calc_mask(void);
-void	intc_do_pending(void);
 
 struct cfattach	intc_ca = {
-	sizeof (struct device), intc_match, intc_attach
+	sizeof (struct device), NULL, intc_attach
 };
 
 struct cfdriver intc_cd = {
@@ -137,25 +133,16 @@ struct cfdriver intc_cd = {
 
 int intc_attached = 0;
 
-int
-intc_match(struct device *parent, void *v, void *aux)
-{
-	if (intc_attached != 0)
-		return 0;
-
-	/* XXX */
-	return (1);
-}
-
 void
 intc_attach(struct device *parent, struct device *self, void *args)
 {
-        struct ahb_attach_args *aa = args;
+	struct omap_attach_args *oa = args;
 	int i;
 	u_int32_t rev;
 
-	intc_iot = aa->aa_iot;
-	if (bus_space_map(intc_iot, aa->aa_addr, INTC_SIZE, 0, &intc_ioh))
+	intc_iot = oa->oa_iot;
+	if (bus_space_map(intc_iot, oa->oa_dev->mem[0].addr,
+	    oa->oa_dev->mem[0].size, 0, &intc_ioh))
 		panic("intc_attach: bus_space_map failed!");
 
 	rev = bus_space_read_4(intc_iot, intc_ioh, INTC_REVISION);
@@ -169,9 +156,7 @@ intc_attach(struct device *parent, struct device *self, void *args)
 	     INTC_PROTECTION_PROT);
 #endif
 
-
 	/* XXX - check power saving bit */
-
 
 	/* mask all interrupts */
 	bus_space_write_4(intc_iot, intc_ioh, INTC_MIR0, 0xffffffff);
@@ -184,19 +169,27 @@ intc_attach(struct device *parent, struct device *self, void *args)
 
 		TAILQ_INIT(&intc_handler[i].iq_list);
 	}
+
 	intc_calc_mask();
 	bus_space_write_4(intc_iot, intc_ioh, INTC_CONTROL,
 	    INTC_CONTROL_NEWIRQ);
 
 	intc_attached = 1;
 
-	_splraise(IPL_HIGH);
+	/* insert self as interrupt handler */
+	arm_set_intr_handler(intc_splraise, intc_spllower, intc_splx,
+	    intc_setipl,
+	    intc_intr_establish, intc_intr_disestablish, intc_intr_string,
+	    intc_irq_handler);
+
+	intc_setipl(IPL_HIGH);  /* XXX ??? */
 	enable_interrupts(I32_bit);
 }
 
 void
 intc_calc_mask(void)
 {
+	struct cpu_info *ci = curcpu();
 	int irq;
 	struct intrhand *ih;
 	int i;
@@ -235,96 +228,35 @@ intc_calc_mask(void)
 		bus_space_write_4(intc_iot, intc_ioh, INTC_ILRn(irq),
 		    INTC_ILR_PRIs(NIPL-max)|INTC_ILR_IRQ);
 	}
-	for (i = IPL_NONE; i <= IPL_HIGH; i++) {
-#if 0
-		printf("calc_mask lvl %d val %x %x %x\n", i,
-		    intc_imask[0][i], intc_imask[1][i], intc_imask[2][i] );
-#endif
-		intc_smask[i] = 0;
-		if (i < IPL_SOFT)
-			intc_smask[i] |= SI_TO_IRQBIT(SI_SOFT);
-		if (i < IPL_SOFTCLOCK)
-			intc_smask[i] |= SI_TO_IRQBIT(SI_SOFTCLOCK);
-		if (i < IPL_SOFTNET)
-			intc_smask[i] |= SI_TO_IRQBIT(SI_SOFTNET);
-		if (i < IPL_SOFTTTY)
-			intc_smask[i] |= SI_TO_IRQBIT(SI_SOFTTTY);
-	}
-	intc_setipl(current_ipl_level);
-}
-
-/*
- * XXX - is it possible to do the soft interrupts with actual interrupt
- * instead of emulating them?
- */
-void
-intc_do_pending(void)
-{
-	static int processing = 0;
-	int oldirqstate, spl_save;
-
-	oldirqstate = disable_interrupts(I32_bit);
-
-	spl_save = current_ipl_level;
-
-	if (processing == 1) {
-		restore_interrupts(oldirqstate);
-		return;
-	}
-//	printf("softint_pending %x\n", softint_pending);
-
-#define DO_SOFTINT(si, ipl) \
-	if ((softint_pending & intc_smask[current_ipl_level]) &	\
-	    SI_TO_IRQBIT(si)) {						\
-		softint_pending &= ~SI_TO_IRQBIT(si);			\
-		if (current_ipl_level < ipl)				\
-			intc_setipl(ipl);				\
-		restore_interrupts(oldirqstate);			\
-		softintr_dispatch(si);					\
-		oldirqstate = disable_interrupts(I32_bit);		\
-		intc_setipl(spl_save);					\
-	}
-
-	do {
-		DO_SOFTINT(SI_SOFTTTY, IPL_SOFTTTY);
-		DO_SOFTINT(SI_SOFTNET, IPL_SOFTNET);
-		DO_SOFTINT(SI_SOFTCLOCK, IPL_SOFTCLOCK);
-		DO_SOFTINT(SI_SOFT, IPL_SOFT);
-	} while (softint_pending & intc_smask[current_ipl_level]);
-		
-
-#if 0
-	printf("exit softint_pending %x pri %x mask %x\n", softint_pending,
-	    current_ipl_level, intc_smask[current_ipl_level]);
-#endif
-
-	processing = 0;
-	restore_interrupts(oldirqstate);
+	arm_init_smask();
+	intc_setipl(ci->ci_cpl);
 }
 
 void
-splx(int new)
+intc_splx(int new)
 {
-
+	struct cpu_info *ci = curcpu();
 	intc_setipl(new);
 
-	if (softint_pending & intc_smask[current_ipl_level])
-		intc_do_pending();
+        if (ci->ci_ipending & arm_smask[ci->ci_cpl])
+		arm_do_pending_intr(ci->ci_cpl);
 }
 
 int
-_spllower(int new)
+intc_spllower(int new)
 {
-	int old = current_ipl_level;
-	splx(new);
+	struct cpu_info *ci = curcpu();
+	int old = ci->ci_cpl;
+	intc_splx(new);
 	return (old);
 }
 
 int
-_splraise(int new)
+intc_splraise(int new)
 {
+	struct cpu_info *ci = curcpu();
 	int old;
-	old = current_ipl_level;
+	old = ci->ci_cpl;
 
 	/*
 	 * setipl must always be called because there is a race window
@@ -342,31 +274,27 @@ _splraise(int new)
 }
 
 void
-_setsoftintr(int si)
-{
-	int oldirqstate;
-
-	oldirqstate = disable_interrupts(I32_bit);
-	softint_pending |= SI_TO_IRQBIT(si);
-	restore_interrupts(oldirqstate);
-
-	/* Process unmasked pending soft interrupts. */
-	if (softint_pending & intc_smask[current_ipl_level])
-		intc_do_pending();
-}
-
-
-
-void
 intc_setipl(int new)
 {
+	struct cpu_info *ci = curcpu();
 	int i;
 	int psw;
 	if (intc_attached == 0)
 		return;
 
 	psw = disable_interrupts(I32_bit);
-	current_ipl_level = new;
+#if 0
+	{
+		volatile static int recursed = 0;
+		if (recursed == 0) {
+			recursed = 1;
+			if (new != 12) 
+				printf("setipl %d\n", new);
+			recursed = 0;
+		}
+	}
+#endif
+	ci->ci_cpl = new;
 	for (i = 0; i < 3; i++)
 		bus_space_write_4(intc_iot, intc_ioh,
 		    INTC_MIRn(i), intc_imask[i][new]);
@@ -400,7 +328,7 @@ intc_irq_handler(void *frame)
 #endif
 
 	pri = intc_handler[irq].iq_irq;
-	s = _splraise(pri);
+	s = intc_splraise(pri);
 	TAILQ_FOREACH(ih, &intc_handler[irq].iq_list, ih_list) {
 		if (ih->ih_arg != 0)
 			arg = ih->ih_arg;
@@ -413,7 +341,8 @@ intc_irq_handler(void *frame)
 	}
 	bus_space_write_4(intc_iot, intc_ioh, INTC_CONTROL,
 	    INTC_CONTROL_NEWIRQ);
-	splx(s);	 /* XXX - handles pending */
+
+	intc_splx(s);
 }
 
 void *
@@ -468,6 +397,13 @@ intc_intr_disestablish(void *cookie)
 	restore_interrupts(psw);
 }
 
+const char *
+intc_intr_string(void *cookie)
+{
+	return "huh?";
+}
+
+
 #if 0
 int intc_tst(void *a);
 
@@ -498,21 +434,3 @@ void intc_test(void)
 	printf("done\n");
 }
 #endif
-
-#ifdef DIAGNOSTIC
-void
-intc_splassert_check(int wantipl, const char *func)
-{
-        int oldipl = current_ipl_level;
-
-        if (oldipl < wantipl) {
-                splassert_fail(wantipl, oldipl, func);
-                /*
-                 * If the splassert_ctl is set to not panic, raise the ipl
-                 * in a feeble attempt to reduce damage.
-                 */
-                intc_setipl(wantipl);
-        }
-}
-#endif
-

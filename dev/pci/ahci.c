@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.182 2011/08/20 20:16:01 kettenis Exp $ */
+/*	$OpenBSD: ahci.c,v 1.184 2011/10/27 08:03:50 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -606,6 +606,7 @@ int			ahci_pwait_eq(struct ahci_port *, bus_size_t,
 			    u_int32_t, u_int32_t, int);
 void			ahci_flush_tfd(struct ahci_port *ap);
 u_int32_t		ahci_active_mask(struct ahci_port *);
+int			ahci_port_detect_pmp(struct ahci_port *);
 void			ahci_pmp_probe_timeout(void *);
 
 /* pmp operations */
@@ -1721,7 +1722,7 @@ ahci_pmp_port_softreset(struct ahci_port *ap, int pmp_port)
 
 	s = splbio();
 	/* ignore spurious IFS errors while resetting */
-	printf("%s: now ignoring IFS\n", PORTNAME(ap));
+	DPRINTF(AHCI_D_VERBOSE, "%s: now ignoring IFS\n", PORTNAME(ap));
 	ap->ap_pmp_ignore_ifs = 1;
 
 	count = 2;
@@ -1812,7 +1813,7 @@ ahci_pmp_port_softreset(struct ahci_port *ap, int pmp_port)
 	ahci_pwrite(ap, AHCI_PREG_SERR, -1);
 	ahci_pwrite(ap, AHCI_PREG_IS, AHCI_PREG_IS_IFS);
 	ap->ap_pmp_ignore_ifs = 0;
-	printf("%s: no longer ignoring IFS\n", PORTNAME(ap));
+	DPRINTF(AHCI_D_VERBOSE, "%s: no longer ignoring IFS\n", PORTNAME(ap));
 	splx(s);
 
 	return (rc);
@@ -1825,7 +1826,8 @@ ahci_pmp_port_probe(struct ahci_port *ap, int pmp_port)
 	
 	ap->ap_state = AP_S_PMP_PORT_PROBE;
 
-	printf("%s.%d: probing pmp port\n", PORTNAME(ap), pmp_port);
+	DPRINTF(AHCI_D_VERBOSE, "%s.%d: probing pmp port\n", PORTNAME(ap),
+	    pmp_port);
 	if (ahci_pmp_port_portreset(ap, pmp_port)) {
 		printf("%s.%d: unable to probe PMP port; portreset failed\n",
 		    PORTNAME(ap), pmp_port);
@@ -1841,8 +1843,8 @@ ahci_pmp_port_probe(struct ahci_port *ap, int pmp_port)
 	}
 
 	sig = ahci_port_signature(ap);
-	printf("%s.%d: port signature returned %d\n", PORTNAME(ap), pmp_port,
-	    sig);
+	DPRINTF(AHCI_D_VERBOSE, "%s.%d: port signature returned %d\n",
+	    PORTNAME(ap), pmp_port, sig);
 	ap->ap_state = AP_S_NORMAL;
 	return (sig);
 }
@@ -2009,7 +2011,8 @@ ahci_pmp_port_portreset(struct ahci_port *ap, int pmp_port)
 	}
 
 	/* device detected */
-	printf("%s.%d: device detected\n", PORTNAME(ap), pmp_port);
+	DPRINTF(AHCI_D_VERBOSE, "%s.%d: device detected\n", PORTNAME(ap),
+	    pmp_port);
 
 	/* clean up a bit */
 	delay(100000);
@@ -2028,10 +2031,7 @@ int
 ahci_port_portreset(struct ahci_port *ap, int pmp)
 {
 	u_int32_t			cmd, r;
-	int				rc, count, pmp_rc, s;
-	struct ahci_cmd_hdr		*cmd_slot;
-	struct ahci_ccb			*ccb = NULL;
-	u_int8_t			*fis = NULL;
+	int				rc, s;
 
 	s = splbio();
 	DPRINTF(AHCI_D_VERBOSE, "%s: port reset\n", PORTNAME(ap));
@@ -2085,12 +2085,35 @@ ahci_port_portreset(struct ahci_port *ap, int pmp)
 		}
 	}
 
-	if (pmp == 0 ||
-	    (ap->ap_sc->sc_flags & AHCI_F_NO_PMP) ||
-	    !ISSET(ahci_read(ap->ap_sc, AHCI_REG_CAP), AHCI_REG_CAP_SPM)) {
-		goto err;
+	if (pmp != 0) {
+		if (ahci_port_detect_pmp(ap) != 0) {
+			rc = EBUSY;
+		}
 	}
 
+err:
+	/* Restore preserved port state */
+	ahci_pwrite(ap, AHCI_PREG_CMD, cmd);
+	splx(s);
+
+	return (rc);
+}
+
+int
+ahci_port_detect_pmp(struct ahci_port *ap)
+{
+	int				 count, pmp_rc, rc;
+	u_int32_t			 r, cmd;
+	struct ahci_cmd_hdr		*cmd_slot;
+	struct ahci_ccb			*ccb = NULL;
+	u_int8_t			*fis = NULL;
+
+	if ((ap->ap_sc->sc_flags & AHCI_F_NO_PMP) ||
+	    !ISSET(ahci_read(ap->ap_sc, AHCI_REG_CAP), AHCI_REG_CAP_SPM)) {
+		return 0;
+	}
+
+	rc = 0;
 	pmp_rc = 0;
 	count = 2;
 	do {
@@ -2131,7 +2154,7 @@ ahci_port_portreset(struct ahci_port *ap, int pmp)
 		 */
 		/* Restart port */
 		if (ahci_port_start(ap, 0)) {
-			rc = 1;
+			rc = EBUSY;
 			printf("%s: failed to start port, cannot probe PMP\n",
 			    PORTNAME(ap));
 			break;
@@ -2277,11 +2300,6 @@ ahci_port_portreset(struct ahci_port *ap, int pmp)
 
 		ahci_port_portreset(ap, 0);
 	}
-
-err:
-	/* Restore preserved port state */
-	ahci_pwrite(ap, AHCI_PREG_CMD, cmd);
-	splx(s);
 
 	return (rc);
 }
