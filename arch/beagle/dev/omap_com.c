@@ -1,4 +1,4 @@
-/* $OpenBSD: omap_com.c,v 1.5 2011/03/22 17:46:02 deraadt Exp $ */
+/* $OpenBSD: omap_com.c,v 1.9 2011/11/10 19:37:01 uwe Exp $ */
 /*
  * Copyright 2003 Wasabi Systems, Inc.
  * All rights reserved.
@@ -50,70 +50,39 @@
 /* pick up armv7_a4x_bs_tag */
 #include <arch/arm/armv7/armv7var.h>
 
-#include <arch/beagle/beagle/ahb.h>
+#include <beagle/dev/omapvar.h>
 
 #define com_isr 8
 #define ISR_RECV	(ISR_RXPL | ISR_XMODE | ISR_RCVEIR)
 
-int	omapuart_match(struct device *, void *, void *);
 void	omapuart_attach(struct device *, struct device *, void *);
 int	omapuart_activate(struct device *, int);
 
-struct cfattach com_ahb_ca = {
-        sizeof (struct com_softc), omapuart_match, omapuart_attach, NULL, 
+struct cfattach com_omap_ca = {
+	sizeof (struct com_softc), NULL, omapuart_attach, NULL, 
 	omapuart_activate
 };
-
-int
-omapuart_match(struct device *parent, void *cf, void *aux)
-{
-        struct ahb_attach_args *aa = aux;
-	bus_space_tag_t bt = &armv7_a4x_bs_tag;	/* XXX: This sucks */
-	bus_space_handle_t bh;
-	int rv;
-
-	/* XXX */
-	if (aa->aa_addr == 0x4806A000 && aa->aa_intr == 72)
-		return 1;
-	if (aa->aa_addr == 0x4806C000 && aa->aa_intr == 73)
-		return 1;
-	if (aa->aa_addr == 0x4806E000 && aa->aa_intr == 74)
-		return 1;
-	{
-		extern bus_addr_t comconsaddr;
-
-		if (comconsaddr == aa->aa_addr)
-			return (1);
-	}
-
-	if (bus_space_map(bt, aa->aa_addr, aa->aa_size, 0, &bh))
-		return (0);
-
-	/* Make sure the UART is enabled - XXX */
-	bus_space_write_1(bt, bh, com_ier, IER_EUART);
-
-	rv = comprobe1(bt, bh);
-	bus_space_unmap(bt, bh, aa->aa_size);
-
-	return (rv);
-}
 
 void
 omapuart_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct com_softc *sc = (struct com_softc *)self;
-        struct ahb_attach_args *aa = aux;
+	struct omap_attach_args *oa = aux;
 
 	sc->sc_iot = &armv7_a4x_bs_tag;	/* XXX: This sucks */
-	sc->sc_iobase = aa->aa_addr;
+	sc->sc_iobase = oa->oa_dev->mem[0].addr;
 	sc->sc_frequency = 48000000;
 	sc->sc_uarttype = COM_UART_TI16750;
 
-	bus_space_map(sc->sc_iot, sc->sc_iobase, aa->aa_size, 0, &sc->sc_ioh);
+	if (bus_space_map(sc->sc_iot, sc->sc_iobase,
+	    oa->oa_dev->mem[0].size, 0, &sc->sc_ioh)) {
+		printf("%s: bus_space_map failed\n", __func__);
+		return;
+	}
 
 	com_attach_subr(sc);
 
-	(void)intc_intr_establish(aa->aa_intr, IPL_TTY, comintr,
+	(void)arm_intr_establish(oa->oa_dev->irq[0], IPL_TTY, comintr,
 	    sc, sc->sc_dev.dv_xname);
 }
 
