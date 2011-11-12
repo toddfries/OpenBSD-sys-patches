@@ -1,4 +1,4 @@
-/*	$OpenBSD: ommmc.c,v 1.8 2010/09/06 19:20:19 deraadt Exp $	*/
+/*	$OpenBSD: ommmc.c,v 1.13 2011/11/10 19:37:01 uwe Exp $	*/
 
 /*
  * Copyright (c) 2009 Dale Rahn <drahn@openbsd.org>
@@ -28,17 +28,23 @@
 #include <sys/systm.h>
 #include <machine/bus.h>
 
-#include <arch/beagle/dev/prcmvar.h>
-#include <arch/beagle/beagle/ahb.h>
 #include <dev/sdmmc/sdmmcchip.h>
 #include <dev/sdmmc/sdmmcvar.h>
+
+#include <beagle/dev/omapvar.h>
+#include <beagle/dev/prcmvar.h>
 
 #define MMCHS1_ADDR 0x4809C000
 #define MMCHS2_ADDR 0x480B4000
 #define MMCHS3_ADDR 0x480AD000
 
+/*
+ * NOTE: on OMAP4430 these registers skew by 0x100
+ * this is handled by mapping at base address + 0x100
+ * then all but the REVISION register is 'correctly' mapped.
+ */
 /* registers */
-#define MMCHS_REVISION	0x000
+/* MMCHS_REVISION	0x000 - is no longer useful */
 #define MMCHS_SYSCONFIG	0x010
 #define MMCHS_SYSSTATUS	0x014
 #define MMCHS_CSRE	0x024
@@ -169,14 +175,12 @@
 #define  MMCHS_CAPA_MBL_SHIFT	16
 #define  MMCHS_CAPA_MBL_MASK	(3 << MMCHS_CAPA_MBL_SHIFT)
 #define MMCHS_CUR_CAPA	0x148
-#define MMCHS_SIZE	0x200
-
+#define MMCHS_REV	0x1fc
 
 #define SDHC_COMMAND_TIMEOUT	hz
 #define SDHC_BUFFER_TIMEOUT	hz
 #define SDHC_TRANSFER_TIMEOUT	hz
 
-int ommmc_match(struct device *parent, void *v, void *aux);
 void ommmc_attach(struct device *parent, struct device *self, void *args);
 
 #include <machine/bus.h>
@@ -185,7 +189,6 @@ struct ommmc_softc {
 	struct device sc_dev;
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
-	int			sc_irq;
 	void			*sc_ih; /* Interrupt handler */
 	u_int sc_flags;
 
@@ -344,57 +347,38 @@ struct cfdriver ommmc_cd = {
 };
 
 struct cfattach ommmc_ca = {
-        sizeof(struct ommmc_softc), ommmc_match, ommmc_attach
+	sizeof(struct ommmc_softc), NULL, ommmc_attach
 };
-
-
-int
-ommmc_match(struct device *parent, void *v, void *aux)
-{
-        struct ahb_attach_args *aa = aux;
-	/* XXX */
-	if (aa->aa_addr == MMCHS1_ADDR && aa->aa_intr == 83)
-		return 1;
-	else if (aa->aa_addr == MMCHS2_ADDR && aa->aa_intr == 86)
-		return 1;
-	else if (aa->aa_addr == MMCHS3_ADDR && aa->aa_intr == 94)
-		return 1;
-	else 
-		return (0);
-}
 
 void
 ommmc_attach(struct device *parent, struct device *self, void *args)
 {
-	struct sdmmcbus_attach_args saa;
-        struct ahb_attach_args *aa = args;
-	struct ommmc_softc *sc = (struct ommmc_softc *) self;
-	uint32_t rev;
-	int error = 1;
+	struct ommmc_softc		*sc = (struct ommmc_softc *) self;
+	struct omap_attach_args		*oa = args;
+	struct sdmmcbus_attach_args	 saa;
+	int				 baseaddr;
+	int				 error = 1;
 
 	/* XXX - ICLKEN, FCLKEN? */
 
-	sc->sc_iot = aa->aa_iot;
-	if (bus_space_map(sc->sc_iot, aa->aa_addr, MMCHS_SIZE, 0, &sc->sc_ioh))
+	baseaddr = oa->oa_dev->mem[0].addr;
+	if (board_id == BOARD_ID_OMAP4_PANDA) {
+		/* omap4430 has mmc registers offset +0x100, but not revision */
+		baseaddr += 0x100;
+	}
+
+	sc->sc_iot = oa->oa_iot;
+	if (bus_space_map(sc->sc_iot, baseaddr, oa->oa_dev->mem[0].size,
+	    0, &sc->sc_ioh))
 		panic("omgpio_attach: bus_space_map failed!");
 
-	rev = bus_space_read_4(sc->sc_iot, sc->sc_ioh, MMCHS_REVISION);
-
-	printf(" rev %d.%d\n", rev >> 4 & 0xf, rev & 0xf);
-
-	sc->sc_irq = aa->aa_intr;
-	if (aa->aa_addr == MMCHS1_ADDR)
-		sc->clockbit = PRCM_CLK_EN_MMC1;
-	else if (aa->aa_addr == MMCHS2_ADDR)
-		sc->clockbit = PRCM_CLK_EN_MMC2;
-	else if (aa->aa_addr == MMCHS3_ADDR)
-		sc->clockbit = PRCM_CLK_EN_MMC3;
+	printf("\n");
 
 	/* XXX DMA channels? */
-	prcm_enableclock(sc->clockbit);
+	/* FIXME prcm_enableclock(sc->clockbit); */
 
-	sc->sc_ih = intc_intr_establish(sc->sc_irq, IPL_SDMMC, ommmc_intr,
-	    sc, sc->sc_dev.dv_xname);
+	sc->sc_ih = arm_intr_establish(oa->oa_dev->irq[0], IPL_SDMMC,
+	    ommmc_intr, sc, sc->sc_dev.dv_xname);
 
 #if 0
 	/* XXX - IIRC firmware should set this */
