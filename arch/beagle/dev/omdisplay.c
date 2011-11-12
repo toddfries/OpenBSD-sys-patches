@@ -1,4 +1,4 @@
-/* $OpenBSD: omdisplay.c,v 1.5 2010/09/07 16:21:37 deraadt Exp $ */
+/* $OpenBSD: omdisplay.c,v 1.7 2011/11/10 19:37:01 uwe Exp $ */
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
  *
@@ -24,8 +24,8 @@
 #include <sys/conf.h>
 #include <sys/uio.h>
 #include <machine/bus.h>
-#include <arch/beagle/beagle/ahb.h>
-#include <arch/beagle/dev/omgpiovar.h>
+#include <beagle/dev/omapvar.h>
+#include <beagle/dev/omgpiovar.h>
 
 #include <dev/cons.h>
 #include <dev/wscons/wsconsio.h>
@@ -540,7 +540,7 @@ omdisplay_attach(struct device *parent, struct device *self, void *args)
 
 	sc->sc_dma_tag = aa->aa_dmat;
 
-	sc->sc_ih = intc_intr_establish(aa->aa_intr, IPL_BIO /* XXX */,
+	sc->sc_ih = arm_intr_establish(aa->aa_intr, IPL_BIO /* XXX */,
 	    omdisplay_intr, sc, sc->sc_dev.dv_xname);
 
 	printf ("\n");
