@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.168 2011/10/13 18:23:39 claudio Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.173 2011/11/09 12:36:03 camield Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -319,8 +319,7 @@ pfsync_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_type = IFT_PFSYNC;
 	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 	ifp->if_hdrlen = sizeof(struct pfsync_header);
-	ifp->if_mtu = 1500; /* XXX */
-	ifp->if_hardmtu = MCLBYTES; /* XXX */
+	ifp->if_mtu = ETHERMTU;
 	timeout_set(&sc->sc_tmo, pfsync_timeout, sc);
 	timeout_set(&sc->sc_bulk_tmo, pfsync_bulk_update, sc);
 	timeout_set(&sc->sc_bulkfail_tmo, pfsync_bulk_fail, sc);
@@ -348,6 +347,7 @@ pfsync_clone_destroy(struct ifnet *ifp)
 	struct pfsync_deferral *pd;
 	int s;
 
+	timeout_del(&sc->sc_bulkfail_tmo);
 	timeout_del(&sc->sc_bulk_tmo);
 	timeout_del(&sc->sc_tmo);
 #if NCARP > 0
@@ -568,9 +568,21 @@ pfsync_state_import(struct pfsync_state *sp, int flags)
 		sks->port[0] = sp->key[PF_SK_STACK].port[0];
 		sks->port[1] = sp->key[PF_SK_STACK].port[1];
 		sks->rdomain = ntohs(sp->key[PF_SK_STACK].rdomain);
-		sks->proto = sp->proto;
 		if (!(sks->af = sp->key[PF_SK_STACK].af))
 			sks->af = sp->af;
+		if (sks->af != skw->af) {
+			switch (sp->proto) {
+			case IPPROTO_ICMP:
+				sks->proto = IPPROTO_ICMPV6;
+				break;
+			case IPPROTO_ICMPV6:
+				sks->proto = IPPROTO_ICMP;
+				break;
+			default:
+				sks->proto = sp->proto;
+			}
+		} else
+			sks->proto = sp->proto;
 	}
 	st->rtableid[PF_SK_WIRE] = ntohl(sp->rtableid[PF_SK_WIRE]);
 	st->rtableid[PF_SK_STACK] = ntohl(sp->rtableid[PF_SK_STACK]);
@@ -580,11 +592,16 @@ pfsync_state_import(struct pfsync_state *sp, int flags)
 	st->creation = time_second - ntohl(sp->creation);
 	st->expire = time_second;
 	if (sp->expire) {
-		/* XXX No adaptive scaling. */
-		st->expire -= r->timeout[sp->timeout] - ntohl(sp->expire);
+		u_int32_t timeout;
+
+		timeout = r->timeout[sp->timeout];
+		if (!timeout)
+			timeout = pf_default_rule.timeout[sp->timeout];
+
+		/* sp->expire may have been adaptively scaled by export. */
+		st->expire -= timeout - ntohl(sp->expire);
 	}
 
-	st->expire = ntohl(sp->expire) + time_second;
 	st->direction = sp->direction;
 	st->log = sp->log;
 	st->timeout = sp->timeout;
@@ -925,27 +942,6 @@ pfsync_in_upd(caddr_t buf, int len, int count, int flags)
 		if (ISSET(st->state_flags, PFSTATE_ACK))
 			pfsync_deferred(st, 1);
 
-		if (st->key[PF_SK_WIRE]->proto == IPPROTO_TCP) {
-			DPFPRINTF(LOG_NOTICE,
-			    "pfsync_input: PFSYNC_ACT_UPD: invalid value");
-			pfsyncstats.pfsyncs_badval++;
-			continue;
-		}
-
-		bcopy(sp->id, &id_key.id, sizeof(id_key.id));
-		id_key.creatorid = sp->creatorid;
-
-		st = pf_find_state_byid(&id_key);
-		if (st == NULL) {
-			/* insert the update */
-			if (pfsync_state_import(sp, 0))
-				pfsyncstats.pfsyncs_badstate++;
-			continue;
-		}
-
-		if (ISSET(st->state_flags, PFSTATE_ACK))
-			pfsync_deferred(st, 1);
-
 		if (st->key[PF_SK_WIRE]->proto == IPPROTO_TCP)
 			sync = pfsync_upd_tcp(st, &sp->src, &sp->dst);
 		else {
@@ -969,7 +965,7 @@ pfsync_in_upd(caddr_t buf, int len, int count, int flags)
 		if (sync < 2) {
 			pfsync_alloc_scrub_memory(&sp->dst, &st->dst);
 			pf_state_peer_ntoh(&sp->dst, &st->dst);
-			st->expire = ntohl(sp->expire) + time_second;
+			st->expire = time_second;
 			st->timeout = sp->timeout;
 		}
 		st->pfsync_time = time_uptime;
@@ -1043,7 +1039,7 @@ pfsync_in_upd_c(caddr_t buf, int len, int count, int flags)
 		if (sync < 2) {
 			pfsync_alloc_scrub_memory(&up->dst, &st->dst);
 			pf_state_peer_ntoh(&up->dst, &st->dst);
-			st->expire = ntohl(up->expire) + time_second;
+			st->expire = time_second;
 			st->timeout = up->timeout;
 		}
 		st->pfsync_time = time_uptime;
@@ -1312,11 +1308,11 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		splx(s);
 		break;
 	case SIOCSIFMTU:
-		s = splnet();
-		if (ifr->ifr_mtu <= PFSYNC_MINPKT)
+		if (!sc->sc_sync_if ||
+		    ifr->ifr_mtu <= PFSYNC_MINPKT ||
+		    ifr->ifr_mtu > sc->sc_sync_if->if_mtu)
 			return (EINVAL);
-		if (ifr->ifr_mtu > MCLBYTES) /* XXX could be bigger */
-			ifr->ifr_mtu = MCLBYTES;
+		s = splnet();
 		if (ifr->ifr_mtu < ifp->if_mtu)
 			pfsync_sendout();
 		ifp->if_mtu = ifr->ifr_mtu;
@@ -1458,12 +1454,6 @@ pfsync_out_upd_c(struct pf_state *st, void *buf)
 	pf_state_peer_hton(&st->src, &up->src);
 	pf_state_peer_hton(&st->dst, &up->dst);
 	up->creatorid = st->creatorid;
-
-	up->expire = pf_state_expires(st);
-	if (up->expire <= time_second)
-		up->expire = htonl(0);
-	else
-		up->expire = htonl(up->expire - time_second);
 	up->timeout = st->timeout;
 }
 
