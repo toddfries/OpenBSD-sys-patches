@@ -1,4 +1,4 @@
-/* $OpenBSD: gptimer.c,v 1.7 2011/10/24 22:49:07 drahn Exp $ */
+/* $OpenBSD: gptimer.c,v 1.12 2011/11/10 19:37:01 uwe Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -30,11 +30,10 @@
 #include <sys/device.h>
 #include <sys/timetc.h>
 #include <dev/clock_subr.h>
+#include <machine/bus.h>
+#include <beagle/dev/omapvar.h>
 #include <beagle/dev/prcmvar.h>
-#include <machine/bus.h>
-#include <arch/beagle/beagle/ahb.h>
 
-#include <machine/bus.h>
 #include <machine/intr.h>
 #include <arm/cpufunc.h>
 
@@ -95,8 +94,6 @@
 #define		GP_TSICR_POSTED		0x00000002
 #define		GP_TSICR_SFT		0x00000001
 #define	GP_TCAR2	0x044
-#define	GP_SIZE	0x100
-
 
 #define TIMER_FREQUENCY			32768	/* 32kHz is used, selectable */
 
@@ -107,10 +104,12 @@ static struct evcount stat_count;
 
 //static int clk_irq = GPT1_IRQ; /* XXX 37 */
 
-int gptimer_match(struct device *parent, void *v, void *aux);
 void gptimer_attach(struct device *parent, struct device *self, void *args);
 int gptimer_intr(void *frame);
-void gptimer_delay(int reg);
+void gptimer_wait(int reg);
+void gptimer_cpu_initclocks(void);
+void gptimer_delay(u_int);
+void gptimer_setstatclockrate(int newhz);
 
 bus_space_tag_t gptimer_iot;
 bus_space_handle_t gptimer_ioh0,  gptimer_ioh1; 
@@ -131,36 +130,23 @@ u_int32_t	ticks_err_sum;
 u_int32_t	statvar, statmin;
 
 struct cfattach	gptimer_ca = {
-	sizeof (struct device), gptimer_match, gptimer_attach
+	sizeof (struct device), NULL, gptimer_attach
 };
 
 struct cfdriver gptimer_cd = {
 	NULL, "gptimer", DV_DULL
 };
 
-int
-gptimer_match(struct device *parent, void *v, void *aux)
-{
-	switch (board_id) {
-	case BOARD_ID_OMAP3_BEAGLE:
-		break; /* continue trying */
-	case BOARD_ID_OMAP4_PANDA:
-		return 0; /* not ported yet ??? - different */
-	default:
-		return 0; /* unknown */
-	}
-	return (1);
-}
-
 void
 gptimer_attach(struct device *parent, struct device *self, void *args)
 {
-        struct ahb_attach_args *aa = args;
-	bus_space_handle_t ioh; 
+	struct omap_attach_args *oa = args;
+	bus_space_handle_t ioh;
 	u_int32_t rev;
 
-	gptimer_iot = aa->aa_iot;
-	if (bus_space_map(gptimer_iot, aa->aa_addr, GP_SIZE, 0, &ioh))
+	gptimer_iot = oa->oa_iot;
+	if (bus_space_map(gptimer_iot, oa->oa_dev->mem[0].addr,
+	    oa->oa_dev->mem[0].size, 0, &ioh))
 		panic("gptimer_attach: bus_space_map failed!");
 
 	rev = bus_space_read_4(gptimer_iot, ioh, GP_TIDR);
@@ -168,24 +154,28 @@ gptimer_attach(struct device *parent, struct device *self, void *args)
 	printf(" rev %d.%d\n", rev >> 4 & 0xf, rev & 0xf);
 	if (self->dv_unit == 0) {
 		gptimer_ioh0 = ioh;
-		gptimer_irq = aa->aa_intr;
+		gptimer_irq = oa->oa_dev->irq[0];
 		bus_space_write_4(gptimer_iot, gptimer_ioh0, GP_TCLR, 0);
 	} else if (self->dv_unit == 1) {
 		/* start timer because it is used in delay */
 		gptimer_ioh1 = ioh;
 		bus_space_write_4(gptimer_iot, gptimer_ioh1, GP_TCRR, 0);
-		gptimer_delay(GP_TWPS_ALL);
+		gptimer_wait(GP_TWPS_ALL);
 		bus_space_write_4(gptimer_iot, gptimer_ioh1, GP_TLDR, 0);
-		gptimer_delay(GP_TWPS_ALL);
+		gptimer_wait(GP_TWPS_ALL);
 		bus_space_write_4(gptimer_iot, gptimer_ioh1, GP_TCLR,
 		    GP_TCLR_AR | GP_TCLR_ST);
-		gptimer_delay(GP_TWPS_ALL);
+		gptimer_wait(GP_TWPS_ALL);
 
 		gptimer_timecounter.tc_frequency = TIMER_FREQUENCY;
 		tc_init(&gptimer_timecounter);
 	}
-	else 
-		panic("attaching too many gptimers at %x", aa->aa_addr);
+	else
+		panic("attaching too many gptimers at 0x%x",
+		    oa->oa_dev->mem[0].addr);
+
+	arm_clock_register(gptimer_cpu_initclocks, gptimer_delay,
+	    gptimer_setstatclockrate);
 }
 
 /* 
@@ -274,10 +264,10 @@ gptimer_intr(void *frame)
                 nextstatevent = now;
         }
 
-	gptimer_delay(GP_TWPS_ALL);
+	gptimer_wait(GP_TWPS_ALL);
 	bus_space_write_4(gptimer_iot, gptimer_ioh0, GP_TISR,
 		bus_space_read_4(gptimer_iot, gptimer_ioh0, GP_TISR));
-	gptimer_delay(GP_TWPS_ALL);
+	gptimer_wait(GP_TWPS_ALL);
         bus_space_write_4(gptimer_iot, gptimer_ioh0, GP_TCRR, -duration);
  
 	return 1;
@@ -290,7 +280,7 @@ gptimer_intr(void *frame)
  */
 
 void
-cpu_initclocks()
+gptimer_cpu_initclocks()
 {
 //	u_int32_t now;
 	stathz = 128;
@@ -318,23 +308,23 @@ cpu_initclocks()
 	nexttickevent = nextstatevent = bus_space_read_4(gptimer_iot,
 	    gptimer_ioh1, GP_TCRR) + ticks_per_intr;
 
-	gptimer_delay(GP_TWPS_ALL);
+	gptimer_wait(GP_TWPS_ALL);
 	bus_space_write_4(gptimer_iot, gptimer_ioh0, GP_TIER, GP_TIER_OVF_EN);
-	gptimer_delay(GP_TWPS_ALL);
+	gptimer_wait(GP_TWPS_ALL);
 	bus_space_write_4(gptimer_iot, gptimer_ioh0, GP_TWER, GP_TWER_OVF_EN);
-	gptimer_delay(GP_TWPS_ALL);
+	gptimer_wait(GP_TWPS_ALL);
 	bus_space_write_4(gptimer_iot, gptimer_ioh0, GP_TCLR,
 	    GP_TCLR_AR | GP_TCLR_ST);
-	gptimer_delay(GP_TWPS_ALL);
+	gptimer_wait(GP_TWPS_ALL);
 	bus_space_write_4(gptimer_iot, gptimer_ioh0, GP_TISR,
 		bus_space_read_4(gptimer_iot, gptimer_ioh0, GP_TISR));
-	gptimer_delay(GP_TWPS_ALL);
+	gptimer_wait(GP_TWPS_ALL);
 	bus_space_write_4(gptimer_iot, gptimer_ioh0, GP_TCRR, -ticks_per_intr);
-	gptimer_delay(GP_TWPS_ALL);
+	gptimer_wait(GP_TWPS_ALL);
 }
 
 void
-gptimer_delay(int reg)
+gptimer_wait(int reg)
 {
 	while (bus_space_read_4(gptimer_iot, gptimer_ioh0, GP_TWPS) & reg)
 		;
@@ -380,7 +370,7 @@ microtime(struct timeval *tvp)
 #endif
 
 void
-delay(u_int usecs)
+gptimer_delay(u_int usecs)
 {
 	u_int32_t clock, oclock, delta, delaycnt;
 	volatile int j;
@@ -419,7 +409,7 @@ delay(u_int usecs)
 }
 
 void
-setstatclockrate(int newhz)
+gptimer_setstatclockrate(int newhz)
 {
 	int minint, statint;
 	int s;
@@ -443,88 +433,6 @@ setstatclockrate(int newhz)
 	 */
 }
 
-todr_chip_handle_t todr_handle;
-
-/*
- * inittodr:
- *
- *      Initialize time from the time-of-day register.
- */
-#define MINYEAR         2003    /* minimum plausible year */
-void
-inittodr(time_t base)
-{
-	time_t deltat;
-	struct timeval rtctime;
-	struct timespec ts;
-	int badbase;
-
-	if (base < (MINYEAR - 1970) * SECYR) {
-		printf("WARNING: preposterous time in file system\n");
-		/* read the system clock anyway */
-		base = (MINYEAR - 1970) * SECYR;
-		badbase = 1;
-	} else
-		badbase = 0;
-
-	if (todr_handle == NULL ||
-	    todr_gettime(todr_handle, &rtctime) != 0 ||
-	    rtctime.tv_sec == 0) {
-		/*
-		 * Believe the time in the file system for lack of
-		 * anything better, resetting the TODR.
-		 */
-		rtctime.tv_sec = base;
-		rtctime.tv_usec = 0;
-		if (todr_handle != NULL && !badbase) {
-			printf("WARNING: preposterous clock chip time\n");
-			resettodr();
-		}
-		goto bad;
-	} else {
-		ts.tv_sec = rtctime.tv_sec;
-		ts.tv_nsec = rtctime.tv_usec * 1000;
-		tc_setclock(&ts);
-	}
-
-	if (!badbase) {
-		/*
-		 * See if we gained/lost two or more days; if
-		 * so, assume something is amiss.
-		 */
-		deltat = rtctime.tv_sec - base;
-		if (deltat < 0)
-			deltat = -deltat;
-		if (deltat < 2 * SECDAY)
-			return;         /* all is well */
-		printf("WARNING: clock %s %ld days\n",
-		    rtctime.tv_sec < base ? "lost" : "gained",
-		    (long)deltat / SECDAY);
-	}
- bad:
-	printf("WARNING: CHECK AND RESET THE DATE!\n");
-}
-
-
-/*
- * resettodr:
- *
- *      Reset the time-of-day register with the current time.
- */
-void
-resettodr(void)
-{
-	struct timeval rtctime;
-
-	if (rtctime.tv_sec == 0)
-		return;
-			
-	microtime(&rtctime);
-
-	if (todr_handle != NULL &&
-	   todr_settime(todr_handle, &rtctime) != 0)
-		printf("resettodr: failed to set time\n");
-}
 
 u_int
 gptimer_get_timecount(struct timecounter *tc)
