@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate.h,v 1.14 2011/09/22 22:12:43 deraadt Exp $	*/
+/*	$OpenBSD: hibernate.h,v 1.17 2011/11/14 00:25:17 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -65,6 +65,9 @@ struct hibernate_disk_chunk {
 	short		flags;		/* Flags */
 };
 
+#define HIB_INIT	-1
+#define HIB_R		0
+#define HIB_W		1
 typedef	int (*hibio_fn)(dev_t, daddr_t, vaddr_t, size_t, int, void *);
 
 /*
@@ -87,6 +90,7 @@ union hibernate_info {
 		vaddr_t				piglet_va;
 		char				kernel_version[128];
 		hibio_fn			io_func;
+		void				*io_page;
 	};
 
 	/* XXX - remove restriction to have this union fit in a single block */
@@ -125,6 +129,7 @@ int	hibernate_read_image(union hibernate_info *);
 int	hibernate_read_chunks(union hibernate_info *, paddr_t, paddr_t, size_t);
 void	hibernate_unpack_image(union hibernate_info *);
 void	hibernate_populate_resume_pt(union hibernate_info *, paddr_t, paddr_t);
+void	hibernate_free(void);
 
 int	hibernate_check_overlap(paddr_t, paddr_t, paddr_t, paddr_t);
 
