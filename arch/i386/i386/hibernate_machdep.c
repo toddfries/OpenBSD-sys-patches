@@ -40,6 +40,8 @@
 
 #include "acpi.h"
 #include "wd.h"
+#include "ahci.h"
+#include "sd.h"
 
 #if NWD > 0
 #include <dev/ata/atavar.h>
@@ -51,8 +53,6 @@ void    hibernate_enter_resume_4k_pte(vaddr_t, paddr_t);
 void    hibernate_enter_resume_4k_pde(vaddr_t);
 void    hibernate_enter_resume_4m_pde(vaddr_t, paddr_t);
 int	hibernate_read_chunks(union hibernate_info *, paddr_t, paddr_t, size_t);
-
-extern	vaddr_t hibernate_inflate_page;
 
 extern	void hibernate_resume_machdep(void);
 extern	void hibernate_flush(void);
@@ -75,6 +75,20 @@ get_hibernate_io_function(void)
 	/* XXX - Only support wd hibernate presently */
 	if (strcmp(findblkname(major(swdevt[0].sw_dev)), "wd") == 0)
 		return wd_hibernate_io;
+#endif
+#if NAHCI > 0 && NSD > 0
+	if (strcmp(findblkname(major(swdevt[0].sw_dev)), "sd") == 0) {
+		extern struct cfdriver sd_cd;
+		extern int ahci_hibernate_io(dev_t dev, daddr_t blkno,
+		    vaddr_t addr, size_t size, int wr, void *page);
+		struct device *dv;
+
+		dv = disk_lookup(&sd_cd, DISKUNIT(swdevt[0].sw_dev));
+		if (dv && dv->dv_parent && dv->dv_parent->dv_parent &&
+		    strcmp(dv->dv_parent->dv_parent->dv_cfdata->cf_driver->cd_name,
+		    "ahci") == 0)
+		return ahci_hibernate_io;
+	}
 #endif
 	return NULL;
 }
@@ -189,8 +203,6 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	pmap_kenter_pa(HIBERNATE_PD_PAGE, HIBERNATE_PD_PAGE, VM_PROT_ALL);
 	pmap_kenter_pa(HIBERNATE_STACK_PAGE, HIBERNATE_STACK_PAGE, VM_PROT_ALL);
 	pmap_activate(curproc);
-
-	hibernate_inflate_page = HIBERNATE_INFLATE_PAGE;
 
 	bzero((caddr_t)HIBERNATE_PT_PAGE, PAGE_SIZE);
 	bzero((caddr_t)HIBERNATE_PD_PAGE, PAGE_SIZE);
