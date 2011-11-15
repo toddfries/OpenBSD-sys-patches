@@ -1,4 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.14 2011/09/08 03:40:32 guenther Exp $	*/
+/*	$OpenBSD: _types.h,v 1.17 2011/11/15 17:12:14 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -37,11 +37,7 @@
 
 #if defined(_KERNEL)
 typedef struct label_t {
-	int	lbl_rp;
-	int	lbl_sp;
-	int	lbl_s[17];
-	int	lbl_ss[1];
-	double	lbl_sf[10];	/* hp800:fr12-fr15, hp700:fr12-fr21 */
+	long	val[19];
 } label_t;
 #endif
 
@@ -138,7 +134,7 @@ typedef int			__timer_t;
 #if defined(__GNUC__) && __GNUC__ >= 3
 typedef	__builtin_va_list	__va_list;
 #else
-typedef	double *		__va_list;
+typedef	double			__va_list;
 #endif
 
 /* Wide character support types */
