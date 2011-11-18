@@ -35,8 +35,12 @@ __KERNEL_RCSID(0, "$NetBSD: puffs_msgif.c,v 1.89 2011/10/19 01:39:29 manu Exp $"
 #endif
 
 #include <sys/param.h>
+#if defined(__OpenBSD__)
+#include <machine/atomic.h>
+#else
 #include <sys/atomic.h>
 #include <sys/kmem.h>
+#endif
 #include <sys/kthread.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -50,10 +54,17 @@ __KERNEL_RCSID(0, "$NetBSD: puffs_msgif.c,v 1.89 2011/10/19 01:39:29 manu Exp $"
 
 #include <dev/putter/putter_sys.h>
 
-#include <fs/puffs/puffs_msgif.h>
-#include <fs/puffs/puffs_sys.h>
+#include <puffs/puffs_msgif.h>
+#include <puffs/puffs_sys.h>
 
+#if defined(__NetBSD__)
 #include <miscfs/syncfs/syncfs.h> /* XXX: for syncer_mutex reference */
+#else
+#if 0
+typedef kmutex_t;
+extern kmutex_t		syncer_mutex;
+#endif
+#endif
 
 /*
  * waitq data structures
