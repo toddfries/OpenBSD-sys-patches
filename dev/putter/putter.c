@@ -35,7 +35,9 @@
  */
 
 #include <sys/cdefs.h>
+#if defined(__NetBSD__)
 __KERNEL_RCSID(0, "$NetBSD: putter.c,v 1.32 2011/07/23 14:28:28 hannken Exp $");
+#endif
 
 #include <sys/param.h>
 #include <sys/systm.h>
