@@ -2,9 +2,9 @@
 
 #deffs	PUFFS
 
-file	fs/puffs/puffs_compat.c		puffs
-file	fs/puffs/puffs_msgif.c		puffs
-file	fs/puffs/puffs_node.c		puffs
-file	fs/puffs/puffs_subr.c		puffs
-file	fs/puffs/puffs_vfsops.c		puffs
-file	fs/puffs/puffs_vnops.c		puffs
+file	puffs/puffs_compat.c		puffs
+file	puffs/puffs_msgif.c		puffs
+file	puffs/puffs_node.c		puffs
+file	puffs/puffs_subr.c		puffs
+file	puffs/puffs_vfsops.c		puffs
+file	puffs/puffs_vnops.c		puffs
