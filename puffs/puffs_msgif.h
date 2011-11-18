@@ -44,7 +44,9 @@
 
 #include <dev/putter/putter.h>
 
+#if defined(__NetBSD__)
 #include <uvm/uvm_prot.h>
+#endif
 
 #define PUFFSOP_VFS		0x01	/* kernel-> */
 #define PUFFSOP_VN		0x02	/* kernel-> */
@@ -107,6 +109,11 @@ enum {
 #define PUFFSNAMESIZE	32
 
 #define PUFFS_TYPEPREFIX "puffs|"
+
+#if defined(__OpenBSD__)
+#define _VFS_NAMELEN MFSNAMELEN
+#define _VFS_MNAMELEN MNAMELEN
+#endif
 
 #define PUFFS_TYPELEN (_VFS_NAMELEN - (sizeof(PUFFS_TYPEPREFIX)+1))
 #define PUFFS_NAMELEN (_VFS_MNAMELEN-1)
@@ -171,6 +178,28 @@ struct puffs_kargs {
 
 #define PUFFS_FHSIZE_MAX	1020	/* FHANDLE_SIZE_MAX - 4 */
 
+#if !defined(__aligned) /* borrowed from NetBSD's cdefs.h */
+#if defined(__lint__)
+#define __packed        __packed
+#define __aligned(x)    /* delete */
+#define __section(x)    /* delete */
+#elif __GNUC_PREREQ__(2, 7)
+#define __packed        __attribute__((__packed__))
+#define __aligned(x)    __attribute__((__aligned__(x)))
+#define __section(x)    __attribute__((__section__(x)))
+#elif defined(__PCC__)
+#define __packed        _Pragma("packed 1")
+#define __aligned(x)    _Pragma("aligned " __STRING(x))
+#define __section(x)    _Pragma("section " ## x)
+#elif defined(_MSC_VER)
+#define __packed        /* ignore */
+#else
+#define __packed        error: no __packed for this compiler
+#define __aligned(x)    error: no __aligned for this compiler
+#define __section(x)    error: no __section for this compiler
+#endif
+#endif
+
 struct puffs_req {
 	struct putter_hdr	preq_pth;
 
@@ -185,7 +214,9 @@ struct puffs_req {
 
 	/* Who is making the call?  Eventually host id is also needed. */
 	pid_t			preq_pid;
+#if defined(__NetBSD__)
 	lwpid_t			preq_lid;
+#endif
 
 	/*
 	 * the following helper pads the struct size to md alignment

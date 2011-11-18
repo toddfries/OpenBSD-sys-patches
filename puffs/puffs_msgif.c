@@ -47,7 +47,9 @@ __KERNEL_RCSID(0, "$NetBSD: puffs_msgif.c,v 1.89 2011/10/19 01:39:29 manu Exp $"
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/proc.h>
+#if defined(__NetBSD__)
 #include <sys/vnode.h>
+#endif
 
 #include <uvm/uvm.h>
 
@@ -383,7 +385,9 @@ puffs_msg_enqueue(struct puffs_mount *pmp, struct puffs_msgpark *park)
 
 	/* fill in caller information */
 	preq->preq_pid = l->l_proc->p_pid;
+#if defined(__NetBSD__)
 	preq->preq_lid = l->l_lid;
+#endif
 
 	/*
 	 * To support cv_sig, yet another movie: check if there are signals
