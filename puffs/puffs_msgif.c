@@ -48,7 +48,6 @@ __KERNEL_RCSID(0, "$NetBSD: puffs_msgif.c,v 1.89 2011/10/19 01:39:29 manu Exp $"
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
-#include <sys/atomic.h>
 
 #include <uvm/uvm.h>
 
