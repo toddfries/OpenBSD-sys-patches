@@ -30,7 +30,9 @@
  */
 
 #include <sys/cdefs.h>
+#if defined(__NetBSD__)
 __KERNEL_RCSID(0, "$NetBSD: puffs_vnops.c,v 1.161 2011/10/30 13:24:13 hannken Exp $");
+#endif
 
 #include <sys/param.h>
 #include <sys/buf.h>

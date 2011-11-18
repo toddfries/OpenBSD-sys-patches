@@ -30,7 +30,9 @@
  */
 
 #include <sys/cdefs.h>
+#if defined(__NetBSD__)
 __KERNEL_RCSID(0, "$NetBSD: puffs_node.c,v 1.22 2011/10/19 01:39:29 manu Exp $");
+#endif
 
 #include <sys/param.h>
 #include <sys/hash.h>

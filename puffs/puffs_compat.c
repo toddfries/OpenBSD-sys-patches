@@ -32,11 +32,17 @@
  */
 
 #include <sys/cdefs.h>
+#if defined(__NetBSD__)
 __KERNEL_RCSID(0, "$NetBSD: puffs_compat.c,v 1.2 2010/07/11 11:17:27 pooka Exp $");
+#endif
 
 #include <sys/param.h>
+#if defined(__OpenBSD__)
+#include <machine/atomic.h>
+#else
 #include <sys/atomic.h>
 #include <sys/kmem.h>
+#endif
 #include <sys/kthread.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -44,14 +50,19 @@ __KERNEL_RCSID(0, "$NetBSD: puffs_compat.c,v 1.2 2010/07/11 11:17:27 pooka Exp $
 #include <sys/namei.h>
 #include <sys/proc.h>
 #include <sys/vnode.h>
-#include <sys/atomic.h>
 
+#if defined(__NetBSD__)
 #include <dev/putter/putter_sys.h>
+#endif
 
-#include <fs/puffs/puffs_msgif.h>
-#include <fs/puffs/puffs_sys.h>
+#include <puffs/puffs_msgif.h>
+#include <puffs/puffs_sys.h>
 
+#if defined(__OpenBSD__)
+#include <sys/time.h>
+#else
 #include <compat/sys/time.h>
+#endif
 
 /*
  * compat types

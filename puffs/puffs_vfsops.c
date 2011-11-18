@@ -30,7 +30,9 @@
  */
 
 #include <sys/cdefs.h>
+#if defined(__NetBSD__)
 __KERNEL_RCSID(0, "$NetBSD: puffs_vfsops.c,v 1.100 2011/10/19 01:39:29 manu Exp $");
+#endif
 
 #include <sys/param.h>
 #include <sys/mount.h>

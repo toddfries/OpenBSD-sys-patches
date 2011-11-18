@@ -30,7 +30,9 @@
  */
 
 #include <sys/cdefs.h>
+#if defined(__NetBSD__)
 __KERNEL_RCSID(0, "$NetBSD: puffs_msgif.c,v 1.89 2011/10/19 01:39:29 manu Exp $");
+#endif
 
 #include <sys/param.h>
 #include <sys/atomic.h>
