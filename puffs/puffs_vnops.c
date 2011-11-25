@@ -45,8 +45,8 @@ __KERNEL_RCSID(0, "$NetBSD: puffs_vnops.c,v 1.161 2011/10/30 13:24:13 hannken Ex
 
 #include <uvm/uvm.h>
 
-#include <fs/puffs/puffs_msgif.h>
-#include <fs/puffs/puffs_sys.h>
+#include <puffs/puffs_msgif.h>
+#include <puffs/puffs_sys.h>
 
 #include <miscfs/fifofs/fifo.h>
 #include <miscfs/genfs/genfs.h>

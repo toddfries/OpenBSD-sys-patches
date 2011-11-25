@@ -52,8 +52,8 @@ __KERNEL_RCSID(0, "$NetBSD: puffs_vfsops.c,v 1.100 2011/10/19 01:39:29 manu Exp 
 
 #include <miscfs/genfs/genfs.h>
 
-#include <fs/puffs/puffs_msgif.h>
-#include <fs/puffs/puffs_sys.h>
+#include <puffs/puffs_msgif.h>
+#include <puffs/puffs_sys.h>
 
 #include <lib/libkern/libkern.h>
 

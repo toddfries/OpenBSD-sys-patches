@@ -34,14 +34,46 @@
 
 #include <sys/param.h>
 #include <sys/select.h>
+#if !defined(__OpenBSD__)
 #include <sys/kauth.h>
+#endif
 #include <sys/mutex.h>
 #include <sys/queue.h>
 #include <sys/pool.h>
 
-#include <fs/puffs/puffs_msgif.h>
+#include <puffs/puffs_msgif.h>
 
+#if !defined(__OpenBSD__)
 #include <miscfs/genfs/genfs_node.h>
+#else
+struct kauth_cred;
+typedef struct kauth_cred kauth_cred_t;
+struct genfs_ops {
+	void	(*gop_size)(struct vnode *, off_t *, off_t *, int);
+	int	(*gop_alloc)(struct vnode *, off_t, off_t, int,
+	    struct kauth_cred *);
+	int	(*gop_write)(struct vnode *, struct vm_page **, int, int);
+	void	(*gop_markupdate)(struct vnode *, int);
+};
+struct genfs_node {
+	const struct genfs_ops	*g_op;		/* ops vector */
+	struct rwlock	g_glock;	/* getpages lock */
+	int		g_dirtygen;
+};
+typedef struct mutex	kmutex_t;
+typedef int		kcondvar_t;
+typedef int		bool;
+typedef struct pool	pool_cache_t;
+#define mutex_init(a,b,c) mtx_init(a,c)
+#define mutex_enter(a)	mtx_enter(a)
+#define mutex_destroy(a) mtx_leave(a)
+#define mutex_exit(a)	mtx_leave(a)
+#define kmem_free(a,b)	free(a,b)
+#define kmem_alloc(a,...) malloc(a, M_MISCFSMNT, M_NOWAIT | M_ZERO)
+#define kmem_zalloc(a,...) malloc(a, M_MISCFSMNT, M_NOWAIT | M_ZERO)
+#define cv_broadcast(...)	while (0) { }
+#endif
+
 
 extern int (**puffs_vnodeop_p)(void *);
 extern int (**puffs_specop_p)(void *);
@@ -294,7 +326,7 @@ checkerr(struct puffs_mount *pmp, int error, const char *str)
 
 	if (error < 0 || error > ELAST) {
 		puffs_senderr(pmp, PUFFS_ERR_ERROR, error, str, NULL);
-		error = EPROTO;
+		error = EPROTOTYPE;
 	}
 
 	return error;
