@@ -52,7 +52,6 @@
 void    hibernate_enter_resume_4k_pte(vaddr_t, paddr_t);
 void    hibernate_enter_resume_4k_pde(vaddr_t);
 void    hibernate_enter_resume_4m_pde(vaddr_t, paddr_t);
-int	hibernate_read_chunks(union hibernate_info *, paddr_t, paddr_t, size_t);
 
 extern	void hibernate_resume_machdep(void);
 extern	void hibernate_flush(void);
@@ -117,13 +116,14 @@ get_hibernate_info_md(union hibernate_info *hiber_info)
 	hiber_info->ranges[hiber_info->nranges].end =
 	    hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
 	hiber_info->image_size += PAGE_SIZE;
-	hiber_info->nranges ++;
+	hiber_info->nranges++;
 #endif
 #ifdef MULTIPROCESSOR
 	hiber_info->ranges[hiber_info->nranges].base = MP_TRAMPOLINE;
 	hiber_info->ranges[hiber_info->nranges].end =
 	    hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
 	hiber_info->image_size += PAGE_SIZE;
+	hiber_info->nranges++;
 #endif
 
 	return (0);
