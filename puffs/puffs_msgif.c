@@ -114,7 +114,9 @@ makepark(void *arg, void *obj, int flags)
 	struct puffs_msgpark *park = obj;
 
 	mutex_init(&park->park_mtx, MUTEX_DEFAULT, IPL_NONE);
+#if 0 /* XXX */
 	cv_init(&park->park_cv, "puffsrpl");
+#endif
 
 	return 0;
 }
@@ -124,7 +126,9 @@ nukepark(void *arg, void *obj)
 {
 	struct puffs_msgpark *park = obj;
 
+#if 0 /* XXX */
 	cv_destroy(&park->park_cv);
+#endif
 	mutex_destroy(&park->park_mtx);
 }
 
@@ -132,25 +136,31 @@ void
 puffs_msgif_init(void)
 {
 
+#if 0 /* XXX */
 	parkpc = pool_cache_init(sizeof(struct puffs_msgpark), 0, 0, 0,
 	    "puffprkl", NULL, IPL_NONE, makepark, nukepark, NULL);
+#endif
 }
 
 void
 puffs_msgif_destroy(void)
 {
 
+#if 0 /* XXX */
 	pool_cache_destroy(parkpc);
+#endif
 }
 
 static struct puffs_msgpark *
 puffs_msgpark_alloc(int waitok)
 {
-	struct puffs_msgpark *park;
+	struct puffs_msgpark *park = NULL;
 
+#if 0 /* XXX */
 	KASSERT(curlwp != uvm.pagedaemon_lwp || !waitok);
 
 	park = pool_cache_get(parkpc, waitok ? PR_WAITOK : PR_NOWAIT);
+#endif
 	if (park == NULL)
 		return park;
 
@@ -169,7 +179,9 @@ static void
 puffs_msgpark_reference(struct puffs_msgpark *park)
 {
 
+#if 0 /* XXX */
 	KASSERT(mutex_owned(&park->park_mtx));
+#endif
 	park->park_refcount++;
 }
 
@@ -183,7 +195,9 @@ puffs_msgpark_release1(struct puffs_msgpark *park, int howmany)
 	struct puffs_req *creq = park->park_creq;
 	int refcnt;
 
+#if 0 /* XXX */
 	KASSERT(mutex_owned(&park->park_mtx));
+#endif
 	refcnt = park->park_refcount -= howmany;
 	mutex_exit(&park->park_mtx);
 
@@ -196,7 +210,9 @@ puffs_msgpark_release1(struct puffs_msgpark *park, int howmany)
 		if (creq)
 			kmem_free(creq, park->park_creqlen);
 #endif
+#if 0 /* XXX */
 		pool_cache_put(parkpc, park);
+#endif
 
 #ifdef PUFFSDEBUG
 		totalpark--;
@@ -250,7 +266,9 @@ puffs_msgmem_alloc(size_t len, struct puffs_msgpark **ppark, void **mem,
 	struct puffs_msgpark *park;
 	void *m;
 
+#if 0 /* XXX */
 	KASSERT(curlwp != uvm.pagedaemon_lwp || !cansleep);
+#endif
 	m = kmem_zalloc(len, cansleep ? KM_SLEEP : KM_NOSLEEP);
 	if (m == NULL) {
 		KASSERT(cansleep == 0);
@@ -346,7 +364,9 @@ puffs_getmsgid(struct puffs_mount *pmp)
 void
 puffs_msg_enqueue(struct puffs_mount *pmp, struct puffs_msgpark *park)
 {
+#if 0 /* XXX */
 	struct lwp *l = curlwp;
+#endif
 	struct mount *mp;
 	struct puffs_req *preq, *creq;
 	ssize_t delta;
@@ -384,10 +404,9 @@ puffs_msg_enqueue(struct puffs_mount *pmp, struct puffs_msgpark *park)
 		preq->preq_id = puffs_getmsgid(pmp);
 
 	/* fill in caller information */
+#if 0 /* XXX */
 	preq->preq_pid = l->l_proc->p_pid;
-#if defined(__NetBSD__)
 	preq->preq_lid = l->l_lid;
-#endif
 
 	/*
 	 * To support cv_sig, yet another movie: check if there are signals
@@ -425,6 +444,7 @@ puffs_msg_enqueue(struct puffs_mount *pmp, struct puffs_msgpark *park)
 			}
 		}
 	}
+#endif
 
 	mutex_enter(&pmp->pmp_lock);
 	if (pmp->pmp_status != PUFFSTAT_RUNNING) {
@@ -460,8 +480,10 @@ puffs_msg_enqueue(struct puffs_mount *pmp, struct puffs_msgpark *park)
 int
 puffs_msg_wait(struct puffs_mount *pmp, struct puffs_msgpark *park)
 {
+#if 0 /* XXX */
 	lwp_t *l = curlwp;
 	proc_t *p = l->l_proc;
+#endif
 	struct puffs_req *preq = park->park_preq; /* XXX: hmmm */
 	sigset_t ss;
 	sigset_t oss;
@@ -800,7 +822,7 @@ puffsop_msg(void *this, struct puffs_req *preq)
 		DPRINTF(("puffsop_msg: invalid buffer length: "
 		    "%" PRIu64 " (req %" PRIu64 ", \n", pth->pth_framelen,
 		    preq->preq_id));
-		park->park_preq->preq_rv = EPROTO;
+		park->park_preq->preq_rv = EPROTOTYPE;
 		cv_signal(&park->park_cv);
 		puffs_msgpark_release1(park, 2);
 		mutex_exit(&pmp->pmp_lock);

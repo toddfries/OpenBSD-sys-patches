@@ -41,8 +41,8 @@ __KERNEL_RCSID(0, "$NetBSD: puffs_subr.c,v 1.66 2008/11/16 19:34:30 pooka Exp $"
 #include <sys/poll.h>
 #include <sys/proc.h>
 
-#include <fs/puffs/puffs_msgif.h>
-#include <fs/puffs/puffs_sys.h>
+#include <puffs/puffs_msgif.h>
+#include <puffs/puffs_sys.h>
 
 #ifdef PUFFSDEBUG
 int puffsdebug;

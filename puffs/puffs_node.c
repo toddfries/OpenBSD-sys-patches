@@ -44,8 +44,8 @@ __KERNEL_RCSID(0, "$NetBSD: puffs_node.c,v 1.22 2011/10/19 01:39:29 manu Exp $")
 
 #include <uvm/uvm.h>
 
-#include <fs/puffs/puffs_msgif.h>
-#include <fs/puffs/puffs_sys.h>
+#include <puffs/puffs_msgif.h>
+#include <puffs/puffs_sys.h>
 
 #include <miscfs/genfs/genfs_node.h>
 #include <miscfs/specfs/specdev.h>

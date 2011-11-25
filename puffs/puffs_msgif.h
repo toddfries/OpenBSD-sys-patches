@@ -268,7 +268,7 @@ struct puffs_flush {
  * if it makes a difference between these two and the super-user.
  */
 struct puffs_kcred {
-	struct uucred	pkcr_uuc;
+	struct ucred	pkcr_uuc;
 	uint8_t		pkcr_type;
 	uint8_t		pkcr_internal;
 };
@@ -284,6 +284,9 @@ struct puffs_kcred {
 #define PUFFS_MSG_MAXSIZE	2*MAXPHYS
 #define PUFFS_MSGSTRUCT_MAX	4096 /* approximate */
 
+#if !defined(KERNEL_NAME_MAX)
+#define KERNEL_NAME_MAX NAME_MAX
+#endif
 #define PUFFS_EXTNAMELEN KERNEL_NAME_MAX /* currently same as EXTATTR_MAXNAMELEN */
 
 #define PUFFS_TOMOVE(a,b) (MIN((a), b->pmp_msg_maxsize - PUFFS_MSGSTRUCT_MAX))
