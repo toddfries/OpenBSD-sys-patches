@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.173 2011/11/09 12:36:03 camield Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.175 2011/11/25 12:52:10 dlg Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -441,7 +441,7 @@ pfsync_state_export(struct pfsync_state *sp, struct pf_state *st)
 	/* copy from state */
 	strlcpy(sp->ifname, st->kif->pfik_name, sizeof(sp->ifname));
 	bcopy(&st->rt_addr, &sp->rt_addr, sizeof(sp->rt_addr));
-	sp->creation = htonl(time_second - st->creation);
+	sp->creation = htonl(time_uptime - st->creation);
 	sp->expire = pf_state_expires(st);
 	if (sp->expire <= time_second)
 		sp->expire = htonl(0);
@@ -589,7 +589,7 @@ pfsync_state_import(struct pfsync_state *sp, int flags)
 
 	/* copy to state */
 	bcopy(&sp->rt_addr, &st->rt_addr, sizeof(st->rt_addr));
-	st->creation = time_second - ntohl(sp->creation);
+	st->creation = time_uptime - ntohl(sp->creation);
 	st->expire = time_second;
 	if (sp->expire) {
 		u_int32_t timeout;
@@ -1290,10 +1290,13 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 #endif
 	case SIOCSIFFLAGS:
 		s = splnet();
-		if (ifp->if_flags & IFF_UP) {
+		if ((ifp->if_flags & IFF_RUNNING) == 0 &&
+		    (ifp->if_flags & IFF_UP)) {
 			ifp->if_flags |= IFF_RUNNING;
 			pfsync_request_full_update(sc);
-		} else {
+		}
+		if ((ifp->if_flags & IFF_RUNNING) &&
+		    (ifp->if_flags & IFF_UP) == 0) {
 			ifp->if_flags &= ~IFF_RUNNING;
 
 			/* drop everything */
