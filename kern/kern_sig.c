@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.128 2011/11/09 20:57:38 guenther Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.130 2011/11/22 23:20:19 joshe Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -167,6 +167,17 @@ sigactsshare(struct proc *p)
 {
 	p->p_sigacts->ps_refcnt++;
 	return p->p_sigacts;
+}
+
+/*
+ * Initialize a new sigaltstack structure.
+ */
+void
+sigstkinit(struct sigaltstack *ss)
+{
+	ss->ss_flags = SS_DISABLE;
+	ss->ss_size = 0;
+	ss->ss_sp = 0;
 }
 
 /*
@@ -383,9 +394,7 @@ execsigs(struct proc *p)
 	 * Reset stack state to the user stack.
 	 * Clear set of signals caught on the signal stack.
 	 */
-	p->p_sigstk.ss_flags = SS_DISABLE;
-	p->p_sigstk.ss_size = 0;
-	p->p_sigstk.ss_sp = 0;
+	sigstkinit(&p->p_sigstk);
 	ps->ps_flags &= ~SAS_NOCLDWAIT;
 	if (ps->ps_sigact[SIGCHLD] == SIG_IGN)
 		ps->ps_sigact[SIGCHLD] = SIG_DFL;
@@ -1621,4 +1630,15 @@ filt_signal(struct knote *kn, long hint)
 			kn->kn_data++;
 	}
 	return (kn->kn_data != 0);
+}
+
+void
+userret(struct proc *p)
+{
+	int sig;
+
+	while ((sig = CURSIG(p)) != 0)
+		postsig(sig);
+
+	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
 }
