@@ -299,7 +299,10 @@ int
 sleep_finish_signal(struct sleep_state *sls)
 {
 	struct proc *p = curproc;
+	int error;
 
+	if ((error = single_thread_check(p, 1)))
+		return (error);
 	if (sls->sls_catch != 0) {
 		if (sls->sls_sig != 0 || (sls->sls_sig = CURSIG(p)) != 0) {
 			if (p->p_sigacts->ps_sigintr & sigmask(sls->sls_sig))

@@ -1158,7 +1158,7 @@ proc_stop(struct proc *p, int sw)
 
 	p->p_stat = SSTOP;
 	atomic_clearbits_int(&p->p_flag, P_WAITED);
-	atomic_setbits_int(&p->p_flag, P_STOPPED);
+	atomic_setbits_int(&p->p_flag, P_STOPPED|P_SUSPSIG);
 	if (!timeout_pending(&proc_stop_to)) {
 		timeout_add(&proc_stop_to, 0);
 		/*
@@ -1313,6 +1313,13 @@ sigexit(struct proc *p, int signum)
 	p->p_acflag |= AXSIG;
 	if (sigprop[signum] & SA_CORE) {
 		p->p_sisig = signum;
+
+		/* if other threads, pause other threads */
+		if (TAILQ_FIRST(&p->p_p->ps_threads) != p ||
+		    TAILQ_NEXT(p, p_thr_link) != NULL) {
+			single_thread_set(p, 0, 0);
+		}
+
 		if (coredump(p) == 0)
 			signum |= WCOREFLAG;
 	}
@@ -1640,5 +1647,141 @@ userret(struct proc *p)
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);
 
+	if (p->p_flag & P_SUSPSINGLE) {
+		KERNEL_LOCK();
+		single_thread_check(p, 0);
+		KERNEL_UNLOCK();
+	}
+
 	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
+}
+
+int
+single_thread_check(struct proc *p, int deep)
+{
+	struct process *pr = p->p_p;
+
+	if (pr->ps_single != NULL && pr->ps_single != p) {
+		/* if we're in deep, we may need to unwind to a safe place */
+		if (deep) {
+			if (pr->ps_flags & PS_SINGLEUNWIND)
+				return (ERESTART);
+			if (pr->ps_flags & PS_SINGLEEXIT)
+				return (EINTR);
+		}
+
+		do {
+			int s;
+
+			if (--pr->ps_singlecount == 0)
+				wakeup(&pr->ps_singlecount);
+			if (pr->ps_flags & PS_SINGLEEXIT)
+				exit1(p, 0, EXIT_THREAD);
+
+			/* not exiting and don't need to unwind, so suspend */
+			SCHED_LOCK(s);
+			p->p_stat = SSTOP;
+			mi_switch();
+			SCHED_UNLOCK(s);
+		} while (pr->ps_single != NULL);
+	}
+
+	return (0);
+}
+
+/*
+ * case 0: just die: exit1
+ * case PS_SINGLEUNWIND: return back to boundary, will either continue
+ * 	or die: execve
+ * case PS_SINGLEEXIT: just stop where you are, will die: sigexit for coredump
+*/
+int
+single_thread_set(struct proc *p, int bits, int deep)
+{
+	struct process *pr = p->p_p;
+	struct proc *q;
+	int error;
+
+	KASSERT(bits == 0 || bits == PS_SINGLEUNWIND || bits == PS_SINGLEEXIT);
+
+	if ((error = single_thread_check(p, deep)))
+		return error;
+
+	pr->ps_single = p;
+	if (bits) {
+		atomic_setbits_int(&pr->ps_flags, bits);
+		if (bits == PS_SINGLEEXIT)
+			atomic_clearbits_int(&pr->ps_flags, PS_SINGLEUNWIND);
+	}
+	pr->ps_singlecount = 0;
+	TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
+		int s;
+
+		if (q == p)
+			continue;
+		SCHED_LOCK(s);
+		atomic_setbits_int(&q->p_flag, P_SUSPSINGLE);
+		switch (q->p_stat) {
+		case SIDL:
+		case SRUN:
+			pr->ps_singlecount++;
+			break;
+		case SSLEEP:
+			if (q->p_flag & P_SINTR) {
+				if (bits != PS_SINGLEUNWIND) {
+					q->p_stat = SSTOP;
+					break;
+				}
+				setrunnable(q);
+			}
+			pr->ps_singlecount++;
+			break;
+		case SSTOP:
+			if (bits == PS_SINGLEEXIT) {
+				setrunnable(q);
+				pr->ps_singlecount++;
+			}
+			break;
+		case SZOMB:
+		case SDEAD:
+			break;
+		case SONPROC:
+			pr->ps_singlecount++;
+			signotify(q);
+			break;
+		}
+		SCHED_UNLOCK(s);
+	}
+
+	/* wait until they're all suspended */
+	while (pr->ps_singlecount > 0)
+		tsleep(&pr->ps_singlecount, PUSER, "suspend", 0);
+	return 0;
+}
+
+void
+single_thread_clear(struct proc *p)
+{
+	struct process *pr = p->p_p;
+	struct proc *q;
+
+	KASSERT(pr->ps_single == p);
+	
+	pr->ps_single = NULL;
+	atomic_clearbits_int(&pr->ps_flags, PS_SINGLEUNWIND | PS_SINGLEEXIT);
+	TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
+		int s;
+
+		if (q == p || (q->p_flag & P_SUSPSINGLE) == 0)
+			continue;
+		atomic_clearbits_int(&q->p_flag, P_SUSPSINGLE);
+		SCHED_LOCK(s);
+		if (q->p_stat == SSTOP && (q->p_flag & P_SUSPSIG) == 0) {
+			if (q->p_wchan == 0)
+				setrunnable(q);
+			else
+				q->p_stat = SSLEEP;
+		}
+		SCHED_UNLOCK(s);
+	}
 }
