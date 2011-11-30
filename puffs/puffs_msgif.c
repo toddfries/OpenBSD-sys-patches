@@ -136,10 +136,8 @@ void
 puffs_msgif_init(void)
 {
 
-#if 0 /* XXX */
-	parkpc = pool_cache_init(sizeof(struct puffs_msgpark), 0, 0, 0,
-	    "puffprkl", NULL, IPL_NONE, makepark, nukepark, NULL);
-#endif
+	pool_init(&parkpc, sizeof(struct puffs_msgpark), 0, 0, 0, "puffprkl",
+	    NULL);
 }
 
 void
