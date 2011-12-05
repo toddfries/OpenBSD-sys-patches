@@ -1,4 +1,4 @@
-/* $OpenBSD: pms.c,v 1.24 2011/10/17 17:12:01 mpi Exp $ */
+/* $OpenBSD: pms.c,v 1.26 2011/12/04 00:53:49 shadchin Exp $ */
 /* $NetBSD: psm.c,v 1.11 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -53,10 +53,10 @@ struct pms_softc;
 
 struct pms_protocol {
 	int type;
-#define PMS_STANDARD	0
-#define PMS_INTELLI	1
-#define PMS_SYNAPTICS	2
-#define PMS_ALPS	3
+#define PMS_STANDARD		0
+#define PMS_INTELLI		1
+#define PMS_SYNAPTICS		2
+#define PMS_ALPS		3
 	u_int packetsize;
 	int (*enable)(struct pms_softc *);
 	int (*ioctl)(struct pms_softc *, u_long, caddr_t, int, struct proc *);
@@ -98,7 +98,7 @@ struct alps_softc {
 	int wsmode;
 	int old_x, old_y;
 	u_int old_buttons;
-#define ALPS_PRESSURE	40
+#define ALPS_PRESSURE		40
 };
 
 struct pms_softc {		/* driver status information */
@@ -126,7 +126,7 @@ struct pms_softc {		/* driver status information */
 	u_char packet[8];
 
 	struct device *sc_wsmousedev;
-	struct device *sc_pt_wsmousedev;
+	struct device *sc_sec_wsmousedev;
 };
 
 static const u_int butmap[8] = {
@@ -147,15 +147,13 @@ static const struct alps_model {
 } alps_models[] = {
 #if 0
 	/* FIXME some clipads are not working yet */
+	{ 0x5212, 0xff, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
+	{ 0x6222, 0xcf, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
+#endif
 	{ 0x2021, 0xf8, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
 	{ 0x2221, 0xf8, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
 	{ 0x2222, 0xff, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
 	{ 0x3222, 0xf8, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
-	{ 0x5212, 0xff, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
-	{ 0x6222, 0xcf, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
-	{ 0x633b, 0xf8, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
-	{ 0x7301, 0xf8, ALPS_DUALPOINT },
-#endif
 	{ 0x5321, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x5322, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x603b, 0xf8, ALPS_GLIDEPOINT },
@@ -165,6 +163,8 @@ static const struct alps_model {
 	{ 0x6324, 0x8f, ALPS_GLIDEPOINT },
 	{ 0x6325, 0xef, ALPS_GLIDEPOINT },
 	{ 0x6326, 0xf8, ALPS_GLIDEPOINT },
+	{ 0x633b, 0xf8, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
+	{ 0x7301, 0xf8, ALPS_DUALPOINT },
 	{ 0x7321, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x7322, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x7325, 0xcf, ALPS_GLIDEPOINT },
@@ -180,9 +180,14 @@ int	pmsactivate(struct device *, int);
 void	pmsinput(void *, int);
 
 int	pms_change_state(struct pms_softc *, int, int);
+
 int	pms_ioctl(void *, u_long, caddr_t, int, struct proc *);
 int	pms_enable(void *);
 void	pms_disable(void *);
+
+int	pms_sec_ioctl(void *, u_long, caddr_t, int, struct proc *);
+int	pms_sec_enable(void *);
+void	pms_sec_disable(void *);
 
 int	pms_cmd(struct pms_softc *, u_char *, int, u_char *, int);
 int	pms_spec_cmd(struct pms_softc *, int);
@@ -215,12 +220,7 @@ void	pms_proc_alps(struct pms_softc *);
 int	synaptics_set_mode(struct pms_softc *, int);
 int	synaptics_query(struct pms_softc *, int, int *);
 int	synaptics_get_hwinfo(struct pms_softc *);
-
-void	synaptics_pt_proc(struct pms_softc *);
-
-int	synaptics_pt_ioctl(void *, u_long, caddr_t, int, struct proc *);
-int	synaptics_pt_enable(void *);
-void	synaptics_pt_disable(void *);
+void	synaptics_sec_proc(struct pms_softc *);
 
 int	alps_get_hwinfo(struct pms_softc *);
 
@@ -239,10 +239,10 @@ const struct wsmouse_accessops pms_accessops = {
 	pms_disable,
 };
 
-const struct wsmouse_accessops synaptics_pt_accessops = {
-	synaptics_pt_enable,
-	synaptics_pt_ioctl,
-	synaptics_pt_disable,
+const struct wsmouse_accessops pms_sec_accessops = {
+	pms_sec_enable,
+	pms_sec_ioctl,
+	pms_sec_disable,
 };
 
 const struct pms_protocol pms_protocols[] = {
@@ -681,6 +681,35 @@ pms_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 		return (-1);
 }
 
+int
+pms_sec_enable(void *v)
+{
+	struct pms_softc *sc = v;
+
+	return (pms_change_state(sc, PMS_STATE_ENABLED, PMS_DEV_SECONDARY));
+}
+
+void
+pms_sec_disable(void *v)
+{
+	struct pms_softc *sc = v;
+
+	pms_change_state(sc, PMS_STATE_DISABLED, PMS_DEV_SECONDARY);
+}
+
+int
+pms_sec_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
+{
+	switch (cmd) {
+	case WSMOUSEIO_GTYPE:
+		*(u_int *)data = WSMOUSE_TYPE_PS2;
+		break;
+	default:
+		return (-1);
+	}
+	return (0);
+}
+
 void
 pmsinput(void *vsc, int data)
 {
@@ -700,6 +729,7 @@ pmsinput(void *vsc, int data)
 	}
 
 	sc->packet[sc->inputstate++] = data;
+
 	if (sc->inputstate != sc->protocol->packetsize)
 		return;
 
@@ -779,7 +809,7 @@ synaptics_get_hwinfo(struct pms_softc *sc)
 }
 
 void
-synaptics_pt_proc(struct pms_softc *sc)
+synaptics_sec_proc(struct pms_softc *sc)
 {
 	u_int buttons;
 	int dx, dy;
@@ -793,37 +823,8 @@ synaptics_pt_proc(struct pms_softc *sc)
 	dy = (sc->packet[1] & PMS_PS2_YNEG) ?
 	    (int)sc->packet[5] - 256 : sc->packet[5];
 
-	wsmouse_input(sc->sc_pt_wsmousedev,
+	wsmouse_input(sc->sc_sec_wsmousedev,
 	    buttons, dx, dy, 0, 0, WSMOUSE_INPUT_DELTA);
-}
-
-int
-synaptics_pt_enable(void *v)
-{
-	struct pms_softc *sc = v;
-
-	return (pms_change_state(sc, PMS_STATE_ENABLED, PMS_DEV_SECONDARY));
-}
-
-void
-synaptics_pt_disable(void *v)
-{
-	struct pms_softc *sc = v;
-
-	pms_change_state(sc, PMS_STATE_DISABLED, PMS_DEV_SECONDARY);
-}
-
-int
-synaptics_pt_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
-{
-	switch (cmd) {
-	case WSMOUSEIO_GTYPE:
-		*(u_int *)data = WSMOUSE_TYPE_PS2;
-		break;
-	default:
-		return (-1);
-	}
-	return (0);
 }
 
 int
@@ -862,9 +863,9 @@ pms_enable_synaptics(struct pms_softc *sc)
 
 		/* enable pass-through PS/2 port if supported */
 		if (syn->capabilities & SYNAPTICS_CAP_PASSTHROUGH) {
-			a.accessops = &synaptics_pt_accessops;
+			a.accessops = &pms_sec_accessops;
 			a.accesscookie = sc;
-			sc->sc_pt_wsmousedev = config_found((void *)sc, &a,
+			sc->sc_sec_wsmousedev = config_found((void *)sc, &a,
 			    wsmousedevprint);
 		}
 
@@ -955,7 +956,7 @@ pms_proc_synaptics(struct pms_softc *sc)
 	    ((sc->packet[3] & 0x04) >> 2);
 
 	if ((syn->capabilities & SYNAPTICS_CAP_PASSTHROUGH) && w == 3) {
-		synaptics_pt_proc(sc);
+		synaptics_sec_proc(sc);
 		return;
 	}
 
@@ -1068,13 +1069,13 @@ alps_get_hwinfo(struct pms_softc *sc)
 		}
 
 	return (-1);
-
 }
 
 int
 pms_enable_alps(struct pms_softc *sc)
 {
 	struct alps_softc *alps = sc->alps;
+	struct wsmousedev_attach_args a;
 	u_char resp[3];
 
 	if (pms_set_resolution(sc, 0) ||
@@ -1108,6 +1109,13 @@ pms_enable_alps(struct pms_softc *sc)
 		alps->max_y = ALPS_YMAX_BEZEL;
 
 		alps->wsmode = WSMOUSE_COMPAT;
+
+		if (alps->model & ALPS_DUALPOINT) {
+			a.accessops = &pms_sec_accessops;
+			a.accesscookie = sc;
+			sc->sc_sec_wsmousedev = config_found((void *)sc, &a,
+			    wsmousedevprint);
+		}
 	}
 
 	if (alps->model == 0)
@@ -1221,6 +1229,23 @@ pms_proc_alps(struct pms_softc *sc)
 	y = sc->packet[4] | ((sc->packet[3] & 0x70) << 3);
 	z = sc->packet[5];
 
+	buttons = ((sc->packet[3] & 1) ? WSMOUSE_BUTTON(1) : 0) |
+	    ((sc->packet[3] & 2) ? WSMOUSE_BUTTON(3) : 0) |
+	    ((sc->packet[3] & 4) ? WSMOUSE_BUTTON(2) : 0);
+
+	if ((sc->sc_dev_enable & PMS_DEV_SECONDARY) && z == ALPS_Z_MAGIC) {
+		dx = (x > ALPS_XSEC_BEZEL / 2) ? (x - ALPS_XSEC_BEZEL) : x;
+		dy = (y > ALPS_YSEC_BEZEL / 2) ? (y - ALPS_YSEC_BEZEL) : y;
+
+		wsmouse_input(sc->sc_sec_wsmousedev, buttons, dx, dy, 0, 0,
+		    WSMOUSE_INPUT_DELTA);
+
+		return;
+	}
+
+	if ((sc->sc_dev_enable & PMS_DEV_PRIMARY) == 0)
+		return;
+
 	/*
 	 * XXX The Y-axis is in the oposit direction compared to
 	 * Synaptics touchpads and PS/2 mouses.
@@ -1229,18 +1254,7 @@ pms_proc_alps(struct pms_softc *sc)
 	 */
 	y = ALPS_YMAX_BEZEL - y + ALPS_YMIN_BEZEL;
 
-	buttons = ((sc->packet[3] & 1) ? WSMOUSE_BUTTON(1) : 0) |
-	    ((sc->packet[3] & 2) ? WSMOUSE_BUTTON(3) : 0) |
-	    ((sc->packet[3] & 4) ? WSMOUSE_BUTTON(2) : 0);
-
 	if (alps->wsmode == WSMOUSE_NATIVE) {
-		if (z == 127) {
-			/* DualPoint touchpads are not absolute. */
-			wsmouse_input(sc->sc_wsmousedev, buttons, x, y, 0, 0,
-			    WSMOUSE_INPUT_DELTA);
-			return;
-		}
-
 		ges = sc->packet[2] & 0x01;
 		fin = sc->packet[2] & 0x02;
 
