@@ -2,3 +2,5 @@ xen3
 OPENBSD_*
 OPENBSD_*
 sub*
+netbsd
+freebsd
