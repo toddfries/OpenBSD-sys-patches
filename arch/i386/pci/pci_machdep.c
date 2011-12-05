@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.66 2011/10/23 21:18:14 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.68 2011/12/04 20:08:09 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -212,6 +212,13 @@ pci_attach_hook(struct device *parent, struct device *self,
 		return;
 
 	/*
+	 * Machines that use the non-standard method of generating PCI
+	 * configuration cycles are way too old to support MSI.
+	 */
+	if (pci_mode == 2)
+		return;
+
+	/*
 	 * In order to decide whether the system supports MSI we look
 	 * at the host bridge, which should be device 0 function 0 on
 	 * bus 0.  It is better to not enable MSI on systems that
@@ -318,7 +325,7 @@ pci_bus_maxdevs(pci_chipset_tag_t pc, int busno)
 	/*
 	 * Bus number is irrelevant.  If Configuration Mechanism 2 is in
 	 * use, can only have devices 0-15 on any bus.  If Configuration
-	 * Mechanism 1 is in use, can have devices 0-32 (i.e. the `normal'
+	 * Mechanism 1 is in use, can have devices 0-31 (i.e. the `normal'
 	 * range).
 	 */
 	if (pci_mode == 2)
