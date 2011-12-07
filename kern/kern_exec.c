@@ -268,7 +268,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	char *pathbuf = NULL;
 
 	/* get other threads to stop */
-	if ((error = single_thread_set(p, PS_SINGLEUNWIND, 1)))
+	if ((error = single_thread_set(p, SINGLE_UNWIND, 1)))
 		goto bad;
 
 	/*
@@ -418,7 +418,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	 * kill the other threads now.
 	 * XXX wait until threads are reaped to make uvmspace_exec() cheaper?
 	 */
-	single_thread_set(p, PS_SINGLEEXIT, 0);
+	single_thread_set(p, SINGLE_EXIT, 0);
 
 	/*
 	 * Prepare vmspace for remapping. Note that uvmspace_exec can replace

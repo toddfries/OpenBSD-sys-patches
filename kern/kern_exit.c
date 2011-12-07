@@ -136,7 +136,7 @@ exit1(struct proc *p, int rv, int flags)
 	else {
 		/* nope, multi-threaded */
 		if (flags == EXIT_NORMAL)
-			single_thread_set(p, PS_SINGLEEXIT, 0);
+			single_thread_set(p, SINGLE_EXIT, 0);
 	}
 
 	if (flags == EXIT_NORMAL) {
@@ -476,7 +476,8 @@ loop:
 			proc_finish_wait(q, p);
 			return (0);
 		}
-		if (p->p_stat == SSTOP && (p->p_flag & P_WAITED) == 0 &&
+		if (p->p_stat == SSTOP &&
+		    (p->p_flag & (P_WAITED|P_SUSPSINGLE)) == 0 &&
 		    (p->p_flag & P_TRACED || SCARG(uap, options) & WUNTRACED)) {
 			atomic_setbits_int(&p->p_flag, P_WAITED);
 			retval[0] = p->p_pid;
