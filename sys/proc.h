@@ -361,7 +361,7 @@ struct proc {
 #define	_P_SINGLEEXIT	0x1000000	/* Other threads must die. */
 #define	_P_SINGLEUNWIND	0x2000000	/* Other threads must unwind. */
 #define	P_THREAD	0x4000000	/* Only a thread, not a real process */
-#define P_SUSPSIG	0x8000000	/* Stopped from signal. */
+#define	P_SUSPSIG	0x8000000	/* Stopped from signal. */
 #define	P_SOFTDEP	0x10000000	/* Stuck processing softdep worklist */
 #define P_STOPPED	0x20000000	/* Just stopped, need sig to parent. */
 #define P_CPUPEG	0x40000000	/* Do not move to another cpu. */
@@ -502,7 +502,12 @@ int	fork1(struct proc *, int, int, void *, pid_t *, void (*)(void *),
 	    void *, register_t *, struct proc **);
 int	groupmember(gid_t, struct ucred *);
 
-int	single_thread_set(struct proc *, int, int);
+enum single_thread_mode {
+	SINGLE_SUSPEND,		/* other threads to stop whereever they are */
+	SINGLE_UNWIND,		/* other threads to unwind and stop */
+	SINGLE_EXIT		/* other threads to unwind and then exit */
+};
+int	single_thread_set(struct proc *, enum single_thread_mode, int);
 void	single_thread_clear(struct proc *);
 int	single_thread_check(struct proc *, int);
 

@@ -282,7 +282,7 @@ sleep_setup_signal(struct sleep_state *sls, int prio)
 	 * stopped, p->p_wchan will be 0 upon return from CURSIG.
 	 */
 	atomic_setbits_int(&p->p_flag, P_SINTR);
-	if ((sls->sls_sig = CURSIG(p)) != 0) {
+	if (p->p_p->ps_single != NULL || (sls->sls_sig = CURSIG(p)) != 0) {
 		if (p->p_wchan)
 			unsleep(p);
 		p->p_stat = SONPROC;
