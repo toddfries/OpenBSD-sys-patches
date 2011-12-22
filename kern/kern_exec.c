@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.120 2011/10/16 05:29:51 guenther Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.122 2011/12/14 07:32:16 guenther Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -267,6 +267,10 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 #endif
 	char *pathbuf = NULL;
 
+	/* get other threads to stop */
+	if ((error = single_thread_set(p, SINGLE_UNWIND, 1)))
+		goto bad;
+
 	/*
 	 * Cheap solution to complicated problems.
 	 * Mark this process as "leave me alone, I'm execing".
@@ -410,6 +414,13 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	pack.ep_ssize = len;	/* maybe should go elsewhere, but... */
 
 	/*
+	 * we're committed: any further errors will kill the process, so
+	 * kill the other threads now.
+	 * XXX wait until threads are reaped to make uvmspace_exec() cheaper?
+	 */
+	single_thread_set(p, SINGLE_EXIT, 0);
+
+	/*
 	 * Prepare vmspace for remapping. Note that uvmspace_exec can replace
 	 * p_vmspace!
 	 */
@@ -505,10 +516,8 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		 * If process is being ktraced, turn off - unless
 		 * root set it.
 		 */
-		if (p->p_tracep && !(p->p_traceflag & KTRFAC_ROOT)) {
-			p->p_traceflag = 0;
-			ktrsettracevnode(p, NULL);
-		}
+		if (pr->ps_tracevp && !(pr->ps_traceflag & KTRFAC_ROOT))
+			ktrcleartrace(pr);
 #endif
 		p->p_ucred = crcopy(cred);
 		if (attr.va_mode & VSUID)
@@ -667,6 +676,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 #endif
 
 	atomic_clearbits_int(&p->p_flag, P_INEXEC);
+	single_thread_clear(p);
 
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE) &&
@@ -702,6 +712,7 @@ bad:
  clrflag:
 #endif
 	atomic_clearbits_int(&p->p_flag, P_INEXEC);
+	single_thread_clear(p);
 
 	if (pathbuf != NULL)
 		pool_put(&namei_pool, pathbuf);
