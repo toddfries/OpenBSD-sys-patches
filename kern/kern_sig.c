@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.130 2011/11/22 23:20:19 joshe Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.131 2011/12/11 19:42:28 guenther Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -1660,7 +1660,7 @@ single_thread_check(struct proc *p, int deep)
 {
 	struct process *pr = p->p_p;
 
-	if (pr->ps_single != NULL && pr->ps_single != p)
+	if (pr->ps_single != NULL && pr->ps_single != p) {
 		do {
 			int s;
 
@@ -1683,6 +1683,7 @@ single_thread_check(struct proc *p, int deep)
 			mi_switch();
 			SCHED_UNLOCK(s);
 		} while (pr->ps_single != NULL);
+	}
 
 	return (0);
 }
@@ -1690,8 +1691,8 @@ single_thread_check(struct proc *p, int deep)
 /*
  * Stop other threads in the process.  The mode controls how and
  * where the other threads should stop:
- *  - SINGLE_SUSPEND: stop whereever they are, will later either be told to
- *    exit (by setting to SINGLE_EXIT) or released (via single_thread_clear())
+ *  - SINGLE_SUSPEND: stop wherever they are, will later either be told to exit
+ *    (by setting to SINGLE_EXIT) or be released (via single_thread_clear())
  *  - SINGLE_UNWIND: just unwind to kernel boundary, will be told to exit
  *    or released as with SINGLE_SUSPEND
  *  - SINGLE_EXIT: unwind to kernel boundary and exit
@@ -1787,13 +1788,13 @@ single_thread_clear(struct proc *p)
 		if (q == p || (q->p_flag & P_SUSPSINGLE) == 0)
 			continue;
 		atomic_clearbits_int(&q->p_flag, P_SUSPSINGLE);
-		SCHED_LOCK(s);
 
 		/*
 		 * if the thread was only stopped for single threading
 		 * then clearing that either makes it runnable or puts
 		 * it back into some sleep queue
 		 */
+		SCHED_LOCK(s);
 		if (q->p_stat == SSTOP && (q->p_flag & P_SUSPSIG) == 0) {
 			if (q->p_wchan == 0)
 				setrunnable(q);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_synch.c,v 1.97 2011/07/07 18:00:33 guenther Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.98 2011/12/11 19:42:28 guenther Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -301,9 +301,9 @@ sleep_finish_signal(struct sleep_state *sls)
 	struct proc *p = curproc;
 	int error;
 
-	if ((error = single_thread_check(p, 1)))
-		return (error);
 	if (sls->sls_catch != 0) {
+		if ((error = single_thread_check(p, 1)))
+			return (error);
 		if (sls->sls_sig != 0 || (sls->sls_sig = CURSIG(p)) != 0) {
 			if (p->p_sigacts->ps_sigintr & sigmask(sls->sls_sig))
 				return (EINTR);
