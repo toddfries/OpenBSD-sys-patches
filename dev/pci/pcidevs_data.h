@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1625 2011/10/22 19:03:05 camield Exp 
+ *	OpenBSD: pcidevs,v 1.1628 2011/12/19 13:52:42 kettenis Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -13364,7 +13364,7 @@ static const struct pci_known_product pci_known_products[] = {
 	    "MCP04 USB",
 	},
 	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP04_ECHI,
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP04_EHCI,
 	    "MCP04 USB",
 	},
 	{
@@ -17850,6 +17850,14 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_TI, PCI_PRODUCT_TI_XIO3130D,
 	    "XIO3130 PCIE-PCIE downstream",
+	},
+	{
+	    PCI_VENDOR_TI, PCI_PRODUCT_TI_XIO2221,
+	    "XIO2221 PCIE-PCI",
+	},
+	{
+	    PCI_VENDOR_TI, PCI_PRODUCT_TI_XIO2221_FW,
+	    "XIO2221 FireWire",
 	},
 	{
 	    PCI_VENDOR_TI, PCI_PRODUCT_TI_XHCI,
