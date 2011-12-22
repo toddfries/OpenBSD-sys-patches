@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.789 2011/12/02 03:15:31 haesbaert Exp $ */
+/*	$OpenBSD: pf.c,v 1.792 2011/12/21 23:00:16 mpf Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -3364,7 +3364,7 @@ pf_test_rule(struct pf_pdesc *pd, struct pf_rule **rm, struct pf_state **sm,
 				/* order is irrelevant */
 				SLIST_INSERT_HEAD(&rules, ri, entry);
 				pf_rule_to_actions(r, &act);
-				if (r->naf)
+				if (r->rule_flag & PFRULE_AFTO)
 					pd->naf = r->naf;
 				if (pf_get_transaddr(r, pd, sns, &nr) == -1) {
 					REASON_SET(&reason, PFRES_MEMORY);
@@ -3399,7 +3399,7 @@ pf_test_rule(struct pf_pdesc *pd, struct pf_rule **rm, struct pf_state **sm,
 
 	/* apply actions for last matching pass/block rule */
 	pf_rule_to_actions(r, &act);
-	if (r->naf)
+	if (r->rule_flag & PFRULE_AFTO)
 		pd->naf = r->naf;
 	if (pf_get_transaddr(r, pd, sns, &nr) == -1) {
 		REASON_SET(&reason, PFRES_MEMORY);
@@ -4278,17 +4278,10 @@ pf_test_state_tcp(struct pf_pdesc *pd, struct pf_state **state, u_short *reason)
 	key.af = pd->af;
 	key.proto = IPPROTO_TCP;
 	key.rdomain = pd->rdomain;
-	if (pd->dir == PF_IN)	{	/* wire side, straight */
-		PF_ACPY(&key.addr[0], pd->src, key.af);
-		PF_ACPY(&key.addr[1], pd->dst, key.af);
-		key.port[0] = th->th_sport;
-		key.port[1] = th->th_dport;
-	} else {			/* stack side, reverse */
-		PF_ACPY(&key.addr[1], pd->src, key.af);
-		PF_ACPY(&key.addr[0], pd->dst, key.af);
-		key.port[1] = th->th_sport;
-		key.port[0] = th->th_dport;
-	}
+	PF_ACPY(&key.addr[pd->sidx], pd->src, key.af);
+	PF_ACPY(&key.addr[pd->didx], pd->dst, key.af);
+	key.port[pd->sidx] = th->th_sport;
+	key.port[pd->didx] = th->th_dport;
 
 	STATE_LOOKUP(pd->kif, &key, pd->dir, *state, pd->m);
 
@@ -4474,17 +4467,10 @@ pf_test_state_udp(struct pf_pdesc *pd, struct pf_state **state)
 	key.af = pd->af;
 	key.proto = IPPROTO_UDP;
 	key.rdomain = pd->rdomain;
-	if (pd->dir == PF_IN)	{	/* wire side, straight */
-		PF_ACPY(&key.addr[0], pd->src, key.af);
-		PF_ACPY(&key.addr[1], pd->dst, key.af);
-		key.port[0] = uh->uh_sport;
-		key.port[1] = uh->uh_dport;
-	} else {			/* stack side, reverse */
-		PF_ACPY(&key.addr[1], pd->src, key.af);
-		PF_ACPY(&key.addr[0], pd->dst, key.af);
-		key.port[1] = uh->uh_sport;
-		key.port[0] = uh->uh_dport;
-	}
+	PF_ACPY(&key.addr[pd->sidx], pd->src, key.af);
+	PF_ACPY(&key.addr[pd->didx], pd->dst, key.af);
+	key.port[pd->sidx] = uh->uh_sport;
+	key.port[pd->didx] = uh->uh_dport;
 
 	STATE_LOOKUP(pd->kif, &key, pd->dir, *state, pd->m);
 
@@ -4555,6 +4541,8 @@ pf_icmp_state_lookup(struct pf_pdesc *pd, struct pf_state_key_cmp *key,
     struct pf_state **state, u_int16_t icmpid, u_int16_t type,
     int icmp_dir, int *iidx, int multi, int inner)
 {
+	int direction;
+
 	key->af = pd->af;
 	key->proto = pd->proto;
 	key->rdomain = pd->rdomain;
@@ -4590,9 +4578,13 @@ pf_icmp_state_lookup(struct pf_pdesc *pd, struct pf_state_key_cmp *key,
 	STATE_LOOKUP(pd->kif, key, pd->dir, *state, pd->m);
 
 	/* Is this ICMP message flowing in right direction? */
-	if ((*state)->rule.ptr->type &&
-	    (((!inner && (*state)->direction == pd->dir) ||
-	    (inner && (*state)->direction != pd->dir)) ?
+	if ((*state)->key[PF_SK_WIRE]->af != (*state)->key[PF_SK_STACK]->af)
+		direction = (pd->af == (*state)->key[PF_SK_WIRE]->af) ?
+		    PF_IN : PF_OUT;
+	else
+		direction = (*state)->direction;
+	if ((((!inner && direction == pd->dir) ||
+	    (inner && direction != pd->dir)) ?
 	    PF_IN : PF_OUT) != icmp_dir) {
 		if (pf_status.debug >= LOG_NOTICE) {
 			log(LOG_NOTICE,
@@ -5440,15 +5432,9 @@ pf_test_state_other(struct pf_pdesc *pd, struct pf_state **state)
 	key.af = pd->af;
 	key.proto = pd->proto;
 	key.rdomain = pd->rdomain;
-	if (pd->dir == PF_IN)	{
-		PF_ACPY(&key.addr[0], pd->src, key.af);
-		PF_ACPY(&key.addr[1], pd->dst, key.af);
-		key.port[0] = key.port[1] = 0;
-	} else {
-		PF_ACPY(&key.addr[1], pd->src, key.af);
-		PF_ACPY(&key.addr[0], pd->dst, key.af);
-		key.port[1] = key.port[0] = 0;
-	}
+	PF_ACPY(&key.addr[pd->sidx], pd->src, key.af);
+	PF_ACPY(&key.addr[pd->didx], pd->dst, key.af);
+	key.port[0] = key.port[1] = 0;
 
 	STATE_LOOKUP(pd->kif, &key, pd->dir, *state, pd->m);
 

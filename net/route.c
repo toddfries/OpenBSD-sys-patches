@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.132 2011/07/22 13:05:29 henning Exp $	*/
+/*	$OpenBSD: route.c,v 1.135 2011/12/06 12:58:34 blambert Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -551,15 +551,10 @@ rtdeletemsg(struct rtentry *rt, u_int tableid)
 	info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 	info.rti_flags = rt->rt_flags;
 	ifp = rt->rt_ifp;
-	error = rtrequest1(RTM_DELETE, &info, rt->rt_priority, &rt, tableid);
+	error = rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, tableid);
 
 	rt_missmsg(RTM_DELETE, &info, info.rti_flags, ifp, error, tableid);
 
-	/* Adjust the refcount */
-	if (error == 0 && rt->rt_refcnt <= 0) {
-		rt->rt_refcnt++;
-		rtfree(rt);
-	}
 	return (error);
 }
 
@@ -661,7 +656,6 @@ int
 rt_getifa(struct rt_addrinfo *info, u_int rtid)
 {
 	struct ifaddr	*ifa;
-	int		 error = 0;
 
 	/*
 	 * ifp may be specified by sockaddr_dl when protocol address
@@ -695,12 +689,14 @@ rt_getifa(struct rt_addrinfo *info, u_int rtid)
 			info->rti_ifa = ifa_ifwithroute(info->rti_flags,
 			    sa, sa, rtid);
 	}
-	if ((ifa = info->rti_ifa) != NULL) {
-		if (info->rti_ifp == NULL)
-			info->rti_ifp = ifa->ifa_ifp;
-	} else
-		error = ENETUNREACH;
-	return (error);
+
+	if ((ifa = info->rti_ifa) == NULL)
+		return (ENETUNREACH);
+
+	if (info->rti_ifp == NULL)
+		info->rti_ifp = ifa->ifa_ifp;
+
+	return (0);
 }
 
 int
@@ -995,12 +991,11 @@ bad:
 }
 
 int
-rt_setgate(struct rtentry *rt0, struct sockaddr *dst, struct sockaddr *gate,
+rt_setgate(struct rtentry *rt, struct sockaddr *dst, struct sockaddr *gate,
     u_int tableid)
 {
 	caddr_t	new, old;
 	int	dlen = ROUNDUP(dst->sa_len), glen = ROUNDUP(gate->sa_len);
-	struct rtentry	*rt = rt0;
 
 	if (rt->rt_gateway == NULL || glen > ROUNDUP(rt->rt_gateway->sa_len)) {
 		old = (caddr_t)rt_key(rt);
@@ -1018,9 +1013,7 @@ rt_setgate(struct rtentry *rt0, struct sockaddr *dst, struct sockaddr *gate,
 		Free(old);
 	}
 	if (rt->rt_gwroute != NULL) {
-		rt = rt->rt_gwroute;
-		RTFREE(rt);
-		rt = rt0;
+		RTFREE(rt->rt_gwroute);
 		rt->rt_gwroute = NULL;
 	}
 	if (rt->rt_flags & RTF_GATEWAY) {
