@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.146 2011/11/22 23:20:19 joshe Exp $	*/
+/*	$OpenBSD: proc.h,v 1.148 2011/12/14 07:32:16 guenther Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -155,6 +155,13 @@ struct process {
 	struct	klist ps_klist;		/* knotes attached to this process */
 	int	ps_flags;		/* PS_* flags. */
 
+	struct	proc *ps_single;	/* Single threading to this thread. */
+	int	ps_singlecount;		/* Not yet suspended threads. */
+
+	int	ps_traceflag;		/* Kernel trace points. */
+	struct	vnode *ps_tracevp;	/* Trace to vnode. */
+	struct	ucred *ps_tracecred;	/* Creds for writing trace */
+
 /* End area that is zeroed on creation. */
 #define	ps_endzero	ps_startcopy
 
@@ -199,6 +206,8 @@ struct process {
 #define	PS_SYSTRACE	_P_SYSTRACE
 #define	PS_CONTINUED	_P_CONTINUED
 #define	PS_STOPPED	_P_STOPPED
+#define	PS_SINGLEEXIT	_P_SINGLEEXIT
+#define	PS_SINGLEUNWIND	_P_SINGLEUNWIND
 
 struct proc {
 	TAILQ_ENTRY(proc) p_runq;
@@ -258,9 +267,6 @@ struct proc {
 	u_quad_t p_uticks;		/* Statclock hits in user mode. */
 	u_quad_t p_sticks;		/* Statclock hits in system mode. */
 	u_quad_t p_iticks;		/* Statclock hits processing intr. */
-
-	int	p_traceflag;		/* Kernel trace points. */
-	struct	vnode *p_tracep;	/* Trace to vnode. */
 
 	void	*p_systrace;		/* Back pointer to systrace */
 
@@ -324,6 +330,7 @@ struct proc {
  * These flags are kept in p_flag, except those with a leading underbar,
  * which are in process's ps_flags
  */
+#define	P_INKTR		0x000001	/* In a ktrace op, don't recurse */
 #define	_P_CONTROLT	0x000002	/* Has a controlling terminal. */
 #define	P_INMEM		0x000004	/* Loaded into memory. UNUSED */
 #define	P_SIGSUSPEND	0x000008	/* Need to restore before-suspend mask*/
@@ -348,14 +355,17 @@ struct proc {
 #define	P_SSTEP		0x020000	/* proc needs single-step fixup ??? */
 #define	_P_SUGIDEXEC	0x040000	/* last execve() was set[ug]id */
 
+#define	P_SUSPSINGLE	0x080000	/* Need to stop for single threading. */
 #define	P_NOZOMBIE	0x100000	/* Pid 1 waits for me instead of dad */
 #define P_INEXEC	0x200000	/* Process is doing an exec right now */
 #define P_SYSTRACE	0x400000	/* Process system call tracing active*/
 #define P_CONTINUED	0x800000	/* Proc has continued from a stopped state. */
+#define	_P_SINGLEEXIT	0x1000000	/* Other threads must die. */
+#define	_P_SINGLEUNWIND	0x2000000	/* Other threads must unwind. */
 #define	P_THREAD	0x4000000	/* Only a thread, not a real process */
-#define	P_IGNEXITRV	0x8000000	/* For thread kills */
+#define	P_SUSPSIG	0x8000000	/* Stopped from signal. */
 #define	P_SOFTDEP	0x10000000	/* Stuck processing softdep worklist */
-#define P_STOPPED	0x20000000	/* Just stopped. */
+#define P_STOPPED	0x20000000	/* Just stopped, need sig to parent. */
 #define P_CPUPEG	0x40000000	/* Do not move to another cpu. */
 
 #ifndef _KERNEL
@@ -369,9 +379,10 @@ struct proc {
 #define	P_BITS \
     ("\20\02CONTROLT\03INMEM\04SIGPAUSE\05PPWAIT\06PROFIL\07SELECT" \
      "\010SINTR\011SUGID\012SYSTEM\013TIMEOUT\014TRACED\015WAITED\016WEXIT" \
-     "\017EXEC\020PWEUPC\021ISPWAIT\022SSTEP\023SUGIDEXEC" \
+     "\017EXEC\020PWEUPC\021ISPWAIT\022SSTEP\023SUGIDEXEC\024SUSPSINGLE" \
      "\025NOZOMBIE\026INEXEC\027SYSTRACE\030CONTINUED" \
-     "\033THREAD\034IGNEXITRV\035SOFTDEP\036STOPPED\037CPUPEG")
+     "\031SINGLEEXIT\032SINGLEUNWIND" \
+     "\033THREAD\034SUSPSIG\035SOFTDEP\036STOPPED\037CPUPEG")
 
 /* Macro to compute the exit signal to be delivered. */
 #define P_EXITSIG(p) \
@@ -492,6 +503,15 @@ void	cpu_exit(struct proc *);
 int	fork1(struct proc *, int, int, void *, pid_t *, void (*)(void *),
 	    void *, register_t *, struct proc **);
 int	groupmember(gid_t, struct ucred *);
+
+enum single_thread_mode {
+	SINGLE_SUSPEND,		/* other threads to stop wherever they are */
+	SINGLE_UNWIND,		/* other threads to unwind and stop */
+	SINGLE_EXIT		/* other threads to unwind and then exit */
+};
+int	single_thread_set(struct proc *, enum single_thread_mode, int);
+void	single_thread_clear(struct proc *);
+int	single_thread_check(struct proc *, int);
 
 void	child_return(void *);
 
