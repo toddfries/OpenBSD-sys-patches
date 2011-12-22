@@ -158,6 +158,10 @@ struct process {
 	struct	proc *ps_single;	/* Single threading to this thread. */
 	int	ps_singlecount;		/* Not yet suspended threads. */
 
+	int	ps_traceflag;		/* Kernel trace points. */
+	struct	vnode *ps_tracevp;	/* Trace to vnode. */
+	struct	ucred *ps_tracecred;	/* Creds for writing trace */
+
 /* End area that is zeroed on creation. */
 #define	ps_endzero	ps_startcopy
 

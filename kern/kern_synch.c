@@ -299,8 +299,6 @@ sleep_finish_signal(struct sleep_state *sls)
 	struct proc *p = curproc;
 	int error;
 
-	if ((error = single_thread_check(p, 1)))
-		return (error);
 	if (sls->sls_catch != 0) {
 		if ((error = single_thread_check(p, 1)))
 			return (error);
