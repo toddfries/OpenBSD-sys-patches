@@ -138,6 +138,7 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
+
 #include <uvm/uvm.h>
 
 /*
@@ -183,13 +184,7 @@ uvm_km_init(vaddr_t start, vaddr_t end)
 	 * before installing.
 	 */
 
-	uvm_map_setup(&kernel_map_store, base, end,
-#ifdef KVA_GUARDPAGES
-	    VM_MAP_PAGEABLE | VM_MAP_GUARDPAGES
-#else
-	    VM_MAP_PAGEABLE
-#endif
-	    );
+	uvm_map_setup(&kernel_map_store, base, end, VM_MAP_PAGEABLE);
 	kernel_map_store.pmap = pmap_kernel();
 	if (base != start && uvm_map(&kernel_map_store, &base, start - base,
 	    NULL, UVM_UNKNOWN_OFFSET, 0, UVM_MAPFLAG(UVM_PROT_ALL, UVM_PROT_ALL,
@@ -469,16 +464,16 @@ uvm_km_free(struct vm_map *map, vaddr_t addr, vsize_t size)
 void
 uvm_km_free_wakeup(struct vm_map *map, vaddr_t addr, vsize_t size)
 {
-	struct uvm_map_deadq dead_entries;
+	struct vm_map_entry *dead_entries;
 
 	vm_map_lock(map);
-	TAILQ_INIT(&dead_entries);
 	uvm_unmap_remove(map, trunc_page(addr), round_page(addr+size), 
-	     &dead_entries, FALSE, TRUE);
+	     &dead_entries, NULL, FALSE);
 	wakeup(map);
 	vm_map_unlock(map);
 
-	uvm_unmap_detach(&dead_entries, 0);
+	if (dead_entries != NULL)
+		uvm_unmap_detach(dead_entries, 0);
 }
 
 /*
@@ -697,10 +692,8 @@ struct uvm_km_free_page *uvm_km_doputpage(struct uvm_km_free_page *);
 void
 uvm_km_page_init(void)
 {
-	int	lowat_min;
-	int	i;
-	int	len, bulk;
-	vaddr_t	addr;
+	int lowat_min;
+	int i;
 
 	mtx_init(&uvm_km_pages.mtx, IPL_VM);
 	if (!uvm_km_pages.lowat) {
@@ -716,27 +709,14 @@ uvm_km_page_init(void)
 	if (uvm_km_pages.hiwat > UVM_KM_PAGES_HIWAT_MAX)
 		uvm_km_pages.hiwat = UVM_KM_PAGES_HIWAT_MAX;
 
-	/* Allocate all pages in as few allocations as possible. */
-	len = 0;
-	bulk = uvm_km_pages.hiwat;
-	while (len < uvm_km_pages.hiwat && bulk > 0) {
-		bulk = MIN(bulk, uvm_km_pages.hiwat - len);
-		addr = vm_map_min(kernel_map);
-		if (uvm_map(kernel_map, &addr, (vsize_t)bulk << PAGE_SHIFT,
-		    NULL, UVM_UNKNOWN_OFFSET, 0,
-		    UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW, UVM_INH_NONE,
-		    UVM_ADV_RANDOM, UVM_KMF_TRYLOCK)) != 0) {
-			bulk /= 2;
-			continue;
-		}
-
-		for (i = len; i < len + bulk; i++, addr += PAGE_SIZE)
-			uvm_km_pages.page[i] = addr;
-		len += bulk;
+	for (i = 0; i < uvm_km_pages.hiwat; i++) {
+		uvm_km_pages.page[i] = (vaddr_t)uvm_km_kmemalloc(kernel_map,
+		    NULL, PAGE_SIZE, UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
+		if (uvm_km_pages.page[i] == 0)
+			break;
 	}
-
-	uvm_km_pages.free = len;
-	for (i = len; i < UVM_KM_PAGES_HIWAT_MAX; i++)
+	uvm_km_pages.free = i;
+	for ( ; i < UVM_KM_PAGES_HIWAT_MAX; i++)
 		uvm_km_pages.page[i] = 0;
 
 	/* tone down if really high */
@@ -780,25 +760,17 @@ uvm_km_thread(void *arg)
 		mtx_leave(&uvm_km_pages.mtx);
 
 		if (allocmore) {
-			bzero(pg, sizeof(pg));
 			for (i = 0; i < nitems(pg); i++) {
-				pg[i] = vm_map_min(kernel_map);
-				if (uvm_map(kernel_map, &pg[i], PAGE_SIZE,
-				    NULL, UVM_UNKNOWN_OFFSET, 0,
-				    UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
-				    UVM_INH_NONE, UVM_ADV_RANDOM,
-				    UVM_KMF_TRYLOCK)) != 0) {
-					pg[i] = 0;
-					break;
-				}
+				pg[i] = (vaddr_t)uvm_km_kmemalloc(kernel_map,
+				    NULL, PAGE_SIZE, UVM_KMF_VALLOC);
 			}
-
+	
 			mtx_enter(&uvm_km_pages.mtx);
 			for (i = 0; i < nitems(pg); i++) {
 				if (uvm_km_pages.free ==
 				    nitems(uvm_km_pages.page))
 					break;
-				else if (pg[i] != 0)
+				else
 					uvm_km_pages.page[uvm_km_pages.free++]
 					    = pg[i];
 			}
@@ -806,12 +778,8 @@ uvm_km_thread(void *arg)
 			mtx_leave(&uvm_km_pages.mtx);
 
 			/* Cleanup left-over pages (if any). */
-			for (; i < nitems(pg); i++) {
-				if (pg[i] != 0) {
-					uvm_unmap(kernel_map,
-					    pg[i], pg[i] + PAGE_SIZE);
-				}
-			}
+			for (; i < nitems(pg); i++)
+				uvm_km_free(kernel_map, pg[i], PAGE_SIZE);
 		}
 		while (fp) {
 			fp = uvm_km_doputpage(fp);
@@ -840,7 +808,7 @@ uvm_km_doputpage(struct uvm_km_free_page *fp)
 	mtx_leave(&uvm_km_pages.mtx);
 
 	if (freeva)
-		uvm_unmap(kernel_map, va, va + PAGE_SIZE);
+		uvm_km_free(kernel_map, va, PAGE_SIZE);
 
 	uvm_pagefree(pg);
 	return (nextfp);

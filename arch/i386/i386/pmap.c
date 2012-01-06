@@ -602,16 +602,14 @@ pmap_exec_fixup(struct vm_map *map, struct trapframe *tf, struct pcb *pcb)
 	vaddr_t va = 0;
 
 	vm_map_lock(map);
-	RB_FOREACH_REVERSE(ent, uvm_map_addr, &map->addr) {
+	for (ent = (&map->header)->next; ent != &map->header; ent = ent->next) {
+		/*
+		 * This entry has greater va than the entries before.
+		 * We need to make it point to the last page, not past it.
+		 */
 		if (ent->protection & VM_PROT_EXECUTE)
-			break;
+			va = trunc_page(ent->end - 1);
 	}
-	/*
-	 * This entry has greater va than the entries before.
-	 * We need to make it point to the last page, not past it.
-	 */
-	if (ent)
-		va = trunc_page(ent->end - 1);
 	vm_map_unlock(map);
 
 	if (va <= pm->pm_hiexec) {
@@ -1246,7 +1244,7 @@ pmap_free_pvpage(void)
 {
 	int s;
 	struct vm_map *map;
-	struct uvm_map_deadq dead_entries;
+	struct vm_map_entry *dead_entries;
 	struct pv_page *pvp;
 
 	s = splvm(); /* protect kmem_map */
@@ -1267,12 +1265,13 @@ pmap_free_pvpage(void)
 		TAILQ_REMOVE(&pv_unusedpgs, pvp, pvinfo.pvpi_list);
 
 		/* unmap the page */
-		TAILQ_INIT(&dead_entries);
+		dead_entries = NULL;
 		uvm_unmap_remove(map, (vaddr_t)pvp, ((vaddr_t)pvp) + PAGE_SIZE,
-		    &dead_entries, FALSE, TRUE);
+		    &dead_entries, NULL, FALSE);
 		vm_map_unlock(map);
 
-		uvm_unmap_detach(&dead_entries, 0);
+		if (dead_entries != NULL)
+			uvm_unmap_detach(dead_entries, 0);
 
 		pv_nfpvents -= PVE_PER_PVPAGE;  /* update free count */
 	}
