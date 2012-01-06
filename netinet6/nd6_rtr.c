@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_rtr.c,v 1.55 2011/02/24 01:25:17 stsp Exp $	*/
+/*	$OpenBSD: nd6_rtr.c,v 1.58 2012/01/03 23:41:51 bluhm Exp $	*/
 /*	$KAME: nd6_rtr.c,v 1.97 2001/02/07 11:09:13 itojun Exp $	*/
 
 /*
@@ -459,7 +459,8 @@ defrouter_addreq(struct nd_defrouter *new)
 	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&mask;
 
 	s = splsoftnet();
-	error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED, &newrt, 0);
+	error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED, &newrt,
+	    new->ifp->if_rdomain);
 	if (newrt) {
 		nd6_rtmsg(RTM_ADD, newrt); /* tell user process */
 		newrt->rt_refcnt--;
@@ -475,12 +476,9 @@ defrouter_lookup(struct in6_addr *addr, struct ifnet *ifp)
 {
 	struct nd_defrouter *dr;
 
-	for (dr = TAILQ_FIRST(&nd_defrouter); dr;
-	     dr = TAILQ_NEXT(dr, dr_entry)) {
-		if (dr->ifp == ifp && IN6_ARE_ADDR_EQUAL(addr, &dr->rtaddr)) {
+	TAILQ_FOREACH(dr, &nd_defrouter, dr_entry)
+		if (dr->ifp == ifp && IN6_ARE_ADDR_EQUAL(addr, &dr->rtaddr))
 			return (dr);
-		}
-	}
 
 	return (NULL);		/* search failed */
 }
@@ -565,7 +563,8 @@ defrouter_delreq(struct nd_defrouter *dr)
 	info.rti_info[RTAX_GATEWAY] = (struct sockaddr *)&gw;
 	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&mask;
 
-	rtrequest1(RTM_DELETE, &info, RTP_CONNECTED, &oldrt, 0);
+	rtrequest1(RTM_DELETE, &info, RTP_CONNECTED, &oldrt,
+	    dr->ifp->if_rdomain);
 	if (oldrt) {
 		nd6_rtmsg(RTM_DELETE, oldrt);
 		if (oldrt->rt_refcnt <= 0) {
@@ -589,8 +588,7 @@ defrouter_reset(void)
 {
 	struct nd_defrouter *dr;
 
-	for (dr = TAILQ_FIRST(&nd_defrouter); dr;
-	     dr = TAILQ_NEXT(dr, dr_entry))
+	TAILQ_FOREACH(dr, &nd_defrouter, dr_entry)
 		defrouter_delreq(dr);
 
 	/*
@@ -646,7 +644,7 @@ defrouter_select(void)
 	 * Let's handle easy case (3) first:
 	 * If default router list is empty, there's nothing to be done.
 	 */
-	if (!TAILQ_FIRST(&nd_defrouter)) {
+	if (TAILQ_EMPTY(&nd_defrouter)) {
 		splx(s);
 		return;
 	}
@@ -656,8 +654,7 @@ defrouter_select(void)
 	 * We just pick up the first reachable one (if any), assuming that
 	 * the ordering rule of the list described in defrtrlist_update().
 	 */
-	for (dr = TAILQ_FIRST(&nd_defrouter); dr;
-	     dr = TAILQ_NEXT(dr, dr_entry)) {
+	TAILQ_FOREACH(dr, &nd_defrouter, dr_entry) {
 		if (!selected_dr &&
 		    (rt = nd6_lookup(&dr->rtaddr, 0, dr->ifp)) &&
 		    (ln = (struct llinfo_nd6 *)rt->rt_llinfo) &&
@@ -817,11 +814,9 @@ insert:
 	 */
 
 	/* insert at the end of the group */
-	for (dr = TAILQ_FIRST(&nd_defrouter); dr;
-	     dr = TAILQ_NEXT(dr, dr_entry)) {
+	TAILQ_FOREACH(dr, &nd_defrouter, dr_entry)
 		if (rtpref(n) > rtpref(dr))
 			break;
-	}
 	if (dr)
 		TAILQ_INSERT_BEFORE(dr, n, dr_entry);
 	else
@@ -1398,7 +1393,7 @@ pfxlist_onlink_check(void)
 		if (pr->ndpr_raf_onlink && find_pfxlist_reachable_router(pr))
 			break;
 	}
-	if (pr != NULL || TAILQ_FIRST(&nd_defrouter) != NULL) {
+	if (pr != NULL || !TAILQ_EMPTY(&nd_defrouter)) {
 		/*
 		 * There is at least one prefix that has a reachable router,
 		 * or at least a router which probably does not advertise
@@ -1573,8 +1568,8 @@ nd6_prefix_onlink(struct nd_prefix *pr)
 	 * We prefer link-local addresses as the associated interface address.
 	 */
 	/* search for a link-local addr */
-	ifa = (struct ifaddr *)in6ifa_ifpforlinklocal(ifp,
-	    IN6_IFF_NOTREADY | IN6_IFF_ANYCAST);
+	ifa = &in6ifa_ifpforlinklocal(ifp,
+	    IN6_IFF_NOTREADY | IN6_IFF_ANYCAST)->ia_ifa;
 	if (ifa == NULL) {
 		/* XXX: freebsd does not have ifa_ifwithaf */
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
@@ -1623,7 +1618,7 @@ nd6_prefix_onlink(struct nd_prefix *pr)
 	info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
 	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&mask6;
 
-	error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED, &rt, 0);
+	error = rtrequest1(RTM_ADD, &info, RTP_CONNECTED, &rt, ifp->if_rdomain);
 	if (error == 0) {
 		if (rt != NULL) /* this should be non NULL, though */
 			nd6_rtmsg(RTM_ADD, rt);
@@ -1674,7 +1669,8 @@ nd6_prefix_offlink(struct nd_prefix *pr)
 	bzero(&info, sizeof(info));
 	info.rti_info[RTAX_DST] = (struct sockaddr *)&sa6;
 	info.rti_info[RTAX_NETMASK] = (struct sockaddr *)&mask6;
-	error = rtrequest1(RTM_DELETE, &info, RTP_CONNECTED, &rt, 0);
+	error = rtrequest1(RTM_DELETE, &info, RTP_CONNECTED, &rt,
+	    ifp->if_rdomain);
 	if (error == 0) {
 		pr->ndpr_stateflags &= ~NDPRF_ONLINK;
 
@@ -1772,7 +1768,7 @@ in6_ifadd(struct nd_prefix *pr)
 	 * with the same interface identifier, than to have multiple addresses
 	 * with different interface identifiers.
 	 */
-	ifa = (struct ifaddr *)in6ifa_ifpforlinklocal(ifp, 0); /* 0 is OK? */
+	ifa = &in6ifa_ifpforlinklocal(ifp, 0)->ia_ifa; /* 0 is OK? */
 	if (ifa)
 		ib = (struct in6_ifaddr *)ifa;
 	else

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_synch.c,v 1.96 2011/01/25 18:42:45 stsp Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.98 2011/12/11 19:42:28 guenther Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -57,8 +57,6 @@
 #include <sys/ktrace.h>
 #endif
 
-void updatepri(struct proc *);
-void endtsleep(void *);
 
 /*
  * We're only looking at 7 bits of the address; everything is
@@ -284,7 +282,7 @@ sleep_setup_signal(struct sleep_state *sls, int prio)
 	 * stopped, p->p_wchan will be 0 upon return from CURSIG.
 	 */
 	atomic_setbits_int(&p->p_flag, P_SINTR);
-	if ((sls->sls_sig = CURSIG(p)) != 0) {
+	if (p->p_p->ps_single != NULL || (sls->sls_sig = CURSIG(p)) != 0) {
 		if (p->p_wchan)
 			unsleep(p);
 		p->p_stat = SONPROC;
@@ -299,8 +297,11 @@ int
 sleep_finish_signal(struct sleep_state *sls)
 {
 	struct proc *p = curproc;
+	int error;
 
 	if (sls->sls_catch != 0) {
+		if ((error = single_thread_check(p, 1)))
+			return (error);
 		if (sls->sls_sig != 0 || (sls->sls_sig = CURSIG(p)) != 0) {
 			if (p->p_sigacts->ps_sigintr & sigmask(sls->sls_sig))
 				return (EINTR);

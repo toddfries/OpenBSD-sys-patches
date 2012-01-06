@@ -1,4 +1,4 @@
-/* $OpenBSD: wskbd.c,v 1.66 2011/04/14 19:25:54 shadchin Exp $ */
+/* $OpenBSD: wskbd.c,v 1.70 2011/11/09 14:27:52 shadchin Exp $ */
 /* $NetBSD: wskbd.c,v 1.80 2005/05/04 01:52:16 augustss Exp $ */
 
 /*
@@ -244,7 +244,9 @@ struct cfattach wskbd_ca = {
 	wskbd_detach, wskbd_activate
 };
 
+#if defined(__i386__) || defined(__amd64__)
 extern int kbd_reset;
+#endif
 
 #ifndef WSKBD_DEFAULT_BELL_PITCH
 #define	WSKBD_DEFAULT_BELL_PITCH	400	/* 400Hz */
@@ -300,7 +302,7 @@ static struct wskbd_internal wskbd_console_data;
 void	wskbd_update_layout(struct wskbd_internal *, kbd_t);
 
 #if NAUDIO > 0
-extern int wskbd_set_mixervolume(long dir);
+extern int wskbd_set_mixervolume(long dir, int out);
 #endif
 
 void
@@ -478,7 +480,7 @@ wskbd_cnattach(const struct wskbd_consops *consops, void *conscookie,
 }
 
 void    
-wskbd_cndetach()
+wskbd_cndetach(void)
 {
 	KASSERT(wskbd_console_initted);
 
@@ -823,6 +825,21 @@ wskbdclose(dev_t dev, int flags, int mode, struct proc *p)
 	(void)wskbd_enable(sc, 0);
 	wsevent_fini(evar);
 
+#if NWSMUX > 0
+	if (sc->sc_base.me_parent == NULL) {
+		int mux, error;
+
+		DPRINTF(("wskbdclose: attach\n"));
+		mux = sc->sc_base.me_dv.dv_cfdata->wskbddevcf_mux;
+		if (mux >= 0) {
+			error = wsmux_attach_sc(wsmux_getmux(mux), &sc->sc_base);
+			if (error)
+				printf("%s: can't attach mux (error=%d)\n",
+				    sc->sc_base.me_dv.dv_xname, error);
+		}
+	}
+#endif
+
 	return (0);
 }
 
@@ -1138,7 +1155,7 @@ wskbdpoll(dev_t dev, int events, struct proc *p)
 #if NWSDISPLAY > 0
 
 int
-wskbd_pickfree()
+wskbd_pickfree(void)
 {
 	int i;
 	struct wskbd_softc *sc;
@@ -1630,15 +1647,15 @@ wskbd_translate(struct wskbd_internal *id, u_int type, int value)
 #if NAUDIO > 0
 		case KS_AudioMute:
 			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-			    (void *)(long)0, NULL);
+			    (void *)(long)0, (void *)(int)1);
 			break;
 		case KS_AudioLower:
 			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-			    (void *)(long)-1, NULL);
+			    (void *)(long)-1, (void*)(int)1);
 			break;
 		case KS_AudioRaise:
 			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-			    (void *)(long)1, NULL);
+			    (void *)(long)1, (void*)(int)1);
 			return (0);
 #endif
 		default:

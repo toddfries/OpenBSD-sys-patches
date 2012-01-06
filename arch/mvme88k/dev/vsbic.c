@@ -1,4 +1,4 @@
-/*	$OpenBSD: vsbic.c,v 1.7 2010/06/28 18:31:01 krw Exp $	*/
+/*	$OpenBSD: vsbic.c,v 1.9 2011/07/17 22:46:47 matthew Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009  Miodrag Vallat.

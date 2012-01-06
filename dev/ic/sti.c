@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti.c,v 1.62 2011/04/07 15:30:16 miod Exp $	*/
+/*	$OpenBSD: sti.c,v 1.64 2011/09/19 11:15:18 miod Exp $	*/
 
 /*
  * Copyright (c) 2000-2003 Michael Shalayeff
@@ -1050,7 +1050,7 @@ sti_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 				    "sti_setcment(%d, %u, %u, %u): %d\n", i,
 				    (u_int)scr->scr_rcmap[i],
 				    (u_int)scr->scr_gcmap[i],
-				    (u_int)scr->scr_bcmap[i]);
+				    (u_int)scr->scr_bcmap[i], ret);
 #endif
 				ret = EINVAL;
 				break;
@@ -1326,11 +1326,10 @@ sti_unpack_attr(void *v, long attr, int *fg, int *bg, int *ul)
 		*ul = 0;
 }
 
-#if NSTI_SGC > 0
+#if NSTI_DIO > 0 || NSTI_SGC > 0
 
 /*
- * Early console support.
- * Only used on hp300 with unique sti@sgc attachment.
+ * Early console support.  Only used on hp300.
  */
 
 int

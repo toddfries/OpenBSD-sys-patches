@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_loop.c,v 1.44 2008/05/07 12:58:54 norby Exp $	*/
+/*	$OpenBSD: if_loop.c,v 1.46 2011/07/09 00:47:18 henning Exp $	*/
 /*	$NetBSD: if_loop.c,v 1.15 1996/05/07 02:40:33 thorpej Exp $	*/
 
 /*
@@ -136,12 +136,6 @@
 #endif
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
-#endif
-
-#ifdef NETATALK
-#include <netinet/if_ether.h>
-#include <netatalk/at.h>
-#include <netatalk/at_var.h>
 #endif
 
 #ifdef MPLS
@@ -297,12 +291,6 @@ looutput(ifp, m, dst, rt)
 		isr = NETISR_IPV6;
 		break;
 #endif /* INET6 */
-#ifdef NETATALK
-	case AF_APPLETALK:
-		ifq = &atintrq2;
-		isr = NETISR_ATALK;
-		break;
-#endif /* NETATALK */
 #ifdef MPLS
 	case AF_MPLS:
 		ifq = &mplsintrq;
@@ -371,12 +359,6 @@ lo_altqstart(ifp)
 			isr = NETISR_MPLS;
 			break;
 #endif
-#ifdef NETATALK
-		case AF_APPLETALK:
-			ifq = &atintrq2;
-			isr = NETISR_ATALK;
-			break;
-#endif /* NETATALK */
 		default:
 			printf("lo_altqstart: can't handle af%d\n", af);
 			m_freem(m);
@@ -423,12 +405,16 @@ loioctl(ifp, cmd, data)
 {
 	struct ifaddr *ifa;
 	struct ifreq *ifr;
-	int error = 0;
+	int s, error = 0;
 
 	switch (cmd) {
 
 	case SIOCSIFADDR:
-		ifp->if_flags |= IFF_UP | IFF_RUNNING;
+		s = splnet();
+		ifp->if_flags |= IFF_RUNNING;
+		if_up(ifp);		/* send up RTM_IFINFO */
+		splx(s);
+
 		ifa = (struct ifaddr *)data;
 		if (ifa != 0)
 			ifa->ifa_rtrequest = lortrequest;

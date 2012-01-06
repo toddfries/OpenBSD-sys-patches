@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC-IP32,v 1.26 2011/05/24 20:27:11 matthew Exp $
+#	$OpenBSD: GENERIC-IP32,v 1.28 2011/12/31 12:39:43 miod Exp $
 #
 # THIS KERNEL IS FOR O2 (IP32) SYSTEMS ONLY.
 #
@@ -64,10 +64,6 @@ isp*		at pci?
 mpi*		at pci?
 siop*		at pci?
 
-scsibus*	at ahc?
-scsibus*	at isp?
-scsibus*	at mpi?
-scsibus*	at siop?
 
 # CardBus bus support
 cbb*		at pci?
@@ -101,7 +97,6 @@ uaudio*		at uhub?	# USB Audio
 audio*		at uaudio?
 ulpt*		at uhub?	# USB Printers	
 umass*		at uhub?	# USB Mass Storage devices
-scsibus*	at umass?
 urio*		at uhub?	# Diamond Multimedia Rio 500
 uscanner*	at uhub? disable# USB Scanners
 uhidev*		at uhub?	# Human Interface Devices
@@ -118,6 +113,7 @@ cue*		at uhub?	# CATC USB-EL1201A based Ethernet
 kue*		at uhub?	# Kawasaki KL5KUSB101B based Ethernet
 mos*		at uhub?	# MOSCHIP MCS7730/7830 10/100 Ethernet
 otus*		at uhub?	# Atheros AR9001U
+rsu*		at uhub?	# RealTek RTL8188SU/RTL8191SU/RTL8192SU
 rum*		at uhub?	# Ralink RT2501USB/RT2601USB
 run*		at uhub?	# Ralink RT2700U/RT2800U/RT3000U
 uath*		at uhub?	# Atheros AR5005UG/AR5005UX
@@ -240,6 +236,7 @@ wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
 
 #### SCSI Bus devices
+scsibus*	at scsi?
 sd*		at scsibus?
 st*		at scsibus?
 cd*		at scsibus?

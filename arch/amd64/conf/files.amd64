@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.62 2011/05/23 09:52:24 claudio Exp $
+#	$OpenBSD: files.amd64,v 1.66 2011/11/15 22:27:52 deraadt Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -18,7 +18,6 @@ file	arch/amd64/amd64/amd64_mem.c		mtrr
 file	arch/amd64/amd64/pmap.c
 file	arch/amd64/amd64/process_machdep.c
 file	arch/amd64/amd64/sys_machdep.c
-file	arch/amd64/amd64/syscall.c
 file	arch/amd64/amd64/trap.c
 file	arch/amd64/amd64/vm_machdep.c
 file	arch/amd64/amd64/fpu.c
@@ -46,8 +45,7 @@ file	arch/amd64/amd64/apic.c			ioapic | lapic
 file	arch/amd64/amd64/consinit.c
 file	dev/cninit.c
 
-file	arch/amd64/amd64/dkcsum.c
-file	lib/libz/adler32.c			!ppp_deflate & !ipsec & !crypto
+file	arch/amd64/amd64/dkcsum.c		bios
 
 file	arch/amd64/amd64/db_disasm.c		ddb
 file	arch/amd64/amd64/db_interface.c		ddb
@@ -115,8 +113,6 @@ include	"dev/pci/files.pci"
 file	arch/amd64/pci/pci_machdep.c		pci
 file	arch/amd64/pci/pciide_machdep.c		pciide
 file	arch/amd64/pci/vga_post.c		vga_pci & x86emu
-
-include	"dev/puc/files.puc"
 
 # PCI Host bridge chipsets
 device	pchb: pcibus, agpbus
@@ -251,7 +247,6 @@ attach	vmt at mainbus
 # device major numbers
 #
 
-major	{ccd = 16}
 major	{vnd = 14}
 major	{sd = 4}
 major	{st = 5}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti_sgc.c,v 1.15 2009/02/06 22:51:03 miod Exp $	*/
+/*	$OpenBSD: sti_sgc.c,v 1.16 2011/08/18 20:02:57 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -43,21 +43,16 @@
 
 #include <dev/ic/stireg.h>
 #include <dev/ic/stivar.h>
+#include <hp300/dev/sti_machdep.h>
 
 #include <uvm/uvm_extern.h>
 
 void	sti_sgc_attach(struct device *, struct device *, void *);
 int	sti_sgc_match(struct device *, void *, void *);
-int	sti_sgc_probe(bus_space_tag_t, int);
 
 struct cfattach sti_sgc_ca = {
 	sizeof(struct sti_softc), sti_sgc_match, sti_sgc_attach
 };
-
-/* Console data */
-struct sti_rom sticn_rom;
-struct sti_screen sticn_scr;
-bus_addr_t sticn_bases[STI_REGION_MAX];
 
 int
 sti_sgc_match(struct device *parent, void *match, void *aux)
@@ -151,52 +146,4 @@ sti_sgc_probe(bus_space_tag_t iot, int slot)
 		return (0);
 
 	return (1);
-}
-
-/*
- * Console code
- */
-
-int	sti_console_scan(int);
-void	sticninit(void);
-
-int
-sti_console_scan(int slot)
-{
-	extern struct hp300_bus_space_tag hp300_mem_tag;
-	bus_space_tag_t iot;
-
-	iot = &hp300_mem_tag;
-	return (sti_sgc_probe(iot, slot));
-}
-
-void
-sticninit()
-{
-	extern struct hp300_bus_space_tag hp300_mem_tag;
-	bus_space_tag_t iot;
-	bus_addr_t base;
-	int i;
-
-	/*
-	 * We are not interested by the *first* console pass.
-	 */
-	if (consolepass == 0)
-		return;
-
-	iot = &hp300_mem_tag;
-	base = (bus_addr_t)sgc_slottopa(CONSCODE_TO_SGC_SLOT(conscode));
-
-	/* sticn_bases[0] will be fixed in sti_cnattach() */
-	for (i = 0; i < STI_REGION_MAX; i++)
-		sticn_bases[i] = base;
-
-	sti_cnattach(&sticn_rom, &sticn_scr, iot, sticn_bases,
-	    STI_CODEBASE_M68K);
-
-	/*
-	 * Since the copyright notice could not be displayed before,
-	 * display it again now.
-	 */
-	printf("%s\n", copyright);
 }

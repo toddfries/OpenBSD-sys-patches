@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.105 2011/01/25 20:03:35 jakemsr Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.107 2011/09/16 17:20:07 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -78,7 +78,7 @@
  *   to send any packets.
  *
  * Note that this device appears to only support loading the station
- * address via autload from the EEPROM (i.e. there's no way to manaully
+ * address via autoload from the EEPROM (i.e. there's no way to manually
  * set it).
  *
  * (Adam Weinberger wanted me to name this driver if_gir.c.)
@@ -884,9 +884,6 @@ axe_activate(struct device *self, int act)
 	DPRINTFN(2,("%s: %s: enter\n", sc->axe_dev.dv_xname, __func__));
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		usbd_deactivate(sc->axe_udev);
 		break;

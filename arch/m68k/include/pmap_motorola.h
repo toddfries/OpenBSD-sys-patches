@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_motorola.h,v 1.24 2011/05/24 15:27:36 ariane Exp $	*/
+/*	$OpenBSD: pmap_motorola.h,v 1.26 2011/11/01 21:20:55 miod Exp $	*/
 
 /* 
  * Copyright (c) 1987 Carnegie-Mellon University
@@ -36,8 +36,8 @@
  *	@(#)pmap.h	8.1 (Berkeley) 6/10/93
  */
 
-#ifndef	_M68K_M68K_M68K_PMAP_MOTOROLA_H_
-#define	_M68K_M68K_M68K_PMAP_MOTOROLA_H_
+#ifndef	_M68K_M68K_PMAP_MOTOROLA_H_
+#define	_M68K_M68K_PMAP_MOTOROLA_H_
 
 #ifdef	_KERNEL
 
@@ -88,29 +88,6 @@ typedef struct pmap	*pmap_t;
 
 /* XXX - struct pv_entry moved to vmparam.h because of include ordering issues */
 
-struct pv_page;
-
-struct pv_page_info {
-	TAILQ_ENTRY(pv_page) pgi_list;
-	struct pv_entry *pgi_freelist;
-	int pgi_nfree;
-};
-
-/*
- * This is basically:
- * ((PAGE_SIZE - sizeof(struct pv_page_info)) / sizeof(struct pv_entry))
- */
-#if PAGE_SHIFT == 13
-#define	NPVPPG	340
-#elif PAGE_SHIFT == 12
-#define	NPVPPG	170
-#endif
-
-struct pv_page {
-	struct pv_page_info pvp_pgi;
-	struct pv_entry pvp_pv[NPVPPG];
-};
-
 extern struct pmap	kernel_pmap_store;
 
 #define pmap_kernel()	(&kernel_pmap_store)
@@ -138,17 +115,6 @@ void	pmap_kenter_cache(vaddr_t, paddr_t, pt_entry_t);
 
 #define PMAP_GROWKERNEL			/* turn on pmap_growkernel interface */
 
-#ifdef M68K_MMU_HP
-vaddr_t	pmap_prefer(vaddr_t, vaddr_t);
-#define	PMAP_PREFER(foff, va)	pmap_prefer((foff), (va))
-
-extern int	pmap_aliasmask;	/* separation at which VA aliasing is ok */
-/* pmap prefer alignment */
-#define PMAP_PREFER_ALIGN()	(pmap_aliasmask ? pmap_aliasmask + 1 : 0)
-/* pmap prefer offset */
-#define PMAP_PREFER_OFFSET(of)	((of) & pmap_aliasmask)
-#endif
-
 #endif	/* _KERNEL */
 
-#endif /* !_M68K_M68K_M68K_PMAP_MOTOROLA_H_ */
+#endif /* !_M68K_M68K_PMAP_MOTOROLA_H_ */

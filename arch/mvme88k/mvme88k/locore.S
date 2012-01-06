@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.67 2010/12/23 20:05:08 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.69 2011/11/19 20:40:10 miod Exp $	*/
 /*
  * Copyright (c) 2005, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -115,7 +115,6 @@ ASGLOBAL(start)
 	NOP
 #endif
 
-
 	/*
 	 * Startup code for main processor.
 	 */
@@ -157,17 +156,17 @@ ASLOCAL(main_start)
 	bsr.n	_ASM_LABEL(setup_psr)
 	 st	r8,  r13, lo16(_C_LABEL(cputyp))
 
-#ifdef MULTIPROCESSOR
 	/*
 	 * Have curcpu() point at the dummy cpuinfo structure,
-	 * so that cpu_number() does not dereference random memory.
-	 * This is necessary for early spl usage, despite the fact that
-	 * interrupts are disabled...
+	 * and initialize cr17.
+	 * This is necessary for early spl*() usage, as well as
+	 * mutex diagnostic code.
 	 */
 	or.u	r11, r0,  hi16(_ASM_LABEL(dummy_cpu))
 	or	r11, r11, lo16(_ASM_LABEL(dummy_cpu))
 	stcr	r11, CPU
 
+#ifdef MULTIPROCESSOR
 	/*
 	 * MVME BUG idles all secondary MPUs upon startup, so at this point
 	 * we do not have to compete with them.
@@ -230,19 +229,20 @@ GLOBAL(secondary_start)
 	bsr.n	_ASM_LABEL(setup_psr)
 	 or	r31, r31, lo16(_ASM_LABEL(slavestack_end))
 
-	/*
-	 * We expect secondary processors to start running with the same 
-	 * VBR value as the primary one.
-	 */
+	or.u	r3,  r0,  hi16(_C_LABEL(kernel_vbr))
+	ld	r2,  r3,  lo16(_C_LABEL(kernel_vbr))
+	stcr	r2,  VBR
+	FLUSH_PIPELINE
 
 	/*
 	 * Have curcpu() point at the dummy cpuinfo structure,
-	 * so that cpu_number() does not dereference random memory.
-	 * This is necessary for early spl usage, despite the fact that
-	 * interrupts are disabled...
+	 * and initialize cr17.
+	 * This is necessary for early spl*() usage, as well as
+	 * mutex diagnostic code.
 	 */
 	or.u	r11, r0,  hi16(_ASM_LABEL(dummy_cpu))
 	or	r11, r11, lo16(_ASM_LABEL(dummy_cpu))
+	st	r0,  r11, CI_FLAGS		/* reset CIF_PRIMARY */
 	stcr	r11, CPU
 
 	/*
@@ -382,7 +382,6 @@ ASLOCAL(u0)
 GLOBAL(proc0paddr)
 	word	_ASM_LABEL(u0)	/*  KVA of proc0 uarea */
 
-#ifdef MULTIPROCESSOR
 /* Dummy cpuinfo structure, for cpu_number() to work early. */
 ASLOCAL(dummy_cpu)
 	word	3 /* CIF_ALIVE | CIF_PRIMARY */	/* ci_flags */
@@ -390,11 +389,14 @@ ASLOCAL(dummy_cpu)
 	word	0				/* ci_curpcb */
 	word	0				/* ci_curpmap */
 	word	0				/* ci_cpuid */
+#ifdef MULTIPROCESSOR
 	word	_ASM_LABEL(dummy_mplock)	/* ci_mp_atomic_begin */
 	word	_ASM_LABEL(dummy_mplock)	/* ci_mp_atomic_end */
-
-	space	CPU_INFO_SIZEOF - 7 * 4
+#else
+	word	0
+	word	0
 #endif	/* MULTIPROCESSOR */
+	space	CPU_INFO_SIZEOF - 7 * 4
 
 #if defined(DDB) || NKSYMS > 0
 GLOBAL(esym)

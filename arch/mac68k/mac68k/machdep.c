@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.156 2010/11/20 20:29:09 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.159 2011/06/26 22:39:59 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.207 1998/07/08 04:39:34 thorpej Exp $	*/
 
 /*
@@ -109,6 +109,7 @@
 #include <machine/bus.h>
 #include <machine/pmap.h>
 
+#include <net/if.h>
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_swap.h>
 
@@ -168,20 +169,6 @@ caddr_t	mac68k_bell_cookie;
 
 struct vm_map *exec_map = NULL;  
 struct vm_map *phys_map = NULL;
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
 
 int	physmem;		/* size of physical memory, in pages */
 
@@ -245,12 +232,10 @@ mac68k_init()
 	for (i = 0; i < numranges; i++) {
 		if (low[i] <= avail_start && avail_start < high[i])
 			uvm_page_physload(atop(avail_start), atop(high[i]),
-			    atop(avail_start), atop(high[i]),
-			    VM_FREELIST_DEFAULT);
+			    atop(avail_start), atop(high[i]), 0);
 		else
 			uvm_page_physload(atop(low[i]), atop(high[i]),
-			    atop(low[i]), atop(high[i]),
-			    VM_FREELIST_DEFAULT);
+			    atop(low[i]), atop(high[i]), 0);
 	}
 
 	/*
@@ -518,6 +503,7 @@ boot(howto)
 #endif
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();			/* Disable interrupts. */

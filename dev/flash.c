@@ -1,4 +1,4 @@
-/*	$OpenBSD: flash.c,v 1.20 2010/09/24 18:27:43 jasper Exp $	*/
+/*	$OpenBSD: flash.c,v 1.24 2011/07/06 04:49:36 matthew Exp $	*/
 
 /*
  * Copyright (c) 2005 Uwe Stuehler <uwe@openbsd.org>
@@ -54,8 +54,6 @@ int	 flash_wait_complete(struct flash_softc *);
 cdev_decl(flash);
 bdev_decl(flash);
 
-#define flashlock(sc) disk_lock(&(sc)->sc_dk)
-#define flashunlock(sc) disk_unlock(&(sc)->sc_dk)
 #define flashlookup(unit) \
 	(struct flash_softc *)device_lookup(&flash_cd, (unit))
 
@@ -678,7 +676,7 @@ flashopen(dev_t dev, int oflags, int devtype, struct proc *p)
 	if (sc == NULL)
 		return ENXIO;
 
-	if ((error = flashlock(sc)) != 0) {
+	if ((error = disk_lock(&sc->sc_dk)) != 0) {
 		device_unref(&sc->sc_dev);
 		return error;
 	}
@@ -698,14 +696,14 @@ flashopen(dev_t dev, int oflags, int devtype, struct proc *p)
 				sc->sc_flags |= FDK_SAFE;
 			if ((error = flashgetdisklabel(dev, sc, 
 			    sc->sc_dk.dk_label, 0)) != 0) {
-				flashunlock(sc);
+				disk_unlock(&sc->sc_dk);
 				device_unref(&sc->sc_dev);
 				return error;
 			}
 		}
 	} else if (((sc->sc_flags & FDK_SAFE) == 0) !=
 	    (flashsafe(dev) == 0)) {
-		flashunlock(sc);
+		disk_unlock(&sc->sc_dk);
 		device_unref(&sc->sc_dev);
 		return EBUSY;
 	}
@@ -715,7 +713,7 @@ flashopen(dev_t dev, int oflags, int devtype, struct proc *p)
 	if (part != RAW_PART &&
 	    (part >= sc->sc_dk.dk_label->d_npartitions ||
 	    sc->sc_dk.dk_label->d_partitions[part].p_fstype == FS_UNUSED)) {
-		flashunlock(sc);
+		disk_unlock(&sc->sc_dk);
 		device_unref(&sc->sc_dev);
 		return ENXIO;
 	}
@@ -732,7 +730,7 @@ flashopen(dev_t dev, int oflags, int devtype, struct proc *p)
 	sc->sc_dk.dk_openmask =
 	    sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
 
-	flashunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	device_unref(&sc->sc_dev);
 	return 0;
 }
@@ -741,17 +739,13 @@ int
 flashclose(dev_t dev, int fflag, int devtype, struct proc *p)
 {
 	struct flash_softc *sc;
-	int error;
 	int part;
 
 	sc = flashlookup(flashunit(dev));
 	if (sc == NULL)
 		return ENXIO;
 
-	if ((error = flashlock(sc)) != 0) {
-		device_unref(&sc->sc_dev);
-		return error;
-	}
+	disk_lock_nointr(&sc->sc_dk);
 
 	/* Close one open partition. */
 	part = flashpart(dev);
@@ -770,7 +764,7 @@ flashclose(dev_t dev, int fflag, int devtype, struct proc *p)
 		/* XXX wait for I/O to complete? */
 	}
 
-	flashunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	device_unref(&sc->sc_dev);
 	return 0;
 }
@@ -790,12 +784,6 @@ flashstrategy(struct buf *bp)
 		goto bad;
 	}
 
-	/* Transfer only a multiple of the flash page size. */
-	if ((bp->b_bcount % sc->sc_flashdev->pagesize) != 0) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
-
 	/* If the device has been invalidated, error out. */
 	if ((sc->sc_flags & FDK_LOADED) == 0) {
 		bp->b_error = EIO;
@@ -803,15 +791,14 @@ flashstrategy(struct buf *bp)
 	}
 
 	/* Translate logical block numbers to physical. */
-	if (flashsafe(bp->b_dev) && flashsafestrategy(sc, bp) <= 0)
+	if (flashsafe(bp->b_dev) && flashsafestrategy(sc, bp) <= 0) {
+		if (bp->b_flags & B_ERROR)
+			bp->b_resid = bp->b_bcount;
 		goto done;
+	}
 
-	/* Return immediately if it is a null transfer. */
-	if (bp->b_bcount == 0)
-		goto done;
-
-	/* Do bounds checking on partitions. */
-	if (bounds_check_with_label(bp, sc->sc_dk.dk_label, 0) <= 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) == -1)
 		goto done;
 
 	/* Queue the transfer. */
@@ -822,11 +809,10 @@ flashstrategy(struct buf *bp)
 	device_unref(&sc->sc_dev);
 	return;
 
-bad:
+ bad:
 	bp->b_flags |= B_ERROR;
-done:
-	if ((bp->b_flags & B_ERROR) != 0)
-		bp->b_resid = bp->b_bcount;
+	bp->b_resid = bp->b_bcount;
+ done:
 	s = splbio();
 	biodone(bp);
 	splx(s);

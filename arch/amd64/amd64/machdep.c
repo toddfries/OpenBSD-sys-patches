@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.141 2011/04/26 17:33:17 jsing Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.149 2011/07/10 18:11:49 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -94,6 +94,7 @@
 #include <dev/cons.h>
 #include <stand/boot/bootarg.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <sys/sysctl.h>
@@ -164,6 +165,11 @@ u_int64_t	dumpmem_high;
 extern int	boothowto;
 int	cpu_class;
 
+paddr_t	dumpmem_paddr;
+vaddr_t	dumpmem_vaddr;
+psize_t	dumpmem_sz;
+
+
 char	*ssym = NULL;
 vaddr_t kern_end;
 
@@ -194,17 +200,6 @@ extern struct vm_map *lkm_map;
 
 struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
-
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 10
-#endif
-
-#ifdef BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
 
 /* UVM constraint ranges. */
 struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
@@ -553,15 +548,15 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 #endif
 
 	bcopy(tf, &ksc, sizeof(*tf));
-	ksc.sc_onstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	ksc.sc_onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 	ksc.sc_mask = mask;
 	ksc.sc_fpstate = NULL;
 
 	/* Allocate space for the signal handler context. */
-	if ((psp->ps_flags & SAS_ALTSTACK) && !ksc.sc_onstack &&
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !ksc.sc_onstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		sp = (register_t)psp->ps_sigstk.ss_sp + psp->ps_sigstk.ss_size;
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		sp = (register_t)p->p_sigstk.ss_sp + p->p_sigstk.ss_size;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		sp = tf->tf_rsp - 128;
 
@@ -670,10 +665,20 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 
 	/* Restore signal stack. */
 	if (ksc.sc_onstack)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = ksc.sc_mask & ~sigcantmask;
+
+	/*
+	 * sigreturn() needs to return to userspace via the 'iretq'
+	 * method, so that if the process was interrupted (by tick,
+	 * an IPI, whatever) as opposed to already being in the kernel
+	 * when a signal was being delivered, the process will be
+	 * completely restored, including the userland %rcx and %r11
+	 * registers which the 'sysretq' instruction cannot restore.
+	 */
+	p->p_md.md_flags |= MDP_IRET;
 
 	return (EJUSTRETURN);
 }
@@ -734,6 +739,7 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	delay(4*1000000);	/* XXX */
 
@@ -778,10 +784,6 @@ haltsys:
 }
 
 /*
- * XXXfvdl share dumpcode.
- */
-
-/*
  * These variables are needed by /sbin/savecore
  */
 u_long	dumpmag = 0x8fca0101;	/* magic number */
@@ -799,6 +801,7 @@ cpu_dump(void)
 	kcore_seg_t *segp;
 	cpu_kcore_hdr_t *cpuhdrp;
 	phys_ram_seg_t *memsegp;
+	caddr_t va;
 	int i;
 
 	dump = bdevsw[major(dumpdev)].d_dump;
@@ -829,7 +832,17 @@ cpu_dump(void)
 		memsegp[i].size = mem_clusters[i].size & ~PAGE_MASK;
 	}
 
-	return (dump(dumpdev, dumplo, (caddr_t)buf, dbtob(1)));
+	/*
+	 * If we have dump memory then assume the kernel stack is in high
+	 * memory and bounce
+	 */
+	if (dumpmem_vaddr != 0) {
+		bcopy(buf, (char *)dumpmem_vaddr, sizeof(buf));
+		va = (caddr_t)dumpmem_vaddr;
+	} else {
+		va = (caddr_t)buf;
+	}
+	return (dump(dumpdev, dumplo, va, dbtob(1)));
 }
 
 /*
@@ -879,6 +892,7 @@ dumpsys(void)
 	u_long totalbytesleft, bytes, i, n, memseg;
 	u_long maddr;
 	daddr64_t blkno;
+	void *va;
 	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
 	int error;
 
@@ -934,9 +948,16 @@ dumpsys(void)
 			n = bytes - i;
 			if (n > BYTES_PER_DUMP)
 				n = BYTES_PER_DUMP;
+			if (maddr > 0xffffffff) {
+				va = (void *)dumpmem_vaddr;
+				if (n > dumpmem_sz)
+					n = dumpmem_sz;
+				bcopy((void *)PMAP_DIRECT_MAP(maddr), va, n);
+			} else {
+				va = (void *)PMAP_DIRECT_MAP(maddr);
+			}
 
-			error = (*dump)(dumpdev, blkno,
-			    (caddr_t)PMAP_DIRECT_MAP(maddr), n);
+			error = (*dump)(dumpdev, blkno, va, n);
 			if (error)
 				goto err;
 			maddr += n;
@@ -1355,12 +1376,11 @@ init_x86_64(paddr_t first_avail)
 
 	/*
 	 * Now, load the memory clusters (which have already been
-	 * fleensed) into the VM system.
+	 * flensed) into the VM system.
 	 */
 	for (x = 0; x < mem_cluster_cnt; x++) {
 		paddr_t seg_start = mem_clusters[x].start;
 		paddr_t seg_end = seg_start + mem_clusters[x].size;
-		int seg_type;
 
 		if (seg_start < first_avail) seg_start = first_avail;
 		if (seg_start > seg_end) continue;
@@ -1368,20 +1388,12 @@ init_x86_64(paddr_t first_avail)
 
 		physmem += atop(mem_clusters[x].size);
 
-		/* XXX - Should deal with 4GB boundary */
-		if (seg_start >= (1UL<<32))
-			seg_type = VM_FREELIST_HIGH;
-		else if (seg_end <= 16*1024*1024)
-			seg_type = VM_FREELIST_LOW;
-		else
-			seg_type = VM_FREELIST_DEFAULT;
-
 #if DEBUG_MEMLOAD
 		printf("loading 0x%lx-0x%lx (0x%lx-0x%lx)\n",
 		    seg_start, seg_end, atop(seg_start), atop(seg_end));
 #endif
 		uvm_page_physload(atop(seg_start), atop(seg_end),
-		    atop(seg_start), atop(seg_end), seg_type);
+		    atop(seg_start), atop(seg_end), 0);
 	}
 #if DEBUG_MEMLOAD
 	printf("avail_start = 0x%lx\n", avail_start);
@@ -1432,8 +1444,41 @@ init_x86_64(paddr_t first_avail)
 	}
 
 	/*
-	 * XXXfvdl todo: acpi wakeup code.
+	 * Steal some memory for a dump bouncebuffer if we have memory over
+	 * the 32-bit barrier.
 	 */
+	if (avail_end > 0xffffffff) {
+		struct vm_physseg *vps = NULL;
+		psize_t sz = round_page(MAX(BYTES_PER_DUMP, dbtob(1)));
+
+		/* XXX assumes segments are ordered */
+		for (x = 0; x < vm_nphysseg; x++) {
+			vps = &vm_physmem[x];
+			/* Find something between 16meg and 4gig */
+			if (ptoa(vps->avail_end) <= 0xffffffff &&
+			    ptoa(vps->avail_start) >= 0xffffff)
+				break;
+		}
+		if (x == vm_nphysseg)
+			panic("init_x86_64: no memory between "
+			    "0xffffff-0xffffffff");
+
+		/* Shrink so it'll fit in the segment. */
+		if ((vps->avail_end - vps->avail_start) < atop(sz))
+			sz = ptoa(vps->avail_end - vps->avail_start);
+
+		vps->avail_end -= atop(sz);
+		vps->end -= atop(sz);
+		dumpmem_paddr = ptoa(vps->avail_end);
+		dumpmem_vaddr = PMAP_DIRECT_MAP(dumpmem_paddr);
+		dumpmem_sz = sz;
+
+		/* Remove the last segment if it now has no pages. */
+		if (vps->start == vps->end) {
+			for (vm_nphysseg--; x < vm_nphysseg; x++)
+				vm_physmem[x] = vm_physmem[x + 1];
+		}
+	}
 
 	pmap_growkernel(VM_MIN_KERNEL_ADDRESS + 32 * 1024 * 1024);
 
@@ -1509,7 +1554,6 @@ init_x86_64(paddr_t first_avail)
 		kgdb_connect(1);
 	}
 #endif
-
 }
 
 #ifdef KGDB

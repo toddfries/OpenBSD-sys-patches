@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.129 2011/04/07 19:07:42 beck Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.134 2011/09/19 14:48:04 beck Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -56,10 +56,9 @@
 #include <sys/resourcevar.h>
 #include <sys/conf.h>
 #include <sys/kernel.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
-
-#include <miscfs/specfs/specdev.h>
 
 /*
  * Definitions for the buffer free lists.
@@ -114,9 +113,6 @@ long buflowpages;	/* bufpages low water mark */
 long bufhighpages; 	/* bufpages high water mark */
 long bufbackpages; 	/* number of pages we back off when asked to shrink */
 
-/* XXX - should be defined here. */
-extern int bufcachepercent;
-
 vsize_t bufkvm;
 
 struct proc *cleanerproc;
@@ -147,9 +143,9 @@ bremfree(struct buf *bp)
 		bcstats.numcleanpages -= atop(bp->b_bufsize);
 	} else {
 		bcstats.numdirtypages -= atop(bp->b_bufsize);
+		bcstats.delwribufs--;
 	}
 	TAILQ_REMOVE(dp, bp, b_freelist);
-	bcstats.freebufs--;
 }
 
 void
@@ -193,9 +189,6 @@ bufinit(void)
 {
 	u_int64_t dmapages;
 	struct bqueues *dp;
-
-	/* XXX - for now */
-	bufhighpages = buflowpages = bufpages = bufcachepercent = bufkvm = 0;
 
 	dmapages = uvm_pagecount(&dma_constraint);
 
@@ -334,7 +327,7 @@ bufadjust(int newbufpages)
  * Make the buffer cache back off from cachepct.
  */
 int
-bufbackoff()
+bufbackoff(struct uvm_constraint_range *range, long size)
 {
 	/*
 	 * Back off the amount of buffer cache pages. Called by the page
@@ -409,8 +402,7 @@ bio_doread(struct vnode *vp, daddr64_t blkno, int size, int async)
  * This algorithm described in Bach (p.54).
  */
 int
-bread(struct vnode *vp, daddr64_t blkno, int size, struct ucred *cred,
-    struct buf **bpp)
+bread(struct vnode *vp, daddr64_t blkno, int size, struct buf **bpp)
 {
 	struct buf *bp;
 
@@ -427,7 +419,7 @@ bread(struct vnode *vp, daddr64_t blkno, int size, struct ucred *cred,
  */
 int
 breadn(struct vnode *vp, daddr64_t blkno, int size, daddr64_t rablks[],
-    int rasizes[], int nrablks, struct ucred *cred, struct buf **bpp)
+    int rasizes[], int nrablks, struct buf **bpp)
 {
 	struct buf *bp;
 	int i;
@@ -826,6 +818,7 @@ brelse(struct buf *bp)
 			bufq = &bufqueues[BQ_CLEAN];
 		} else {
 			bcstats.numdirtypages += atop(bp->b_bufsize);
+			bcstats.delwribufs++;
 			bufq = &bufqueues[BQ_DIRTY];
 		}
 		if (ISSET(bp->b_flags, B_AGE)) {
@@ -838,7 +831,6 @@ brelse(struct buf *bp)
 	}
 
 	/* Unlock the buffer. */
-	bcstats.freebufs++;
 	CLR(bp->b_flags, (B_AGE | B_ASYNC | B_NOCACHE | B_DEFERRED));
 	buf_release(bp);
 
@@ -1126,8 +1118,8 @@ buf_daemon(struct proc *p)
 				SET(bp->b_flags, B_DEFERRED);
 				s = splbio();
 				bcstats.numdirtypages += atop(bp->b_bufsize);
+				bcstats.delwribufs++;
 				binstailfree(bp, &bufqueues[BQ_DIRTY]);
-				bcstats.freebufs++;
 				buf_release(bp);
 				continue;
 			}
@@ -1239,10 +1231,12 @@ void
 bcstats_print(int (*pr)(const char *, ...))
 {
 	(*pr)("Current Buffer Cache status:\n");
-	(*pr)("numbufs %lld, freebufs %lld\n",
-	    bcstats.numbufs, bcstats.freebufs);
-    	(*pr)("bufpages %lld, freepages %lld, dirtypages %lld\n",
-	    bcstats.numbufpages, bcstats.numfreepages, bcstats.numdirtypages);
+	(*pr)("numbufs %lld busymapped %lld, delwri %lld\n",
+	    bcstats.numbufs, bcstats.busymapped, bcstats.delwribufs);
+	(*pr)("kvaslots %lld avail kva slots %lld\n",
+	    bcstats.kvaslots, bcstats.kvaslots_avail);
+    	(*pr)("bufpages %lld, dirtypages %lld\n",
+	    bcstats.numbufpages,  bcstats.numdirtypages);
 	(*pr)("pendingreads %lld, pendingwrites %lld\n",
 	    bcstats.pendingreads, bcstats.pendingwrites);
 }

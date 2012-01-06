@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.195 2011/04/24 20:31:26 jakemsr Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.199 2011/09/19 07:36:59 kettenis Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -355,6 +355,9 @@ static const char *line_colors[16] = {
 #define NVIDIA_HDA_ISTR_COH_REG		0x4d
 #define NVIDIA_HDA_OSTR_COH_REG		0x4c
 #define NVIDIA_HDA_STR_COH_ENABLE	0x01
+#define INTEL_PCIE_NOSNOOP_REG		0x79
+#define INTEL_PCIE_NOSNOOP_MASK		0xf7
+#define INTEL_PCIE_NOSNOOP_ENABLE	0x08
 
 uint8_t
 azalia_pci_read(pci_chipset_tag_t pc, pcitag_t pa, int reg)
@@ -389,13 +392,6 @@ azalia_configure_pci(azalia_t *az)
 	v = pci_conf_read(az->pc, az->tag, ICH_PCI_HDTCSEL);
 	pci_conf_write(az->pc, az->tag, ICH_PCI_HDTCSEL,
 	    v & ~(ICH_PCI_HDTCSEL_MASK));
-
-	/* disable MSI, use INTx instead */
-	if (PCI_VENDOR(az->pciid) == PCI_VENDOR_INTEL) {
-		reg = azalia_pci_read(az->pc, az->tag, ICH_PCI_MMC);
-		reg &= ~(ICH_PCI_MMC_ME);
-		azalia_pci_write(az->pc, az->tag, ICH_PCI_MMC, reg);
-	}
 
 	/* enable PCIe snoop */
 	switch (PCI_PRODUCT(az->pciid)) {
@@ -453,7 +449,22 @@ azalia_configure_pci(azalia_t *az)
 		    NVIDIA_PCIE_SNOOP_ENABLE) {
 			printf(": could not enable PCIe cache snooping!\n");
 		}
-
+		break;
+	case PCI_PRODUCT_INTEL_82801FB_HDA:
+	case PCI_PRODUCT_INTEL_82801GB_HDA:
+	case PCI_PRODUCT_INTEL_82801H_HDA:
+	case PCI_PRODUCT_INTEL_82801I_HDA:
+	case PCI_PRODUCT_INTEL_82801JI_HDA:
+	case PCI_PRODUCT_INTEL_82801JD_HDA:
+	case PCI_PRODUCT_INTEL_6321ESB_HDA:
+	case PCI_PRODUCT_INTEL_3400_HDA:
+	case PCI_PRODUCT_INTEL_QS57_HDA:
+	case PCI_PRODUCT_INTEL_6SERIES_HDA:
+		reg = azalia_pci_read(az->pc, az->tag,
+		    INTEL_PCIE_NOSNOOP_REG);
+		reg &= INTEL_PCIE_NOSNOOP_MASK;
+		azalia_pci_write(az->pc, az->tag,
+		    INTEL_PCIE_NOSNOOP_REG, reg);
 		break;
 	}
 }
@@ -476,6 +487,7 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	azalia_t *sc;
 	struct pci_attach_args *pa;
 	pcireg_t v;
+	uint8_t reg;
 	pci_intr_handle_t ih;
 	const char *interrupt_str;
 
@@ -499,8 +511,15 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	azalia_configure_pci(sc);
 
+	/* disable MSI, use INTx instead */
+	if (PCI_VENDOR(sc->pciid) == PCI_VENDOR_INTEL) {
+		reg = azalia_pci_read(sc->pc, sc->tag, ICH_PCI_MMC);
+		reg &= ~(ICH_PCI_MMC_ME);
+		azalia_pci_write(sc->pc, sc->tag, ICH_PCI_MMC, reg);
+	}
+
 	/* interrupt */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) && pci_intr_map(pa, &ih)) {
 		printf(": can't map interrupt\n");
 		return;
 	}
@@ -543,8 +562,6 @@ azalia_pci_activate(struct device *self, int act)
 	int rv = 0; 
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
 	case DVACT_QUIESCE:
 		rv = config_activate_children(self, act);
 		break;

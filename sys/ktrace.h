@@ -1,4 +1,4 @@
-/*	$OpenBSD: ktrace.h,v 1.9 2006/05/17 02:11:25 tedu Exp $	*/
+/*	$OpenBSD: ktrace.h,v 1.12 2011/12/14 07:32:16 guenther Exp $	*/
 /*	$NetBSD: ktrace.h,v 1.12 1996/02/04 02:12:29 christos Exp $	*/
 
 /*
@@ -60,7 +60,7 @@ struct ktr_header {
  * Test for kernel trace point
  */
 #define KTRPOINT(p, type)	\
-	(((p)->p_traceflag & ((1<<(type))|KTRFAC_ACTIVE)) == (1<<(type)))
+	((p)->p_p->ps_traceflag & (1<<(type)) && ((p)->p_flag & P_INKTR) == 0)
 
 /*
  * ktrace record types
@@ -86,7 +86,7 @@ struct ktr_sysret {
 	short	ktr_code;
 	short	ktr_eosys;
 	int	ktr_error;
-	int	ktr_retval;
+	register_t ktr_retval;
 };
 
 /*
@@ -134,6 +134,16 @@ struct ktr_csw {
 #define KTR_EMUL	7
 	/* record contains emulation name */
 
+/*
+ * KTR_STRUCT - misc. structs
+ */
+#define KTR_STRUCT	8
+	/*
+	 * record contains null-terminated struct name followed by
+	 * struct contents
+	 */
+struct sockaddr;
+struct stat;
 
 /*
  * kernel trace points (in p_traceflag)
@@ -146,12 +156,13 @@ struct ktr_csw {
 #define	KTRFAC_PSIG	(1<<KTR_PSIG)
 #define KTRFAC_CSW	(1<<KTR_CSW)
 #define KTRFAC_EMUL	(1<<KTR_EMUL)
+#define KTRFAC_STRUCT   (1<<KTR_STRUCT)
+
 /*
  * trace flags (also in p_traceflags)
  */
 #define KTRFAC_ROOT	0x80000000	/* root set this trace */
 #define KTRFAC_INHERIT	0x40000000	/* pass trace flags to children */
-#define KTRFAC_ACTIVE	0x20000000	/* ktrace logging in progress, ignore */
 
 #ifndef	_KERNEL
 
@@ -171,6 +182,14 @@ void ktrpsig(struct proc *, int, sig_t, int, int, siginfo_t *);
 void ktrsyscall(struct proc *, register_t, size_t, register_t []);
 void ktrsysret(struct proc *, register_t, int, register_t);
 
-void ktrsettracevnode(struct proc *, struct vnode *);
+void ktrcleartrace(struct process *);
+void ktrsettrace(struct process *, int, struct vnode *, struct ucred *);
+
+void    ktrstruct(struct proc *, const char *, const void *, size_t);
+#define ktrsockaddr(p, s, l) \
+	ktrstruct((p), "sockaddr", (s), (l))
+#define ktrstat(p, s) \
+	ktrstruct((p), "stat", (s), sizeof(struct stat))
+
 
 #endif	/* !_KERNEL */

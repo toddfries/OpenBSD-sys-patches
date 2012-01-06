@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.25 2011/04/21 12:42:59 jsing Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.27 2011/08/16 17:36:37 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -134,9 +134,9 @@ extern int cpu_hvers;
  * Exported definitions unique to hp700/PA-RISC cpu support.
  */
 
-#define	HPPA_PGALIAS	0x0000000000100000UL
-#define	HPPA_PGAMASK	0xfffffffffff00000UL
-#define	HPPA_PGAOFF	0x00000000000fffffUL
+#define	HPPA_PGALIAS	0x0000000000400000UL
+#define	HPPA_PGAMASK	0xffffffffffc00000UL
+#define	HPPA_PGAOFF	0x00000000003fffffUL
 
 #define	HPPA_PHYSMAP	0x000001ffffffffffUL
 #define	HPPA_IOBEGIN	0xfffffff000000000UL
@@ -234,6 +234,8 @@ void ficacheall(void);
 void fdcacheall(void);
 void pitlb(pa_space_t sp, vaddr_t va);
 void pdtlb(pa_space_t sp, vaddr_t va);
+void pitlbe(pa_space_t sp, vaddr_t va);
+void pdtlbe(pa_space_t sp, vaddr_t va);
 void ptlball(void);
 void mtctl(register_t val, int reg);
 register_t mfctl(int reg);

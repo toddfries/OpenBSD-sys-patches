@@ -1,4 +1,4 @@
-/*	$OpenBSD: com_puc.c,v 1.18 2010/08/06 21:07:27 kettenis Exp $	*/
+/*	$OpenBSD: com_puc.c,v 1.20 2011/11/15 22:27:53 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997 - 1999, Jason Downs.  All rights reserved.
@@ -71,7 +71,7 @@ com_puc_match(parent, match, aux)
 {
 	struct puc_attach_args *pa = aux;
 
-	if (pa->type == PUC_PORT_TYPE_COM)
+	if (PUC_IS_COM(pa->type))
 		return(1);
 
 	return(0);
@@ -102,15 +102,10 @@ com_puc_attach(parent, self, aux)
 	sc->sc_iot = pa->t;
 	sc->sc_ioh = pa->h;
 	sc->sc_iobase = pa->a;
-	sc->sc_frequency = COM_FREQ;
-
-	if (pa->flags)
-		sc->sc_frequency = pa->flags & PUC_COM_CLOCKMASK;
-	if (pa->hwtype)
-		sc->sc_uarttype = pa->hwtype;
-
-	sc->sc_hwflags = 0;
-	sc->sc_swflags = 0;
+	if (PUC_IS_COM_MUL(pa->type))
+		sc->sc_frequency = COM_FREQ * PUC_COM_GET_MUL(pa->type);
+	else
+		sc->sc_frequency = COM_FREQ * (1 << PUC_COM_GET_POW2(pa->type));
 
 	com_attach_subr(sc);
 }

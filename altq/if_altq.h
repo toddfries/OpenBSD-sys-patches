@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_altq.h,v 1.12 2009/05/31 19:15:59 claudio Exp $	*/
+/*	$OpenBSD: if_altq.h,v 1.15 2011/10/07 17:10:08 henning Exp $	*/
 /*	$KAME: if_altq.h,v 1.6 2001/01/29 19:59:09 itojun Exp $	*/
 
 /*
@@ -29,15 +29,19 @@
 #ifndef _ALTQ_IF_ALTQ_H_
 #define	_ALTQ_IF_ALTQ_H_
 
-struct altq_pktattr; struct tb_regulator; struct top_cdnr;
+struct altq_pktattr; struct tb_regulator;
+
+#define ALTQ_IFQ_NQUEUES	8
 
 /*
  * Structure defining a queue for a network interface.
  */
 struct	ifaltq {
 	/* fields compatible with struct ifqueue */
-	struct	mbuf *ifq_head;
-	struct	mbuf *ifq_tail;
+	struct {
+		struct	mbuf *head;
+		struct	mbuf *tail;
+	}	ifq_q[ALTQ_IFQ_NQUEUES];
 	int	ifq_len;
 	int	ifq_maxlen;
 	int	ifq_drops;
@@ -59,12 +63,8 @@ struct	ifaltq {
 	void	*(*altq_classify)(void *, struct mbuf *, int);
 
 	/* token bucket regulator */
-	struct	tb_regulator *altq_tbr;
-
-	/* input traffic conditioner (doesn't belong to the output queue...) */
-	struct top_cdnr *altq_cdnr;
+	struct	oldtb_regulator *altq_tbr;
 };
-
 
 #ifdef _KERNEL
 
@@ -94,7 +94,7 @@ struct altq_pktattr {
  * a token-bucket is used to control the burst size in a device
  * independent manner.
  */
-struct tb_regulator {
+struct oldtb_regulator {
 	int64_t		tbr_rate;	/* (scaled) token bucket rate */
 	int64_t		tbr_depth;	/* (scaled) token bucket depth */
 
@@ -141,7 +141,8 @@ struct tb_regulator {
 #define	ALTQ_PURGE(ifq)							\
 	(void)(*(ifq)->altq_request)((ifq), ALTRQ_PURGE, (void *)0)
 #define	ALTQ_IS_EMPTY(ifq)		((ifq)->ifq_len == 0)
-#define	TBR_IS_ENABLED(ifq)		((ifq)->altq_tbr != NULL)
+#define	OLDTBR_IS_ENABLED(ifq)		((ifq)->altq_tbr != NULL)
+#define	TBR_IS_ENABLED(ifq)		OLDTBR_IS_ENABLED(ifq)
 
 extern int altq_attach(struct ifaltq *, int, void *,
 			    int (*)(struct ifaltq *, struct mbuf *,
@@ -153,7 +154,7 @@ extern int altq_attach(struct ifaltq *, int, void *,
 extern int altq_detach(struct ifaltq *);
 extern int altq_enable(struct ifaltq *);
 extern int altq_disable(struct ifaltq *);
-extern struct mbuf *tbr_dequeue(struct ifaltq *, int);
+extern struct mbuf *oldtbr_dequeue(struct ifaltq *, int);
 extern int (*altq_input)(struct mbuf *, int);
 
 #endif /* _KERNEL */

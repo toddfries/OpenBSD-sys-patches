@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahc_pci.c,v 1.53 2008/05/13 02:24:08 brad Exp $	*/
+/*	$OpenBSD: ahc_pci.c,v 1.55 2011/07/17 22:46:48 matthew Exp $	*/
 /*	$NetBSD: ahc_pci.c,v 1.43 2003/08/18 09:16:22 taca Exp $	*/
 
 /*
@@ -42,7 +42,7 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $Id: ahc_pci.c,v 1.53 2008/05/13 02:24:08 brad Exp $
+ * $Id: ahc_pci.c,v 1.55 2011/07/17 22:46:48 matthew Exp $
  *
  * //depot/aic7xxx/aic7xxx/aic7xxx_pci.c#57 $
  *

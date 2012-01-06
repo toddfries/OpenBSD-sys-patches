@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.32 2009/03/20 18:39:30 miod Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.35 2011/07/10 17:31:40 deraadt Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.45 1999/10/23 14:56:05 ragge Exp $	*/
 
 /*
@@ -48,9 +48,6 @@
 #include <machine/param.h>
 #include <machine/vmparam.h>
 #include <machine/nexus.h>
-#include <machine/ioa.h>
-#include <machine/ka820.h>
-#include <machine/ka750.h>
 #include <machine/clock.h>
 #include <machine/rpb.h>
 #ifdef VAX60
@@ -63,8 +60,6 @@
 
 #include <vax/vax/gencons.h>
 
-#include <vax/bi/bireg.h>
-
 void	dumpconf(void);	/* machdep.c */
 
 struct cpu_dep *dep_call;
@@ -75,7 +70,7 @@ struct device *bootdv;
 int booted_partition;	/* defaults to 0 (aka 'a' partition) */
 
 void
-cpu_configure()
+cpu_configure(void)
 {
 	softintr_init();
 
@@ -106,9 +101,7 @@ int	mainbus_match(struct device *, struct cfdata *, void *);
 void	mainbus_attach(struct device *, struct device *, void *);
 
 int
-mainbus_print(aux, hej)
-	void *aux;
-	const char *hej;
+mainbus_print(void *aux, const char *hej)
 {
 	struct mainbus_attach_args *maa = aux;
 
@@ -122,10 +115,7 @@ mainbus_print(aux, hej)
 }
 
 int
-mainbus_match(parent, cf, aux)
-	struct	device	*parent;
-	struct cfdata *cf;
-	void	*aux;
+mainbus_match(struct device *parent, struct cfdata *cf, void *aux)
 {
 	if (cf->cf_unit == 0 &&
 	    strcmp(cf->cf_driver->cd_name, "mainbus") == 0)
@@ -135,9 +125,7 @@ mainbus_match(parent, cf, aux)
 }
 
 void
-mainbus_attach(parent, self, hej)
-	struct	device	*parent, *self;
-	void	*hej;
+mainbus_attach(struct device *parent, struct device *self, void *hej)
 {
 	struct mainbus_attach_args maa;
 
@@ -153,9 +141,6 @@ mainbus_attach(parent, self, hej)
 		config_found(self, &maa, mainbus_print);
 	}
 #endif
-
-	if (dep_call->cpu_subconf)
-		(*dep_call->cpu_subconf)(self);
 
 #if NLED > 0
 	maa.maa_bustype = VAX_LEDS;
@@ -179,14 +164,7 @@ struct  cfdriver mainbus_cd = {
 
 #include "sd.h"
 #include "cd.h"
-#if NRL > 0
-#include "rl.h"
-#endif
 #include "ra.h"
-#include "hp.h"
-#if NRY > 0
-#include "ry.h"
-#endif
 
 static int ubtest(void *);
 static int jmfr(char *, struct device *, int);
@@ -194,7 +172,6 @@ static int booted_qe(struct device *, void *);
 static int booted_le(struct device *, void *);
 static int booted_ze(struct device *, void *);
 static int booted_de(struct device *, void *);
-static int booted_ni(struct device *, void *);
 #if NSD > 0 || NCD > 0
 static int booted_sd(struct device *, void *);
 #endif
@@ -203,9 +180,6 @@ static int booted_rl(struct device *, void *);
 #endif
 #if NRA
 static int booted_ra(struct device *, void *);
-#endif
-#if NHP
-static int booted_hp(struct device *, void *);
 #endif
 #if NRD
 static int booted_rd(struct device *, void *);
@@ -216,7 +190,6 @@ int (*devreg[])(struct device *, void *) = {
 	booted_le,
 	booted_ze,
 	booted_de,
-	booted_ni,
 #if NSD > 0 || NCD > 0
 	booted_sd,
 #endif
@@ -225,9 +198,6 @@ int (*devreg[])(struct device *, void *) = {
 #endif
 #if NRA
 	booted_ra,
-#endif
-#if NHP
-	booted_hp,
 #endif
 #if NRD
 	booted_hd,
@@ -278,20 +248,6 @@ ubtest(void *aux)
 		return 1;
 	return 0;
 }
-
-#if 1 /* NNI */
-#include <arch/vax/bi/bivar.h>
-int
-booted_ni(struct device *dev, void *aux)
-{
-	struct bi_attach_args *ba = aux;
-
-	if (jmfr("ni", dev, BDEV_NI) || (kvtophys(ba->ba_ioh) != rpb.csrphy))
-		return 0;
-
-	return 1;
-}
-#endif /* NNI */
 
 #if 1 /* NDE */
 int
@@ -413,33 +369,6 @@ booted_ra(struct device *dev, void *aux)
 	return 0;
 }
 #endif
-#if NHP
-#include <vax/mba/mbavar.h>
-int
-booted_hp(struct device *dev, void *aux)
-{
-	static int mbaaddr;
-
-	/* Save last adapter address */
-	if (jmfr("mba", dev, BDEV_HP) == 0) {
-		struct sbi_attach_args *sa = aux;
-
-		mbaaddr = kvtophys(sa->sa_ioh);
-		return 0;
-	}
-
-	if (jmfr("hp", dev, BDEV_HP))
-		return 0;
-
-	if (((struct mba_attach_args *)aux)->ma_unit != rpb.unit)
-		return 0;
-
-	if (mbaaddr != rpb.adpphy)
-		return 0;
-
-	return 1;
-}
-#endif
 #if NHD
 int     
 booted_hd(struct device *dev, void *aux)
@@ -456,17 +385,9 @@ booted_hd(struct device *dev, void *aux)
 }
 #endif
 
-struct  ngcconf {
-        struct  cfdriver *ng_cf;
-        dev_t   ng_root;
-};
-
 struct nam2blk nam2blk[] = {
 	{ "ra",          9 },
 	{ "rx",         12 },
-#ifdef notyet
-	{ "rl",         14 },
-#endif
 	{ "hd",		19 },
 	{ "sd",         20 },
 	{ "cd",         22 },

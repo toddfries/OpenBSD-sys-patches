@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.40 2011/05/24 20:27:11 matthew Exp $ 
+# $OpenBSD: GENERIC,v 1.44 2011/11/14 15:28:46 deraadt Exp $ 
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -20,7 +20,7 @@ makeoptions	KERNEL_BASE_VIRT="0xc0200000"
 
 options	CPU_XSCALE_80321	# Support the XScale core
 options	XSCALE_CACHE_READ_WRITE_ALLOCATE
-options	CACHE_CLEAN_BLOCK_INTR
+makeoptions	CPUFLAGS="-mcpu=xscale"
 
 #options	PERFCTRS	# performance counters
 
@@ -61,7 +61,6 @@ pci0		at iopxs? bus ?	# PCI/PCI-X support
 
 
 siop*		at pci? # NCR 538XX SCSI controllers(new)
-scsibus*	at siop?
 em*		at pci?
 re*		at pci?
 ral*		at pci?
@@ -71,6 +70,7 @@ pciide* 	at pci? flags 0x0000
 wd*		at pciide? flags 0x0000
 
 
+scsibus*	at scsi?
 sd*		at scsibus?	# SCSI disk drives
 #st*		at scsibus?	# SCSI tape drives
 cd*		at scsibus?	# SCSI CD-ROM drives
@@ -120,7 +120,6 @@ umidi*	at uhub?		# USB MIDI
 midi*	at umidi?
 ulpt*	at uhub?		# USB Printers
 umass*	at uhub?		# USB Mass Storage devices
-scsibus* at umass?
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
@@ -161,16 +160,15 @@ uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 
 # Bluetooth controllers
-ubt*	at uhub? disable	# USB Bluetooth
-bthub*	at ubt?
-
-bthidev* at bthub?		# Bluetooth HID support
-btkbd*	at bthidev?
-btms*	at bthidev?
-wskbd*	at btkbd? mux 1
-wsmouse* at btms? mux 0
-btsco*	at bthub?		# Bluetooth audio support
-audio*	at btsco?
+#ubt*	at uhub? disable	# USB Bluetooth
+#bthub*	at ubt?
+#bthidev* at bthub?		# Bluetooth HID support
+#btkbd*	at bthidev?
+#btms*	at bthidev?
+#wskbd*	at btkbd? mux 1
+#wsmouse* at btms? mux 0
+#btsco*	at bthub?		# Bluetooth audio support
+#audio*	at btsco?
 
 amphy*		at mii?		# AMD 79C873 PHYs
 dcphy*		at mii?		# Digital Clone PHYs

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.macppc,v 1.60 2011/04/15 02:41:28 guenther Exp $
+#	$OpenBSD: Makefile.macppc,v 1.63 2011/11/08 18:41:34 matthieu Exp $
 
 # For instructions on building kernels consult the config(8) and options(4)
 # manual pages.
@@ -10,7 +10,6 @@
 
 .include <bsd.own.mk>
 
-MKDEP?=	mkdep
 SIZE?=	size
 STRIP?=	strip
 
@@ -119,7 +118,7 @@ vers.o: ${SYSTEM_DEP} ${SYSTEM_SWAP_DEP}
 	${CC} ${CFLAGS} ${CPPFLAGS} ${PROF} -c vers.c
 
 clean::
-	rm -f eddep *bsd *bsd.gdb tags *.[io] [a-z]*.s \
+	rm -f eddep *bsd *bsd.gdb tags *.[dio] [a-z]*.s \
 	    [Ee]rrs linterrs assym.h ${DB_STRUCTINFO}
 
 lint:
@@ -158,9 +157,11 @@ install-kernel-${MACHINE_NAME}:
  ${SYSTEM_OBJ}: ${DB_STRUCTINFO}
 .endif
 .ifnmake clean
-. for o in ${SYSTEM_OBJ:.o=.d} assym.d ${DB_STRUCTINFO:.h=.d}
-.  if exists($o)
-.   include "$o"
+. for o in ${SYSTEM_OBJ} assym.h ${DB_STRUCTINFO}
+.  if exists(${o:R}.d)
+.   include "${o:R}.d"
+.  elif exists($o)
+    .PHONY: $o
 .  endif
 . endfor
 .endif

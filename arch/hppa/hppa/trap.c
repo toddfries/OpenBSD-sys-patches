@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.114 2011/04/03 14:56:28 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.121 2011/11/16 20:56:01 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -62,6 +62,8 @@ int	pcxs_unaligned(u_int opcode, vaddr_t va);
 #ifdef PTRACE
 void	ss_clear_breakpoints(struct proc *p);
 #endif
+
+void	ast(struct proc *);
 
 /* single-step breakpoint */
 #define SSBREAKPOINT	(HPPA_BREAK_KERNEL | (HPPA_BREAK_SS << 13))
@@ -135,29 +137,21 @@ u_char hppa_regmap[32] = {
 	offsetof(struct trapframe, tf_r31) / 4,
 };
 
-void	userret(struct proc *p);
-
 void
-userret(struct proc *p)
+ast(struct proc *p)
 {
-	int sig;
-
 	if (p->p_md.md_astpending) {
 		p->p_md.md_astpending = 0;
 		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			ADDUPROF(p);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 		}
 		if (curcpu()->ci_want_resched)
 			preempt(NULL);
 	}
 
-	while ((sig = CURSIG(p)) != 0)
-		postsig(sig);
-
-	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
 }
 
 void
@@ -257,7 +251,7 @@ trap(int type, struct trapframe *frame)
 	case T_DBREAK:
 	dead_end:
 #ifdef DDB
-		if (kdb_trap (type, va, frame)) {
+		if (kdb_trap(type, va, frame)) {
 			if (type == T_IBREAK) {
 				/* skip break instruction */
 				frame->tf_iioq_head = frame->tf_iioq_tail;
@@ -282,9 +276,9 @@ trap(int type, struct trapframe *frame)
 			code = TRAP_TRACE;
 #endif
 		/* pass to user debugger */
-		KERNEL_PROC_LOCK(p);
-		trapsignal(p, SIGTRAP, type &~ T_USER, code, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_LOCK();
+		trapsignal(p, SIGTRAP, type & ~T_USER, code, sv);
+		KERNEL_UNLOCK();
 		}
 		break;
 
@@ -293,9 +287,9 @@ trap(int type, struct trapframe *frame)
 		ss_clear_breakpoints(p);
 
 		/* pass to user debugger */
-		KERNEL_PROC_LOCK(p);
-		trapsignal(p, SIGTRAP, type &~ T_USER, TRAP_TRACE, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_LOCK();
+		trapsignal(p, SIGTRAP, type & ~T_USER, TRAP_TRACE, sv);
+		KERNEL_UNLOCK();
 		break;
 #endif
 
@@ -335,9 +329,9 @@ trap(int type, struct trapframe *frame)
 		fpp[0] &= ~(((u_int64_t)HPPA_FPU_T) << 32);
 
 		sv.sival_int = va;
-		KERNEL_PROC_LOCK(p);
-		trapsignal(p, SIGFPE, type &~ T_USER, flt, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_LOCK();
+		trapsignal(p, SIGFPE, type & ~T_USER, flt, sv);
+		KERNEL_UNLOCK();
 		}
 		break;
 
@@ -347,46 +341,65 @@ trap(int type, struct trapframe *frame)
 
 	case T_EMULATION | T_USER:
 		sv.sival_int = va;
-		KERNEL_PROC_LOCK(p);
-		trapsignal(p, SIGILL, type &~ T_USER, ILL_COPROC, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_LOCK();
+		trapsignal(p, SIGILL, type & ~T_USER, ILL_COPROC, sv);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_OVERFLOW | T_USER:
 		sv.sival_int = va;
-		KERNEL_PROC_LOCK(p);
-		trapsignal(p, SIGFPE, type &~ T_USER, FPE_INTOVF, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_LOCK();
+		trapsignal(p, SIGFPE, type & ~T_USER, FPE_INTOVF, sv);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_CONDITION | T_USER:
 		sv.sival_int = va;
-		KERNEL_PROC_LOCK(p);
-		trapsignal(p, SIGFPE, type &~ T_USER, FPE_INTDIV, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_LOCK();
+		trapsignal(p, SIGFPE, type & ~T_USER, FPE_INTDIV, sv);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_PRIV_OP | T_USER:
 		sv.sival_int = va;
-		KERNEL_PROC_LOCK(p);
-		trapsignal(p, SIGILL, type &~ T_USER, ILL_PRVOPC, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_LOCK();
+		trapsignal(p, SIGILL, type & ~T_USER, ILL_PRVOPC, sv);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_PRIV_REG | T_USER:
-		sv.sival_int = va;
-		KERNEL_PROC_LOCK(p);
-		trapsignal(p, SIGILL, type &~ T_USER, ILL_PRVREG, sv);
-		KERNEL_PROC_UNLOCK(p);
+		/*
+		 * On PCXS processors, attempting to read control registers
+		 * cr26 and cr27 from userland causes a ``privileged register''
+		 * trap.  Later processors do not restrict read accesses to
+		 * these registers.
+		 */
+		if (cpu_type == hpcxs &&
+		    (opcode & (0xfc1fffe0 | (0x1e << 21))) ==
+		     (0x000008a0 | (0x1a << 21))) { /* mfctl %cr{26,27}, %r# */
+			register_t cr;
+
+			if (((opcode >> 21) & 0x1f) == 27)
+				mfctl(CR_TR3, cr);	/* cr27 */
+			else
+				mfctl(CR_TR2, cr);	/* cr26 */
+			frame_regmap(frame, opcode & 0x1f) = cr;
+			frame->tf_ipsw |= PSL_N;
+		} else {
+			sv.sival_int = va;
+			KERNEL_LOCK();
+			trapsignal(p, SIGILL, type & ~T_USER, ILL_PRVREG, sv);
+			KERNEL_UNLOCK();
+		}
 		break;
 
 		/* these should never got here */
 	case T_HIGHERPL | T_USER:
 	case T_LOWERPL | T_USER:
 		sv.sival_int = va;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 	/*
@@ -405,9 +418,9 @@ trap(int type, struct trapframe *frame)
 
 	case T_IPROT | T_USER:
 		sv.sival_int = va;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_ITLBMISSNA:
@@ -435,10 +448,7 @@ trap(int type, struct trapframe *frame)
 				pl = frame_regmap(frame,
 				    (opcode >> 16) & 0x1f) & 3;
 
-			if (type & T_USER)
-				KERNEL_PROC_LOCK(p);
-			else
-				KERNEL_LOCK();
+			KERNEL_LOCK();
 
 			if ((type & T_USER && space == HPPA_SID_KERNEL) ||
 			    (frame->tf_iioq_head & 3) != pl ||
@@ -449,15 +459,12 @@ trap(int type, struct trapframe *frame)
 				frame->tf_ipsw |= PSL_N;
 			}
 
-			if (type & T_USER)
-				KERNEL_PROC_UNLOCK(p);
-			else
-				KERNEL_UNLOCK();
+			KERNEL_UNLOCK();
 		} else if (type & T_USER) {
 			sv.sival_int = va;
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			trapsignal(p, SIGILL, type & ~T_USER, ILL_ILLTRP, sv);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 		} else
 			panic("trap: %s @ 0x%x:0x%x for 0x%x:0x%x irr 0x%08x",
 			    tts, frame->tf_iisq_head, frame->tf_iioq_head,
@@ -495,16 +502,13 @@ datacc:
 		if ((type & T_USER && va >= VM_MAXUSER_ADDRESS) ||
 		   (type & T_USER && map->pmap->pm_space != space)) {
 			sv.sival_int = va;
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			trapsignal(p, SIGSEGV, vftype, SEGV_MAPERR, sv);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 			break;
 		}
 
-		if (type & T_USER)
-			KERNEL_PROC_LOCK(p);
-		else
-			KERNEL_LOCK();
+		KERNEL_LOCK();
 
 		ret = uvm_fault(map, trunc_page(va), fault, vftype);
 
@@ -523,19 +527,16 @@ datacc:
 				ret = EFAULT;
 		}
 
-		if (type & T_USER)
-			KERNEL_PROC_UNLOCK(p);
-		else
-			KERNEL_UNLOCK();
+		KERNEL_UNLOCK();
 
 		if (ret != 0) {
 			if (type & T_USER) {
 				sv.sival_int = va;
-				KERNEL_PROC_LOCK(p);
+				KERNEL_LOCK();
 				trapsignal(p, SIGSEGV, vftype,
 				    ret == EACCES? SEGV_ACCERR : SEGV_MAPERR,
 				    sv);
-				KERNEL_PROC_UNLOCK(p);
+				KERNEL_UNLOCK();
 			} else {
 				if (p && p->p_addr->u_pcb.pcb_onfault) {
 					frame->tf_iioq_tail = 4 +
@@ -556,9 +557,9 @@ datacc:
 	case T_DATALIGN | T_USER:
 datalign_user:
 		sv.sival_int = va;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGBUS, vftype, BUS_ADRALN, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_INTERRUPT:
@@ -580,9 +581,9 @@ datalign_user:
 		}
 		if (type & T_USER) {
 			sv.sival_int = va;
-			KERNEL_PROC_LOCK(p);
-			trapsignal(p, SIGILL, type &~ T_USER, ILL_ILLOPC, sv);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_LOCK();
+			trapsignal(p, SIGILL, type & ~T_USER, ILL_ILLOPC, sv);
+			KERNEL_UNLOCK();
 			break;
 		}
 		/* FALLTHROUGH */
@@ -613,9 +614,9 @@ datalign_user:
 	case T_DATAPID | T_USER:
 		/* FALLTHROUGH to unimplemented */
 	default:
-#if 0
-if (kdb_trap (type, va, frame))
-	return;
+#ifdef TRAPDEBUG
+		if (kdb_trap(type, va, frame))
+			return;
 #endif
 		panic("trap: unimplemented \'%s\' (%d)", tts, trapnum);
 	}
@@ -636,8 +637,10 @@ if (kdb_trap (type, va, frame))
 	 * and also see a note in locore.S:TLABEL(all)
 	 */
 	if ((type & T_USER) && !(frame->tf_iisq_head == HPPA_SID_KERNEL &&
-	    (frame->tf_iioq_head & ~PAGE_MASK) == SYSCALLGATE))
+	    (frame->tf_iioq_head & ~PAGE_MASK) == SYSCALLGATE)) {
+		ast(p);
 		userret(p);
+	}
 }
 
 void
@@ -653,17 +656,18 @@ child_return(void *arg)
 	tf->tf_ret1 = 1;	/* ischild */
 	tf->tf_t1 = 0;		/* errno */
 
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 
+	ast(p);
 	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		ktrsysret(p,
 		    (p->p_flag & P_THREAD) ? SYS_rfork :
 		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
 		    0, 0);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 	}
 #endif
 }
@@ -881,15 +885,15 @@ syscall(struct trapframe *frame)
 	}
 
 #ifdef SYSCALL_DEBUG
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 	scdebug_call(p, code, args);
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 #endif
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSCALL)) {
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		ktrsyscall(p, code, callp->sy_argsize, args);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 	}
 #endif
 	if (error)
@@ -899,18 +903,18 @@ syscall(struct trapframe *frame)
 	rval[1] = frame->tf_ret1;
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE)) {
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		oerror = error = systrace_redirect(code, p, args, rval);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 	} else
 #endif
 	{
 		int nolock = (callp->sy_flags & SY_NOLOCK);
 		if (!nolock)
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 		oerror = error = (*callp->sy_call)(p, args, rval);
 		if (!nolock)
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 
 	}
 	switch (error) {
@@ -934,16 +938,17 @@ syscall(struct trapframe *frame)
 		break;
 	}
 #ifdef SYSCALL_DEBUG
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 	scdebug_ret(p, code, oerror, rval);
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 #endif
+	ast(p);
 	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		ktrsysret(p, code, oerror, rval[0]);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 	}
 #endif
 #ifdef DIAGNOSTIC

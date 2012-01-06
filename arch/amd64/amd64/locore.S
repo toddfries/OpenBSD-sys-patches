@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.47 2011/04/13 02:49:12 guenther Exp $	*/
+/*	$OpenBSD: locore.S,v 1.51 2011/12/26 23:07:04 haesbaert Exp $	*/
 /*	$NetBSD: locore.S,v 1.13 2004/03/25 18:33:17 drochner Exp $	*/
 
 /*
@@ -169,7 +169,7 @@ _C_LABEL(lapic_isr):
 
 	.globl	_C_LABEL(cpu_id),_C_LABEL(cpu_vendor), _C_LABEL(cpu_brand_id)
 	.globl	_C_LABEL(cpuid_level),_C_LABEL(cpu_feature)
-	.globl	_C_LABEL(cpu_ecxfeature)
+	.globl	_C_LABEL(cpu_ecxfeature),_C_LABEL(ecpu_ecxfeature)
 	.globl	_C_LABEL(esym),_C_LABEL(boothowto),_C_LABEL(bootdev)
 	.globl	_C_LABEL(bootinfo), _C_LABEL(bootinfo_size), _C_LABEL(atdevbase)
 	.globl	_C_LABEL(proc0paddr),_C_LABEL(PTDpaddr)
@@ -181,6 +181,7 @@ _C_LABEL(cpu_id):	.long	0	# saved from `cpuid' instruction
 _C_LABEL(cpu_feature):	.long	0	# feature flags from 'cpuid'
 					#   instruction
 _C_LABEL(cpu_ecxfeature):.long	0	# extended feature flags from 'cpuid'
+_C_LABEL(ecpu_ecxfeature):.long	0	# extended ecx feature flags
 _C_LABEL(cpuid_level):	.long	-1	# max. level accepted by 'cpuid'
 					#   instruction
 _C_LABEL(cpu_vendor):	.space	16	# vendor string returned by `cpuid'
@@ -637,12 +638,7 @@ longmode_hi:
 
 /*
  * Signal trampoline; copied to top of user stack.
- *
- * Note, the "system call" to sigreturn() needs to be an 'int $0x80' one
- * so that the kernel returns using 'iretq' method.  This way if a process
- * was interrupted (by tick) as opposed to in the kernel when a signal was
- * being delivered, the process will be completely restored, including the
- * userland %rcx register, which the 'sysret' instruction can not restore.
+ * gdb's backtrace logic matches against the instructions in this.
  */
 NENTRY(sigcode)
 	call	*%rax
@@ -650,7 +646,7 @@ NENTRY(sigcode)
 	movq	%rsp,%rdi
 	pushq	%rdi			/* fake return address */
 	movq	$SYS_sigreturn,%rax
-	int	$0x80
+	syscall
 	movq	$SYS_exit,%rax
 	syscall
 	.globl	_C_LABEL(esigcode)
@@ -728,14 +724,6 @@ ENTRY(cpu_switchto)
 
 	movq	%rdi, %r13
 	movq	%rsi, %r12
-
-#ifdef DIAGNOSTIC
-	xorq	%rax,%rax
-	cmpq	%rax,P_WCHAN(%r12)
-	jne	_C_LABEL(switch_error2)
-	cmpb	$SRUN,P_STAT(%r12)
-	jne	_C_LABEL(switch_error3)
-#endif
 
 	/* Record new proc. */
 	movb	$SONPROC,P_STAT(%r12)	# p->p_stat = SONPROC
@@ -863,21 +851,6 @@ ENTRY(cpu_idle_leave)
 	.globl	_C_LABEL(panic)
 
 #ifdef DIAGNOSTIC
-NENTRY(switch_error1)
-	movabsq	$1f,%rdi
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch 1"
-NENTRY(switch_error2)
-	movabsq	$1f,%rdi
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch 2"
-NENTRY(switch_error3)
-	movabsq	$1f,%rdi
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch 3"
 NENTRY(switch_pmcpu_set)
 	movabsq	$1f,%rdi
 	call	_C_LABEL(panic)
@@ -958,17 +931,28 @@ syscall_return:
 #ifdef DIAGNOSTIC
 	cmpl	$IPL_NONE,CPUVAR(ILEVEL)
 	jne	3f
-#endif
-	/*
-	 * XXX interrupts off longer than they should be here.
-	 */
+#endif /* DIAGNOSTIC */
+
+	movq	TF_RDI(%rsp),%rdi
+	movq	TF_RSI(%rsp),%rsi
+	movq	TF_R8(%rsp),%r8
+	movq	TF_R9(%rsp),%r9
+	movq	TF_R10(%rsp),%r10
+	movq	TF_R12(%rsp),%r12
+	movq	TF_R13(%rsp),%r13
+	movq	TF_R14(%rsp),%r14
+	movq	TF_R15(%rsp),%r15
+	movq	TF_RBP(%rsp),%rbp
+	movq	TF_RBX(%rsp),%rbx
+
 	INTR_RESTORE_SELECTORS
-	INTR_RESTORE_GPRS
-	addq	$48,%rsp
-	popq	%rcx	/* return rip */
-	addq	$8,%rsp
-	popq	%r11	/* flags as set by sysret insn */
-	movq	%ss:(%rsp),%rsp
+
+	movq	TF_RDX(%rsp),%rdx
+	movq	TF_RAX(%rsp),%rax
+
+	movq	TF_RIP(%rsp),%rcx
+	movq	TF_RFLAGS(%rsp),%r11
+	movq	TF_RSP(%rsp),%rsp
 	sysretq
 
 #ifdef DIAGNOSTIC
@@ -1007,11 +991,9 @@ NENTRY(child_trampoline)
 	call	*%r12
 	jmp	syscall_return
 
-	.globl  _C_LABEL(osyscall_return)
-
 
 /*
- * Trap gate entry for int $80 syscall, also used by sigreturn.
+ * Trap gate entry for old int $80 syscall (used to be used by sigreturn)
  */
 IDTVEC(osyscall)
 	pushq	$2		# size of instruction for restart
@@ -1035,6 +1017,9 @@ _C_LABEL(osyscall_return):
 	call	_C_LABEL(trap)
 	jmp	2b
 
+/*
+ * Return via iretq, for real interrupts and signal returns
+ */
 iret_return:
 1:
 #ifdef DIAGNOSTIC
@@ -1043,11 +1028,29 @@ iret_return:
 #endif /* DIAGNOSTIC */
 	.globl	intr_fast_exit
 intr_fast_exit:
+	movq	TF_RDI(%rsp),%rdi
+	movq	TF_RSI(%rsp),%rsi
+	movq	TF_R8(%rsp),%r8
+	movq	TF_R9(%rsp),%r9
+	movq	TF_R10(%rsp),%r10
+	movq	TF_R12(%rsp),%r12
+	movq	TF_R13(%rsp),%r13
+	movq	TF_R14(%rsp),%r14
+	movq	TF_R15(%rsp),%r15
+	movq	TF_RBP(%rsp),%rbp
+	movq	TF_RBX(%rsp),%rbx
+
 	testq	$SEL_UPL,TF_CS(%rsp)
 	je	5f
+
 	INTR_RESTORE_SELECTORS
-5:	INTR_RESTORE_GPRS
-	addq	$48,%rsp
+
+5:	movq	TF_RDX(%rsp),%rdx
+	movq	TF_RCX(%rsp),%rcx
+	movq	TF_R11(%rsp),%r11
+	movq	TF_RAX(%rsp),%rax
+	addq	$TF_RIP,%rsp
+
 	.globl	_C_LABEL(doreti_iret)
 _C_LABEL(doreti_iret):
 	iretq

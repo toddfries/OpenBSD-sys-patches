@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.121 2011/04/18 21:44:56 guenther Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.131 2011/12/11 19:42:28 guenther Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -160,14 +160,24 @@ sigactsinit(struct proc *p)
 }
 
 /*
- * Make p2 share p1's sigacts.
+ * Share a sigacts structure.
+ */
+struct sigacts *
+sigactsshare(struct proc *p)
+{
+	p->p_sigacts->ps_refcnt++;
+	return p->p_sigacts;
+}
+
+/*
+ * Initialize a new sigaltstack structure.
  */
 void
-sigactsshare(struct proc *p1, struct proc *p2)
+sigstkinit(struct sigaltstack *ss)
 {
-
-	p2->p_sigacts = p1->p_sigacts;
-	p1->p_sigacts->ps_refcnt++;
+	ss->ss_flags = SS_DISABLE;
+	ss->ss_size = 0;
+	ss->ss_sp = 0;
 }
 
 /*
@@ -242,9 +252,9 @@ sys_sigaction(struct proc *p, void *v, register_t *retval)
 		if ((ps->ps_siginfo & bit) != 0)
 			sa->sa_flags |= SA_SIGINFO;
 		if (signum == SIGCHLD) {
-			if ((p->p_flag & P_NOCLDSTOP) != 0)
+			if ((ps->ps_flags & SAS_NOCLDSTOP) != 0)
 				sa->sa_flags |= SA_NOCLDSTOP;
-			if ((p->p_flag & P_NOCLDWAIT) != 0)
+			if ((ps->ps_flags & SAS_NOCLDWAIT) != 0)
 				sa->sa_flags |= SA_NOCLDWAIT;
 		}
 		if ((sa->sa_mask & bit) == 0)
@@ -281,21 +291,22 @@ setsigvec(struct proc *p, int signum, struct sigaction *sa)
 	ps->ps_catchmask[signum] = sa->sa_mask &~ sigcantmask;
 	if (signum == SIGCHLD) {
 		if (sa->sa_flags & SA_NOCLDSTOP)
-			atomic_setbits_int(&p->p_flag, P_NOCLDSTOP);
+			atomic_setbits_int(&ps->ps_flags, SAS_NOCLDSTOP);
 		else
-			atomic_clearbits_int(&p->p_flag, P_NOCLDSTOP);
+			atomic_clearbits_int(&ps->ps_flags, SAS_NOCLDSTOP);
 		/*
 		 * If the SA_NOCLDWAIT flag is set or the handler
 		 * is SIG_IGN we reparent the dying child to PID 1
 		 * (init) which will reap the zombie.  Because we use
-		 * init to do our dirty work we never set P_NOCLDWAIT
+		 * init to do our dirty work we never set SAS_NOCLDWAIT
 		 * for PID 1.
 		 */
-		if (p->p_pid != 1 && ((sa->sa_flags & SA_NOCLDWAIT) ||
+		if (initproc->p_sigacts != ps &&
+		    ((sa->sa_flags & SA_NOCLDWAIT) ||
 		    sa->sa_handler == SIG_IGN))
-			atomic_setbits_int(&p->p_flag, P_NOCLDWAIT);
+			atomic_setbits_int(&ps->ps_flags, SAS_NOCLDWAIT);
 		else
-			atomic_clearbits_int(&p->p_flag, P_NOCLDWAIT);
+			atomic_clearbits_int(&ps->ps_flags, SAS_NOCLDWAIT);
 	}
 	if ((sa->sa_flags & SA_RESETHAND) != 0)
 		ps->ps_sigreset |= bit;
@@ -314,23 +325,23 @@ setsigvec(struct proc *p, int signum, struct sigaction *sa)
 	else
 		ps->ps_sigonstack &= ~bit;
 	/*
-	 * Set bit in p_sigignore for signals that are set to SIG_IGN,
+	 * Set bit in ps_sigignore for signals that are set to SIG_IGN,
 	 * and for signals set to SIG_DFL where the default is to ignore.
-	 * However, don't put SIGCONT in p_sigignore,
+	 * However, don't put SIGCONT in ps_sigignore,
 	 * as we have to restart the process.
 	 */
 	if (sa->sa_handler == SIG_IGN ||
 	    (sigprop[signum] & SA_IGNORE && sa->sa_handler == SIG_DFL)) {
 		atomic_clearbits_int(&p->p_siglist, bit);	
 		if (signum != SIGCONT)
-			p->p_sigignore |= bit;	/* easier in psignal */
-		p->p_sigcatch &= ~bit;
+			ps->ps_sigignore |= bit;	/* easier in psignal */
+		ps->ps_sigcatch &= ~bit;
 	} else {
-		p->p_sigignore &= ~bit;
+		ps->ps_sigignore &= ~bit;
 		if (sa->sa_handler == SIG_DFL)
-			p->p_sigcatch &= ~bit;
+			ps->ps_sigcatch &= ~bit;
 		else
-			p->p_sigcatch |= bit;
+			ps->ps_sigcatch |= bit;
 	}
 	splx(s);
 }
@@ -342,11 +353,13 @@ setsigvec(struct proc *p, int signum, struct sigaction *sa)
 void
 siginit(struct proc *p)
 {
+	struct sigacts *ps = p->p_sigacts;
 	int i;
 
 	for (i = 0; i < NSIG; i++)
 		if (sigprop[i] & SA_IGNORE && i != SIGCONT)
-			p->p_sigignore |= sigmask(i);
+			ps->ps_sigignore |= sigmask(i);
+	ps->ps_flags = SAS_NOCLDWAIT | SAS_NOCLDSTOP;
 }
 
 /*
@@ -366,13 +379,13 @@ execsigs(struct proc *p)
 	 * through p_sigmask (unless they were caught,
 	 * and are now ignored by default).
 	 */
-	while (p->p_sigcatch) {
-		nc = ffs((long)p->p_sigcatch);
+	while (ps->ps_sigcatch) {
+		nc = ffs((long)ps->ps_sigcatch);
 		mask = sigmask(nc);
-		p->p_sigcatch &= ~mask;
+		ps->ps_sigcatch &= ~mask;
 		if (sigprop[nc] & SA_IGNORE) {
 			if (nc != SIGCONT)
-				p->p_sigignore |= mask;
+				ps->ps_sigignore |= mask;
 			atomic_clearbits_int(&p->p_siglist, mask);
 		}
 		ps->ps_sigact[nc] = SIG_DFL;
@@ -381,11 +394,8 @@ execsigs(struct proc *p)
 	 * Reset stack state to the user stack.
 	 * Clear set of signals caught on the signal stack.
 	 */
-	ps->ps_sigstk.ss_flags = SS_DISABLE;
-	ps->ps_sigstk.ss_size = 0;
-	ps->ps_sigstk.ss_sp = 0;
-	ps->ps_flags = 0;
-	atomic_clearbits_int(&p->p_flag, P_NOCLDWAIT);
+	sigstkinit(&p->p_sigstk);
+	ps->ps_flags &= ~SAS_NOCLDWAIT;
 	if (ps->ps_sigact[SIGCHLD] == SIG_IGN)
 		ps->ps_sigact[SIGCHLD] = SIG_DFL;
 }
@@ -459,61 +469,13 @@ sys_sigsuspend(struct proc *p, void *v, register_t *retval)
 	 * save it here and mark the sigacts structure
 	 * to indicate this.
 	 */
-	ps->ps_oldmask = p->p_sigmask;
-	ps->ps_flags |= SAS_OLDMASK;
+	p->p_oldmask = p->p_sigmask;
+	atomic_setbits_int(&p->p_flag, P_SIGSUSPEND);
 	p->p_sigmask = SCARG(uap, mask) &~ sigcantmask;
 	while (tsleep(ps, PPAUSE|PCATCH, "pause", 0) == 0)
 		/* void */;
 	/* always return EINTR rather than ERESTART... */
 	return (EINTR);
-}
-
-/* ARGSUSED */
-int
-sys_osigaltstack(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_osigaltstack_args /* {
-		syscallarg(const struct osigaltstack *) nss;
-		syscallarg(struct osigaltstack *) oss;
-	} */ *uap = v;
-	struct sigacts *psp;
-	struct osigaltstack ss;
-	const struct osigaltstack *nss;
-	struct osigaltstack *oss;
-	int error;
-
-	nss = SCARG(uap, nss);
-	oss = SCARG(uap, oss);
-
-	psp = p->p_sigacts;
-	if ((psp->ps_flags & SAS_ALTSTACK) == 0)
-		psp->ps_sigstk.ss_flags |= SS_DISABLE;
-	if (oss) {
-		ss.ss_sp = psp->ps_sigstk.ss_sp;
-		ss.ss_size = psp->ps_sigstk.ss_size;
-		ss.ss_flags = psp->ps_sigstk.ss_flags;
-		if ((error = copyout(&ss, oss, sizeof(ss))))
-			return (error);
-	}
-	if (nss == NULL)
-		return (0);
-	error = copyin(nss, &ss, sizeof(ss));
-	if (error)
-		return (error);
-	if (ss.ss_flags & SS_DISABLE) {
-		if (psp->ps_sigstk.ss_flags & SS_ONSTACK)
-			return (EINVAL);
-		psp->ps_flags &= ~SAS_ALTSTACK;
-		psp->ps_sigstk.ss_flags = ss.ss_flags;
-		return (0);
-	}
-	if (ss.ss_size < MINSIGSTKSZ)
-		return (ENOMEM);
-	psp->ps_flags |= SAS_ALTSTACK;
-	psp->ps_sigstk.ss_sp = ss.ss_sp;
-	psp->ps_sigstk.ss_size = ss.ss_size;
-	psp->ps_sigstk.ss_flags = ss.ss_flags;
-	return (0);
 }
 
 int
@@ -523,7 +485,6 @@ sys_sigaltstack(struct proc *p, void *v, register_t *retval)
 		syscallarg(const struct sigaltstack *) nss;
 		syscallarg(struct sigaltstack *) oss;
 	} */ *uap = v;
-	struct sigacts *psp;
 	struct sigaltstack ss;
 	const struct sigaltstack *nss;
 	struct sigaltstack *oss;
@@ -532,28 +493,24 @@ sys_sigaltstack(struct proc *p, void *v, register_t *retval)
 	nss = SCARG(uap, nss);
 	oss = SCARG(uap, oss);
 
-	psp = p->p_sigacts;
-	if ((psp->ps_flags & SAS_ALTSTACK) == 0)
-		psp->ps_sigstk.ss_flags |= SS_DISABLE;
-	if (oss && (error = copyout(&psp->ps_sigstk,
-	    oss, sizeof(struct sigaltstack))))
+	if (oss && (error = copyout(&p->p_sigstk, oss, sizeof(p->p_sigstk))))
 		return (error);
 	if (nss == NULL)
 		return (0);
 	error = copyin(nss, &ss, sizeof(ss));
 	if (error)
 		return (error);
+	if (p->p_sigstk.ss_flags & SS_ONSTACK)
+		return (EPERM);
+	if (ss.ss_flags & ~SS_DISABLE)
+		return (EINVAL);
 	if (ss.ss_flags & SS_DISABLE) {
-		if (psp->ps_sigstk.ss_flags & SS_ONSTACK)
-			return (EINVAL);
-		psp->ps_flags &= ~SAS_ALTSTACK;
-		psp->ps_sigstk.ss_flags = ss.ss_flags;
+		p->p_sigstk.ss_flags = ss.ss_flags;
 		return (0);
 	}
 	if (ss.ss_size < MINSIGSTKSZ)
 		return (ENOMEM);
-	psp->ps_flags |= SAS_ALTSTACK;
-	psp->ps_sigstk = ss;
+	p->p_sigstk = ss;
 	return (0);
 }
 
@@ -730,39 +687,39 @@ pgsignal(struct pgrp *pgrp, int signum, int checkctty)
  * Otherwise, post it normally.
  */
 void
-trapsignal(struct proc *p, int signum, u_long code, int type,
+trapsignal(struct proc *p, int signum, u_long trapno, int code,
     union sigval sigval)
 {
 	struct sigacts *ps = p->p_sigacts;
 	int mask;
 
 	mask = sigmask(signum);
-	if ((p->p_flag & P_TRACED) == 0 && (p->p_sigcatch & mask) != 0 &&
+	if ((p->p_flag & P_TRACED) == 0 && (ps->ps_sigcatch & mask) != 0 &&
 	    (p->p_sigmask & mask) == 0) {
 #ifdef KTRACE
 		if (KTRPOINT(p, KTR_PSIG)) {
 			siginfo_t si;
 
-			initsiginfo(&si, signum, code, type, sigval);
+			initsiginfo(&si, signum, trapno, code, sigval);
 			ktrpsig(p, signum, ps->ps_sigact[signum],
-			    p->p_sigmask, type, &si);
+			    p->p_sigmask, code, &si);
 		}
 #endif
 		p->p_stats->p_ru.ru_nsignals++;
 		(*p->p_emul->e_sendsig)(ps->ps_sigact[signum], signum,
-		    p->p_sigmask, code, type, sigval);
+		    p->p_sigmask, trapno, code, sigval);
 		p->p_sigmask |= ps->ps_catchmask[signum];
 		if ((ps->ps_sigreset & mask) != 0) {
-			p->p_sigcatch &= ~mask;
+			ps->ps_sigcatch &= ~mask;
 			if (signum != SIGCONT && sigprop[signum] & SA_IGNORE)
-				p->p_sigignore |= mask;
+				ps->ps_sigignore |= mask;
 			ps->ps_sigact[signum] = SIG_DFL;
 		}
 	} else {
-		ps->ps_sig = signum;
-		ps->ps_code = code;	/* XXX for core dump/debugger */
-		ps->ps_type = type;
-		ps->ps_sigval = sigval;
+		p->p_sisig = signum;
+		p->p_sitrapno = trapno;	/* XXX for core dump/debugger */
+		p->p_sicode = code;
+		p->p_sigval = sigval;
 		ptsignal(p, signum, STHREAD);
 	}
 }
@@ -845,15 +802,15 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		/*
 		 * If the signal is being ignored,
 		 * then we forget about it immediately.
-		 * (Note: we don't set SIGCONT in p_sigignore,
+		 * (Note: we don't set SIGCONT in ps_sigignore,
 		 * and if it is set to SIG_IGN,
 		 * action will be SIG_DFL here.)
 		 */
-		if (p->p_sigignore & mask)
+		if (p->p_sigacts->ps_sigignore & mask)
 			return;
 		if (p->p_sigmask & mask)
 			action = SIG_HOLD;
-		else if (p->p_sigcatch & mask)
+		else if (p->p_sigacts->ps_sigcatch & mask)
 			action = SIG_CATCH;
 		else {
 			action = SIG_DFL;
@@ -1068,7 +1025,8 @@ issignal(struct proc *p)
 		 * We should see pending but ignored signals
 		 * only if P_TRACED was on when they were posted.
 		 */
-		if (mask & p->p_sigignore && (p->p_flag & P_TRACED) == 0)
+		if (mask & p->p_sigacts->ps_sigignore &&
+		    (p->p_flag & P_TRACED) == 0)
 			continue;
 
 		if (p->p_flag & P_TRACED &&
@@ -1200,7 +1158,7 @@ proc_stop(struct proc *p, int sw)
 
 	p->p_stat = SSTOP;
 	atomic_clearbits_int(&p->p_flag, P_WAITED);
-	atomic_setbits_int(&p->p_flag, P_STOPPED);
+	atomic_setbits_int(&p->p_flag, P_STOPPED|P_SUSPSIG);
 	if (!timeout_pending(&proc_stop_to)) {
 		timeout_add(&proc_stop_to, 0);
 		/*
@@ -1228,7 +1186,8 @@ proc_stop_sweep(void *v)
 			continue;
 		atomic_clearbits_int(&p->p_flag, P_STOPPED);
 
-		if ((p->p_p->ps_pptr->ps_mainproc->p_flag & P_NOCLDSTOP) == 0)
+		if ((p->p_p->ps_pptr->ps_mainproc->p_sigacts->ps_flags &
+		    SAS_NOCLDSTOP) == 0)
 			prsignal(p->p_p->ps_pptr, SIGCHLD);
 		wakeup(p->p_p->ps_pptr);
 	}
@@ -1244,41 +1203,40 @@ postsig(int signum)
 	struct proc *p = curproc;
 	struct sigacts *ps = p->p_sigacts;
 	sig_t action;
-	u_long code;
+	u_long trapno;
 	int mask, returnmask;
 	union sigval sigval;
-	int s, type;
+	int s, code;
 
 #ifdef DIAGNOSTIC
 	if (signum == 0)
 		panic("postsig");
 #endif
 
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 
 	mask = sigmask(signum);
 	atomic_clearbits_int(&p->p_siglist, mask);
 	action = ps->ps_sigact[signum];
 	sigval.sival_ptr = 0;
-	type = SI_USER;
 
-	if (ps->ps_sig != signum) {
-		code = 0;
-		type = SI_USER;
+	if (p->p_sisig != signum) {
+		trapno = 0;
+		code = SI_USER;
 		sigval.sival_ptr = 0;
 	} else {
-		code = ps->ps_code;
-		type = ps->ps_type;
-		sigval = ps->ps_sigval;
+		trapno = p->p_sitrapno;
+		code = p->p_sicode;
+		sigval = p->p_sigval;
 	}
 
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_PSIG)) {
 		siginfo_t si;
 		
-		initsiginfo(&si, signum, code, type, sigval);
-		ktrpsig(p, signum, action, ps->ps_flags & SAS_OLDMASK ?
-		    ps->ps_oldmask : p->p_sigmask, type, &si);
+		initsiginfo(&si, signum, trapno, code, sigval);
+		ktrpsig(p, signum, action, p->p_flag & P_SIGSUSPEND ?
+		    p->p_oldmask : p->p_sigmask, code, &si);
 	}
 #endif
 	if (action == SIG_DFL) {
@@ -1310,32 +1268,32 @@ postsig(int signum)
 #else
 		s = splhigh();
 #endif
-		if (ps->ps_flags & SAS_OLDMASK) {
-			returnmask = ps->ps_oldmask;
-			ps->ps_flags &= ~SAS_OLDMASK;
+		if (p->p_flag & P_SIGSUSPEND) {
+			atomic_clearbits_int(&p->p_flag, P_SIGSUSPEND);
+			returnmask = p->p_oldmask;
 		} else
 			returnmask = p->p_sigmask;
 		p->p_sigmask |= ps->ps_catchmask[signum];
 		if ((ps->ps_sigreset & mask) != 0) {
-			p->p_sigcatch &= ~mask;
+			ps->ps_sigcatch &= ~mask;
 			if (signum != SIGCONT && sigprop[signum] & SA_IGNORE)
-				p->p_sigignore |= mask;
+				ps->ps_sigignore |= mask;
 			ps->ps_sigact[signum] = SIG_DFL;
 		}
 		splx(s);
 		p->p_stats->p_ru.ru_nsignals++;
-		if (ps->ps_sig == signum) {
-			ps->ps_sig = 0;
-			ps->ps_code = 0;
-			ps->ps_type = SI_USER;
-			ps->ps_sigval.sival_ptr = NULL;
+		if (p->p_sisig == signum) {
+			p->p_sisig = 0;
+			p->p_sitrapno = 0;
+			p->p_sicode = SI_USER;
+			p->p_sigval.sival_ptr = NULL;
 		}
 
-		(*p->p_emul->e_sendsig)(action, signum, returnmask, code,
-		    type, sigval);
+		(*p->p_emul->e_sendsig)(action, signum, returnmask, trapno,
+		    code, sigval);
 	}
 
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 }
 
 /*
@@ -1354,7 +1312,13 @@ sigexit(struct proc *p, int signum)
 
 	p->p_acflag |= AXSIG;
 	if (sigprop[signum] & SA_CORE) {
-		p->p_sigacts->ps_sig = signum;
+		p->p_sisig = signum;
+
+		/* if there are other threads, pause them */
+		if (TAILQ_FIRST(&p->p_p->ps_threads) != p ||
+		    TAILQ_NEXT(p, p_thr_link) != NULL)
+			single_thread_set(p, SINGLE_SUSPEND, 0);
+
 		if (coredump(p) == 0)
 			signum |= WCOREFLAG;
 	}
@@ -1479,8 +1443,8 @@ coredump_trad(struct proc *p, void *cookie)
 	core.c_midmag = 0;
 	strlcpy(core.c_name, p->p_comm, sizeof(core.c_name));
 	core.c_nseg = 0;
-	core.c_signo = p->p_sigacts->ps_sig;
-	core.c_ucode = p->p_sigacts->ps_code;
+	core.c_signo = p->p_sisig;
+	core.c_ucode = p->p_sitrapno;
 	core.c_cpusize = 0;
 	core.c_tsize = (u_long)ptoa(vm->vm_tsize);
 	core.c_dsize = (u_long)ptoa(vm->vm_dsize);
@@ -1610,13 +1574,13 @@ sys_thrsigdivert(struct proc *p, void *v, register_t *retval)
 }
 
 void
-initsiginfo(siginfo_t *si, int sig, u_long code, int type, union sigval val)
+initsiginfo(siginfo_t *si, int sig, u_long trapno, int code, union sigval val)
 {
 	bzero(si, sizeof *si);
 
 	si->si_signo = sig;
-	si->si_code = type;
-	if (type == SI_USER) {
+	si->si_code = code;
+	if (code == SI_USER) {
 		si->si_value = val;
 	} else {
 		switch (sig) {
@@ -1625,7 +1589,7 @@ initsiginfo(siginfo_t *si, int sig, u_long code, int type, union sigval val)
 		case SIGBUS:
 		case SIGFPE:
 			si->si_addr = val.sival_ptr;
-			si->si_trapno = code;
+			si->si_trapno = trapno;
 			break;
 		case SIGXFSZ:
 			break;
@@ -1672,4 +1636,171 @@ filt_signal(struct knote *kn, long hint)
 			kn->kn_data++;
 	}
 	return (kn->kn_data != 0);
+}
+
+void
+userret(struct proc *p)
+{
+	int sig;
+
+	while ((sig = CURSIG(p)) != 0)
+		postsig(sig);
+
+	if (p->p_flag & P_SUSPSINGLE) {
+		KERNEL_LOCK();
+		single_thread_check(p, 0);
+		KERNEL_UNLOCK();
+	}
+
+	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
+}
+
+int
+single_thread_check(struct proc *p, int deep)
+{
+	struct process *pr = p->p_p;
+
+	if (pr->ps_single != NULL && pr->ps_single != p) {
+		do {
+			int s;
+
+			/* if we're in deep, we need to unwind to the edge */
+			if (deep) {
+				if (pr->ps_flags & PS_SINGLEUNWIND)
+					return (ERESTART);
+				if (pr->ps_flags & PS_SINGLEEXIT)
+					return (EINTR);
+			}
+
+			if (--pr->ps_singlecount == 0)
+				wakeup(&pr->ps_singlecount);
+			if (pr->ps_flags & PS_SINGLEEXIT)
+				exit1(p, 0, EXIT_THREAD);
+
+			/* not exiting and don't need to unwind, so suspend */
+			SCHED_LOCK(s);
+			p->p_stat = SSTOP;
+			mi_switch();
+			SCHED_UNLOCK(s);
+		} while (pr->ps_single != NULL);
+	}
+
+	return (0);
+}
+
+/*
+ * Stop other threads in the process.  The mode controls how and
+ * where the other threads should stop:
+ *  - SINGLE_SUSPEND: stop wherever they are, will later either be told to exit
+ *    (by setting to SINGLE_EXIT) or be released (via single_thread_clear())
+ *  - SINGLE_UNWIND: just unwind to kernel boundary, will be told to exit
+ *    or released as with SINGLE_SUSPEND
+ *  - SINGLE_EXIT: unwind to kernel boundary and exit
+ */
+int
+single_thread_set(struct proc *p, enum single_thread_mode mode, int deep)
+{
+	struct process *pr = p->p_p;
+	struct proc *q;
+	int error;
+
+	if ((error = single_thread_check(p, deep)))
+		return error;
+
+	switch (mode) {
+	case SINGLE_SUSPEND:
+		break;
+	case SINGLE_UNWIND:
+		atomic_setbits_int(&pr->ps_flags, PS_SINGLEUNWIND);
+		break;
+	case SINGLE_EXIT:
+		atomic_setbits_int(&pr->ps_flags, PS_SINGLEEXIT);
+		atomic_clearbits_int(&pr->ps_flags, PS_SINGLEUNWIND);
+		break;
+#ifdef DIAGNOSTIC
+	default:
+		panic("single_thread_mode = %d", mode);
+#endif
+	}
+	pr->ps_single = p;
+	pr->ps_singlecount = 0;
+	TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
+		int s;
+
+		if (q == p)
+			continue;
+		SCHED_LOCK(s);
+		atomic_setbits_int(&q->p_flag, P_SUSPSINGLE);
+		switch (q->p_stat) {
+		case SIDL:
+		case SRUN:
+			pr->ps_singlecount++;
+			break;
+		case SSLEEP:
+			/* if it's not interruptible, then just have to wait */
+			if (q->p_flag & P_SINTR) {
+				/* merely need to suspend?  just stop it */
+				if (mode == SINGLE_SUSPEND) {
+					q->p_stat = SSTOP;
+					break;
+				}
+				/* need to unwind or exit, so wake it */
+				setrunnable(q);
+			}
+			pr->ps_singlecount++;
+			break;
+		case SSTOP:
+			if (mode == SINGLE_EXIT) {
+				setrunnable(q);
+				pr->ps_singlecount++;
+			}
+			break;
+		case SZOMB:
+		case SDEAD:
+			break;
+		case SONPROC:
+			pr->ps_singlecount++;
+			signotify(q);
+			break;
+		}
+		SCHED_UNLOCK(s);
+	}
+
+	/* wait until they're all suspended */
+	while (pr->ps_singlecount > 0)
+		tsleep(&pr->ps_singlecount, PUSER, "suspend", 0);
+	return 0;
+}
+
+void
+single_thread_clear(struct proc *p)
+{
+	struct process *pr = p->p_p;
+	struct proc *q;
+
+	KASSERT(pr->ps_single == p);
+	
+	pr->ps_single = NULL;
+	atomic_clearbits_int(&pr->ps_flags, PS_SINGLEUNWIND | PS_SINGLEEXIT);
+	TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
+		int s;
+
+		if (q == p || (q->p_flag & P_SUSPSINGLE) == 0)
+			continue;
+		atomic_clearbits_int(&q->p_flag, P_SUSPSINGLE);
+
+		/*
+		 * if the thread was only stopped for single threading
+		 * then clearing that either makes it runnable or puts
+		 * it back into some sleep queue
+		 */
+		SCHED_LOCK(s);
+		if (q->p_stat == SSTOP && (q->p_flag & P_SUSPSIG) == 0) {
+			if (q->p_wchan == 0)
+				setrunnable(q);
+			else
+				q->p_stat = SSLEEP;
+		}
+		SCHED_UNLOCK(s);
+	}
 }

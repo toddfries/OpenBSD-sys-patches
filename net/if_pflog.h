@@ -1,4 +1,4 @@
-/* $OpenBSD: if_pflog.h,v 1.18 2011/05/22 13:21:24 claudio Exp $ */
+/* $OpenBSD: if_pflog.h,v 1.22 2011/10/13 18:23:39 claudio Exp $ */
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -54,7 +54,8 @@ struct pfloghdr {
 	pid_t		rule_pid;
 	u_int8_t	dir;
 	u_int8_t	rewritten;
-	u_int8_t	pad[2];
+	sa_family_t	naf;
+	u_int8_t	pad[1];
 	struct pf_addr	saddr;
 	struct pf_addr	daddr;
 	u_int16_t	sport;
@@ -70,9 +71,9 @@ struct pfloghdr {
 void	pflog_bpfcopy(const void *, void *, size_t);
 
 #if NPFLOG > 0
-#define	PFLOG_PACKET(i,x,b,c,d,e,f,g,h) pflog_packet(i,b,c,d,e,f,g,h)
+#define	PFLOG_PACKET(a,b,c,d,e) pflog_packet(a,b,c,d,e)
 #else
-#define	PFLOG_PACKET(i,x,b,c,d,e,f,g,h) ((void)0)
+#define	PFLOG_PACKET(a,b,c,d,e) ((void)0)
 #endif /* NPFLOG > 0 */
 #endif /* _KERNEL */
 #endif /* _NET_IF_PFLOG_H_ */

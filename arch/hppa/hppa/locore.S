@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.186 2011/05/05 20:50:43 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.189 2011/12/30 12:30:59 miod Exp $	*/
 
 /*
  * Copyright (c) 1998-2004 Michael Shalayeff
@@ -80,8 +80,8 @@
  */
 #define	DR_PAGE0	.word	0x14001200
 #define	DR_PAGE1	.word	0x14001240
-#define	MTCPU_T(x,t)	.word	0x14001400 | ((t) << 21) | ((x) << 16)
-#define	MFCPU_T(r,x)	.word	0x14001400 | ((r) << 21) | (x)
+#define	MTCPU_T(x,t)	.word	0x14001600 | ((t) << 21) | ((x) << 16)
+#define	MFCPU_T(r,x)	.word	0x14001a00 | ((r) << 21) | ((x) << 16)
 #define	MTCPU_C(x,t)	.word	0x14000240 | ((t) << 21) | ((x) << 16)
 #define	MFCPU_C(r,x)	.word	0x14000600 | ((r) << 21) | ((x) << 16)
 #define	MFCPU_U(r,x)	.word	0x140008a0 | ((r) << 21) | ((x))
@@ -773,8 +773,10 @@ $syscall_return
 #endif
 	ldw	TF_CR0(sr3, t3), t1
 	mtctl	t1, rctr
-	ldw	TF_CR30(sr3, t3), t1
-	mtctl	t1, cr30
+	ldw	TF_CR27(sr3, t3), t1
+	ldw	TF_CR30(sr3, t3), t2
+	mtctl	t1, cr27
+	mtctl	t2, cr30
 
 	/*
 	 * clear the system mask, this puts us back into physical mode.
@@ -1790,8 +1792,10 @@ $trapnowvirt
 	mfctl	cr28, t2
 	stw	t2, TF_CR28(t3)
 #endif
-	mfctl	cr30, t1
-	stw	t1, TF_CR30(t3)
+	mfctl	cr27, t1
+	mfctl	cr30, t2
+	stw	t1, TF_CR27(t3)
+	stw	t2, TF_CR30(t3)
 
 	/*
 	 * load the global pointer for the kernel
@@ -1836,7 +1840,7 @@ $trapnowvirt
 	nop
 EXIT(TLABEL(all))
 
-#if defined(HP7000_CPU) || defined(HP7100_CPU)
+#if defined(HP7000_CPU)
 /*
  * void desidhash_s(void)
  */
@@ -1858,9 +1862,9 @@ LEAF_ENTRY(desidhash_s)
 	bv	0(rp)
 	extru	t1, 4, 5, ret0	/* return chip revision */
 EXIT(desidhash_s)
-#endif /* HP7000_CPU || HP7100_CPU */
+#endif /* HP7000_CPU */
 
-#ifdef HP7200_CPU
+#if defined(HP7100_CPU) || defined(HP7200_CPU)
 /*
  * void desidhash_t(void)
  */
@@ -1882,7 +1886,7 @@ LEAF_ENTRY(desidhash_t)
 	bv	0(rp)
 	extru	t1, 4, 5, ret0	/* return chip revision */
 EXIT(desidhash_t)
-#endif /* HP7200_CPU */
+#endif /* HP7100_CPU || HP7200_CPU */
 
 #ifdef HP7300LC_CPU
 	.data
@@ -2769,12 +2773,6 @@ Lcspstr
 	.asciz	"cpu_switch:old=%p, new=%p"
 	.align	8
 kstack_check
-	ldw	P_WCHAN(arg1), t1
-	comb,<>,n r0, t1, switch_error
-	nop
-	ldb	P_STAT(arg1), t1
-	comib,<>,n SRUN, t1, switch_error
-	nop
 	/*
 	 * The new process' kernel stack must be reasonable.
 	 */

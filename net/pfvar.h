@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.332 2011/05/24 14:01:52 claudio Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.358 2011/12/12 21:30:27 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -61,7 +61,7 @@ struct ip6_hdr;
 enum	{ PF_INOUT, PF_IN, PF_OUT, PF_FWD };
 enum	{ PF_PASS, PF_DROP, PF_SCRUB, PF_NOSCRUB, PF_NAT, PF_NONAT,
 	  PF_BINAT, PF_NOBINAT, PF_RDR, PF_NORDR, PF_SYNPROXY_DROP, PF_DEFER,
-	  PF_MATCH, PF_DIVERT, PF_RT };
+	  PF_MATCH, PF_DIVERT, PF_RT, PF_AFRT };
 enum	{ PF_TRANS_RULESET, PF_TRANS_ALTQ, PF_TRANS_TABLE };
 enum	{ PF_OP_NONE, PF_OP_IRG, PF_OP_EQ, PF_OP_NE, PF_OP_LT,
 	  PF_OP_LE, PF_OP_GT, PF_OP_GE, PF_OP_XRG, PF_OP_RRG };
@@ -82,8 +82,7 @@ enum	{ PFTM_TCP_FIRST_PACKET, PFTM_TCP_OPENING, PFTM_TCP_ESTABLISHED,
 	  PFTM_OTHER_FIRST_PACKET, PFTM_OTHER_SINGLE,
 	  PFTM_OTHER_MULTIPLE, PFTM_FRAG, PFTM_INTERVAL,
 	  PFTM_ADAPTIVE_START, PFTM_ADAPTIVE_END, PFTM_SRC_NODE,
-	  PFTM_TS_DIFF, PFTM_MAX, PFTM_PURGE, PFTM_UNLINKED,
-	  PFTM_UNTIL_PACKET };
+	  PFTM_TS_DIFF, PFTM_MAX, PFTM_PURGE, PFTM_UNLINKED };
 
 /* PFTM default values */
 #define PFTM_TCP_FIRST_PACKET_VAL	120	/* First TCP packet */
@@ -110,7 +109,7 @@ enum	{ PF_LIMIT_STATES, PF_LIMIT_SRC_NODES, PF_LIMIT_FRAGS,
 	  PF_LIMIT_TABLES, PF_LIMIT_TABLE_ENTRIES, PF_LIMIT_MAX };
 #define PF_POOL_IDMASK		0x0f
 enum	{ PF_POOL_NONE, PF_POOL_BITMASK, PF_POOL_RANDOM,
-	  PF_POOL_SRCHASH, PF_POOL_ROUNDROBIN };
+	  PF_POOL_SRCHASH, PF_POOL_ROUNDROBIN, PF_POOL_LEASTSTATES };
 enum	{ PF_ADDR_ADDRMASK, PF_ADDR_NOROUTE, PF_ADDR_DYNIFTL,
 	  PF_ADDR_TABLE, PF_ADDR_RTLABEL, PF_ADDR_URPFFAILED,
 	  PF_ADDR_RANGE, PF_ADDR_NONE };
@@ -196,7 +195,7 @@ struct pfi_dynaddr {
 #ifndef PF_DEBUGNAME
 #define PF_DEBUGNAME "pf: "
 #endif
- 
+
 #ifdef _KERNEL
 #define	DPFPRINTF(n, format, x...)					\
 	do {								\
@@ -393,6 +392,7 @@ struct pf_rule_addr {
 	u_int16_t		 port[2];
 	u_int8_t		 neg;
 	u_int8_t		 port_op;
+	u_int16_t		 weight;
 };
 
 struct pf_poolhashkey {
@@ -409,10 +409,13 @@ struct pf_poolhashkey {
 struct pf_pool {
 	struct pf_addr_wrap	 addr;
 	struct pf_poolhashkey	 key;
-	struct pf_addr	 	 counter;
+	struct pf_addr		 counter;
 	char			 ifname[IFNAMSIZ];
 	struct pfi_kif		*kif;
 	int			 tblidx;
+	u_int64_t		 states;
+	int			 curweight;
+	u_int16_t		 weight;
 	u_int16_t		 proxy_port[2];
 	u_int8_t		 port_op;
 	u_int8_t		 opts;
@@ -524,11 +527,12 @@ struct pf_rule_actions {
 	u_int16_t	qid;
 	u_int16_t	pqid;
 	u_int16_t	max_mss;
+	u_int16_t	flags;
 	u_int8_t	log;
 	u_int8_t	set_tos;
 	u_int8_t	min_ttl;
-	u_int8_t	pad[1];
-	u_int16_t	flags;
+	u_int8_t	prio[2];
+	u_int8_t	pad[3];
 };
 
 union pf_rule_ptr {
@@ -547,8 +551,8 @@ struct pf_rule {
 #define PF_SKIP_AF		3
 #define PF_SKIP_PROTO		4
 #define PF_SKIP_SRC_ADDR	5
-#define PF_SKIP_SRC_PORT	6
-#define PF_SKIP_DST_ADDR	7
+#define PF_SKIP_DST_ADDR	6
+#define PF_SKIP_SRC_PORT	7
 #define PF_SKIP_DST_PORT	8
 #define PF_SKIP_COUNT		9
 	union pf_rule_ptr	 skip[PF_SKIP_COUNT];
@@ -644,7 +648,9 @@ struct pf_rule {
 #define PF_FLUSH		0x01
 #define PF_FLUSH_GLOBAL		0x02
 	u_int8_t		 flush;
-	u_int8_t		 pad2[3];
+#define PF_PRIO_NOTSET		0xff
+	u_int8_t		 prio[2];
+	sa_family_t		 naf;
 
 	struct {
 		struct pf_addr		addr;
@@ -666,6 +672,8 @@ struct pf_rule {
 #define PFRULE_IFBOUND		0x00010000	/* if-bound */
 #define PFRULE_STATESLOPPY	0x00020000	/* sloppy state tracking */
 #define PFRULE_PFLOW		0x00040000
+#define PFRULE_ONCE		0x00100000	/* one shot rule */
+#define PFRULE_AFTO		0x00200000	/* af-to rule */
 
 #define PFSTATE_HIWAT		10000	/* default state table size */
 #define PFSTATE_ADAPT_START	6000	/* default adaptive timeout start */
@@ -704,6 +712,7 @@ struct pf_src_node {
 	u_int32_t		 creation;
 	u_int32_t		 expire;
 	sa_family_t		 af;
+	sa_family_t		 naf;
 	u_int8_t		 type;
 };
 
@@ -781,6 +790,9 @@ struct pf_state_key {
 	struct pf_state_key	*reverse;
 	struct inpcb		*inp;
 };
+#define PF_REVERSED_KEY(key, family)				\
+	((key[PF_SK_WIRE]->af != key[PF_SK_STACK]->af) &&	\
+	 (key[PF_SK_WIRE]->af != (family)))
 
 /* keep synced with struct pf_state, used in RB_FIND */
 struct pf_state_cmp {
@@ -804,6 +816,7 @@ struct pf_state {
 	struct pf_rule_slist	 match_rules;
 	union pf_rule_ptr	 rule;
 	union pf_rule_ptr	 anchor;
+	union pf_rule_ptr	 natrule;
 	struct pf_addr		 rt_addr;
 	struct pf_sn_head	 src_nodes;
 	struct pf_state_key	*key[2];	/* addresses stack and wire  */
@@ -812,7 +825,7 @@ struct pf_state {
 	u_int64_t		 packets[2];
 	u_int64_t		 bytes[2];
 	u_int32_t		 creation;
-	u_int32_t	 	 expire;
+	u_int32_t		 expire;
 	u_int32_t		 pfsync_time;
 	u_int16_t		 qid;
 	u_int16_t		 pqid;
@@ -838,6 +851,8 @@ struct pf_state {
 	u_int8_t		 min_ttl;
 	u_int8_t		 set_tos;
 	u_int16_t		 max_mss;
+	u_int8_t		 prio[2];
+	u_int8_t		 pad2[2];
 };
 
 /*
@@ -868,11 +883,12 @@ struct pfsync_state_key {
 	struct pf_addr	 addr[2];
 	u_int16_t	 port[2];
 	u_int16_t	 rdomain;
-	u_int8_t	 pad[2];
+	sa_family_t	 af;
+	u_int8_t	 pad;
 };
 
 struct pfsync_state {
-	u_int32_t	 id[2];
+	u_int64_t	 id;
 	char		 ifname[IFNAMSIZ];
 	struct pfsync_state_key	key[2];
 	struct pfsync_state_peer src;
@@ -892,13 +908,14 @@ struct pfsync_state {
 	u_int8_t	 proto;
 	u_int8_t	 direction;
 	u_int8_t	 log;
-	u_int8_t	 state_flags;
+	u_int8_t	 state_flags; /* XXX remove after 5.0 */
 	u_int8_t	 timeout;
 	u_int8_t	 sync_flags;
 	u_int8_t	 updates;
 	u_int8_t	 min_ttl;
 	u_int8_t	 set_tos;
-	u_int8_t	 pad[4];
+	u_int16_t	 all_state_flags;
+	u_int8_t	 pad[2];
 } __packed;
 
 #define PFSYNC_FLAG_SRCNODE	0x04
@@ -915,7 +932,7 @@ struct pfsync_state {
 	(d)->state = (s)->state;		\
 	(d)->wscale = (s)->wscale;		\
 	if ((s)->scrub) {						\
-		(d)->scrub.pfss_flags = 				\
+		(d)->scrub.pfss_flags =					\
 		    htons((s)->scrub->pfss_flags & PFSS_TIMESTAMP);	\
 		(d)->scrub.pfss_ttl = (s)->scrub->pfss_ttl;		\
 		(d)->scrub.pfss_ts_mod = htonl((s)->scrub->pfss_ts_mod);\
@@ -931,7 +948,7 @@ struct pfsync_state {
 	(d)->mss = ntohs((s)->mss);		\
 	(d)->state = (s)->state;		\
 	(d)->wscale = (s)->wscale;		\
-	if ((s)->scrub.scrub_flag == PFSYNC_SCRUB_FLAG_VALID && 	\
+	if ((s)->scrub.scrub_flag == PFSYNC_SCRUB_FLAG_VALID &&		\
 	    (d)->scrub != NULL) {					\
 		(d)->scrub->pfss_flags =				\
 		    ntohs((s)->scrub.pfss_flags) & PFSS_TIMESTAMP;	\
@@ -1022,6 +1039,8 @@ struct pfr_addr {
 		struct in6_addr	 _pfra_ip6addr;
 	}		 pfra_u;
 	char		 pfra_ifname[IFNAMSIZ];
+	u_int32_t	 pfra_states;
+	u_int16_t	 pfra_weight;
 	u_int8_t	 pfra_af;
 	u_int8_t	 pfra_net;
 	u_int8_t	 pfra_not;
@@ -1061,6 +1080,7 @@ struct pfr_tstats {
 struct pfr_kcounters {
 	u_int64_t		 pfrkc_packets[PFR_DIR_MAX][PFR_OP_ADDR_MAX];
 	u_int64_t		 pfrkc_bytes[PFR_DIR_MAX][PFR_OP_ADDR_MAX];
+	u_int64_t		 states;
 };
 
 SLIST_HEAD(pfr_kentryworkq, pfr_kentry);
@@ -1079,11 +1099,11 @@ struct _pfr_kentry {
 #define PFRKE_FLAG_MARK		0x02
 
 /* pfrke_type */
-enum { PFRKE_PLAIN, PFRKE_ROUTE, PFRKE_MAX };
+enum { PFRKE_PLAIN, PFRKE_ROUTE, PFRKE_COST, PFRKE_MAX };
 
 struct pfr_kentry {
 	union {
-		struct _pfr_kentry	_ke;	
+		struct _pfr_kentry	_ke;
 	} u;
 };
 #define pfrke_node	u._ke._pfrke_node
@@ -1104,10 +1124,22 @@ struct pfr_kentry_route {
 	struct pfi_kif		*kif;
 };
 
+struct pfr_kentry_cost {
+	union {
+		struct _pfr_kentry	_ke;
+	} u;
+
+	struct pfi_kif		*kif;
+	/* Above overlaps with pfr_kentry route */
+
+	u_int16_t		 weight;
+};
+
 struct pfr_kentry_all {
 	union {
 		struct _pfr_kentry		_ke;
 		struct pfr_kentry_route		kr;
+		struct pfr_kentry_cost		kc;
 	} u;
 };
 #define pfrke_rkif	u.kr.kif
@@ -1125,6 +1157,9 @@ struct pfr_ktable {
 	struct pf_ruleset	*pfrkt_rs;
 	long			 pfrkt_larg;
 	int			 pfrkt_nflags;
+	u_int64_t		 pfrkt_refcntcost;
+	u_int16_t		 pfrkt_gcdweight;
+	u_int16_t		 pfrkt_maxweight;
 };
 #define pfrkt_t		pfrkt_ts.pfrts_t
 #define pfrkt_name	pfrkt_t.pfrt_name
@@ -1203,6 +1238,8 @@ struct pf_pdesc {
 	struct pf_addr	 nsaddr;	/* src address after NAT */
 	struct pf_addr	 ndaddr;	/* dst address after NAT */
 
+	struct pfi_kif	*kif;		/* incomming interface */
+	struct mbuf	*m;		/* mbuf containing the packet */
 	struct ether_header
 			*eh;
 	struct pf_addr	*src;		/* src address */
@@ -1214,18 +1251,19 @@ struct pf_pdesc {
 	u_int16_t	 nsport;	/* src port after NAT */
 	u_int16_t	 ndport;	/* dst port after NAT */
 
-	u_int32_t	 p_len;		/* total length of payload */
-	u_int32_t	 rh_cnt;	/* # of routing headers */
-
-	u_int16_t	*ip_sum;
-	u_int16_t	*proto_sum;
+	u_int32_t	 off;		/* protocol header offset */
+	u_int32_t	 hdrlen;	/* protocol header length */
+	u_int32_t	 p_len;		/* length of protocol payload */
+	u_int32_t	 badopts;	/* v4 options or v6 routing headers */
 
 	u_int16_t	 rdomain;	/* original routing domain */
-	u_int16_t	 flags;
-#define PFDESC_IP_REAS	0x0002		/* IP frags would've been reassembled */
+	u_int16_t	 virtual_proto;
+#define PF_VPROTO_FRAGMENT	256
 	sa_family_t	 af;
+	sa_family_t	 naf;
 	u_int8_t	 proto;
 	u_int8_t	 tos;
+	u_int8_t	 ttl;
 	u_int8_t	 dir;		/* direction */
 	u_int8_t	 sidx;		/* key index for source */
 	u_int8_t	 didx;		/* key index for destination */
@@ -1437,10 +1475,7 @@ struct pf_tagname {
 };
 
 struct pf_divert {
-	union {
-		struct in_addr	ipv4;
-		struct in6_addr	ipv6;
-	}		addr;
+	struct pf_addr	addr;
 	u_int16_t	port;
 	u_int16_t	rdomain;
 };
@@ -1452,7 +1487,7 @@ struct pf_divert {
 
 #define PFR_KTABLE_HIWAT	1000	/* Number of tables */
 #define PFR_KENTRY_HIWAT	200000	/* Number of table entries */
-#define PFR_KENTRY_HIWAT_SMALL	100000	/* Number of table entries (tiny hosts) */
+#define PFR_KENTRY_HIWAT_SMALL	100000	/* Number of entries for tiny hosts */
 
 /*
  * ioctl parameter structures
@@ -1686,7 +1721,6 @@ RB_PROTOTYPE(pf_state_tree_id, pf_state,
 extern struct pf_state_tree_id tree_id;
 extern struct pf_state_queue state_list;
 
-TAILQ_HEAD(pf_poolqueue, pf_pool);
 TAILQ_HEAD(pf_altqqueue, pf_altq);
 extern struct pf_altqqueue		  pf_altqs[2];
 
@@ -1696,8 +1730,6 @@ extern int			 altqs_inactive_open;
 extern u_int32_t		 ticket_pabuf;
 extern struct pf_altqqueue	*pf_altqs_active;
 extern struct pf_altqqueue	*pf_altqs_inactive;
-extern struct pf_poolqueue	*pf_pools_active;
-extern struct pf_poolqueue	*pf_pools_inactive;
 extern int			 pf_tbladdr_setup(struct pf_ruleset *,
 				    struct pf_addr_wrap *);
 extern void			 pf_tbladdr_remove(struct pf_addr_wrap *);
@@ -1741,19 +1773,17 @@ extern void			 pf_addrcpy(struct pf_addr *, struct pf_addr *,
 				    u_int8_t);
 void				 pf_rm_rule(struct pf_rulequeue *,
 				    struct pf_rule *);
+void				 pf_purge_rule(struct pf_ruleset *,
+				    struct pf_rule *);
 struct pf_divert		*pf_find_divert(struct mbuf *);
-int				 pf_setup_pdesc(sa_family_t, int,
-				    struct pf_pdesc *, struct mbuf *,
-				    u_short *, u_short *, struct pfi_kif *,
-				    struct pf_rule **, struct pf_rule **,
-				    struct pf_ruleset **, int *, int *);
+int				 pf_setup_pdesc(struct pf_pdesc *, void *,
+				    sa_family_t, int, struct pfi_kif *,
+				    struct mbuf **, u_short *, u_short *);
 
-#ifdef INET
-int	pf_test(int, struct ifnet *, struct mbuf **, struct ether_header *);
-#endif /* INET */
+int	pf_test(sa_family_t, int, struct ifnet *, struct mbuf **,
+	    struct ether_header *);
 
 #ifdef INET6
-int	pf_test6(int, struct ifnet *, struct mbuf **, struct ether_header *);
 void	pf_poolmask(struct pf_addr *, struct pf_addr*,
 	    struct pf_addr *, struct pf_addr *, u_int8_t);
 void	pf_addr_inc(struct pf_addr *, sa_family_t);
@@ -1762,9 +1792,8 @@ void	pf_addr_inc(struct pf_addr *, sa_family_t);
 void   *pf_pull_hdr(struct mbuf *, int, void *, int, u_short *, u_short *,
 	    sa_family_t);
 void	pf_change_a(void *, u_int16_t *, u_int32_t, u_int8_t);
-int	pflog_packet(struct pfi_kif *, struct mbuf *, u_int8_t,
-	    u_int8_t, struct pf_rule *, struct pf_rule *, struct pf_ruleset *,
-	    struct pf_pdesc *);
+int	pflog_packet(struct pf_pdesc *, u_int8_t, struct pf_rule *,
+	    struct pf_rule *, struct pf_ruleset *);
 void	pf_send_deferred_syn(struct pf_state *);
 int	pf_match_addr(u_int8_t, struct pf_addr *, struct pf_addr *,
 	    struct pf_addr *, sa_family_t);
@@ -1777,19 +1806,16 @@ int	pf_match_gid(u_int8_t, gid_t, gid_t, gid_t);
 
 int	pf_refragment6(struct mbuf **, struct m_tag *mtag, int);
 void	pf_normalize_init(void);
-int	pf_normalize_ip(struct mbuf **, int, struct pfi_kif *, u_short *,
-	    struct pf_pdesc *);
-int	pf_normalize_ip6(struct mbuf **, int, struct pfi_kif *, u_short *,
-	    struct pf_pdesc *);
-int	pf_normalize_tcp(int, struct pfi_kif *, struct mbuf *, int, int, void *,
-	    struct pf_pdesc *);
+int	pf_normalize_ip(struct mbuf **, int, u_short *);
+int	pf_normalize_ip6(struct mbuf **, int, int, int, u_short *);
+int	pf_normalize_tcp(struct pf_pdesc *);
 void	pf_normalize_tcp_cleanup(struct pf_state *);
-int	pf_normalize_tcp_init(struct mbuf *, int, struct pf_pdesc *,
-	    struct tcphdr *, struct pf_state_peer *, struct pf_state_peer *);
-int	pf_normalize_tcp_stateful(struct mbuf *, int, struct pf_pdesc *,
-	    u_short *, struct tcphdr *, struct pf_state *,
-	    struct pf_state_peer *, struct pf_state_peer *, int *);
-int	pf_normalize_mss(struct mbuf *, int, struct pf_pdesc *, u_int16_t);
+int	pf_normalize_tcp_init(struct pf_pdesc *, struct pf_state_peer *,
+	    struct pf_state_peer *);
+int	pf_normalize_tcp_stateful(struct pf_pdesc *, u_short *,
+	    struct pf_state *, struct pf_state_peer *, struct pf_state_peer *,
+	    int *);
+int	pf_normalize_mss(struct pf_pdesc *, u_int16_t);
 void	pf_scrub(struct mbuf *, u_int16_t, sa_family_t, u_int8_t, u_int8_t);
 u_int32_t
 	pf_state_expires(const struct pf_state *);
@@ -1798,12 +1824,17 @@ int	pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *,
 	    int);
 int	pf_rtlabel_match(struct pf_addr *, sa_family_t, struct pf_addr_wrap *,
 	    int);
-int	pf_socket_lookup(int, struct pf_pdesc *);
+int	pf_socket_lookup(struct pf_pdesc *);
 struct pf_state_key *pf_alloc_state_key(int);
 void	pf_pkt_addr_changed(struct mbuf *);
 int	pf_state_key_attach(struct pf_state_key *, struct pf_state *, int);
 int	pf_translate(struct pf_pdesc *, struct pf_addr *, u_int16_t,
 	    struct pf_addr *, u_int16_t, u_int16_t, int);
+int	pf_translate_af(struct pf_pdesc *);
+void	pf_route(struct mbuf **, struct pf_rule *, int,
+	    struct ifnet *, struct pf_state *);
+void	pf_route6(struct mbuf **, struct pf_rule *, int,
+	   struct ifnet *, struct pf_state *);
 
 void	pfr_initialize(void);
 int	pfr_match_addr(struct pfr_ktable *, struct pf_addr *, sa_family_t);
@@ -1811,7 +1842,13 @@ void	pfr_update_stats(struct pfr_ktable *, struct pf_addr *, sa_family_t,
 	    u_int64_t, int, int, int);
 int	pfr_pool_get(struct pfr_ktable *, int *, struct pf_addr *,
 	    struct pf_addr **, struct pf_addr **, struct pfi_kif **,
+	    u_int64_t *, u_int16_t *, int *,
 	    sa_family_t, int (*)(sa_family_t, struct pf_addr *));
+int	pfr_states_increase(struct pfr_ktable *, struct pf_addr *, int);
+int	pfr_states_decrease(struct pfr_ktable *, struct pf_addr *, int);
+struct pfr_kentry *
+	pfr_kentry_byaddr(struct pfr_ktable *, struct pf_addr *, sa_family_t,
+	    int);
 void	pfr_dynaddr_update(struct pfr_ktable *, struct pfi_dynaddr *);
 struct pfr_ktable *
 	pfr_attach_table(struct pf_ruleset *, char *, int);
@@ -1872,9 +1909,6 @@ void		 pf_tag2tagname(u_int16_t, char *);
 void		 pf_tag_ref(u_int16_t);
 void		 pf_tag_unref(u_int16_t);
 void		 pf_tag_packet(struct mbuf *, int, int);
-u_int32_t	 pf_qname2qid(char *);
-void		 pf_qid2qname(u_int32_t, char *);
-void		 pf_qid_unref(u_int32_t);
 int		 pf_addr_compare(struct pf_addr *, struct pf_addr *,
 		    sa_family_t);
 
@@ -1919,8 +1953,7 @@ void			 pf_anchor_remove(struct pf_rule *);
 int	pf_osfp_add(struct pf_osfp_ioctl *);
 #ifdef _KERNEL
 struct pf_osfp_enlist *
-	pf_osfp_fingerprint(struct pf_pdesc *, struct mbuf *, int,
-	    const struct tcphdr *);
+	pf_osfp_fingerprint(struct pf_pdesc *);
 #endif /* _KERNEL */
 struct pf_osfp_enlist *
 	pf_osfp_fingerprint_hdr(const struct ip *, const struct ip6_hdr *,
@@ -1942,12 +1975,14 @@ int			 pf_step_out_of_anchor(int *, struct pf_ruleset **,
 			     int *);
 
 int			 pf_get_transaddr(struct pf_rule *, struct pf_pdesc *,
-			    struct pf_src_node **);
+			    struct pf_src_node **, struct pf_rule **);
 
 int			 pf_map_addr(sa_family_t, struct pf_rule *,
 			    struct pf_addr *, struct pf_addr *,
 			    struct pf_addr *, struct pf_src_node **,
 			    struct pf_pool *, enum pf_sn_types);
+
+int			 pf_postprocess_addr(struct pf_state *);
 
 #endif /* _KERNEL */
 

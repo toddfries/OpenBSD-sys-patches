@@ -1,4 +1,4 @@
-/*	$OpenBSD: hdc9224.c,v 1.34 2010/09/28 13:20:50 miod Exp $	*/
+/*	$OpenBSD: hdc9224.c,v 1.38 2011/09/19 21:23:42 miod Exp $	*/
 /*	$NetBSD: hdc9224.c,v 1.16 2001/07/26 15:05:09 wiz Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -372,7 +372,7 @@ hdattach(struct device *parent, struct device *self, void *aux)
 	dl = hd->sc_disk.dk_label;
 	error = hdgetdisklabel(MAKEDISKDEV(HDMAJOR, hd->sc_dev.dv_unit, RAW_PART),
 	    hd, dl, 0);
-	printf("%s: %luMB, %lu sectors\n",
+	printf("%s: %lluMB, %llu sectors\n",
 	    hd->sc_dev.dv_xname, DL_GETDSIZE(dl) / (1048576 / DEV_BSIZE),
 	    DL_GETDSIZE(dl));
 #ifdef HDDEBUG
@@ -440,22 +440,19 @@ hdstrategy(struct buf *bp)
 {
 	struct hdsoftc *hd;
 	struct hdcsoftc *sc;
-	struct disklabel *lp;
 	int unit, s;
 
 	unit = DISKUNIT(bp->b_dev);
 	if (unit > hd_cd.cd_ndevs || (hd = hd_cd.cd_devs[unit]) == NULL) {
 		bp->b_error = ENXIO;
 		bp->b_flags |= B_ERROR;
+		bp->b_resid = bp->b_bcount;
 		goto done;
 	}
 	sc = (void *)hd->sc_dev.dv_parent;
 
-	lp = hd->sc_disk.dk_label;
-	if ((bounds_check_with_label(bp, hd->sc_disk.dk_label, 1)) <= 0)
-		goto done;
-
-	if (bp->b_bcount == 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, hd->sc_disk.dk_label) == -1)
 		goto done;
 
 	s = splbio();
@@ -732,11 +729,6 @@ hdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			if (cmd == DIOCWDINFO)
 				error = writedisklabel(dev, hdstrategy, lp);
 		}
-		break;
-
-	case DIOCWLABEL:
-		if ((flag & FWRITE) == 0)
-			error = EBADF;
 		break;
 
 	default:

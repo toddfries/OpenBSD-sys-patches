@@ -1,4 +1,4 @@
-/*	$OpenBSD: diskmap.c,v 1.4 2011/04/07 15:30:16 miod Exp $	*/
+/*	$OpenBSD: diskmap.c,v 1.6 2011/07/07 23:45:00 matthew Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Joel Sing <jsing@openbsd.org>
@@ -55,7 +55,7 @@ diskmapioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	struct dk_diskmap *dm;
 	struct nameidata ndp;
 	struct filedesc *fdp;
-	struct file *fp;
+	struct file *fp = NULL;
 	struct vnode *vp = NULL, *ovp;
 	char *devname;
 	int fd, error = EINVAL;
@@ -81,17 +81,11 @@ diskmapioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	fdp = p->p_fd;
 	fdplock(fdp);
 
-	if ((u_int)fd >= fdp->fd_nfiles || (fp = fdp->fd_ofiles[fd]) == NULL) {
-		error = EINVAL;
+	if ((error = getvnode(fdp, fd, &fp)) != 0)
 		goto bad;
-	}
-
-	if (!FILE_IS_USABLE(fp)) {
-		error = EINVAL;
-		goto bad;
-	}
 
 	ndp.ni_segflg = UIO_SYSSPACE;
+	ndp.ni_dirfd = AT_FDCWD;
 	ndp.ni_dirp = devname;
 	ndp.ni_cnd.cn_proc = p;
 	if ((error = vn_open(&ndp, fp->f_flag, 0)) != 0)
@@ -122,14 +116,17 @@ diskmapioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 
 	VOP_UNLOCK(vp, 0, p);
 
-	free(devname, M_DEVBUF);
+	FRELE(fp);
 	fdpunlock(fdp);
+	free(devname, M_DEVBUF);
 
 	return 0;
 
 bad:
 	if (vp)
 		vput(vp);
+	if (fp)
+		FRELE(fp);
 
 	fdpunlock(fdp);
 

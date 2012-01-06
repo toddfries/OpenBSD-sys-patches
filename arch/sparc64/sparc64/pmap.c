@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.73 2011/04/26 23:50:21 ariane Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.75 2011/09/22 17:41:00 jasper Exp $	*/
 /*	$NetBSD: pmap.c,v 1.107 2001/08/31 16:47:41 eeh Exp $	*/
 #undef	NO_VCACHE /* Don't forget the locked TLB in dostart */
 /*
@@ -1235,8 +1235,7 @@ remap_data:
 			atop(mp->start),
 			atop(mp->start+mp->size),
 			atop(mp->start),
-			atop(mp->start+mp->size),
-			VM_FREELIST_DEFAULT);
+			atop(mp->start+mp->size), 0);
 	}
 
 #if 0
@@ -1246,8 +1245,7 @@ remap_data:
 		uvm_page_physload(atop(ekdatap), 
 			atop(roundup(ekdatap, (4*MEG))),
 			atop(ekdatap), 
-			atop(roundup(ekdatap, (4*MEG))),
-			VM_FREELIST_DEFAULT);
+			atop(roundup(ekdatap, (4*MEG))), 0);
 	}
 #endif
 
@@ -1566,7 +1564,7 @@ sun4v_bootstrap_cpu(paddr_t intstack)
 
 /*
  * Initialize anything else for pmap handling.
- * Called during vm_init().
+ * Called during uvm_init().
  */
 void
 pmap_init()

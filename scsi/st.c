@@ -1,4 +1,4 @@
-/*	$OpenBSD: st.c,v 1.119 2011/03/31 18:42:48 jasper Exp $	*/
+/*	$OpenBSD: st.c,v 1.121 2011/07/03 15:47:18 matthew Exp $	*/
 /*	$NetBSD: st.c,v 1.71 1997/02/21 23:03:49 thorpej Exp $	*/
 
 /*
@@ -351,9 +351,6 @@ stactivate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		st->flags |= ST_DYING;
 		scsi_xsh_del(&st->sc_xsh);
@@ -1111,7 +1108,7 @@ stminphys(struct buf *bp)
 
 	st = stlookup(STUNIT(bp->b_dev));
 	if (st == NULL)
-		return;  /* can't happen */
+		return;
 
 	(*st->sc_link->adapter->scsi_minphys)(bp, st->sc_link);
 
@@ -1121,34 +1118,12 @@ stminphys(struct buf *bp)
 int
 stread(dev_t dev, struct uio *uio, int iomode)
 {
-	struct st_softc *st;
-
-	st = stlookup(STUNIT(dev));
-	if (st == NULL)
-		return (ENXIO);
-
-	if (st->flags & ST_DYING) {
-		device_unref(&st->sc_dev);
-		return (ENXIO);
-	}
-
 	return (physio(ststrategy, dev, B_READ, stminphys, uio));
 }
 
 int
 stwrite(dev_t dev, struct uio *uio, int iomode)
 {
-	struct st_softc *st;
-
-	st = stlookup(STUNIT(dev));
-	if (st == NULL)
-		return (ENXIO);
-
-	if (st->flags & ST_DYING) {
-		device_unref(&st->sc_dev);
-		return (ENXIO);
-	}
-
 	return (physio(ststrategy, dev, B_WRITE, stminphys, uio));
 }
 

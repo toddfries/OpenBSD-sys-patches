@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.88 2011/05/02 13:48:38 mikeb Exp $	*/
+/*	$OpenBSD: in.h,v 1.90 2011/07/06 01:57:37 dlg Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -187,6 +187,12 @@ struct in_addr {
 #define	IN_CLASSD_HOST		__IPADDR(0x0fffffff)
 #define	IN_MULTICAST(i)		IN_CLASSD(i)
 
+#define	IN_RFC3021_NET		__IPADDR(0xfffffffe)
+#define	IN_RFC3021_NSHIFT	31
+#define	IN_RFC3021_HOST		__IPADDR(0x00000001)
+#define	IN_RFC3021_SUBNET(n)	(((u_int32_t)(n) & IN_RFC3021_NET) == \
+				 IN_RFC3021_NET)
+
 #define	IN_EXPERIMENTAL(i)	(((u_int32_t)(i) & __IPADDR(0xf0000000)) == \
 				 __IPADDR(0xf0000000))
 #define	IN_BADCLASS(i)		(((u_int32_t)(i) & __IPADDR(0xf0000000)) == \
@@ -281,6 +287,7 @@ struct ip_opts {
 #define IP_MINTTL		32   /* minimum TTL for packet or drop */
 #define IP_RECVDSTPORT		33   /* bool; receive IP dst port w/dgram */
 #define IP_PIPEX		34   /* bool; using PIPEX */
+#define IP_RECVRTABLE		35   /* bool; receive rdomain w/dgram */
 
 #define IP_RTABLE		0x1021	/* int; routing table, see SO_RTABLE */
 

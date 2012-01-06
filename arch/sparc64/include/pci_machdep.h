@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.27 2011/05/21 20:46:11 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.30 2011/10/10 19:42:36 miod Exp $	*/
 /* $NetBSD: pci_machdep.h,v 1.7 2001/07/20 00:07:14 eeh Exp $ */
 
 /*
@@ -42,6 +42,8 @@ struct pci_attach_args;
  */
 
 typedef struct sparc_pci_chipset *pci_chipset_tag_t;
+
+#define PCI_INTR_MSI		0x80000000
 typedef u_int pci_intr_handle_t;
 
 /* 
@@ -85,11 +87,14 @@ pcireg_t	pci_conf_read(pci_chipset_tag_t, pcitag_t, int);
 void		pci_conf_write(pci_chipset_tag_t, pcitag_t, int,
 				    pcireg_t);
 int		pci_intr_map(struct pci_attach_args *, pci_intr_handle_t *);
+int		pci_intr_map_msi(struct pci_attach_args *, pci_intr_handle_t *);
 int		pci_intr_line(pci_chipset_tag_t, pci_intr_handle_t);
 const char	*pci_intr_string(pci_chipset_tag_t, pci_intr_handle_t);
 void		*pci_intr_establish(pci_chipset_tag_t, pci_intr_handle_t,
 				 int, int (*)(void *), void *, const char *);
 void		pci_intr_disestablish(pci_chipset_tag_t, void *);
+
+void		pci_msi_enable(pci_chipset_tag_t, pcitag_t, bus_addr_t, int);
 
 int		sparc64_pci_enumerate_bus(struct pci_softc *,
 		    int (*match)(struct pci_attach_args *),
@@ -97,10 +102,11 @@ int		sparc64_pci_enumerate_bus(struct pci_softc *,
 
 #define PCI_MACHDEP_ENUMERATE_BUS sparc64_pci_enumerate_bus
 
+#define	pci_probe_device_hook(c, a)	(0)
+
 #define pciide_machdep_compat_intr_establish(a, b, c, d, e) (NULL)
 #define pciide_machdep_compat_intr_disestablish(a, b) do { } while (0)
 
-#define pci_intr_map_msi(a, b)		(-1)
 #define	pci_dev_postattach(a, b)
 
 #endif /* _MACHINE_PCI_MACHDEP_H_ */

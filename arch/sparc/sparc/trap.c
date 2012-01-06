@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.56 2011/04/03 14:56:28 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.58 2011/11/16 20:50:19 deraadt Exp $	*/
 /*	$NetBSD: trap.c,v 1.58 1997/09/12 08:55:01 pk Exp $ */
 
 /*
@@ -81,9 +81,6 @@
 #include <machine/db_machdep.h>
 #else
 #include <machine/frame.h>
-#endif
-#ifdef COMPAT_SVR4
-#include <machine/svr4_machdep.h>
 #endif
 
 #include <sparc/fpu/fpu_extern.h>
@@ -199,7 +196,6 @@ const char *trap_type[] = {
 
 #define	N_TRAP_TYPES	(sizeof trap_type / sizeof *trap_type)
 
-static __inline void userret(struct proc *);
 void trap(unsigned, int, int, struct trapframe *);
 static __inline void share_fpu(struct proc *, struct trapframe *);
 void mem_access_fault(unsigned, int, u_int, int, int, struct trapframe *);
@@ -209,21 +205,6 @@ void syscall(register_t, struct trapframe *, register_t);
 int ignore_bogus_traps = 0;
 
 int want_ast = 0;
-/*
- * Define the code needed before returning to user mode, for
- * trap, mem_access_fault, and syscall.
- */
-static __inline void
-userret(struct proc *p)
-{
-	int sig;
-
-	/* take pending signals */
-	while ((sig = CURSIG(p)) != 0)
-		postsig(sig);
-
-	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
-}
 
 /*
  * If someone stole the FPU while we were away, do not enable it
@@ -315,28 +296,12 @@ trap(type, psr, pc, tf)
 			trapsignal(p, SIGILL, type, ILL_ILLOPC, sv);
 			break;
 		}
-#if defined(COMPAT_SVR4)
-badtrap:
-#endif
 		/* the following message is gratuitous */
 		/* ... but leave it in until we find anything */
 		printf("%s[%d]: unimplemented software trap 0x%x\n",
 			p->p_comm, p->p_pid, type);
 		trapsignal(p, SIGILL, type, ILL_ILLOPC, sv);
 		break;
-
-#ifdef COMPAT_SVR4
-	case T_SVR4_GETCC:
-	case T_SVR4_SETCC:
-	case T_SVR4_GETPSR:
-	case T_SVR4_SETPSR:
-	case T_SVR4_GETHRTIME:
-	case T_SVR4_GETHRVTIME:
-	case T_SVR4_GETHRESTIME:
-		if (!svr4_trap(type, p))
-			goto badtrap;
-		break;
-#endif
 
 	case T_AST:
 		want_ast = 0;

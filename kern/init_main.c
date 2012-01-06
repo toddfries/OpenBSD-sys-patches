@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.177 2011/04/18 21:44:56 guenther Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.181 2012/01/01 12:17:33 fgsch Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -107,7 +107,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2011 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2012 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -191,10 +191,7 @@ main(void *framep)
 	quad_t lim;
 	int s, i;
 	extern struct pdevinit pdevinit[];
-	extern void scheduler_start(void);
 	extern void disk_init(void);
-	extern void endtsleep(void *);
-	extern void realitexpire(void *);
 
 	/*
 	 * Initialize the current process pointer (curproc) before
@@ -283,7 +280,7 @@ main(void *framep)
 	session0.s_count = 1;
 	session0.s_leader = pr;
 
-	atomic_setbits_int(&p->p_flag, P_SYSTEM | P_NOCLDWAIT);
+	atomic_setbits_int(&p->p_flag, P_SYSTEM);
 	p->p_stat = SONPROC;
 	pr->ps_nice = NZERO;
 	p->p_emul = &emul_native;
@@ -368,7 +365,7 @@ main(void *framep)
 	initclocks();
 
 	/* Lock the kernel on behalf of proc0. */
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 
 #ifdef SYSVSHM
 	/* Initialize System V style shared memory. */
@@ -615,6 +612,9 @@ start_init(void *arg)
 
 	check_console(p);
 
+	/* process 0 ignores SIGCHLD, but we can't */
+	p->p_sigacts->ps_flags = 0;
+
 	/*
 	 * Need just enough stack to hold the faked-up "execve()" arguments.
 	 */
@@ -713,7 +713,7 @@ start_init(void *arg)
 		 * other than it doesn't exist, complain.
 		 */
 		if ((error = sys_execve(p, &args, retval)) == 0) {
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 			return;
 		}
 		if (error != ENOENT)

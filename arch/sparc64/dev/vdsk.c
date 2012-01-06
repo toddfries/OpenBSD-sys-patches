@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsk.c,v 1.27 2011/01/01 20:49:53 kettenis Exp $	*/
+/*	$OpenBSD: vdsk.c,v 1.29 2011/07/17 22:46:47 matthew Exp $	*/
 /*
  * Copyright (c) 2009, 2011 Mark Kettenis
  *

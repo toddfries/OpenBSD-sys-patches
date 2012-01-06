@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_machdep.c,v 1.39 2011/04/18 21:44:55 guenther Exp $	*/
+/*	$OpenBSD: linux_machdep.c,v 1.42 2011/11/07 15:41:33 guenther Exp $	*/
 /*	$NetBSD: linux_machdep.c,v 1.29 1996/05/03 19:42:11 christos Exp $	*/
 
 /*
@@ -114,16 +114,16 @@ linux_sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	int oonstack;
 
 	tf = p->p_md.md_regs;
-	oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !oonstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		fp = (struct linux_sigframe *)((char *)psp->ps_sigstk.ss_sp +
-		    psp->ps_sigstk.ss_size - sizeof(struct linux_sigframe));
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		fp = (struct linux_sigframe *)((char *)p->p_sigstk.ss_sp +
+		    p->p_sigstk.ss_size - sizeof(struct linux_sigframe));
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else {
 		fp = (struct linux_sigframe *)tf->tf_esp - 1;
 	}
@@ -257,7 +257,7 @@ linux_sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	tf->tf_esp = context.sc_esp_at_signal;
 	tf->tf_ss = context.sc_ss;
 
-	p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+	p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = context.sc_mask & ~sigcantmask;
 
 	return (EJUSTRETURN);
@@ -653,7 +653,7 @@ linux_sys_set_thread_area(struct proc *p, void *v, register_t *retval)
 	} else if (ldesc.entry_number != GUGS_SEL)
 		return EINVAL;
 
-	return i386_set_threadbase(p, &SCARG(uap, desc)->base_addr, TSEG_GS);
+	return i386_set_threadbase(p, ldesc.base_addr, TSEG_GS);
 }
 
 int
@@ -663,7 +663,6 @@ linux_sys_get_thread_area(struct proc *p, void *v, register_t *retval)
 	struct l_segment_descriptor info;
 	int error;
 	int idx;
-	void *base;
 
 	error = copyin(SCARG(uap, desc), &info, sizeof(info));
 	if (error)
@@ -673,11 +672,7 @@ linux_sys_get_thread_area(struct proc *p, void *v, register_t *retval)
 	if (idx != GUGS_SEL)
 		return (EINVAL);
 
-	error = i386_get_threadbase(p, &base, TSEG_GS);
-	if (error)
-		return error;
-
-	info.base_addr = (int)base;
+	info.base_addr = i386_get_threadbase(p, TSEG_GS);
 	info.limit = atop(VM_MAXUSER_ADDRESS) - 1;
 	info.seg_32bit = 1;
 	info.contents = 0;
@@ -686,9 +681,5 @@ linux_sys_get_thread_area(struct proc *p, void *v, register_t *retval)
 	info.seg_not_present = 0;
 	info.useable = 1;
 
-	error = copyout(&info, SCARG(uap, desc), sizeof(SCARG(uap, desc)));
-	if (error)
-	   	return error;
-
-	return 0;
+	return (copyout(&info, SCARG(uap, desc), sizeof(SCARG(uap, desc))));
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.19 2011/04/16 22:02:32 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.29 2011/11/26 19:14:17 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -17,7 +17,7 @@
  * OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define TRAPDEBUG
+#undef TRAPDEBUG
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -45,11 +45,19 @@
 #endif
 
 static __inline int inst_store(u_int ins) {
-	return (ins & 0xf0000000) == 0x60000000 ||	/* st */
-	       (ins & 0xf4000200) == 0x24000200 ||	/* fst/cst */
-	       (ins & 0xfc000200) == 0x0c000200 ||	/* stby */
-	       (ins & 0xfc0003c0) == 0x0c0001c0;	/* ldcw */
+	return (ins & 0xf0000000) == 0x60000000 ||	/* stb/sth/stw */
+	       (ins & 0xfc000000) == 0x70000000 ||	/* std/fstd */
+	       (ins & 0xfc000000) == 0x78000000 ||	/* fstw */
+	       (ins & 0xfc000000) == 0x7c000000 ||	/* stw/fstw */
+	       (ins & 0xfc000200) == 0x24000200 ||	/* cstw */
+	       (ins & 0xfc000200) == 0x2c000200 ||	/* cstd */
+	       (ins & 0xfc001300) == 0x0c001200 ||	/* stb/sth/stw/std */
+	       (ins & 0xfc001380) == 0x0c001300 ||	/* stby/stdby */
+	       (ins & 0xfc0003c0) == 0x0c0001c0 ||	/* ldcw */
+	       (ins & 0xfc0003c0) == 0x0c000140;	/* ldcd */
 }
+
+void	ast(struct proc *);
 
 const char *trap_type[] = {
 	"invalid",
@@ -122,43 +130,18 @@ u_char hppa64_regmap[32] = {
 	offsetof(struct trapframe, tf_r31) / 8,
 };
 
-void	userret(struct proc *p, register_t pc, u_quad_t oticks);
-
 void
-userret(struct proc *p, register_t pc, u_quad_t oticks)
+ast(struct proc *p)
 {
-	int sig;
-
-	/* take pending signals */
-	while ((sig = CURSIG(p)) != 0)
-		postsig(sig);
-
-	p->p_priority = p->p_usrpri;
 	if (astpending) {
 		astpending = 0;
+		uvmexp.softs++;
 		if (p->p_flag & P_OWEUPC) {
 			ADDUPROF(p);
 		}
+		if (want_resched)
+			preempt(NULL);
 	}
-	if (want_resched) {
-		/*
-		 * We're being preempted.
-		 */
-		preempt(NULL);
-		while ((sig = CURSIG(p)) != 0)
-			postsig(sig);
-	}
-
-	/*
-	 * If profiling, charge recent system time to the trapped pc.
-	 */
-	if (p->p_flag & P_PROFIL) {
-		extern int psratio;
-
-		addupc_task(p, pc, (int)(p->p_sticks - oticks) * psratio);
-	}
-
-	p->p_cpu->ci_schedstate.spc_curpriority = p->p_priority;
 }
 
 void
@@ -184,7 +167,8 @@ trap(int type, struct trapframe *frame)
 	opcode = frame->tf_iir;
 	if (trapnum <= T_EXCEPTION || trapnum == T_HIGHERPL ||
 	    trapnum == T_LOWERPL || trapnum == T_TAKENBR ||
-	    trapnum == T_IDEBUG || trapnum == T_PERFMON) {
+	    trapnum == T_IDEBUG || trapnum == T_PERFMON ||
+	    trapnum == T_IPROT) {
 		va = frame->tf_iioq[0];
 		space = frame->tf_iisq[0];
 		vftype = UVM_PROT_EXEC;
@@ -360,7 +344,6 @@ trap(int type, struct trapframe *frame)
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
 		break;
 
-	case T_IPROT | T_USER:
 	case T_DPROT | T_USER:
 		sv.sival_int = va;
 		trapsignal(p, SIGSEGV, vftype, SEGV_ACCERR, sv);
@@ -408,6 +391,7 @@ trap(int type, struct trapframe *frame)
 	case T_TLB_DIRTY | T_USER:
 	case T_DATACC:
 	case T_DATACC | T_USER:
+	case T_IPROT | T_USER:
 		fault = VM_FAULT_PROTECT;
 	case T_ITLBMISS:
 	case T_ITLBMISS | T_USER:
@@ -438,7 +422,6 @@ trap(int type, struct trapframe *frame)
 			break;
 		}
 
-printf("here\n");
 		ret = uvm_fault(map, trunc_page(va), fault, vftype);
 
 		/*
@@ -471,9 +454,10 @@ printf("here\n");
 					frame->tf_iir = 0;
 #endif
 				} else {
-					panic("trap: "
-					    "uvm_fault(%p, %lx, %d, %d): %d",
+					printf("trap: "
+					    "uvm_fault(%p, %lx, %d, %d): %d\n",
 					    map, va, fault, vftype, ret);
+					goto dead_end;
 				}
 			}
 		}
@@ -547,8 +531,10 @@ printf("here\n");
 	 * and also see a note in locore.S:TLABEL(all)
 	 */
 	if ((type & T_USER) &&
-	    (frame->tf_iioq[0] & ~PAGE_MASK) != SYSCALLGATE)
-		userret(p, frame->tf_iioq[0], 0);
+	    (frame->tf_iioq[0] & ~PAGE_MASK) != SYSCALLGATE) {
+		ast(p);
+		userret(p);
+	}
 }
 
 void
@@ -564,7 +550,8 @@ child_return(void *arg)
 	tf->tf_ret1 = 1;	/* ischild */
 	tf->tf_r1 = 0;		/* errno */
 
-	userret(p, tf->tf_iioq[0], 0);
+	ast(p);
+	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p,
@@ -584,13 +571,11 @@ syscall(struct trapframe *frame)
 {
 	register struct proc *p = curproc;
 	register const struct sysent *callp;
-	int retq, nsys, code, argsize, argoff, oerror, error;
+	int nsys, code, oerror, error;
 	register_t args[8], rval[2];
 #ifdef DIAGNOSTIC
 	long oldcpl = curcpu()->ci_cpl;
 #endif
-
-	/* TODO syscall */
 
 	uvmexp.syscalls++;
 
@@ -601,34 +586,27 @@ syscall(struct trapframe *frame)
 	nsys = p->p_emul->e_nsysent;
 	callp = p->p_emul->e_sysent;
 
-	argoff = 4; retq = 0;
 	switch (code = frame->tf_r1) {
 	case SYS_syscall:
+	case SYS___syscall:
 		code = frame->tf_args[0];
 		args[0] = frame->tf_args[1];
 		args[1] = frame->tf_args[2];
 		args[2] = frame->tf_args[3];
-		argoff = 3;
-		break;
-	case SYS___syscall:
-		if (callp != sysent)
-			break;
-		/*
-		 * this works, because quads get magically swapped
-		 * due to the args being laid backwards on the stack
-		 * and then copied in words
-		 */
-		code = frame->tf_args[0];
-		args[0] = frame->tf_args[2];
-		args[1] = frame->tf_args[3];
-		argoff = 2;
-		retq = 1;
+		args[3] = frame->tf_args[4];
+		args[4] = frame->tf_args[5];
+		args[5] = frame->tf_args[6];
+		args[6] = frame->tf_args[7];
 		break;
 	default:
 		args[0] = frame->tf_args[0];
 		args[1] = frame->tf_args[1];
 		args[2] = frame->tf_args[2];
 		args[3] = frame->tf_args[3];
+		args[4] = frame->tf_args[4];
+		args[5] = frame->tf_args[5];
+		args[6] = frame->tf_args[6];
+		args[7] = frame->tf_args[7];
 		break;
 	}
 
@@ -638,43 +616,6 @@ syscall(struct trapframe *frame)
 		callp += code;
 
 	oerror = error = 0;
-	if ((argsize = callp->sy_argsize)) {
-		int i;
-
-/* TODO syscallargs */
-
-		/*
-		 * coming from syscall() or __syscall we must be
-		 * having one of those w/ a 64 bit arguments,
-		 * which needs a word swap due to the order
-		 * of the arguments on the stack.
-		 * this assumes that none of 'em are called
-		 * by their normal syscall number, maybe a regress
-		 * test should be used, to watch the behaviour.
-		 */
-		if (!error && argoff < 4) {
-			int t;
-
-			i = 0;
-			switch (code) {
-			case SYS_lseek:		retq = 0;
-			case SYS_truncate:
-			case SYS_ftruncate:	i = 2;	break;
-			case SYS_preadv:
-			case SYS_pwritev:
-			case SYS_pread:
-			case SYS_pwrite:	i = 4;	break;
-			case SYS_mquery:
-			case SYS_mmap:		i = 6;	break;
-			}
-
-			if (i) {
-				t = args[i];
-				args[i] = args[i + 1];
-				args[i + 1] = t;
-			}
-		}
-	}
 
 #ifdef SYSCALL_DEBUG
 	scdebug_call(p, code, args);
@@ -683,9 +624,6 @@ syscall(struct trapframe *frame)
 	if (KTRPOINT(p, KTR_SYSCALL))
 		ktrsyscall(p, code, callp->sy_argsize, args);
 #endif
-	if (error)
-		goto bad;
-
 	rval[0] = 0;
 	rval[1] = frame->tf_ret1;
 #if NSYSTRACE > 0
@@ -697,16 +635,15 @@ syscall(struct trapframe *frame)
 	switch (error) {
 	case 0:
 		frame->tf_ret0 = rval[0];
-		frame->tf_ret1 = rval[!retq];
+		frame->tf_ret1 = rval[1];
 		frame->tf_r1 = 0;
 		break;
 	case ERESTART:
-		frame->tf_iioq[0] -= 12;
-		frame->tf_iioq[1] -= 12;
+		frame->tf_iioq[0] -= 16;
+		frame->tf_iioq[1] -= 16;
 	case EJUSTRETURN:
 		break;
 	default:
-	bad:
 		if (p->p_emul->e_errno)
 			error = p->p_emul->e_errno[error];
 		frame->tf_r1 = error;
@@ -717,7 +654,8 @@ syscall(struct trapframe *frame)
 #ifdef SYSCALL_DEBUG
 	scdebug_ret(p, code, oerror, rval);
 #endif
-	userret(p, frame->tf_iioq[1], 0);
+	ast(p);
+	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET))
 		ktrsysret(p, code, oerror, rval[0]);

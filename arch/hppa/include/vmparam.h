@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.37 2010/12/15 05:30:19 tedu Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.39 2011/11/10 22:48:13 deraadt Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -59,7 +59,7 @@
 #define	MAXSSIZ		(128*1024*1024UL)	/* max stack size */
 #endif
 
-#define STACKGAP_RANDOM	256*1024
+#define	STACKGAP_RANDOM	256*1024
 
 #ifndef USRIOSIZE
 #define	USRIOSIZE	((2*HPPA_PGALIAS)/PAGE_SIZE)	/* 8mb */
@@ -92,10 +92,6 @@
 
 #define	VM_PHYSSEG_NOADD	/* XXX until uvm code is fixed */
 
-#define	VM_NFREELIST		2
-#define	VM_FREELIST_DEFAULT	0
-#define	VM_FREELIST_ARCH	1
-
 #if defined(_KERNEL) && !defined(_LOCORE)
 
 #include <sys/lock.h>
@@ -116,4 +112,3 @@ struct vm_page_md {
 #endif
 
 #endif	/* _MACHINE_VMPARAM_H_ */
-

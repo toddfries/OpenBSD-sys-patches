@@ -1,4 +1,4 @@
-/*	$OpenBSD: ka680.c,v 1.12 2008/08/18 23:05:38 miod Exp $	*/
+/*	$OpenBSD: ka680.c,v 1.15 2011/09/19 21:53:02 miod Exp $	*/
 /*	$NetBSD: ka680.c,v 1.3 2001/01/28 21:01:53 ragge Exp $	*/
 /*
  * Copyright (c) 2002 Hugh Graham.
@@ -45,7 +45,6 @@
 #include <machine/cpu.h>
 #include <machine/mtpr.h>
 #include <machine/sid.h>
-#include <machine/nexus.h>
 #include <machine/uvax.h>
 #include <machine/ka680.h>
 #include <machine/clock.h>
@@ -98,8 +97,7 @@ struct cpu_dep ka680_calls = {
 	generic_halt,
 	generic_reboot,
 	NULL,
-	NULL,
-	hardclock
+	icr_hardclock
 };
 
 void
@@ -117,7 +115,7 @@ ka680_conf()
 
 	switch(vax_boardtype) {
 	case VAX_BTYP_1301:
-		switch((vax_siedata & 0xff00) >> 8) {
+		switch (vax_cpustype) {
 		case VAX_STYP_675:
 			cpuname = "KA675";
 			break;
@@ -132,7 +130,7 @@ ka680_conf()
 		}
 		break;
 	case VAX_BTYP_1305:
-		switch((vax_siedata & 0xff00) >> 8) {
+		switch (vax_cpustype) {
 		case VAX_STYP_681:
 			cpuname = "KA681";
 			break;
@@ -172,7 +170,7 @@ ka680_cache_enable()
 	mtpr(mfpr(PR_BCEDSTS), PR_BCEDSTS);	/* Clear error bits */
 	mtpr(mfpr(PR_NESTS), PR_NESTS);	 /* Clear error bits */
 
-	switch((vax_siedata & 0xff00) >> 8) {
+	switch (vax_cpustype) {
 	case VAX_STYP_680:
 	case VAX_STYP_681:	/* XXX untested */
 		fslut = 0x01420000;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ips.c,v 1.105 2011/04/06 15:33:15 dlg Exp $	*/
+/*	$OpenBSD: ips.c,v 1.108 2011/07/17 22:46:48 matthew Exp $	*/
 
 /*
  * Copyright (c) 2006, 2007, 2009 Alexander Yurchenko <grange@openbsd.org>

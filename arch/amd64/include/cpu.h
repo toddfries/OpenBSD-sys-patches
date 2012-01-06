@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.67 2011/05/23 09:52:24 claudio Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.70 2011/12/26 23:07:04 haesbaert Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -82,11 +82,11 @@ struct cpu_info {
 	struct pcb *ci_idle_pcb;
 
 	struct intrsource *ci_isources[MAX_INTR_SOURCES];
-	u_int32_t	ci_ipending;
+	u_int64_t	ci_ipending;
 	int		ci_ilevel;
 	int		ci_idepth;
-	u_int32_t	ci_imask[NIPL];
-	u_int32_t	ci_iunmask[NIPL];
+	u_int64_t	ci_imask[NIPL];
+	u_int64_t	ci_iunmask[NIPL];
 #ifdef DIAGNOSTIC
 	int		ci_mutex_level;
 #endif
@@ -160,7 +160,7 @@ extern void need_resched(struct cpu_info *);
 
 #if defined(MULTIPROCESSOR)
 
-#define MAXCPUS		64	/* bitmask; can be bumped to 64 */
+#define MAXCPUS		64	/* bitmask */
 
 #define CPU_STARTUP(_ci)	((_ci)->ci_func->start(_ci))
 #define CPU_STOP(_ci)		((_ci)->ci_func->stop(_ci))
@@ -255,6 +255,7 @@ extern int biosextmem;
 extern int cpu;
 extern int cpu_feature;
 extern int cpu_ecxfeature;
+extern int ecpu_ecxfeature;
 extern int cpu_id;
 extern char cpu_vendor[];
 extern int cpuid_level;

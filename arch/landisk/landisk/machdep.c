@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.23 2010/06/27 12:41:23 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.26 2011/06/26 22:39:59 deraadt Exp $	*/
 /*	$NetBSD: machdep.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
@@ -78,6 +78,7 @@
 #include <sys/core.h>
 #include <sys/kcore.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <dev/cons.h>
@@ -110,7 +111,6 @@ __dead void main(void);
 void	cpu_init_kcore_hdr(void);
 void	blink_led(void *);
 
-int	kbd_reset;
 int	led_blink;
 
 extern u_int32_t getramsize(void);
@@ -163,7 +163,7 @@ landisk_startup(int howto, char *_esym)
 	kernend = atop(round_page(SH3_P1SEG_TO_PHYS(kernend)));
 	uvm_page_physload(atop(IOM_RAM_BEGIN),
 	    atop(IOM_RAM_BEGIN + ramsize), kernend,
-	    atop(IOM_RAM_BEGIN + ramsize), VM_FREELIST_DEFAULT);
+	    atop(IOM_RAM_BEGIN + ramsize), 0);
 	cpu_init_kcore_hdr();	/* need to be done before pmap_bootstrap */
 
 	/* Initialize proc0 u-area */
@@ -211,6 +211,7 @@ boot(int howto)
 		else
 			printf("WARNING: not updating battery clock\n");
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();		/* Disable interrupts. */
@@ -472,11 +473,6 @@ cpu_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &consdev,
 		    sizeof consdev));
 	}
-
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 
 	case CPU_LED_BLINK:
 		oldval = led_blink;

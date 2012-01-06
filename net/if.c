@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.234 2011/03/13 15:31:41 stsp Exp $	*/
+/*	$OpenBSD: if.c,v 1.241 2012/01/03 23:41:51 bluhm Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -279,7 +279,7 @@ if_attachsetup(struct ifnet *ifp)
 	ifindex2ifnet[if_index] = ifp;
 
 	if (ifp->if_snd.ifq_maxlen == 0)
-		ifp->if_snd.ifq_maxlen = ifqmaxlen;
+		IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
 #ifdef ALTQ
 	ifp->if_snd.altq_type = 0;
 	ifp->if_snd.altq_disc = NULL;
@@ -585,10 +585,6 @@ do { \
 #ifdef INET6
 	IF_DETACH_QUEUES(ip6intrq);
 #endif
-#ifdef NETATALK
-	IF_DETACH_QUEUES(atintrq1);
-	IF_DETACH_QUEUES(atintrq2);
-#endif
 #ifdef NATM
 	IF_DETACH_QUEUES(natmintrq);
 #endif
@@ -652,33 +648,35 @@ do { \
 void
 if_detach_queues(struct ifnet *ifp, struct ifqueue *q)
 {
-	struct mbuf *m, *prev, *next;
+	struct mbuf *m, *prev = NULL, *next;
+	int prio;
 
-	prev = NULL;
-	for (m = q->ifq_head; m; m = next) {
-		next = m->m_nextpkt;
+	for (prio = 0; prio <= IFQ_MAXPRIO; prio++) {
+		for (m = q->ifq_q[prio].head; m; m = next) {
+			next = m->m_nextpkt;
 #ifdef DIAGNOSTIC
-		if ((m->m_flags & M_PKTHDR) == 0) {
-			prev = m;
-			continue;
-		}
+			if ((m->m_flags & M_PKTHDR) == 0) {
+				prev = m;
+				continue;
+			}
 #endif
-		if (m->m_pkthdr.rcvif != ifp) {
-			prev = m;
-			continue;
+			if (m->m_pkthdr.rcvif != ifp) {
+				prev = m;
+				continue;
+			}
+
+			if (prev)
+				prev->m_nextpkt = m->m_nextpkt;
+			else
+				q->ifq_q[prio].head = m->m_nextpkt;
+			if (q->ifq_q[prio].tail == m)
+				q->ifq_q[prio].tail = prev;
+			q->ifq_len--;
+
+			m->m_nextpkt = NULL;
+			m_freem(m);
+			IF_DROP(q);
 		}
-
-		if (prev)
-			prev->m_nextpkt = m->m_nextpkt;
-		else
-			q->ifq_head = m->m_nextpkt;
-		if (q->ifq_tail == m)
-			q->ifq_tail = prev;
-		q->ifq_len--;
-
-		m->m_nextpkt = NULL;
-		m_freem(m);
-		IF_DROP(q);
 	}
 }
 
@@ -714,7 +712,7 @@ if_clone_destroy(const char *name)
 {
 	struct if_clone *ifc;
 	struct ifnet *ifp;
-	int s, ret;
+	int s;
 
 	ifc = if_clone_lookup(name, NULL);
 	if (ifc == NULL)
@@ -733,12 +731,7 @@ if_clone_destroy(const char *name)
 		splx(s);
 	}
 
-	if_delgroup(ifp, ifc->ifc_name);
-
-	if ((ret = (*ifc->ifc_destroy)(ifp)) != 0)
-		if_addgroup(ifp, ifc->ifc_name);
-
-	return (ret);
+	return ((*ifc->ifc_destroy)(ifp));
 }
 
 /*
@@ -1165,24 +1158,6 @@ if_link_state_change(struct ifnet *ifp)
 	rt_if_track(ifp);
 #endif
 	dohooks(ifp->if_linkstatehooks, 0);
-}
-
-/*
- * Flush an interface queue.
- */
-void
-if_qflush(struct ifqueue *ifq)
-{
-	struct mbuf *m, *n;
-
-	n = ifq->ifq_head;
-	while ((m = n) != NULL) {
-		n = m->m_act;
-		m_freem(m);
-	}
-	ifq->ifq_head = 0;
-	ifq->ifq_tail = 0;
-	ifq->ifq_len = 0;
 }
 
 /*
@@ -1619,7 +1594,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	default:
 		if (so->so_proto == 0)
 			return (EOPNOTSUPP);
-#if !defined(COMPAT_43) && !defined(COMPAT_LINUX) && !defined(COMPAT_SVR4)
+#if !defined(COMPAT_43) && !defined(COMPAT_LINUX)
 		error = ((*so->so_proto->pr_usrreq)(so, PRU_CONTROL,
 			(struct mbuf *) cmd, (struct mbuf *) data,
 			(struct mbuf *) ifp, p));
@@ -1718,7 +1693,7 @@ ifconf(u_long cmd, caddr_t data)
 				TAILQ_FOREACH(ifa,
 				    &ifp->if_addrlist, ifa_list) {
 					sa = ifa->ifa_addr;
-#if defined(COMPAT_43) || defined(COMPAT_LINUX) || defined(COMPAT_SVR4)
+#if defined(COMPAT_43) || defined(COMPAT_LINUX)
 					if (cmd != OSIOCGIFCONF)
 #endif
 					if (sa->sa_len > sizeof(*sa))
@@ -1748,7 +1723,7 @@ ifconf(u_long cmd, caddr_t data)
 			    ifa != TAILQ_END(&ifp->if_addrlist);
 			    ifa = TAILQ_NEXT(ifa, ifa_list)) {
 				struct sockaddr *sa = ifa->ifa_addr;
-#if defined(COMPAT_43) || defined(COMPAT_LINUX) || defined(COMPAT_SVR4)
+#if defined(COMPAT_43) || defined(COMPAT_LINUX)
 				if (cmd == OSIOCGIFCONF) {
 					struct osockaddr *osa =
 					    (struct osockaddr *)&ifr.ifr_addr;
@@ -2344,13 +2319,12 @@ ifnewlladdr(struct ifnet *ifp)
 	/* Update the link-local address. Don't do it if we're
 	 * a router to avoid confusing hosts on the network. */
 	if (!(ifp->if_xflags & IFXF_NOINET6) && !ip6_forwarding) {
-		ifa = (struct ifaddr *)in6ifa_ifpforlinklocal(ifp, 0);
+		ifa = &in6ifa_ifpforlinklocal(ifp, 0)->ia_ifa;
 		if (ifa) {
 			in6_purgeaddr(ifa);
 			in6_ifattach_linklocal(ifp, NULL);
 			if (in6if_do_dad(ifp)) {
-				ifa = (struct ifaddr *)
-				    in6ifa_ifpforlinklocal(ifp, 0);
+				ifa = &in6ifa_ifpforlinklocal(ifp, 0)->ia_ifa;
 				if (ifa)
 					nd6_dad_start(ifa, NULL);
 			}

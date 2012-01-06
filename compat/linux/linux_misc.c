@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.c,v 1.67 2011/04/05 15:36:09 pirofti Exp $	*/
+/*	$OpenBSD: linux_misc.c,v 1.73 2011/12/14 08:33:18 robert Exp $	*/
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*-
@@ -51,10 +51,12 @@
 #include <sys/mount.h>
 #include <sys/ptrace.h>
 #include <sys/resource.h>
+#include <sys/swap.h>
 #include <sys/resourcevar.h>
 #include <sys/signal.h>
 #include <sys/signalvar.h>
 #include <sys/socket.h>
+#include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/times.h>
 #include <sys/vnode.h>
@@ -566,6 +568,20 @@ linux_sys_oldolduname(p, v, retval)
 	return copyout(&luts, SCARG(uap, up), sizeof(luts));
 }
 
+int
+linux_sys_sethostname(struct proc *p, void *v, register_t *retval)
+{
+	struct linux_sys_sethostname_args *uap = v;
+	int name;
+	int error;
+
+	if ((error = suser(p, 0)) != 0)
+		return (error);
+	name = KERN_HOSTNAME;
+	return (kern_sysctl(&name, 1, 0, 0, SCARG(uap, hostname),
+			    SCARG(uap, len), p));
+}
+
 /*
  * Linux wants to pass everything to a syscall in registers. However,
  * mmap() has 6 of them. Oops: out of register error. They just pass
@@ -746,52 +762,6 @@ linux_sys_times(p, v, retval)
 	microuptime(&t);
 
 	retval[0] = ((linux_clock_t)(CONVTCK(t)));
-	return 0;
-}
-
-/*
- * OpenBSD passes fd[0] in retval[0], and fd[1] in retval[1].
- * Linux directly passes the pointer.
- */
-int
-linux_sys_pipe(p, v, retval)
-	struct proc *p;
-	void *v;
-	register_t *retval;
-{
-	struct linux_sys_pipe_args /* {
-		syscallarg(int *) pfds;
-	} */ *uap = v;
-	int error;
-	int pfds[2];
-#ifdef __i386__
-	int reg_edx = retval[1];
-#endif /* __i386__ */
-
-	if ((error = sys_opipe(p, 0, retval))) {
-#ifdef __i386__
-		retval[1] = reg_edx;
-#endif /* __i386__ */
-		return error;
-	}
-
-	/* Assumes register_t is an int */
-
-	pfds[0] = retval[0];
-	pfds[1] = retval[1];
-	if ((error = copyout(pfds, SCARG(uap, pfds), 2 * sizeof (int)))) {
-#ifdef __i386__
-		retval[1] = reg_edx;
-#endif /* __i386__ */
-		fdrelease(p, retval[0]);
-		fdrelease(p, retval[1]);
-		return error;
-	}
-
-	retval[0] = 0;
-#ifdef __i386__
-	retval[1] = reg_edx;
-#endif /* __i386__ */
 	return 0;
 }
 
@@ -1451,7 +1421,7 @@ linux_sys_sysinfo(p, v, retval)
 	} */ *uap = v;
 	struct linux_sysinfo si;
 	struct loadavg *la;
-	extern int bufpages;
+	extern long bufpages;
 	struct timeval tv;
 
 	getmicrouptime(&tv);
@@ -1483,4 +1453,113 @@ linux_sys_mprotect(struct proc *p, void *v, register_t *retval)
 	if (SCARG(uap, prot) & (PROT_WRITE | PROT_EXEC))
 		SCARG(uap, prot) |= PROT_READ;
 	return (sys_mprotect(p, uap, retval));
+}
+
+int
+linux_sys_setdomainname(struct proc *p, void *v, register_t *retval)
+{
+	struct linux_sys_setdomainname_args *uap = v;
+	int error, mib[1];
+	
+	if ((error = suser(p, 0)))
+		return (error);
+	mib[0] = KERN_DOMAINNAME;
+	return (kern_sysctl(mib, 1, NULL, NULL, SCARG(uap, name),
+	    SCARG(uap, len), p));
+}
+
+int
+linux_sys_swapon(struct proc *p, void *v, register_t *retval)
+{
+	struct sys_swapctl_args ua;
+	struct linux_sys_swapon_args /* {
+		syscallarg(const char *) name;
+	} */ *uap = v;
+
+	SCARG(&ua, cmd) = SWAP_ON;
+	SCARG(&ua, arg) = (void *)SCARG(uap, name);
+	SCARG(&ua, misc) = 0;	/* priority */
+	return (sys_swapctl(p, &ua, retval));
+}
+
+int
+linux_sys_prctl(struct proc *p, void *v, register_t *retval)
+{
+	int error = 0, max_size, pdeath_signal;
+	char comm[LINUX_MAX_COMM_LEN];
+	struct linux_emuldata *ed = (struct linux_emuldata*)p->p_emuldata;
+
+	struct linux_sys_prctl_args /* {
+		int option;
+		unsigned long arg2;
+		unsigned long arg3;
+		unsigned long arg4;
+		unsigned long arg5;
+	} */ *uap = v;
+
+	switch (SCARG(uap, option)) {
+	case LINUX_PR_SET_PDEATHSIG:
+		if (SCARG(uap, arg2) < 0 || SCARG(uap, arg2) >= LINUX__NSIG)
+			return (EINVAL);
+		ed->pdeath_signal = SCARG(uap, arg2);
+		break;
+	case LINUX_PR_GET_PDEATHSIG:
+		pdeath_signal = ed->pdeath_signal;
+		error = copyout(&pdeath_signal, (void *)SCARG(uap, arg2),
+		    sizeof(pdeath_signal));
+		break;
+	case LINUX_PR_GET_KEEPCAPS:
+		/*
+		 * Indicate that we always clear the effective and
+		 * permitted capability sets when the user id becomes
+		 * non-zero (actually the capability sets are simply
+		 * always zero in the current implementation).
+		 */
+		*retval = 0;
+		break;
+	case LINUX_PR_SET_KEEPCAPS:
+		 /* Ignore requests to keep the effective and permitted
+		  * capability sets when the user id becomes non-zero.
+		  */
+		break;
+	case LINUX_PR_SET_NAME:
+		/*
+		 * To be on the safe side we need to make sure not to
+		 * overflow the size a linux program expects. We already
+		 * do this here in the copyin, so that we don't need to
+		 * check on copyout.
+		 */
+		max_size = MIN(sizeof(comm), sizeof(p->p_comm));
+		error = copyinstr((void *)SCARG(uap, arg2), comm,
+		    max_size, NULL);
+
+		/* Linux silently truncates the name if it is too long. */
+		if (error == ENAMETOOLONG) {
+			/*
+			 * XXX: copyinstr() isn't documented to populate the
+			 * array completely, so do a copyin() to be on the
+			 * safe side. This should be changed in case copyinstr()
+			 * is changed to guarantee this.
+			 */
+			error = copyin((void *)SCARG(uap, arg2), comm,
+			    max_size - 1);
+			comm[max_size - 1] = '\0';
+		}
+		if (error)
+			return (error);
+		strlcpy(p->p_comm, comm, sizeof(p->p_comm));
+		break;
+	case LINUX_PR_GET_NAME:
+		strlcpy(comm, p->p_comm, sizeof(comm));
+		error = copyout(comm, (void *)SCARG(uap, arg2),
+		    strlen(comm) + 1);
+		break;
+	default:
+		printf("linux_sys_prctl: unsupported option %d\n",
+		    SCARG(uap, option));
+		error = EINVAL;
+		break;
+	}
+
+	return (error);
 }

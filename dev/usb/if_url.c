@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_url.c,v 1.61 2011/01/25 20:03:35 jakemsr Exp $ */
+/*	$OpenBSD: if_url.c,v 1.63 2011/07/03 15:47:17 matthew Exp $ */
 /*	$NetBSD: if_url.c,v 1.6 2002/09/29 10:19:21 martin Exp $	*/
 /*
  * Copyright (c) 2001, 2002
@@ -587,9 +587,6 @@ url_activate(struct device *self, int act)
 		 __func__, act));
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		usbd_deactivate(sc->sc_udev);
 		break;
@@ -1055,12 +1052,6 @@ url_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	DPRINTF(("%s: %s: start rx\n", sc->sc_dev.dv_xname, __func__));
 }
-
-#if 0
-void url_intr()
-{
-}
-#endif
 
 int
 url_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.c,v 1.107 2011/05/10 21:38:04 oga Exp $	*/
+/*	$OpenBSD: uvm_page.c,v 1.114 2011/07/08 00:10:59 tedu Exp $	*/
 /*	$NetBSD: uvm_page.c,v 1.44 2000/11/27 08:40:04 chs Exp $	*/
 
 /*
@@ -129,11 +129,6 @@ static vaddr_t      virtual_space_start;
 static vaddr_t      virtual_space_end;
 
 /*
- * History
- */
-UVMHIST_DECL(pghist);
-
-/*
  * local prototypes
  */
 
@@ -157,7 +152,6 @@ __inline static void
 uvm_pageinsert(struct vm_page *pg)
 {
 	struct vm_page	*dupe;
-	UVMHIST_FUNC("uvm_pageinsert"); UVMHIST_CALLED(pghist);
 
 	KASSERT((pg->pg_flags & PG_TABLED) == 0);
 	dupe = RB_INSERT(uvm_objtree, &pg->uobject->memt, pg);
@@ -177,7 +171,6 @@ uvm_pageinsert(struct vm_page *pg)
 static __inline void
 uvm_pageremove(struct vm_page *pg)
 {
-	UVMHIST_FUNC("uvm_pageremove"); UVMHIST_CALLED(pghist);
 
 	KASSERT(pg->pg_flags & PG_TABLED);
 	RB_REMOVE(uvm_objtree, &pg->uobject->memt, pg);
@@ -201,13 +194,6 @@ uvm_page_init(vaddr_t *kvm_startp, vaddr_t *kvm_endp)
 	vm_page_t pagearray;
 	int lcv, i;
 	paddr_t paddr;
-#if defined(UVMHIST)
-	static struct uvm_history_ent pghistbuf[100];
-#endif
-
-	UVMHIST_FUNC("uvm_page_init");
-	UVMHIST_INIT_STATIC(pghist, pghistbuf);
-	UVMHIST_CALLED(pghist);
 
 	/*
 	 * init the page queues and page queue locks
@@ -459,14 +445,10 @@ uvm_pageboot_alloc(vsize_t size)
  * => return false if out of memory.
  */
 
-/* subroutine: try to allocate from memory chunks on the specified freelist */
-static boolean_t uvm_page_physget_freelist(paddr_t *, int);
-
-static boolean_t
-uvm_page_physget_freelist(paddr_t *paddrp, int freelist)
+boolean_t
+uvm_page_physget(paddr_t *paddrp)
 {
 	int lcv, x;
-	UVMHIST_FUNC("uvm_page_physget_freelist"); UVMHIST_CALLED(pghist);
 
 	/* pass 1: try allocating from a matching end */
 #if (VM_PHYSSEG_STRAT == VM_PSTRAT_BIGFIRST) || \
@@ -479,9 +461,6 @@ uvm_page_physget_freelist(paddr_t *paddrp, int freelist)
 
 		if (uvm.page_init_done == TRUE)
 			panic("uvm_page_physget: called _after_ bootstrap");
-
-		if (vm_physmem[lcv].free_list != freelist)
-			continue;
 
 		/* try from front */
 		if (vm_physmem[lcv].avail_start == vm_physmem[lcv].start &&
@@ -555,18 +534,6 @@ uvm_page_physget_freelist(paddr_t *paddrp, int freelist)
 	return (FALSE);        /* whoops! */
 }
 
-boolean_t
-uvm_page_physget(paddr_t *paddrp)
-{
-	int i;
-	UVMHIST_FUNC("uvm_page_physget"); UVMHIST_CALLED(pghist);
-
-	/* try in the order of freelist preference */
-	for (i = 0; i < VM_NFREELIST; i++)
-		if (uvm_page_physget_freelist(paddrp, i) == TRUE)
-			return (TRUE);
-	return (FALSE);
-}
 #endif /* PMAP_STEAL_MEMORY */
 
 /*
@@ -579,8 +546,8 @@ uvm_page_physget(paddr_t *paddrp)
  */
 
 void
-uvm_page_physload_flags(paddr_t start, paddr_t end, paddr_t avail_start,
-    paddr_t avail_end, int free_list, int flags)
+uvm_page_physload(paddr_t start, paddr_t end, paddr_t avail_start,
+    paddr_t avail_end, int flags)
 {
 	int preload, lcv;
 	psize_t npages;
@@ -589,9 +556,6 @@ uvm_page_physload_flags(paddr_t start, paddr_t end, paddr_t avail_start,
 
 	if (uvmexp.pagesize == 0)
 		panic("uvm_page_physload: page size not set!");
-
-	if (free_list >= VM_NFREELIST || free_list < VM_FREELIST_DEFAULT)
-		panic("uvm_page_physload: bad free list %d", free_list);
 
 	if (start >= end)
 		panic("uvm_page_physload: start >= end");
@@ -732,7 +696,6 @@ uvm_page_physload_flags(paddr_t start, paddr_t end, paddr_t avail_start,
 		ps->pgs = pgs;
 		ps->lastpg = pgs + npages - 1;
 	}
-	ps->free_list = free_list;
 	vm_nphysseg++;
 
 	/*
@@ -806,11 +769,85 @@ uvm_pagealloc_pg(struct vm_page *pg, struct uvm_object *obj, voff_t off,
 }
 
 /*
+ * uvm_pglistalloc: allocate a list of pages
+ *
+ * => allocated pages are placed at the tail of rlist.  rlist is
+ *    assumed to be properly initialized by caller.
+ * => returns 0 on success or errno on failure
+ * => doesn't take into account clean non-busy pages on inactive list
+ *	that could be used(?)
+ * => params:
+ *	size		the size of the allocation, rounded to page size.
+ *	low		the low address of the allowed allocation range.
+ *	high		the high address of the allowed allocation range.
+ *	alignment	memory must be aligned to this power-of-two boundary.
+ *	boundary	no segment in the allocation may cross this 
+ *			power-of-two boundary (relative to zero).
+ * => flags:
+ *	UVM_PLA_NOWAIT	fail if allocation fails
+ *	UVM_PLA_WAITOK	wait for memory to become avail
+ *	UVM_PLA_ZERO	return zeroed memory
+ */
+int
+uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
+    paddr_t boundary, struct pglist *rlist, int nsegs, int flags)
+{
+
+	KASSERT((alignment & (alignment - 1)) == 0);
+	KASSERT((boundary & (boundary - 1)) == 0);
+	KASSERT(!(flags & UVM_PLA_WAITOK) ^ !(flags & UVM_PLA_NOWAIT));
+
+	if (size == 0)
+		return (EINVAL);
+
+	if ((high & PAGE_MASK) != PAGE_MASK) {
+		printf("uvm_pglistalloc: Upper boundary 0x%lx "
+		    "not on pagemask.\n", (unsigned long)high);
+	}
+
+	/*
+	 * Our allocations are always page granularity, so our alignment
+	 * must be, too.
+	 */
+	if (alignment < PAGE_SIZE)
+		alignment = PAGE_SIZE;
+
+	low = atop(roundup(low, alignment));
+	/*
+	 * high + 1 may result in overflow, in which case high becomes 0x0,
+	 * which is the 'don't care' value.
+	 * The only requirement in that case is that low is also 0x0, or the
+	 * low<high assert will fail.
+	 */
+	high = atop(high + 1);
+	size = atop(round_page(size));
+	alignment = atop(alignment);
+	if (boundary < PAGE_SIZE && boundary != 0)
+		boundary = PAGE_SIZE;
+	boundary = atop(boundary);
+
+	return uvm_pmr_getpages(size, low, high, alignment, boundary, nsegs,
+	    flags, rlist);
+}
+
+/*
+ * uvm_pglistfree: free a list of pages
+ *
+ * => pages should already be unmapped
+ */
+void
+uvm_pglistfree(struct pglist *list)
+{
+	uvm_pmr_freepageq(list);
+}
+
+/*
  * interface used by the buffer cache to allocate a buffer at a time.
  * The pages are allocated wired in DMA accessible memory
  */
 void
-uvm_pagealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size, int flags)
+uvm_pagealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size,
+    int flags)
 {
 	struct pglist    plist;
 	struct vm_page  *pg;
@@ -828,6 +865,40 @@ uvm_pagealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size, int flags)
 		KASSERT((pg->pg_flags & PG_DEV) == 0);
 		TAILQ_REMOVE(&plist, pg, pageq);
 		uvm_pagealloc_pg(pg, obj, off + ptoa(i++), NULL);
+	}
+}
+
+/*
+ * interface used by the buffer cache to reallocate a buffer at a time.
+ * The pages are reallocated wired outside the DMA accessible region.
+ *
+ */
+void
+uvm_pagerealloc_multi(struct uvm_object *obj, voff_t off, vsize_t size,
+    int flags, struct uvm_constraint_range *where)
+{
+	struct pglist    plist;
+	struct vm_page  *pg, *tpg;
+	int              i;
+	voff_t		offset;
+
+
+	TAILQ_INIT(&plist);
+	if (size == 0)
+		panic("size 0 uvm_pagerealloc");
+	(void) uvm_pglistalloc(size, where->ucr_low, where->ucr_high, 0,
+	    0, &plist, atop(round_page(size)), UVM_PLA_WAITOK);
+	i = 0;
+	while((pg = TAILQ_FIRST(&plist)) != NULL) {
+		offset = off + ptoa(i++);
+		tpg = uvm_pagelookup(obj, offset);
+		pg->wire_count = 1;
+		atomic_setbits_int(&pg->pg_flags, PG_CLEAN | PG_FAKE);
+		KASSERT((pg->pg_flags & PG_DEV) == 0);
+		TAILQ_REMOVE(&plist, pg, pageq);
+		uvm_pagecopy(tpg, pg);
+		uvm_pagefree(tpg);
+		uvm_pagealloc_pg(pg, obj, offset, NULL);
 	}
 }
 
@@ -850,7 +921,6 @@ uvm_pagealloc(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 	struct pglist pgl;
 	int pmr_flags;
 	boolean_t use_reserve;
-	UVMHIST_FUNC("uvm_pagealloc"); UVMHIST_CALLED(pghist);
 
 	KASSERT(obj == NULL || anon == NULL);
 	KASSERT(off == trunc_page(off));
@@ -897,12 +967,9 @@ uvm_pagealloc(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 	if (flags & UVM_PGA_ZERO)
 		atomic_clearbits_int(&pg->pg_flags, PG_CLEAN);
 
-	UVMHIST_LOG(pghist, "allocated pg %p/%lx", pg,
-	    (u_long)VM_PAGE_TO_PHYS(pg), 0, 0);
 	return(pg);
 
  fail:
-	UVMHIST_LOG(pghist, "failed!", 0, 0, 0, 0);
 	return (NULL);
 }
 
@@ -915,8 +982,6 @@ uvm_pagealloc(struct uvm_object *obj, voff_t off, struct vm_anon *anon,
 void
 uvm_pagerealloc(struct vm_page *pg, struct uvm_object *newobj, voff_t newoff)
 {
-
-	UVMHIST_FUNC("uvm_pagerealloc"); UVMHIST_CALLED(pghist);
 
 	/*
 	 * remove it from the old object
@@ -953,7 +1018,6 @@ void
 uvm_pagefree(struct vm_page *pg)
 {
 	int saved_loan_count = pg->loan_count;
-	UVMHIST_FUNC("uvm_pagefree"); UVMHIST_CALLED(pghist);
 
 #ifdef DEBUG
 	if (pg->uobject == (void *)0xdeadbeef &&
@@ -962,8 +1026,6 @@ uvm_pagefree(struct vm_page *pg)
 	}
 #endif
 
-	UVMHIST_LOG(pghist, "freeing pg %p/%lx", pg,
-	    (u_long)VM_PAGE_TO_PHYS(pg), 0, 0);
 	KASSERT((pg->pg_flags & PG_DEV) == 0);
 
 	/*
@@ -1081,7 +1143,6 @@ uvm_page_unbusy(struct vm_page **pgs, int npgs)
 	struct vm_page *pg;
 	struct uvm_object *uobj;
 	int i;
-	UVMHIST_FUNC("uvm_page_unbusy"); UVMHIST_CALLED(pdhist);
 
 	for (i = 0; i < npgs; i++) {
 		pg = pgs[i];
@@ -1093,13 +1154,12 @@ uvm_page_unbusy(struct vm_page **pgs, int npgs)
 			wakeup(pg);
 		}
 		if (pg->pg_flags & PG_RELEASED) {
-			UVMHIST_LOG(pdhist, "releasing pg %p", pg,0,0,0);
 			uobj = pg->uobject;
 			if (uobj != NULL) {
 				uvm_lock_pageq();
 				pmap_page_protect(pg, VM_PROT_NONE);
 				/* XXX won't happen right now */
-				if (pg->pg_flags & PQ_ANON)
+				if (pg->pg_flags & PQ_AOBJ)
 					uao_dropswap(uobj,
 					    pg->offset >> PAGE_SHIFT);
 				uvm_pagefree(pg);
@@ -1110,7 +1170,6 @@ uvm_page_unbusy(struct vm_page **pgs, int npgs)
 				uvm_anfree(pg->uanon);
 			}
 		} else {
-			UVMHIST_LOG(pdhist, "unbusying pg %p", pg,0,0,0);
 			atomic_clearbits_int(&pg->pg_flags, PG_WANTED|PG_BUSY);
 			UVM_PAGE_OWN(pg, NULL);
 		}
@@ -1168,7 +1227,6 @@ uvm_pageidlezero(void)
 	struct vm_page *pg;
 	struct pgfreelist *pgfl;
 	int free_list;
-	UVMHIST_FUNC("uvm_pageidlezero"); UVMHIST_CALLED(pghist);
 
 	do {
 		uvm_lock_fpageq();

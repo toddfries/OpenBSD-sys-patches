@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.159 2011/04/26 23:50:21 ariane Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.161 2011/09/22 17:41:00 jasper Exp $	*/
 /*	$NetBSD: pmap.c,v 1.118 1998/05/19 19:00:18 thorpej Exp $ */
 
 /*
@@ -865,7 +865,7 @@ pmap_page_upload(void)
 				start, chop, end);
 #endif
 			uvm_page_physload(atop(start), atop(chop),
-				atop(start), atop(chop), VM_FREELIST_DEFAULT);
+				atop(start), atop(chop), 0);
 
 			/*
 			 * Adjust the start address to reflect the
@@ -883,7 +883,7 @@ pmap_page_upload(void)
 
 		/* Upload (the rest of) this segment */
 		uvm_page_physload(atop(start), atop(end),
-			atop(start), atop(end), VM_FREELIST_DEFAULT);
+			atop(start), atop(end), 0);
 	}
 }
 
@@ -2836,7 +2836,7 @@ pmap_bootstrap4_4c(void *top, int nctx, int nregion, int nsegment)
 	TAILQ_INIT(&segm_locked);
 
 	/*
-	 * Set up the `constants' for the call to vm_init()
+	 * Set up the `constants' for the call to uvm_init()
 	 * in main().  All pages beginning at p (rounded up to
 	 * the next whole page) and continuing through the number
 	 * of available pages are free, but they start at a higher
@@ -3158,7 +3158,7 @@ pmap_bootstrap4m(void *top)
 #endif
 
 	/*
-	 * Set up the `constants' for the call to vm_init()
+	 * Set up the `constants' for the call to uvm_init()
 	 * in main().  All pages beginning at p (rounded up to
 	 * the next whole page) and continuing through the number
 	 * of available pages are free.

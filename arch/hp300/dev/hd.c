@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.63 2010/09/22 01:18:57 matthew Exp $	*/
+/*	$OpenBSD: hd.c,v 1.69 2011/07/06 04:49:35 matthew Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -263,8 +263,6 @@ struct cfdriver hd_cd = {
 	NULL, "hd", DV_DISK
 };
 
-#define	hdlock(rs)	disk_lock(&(rs)->sc_dkdev)
-#define	hdunlock(rs)	disk_unlock(&(rs)->sc_dkdev)
 #define	hdlookup(unit)	(struct hd_softc *)device_lookup(&hd_cd, (unit))
 
 int
@@ -546,7 +544,7 @@ hdopen(dev, flags, mode, p)
 		return (error);
 	}
 
-	if ((error = hdlock(rs)) != 0) {
+	if ((error = disk_lock(&rs->sc_dkdev)) != 0) {
 		device_unref(&rs->sc_dev);
 		return (error);
 	}
@@ -589,7 +587,7 @@ hdopen(dev, flags, mode, p)
 
 	error = 0;
 out:
-	hdunlock(rs);
+	disk_unlock(&rs->sc_dkdev);
 	device_unref(&rs->sc_dev);
 	return (error);
 }
@@ -604,16 +602,12 @@ hdclose(dev, flag, mode, p)
 	struct hd_softc *rs;
 	struct disk *dk;
 	int mask, s;
-	int error;
 
 	rs = hdlookup(unit);
 	if (rs == NULL)
 		return (ENXIO);
 
-	if ((error = hdlock(rs)) != 0) {
-		device_unref(&rs->sc_dev);
-		return (error);
-	}
+	disk_lock_nointr(&rs->sc_dkdev);
 
 	mask = 1 << DISKPART(dev);
  	dk = &rs->sc_dkdev;
@@ -644,7 +638,7 @@ hdclose(dev, flag, mode, p)
 		rs->sc_flags &= ~(HDF_CLOSING);
 	}
 
-	hdunlock(rs);
+	disk_unlock(&rs->sc_dkdev);
 	device_unref(&rs->sc_dev);
 	return (0);
 }
@@ -656,7 +650,6 @@ hdstrategy(bp)
 	int unit = DISKUNIT(bp->b_dev);
 	struct hd_softc *rs;
 	struct buf *dp;
-	struct disklabel *lp;
 	int s;
 
 	rs = hdlookup(unit);
@@ -672,29 +665,9 @@ hdstrategy(bp)
 		       (bp->b_flags & B_READ) ? 'R' : 'W');
 #endif
 
-	lp = rs->sc_dkdev.dk_label;
-
-	/*
-	 * If it's a null transfer, return immediately
-	 */
-	if (bp->b_bcount == 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, rs->sc_dkdev.dk_label) == -1)
 		goto done;
-
-	/*
-	 * The transfer must be a whole number of blocks.
-	 */
-	if ((bp->b_bcount % lp->d_secsize) != 0) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
-
-	/*
-	 * Do bounds checking, adjust transfer. if error, process;
-	 * If end of partition, just return.
-	 */
-	if (bounds_check_with_label(bp, lp,
-	    (rs->sc_flags & HDF_WLABEL) != 0) <= 0)
-			goto done;
 
 	s = splbio();
  	dp = &rs->sc_tab;
@@ -707,13 +680,11 @@ hdstrategy(bp)
 
 	device_unref(&rs->sc_dev);
 	return;
-bad:
+
+ bad:
 	bp->b_flags |= B_ERROR;
-done:
-	/*
-	 * Correctly set the buf to indicate a completed xfer
-	 */
 	bp->b_resid = bp->b_bcount;
+ done:
 	s = splbio();
 	biodone(bp);
 	splx(s);
@@ -1162,17 +1133,6 @@ hdioctl(dev, cmd, data, flag, p)
 			&sc->sc_dkdev.dk_label->d_partitions[DISKPART(dev)];
 		goto exit;
 
-	case DIOCWLABEL:
-		if ((flag & FWRITE) == 0) {
-			error = EBADF;
-			goto exit;
-		}
-		if (*(int *)data)
-			sc->sc_flags |= HDF_WLABEL;
-		else
-			sc->sc_flags &= ~HDF_WLABEL;
-		goto exit;
-
 	case DIOCWDINFO:
 	case DIOCSDINFO:
 		if ((flag & FWRITE) == 0) {
@@ -1180,9 +1140,8 @@ hdioctl(dev, cmd, data, flag, p)
 			goto exit;
 		}
 
-		if ((error = hdlock(sc)) != 0)
+		if ((error = disk_lock(&sc->sc_dkdev)) != 0)
 			goto exit;
-		sc->sc_flags |= HDF_WLABEL;
 
 		error = setdisklabel(sc->sc_dkdev.dk_label,
 		    (struct disklabel *)data, /* sc->sc_dkdev.dk_openmask */ 0);
@@ -1192,8 +1151,7 @@ hdioctl(dev, cmd, data, flag, p)
 				    hdstrategy, sc->sc_dkdev.dk_label);
 		}
 
-		sc->sc_flags &= ~HDF_WLABEL;
-		hdunlock(sc);
+		disk_unlock(&sc->sc_dkdev);
 		goto exit;
 
 	default:

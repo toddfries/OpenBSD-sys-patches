@@ -1,4 +1,4 @@
-/*	$OpenBSD: sh_machdep.c,v 1.29 2011/04/18 21:44:55 guenther Exp $	*/
+/*	$OpenBSD: sh_machdep.c,v 1.31 2011/07/05 04:48:01 guenther Exp $	*/
 /*	$NetBSD: sh3_machdep.c,v 1.59 2006/03/04 01:13:36 uwe Exp $	*/
 
 /*
@@ -112,17 +112,6 @@
 #include <sh/trap.h>
 #include <sh/intr.h>
 #include <sh/kcore.h>
-
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
-#endif
-
-#ifdef  BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
 
 /* Our exported CPU info; we can have only one. */
 int cpu_arch;
@@ -471,16 +460,16 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct sigframe *fp, frame;
 	struct trapframe *tf = p->p_md.md_regs;
-	struct sigacts *ps = p->p_sigacts;
+	struct sigacts *psp = p->p_sigacts;
 	siginfo_t *sip;
 	int onstack;
 
-	onstack = ps->ps_sigstk.ss_flags & SS_ONSTACK;
-	if ((ps->ps_flags & SAS_ALTSTACK) && onstack == 0 &&
-	    (ps->ps_sigonstack & sigmask(sig))) {
-		fp = (struct sigframe *)((vaddr_t)ps->ps_sigstk.ss_sp +
-		    ps->ps_sigstk.ss_size);
-		ps->ps_sigstk.ss_flags |= SS_ONSTACK;
+	onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && onstack == 0 &&
+	    (psp->ps_sigonstack & sigmask(sig))) {
+		fp = (struct sigframe *)((vaddr_t)p->p_sigstk.ss_sp +
+		    p->p_sigstk.ss_size);
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		fp = (void *)p->p_md.md_regs->tf_r15;
 	--fp;
@@ -488,7 +477,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 
 	bzero(&frame, sizeof(frame));
 
-	if (ps->ps_siginfo & sigmask(sig)) {
+	if (psp->ps_siginfo & sigmask(sig)) {
 		initsiginfo(&frame.sf_si, sig, code, type, val);
 		sip = &fp->sf_si;
 	} else
@@ -608,9 +597,9 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 
 	/* Restore signal stack. */
 	if (context.sc_onstack)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	/* Restore signal mask. */
 	p->p_sigmask = context.sc_mask & ~sigcantmask;
 

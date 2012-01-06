@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.113 2011/04/18 21:44:56 guenther Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.119 2011/12/14 07:32:16 guenther Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -189,7 +189,8 @@ struct ctlname {
 #define	KERN_CONSDEV		75	/* dev_t: console terminal device */
 #define	KERN_NETLIVELOCKS	76	/* int: number of network livelocks */
 #define	KERN_POOL_DEBUG		77	/* int: enable pool_debug */
-#define	KERN_MAXID		78	/* number of valid kern ids */
+#define	KERN_PROC_CWD		78      /* node: proc cwd */
+#define	KERN_MAXID		79	/* number of valid kern ids */
 
 #define	CTL_KERN_NAMES { \
 	{ 0, 0 }, \
@@ -270,6 +271,7 @@ struct ctlname {
 	{ "consdev", CTLTYPE_STRUCT }, \
 	{ "netlivelocks", CTLTYPE_INT }, \
 	{ "pool_debug", CTLTYPE_INT }, \
+	{ "proc_cwd", CTLTYPE_NODE }, \
 }
 
 /*
@@ -453,7 +455,7 @@ struct kinfo_proc {
  *	kp - target kinfo_proc structure
  *	copy_str - a function or macro invoked as copy_str(dst,src,maxlen)
  *	    that has strlcpy or memcpy semantics; the destination is
- *	    pre-filled with zeros
+ *	    pre-filled with zeros; for libkvm, src is a kvm address
  *	p - source struct proc
  *	pr - source struct process
  *	pc - source struct pcreds
@@ -464,6 +466,7 @@ struct kinfo_proc {
  *	vm - source struct vmspace
  *	lim - source struct plimits
  *	ps - source struct pstats
+ *	sa - source struct sigacts
  * There are some members that are not handled by these macros
  * because they're too painful to generalize: p_ppid, p_sid, p_tdev,
  * p_tpgid, p_tsess, p_vm_rssize, p_u[us]time_{sec,usec}, p_cpuid
@@ -471,7 +474,7 @@ struct kinfo_proc {
 
 #define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
-#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, ps) \
+#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, ps, sa) \
 do {									\
 	memset((kp), 0, sizeof(*(kp)));					\
 									\
@@ -481,7 +484,7 @@ do {									\
 	(kp)->p_limit = PTRTOINT64((pr)->ps_limit);			\
 	(kp)->p_vmspace = PTRTOINT64((p)->p_vmspace);			\
 	(kp)->p_sigacts = PTRTOINT64((p)->p_sigacts);			\
-	(kp)->p_sess = PTRTOINT64((pr)->ps_session);			\
+	(kp)->p_sess = PTRTOINT64((pg)->pg_session);			\
 	(kp)->p_ru = PTRTOINT64((p)->p_ru);				\
 									\
 	(kp)->p_exitsig = (p)->p_exitsig;				\
@@ -513,13 +516,13 @@ do {									\
 	(kp)->p_sticks = (p)->p_sticks;					\
 	(kp)->p_iticks = (p)->p_iticks;					\
 									\
-	(kp)->p_tracep = PTRTOINT64((p)->p_tracep);			\
-	(kp)->p_traceflag = (p)->p_traceflag;				\
+	(kp)->p_tracep = PTRTOINT64((pr)->ps_tracevp);			\
+	(kp)->p_traceflag = (pr)->ps_traceflag;				\
 									\
 	(kp)->p_siglist = (p)->p_siglist;				\
 	(kp)->p_sigmask = (p)->p_sigmask;				\
-	(kp)->p_sigignore = (p)->p_sigignore;				\
-	(kp)->p_sigcatch = (p)->p_sigcatch;				\
+	(kp)->p_sigignore = (sa) ? (sa)->ps_sigignore : 0;		\
+	(kp)->p_sigcatch = (sa) ? (sa)->ps_sigcatch : 0;		\
 									\
 	(kp)->p_stat = (p)->p_stat;					\
 	(kp)->p_nice = (pr)->ps_nice;					\
@@ -527,12 +530,12 @@ do {									\
 	(kp)->p_xstat = (p)->p_xstat;					\
 	(kp)->p_acflag = (p)->p_acflag;					\
 									\
-	/* XXX depends on p_emul being an array and not a pointer */	\
+	/* XXX depends on e_name being an array and not a pointer */	\
 	copy_str((kp)->p_emul, (char *)(p)->p_emul +			\
 	    offsetof(struct emul, e_name), sizeof((kp)->p_emul));	\
-	copy_str((kp)->p_comm, (p)->p_comm, sizeof((kp)->p_comm));	\
-	copy_str((kp)->p_login, (sess)->s_login,			\
-	    MIN(sizeof((kp)->p_login) - 1, sizeof((sess)->s_login)));	\
+	strlcpy((kp)->p_comm, (p)->p_comm, sizeof((kp)->p_comm));	\
+	strlcpy((kp)->p_login, (sess)->s_login,			\
+	    MIN(sizeof((kp)->p_login), sizeof((sess)->s_login)));	\
 									\
 	if ((sess)->s_ttyvp)						\
 		(kp)->p_eflag |= EPROC_CTTY;				\
@@ -757,28 +760,29 @@ struct kinfo_file2 {
 /*
  * CTL_HW identifiers
  */
-#define	HW_MACHINE	 1		/* string: machine class */
-#define	HW_MODEL	 2		/* string: specific machine model */
-#define	HW_NCPU		 3		/* int: number of cpus being used */
-#define	HW_BYTEORDER	 4		/* int: machine byte order */
-#define	HW_PHYSMEM	 5		/* int: total memory */
-#define	HW_USERMEM	 6		/* int: non-kernel memory */
-#define	HW_PAGESIZE	 7		/* int: software page size */
-#define	HW_DISKNAMES	 8		/* strings: disk drive names */
-#define	HW_DISKSTATS	 9		/* struct: diskstats[] */
-#define	HW_DISKCOUNT	10		/* int: number of disks */
-#define	HW_SENSORS	11		/* node: hardware monitors */
-#define	HW_CPUSPEED	12		/* get CPU frequency */
-#define	HW_SETPERF	13		/* set CPU performance % */
-#define	HW_VENDOR	14		/* string: vendor name */
-#define	HW_PRODUCT	15		/* string: product name */
-#define	HW_VERSION	16		/* string: hardware version */
-#define	HW_SERIALNO	17		/* string: hardware serial number */
-#define	HW_UUID		18		/* string: universal unique id */
-#define	HW_PHYSMEM64	19		/* quad: total memory */
-#define	HW_USERMEM64	20		/* quad: non-kernel memory */
-#define	HW_NCPUFOUND	21		/* int: number of cpus found*/
-#define	HW_MAXID	22		/* number of valid hw ids */
+#define	HW_MACHINE		 1	/* string: machine class */
+#define	HW_MODEL		 2	/* string: specific machine model */
+#define	HW_NCPU			 3	/* int: number of cpus being used */
+#define	HW_BYTEORDER		 4	/* int: machine byte order */
+#define	HW_PHYSMEM		 5	/* int: total memory */
+#define	HW_USERMEM		 6	/* int: non-kernel memory */
+#define	HW_PAGESIZE		 7	/* int: software page size */
+#define	HW_DISKNAMES		 8	/* strings: disk drive names */
+#define	HW_DISKSTATS		 9	/* struct: diskstats[] */
+#define	HW_DISKCOUNT		10	/* int: number of disks */
+#define	HW_SENSORS		11	/* node: hardware monitors */
+#define	HW_CPUSPEED		12	/* get CPU frequency */
+#define	HW_SETPERF		13	/* set CPU performance % */
+#define	HW_VENDOR		14	/* string: vendor name */
+#define	HW_PRODUCT		15	/* string: product name */
+#define	HW_VERSION		16	/* string: hardware version */
+#define	HW_SERIALNO		17	/* string: hardware serial number */
+#define	HW_UUID			18	/* string: universal unique id */
+#define	HW_PHYSMEM64		19	/* quad: total memory */
+#define	HW_USERMEM64		20	/* quad: non-kernel memory */
+#define	HW_NCPUFOUND		21	/* int: number of cpus found*/
+#define	HW_ALLOWPOWERDOWN	22	/* allow power button shutdown */
+#define	HW_MAXID		23	/* number of valid hw ids */
 
 #define	CTL_HW_NAMES { \
 	{ 0, 0 }, \
@@ -803,6 +807,7 @@ struct kinfo_file2 {
 	{ "physmem", CTLTYPE_QUAD }, \
 	{ "usermem", CTLTYPE_QUAD }, \
 	{ "ncpufound", CTLTYPE_INT }, \
+	{ "allowpowerdown", CTLTYPE_INT }, \
 }
 
 /*
@@ -959,6 +964,7 @@ extern void (*cpu_setperf)(int);
 
 int bpf_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 int pflow_sysctl(int *, u_int, void *, size_t *, void *, size_t);
+int pipex_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 
 #else	/* !_KERNEL */
 #include <sys/cdefs.h>

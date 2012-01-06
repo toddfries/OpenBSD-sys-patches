@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.100 2011/04/18 21:44:56 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.105 2011/12/14 07:32:16 guenther Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -119,7 +119,6 @@ sys_threxit(struct proc *p, void *v, register_t *retval)
 void
 exit1(struct proc *p, int rv, int flags)
 {
-	struct proc *q, *nq;
 	struct process *pr, *qr, *nqr;
 
 	if (p->p_pid == 1)
@@ -128,39 +127,21 @@ exit1(struct proc *p, int rv, int flags)
 	
 	atomic_setbits_int(&p->p_flag, P_WEXIT);
 
-	/* unlink ourselves from the active threads */
 	pr = p->p_p;
-	TAILQ_REMOVE(&pr->ps_threads, p, p_thr_link);
-	if (TAILQ_EMPTY(&pr->ps_threads))
-		wakeup(&pr->ps_threads);
-	/*
-	 * if one thread calls exit, we take down everybody.
-	 * we have to be careful not to get recursively caught.
-	 * this is kinda sick.
-	 */
-	if (flags == EXIT_NORMAL && (p->p_flag & P_THREAD) &&
-	    (pr->ps_mainproc->p_flag & P_WEXIT) == 0) {
-		/*
-		 * we are one of the threads.  we SIGKILL the parent,
-		 * it will wake us up again, then we proceed.
-		 */
-		atomic_setbits_int(&pr->ps_mainproc->p_flag, P_IGNEXITRV);
+
+	/* single-threaded? */
+	if (TAILQ_FIRST(&pr->ps_threads) == p &&
+	    TAILQ_NEXT(p, p_thr_link) == NULL)
+		flags = EXIT_NORMAL;
+	else {
+		/* nope, multi-threaded */
+		if (flags == EXIT_NORMAL)
+			single_thread_set(p, SINGLE_EXIT, 0);
+	}
+
+	if (flags == EXIT_NORMAL) {
 		pr->ps_mainproc->p_xstat = rv;
-		ptsignal(pr->ps_mainproc, SIGKILL, SPROPAGATED);
-		tsleep(pr, PUSER, "thrdying", 0);
-	} else if ((p->p_flag & P_THREAD) == 0) {
-		if (flags == EXIT_NORMAL) {
-			q = TAILQ_FIRST(&pr->ps_threads);
-			for (; q != NULL; q = nq) {
-				nq = TAILQ_NEXT(q, p_thr_link);
-				atomic_setbits_int(&q->p_flag, P_IGNEXITRV);
-				q->p_xstat = rv;
-				ptsignal(q, SIGKILL, SPROPAGATED);
-			}
-		}
-		wakeup(pr);
-		while (!TAILQ_EMPTY(&pr->ps_threads))
-			tsleep(&pr->ps_threads, PUSER, "thrdeath", 0);
+
 		/*
 		 * If parent is waiting for us to exit or exec, PS_PPWAIT
 		 * is set; we wake up the parent early to avoid deadlock.
@@ -173,10 +154,18 @@ exit1(struct proc *p, int rv, int flags)
 		}
 	}
 
+	/* unlink ourselves from the active threads */
+	TAILQ_REMOVE(&pr->ps_threads, p, p_thr_link);
+	if ((p->p_flag & P_THREAD) == 0) {
+		/* main thread gotta wait because it has the pid, et al */
+		while (! TAILQ_EMPTY(&pr->ps_threads))
+			tsleep(&pr->ps_threads, PUSER, "thrdeath", 0);
+	} else if (TAILQ_EMPTY(&pr->ps_threads))
+		wakeup(&pr->ps_threads);
+
 	if (p->p_flag & P_PROFIL)
 		stopprofclock(p);
 	p->p_ru = pool_get(&rusage_pool, PR_WAITOK);
-	p->p_sigignore = ~0;
 	p->p_siglist = 0;
 	timeout_del(&p->p_realit_to);
 	timeout_del(&p->p_stats->p_virt_to);
@@ -231,16 +220,14 @@ exit1(struct proc *p, int rv, int flags)
 #ifdef ACCOUNTING
 		(void)acct_process(p);
 #endif
-	}
 
 #ifdef KTRACE
-	/* 
-	 * release trace file
-	 */
-	p->p_traceflag = 0;	/* don't trace the vrele() */
-	if (p->p_tracep)
-		ktrsettracevnode(p, NULL);
+		/* release trace file */
+		if (pr->ps_tracevp)
+			ktrcleartrace(pr);
 #endif
+	}
+
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE))
 		systrace_exit(p);
@@ -288,8 +275,6 @@ exit1(struct proc *p, int rv, int flags)
 	 * Save exit status and final rusage info, adding in child rusage
 	 * info and self times.
 	 */
-	if (!(p->p_flag & P_IGNEXITRV))
-		p->p_xstat = rv;
 	*p->p_ru = p->p_stats->p_ru;
 	calcru(p, &p->p_ru->ru_utime, &p->p_ru->ru_stime, NULL);
 	ruadd(p->p_ru, &p->p_stats->p_cru);
@@ -305,11 +290,12 @@ exit1(struct proc *p, int rv, int flags)
 
 		/*
 		 * Notify parent that we're gone.  If we have P_NOZOMBIE
-		 * or parent has the P_NOCLDWAIT flag set, notify process 1
+		 * or parent has the SAS_NOCLDWAIT flag set, notify process 1
 		 * instead (and hope it will handle this situation).
 		 */
 		if ((p->p_flag & P_NOZOMBIE) ||
-		    (pr->ps_pptr->ps_mainproc->p_flag & P_NOCLDWAIT)) {
+		    (pr->ps_pptr->ps_mainproc->p_sigacts->ps_flags &
+		    SAS_NOCLDWAIT)) {
 			struct process *ppr = pr->ps_pptr;
 			proc_reparent(pr, initproc->p_p);
 			/*
@@ -393,7 +379,7 @@ reaper(void)
 {
 	struct proc *p;
 
-	KERNEL_PROC_UNLOCK(curproc);
+	KERNEL_UNLOCK();
 
 	SCHED_ASSERT_UNLOCKED();
 
@@ -406,7 +392,7 @@ reaper(void)
 		LIST_REMOVE(p, p_hash);
 		mtx_leave(&deadproc_mutex);
 
-		KERNEL_PROC_LOCK(curproc);
+		KERNEL_LOCK();
 
 		/*
 		 * Free the VM resources we're still holding on to.
@@ -428,11 +414,11 @@ reaper(void)
 			proc_zap(p);
 		}
 
-		KERNEL_PROC_UNLOCK(curproc);
+		KERNEL_UNLOCK();
 	}
 }
 
-pid_t
+int
 sys_wait4(struct proc *q, void *v, register_t *retval)
 {
 	struct sys_wait4_args /* {
@@ -488,7 +474,8 @@ loop:
 			proc_finish_wait(q, p);
 			return (0);
 		}
-		if (p->p_stat == SSTOP && (p->p_flag & P_WAITED) == 0 &&
+		if (p->p_stat == SSTOP &&
+		    (p->p_flag & (P_WAITED|P_SUSPSINGLE)) == 0 &&
 		    (p->p_flag & P_TRACED || SCARG(uap, options) & WUNTRACED)) {
 			atomic_setbits_int(&p->p_flag, P_WAITED);
 			retval[0] = p->p_pid;

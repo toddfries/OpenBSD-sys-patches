@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.21 2010/07/02 19:57:15 tedu Exp $	*/
+/*	$OpenBSD: signal.h,v 1.23 2011/11/22 21:13:30 guenther Exp $	*/
 /*	$NetBSD: signal.h,v 1.21 1996/02/09 18:25:32 christos Exp $	*/
 
 /*
@@ -161,21 +161,13 @@ struct	sigvec {
  * Macro for converting signal number to a mask suitable for
  * sigblock().
  */
-#define sigmask(m)	(1 << ((m)-1))
+#define sigmask(m)	(1U << ((m)-1))
 
 #define	BADSIG		SIG_ERR
 
 #endif	/* __BSD_VISIBLE */
 
 #if __BSD_VISIBLE || __XPG_VISIBLE >= 420
-/*
- * Structure used in sigstack call.
- */
-struct	sigstack {
-	void	*ss_sp;			/* signal stack pointer */
-	int	ss_onstack;		/* current status */
-};
-
 /*
  * Structure used in sigaltstack call.
  */
@@ -188,14 +180,6 @@ typedef struct sigaltstack {
 #define SS_DISABLE	0x0004	/* disable taking signals on alternate stack */
 #define	MINSIGSTKSZ	8192			/* minimum allowable stack */
 #define	SIGSTKSZ	(MINSIGSTKSZ + 32768)	/* recommended stack size */
-
-#ifdef _KERNEL
-struct osigaltstack {
-	void	*ss_sp;			/* signal stack base */
-	int	ss_size;		/* signal stack length */
-	int	ss_flags;		/* SS_DISABLE and/or SS_ONSTACK */
-};
-#endif
 
 typedef struct sigcontext ucontext_t;
 #endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */

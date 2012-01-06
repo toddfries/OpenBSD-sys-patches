@@ -1,4 +1,4 @@
-/*	$OpenBSD: resourcevar.h,v 1.12 2010/06/29 20:14:46 guenther Exp $	*/
+/*	$OpenBSD: resourcevar.h,v 1.14 2011/07/11 15:40:47 guenther Exp $	*/
 /*	$NetBSD: resourcevar.h,v 1.12 1995/11/22 23:01:53 cgd Exp $	*/
 
 /*

@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.113 2011/04/18 21:44:56 guenther Exp $ */
+/* $OpenBSD: machdep.c,v 1.120 2011/09/19 21:53:02 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -74,6 +74,7 @@
 
 #include <dev/cons.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <net/if.h>
@@ -81,9 +82,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/ip_var.h>
-#endif
-#ifdef NETATALK
-#include <netatalk/at_extern.h>
 #endif
 #include "ppp.h"	/* For NPPP */
 #include "bridge.h"	/* For NBRIDGE */
@@ -93,7 +91,6 @@
 #endif
 
 #include <machine/sid.h>
-#include <machine/nexus.h>
 #include <machine/db_machdep.h>
 #include <machine/kcore.h>
 #include <vax/vax/gencons.h>
@@ -107,17 +104,6 @@
 #include <vax/vax/db_disasm.h>
 
 #include "led.h"
-
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
-#endif
-
-#ifdef	BUFPAGES
-int bufpages = BUFPAGES;
-#else
-int bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
 
 extern int virtual_avail, virtual_end;
 /*
@@ -409,9 +395,9 @@ sys_sigreturn(p, v, retval)
 		return (EINVAL);
 	}
 	if (ksc.sc_onstack & 01)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	/* Restore signal mask. */
 	p->p_sigmask = ksc.sc_mask & ~sigcantmask;
 
@@ -467,11 +453,11 @@ sendsig(catcher, sig, mask, code, type, val)
 	int	onstack;
 
 	syscf = p->p_addr->u_pcb.framep;
-	onstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/* Allocate space for the signal handler context. */
 	if (onstack)
-		cursp = ((int)psp->ps_sigstk.ss_sp + psp->ps_sigstk.ss_size);
+		cursp = ((int)p->p_sigstk.ss_sp + p->p_sigstk.ss_size);
 	else
 		cursp = syscf->sp;
 
@@ -489,7 +475,7 @@ sendsig(catcher, sig, mask, code, type, val)
 		initsiginfo(&gsigf.sf_si, sig, code, type, val);
 	}
 
-	gsigf.sf_sc.sc_onstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	gsigf.sf_sc.sc_onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 	gsigf.sf_sc.sc_mask = mask;
 	gsigf.sf_sc.sc_sp = syscf->sp; 
 	gsigf.sf_sc.sc_fp = syscf->fp; 
@@ -524,7 +510,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	syscf->ap = (unsigned)sigf + offsetof(struct sigframe, sf_pc);
 
 	if (onstack)
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 }
 
 int	waittime = -1;
@@ -551,6 +537,7 @@ boot(howto)
 		 */
 		resettodr();
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();		/* extreme priority */
@@ -1082,10 +1069,6 @@ char	cpu_model[100];
  * The strict cpu-dependent information is set up here, in
  * form of a pointer to a struct that is specific for each cpu.
  */
-extern struct cpu_dep ka780_calls;
-extern struct cpu_dep ka750_calls;
-extern struct cpu_dep ka860_calls;
-extern struct cpu_dep ka820_calls;
 extern struct cpu_dep ka43_calls;
 extern struct cpu_dep ka46_calls;
 extern struct cpu_dep ka48_calls;
@@ -1122,33 +1105,11 @@ start(struct rpb *prpb)
 		strlcpy(cpu_model, "VAXstation ", sizeof cpu_model);
 
 	switch (vax_boardtype) {
-#if VAX780
-	case VAX_BTYP_780:
-		dep_call = &ka780_calls;
-		strlcpy(cpu_model,"VAX 11/780", sizeof cpu_model);
-		if (vax_cpudata & 0x100)
-			cpu_model[9] = '5';
-		break;
-#endif
-#if VAX750
-	case VAX_BTYP_750:
-		dep_call = &ka750_calls;
-		strlcpy(cpu_model, "VAX 11/750", sizeof cpu_model);
-		break;
-#endif
-#if VAX8600
-	case VAX_BTYP_790:
-		dep_call = &ka860_calls;
-		strlcpy(cpu_model,"VAX 8600", sizeof cpu_model);
-		if (vax_cpudata & 0x100)
-			cpu_model[6] = '5';
-		break;
-#endif
 #if VAX410
 	case VAX_BTYP_420: /* They are very similar */
 		dep_call = &ka410_calls;
 		strlcat(cpu_model, "3100", sizeof cpu_model);
-		switch ((vax_siedata >> 8) & 0xff) {
+		switch (vax_cpustype) {
 		case 0x00:
 			strlcat(cpu_model, "/m{30,40}", sizeof cpu_model);
 			break;
@@ -1175,7 +1136,7 @@ start(struct rpb *prpb)
 #if VAX46
 	case VAX_BTYP_46:
 		dep_call = &ka46_calls;
-		switch(vax_siedata & 0xff) {
+		switch (vax_siedata & 0xff) {
 		case VAX_VTYP_47:
 			strlcpy(cpu_model, "MicroVAX 3100 m80", sizeof cpu_model);
 			break;
@@ -1196,7 +1157,7 @@ start(struct rpb *prpb)
 #if VAX48
 	case VAX_BTYP_48:
 		dep_call = &ka48_calls;
-		switch ((vax_siedata >> 8) & 0xff) {
+		switch (vax_cpustype) {
 		case VAX_STYP_45:
 			strlcpy(cpu_model, "MicroVAX 3100/m{30,40}", sizeof cpu_model);
 			break;
@@ -1217,7 +1178,7 @@ start(struct rpb *prpb)
 #if VAX53
 	case VAX_BTYP_1303:	
 		dep_call = &ka53_calls;
-		switch ((vax_siedata >> 8) & 0xff) {
+		switch (vax_cpustype) {
 		case VAX_STYP_50:
 			strlcpy(cpu_model, "MicroVAX 3100 model 85 or 90", sizeof cpu_model);
 			break;
@@ -1245,16 +1206,16 @@ start(struct rpb *prpb)
 	case VAX_BTYP_650:
 		dep_call = &ka650_calls;
 		strlcpy(cpu_model,"MicroVAX ", sizeof cpu_model);
-		switch ((vax_siedata >> 8) & 255) {
-		case VAX_SIE_KA640:
+		switch (vax_cpustype) {
+		case VAX_STYP_640:
 			strlcat(cpu_model, "3300/3400", sizeof cpu_model);
 			break;
 
-		case VAX_SIE_KA650:
+		case VAX_STYP_650:
 			strlcat(cpu_model, "3500/3600", sizeof cpu_model);
 			break;
 
-		case VAX_SIE_KA655:
+		case VAX_STYP_655:
 			strlcat(cpu_model, "3800/3900", sizeof cpu_model);
 			break;
 
@@ -1280,7 +1241,7 @@ start(struct rpb *prpb)
 	case VAX_BTYP_1301:
 		dep_call = &ka680_calls;
 		strlcpy(cpu_model,"VAX 4000 ", sizeof cpu_model);
-		switch ((vax_siedata >> 8) & 0xff) {
+		switch (vax_cpustype) {
 		case VAX_STYP_675:
 			strlcat(cpu_model,"400", sizeof cpu_model);
 			break;
@@ -1297,7 +1258,7 @@ start(struct rpb *prpb)
 	case VAX_BTYP_1305:
 		dep_call = &ka680_calls;
 		strlcpy(cpu_model,"VAX 4000 ", sizeof cpu_model);
-		switch ((vax_siedata >> 8) & 0xff) {
+		switch (vax_cpustype) {
 		case VAX_STYP_681:
 			strlcat(cpu_model,"500A", sizeof cpu_model);
 			break;
@@ -1313,13 +1274,6 @@ start(struct rpb *prpb)
 		default:
 			strlcat(cpu_model,"- Unknown Legacy Class", sizeof cpu_model);
 		}
-		break;
-#endif
-#if VAX8200
-	case VAX_BTYP_8000:
-		mastercpu = mfpr(PR_BINID);
-		dep_call = &ka820_calls;
-		strlcpy(cpu_model, "VAX 8200", sizeof cpu_model);
 		break;
 #endif
 #ifdef VAX60

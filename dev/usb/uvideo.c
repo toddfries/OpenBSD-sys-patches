@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvideo.c,v 1.161 2011/04/11 02:04:48 jakemsr Exp $ */
+/*	$OpenBSD: uvideo.c,v 1.166 2011/10/28 12:48:31 mglocker Exp $ */
 
 /*
  * Copyright (c) 2008 Robert Nagy <robert@openbsd.org>
@@ -34,6 +34,7 @@
 #include <sys/stat.h>
 #include <sys/device.h>
 #include <sys/poll.h>
+#include <sys/timeout.h>
 #include <sys/kthread.h>
 #include <uvm/uvm.h>
 
@@ -564,8 +565,6 @@ uvideo_activate(struct device *self, int act)
 	DPRINTF(1, "uvideo_activate: sc=%p\n", sc);
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
 	case DVACT_DEACTIVATE:
 		if (sc->sc_videodev != NULL)
 			config_deactivate(sc->sc_videodev);
@@ -1415,11 +1414,11 @@ uvideo_vs_negotiation(struct uvideo_softc *sc, int commit)
 				frame = fmtgrp->frame[i];
 				break;
 			}
-			if (i == fmtgrp->frame_num) {
-				DPRINTF(1, "%s: %s: invalid frame index 0x%x\n",
-				    DEVNAME(sc), __func__, pc->bFrameIndex);
-				return (USBD_INVAL);
-			}
+		}
+		if (i == fmtgrp->frame_num) {
+			DPRINTF(1, "%s: %s: invalid frame index 0x%x\n",
+			    DEVNAME(sc), __func__, pc->bFrameIndex);
+			return (USBD_INVAL);
 		}
 	} else
 		frame = fmtgrp->frame_cur;
@@ -3227,7 +3226,7 @@ int
 uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 {
 	struct uvideo_softc *sc = v;
-	int i;
+	int i, ret = 0;
 	usbd_status error;
 	uint8_t *ctrl_data;
 	uint16_t ctrl_len;
@@ -3242,7 +3241,7 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 		return (EINVAL);
 	}
 
-	ctrl_data = malloc(ctrl_len, M_USBDEV, M_WAITOK);
+	ctrl_data = malloc(ctrl_len, M_USBDEV, M_WAITOK | M_CANFAIL);
 	if (ctrl_data == NULL) {
 		printf("%s: could not allocate control data\n", __func__);
 		return (ENOMEM);
@@ -3258,8 +3257,10 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 	error = uvideo_vc_get_ctrl(sc, ctrl_data, GET_MIN,
 	    sc->sc_desc_vc_pu_cur->bUnitID,
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
-	if (error != USBD_NORMAL_COMPLETION)
-		return (EINVAL);
+	if (error != USBD_NORMAL_COMPLETION) {
+		ret = EINVAL;
+		goto out;
+	}
 	switch (ctrl_len) {
 	case 1:
 		qctrl->minimum = uvideo_ctrls[i].sig ?
@@ -3277,8 +3278,10 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 	error = uvideo_vc_get_ctrl(sc, ctrl_data, GET_MAX,
 	    sc->sc_desc_vc_pu_cur->bUnitID,
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
-	if (error != USBD_NORMAL_COMPLETION)
-		return (EINVAL);
+	if (error != USBD_NORMAL_COMPLETION) {
+		ret = EINVAL;
+		goto out;
+	}
 	switch(ctrl_len) {
 	case 1:
 		qctrl->maximum = uvideo_ctrls[i].sig ?
@@ -3296,8 +3299,10 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 	error = uvideo_vc_get_ctrl(sc, ctrl_data, GET_RES,
 	    sc->sc_desc_vc_pu_cur->bUnitID,
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
-	if (error != USBD_NORMAL_COMPLETION)
-		return (EINVAL);
+	if (error != USBD_NORMAL_COMPLETION) {
+		ret = EINVAL;
+		goto out;
+	}
 	switch(ctrl_len) {
 	case 1:
 		qctrl->step = uvideo_ctrls[i].sig ?
@@ -3315,8 +3320,10 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 	error = uvideo_vc_get_ctrl(sc, ctrl_data, GET_DEF,
 	    sc->sc_desc_vc_pu_cur->bUnitID,
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
-	if (error != USBD_NORMAL_COMPLETION)
-		return (EINVAL);
+	if (error != USBD_NORMAL_COMPLETION) {
+		ret = EINVAL;
+		goto out;
+	}
 	switch(ctrl_len) {
 	case 1:
 		qctrl->default_value = uvideo_ctrls[i].sig ?
@@ -3333,16 +3340,17 @@ uvideo_queryctrl(void *v, struct v4l2_queryctrl *qctrl)
 	/* set flags */
 	qctrl->flags = 0;
 
+out:
 	free(ctrl_data, M_USBDEV);
 
-	return (0);
+	return (ret);
 }
 
 int
 uvideo_g_ctrl(void *v, struct v4l2_control *gctrl)
 {
 	struct uvideo_softc *sc = v;
-	int i;
+	int i, ret = 0;
 	usbd_status error;
 	uint8_t *ctrl_data;
 	uint16_t ctrl_len;
@@ -3357,7 +3365,7 @@ uvideo_g_ctrl(void *v, struct v4l2_control *gctrl)
 		return (EINVAL);
 	}
 
-	ctrl_data = malloc(ctrl_len, M_USBDEV, M_WAITOK);
+	ctrl_data = malloc(ctrl_len, M_USBDEV, M_WAITOK | M_CANFAIL);
 	if (ctrl_data == NULL) {
 		printf("%s: could not allocate control data\n", __func__);
 		return (ENOMEM);
@@ -3366,8 +3374,10 @@ uvideo_g_ctrl(void *v, struct v4l2_control *gctrl)
 	error = uvideo_vc_get_ctrl(sc, ctrl_data, GET_CUR,
 	    sc->sc_desc_vc_pu_cur->bUnitID,
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
-	if (error != USBD_NORMAL_COMPLETION)
-		return (EINVAL);
+	if (error != USBD_NORMAL_COMPLETION) {
+		ret = EINVAL;
+		goto out;
+	}
 	switch(ctrl_len) {
 	case 1:
 		gctrl->value = uvideo_ctrls[i].sig ?
@@ -3381,6 +3391,7 @@ uvideo_g_ctrl(void *v, struct v4l2_control *gctrl)
 		break;
 	}
 
+out:
 	free(ctrl_data, M_USBDEV);
 
 	return (0);
@@ -3390,7 +3401,7 @@ int
 uvideo_s_ctrl(void *v, struct v4l2_control *sctrl)
 {
 	struct uvideo_softc *sc = v;
-	int i;
+	int i, ret = 0;
 	usbd_status error;
 	uint8_t *ctrl_data;
 	uint16_t ctrl_len;
@@ -3405,7 +3416,7 @@ uvideo_s_ctrl(void *v, struct v4l2_control *sctrl)
 		return (EINVAL);
 	}
 
-	ctrl_data = malloc(ctrl_len, M_USBDEV, M_WAITOK);
+	ctrl_data = malloc(ctrl_len, M_USBDEV, M_WAITOK | M_CANFAIL);
 	if (ctrl_data == NULL) {
 		printf("%s: could not allocate control data\n", __func__);
 		return (ENOMEM);
@@ -3426,11 +3437,11 @@ uvideo_s_ctrl(void *v, struct v4l2_control *sctrl)
 	    sc->sc_desc_vc_pu_cur->bUnitID,
 	    uvideo_ctrls[i].ctrl_selector, uvideo_ctrls[i].ctrl_len);
 	if (error != USBD_NORMAL_COMPLETION)
-		return (EINVAL);
+		ret = EINVAL;
 
 	free(ctrl_data, M_USBDEV);
 
-	return (0);
+	return (ret);
 }
 
 int

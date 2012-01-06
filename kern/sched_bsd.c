@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched_bsd.c,v 1.25 2011/03/07 07:07:13 guenther Exp $	*/
+/*	$OpenBSD: sched_bsd.c,v 1.27 2011/07/07 18:00:33 guenther Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*-
@@ -61,12 +61,7 @@ int	rrticks_init;		/* # of hardclock ticks per roundrobin() */
 struct __mp_lock sched_lock;
 #endif
 
-void scheduler_start(void);
-
-void roundrobin(struct cpu_info *);
 void schedcpu(void *);
-void updatepri(struct proc *);
-void endtsleep(void *);
 
 void
 scheduler_start(void)
@@ -366,8 +361,10 @@ mi_switch(void)
 	 * Release the kernel_lock, as we are about to yield the CPU.
 	 */
 	sched_count = __mp_release_all_but_one(&sched_lock);
-	if (p->p_flag & P_BIGLOCK)
+	if (__mp_lock_held(&kernel_lock))
 		hold_count = __mp_release_all(&kernel_lock);
+	else
+		hold_count = 0;
 #endif
 
 	/*
@@ -448,7 +445,7 @@ mi_switch(void)
 	 * released the scheduler lock to avoid deadlock, and before
 	 * we reacquire the interlock and the scheduler lock.
 	 */
-	if (p->p_flag & P_BIGLOCK)
+	if (hold_count)
 		__mp_acquire_count(&kernel_lock, hold_count);
 	__mp_acquire_count(&sched_lock, sched_count + 1);
 #endif

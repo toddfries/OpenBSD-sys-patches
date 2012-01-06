@@ -1,4 +1,4 @@
-/*	$OpenBSD: fpu.c,v 1.22 2011/03/20 21:44:08 guenther Exp $	*/
+/*	$OpenBSD: fpu.c,v 1.26 2011/07/11 15:40:47 guenther Exp $	*/
 /*	$NetBSD: fpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*-
@@ -30,12 +30,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)npx.c	7.2 (Berkeley) 5/12/91
- */
-
-/*
- * XXXfvdl update copyright notice. this started out as a stripped isa/npx.c
  */
 
 #include <sys/param.h>
@@ -166,9 +160,9 @@ fputrap(struct trapframe *frame)
 	sfp->fp_ex_sw = sfp->fp_fxsave.fx_fsw;
 	code = x86fpflags_to_siginfo (statbits);
 	sv.sival_ptr = (void *)frame->tf_rip;	/* XXX - ? */
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 	trapsignal(p, SIGFPE, frame->tf_err, code, sv);
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 }
 
 static int

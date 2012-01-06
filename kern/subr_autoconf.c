@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_autoconf.c,v 1.63 2010/09/08 15:50:11 deraadt Exp $	*/
+/*	$OpenBSD: subr_autoconf.c,v 1.66 2011/07/03 15:47:16 matthew Exp $	*/
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -51,6 +51,7 @@
 #include <sys/systm.h>
 #include <sys/queue.h>
 #include <sys/proc.h>
+#include <sys/mutex.h>
 
 #include "hotplug.h"
 
@@ -99,6 +100,14 @@ void config_process_deferred_children(struct device *);
 struct devicelist alldevs;		/* list of all devices */
 
 __volatile int config_pending;		/* semaphore for mountroot */
+
+struct mutex autoconf_attdet_mtx = MUTEX_INITIALIZER(IPL_HIGH);
+/*
+ * If > 0, devices are being attached and any thread which tries to
+ * detach will sleep; if < 0 devices are being detached and any
+ * thread which tries to attach will sleep.
+ */
+int	autoconf_attdet;
 
 /*
  * Initialize autoconfiguration data structures.  This occurs before console
@@ -339,6 +348,13 @@ config_attach(struct device *parent, void *match, void *aux, cfprint_t print)
 	struct cfattach *ca;
 	struct cftable *t;
 
+	mtx_enter(&autoconf_attdet_mtx);
+	while (autoconf_attdet < 0)
+		msleep(&autoconf_attdet, &autoconf_attdet_mtx,
+		    PWAIT, "autoconf", 0);
+	autoconf_attdet++;
+	mtx_leave(&autoconf_attdet_mtx);
+
 	if (parent && parent->dv_cfdata->cf_driver->cd_indirect) {
 		dev = match;
 		cf = dev->dv_cfdata;
@@ -350,6 +366,9 @@ config_attach(struct device *parent, void *match, void *aux, cfprint_t print)
 	cd = cf->cf_driver;
 	ca = cf->cf_attach;
 
+	KASSERT(cd->cd_devs != NULL);
+	KASSERT(dev->dv_unit < cd->cd_ndevs);
+	KASSERT(cd->cd_devs[dev->dv_unit] == NULL);
 	cd->cd_devs[dev->dv_unit] = dev;
 
 	/*
@@ -395,6 +414,11 @@ config_attach(struct device *parent, void *match, void *aux, cfprint_t print)
 	if (!cold)
 		hotplug_device_attach(cd->cd_class, dev->dv_xname);
 #endif
+
+	mtx_enter(&autoconf_attdet_mtx);
+	if (--autoconf_attdet == 0)
+		wakeup(&autoconf_attdet);
+	mtx_leave(&autoconf_attdet_mtx);
 	return (dev);
 }
 
@@ -492,6 +516,13 @@ config_detach(struct device *dev, int flags)
 	char devname[16];
 #endif
 
+	mtx_enter(&autoconf_attdet_mtx);
+	while (autoconf_attdet > 0)
+		msleep(&autoconf_attdet, &autoconf_attdet_mtx,
+		    PWAIT, "autoconf", 0);
+	autoconf_attdet--;
+	mtx_leave(&autoconf_attdet_mtx);
+
 #if NHOTPLUG > 0
 	strlcpy(devname, dev->dv_xname, sizeof(devname));
 #endif
@@ -526,7 +557,7 @@ config_detach(struct device *dev, int flags)
 	}
 	if (rv != 0) {
 		if ((flags & DETACH_FORCE) == 0)
-			return (rv);
+			goto done;
 		else
 			panic("config_detach: forced detach of %s failed (%d)",
 			    dev->dv_xname, rv);
@@ -543,11 +574,18 @@ config_detach(struct device *dev, int flags)
 	 * after parents, we only need to search the latter part of
 	 * the list.)
 	 */
+	i = 0;
 	for (d = TAILQ_NEXT(dev, dv_list); d != NULL;
 	     d = TAILQ_NEXT(d, dv_list)) {
-		if (d->dv_parent == dev)
-			panic("config_detach: detached device has children");
+		if (d->dv_parent == dev) {
+			printf("config_detach: %s attached at %s\n",
+			    d->dv_xname, dev->dv_xname);
+			i = 1;
+		}
 	}
+	if (i != 0)
+		panic("config_detach: detached device (%s) has children",
+		    dev->dv_xname);
 #endif
 
 	/*
@@ -601,24 +639,11 @@ config_detach(struct device *dev, int flags)
 	/*
 	 * Return success.
 	 */
-	return (0);
-}
-
-int
-config_activate(struct device *dev)
-{
-	struct cfattach *ca = dev->dv_cfdata->cf_attach;
-	int rv = 0, oflags = dev->dv_flags;
-
-	if (ca->ca_activate == NULL)
-		return (EOPNOTSUPP);
-
-	if ((dev->dv_flags & DVF_ACTIVE) == 0) {
-		dev->dv_flags |= DVF_ACTIVE;
-		rv = (*ca->ca_activate)(dev, DVACT_ACTIVATE);
-		if (rv)
-			dev->dv_flags = oflags;
-	}
+done:
+	mtx_enter(&autoconf_attdet_mtx);
+	if (++autoconf_attdet == 0)
+		wakeup(&autoconf_attdet);
+	mtx_leave(&autoconf_attdet_mtx);
 	return (rv);
 }
 
@@ -774,9 +799,6 @@ config_activate_children(struct device *parent, int act)
 		if (d->dv_parent != parent)
 			continue;
 		switch (act) {
-		case DVACT_ACTIVATE:
-			rv = config_activate(d);
-			break;
 		case DVACT_SUSPEND:
 		case DVACT_RESUME:
 		case DVACT_QUIESCE:

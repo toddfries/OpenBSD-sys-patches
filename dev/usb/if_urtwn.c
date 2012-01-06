@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtwn.c,v 1.16 2011/02/10 17:26:40 jakemsr Exp $	*/
+/*	$OpenBSD: if_urtwn.c,v 1.20 2011/11/26 06:39:33 ckuethe Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -92,6 +92,7 @@ static const struct usb_devno urtwn_devs[] = {
 	{ USB_VENDOR_FEIXUN,	USB_PRODUCT_FEIXUN_RTL8192CU },
 	{ USB_VENDOR_GUILLEMOT,	USB_PRODUCT_GUILLEMOT_HWNUP150 },
 	{ USB_VENDOR_HP3,	USB_PRODUCT_HP3_RTL8188CU },
+	{ USB_VENDOR_NETGEAR,	USB_PRODUCT_NETGEAR_WNA1000M },
 	{ USB_VENDOR_NOVATECH,	USB_PRODUCT_NOVATECH_RTL8188CU },
 	{ USB_VENDOR_PLANEX2,	USB_PRODUCT_PLANEX2_RTL8188CU_1 },
 	{ USB_VENDOR_PLANEX2,	USB_PRODUCT_PLANEX2_RTL8188CU_2 },
@@ -403,8 +404,6 @@ urtwn_activate(struct device *self, int act)
 	struct urtwn_softc *sc = (struct urtwn_softc *)self;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
 	case DVACT_DEACTIVATE:
 		usbd_deactivate(sc->sc_udev);
 		break;
@@ -2222,7 +2221,7 @@ urtwn_load_firmware(struct urtwn_softc *sc)
 		error = urtwn_fw_loadpage(sc, page, ptr, mlen);
 		if (error != 0) {
 			printf("%s: could not load firmware page %d\n",
-			    sc->sc_dev.dv_xname);
+			    sc->sc_dev.dv_xname, page);
 			goto fail;
 		}
 		ptr += mlen;
@@ -2892,9 +2891,9 @@ urtwn_iq_calib_chain(struct urtwn_softc *sc, int chain, uint16_t tx[2],
 	if (status & (1 << (27 + chain * 3)))
 		return (1);	/* Rx failed. */
 	/* Read Rx IQ calibration results. */
-	rx[2] = (urtwn_bb_read(sc, 0xea4 + offset) >> 16) & 0x3ff;
-	rx[3] = (urtwn_bb_read(sc, 0xeac + offset) >> 16) & 0x3ff;
-	if (rx[2] == 0x132 || rx[3] == 0x036)
+	rx[0] = (urtwn_bb_read(sc, 0xea4 + offset) >> 16) & 0x3ff;
+	rx[1] = (urtwn_bb_read(sc, 0xeac + offset) >> 16) & 0x3ff;
+	if (rx[0] == 0x132 || rx[1] == 0x036)
 		return (1);	/* Rx failed. */
 
 	return (3);	/* Both Tx and Rx succeeded. */

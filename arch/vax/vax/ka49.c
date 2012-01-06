@@ -1,4 +1,4 @@
-/*	$OpenBSD: ka49.c,v 1.9 2008/08/18 23:05:38 miod Exp $	*/
+/*	$OpenBSD: ka49.c,v 1.11 2011/09/15 00:48:24 miod Exp $	*/
 /*
  * Copyright (c) 1999 Ludd, University of Lule}, Sweden.
  * All rights reserved.
@@ -65,8 +65,7 @@ struct	cpu_dep ka49_calls = {
 	ka49_halt,
 	ka49_reboot,
 	NULL,
-	NULL,
-	hardclock
+	icr_hardclock
 };
 
 

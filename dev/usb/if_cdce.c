@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdce.c,v 1.49 2011/01/25 20:03:35 jakemsr Exp $ */
+/*	$OpenBSD: if_cdce.c,v 1.51 2011/11/09 21:45:50 sthen Exp $ */
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003 Bill Paul <wpaul@windriver.com>
@@ -146,8 +146,10 @@ cdce_match(struct device *parent, void *match, void *aux)
 	if (cdce_lookup(uaa->vendor, uaa->product) != NULL)
 		return (UMATCH_VENDOR_PRODUCT);
 
-	if (id->bInterfaceClass == UICLASS_CDC && id->bInterfaceSubClass ==
-	    UISUBCLASS_ETHERNET_NETWORKING_CONTROL_MODEL)
+	if (id->bInterfaceClass == UICLASS_CDC &&
+	    (id->bInterfaceSubClass ==
+	    UISUBCLASS_ETHERNET_NETWORKING_CONTROL_MODEL ||
+	    id->bInterfaceSubClass == UISUBCLASS_MOBILE_DIRECT_LINE_MODEL))
 		return (UMATCH_IFACECLASS_GENERIC);
 
 	return (UMATCH_NONE);
@@ -872,9 +874,6 @@ cdce_activate(struct device *self, int act)
 	struct cdce_softc *sc = (struct cdce_softc *)self;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		sc->cdce_dying = 1;
 		break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_udav.c,v 1.55 2011/03/31 17:06:25 mk Exp $ */
+/*	$OpenBSD: if_udav.c,v 1.58 2011/09/04 18:34:02 jsg Exp $ */
 /*	$NetBSD: if_udav.c,v 1.3 2004/04/23 17:25:25 itojun Exp $	*/
 /*	$nabe: if_udav.c,v 1.3 2003/08/21 16:57:19 nabe Exp $	*/
 /*
@@ -167,7 +167,8 @@ static const struct udav_type {
 	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ST268 }, 0 },
 	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ZT6688 }, 0 },
 	{{ USB_VENDOR_SHANTOU, USB_PRODUCT_SHANTOU_ADM8515 }, 0 },
-	{{ USB_VENDOR_UNKNOWN4, USB_PRODUCT_UNKNOWN4_DM9601 }, 0 }
+	{{ USB_VENDOR_UNKNOWN4, USB_PRODUCT_UNKNOWN4_DM9601 }, 0 },
+	{{ USB_VENDOR_UNKNOWN6, USB_PRODUCT_UNKNOWN6_DM9601 }, 0 }
 };
 #define udav_lookup(v, p) ((struct udav_type *)usb_lookup(udav_devs, v, p))
 
@@ -721,9 +722,6 @@ udav_activate(struct device *self, int act)
 	DPRINTF(("%s: %s: enter, act=%d\n", sc->sc_dev.dv_xname,
 		 __func__, act));
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		usbd_deactivate(sc->sc_udev);
 		break;
@@ -1191,12 +1189,6 @@ udav_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	DPRINTF(("%s: %s: start rx\n", sc->sc_dev.dv_xname, __func__));
 }
-
-#if 0
-void udav_intr()
-{
-}
-#endif
 
 int
 udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: namei.h,v 1.25 2010/09/09 10:37:04 thib Exp $	*/
+/*	$OpenBSD: namei.h,v 1.27 2011/09/30 03:43:27 guenther Exp $	*/
 /*	$NetBSD: namei.h,v 1.11 1996/02/09 18:25:20 christos Exp $	*/
 
 /*
@@ -51,6 +51,7 @@ struct nameidata {
 	 * Arguments to namei/lookup.
 	 */
 	const char *ni_dirp;		/* pathname pointer */
+	int	ni_dirfd;		/* dirfd from *at() functions */
 	enum	uio_seg ni_segflg;	/* location of pathname */
      /* u_long	ni_nameiop;		   namei operation */
      /* u_long	ni_flags;		   flags to namei */
@@ -144,13 +145,19 @@ struct nameidata {
 /*
  * Initialization of an nameidata structure.
  */
-#define NDINIT(ndp, op, flags, segflg, namep, p) { \
+#define NDINITAT(ndp, op, flags, segflg, dirfd, namep, p) { \
 	(ndp)->ni_cnd.cn_nameiop = op; \
 	(ndp)->ni_cnd.cn_flags = flags; \
 	(ndp)->ni_segflg = segflg; \
+	(ndp)->ni_dirfd = dirfd; \
 	(ndp)->ni_dirp = namep; \
 	(ndp)->ni_cnd.cn_proc = p; \
 }
+#define NDINIT(ndp, op, flags, segflp, namep, p) \
+	NDINITAT(ndp, op, flags, segflp, AT_FDCWD, namep, p)
+
+/* Defined for users of NDINIT(). */
+#define	AT_FDCWD	-100
 #endif
 
 /*

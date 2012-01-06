@@ -1,4 +1,4 @@
-/* $OpenBSD: omgpio.c,v 1.4 2010/09/20 06:33:48 matthew Exp $ */
+/* $OpenBSD: omgpio.c,v 1.8 2011/11/10 19:37:01 uwe Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -21,11 +21,14 @@
 #include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/evcount.h>
+
+#include <arm/cpufunc.h>
+
 #include <machine/bus.h>
 #include <machine/intr.h>
-#include <arch/beagle/beagle/ahb.h>
-#include <arch/beagle/dev/omgpiovar.h>
-#include "omgpio.h"
+
+#include <beagle/dev/omapvar.h>
+#include <beagle/dev/omgpiovar.h>
 
 
 /* registers */
@@ -102,25 +105,35 @@ struct cfdriver omgpio_cd = {
 int
 omgpio_match(struct device *parent, void *v, void *aux)
 {
+	switch (board_id) {
+	case BOARD_ID_OMAP3_BEAGLE:
+	case BOARD_ID_OMAP3_OVERO:
+		break; /* continue trying */
+	case BOARD_ID_OMAP4_PANDA:
+		return 0; /* not ported yet ??? - different */
+	default:
+		return 0; /* unknown */
+	}
 	return (1);
 }
 
 void
 omgpio_attach(struct device *parent, struct device *self, void *args)
 {
-        struct ahb_attach_args *aa = args;
+	struct omap_attach_args *oa = args;
 	struct omgpio_softc *sc = (struct omgpio_softc *) self;
 	u_int32_t rev;
 
-	sc->sc_iot = aa->aa_iot;
-	if (bus_space_map(sc->sc_iot, aa->aa_addr, GPIO_SIZE, 0, &sc->sc_ioh))
+	sc->sc_iot = oa->oa_iot;
+	if (bus_space_map(sc->sc_iot, oa->oa_dev->mem[0].addr,
+	    oa->oa_dev->mem[0].size, 0, &sc->sc_ioh))
 		panic("omgpio_attach: bus_space_map failed!");
 
 	rev = bus_space_read_4(sc->sc_iot, sc->sc_ioh, GPIO_REVISION);
 
 	printf(" rev %d.%d\n", rev >> 4 & 0xf, rev & 0xf);
 
-	sc->sc_irq = aa->aa_intr;
+	sc->sc_irq = oa->oa_dev->irq[0];
 
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh, GPIO_CLEARIRQENABLE1, ~0);
 
@@ -305,7 +318,7 @@ omgpio_intr_establish(unsigned int gpio, int level, int spl,
 	 * which is 96 + gpio pin?
 	 */
 
-	if (GPIO_PIN_TO_INST(gpio) > NOMGPIO)
+	if (GPIO_PIN_TO_INST(gpio) > omgpio_cd.cd_ndevs)
 		panic("omgpio_intr_establish: bogus irqnumber %d: %s",
 		     gpio, name);
 
@@ -327,7 +340,7 @@ omgpio_intr_establish(unsigned int gpio, int level, int spl,
 	ih->ih_arg = arg;
 	ih->ih_ipl = level;
 	ih->ih_gpio = gpio;
-	ih->ih_irq = gpio + INTC_NUM_IRQ;
+	ih->ih_irq = gpio + 512;
 	ih->ih_name = name;
 
 	sc->sc_handlers[GPIO_PIN_TO_OFFSET(gpio)] = ih;
@@ -428,18 +441,18 @@ omgpio_recalc_interrupts(struct omgpio_softc *sc)
 
 #if 0
 	if ((max == IPL_NONE || max != sc->sc_max_il) && sc->sc_ih_h != NULL)
-		intc_intr_disestablish(sc->sc_ih_h);
+		arm_intr_disestablish(sc->sc_ih_h);
 
 	if (max != IPL_NONE && max != sc->sc_max_il) {
-		sc->sc_ih_h = intc_intr_establish(sc->sc_irq, max, omgpio_irq,
+		sc->sc_ih_h = arm_intr_establish(sc->sc_irq, max, omgpio_irq,
 		    sc, NULL);
 	}
 #else
 	if (sc->sc_ih_h != NULL)
-		intc_intr_disestablish(sc->sc_ih_h);
+		arm_intr_disestablish(sc->sc_ih_h);
 
 	if (max != IPL_NONE) {
-		sc->sc_ih_h = intc_intr_establish(sc->sc_irq, max, omgpio_irq,
+		sc->sc_ih_h = arm_intr_establish(sc->sc_irq, max, omgpio_irq,
 		    sc, NULL);
 	}
 #endif
@@ -447,10 +460,10 @@ omgpio_recalc_interrupts(struct omgpio_softc *sc)
 	sc->sc_max_il = max;
 
 	if (sc->sc_ih_l != NULL)
-		intc_intr_disestablish(sc->sc_ih_l);
+		arm_intr_disestablish(sc->sc_ih_l);
 
 	if (max != min) {
-		sc->sc_ih_h = intc_intr_establish(sc->sc_irq, min,
+		sc->sc_ih_h = arm_intr_establish(sc->sc_irq, min,
 		    omgpio_irq_dummy, sc, NULL);
 	}
 	sc->sc_min_il = min;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.28 2011/05/25 21:22:27 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.33 2011/07/21 20:36:12 miod Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -63,6 +63,7 @@
 #include <sys/sem.h>
 #endif
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
@@ -75,24 +76,16 @@
 
 #include <dev/cons.h>
 
+#include <dev/pci/pcireg.h>
+#include <dev/pci/pcivar.h>
+#include <dev/pci/pcidevs.h>
+
 #include <mips64/archtype.h>
 
 /* The following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* Machine "architecture" */
 char	cpu_model[30];
 char	pmon_bootp[80];
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5	/* Can be changed in config. */
-#endif
-#ifndef	BUFPAGES
-#define BUFPAGES 0		/* Can be changed in config. */
-#endif
-int	bufpages = BUFPAGES;
-int	bufcachepercent = BUFCACHEPERCENT;
 
 /*
  * Even though the system is 64bit, the hardware is constrained to up
@@ -117,7 +110,6 @@ vaddr_t	uncached_base;
 int	physmem;		/* Max supported memory, changes to actual. */
 int	ncpu = 1;		/* At least one CPU in the system. */
 struct	user *proc0paddr;
-int	kbd_reset;
 
 const struct platform *sys_platform;
 struct cpu_hwinfo bootcpu_hwinfo;
@@ -136,6 +128,7 @@ static void dobootopts(int);
 void	dumpsys(void);
 void	dumpconf(void);
 extern	void parsepmonbp(void);
+const struct platform *loongson_identify(const char *);
 vaddr_t	mips_init(int32_t, int32_t, int32_t, int32_t, char *);
 
 extern	void loongson2e_setup(u_long, u_long);
@@ -164,6 +157,7 @@ struct bonito_flavour {
 	const struct platform *platform;
 };
 
+extern const struct platform ebenton_platform;
 extern const struct platform fuloong_platform;
 extern const struct platform gdium_platform;
 extern const struct platform generic2e_platform;
@@ -171,8 +165,11 @@ extern const struct platform lynloong_platform;
 extern const struct platform yeeloong_platform;
 
 const struct bonito_flavour bonito_flavours[] = {
+	/* eBenton EBT700 netbook */
+	{ "EBT700",	&ebenton_platform },	/* prefix added by user */
 	/* Lemote Fuloong 2F mini-PC */
-	{ "LM6002",	&fuloong_platform }, /* dual Ethernet, no prefix */
+	{ "LM6002",	&fuloong_platform },	/* dual Ethernet,
+						   prefix added by user */
 	{ "LM6003",	&fuloong_platform },
 	{ "LM6004",	&fuloong_platform },
 	/* EMTEC Gdium Liberty 1000 */
@@ -188,6 +185,95 @@ const struct bonito_flavour bonito_flavours[] = {
 };
 
 /*
+ * Try to figure out what particular machine we run on, depending on the
+ * scarce PMON version information and whatever else we can figure.
+ */
+const struct platform *
+loongson_identify(const char *version)
+{
+	const struct bonito_flavour *f;
+
+	if (version == NULL) {
+		/*
+		 * If there is no `Version' variable, we expect to be running
+		 * on a 2E system, use the generic code and hope for the best.
+		 */
+		if (loongson_ver == 0x2e) {
+			return &generic2e_platform;
+		} else {
+			pmon_printf("Unable to figure out model!\n");
+			return NULL;
+		}
+	}
+
+	for (f = bonito_flavours; f->prefix != NULL; f++)
+		if (strncmp(version, f->prefix, strlen(f->prefix)) == 0)
+			return f->platform;
+
+	/*
+	 * Early Lemote designs shipped without a model prefix.
+	 *
+	 * We can reasonably expect these to be close enough to either the
+	 * first generation Fuloong 2F design (LM6002), or the 7 inch
+	 * first netbook model; we can tell them apart by looking at which
+	 * video chip they embed.
+	 *
+	 * Note that this is only worth doing if the version string is
+	 * 1.2.something (1.3 onwards are expected to have a model prefix,
+	 * and there are currently no reports of 1.1 and
+	 * below being 2F systems).
+	 *
+	 * LM6002 users are encouraged to add the system model prefix to
+	 * the `Version' variable.
+	 */
+	if (strncmp(version, "1.2.", 4) == 0) {
+		const struct platform *p = NULL;
+		pcitag_t tag;
+		pcireg_t id, class;
+		int dev;
+
+		pmon_printf("No model prefix in version string \"%s\".\n",
+		    version);
+
+		for (dev = 0; dev < 32; dev++) {
+			tag = pci_make_tag_early(0, dev, 0);
+			id = pci_conf_read_early(tag, PCI_ID_REG);
+			if (id == 0 || PCI_VENDOR(id) == PCI_VENDOR_INVALID)
+				continue;
+
+			/* no need to check for DEVICE_IS_VGA_PCI here
+			   since we expect a linear framebuffer */
+			class = pci_conf_read_early(tag, PCI_CLASS_REG);
+			if (PCI_CLASS(class) != PCI_CLASS_DISPLAY ||
+			    (PCI_SUBCLASS(class) != PCI_SUBCLASS_DISPLAY_VGA &&
+			     PCI_SUBCLASS(class) != PCI_SUBCLASS_DISPLAY_MISC))
+				continue;
+
+			switch (id) {
+			case PCI_ID_CODE(PCI_VENDOR_SIS,
+			    PCI_PRODUCT_SIS_315PRO_VGA):
+				p = &fuloong_platform;
+				break;
+			case PCI_ID_CODE(PCI_VENDOR_SMI,
+			    PCI_PRODUCT_SMI_SM712):
+				p = &ebenton_platform;
+				break;
+			}
+
+			if (p != NULL) {
+				pmon_printf("Attempting to match as %s %s\n",
+				    p->vendor, p->product);
+				return p;
+			}
+		}
+	}
+
+	pmon_printf("This kernel doesn't support model \"%s\"." "\n", version);
+	return NULL;
+}
+
+
+/*
  * Do all the stuff that locore normally does before calling main().
  * Reset mapping and set up mapping to hardware and init "wired" reg.
  */
@@ -201,7 +287,6 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 	vaddr_t xtlb_handler;
 	const char *envvar;
 	int i;
-	const struct bonito_flavour *f;
 
 	extern char start[], edata[], end[];
 	extern char exception[], e_exception[];
@@ -311,57 +396,8 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 	 * on the PMON version information.
 	 */
 
-	envvar = pmon_getenv("Version");
-	if (envvar == NULL) {
-		/*
-		 * If this is a 2E system, use the generic code and hope
-		 * for the best.
-		 */
-		if (loongson_ver == 0x2e) {
-			sys_platform = &generic2e_platform;
-		} else {
-			pmon_printf("Unable to figure out model!\n");
-			goto unsupported;
-		}
-	} else {
-		for (f = bonito_flavours; f->prefix != NULL; f++)
-			if (strncmp(envvar, f->prefix, strlen(f->prefix)) ==
-			    0) {
-				sys_platform = f->platform;
-				break;
-			}
-
-		if (sys_platform == NULL) {
-			/*
-			 * Early Lemote designs shipped without a model prefix.
-			 * Hopefully these well be close enough to the first
-			 * generation Fuloong 2F design (LM6002); let's warn
-			 * the user and try this if version is 1.2.something
-			 * (1.3 onwards are expected to have a model prefix,
-			 *  and there are currently no reports of 1.1 and
-			 *  below being 2F systems).
-			 *
-			 * Note that this could be handled by adding a
-			 * "1.2." machine type entry to the flavours table,
-			 * but I prefer have it stand out.
-			 * LM6002 users are encouraged to add the system
-			 * model prefix to the `Version' variable.
-			 */
-			if (strncmp(envvar, "1.2.", 4) == 0) {
-				pmon_printf("No model prefix in version"
-				    " string \"%s\".\n"
-				    "Attempting to match as Lemote Fuloong\n",
-				    envvar);
-				sys_platform = &fuloong_platform;
-			}
-		}
-
-		if (sys_platform == NULL) {
-			pmon_printf("This kernel doesn't support model \"%s\"."
-			    "\n", envvar);
-			goto unsupported;
-		}
-	}
+	if ((sys_platform = loongson_identify(pmon_getenv("Version"))) == NULL)
+		goto unsupported;
 
 	hw_vendor = sys_platform->vendor;
 	hw_prod = sys_platform->product;
@@ -456,7 +492,6 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_last_page != 0; i++) {
 		uint64_t fp, lp;
 		uint64_t firstkernpage, lastkernpage;
-		unsigned int freelist;
 		paddr_t firstkernpa, lastkernpa;
 
 		/* kernel is linked in CKSEG0 */
@@ -470,14 +505,13 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
-		freelist = mem_layout[i].mem_freelist;
 
 		/* Account for kernel and kernel symbol table. */
 		if (fp >= firstkernpage && lp < lastkernpage)
 			continue;	/* In kernel. */
 
 		if (lp < firstkernpage || fp > lastkernpage) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 			continue;	/* Outside kernel. */
 		}
 
@@ -487,11 +521,11 @@ mips_init(int32_t argc, int32_t argv, int32_t envp, int32_t cv,
 			lp = firstkernpage;
 		else { /* Need to split! */
 			uint64_t xp = firstkernpage;
-			uvm_page_physload(fp, xp, fp, xp, freelist);
+			uvm_page_physload(fp, xp, fp, xp, 0);
 			fp = lastkernpage;
 		}
 		if (lp > fp) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 		}
 	}
 
@@ -768,10 +802,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return ENOTDIR;		/* Overloaded */
 
 	switch (name[0]) {
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return EOPNOTSUPP;
 	}
@@ -819,6 +849,7 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	(void) splhigh();		/* Extreme priority. */

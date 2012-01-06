@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.9 2009/01/28 08:02:02 grange Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.12 2011/11/08 17:07:20 deraadt Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.31 2004/01/04 11:33:29 jdolecek Exp $	*/
 
 /*
@@ -47,15 +47,14 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/signalvar.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
 #include <sys/buf.h>
-#if 0
-#include <sys/pmc.h>
-#endif
 #include <sys/user.h>
+#include <sys/core.h>
 #include <sys/exec.h>
-#include <sys/syslog.h>
+#include <sys/ptrace.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -63,10 +62,6 @@
 #include <machine/pmap.h>
 #include <machine/reg.h>
 #include <machine/vmparam.h>
-
-#ifdef ARMFPE
-#include <arm/fpe-arm/armfpe.h>
-#endif
 
 extern pv_addr_t systempage;
 
@@ -116,15 +111,13 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 
 #ifdef PMAP_DEBUG
 	if (pmap_debug_level >= 0)
-		printf("cpu_fork: %p %p %p %p\n", p1, p2, curlwp, &proc0);
+		printf("cpu_fork: %p %p %p\n", p1, p2, &proc0);
 #endif	/* PMAP_DEBUG */
 
-#if 0 /* XXX */
-	if (l1 == curlwp) {
+	if (p1 == curproc) {
 		/* Sync the PCB before we copy it. */
 		savectx(curpcb);
 	}
-#endif
 
 	/* Copy the pcb */
 	*pcb = p1->p_addr->u_pcb;
@@ -149,21 +142,15 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 #ifdef PMAP_DEBUG
 	if (pmap_debug_level >= 0) {
 		printf("p1->procaddr=%p p1->procaddr->u_pcb=%p pid=%d pmap=%p\n",
-		    p1->p_addr, &p1->p_addr->u_pcb, p1->p_lid,
-		    p1->p_proc->p_vmspace->vm_map.pmap);
+		    p1->p_addr, &p1->p_addr->u_pcb, p1->p_pid,
+		    p1->p_vmspace->vm_map.pmap);
 		printf("p2->procaddr=%p p2->procaddr->u_pcb=%p pid=%d pmap=%p\n",
-		    p2->p_addr, &p2->p_addr->u_pcb, p2->p_lid,
-		    p2->p_proc->p_vmspace->vm_map.pmap);
+		    p2->p_addr, &p2->p_addr->u_pcb, p2->p_pid,
+		    p2->p_vmspace->vm_map.pmap);
 	}
 #endif	/* PMAP_DEBUG */
 
 	pmap_activate(p2);
-
-#ifdef ARMFPE
-	/* Initialise a new FP context for p2 and copy the context from p1 */
-	arm_fpe_core_initcontext(FP_CONTEXT(p2));
-	arm_fpe_copycontext(FP_CONTEXT(p1), FP_CONTEXT(p2));
-#endif	/* ARMFPE */
 
 	p2->p_addr->u_pcb.pcb_tf = tf =
 	    (struct trapframe *)pcb->pcb_un.un_32.pcb32_sp - 1;
@@ -187,6 +174,56 @@ cpu_exit(struct proc *p)
 {
 	pmap_deactivate(p);
 	sched_exit(p);
+}
+
+/*
+ * Dump the machine specific segment at the start of a core dump.
+ */
+
+int
+cpu_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
+    struct core *chdr)
+{
+	int error;
+	struct {
+		struct reg regs;
+		struct fpreg fpregs;
+	} cpustate;
+	struct coreseg cseg;
+
+	CORE_SETMAGIC(*chdr, COREMAGIC, MID_MACHINE, 0);
+	chdr->c_hdrsize = ALIGN(sizeof(*chdr));
+	chdr->c_seghdrsize = ALIGN(sizeof(cseg));
+	chdr->c_cpusize = sizeof(cpustate);
+
+	/* Save integer registers. */
+	error = process_read_regs(p, &cpustate.regs);
+	if (error)
+		return error;
+	/* Save floating point registers. */
+	error = process_read_fpregs(p, &cpustate.fpregs);
+	if (error)
+		return error;
+
+	CORE_SETMAGIC(cseg, CORESEGMAGIC, MID_MACHINE, CORE_CPU);
+	cseg.c_addr = 0;
+	cseg.c_size = chdr->c_cpusize;
+
+	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&cseg, chdr->c_seghdrsize,
+	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE,
+	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
+	if (error)
+		return error;
+
+	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&cpustate, sizeof(cpustate),
+	    (off_t)(chdr->c_hdrsize + chdr->c_seghdrsize), UIO_SYSSPACE,
+	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
+	if (error)
+		return error;
+
+	chdr->c_nseg++;
+
+	return error;
 }
 
 /*

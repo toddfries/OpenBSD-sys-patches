@@ -1,4 +1,4 @@
-/*	$OpenBSD: ka660.c,v 1.6 2009/06/20 20:58:07 miod Exp $	*/
+/*	$OpenBSD: ka660.c,v 1.8 2011/09/15 00:48:24 miod Exp $	*/
 /*	$NetBSD: ka660.c,v 1.3 2000/06/29 07:14:27 mrg Exp $	*/
 /*
  * Copyright (c) 2000 Ludd, University of Lule}, Sweden.
@@ -44,7 +44,6 @@
 #include <machine/mtpr.h>
 #include <machine/sid.h>
 #include <machine/pmap.h>
-#include <machine/nexus.h>
 #include <machine/uvax.h>
 #include <machine/ka410.h>
 #include <machine/ka420.h>
@@ -80,8 +79,7 @@ struct cpu_dep ka660_calls = {
 	generic_halt,
 	generic_reboot,
 	NULL,
-	NULL,
-	hardclock
+	icr_hardclock
 };
 
 

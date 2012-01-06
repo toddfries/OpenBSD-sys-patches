@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_lock.c,v 1.35 2010/04/26 05:48:17 deraadt Exp $	*/
+/*	$OpenBSD: kern_lock.c,v 1.38 2011/08/28 02:35:34 guenther Exp $	*/
 
 /* 
  * Copyright (c) 1995
@@ -49,7 +49,9 @@
  */
 
 /*
- * Acquire a resource.
+ * Acquire a resource.  We sleep on the address of the lk_sharecount
+ * member normally; if waiting for it to drain we sleep on the address
+ * of the lk_waitcount member instead.
  */
 #define ACQUIRE(lkp, error, extflags, drain, wanted)			\
 do {									\
@@ -58,9 +60,8 @@ do {									\
 			(lkp)->lk_flags |= LK_WAITDRAIN;		\
 		else							\
 			(lkp)->lk_waitcount++;				\
-		/* XXX Cast away volatile. */				\
 		error = tsleep((drain) ?				\
-		    (void *)&(lkp)->lk_flags : (void *)(lkp),		\
+		    &(lkp)->lk_waitcount : &(lkp)->lk_sharecount,	\
 		    (lkp)->lk_prio, (lkp)->lk_wmesg, (lkp)->lk_timo);	\
 		if ((drain) == 0)					\
 			(lkp)->lk_waitcount--;				\
@@ -197,7 +198,7 @@ lockmgr(__volatile struct lock *lkp, u_int flags, void *notused)
 		lkp->lk_flags &= ~LK_HAVE_EXCL;
 		SETHOLDER(lkp, LK_NOPROC, LK_NOCPU);
 		if (lkp->lk_waitcount)
-			wakeup((void *)(lkp));
+			wakeup(&lkp->lk_sharecount);
 		break;
 
 	case LK_EXCLUSIVE:
@@ -266,7 +267,7 @@ lockmgr(__volatile struct lock *lkp, u_int flags, void *notused)
 			panic("lockmgr: release of unlocked lock!");
 #endif
 		if (lkp->lk_waitcount)
-			wakeup((void *)(lkp));
+			wakeup(&lkp->lk_sharecount);
 		break;
 
 	case LK_DRAIN:
@@ -309,7 +310,7 @@ lockmgr(__volatile struct lock *lkp, u_int flags, void *notused)
 	    (LK_HAVE_EXCL | LK_WANT_EXCL)) == 0 &&
 	    lkp->lk_sharecount == 0 && lkp->lk_waitcount == 0)) {
 		lkp->lk_flags &= ~LK_WAITDRAIN;
-		wakeup((void *)&lkp->lk_flags);
+		wakeup(&lkp->lk_waitcount);
 	}
 	return (error);
 }
@@ -366,25 +367,6 @@ _kernel_lock(void)
 void
 _kernel_unlock(void)
 {
-	__mp_unlock(&kernel_lock);
-}
-
-/*
- * Acquire/release the kernel_lock on behalf of a process.  Intended for
- * use in the top half of the kernel.
- */
-void
-_kernel_proc_lock(struct proc *p)
-{
-	SCHED_ASSERT_UNLOCKED();
-	__mp_lock(&kernel_lock);
-	atomic_setbits_int(&p->p_flag, P_BIGLOCK);
-}
-
-void
-_kernel_proc_unlock(struct proc *p)
-{
-	atomic_clearbits_int(&p->p_flag, P_BIGLOCK);
 	__mp_unlock(&kernel_lock);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ka650.c,v 1.18 2008/08/18 23:07:26 miod Exp $	*/
+/*	$OpenBSD: ka650.c,v 1.21 2011/09/19 21:53:02 miod Exp $	*/
 /*	$NetBSD: ka650.c,v 1.25 2001/04/27 15:02:37 ragge Exp $	*/
 /*
  * Copyright (c) 1988 The Regents of the University of California.
@@ -79,8 +79,7 @@ struct	cpu_dep	ka650_calls = {
 	cvax_halt,
 	cvax_reboot,
 	NULL,
-	NULL,
-	hardclock
+	icr_hardclock
 };
 
 /*
@@ -89,8 +88,6 @@ struct	cpu_dep	ka650_calls = {
 void
 uvaxIII_conf()
 {
-	int syssub = GETSYSSUBT(vax_siedata);
-
 	/*
 	 * MicroVAX III: We map in memory error registers,
 	 * cache control registers, SSC registers,
@@ -104,8 +101,8 @@ uvaxIII_conf()
 	    (KA650_CACHESIZE/VAX_NBPG));
 
 	printf("cpu: KA6%d%d, CVAX microcode rev %d Firmware rev %d\n",
-	    syssub == VAX_SIE_KA640 ? 4 : 5,
-	    syssub == VAX_SIE_KA655 ? 5 : 0,
+	    vax_cpustype == VAX_STYP_640 ? 4 : 5,
+	    vax_cpustype == VAX_STYP_655 ? 5 : 0,
 	    (vax_cpudata & 0xff), GETFRMREV(vax_siedata));
 	ka650setcache(CACHEON);
 	if (ptoa(physmem) > ka650merr_ptr->merr_qbmbr) {
@@ -128,11 +125,11 @@ uvaxIII_memerr()
 
 	if (ka650cbd.cbd_cacr & CACR_CPE) {
 		printf("cache 2 tag parity error: ");
-		if (time.tv_sec - cache2tag < 7) {
+		if (time_second - cache2tag < 7) {
 			ka650setcache(CACHEOFF);
 			printf("caching disabled\n");
 		} else {
-			cache2tag = time.tv_sec;
+			cache2tag = time_second;
 			printf("flushing cache\n");
 			ka650setcache(CACHEON);
 		}
@@ -188,19 +185,19 @@ uvaxIII_mchk(cmcf)
 		if (i & CAER_DAT) {
 			printf("data");
 			i = cache1data;
-			cache1data = time.tv_sec;
+			cache1data = time_second;
 		}
 		if (i & CAER_TAG) {
 			printf("tag");
 			i = cache1tag;
-			cache1tag = time.tv_sec;
+			cache1tag = time_second;
 		}
 	} else if ((i & CAER_MCD) || (ka650merr_ptr->merr_errstat & MEM_CDAL)) {
 		printf("CDAL");
 		i = cdalerr;
-		cdalerr = time.tv_sec;
+		cdalerr = time_second;
 	}
-	if (time.tv_sec - i < 7) {
+	if (time_second - i < 7) {
 		ka650setcache(CACHEOFF);
 		printf(" parity error:	caching disabled\n");
 	} else {
@@ -230,14 +227,13 @@ uvaxIII_mchk(cmcf)
 void
 ka650setcache(int state)
 {
-	int syssub = GETSYSSUBT(vax_siedata);
 	int i;
 
 	/*
 	 * Before doing anything, disable the cache.
 	 */
 	mtpr(0, PR_CADR);
-	if (syssub != VAX_SIE_KA640)
+	if (vax_cpustype != VAX_STYP_640)
 		ka650cbd_ptr->cbd_cacr = CACR_CPE;
 
 	/*
@@ -245,7 +241,7 @@ ka650setcache(int state)
 	 */
 	if (state == CACHEON) {
 		mtpr(CADR_SEN2 | CADR_SEN1 | CADR_CENI | CADR_CEND, PR_CADR);
-		if (syssub != VAX_SIE_KA640) {
+		if (vax_cpustype != VAX_STYP_640) {
 			for (i = 0;
 			    i < (KA650_CACHESIZE / sizeof(KA650_CACHE_ptr[0]));
 			    i += 2)

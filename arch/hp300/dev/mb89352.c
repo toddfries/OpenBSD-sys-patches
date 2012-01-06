@@ -1,4 +1,4 @@
-/*	$OpenBSD: mb89352.c,v 1.27 2011/04/25 12:40:52 miod Exp $	*/
+/*	$OpenBSD: mb89352.c,v 1.29 2011/09/18 19:23:46 miod Exp $	*/
 /*	$NetBSD: mb89352.c,v 1.5 2000/03/23 07:01:31 thorpej Exp $	*/
 /*	NecBSD: mb89352.c,v 1.4 1998/03/14 07:31:20 kmatsuda Exp	*/
 
@@ -350,10 +350,8 @@ spc_acb_alloc(void *xsc)
 
 	mtx_enter(&sc->sc_acb_mtx);
 	acb = TAILQ_FIRST(&sc->free_list);
-	if (acb) {
+	if (acb)
 		TAILQ_REMOVE(&sc->free_list, acb, chain);
-		acb->flags |= ACB_ALLOC;
-	}
 	mtx_leave(&sc->sc_acb_mtx);
 
 	return acb;
@@ -1000,7 +998,7 @@ nextbyte:
 			default:
 				printf("%s: unrecognized MESSAGE EXTENDED 0x%x;"
 				    " sending REJECT\n",
-				     sc->sc_imess[2], sc->sc_dev.dv_xname);
+				     sc->sc_dev.dv_xname, sc->sc_imess[2]);
 				SPC_BREAK();
 				goto reject;
 			}

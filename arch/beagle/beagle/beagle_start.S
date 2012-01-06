@@ -1,4 +1,4 @@
-/*	$OpenBSD: beagle_start.S,v 1.1 2009/05/08 03:13:26 drahn Exp $	*/
+/*	$OpenBSD: beagle_start.S,v 1.3 2011/10/21 22:55:01 drahn Exp $	*/
 /*	$NetBSD: lubbock_start.S,v 1.1 2003/06/18 10:51:15 bsh Exp $ */
 
 /*
@@ -54,14 +54,19 @@
 	CPWAIT_BRANCH			/* branch to next insn */
 	
 /*
- * Kernel start routine for DBPXA250 (Lubbock)
+ * Kernel start routine for OMAP
  * this code is excuted at the very first after the kernel is loaded
- * by RedBoot.
+ * by U-Boot.
  */
 	.text
 
 	.global	_C_LABEL(bootstrap_start)
 _C_LABEL(bootstrap_start):
+	/* Save U-Boot arguments */
+	mov	r6, r0
+	mov	r7, r1
+	mov	r8, r2
+
 	/* Are we running on ROM ? */
 	cmp     pc, #0x06000000
 	bhi     bootstrap_start_ram
@@ -147,9 +152,14 @@ bootstrap_start_ram:
 	mcr	p15, 0, r0, c1, c0, 0
 	CPWAIT(r0)
 
+	/* Restore U-Boot arguments */
+	mov	r0, r6
+	mov	r1, r7
+	mov	r2, r8
+
 	/* Jump to kernel code in TRUE VA */
-	adr	r0, Lstart
-	ldr	pc, [r0]
+	adr	r6, Lstart
+	ldr	pc, [r6]
 
 Lstart:
 	.word	start

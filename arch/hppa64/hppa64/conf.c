@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.18 2011/01/14 19:04:08 jasper Exp $	*/
+/*	$OpenBSD: conf.c,v 1.21 2011/10/06 20:49:28 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -40,7 +40,6 @@
 
 #include <machine/conf.h>
 
-#include "ccd.h"
 #include "vnd.h"
 #include "rd.h"
 #include "sd.h"
@@ -62,7 +61,7 @@ cdev_decl(fd);
 struct bdevsw   bdevsw[] =
 {
 	bdev_swap_init(1,sw),		/*  0: swap pseudo-device */
-	bdev_disk_init(NCCD,ccd),	/*  1: concatenated disk driver */
+	bdev_notdef(),			/*  1: was: concatenated disk driver */
 	bdev_disk_init(NVND,vnd),	/*  2: vnode disk driver */
 	bdev_disk_init(NRD,rd),		/*  3: RAM disk */
 	bdev_disk_init(NSD,sd),		/*  4: SCSI disk */
@@ -70,13 +69,12 @@ struct bdevsw   bdevsw[] =
 	bdev_disk_init(NCD,cd),		/*  6: SCSI CD-ROM */
 	bdev_disk_init(NFD,fd),		/*  7: floppy drive */
 	bdev_disk_init(NWD,wd),		/*  8: ST506 drive */
-					/*  9: */
-	bdev_lkm_dummy(),
-	bdev_lkm_dummy(),
-	bdev_lkm_dummy(),
-	bdev_lkm_dummy(),
-	bdev_lkm_dummy(),
-	bdev_lkm_dummy(),
+	bdev_lkm_dummy(),		/*  9: */
+	bdev_lkm_dummy(),		/* 10: */
+	bdev_lkm_dummy(),		/* 11: */
+	bdev_lkm_dummy(),		/* 12: */
+	bdev_lkm_dummy(),		/* 13: */
+	bdev_lkm_dummy(),		/* 14: */
 };
 int	nblkdev = nitems(bdevsw);
 
@@ -127,7 +125,6 @@ cdev_decl(pci);
 
 #include "bthub.h"
 
-
 struct cdevsw   cdevsw[] =
 {
 	cdev_cn_init(1,cn),		/*  0: virtual console */
@@ -137,14 +134,14 @@ struct cdevsw   cdevsw[] =
 	cdev_tty_init(NPTY,pts),	/*  4: pseudo-tty slave */
 	cdev_ptc_init(NPTY,ptc),	/*  5: pseudo-tty master */
 	cdev_log_init(1,log),		/*  6: /dev/klog */
-	cdev_disk_init(NCCD,ccd),	/*  7: concatenated disk */
+	cdev_notdef(),			/*  7: was: concatenated disk */
 	cdev_disk_init(NVND,vnd),	/*  8: vnode disk driver */
 	cdev_disk_init(NRD,rd),		/*  9: RAM disk */
 	cdev_disk_init(NSD,sd),		/* 10: SCSI disk */
 	cdev_tape_init(NST,st),		/* 11: SCSI tape */
 	cdev_disk_init(NCD,cd),		/* 12: SCSI cd-rom */
 	cdev_ch_init(NCH,ch),		/* 13: SCSI changer */
-	cdev_notdef(),			/* 14 */
+	cdev_notdef(),			/* 14: */
 	cdev_uk_init(NUK,uk),		/* 15: SCSI unknown */
 	cdev_fd_init(1,filedesc),	/* 16: file descriptor pseudo-device */
 	cdev_bpf_init(NBPFILTER,bpf),	/* 17: Berkeley packet filter */
@@ -165,7 +162,7 @@ struct cdevsw   cdevsw[] =
 #ifdef USER_PCICONF
 	cdev_pci_init(NPCI,pci),	/* 31: PCI user */
 #else
-	cdev_notdef(),
+	cdev_notdef(),			/* 31: */
 #endif
 #ifdef NNPFS
 	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 32: nnpfs communication device */
@@ -223,7 +220,7 @@ int chrtoblktbl[] = {
 	/*  4 */	NODEV,
 	/*  5 */	NODEV,
 	/*  6 */	NODEV,
-	/*  7 */	1,		/* ccd */
+	/*  7 */	NODEV,
 	/*  8 */	2,		/* vnd */
 	/*  9 */	3,		/* rd */
 	/* 10 */	4,		/* sd */
@@ -263,14 +260,13 @@ int nchrtoblktbl = nitems(chrtoblktbl);
  * Returns true if dev is /dev/zero.
  */
 int
-iszerodev(dev)
-	dev_t dev;
+iszerodev(dev_t dev)
 {
 	return (major(dev) == mem_no && minor(dev) == 12);
 }
 
 dev_t
-getnulldev()
+getnulldev(void)
 {
 	return makedev(mem_no, 2);
 }
@@ -279,8 +275,7 @@ getnulldev()
  * Returns true if dev is /dev/mem or /dev/kmem.
  */
 int
-iskmemdev(dev)
-	dev_t dev;
+iskmemdev(dev_t dev)
 {
 	return (major(dev) == mem_no && minor(dev) < 2);
 }

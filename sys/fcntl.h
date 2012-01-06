@@ -1,4 +1,4 @@
-/*	$OpenBSD: fcntl.h,v 1.11 2007/11/24 12:59:28 jmc Exp $	*/
+/*	$OpenBSD: fcntl.h,v 1.19 2011/07/18 17:29:49 matthew Exp $	*/
 /*	$NetBSD: fcntl.h,v 1.8 1995/03/26 20:24:12 jtc Exp $	*/
 
 /*-
@@ -91,9 +91,9 @@
 #define	O_CREAT		0x0200		/* create if nonexistent */
 #define	O_TRUNC		0x0400		/* truncate to zero length */
 #define	O_EXCL		0x0800		/* error if already exists */
+
+/* XXX - FHASLOCK should be FIF_HASLOCK. */
 #ifdef _KERNEL
-#define	FMARK		0x1000		/* mark during gc() */
-#define	FDEFER		0x2000		/* defer for next gc pass */
 #define	FHASLOCK	0x4000		/* descriptor holds advisory lock */
 #endif
 
@@ -107,6 +107,10 @@
 
 /* defined by POSIX 1003.1; BSD default, this bit is not required */
 #define	O_NOCTTY	0x8000		/* don't assign controlling terminal */
+
+/* defined by POSIX Issue 7 */
+#define	O_CLOEXEC	0x10000		/* atomically set FD_CLOEXEC */
+#define	O_DIRECTORY	0x20000		/* fail if not a directory */
 
 #ifdef _KERNEL
 /*
@@ -153,6 +157,9 @@
 #define	F_GETLK		7		/* get record locking information */
 #define	F_SETLK		8		/* set record locking information */
 #define	F_SETLKW	9		/* F_SETLK; wait if blocked */
+#if __POSIX_VISIBLE >= 200809
+#define	F_DUPFD_CLOEXEC	10		/* duplicate with FD_CLOEXEC set */
+#endif
 
 /* file descriptor flags (F_GETFD, F_SETFD) */
 #define	FD_CLOEXEC	1		/* close-on-exec flag */
@@ -188,6 +195,14 @@ struct flock {
 #define	LOCK_UN		0x08		/* unlock file */
 #endif
 
+#if __POSIX_VISIBLE >= 200809
+#define	AT_FDCWD	-100
+
+#define	AT_EACCESS		0x01
+#define	AT_SYMLINK_NOFOLLOW	0x02
+#define	AT_SYMLINK_FOLLOW	0x04
+#define	AT_REMOVEDIR		0x08
+#endif
 
 #ifndef _KERNEL
 __BEGIN_DECLS
@@ -196,6 +211,9 @@ int	creat(const char *, mode_t);
 int	fcntl(int, int, ...);
 #if __BSD_VISIBLE
 int	flock(int, int);
+#endif
+#if __POSIX_VISIBLE >= 200809
+int	openat(int, const char *, int, ...);
 #endif
 __END_DECLS
 #endif

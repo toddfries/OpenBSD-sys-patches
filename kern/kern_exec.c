@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.118 2011/05/24 15:27:36 ariane Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.122 2011/12/14 07:32:16 guenther Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -63,6 +63,10 @@
 
 #include <machine/cpu.h>
 #include <machine/reg.h>
+
+#ifdef __HAVE_MD_TCB
+# include <machine/tcb.h>
+#endif
 
 #include <dev/rndvar.h>
 
@@ -263,6 +267,10 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 #endif
 	char *pathbuf = NULL;
 
+	/* get other threads to stop */
+	if ((error = single_thread_set(p, SINGLE_UNWIND, 1)))
+		goto bad;
+
 	/*
 	 * Cheap solution to complicated problems.
 	 * Mark this process as "leave me alone, I'm execing".
@@ -406,6 +414,13 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	pack.ep_ssize = len;	/* maybe should go elsewhere, but... */
 
 	/*
+	 * we're committed: any further errors will kill the process, so
+	 * kill the other threads now.
+	 * XXX wait until threads are reaped to make uvmspace_exec() cheaper?
+	 */
+	single_thread_set(p, SINGLE_EXIT, 0);
+
+	/*
 	 * Prepare vmspace for remapping. Note that uvmspace_exec can replace
 	 * p_vmspace!
 	 */
@@ -454,6 +469,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	stopprofclock(p);	/* stop profiling */
 	fdcloseexec(p);		/* handle close on exec */
 	execsigs(p);		/* reset caught signals */
+	TCB_SET(p, NULL);	/* reset the TCB address */
 
 	/* set command name & other accounting info */
 	len = min(nid.ni_cnd.cn_namelen, MAXCOMLEN);
@@ -500,10 +516,8 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		 * If process is being ktraced, turn off - unless
 		 * root set it.
 		 */
-		if (p->p_tracep && !(p->p_traceflag & KTRFAC_ROOT)) {
-			p->p_traceflag = 0;
-			ktrsettracevnode(p, NULL);
-		}
+		if (pr->ps_tracevp && !(pr->ps_traceflag & KTRFAC_ROOT))
+			ktrcleartrace(pr);
 #endif
 		p->p_ucred = crcopy(cred);
 		if (attr.va_mode & VSUID)
@@ -662,6 +676,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 #endif
 
 	atomic_clearbits_int(&p->p_flag, P_INEXEC);
+	single_thread_clear(p);
 
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE) &&
@@ -697,6 +712,7 @@ bad:
  clrflag:
 #endif
 	atomic_clearbits_int(&p->p_flag, P_INEXEC);
+	single_thread_clear(p);
 
 	if (pathbuf != NULL)
 		pool_put(&namei_pool, pathbuf);
@@ -810,6 +826,7 @@ exec_sigcode_map(struct proc *p, struct emul *e)
 	}
 
 	/* Just a hint to uvm_mmap where to put it. */
+	p->p_sigcode = uvm_map_hint(p, VM_PROT_READ|VM_PROT_EXECUTE);
 	uao_reference(e->e_sigobject);
 	if (uvm_map(&p->p_vmspace->vm_map, &p->p_sigcode, round_page(sz),
 	    e->e_sigobject, 0, 0, UVM_MAPFLAG(UVM_PROT_RX, UVM_PROT_RX,

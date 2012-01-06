@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.82 2011/05/24 15:27:36 ariane Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.85 2011/07/05 04:48:02 guenther Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -96,10 +96,6 @@
 #include <compat/linux/linux_exec.h>
 #endif
 
-#ifdef COMPAT_SVR4
-#include <compat/svr4/svr4_exec.h>
-#endif
-
 struct ELFNAME(probe_entry) {
 	int (*func)(struct proc *, struct exec_package *, char *,
 	    u_long *, u_int8_t *);
@@ -107,9 +103,6 @@ struct ELFNAME(probe_entry) {
 	/* XXX - bogus, shouldn't be size independent.. */
 #ifdef COMPAT_LINUX
 	{ linux_elf_probe },
-#endif
-#ifdef COMPAT_SVR4
-	{ svr4_elf_probe },
 #endif
 	{ NULL }
 };
@@ -333,7 +326,6 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 	int nload, idx = 0;
 	Elf_Addr pos = *last;
 	int file_align;
-	int loop;
 
 	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, path, p);
 	if ((error = namei(&nd)) != 0) {
@@ -390,7 +382,6 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 
 	pos = ELF_ROUND(pos, file_align);
 	*last = epp->ep_interp_pos = pos;
-	loop = 0;
 	for (i = 0; i < nload;/**/) {
 		vaddr_t	addr;
 		struct	uvm_object *uobj;
@@ -418,17 +409,17 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 			addr = round_page((vaddr_t)p->p_vmspace->vm_daddr +
 			    BRKSIZ);
 
-		if (uvm_map_mquery(&p->p_vmspace->vm_map, &addr, size,
-		    (i == 0 ? uoff : UVM_UNKNOWN_OFFSET), 0) != 0) {
-			if (loop == 0) {
-				loop = 1;
-				i = 0;
-				*last = epp->ep_interp_pos = pos = 0;
-				continue;
+		vm_map_lock(&p->p_vmspace->vm_map);
+		if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
+		    &addr, uobj, uoff, 0, UVM_FLAG_FIXED) == NULL) {
+			if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
+			    &addr, uobj, uoff, 0, 0) == NULL) {
+				error = ENOMEM; /* XXX */
+				vm_map_unlock(&p->p_vmspace->vm_map);
+				goto bad1;
 			}
-			error = ENOMEM;
-			goto bad1;
-		}
+		} 
+		vm_map_unlock(&p->p_vmspace->vm_map);
 		if (addr != pos + loadmap[i].vaddr) {
 			/* base changed. */
 			pos = addr - trunc_page(loadmap[i].vaddr);
@@ -1149,13 +1140,13 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 
 		cpi.cpi_version = ELFCORE_PROCINFO_VERSION;
 		cpi.cpi_cpisize = sizeof(cpi);
-		cpi.cpi_signo = p->p_sigacts->ps_sig;
-		cpi.cpi_sigcode = p->p_sigacts->ps_code;
+		cpi.cpi_signo = p->p_sisig;
+		cpi.cpi_sigcode = p->p_sicode;
 
 		cpi.cpi_sigpend = p->p_siglist;
 		cpi.cpi_sigmask = p->p_sigmask;
-		cpi.cpi_sigignore = p->p_sigignore;
-		cpi.cpi_sigcatch = p->p_sigcatch;
+		cpi.cpi_sigignore = p->p_sigacts->ps_sigignore;
+		cpi.cpi_sigcatch = p->p_sigacts->ps_sigcatch;
 
 		cpi.cpi_pid = pr->ps_pid;
 		cpi.cpi_ppid = pr->ps_pptr->ps_pid;

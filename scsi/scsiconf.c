@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.175 2011/05/04 20:49:41 sthen Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.182 2011/09/22 21:36:00 jsing Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -75,6 +75,7 @@
 int	scsi_probedev(struct scsibus_softc *, int, int);
 
 void	scsi_devid(struct scsi_link *);
+int	scsi_devid_pg80(struct scsi_link *);
 int	scsi_devid_pg83(struct scsi_link *);
 
 int	scsibusmatch(struct device *, void *, void *);
@@ -98,9 +99,9 @@ struct cfdriver scsibus_cd = {
 };
 
 #ifdef SCSIDEBUG
-int scsidebug_buses = SCSIDEBUG_BUSES;
-int scsidebug_targets = SCSIDEBUG_TARGETS;
-int scsidebug_luns = SCSIDEBUG_LUNS;
+u_int32_t scsidebug_buses = SCSIDEBUG_BUSES;
+u_int32_t scsidebug_targets = SCSIDEBUG_TARGETS;
+u_int32_t scsidebug_luns = SCSIDEBUG_LUNS;
 int scsidebug_level = SCSIDEBUG_LEVEL;
 #endif
 
@@ -247,10 +248,6 @@ scsi_activate_lun(struct scsibus_softc *sc, int target, int lun, int act)
 
 	dev = link->device_softc;
 	switch (act) {
-	case DVACT_ACTIVATE:
-		atomic_clearbits_int(&link->state, SDEV_S_DYING);
-		config_activate(dev);
-		break;
 	case DVACT_QUIESCE:
 	case DVACT_SUSPEND:
 	case DVACT_RESUME:
@@ -902,9 +899,10 @@ scsi_probedev(struct scsibus_softc *scsi, int target, int lun)
 	 * Ask the device what it is
 	 */
 #ifdef SCSIDEBUG
-	if (((1 << sc_link->scsibus) & scsidebug_buses) &&
-	    ((target < 32) && ((1 << target) & scsidebug_targets)) &&
-	    ((lun < 32) && ((1 << lun) & scsidebug_luns)))
+	if (((scsi->sc_dev.dv_unit < 32) &&
+	     ((1U << scsi->sc_dev.dv_unit) & scsidebug_buses)) &&
+	    ((target < 32) && ((1U << target) & scsidebug_targets)) &&
+	    ((lun < 32) && ((1U << lun) & scsidebug_luns)))
 		sc_link->flags |= scsidebug_level;
 #endif /* SCSIDEBUG */
 
@@ -1155,10 +1153,8 @@ scsi_devid(struct scsi_link *link)
 
 		if (pg83 && scsi_devid_pg83(link) == 0)
 			goto done;
-#ifdef notyet
 		if (pg80 && scsi_devid_pg80(link) == 0)
 			goto done;
-#endif
 	}
 done:
 	dma_free(pg, sizeof(*pg));
@@ -1256,6 +1252,56 @@ done:
 		dma_free(pg, len);
 	if (hdr)
 		dma_free(hdr, sizeof(*hdr));
+	return (rv);
+}
+
+int
+scsi_devid_pg80(struct scsi_link *link)
+{
+	struct scsi_vpd_hdr *hdr = NULL;
+	u_int8_t *pg = NULL;
+	char *id;
+	int pglen, len;
+	int rv;
+
+	hdr = dma_alloc(sizeof(*hdr), PR_WAITOK | PR_ZERO);
+
+	rv = scsi_inquire_vpd(link, hdr, sizeof(*hdr), SI_PG_SERIAL,
+	    scsi_autoconf);
+	if (rv != 0)
+		goto freehdr;
+
+	len = _2btol(hdr->page_length);
+	if (len == 0) {
+		rv = EINVAL;
+		goto freehdr;
+	}
+
+	pglen = sizeof(*hdr) + len;
+	pg = dma_alloc(pglen, PR_WAITOK | PR_ZERO);
+
+	rv = scsi_inquire_vpd(link, pg, pglen, SI_PG_SERIAL, scsi_autoconf);
+	if (rv != 0)
+		goto free;
+
+	id = malloc(sizeof(link->inqdata.vendor) +
+	    sizeof(link->inqdata.product) + len, M_TEMP, M_WAITOK);
+	memcpy(id, link->inqdata.vendor, sizeof(link->inqdata.vendor));
+	memcpy(id + sizeof(link->inqdata.vendor), link->inqdata.product,
+	    sizeof(link->inqdata.product));
+	memcpy(id + sizeof(link->inqdata.vendor) +
+	    sizeof(link->inqdata.product), pg + sizeof(*hdr), len);
+
+	link->id = devid_alloc(DEVID_SERIAL, DEVID_F_PRINT,
+	    sizeof(link->inqdata.vendor) + sizeof(link->inqdata.product) + len,
+	    id);
+
+	free(id, M_TEMP);
+
+free:
+	dma_free(pg, pglen);
+freehdr:
+	dma_free(hdr, sizeof(*hdr));
 	return (rv);
 }
 

@@ -1,4 +1,4 @@
-#	$OpenBSD: SUN4C,v 1.62 2010/07/03 03:59:17 krw Exp $
+#	$OpenBSD: SUN4C,v 1.65 2011/11/08 12:53:58 deraadt Exp $
 #	$NetBSD: GENERIC,v 1.48 1997/08/23 19:19:01 mjacob Exp $
 
 # Machine architecture; required by config(8)
@@ -14,9 +14,6 @@ option		SUN4C		# sun4c - SS1, 1+, 2, ELC, SLC, IPC, IPX, etc.
 #option		KGDBRATE=38400	# baud rate
 
 # Options for SPARCstation hardware
-option		COMPAT_SVR4	# compatibility with SVR4 binaries
-option		PROCFS		# /proc
-
 option		WSEMUL_SUN	# provide sun terminal emulation; required
 option		WSEMUL_NO_VT100	# do not provide vt100 terminal emulation
 option		WSDISPLAY_COMPAT_RAWKBD # provide raw scancodes; needed for X11
@@ -174,11 +171,10 @@ ukphy*	at mii?
 
 # SCSI bus layer.  SCSI devices attach to the SCSI bus, which attaches
 # to the underlying hardware controller.
-scsibus* at esp?
-scsibus* at isp?
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
+scsibus* at scsi?
 sd*	at scsibus?		# SCSI disks
 st*	at scsibus?		# SCSI tapes
 cd*	at scsibus?		# SCSI CD-ROMs

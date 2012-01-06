@@ -1,4 +1,4 @@
-/*	$OpenBSD: xy.c,v 1.50 2010/09/22 06:40:25 krw Exp $	*/
+/*	$OpenBSD: xy.c,v 1.53 2011/07/06 04:49:35 matthew Exp $	*/
 /*	$NetBSD: xy.c,v 1.26 1997/07/19 21:43:56 pk Exp $	*/
 
 /*
@@ -810,15 +810,6 @@ xyioctl(dev, command, addr, flag, p)
 		    &xy->sc_dk.dk_label->d_partitions[DISKPART(dev)];
 		return 0;
 
-	case DIOCWLABEL:	/* change write status of disk label */
-		if ((flag & FWRITE) == 0)
-			return EBADF;
-		if (*(int *) addr)
-			xy->flags |= XY_WLABEL;
-		else
-			xy->flags &= ~XY_WLABEL;
-		return 0;
-
 	case DIOCWDINFO:	/* write disk label */
 	case DIOCSDINFO:	/* set disk label */
 		if ((flag & FWRITE) == 0)
@@ -983,9 +974,7 @@ xystrategy(bp)
 
 	/* check for live device */
 
-	if (unit >= xy_cd.cd_ndevs || (xy = xy_cd.cd_devs[unit]) == 0 ||
-	    bp->b_blkno < 0 ||
-	    (bp->b_bcount % xy->sc_dk.dk_label->d_secsize) != 0) {
+	if (unit >= xy_cd.cd_ndevs || (xy = xy_cd.cd_devs[unit]) == 0) {
 		bp->b_error = EINVAL;
 		goto bad;
 	}
@@ -1008,18 +997,9 @@ xystrategy(bp)
 		bp->b_error = EIO;
 		goto bad;
 	}
-	/* short circuit zero length request */
 
-	if (bp->b_bcount == 0)
-		goto done;
-
-	/* check bounds with label (disksubr.c).  Determine the size of the
-	 * transfer, and make sure it is within the boundaries of the
-	 * partition. Adjust transfer if needed, and signal errors or early
-	 * completion. */
-
-	if (bounds_check_with_label(bp, xy->sc_dk.dk_label,
-	    (xy->flags & XY_WLABEL) != 0) <= 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, xy->sc_dk.dk_label) == -1)
 		goto done;
 
 	/*
@@ -1039,11 +1019,11 @@ xystrategy(bp)
 	splx(s);
 	return;
 
-bad:				/* tells upper layers we have an error */
+ bad:				/* tells upper layers we have an error */
 	bp->b_flags |= B_ERROR;
-done:				/* tells upper layers we are done with this
-				 * buf */
 	bp->b_resid = bp->b_bcount;
+ done:				/* tells upper layers we are done with this
+				 * buf */
 	s = splbio();
 	biodone(bp);
 	splx(s);

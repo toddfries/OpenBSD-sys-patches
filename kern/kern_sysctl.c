@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.202 2011/04/18 21:44:56 guenther Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.210 2011/12/14 07:32:16 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -45,6 +45,7 @@
 #include <sys/malloc.h>
 #include <sys/proc.h>
 #include <sys/resourcevar.h>
+#include <sys/signalvar.h>
 #include <sys/file.h>
 #include <sys/filedesc.h>
 #include <sys/vnode.h>
@@ -116,6 +117,7 @@ extern void nmbclust_update(void);
 
 int sysctl_diskinit(int, struct proc *);
 int sysctl_proc_args(int *, u_int, void *, size_t *, struct proc *);
+int sysctl_proc_cwd(int *, u_int, void *, size_t *, struct proc *);
 int sysctl_intrcnt(int *, u_int, void *, size_t *);
 int sysctl_sensors(int *, u_int, void *, size_t *, void *, size_t);
 int sysctl_emul(int *, u_int, void *, size_t *, void *, size_t);
@@ -281,6 +283,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		case KERN_TTY:
 		case KERN_POOL:
 		case KERN_PROC_ARGS:
+		case KERN_PROC_CWD:
 		case KERN_SYSVIPC_INFO:
 		case KERN_SEMINFO:
 		case KERN_SHMINFO:
@@ -365,6 +368,9 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_doproc(name + 1, namelen - 1, oldp, oldlenp));
 	case KERN_PROC_ARGS:
 		return (sysctl_proc_args(name + 1, namelen - 1, oldp, oldlenp,
+		     p));
+	case KERN_PROC_CWD:
+		return (sysctl_proc_cwd(name + 1, namelen - 1, oldp, oldlenp,
 		     p));
 	case KERN_FILE2:
 		return (sysctl_file2(name + 1, namelen - 1, oldp, oldlenp, p));
@@ -611,6 +617,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
  * hardware related system variables.
  */
 char *hw_vendor, *hw_prod, *hw_uuid, *hw_serial, *hw_ver;
+int allowpowerdown = 1;
 
 int
 hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
@@ -716,6 +723,12 @@ hw_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case HW_USERMEM64:
 		return (sysctl_rdquad(oldp, oldlenp, newp,
 		    ptoa((psize_t)physmem - uvmexp.wired)));
+	case HW_ALLOWPOWERDOWN:
+		if (securelevel > 0)
+			return (sysctl_rdint(oldp, oldlenp, newp,
+			    allowpowerdown));
+		return (sysctl_int(oldp, oldlenp, newp, newlen,
+		    &allowpowerdown));
 	default:
 		return (EOPNOTSUPP);
 	}
@@ -897,7 +910,6 @@ sysctl__string(void *oldp, size_t *oldlenp, void *newp, size_t newlen,
     char *str, int maxlen, int trunc)
 {
 	int len, error = 0;
-	char c;
 
 	len = strlen(str) + 1;
 	if (oldp && *oldlenp < len) {
@@ -908,16 +920,15 @@ sysctl__string(void *oldp, size_t *oldlenp, void *newp, size_t newlen,
 		return (EINVAL);
 	if (oldp) {
 		if (trunc && *oldlenp < len) {
-			/* save & zap NUL terminator while copying */
-			c = str[*oldlenp-1];
-			str[*oldlenp-1] = '\0';
-			error = copyout(str, oldp, *oldlenp);
-			str[*oldlenp-1] = c;
+			len = *oldlenp;
+			error = copyout(str, oldp, len - 1);
+			if (error == 0)
+				error = copyout("", (char *)oldp + len - 1, 1);
 		} else {
-			*oldlenp = len;
 			error = copyout(str, oldp, len);
 		}
 	}
+	*oldlenp = len;
 	if (error == 0 && newp) {
 		error = copyin(newp, str, newlen);
 		str[newlen] = 0;
@@ -1036,6 +1047,7 @@ sysctl_file(char *where, size_t *sizep, struct proc *p)
 			cfile.f_offset = (off_t)-1;
 			cfile.f_rxfer = 0;
 			cfile.f_wxfer = 0;
+			cfile.f_seek = 0;
 			cfile.f_rbytes = 0;
 			cfile.f_wbytes = 0;
 		}
@@ -1071,17 +1083,18 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		kf->f_uid = fp->f_cred->cr_uid;
 		kf->f_gid = fp->f_cred->cr_gid;
 		kf->f_ops = PTRTOINT64(fp->f_ops);
-		kf->f_offset = fp->f_offset;
 		kf->f_data = PTRTOINT64(fp->f_data);
 		kf->f_usecount = fp->f_usecount;
 
 		if (suser(p, 0) == 0 || p->p_ucred->cr_uid == fp->f_cred->cr_uid) {
+			kf->f_offset = fp->f_offset;
 			kf->f_rxfer = fp->f_rxfer;
 			kf->f_rwfer = fp->f_wxfer;
 			kf->f_seek = fp->f_seek;
 			kf->f_rbytes = fp->f_rbytes;
 			kf->f_wbytes = fp->f_rbytes;
-		}
+		} else
+			kf->f_offset = -1;
 	} else if (vp != NULL) {
 		/* fake it */
 		kf->f_type = DTYPE_VNODE;
@@ -1147,7 +1160,7 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 			kf->inp_laddru[2] = inpcb->inp_laddr6.s6_addr32[2];
 			kf->inp_laddru[3] = inpcb->inp_laddr6.s6_addr32[3];
 			kf->inp_fport = inpcb->inp_fport;
-			kf->inp_faddru[0] = inpcb->inp_laddr6.s6_addr32[0];
+			kf->inp_faddru[0] = inpcb->inp_faddr6.s6_addr32[0];
 			kf->inp_faddru[1] = inpcb->inp_faddr6.s6_addr32[1];
 			kf->inp_faddru[2] = inpcb->inp_faddr6.s6_addr32[2];
 			kf->inp_faddru[3] = inpcb->inp_faddr6.s6_addr32[3];
@@ -1278,8 +1291,8 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 				FILLIT(NULL, NULL, KERN_FILE_CDIR, fdp->fd_cdir, pp);
 			if (fdp->fd_rdir)
 				FILLIT(NULL, NULL, KERN_FILE_RDIR, fdp->fd_rdir, pp);
-			if (pp->p_tracep)
-				FILLIT(NULL, NULL, KERN_FILE_TRACE, pp->p_tracep, pp);
+			if (pp->p_p->ps_tracevp)
+				FILLIT(NULL, NULL, KERN_FILE_TRACE, pp->p_p->ps_tracevp, pp);
 			for (i = 0; i < fdp->fd_nfiles; i++) {
 				if ((fp = fdp->fd_ofiles[i]) == NULL)
 					continue;
@@ -1304,8 +1317,8 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 				FILLIT(NULL, NULL, KERN_FILE_CDIR, fdp->fd_cdir, pp);
 			if (fdp->fd_rdir)
 				FILLIT(NULL, NULL, KERN_FILE_RDIR, fdp->fd_rdir, pp);
-			if (pp->p_tracep)
-				FILLIT(NULL, NULL, KERN_FILE_TRACE, pp->p_tracep, pp);
+			if (pp->p_p->ps_tracevp)
+				FILLIT(NULL, NULL, KERN_FILE_TRACE, pp->p_p->ps_tracevp, pp);
 			for (i = 0; i < fdp->fd_nfiles; i++) {
 				if ((fp = fdp->fd_ofiles[i]) == NULL)
 					continue;
@@ -1473,7 +1486,7 @@ fill_kproc(struct proc *p, struct kinfo_proc *ki)
 	struct timeval ut, st;
 
 	FILL_KPROC(ki, strlcpy, p, pr, p->p_cred, p->p_ucred, pr->ps_pgrp,
-	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_stats);
+	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_stats, p->p_sigacts);
 
 	/* stuff that's too painful to generalize into the macros */
 	if (pr->ps_pptr)
@@ -1711,6 +1724,67 @@ out:
 	return (error);
 }
 
+int
+sysctl_proc_cwd(int *name, u_int namelen, void *oldp, size_t *oldlenp,
+    struct proc *cp)
+{
+	struct proc *findp;
+	pid_t pid;
+	int error;
+	size_t lenused, len;
+	char *path, *bp, *bend;
+
+	if (namelen > 1)
+		return (ENOTDIR);
+	if (namelen < 1)
+		return (EINVAL);
+
+	pid = name[0];
+	if ((findp = pfind(pid)) == NULL)
+		return (ESRCH);
+
+	if (oldp == NULL) {
+		*oldlenp = MAXPATHLEN * 4;
+		return (0);
+	}
+
+	if (P_ZOMBIE(findp) || (findp->p_flag & P_SYSTEM))
+		return (EINVAL);
+
+	/* Only owner or root can get cwd */
+	if (findp->p_ucred->cr_uid != cp->p_ucred->cr_uid &&
+	    (error = suser(cp, 0)) != 0)
+		return (error);
+
+	/* Exiting - don't bother, it will be gone soon anyway */
+	if (findp->p_flag & P_WEXIT)
+		return (ESRCH);
+
+	len = *oldlenp;
+	if (len > MAXPATHLEN * 4)
+		len = MAXPATHLEN * 4;
+	else if (len < 2)
+		return (ERANGE);
+	*oldlenp = 0;
+
+	path = malloc(len, M_TEMP, M_WAITOK);
+
+	bp = &path[len];
+	bend = bp;
+	*(--bp) = '\0';
+
+	/* Same as sys__getcwd */
+	error = vfs_getcwd_common(findp->p_fd->fd_cdir, NULL,
+	    &bp, path, len / 2, GETCWD_CHECK_ACCESS, cp);
+	if (error == 0) {
+		*oldlenp = lenused = bend - bp;
+		error = copyout(bp, oldp, lenused);
+	}
+
+	free(path, M_TEMP);
+
+	return (error);
+}
 #endif
 
 /*
@@ -1756,8 +1830,8 @@ sysctl_diskinit(int update, struct proc *p)
 			bzero(duid, sizeof(duid));
 			if (dl && bcmp(dl->d_uid, &uid, sizeof(dl->d_uid))) {
 				snprintf(duid, sizeof(duid), 
-				    "%02hhx%02hhx%02hhx%02hhx"
-				    "%02hhx%02hhx%02hhx%02hhx",
+				    "%02hx%02hx%02hx%02hx"
+				    "%02hx%02hx%02hx%02hx",
 				    dl->d_uid[0], dl->d_uid[1], dl->d_uid[2],
 				    dl->d_uid[3], dl->d_uid[4], dl->d_uid[5],
 				    dl->d_uid[6], dl->d_uid[7]);

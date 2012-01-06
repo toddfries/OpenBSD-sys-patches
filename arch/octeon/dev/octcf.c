@@ -1,4 +1,4 @@
-/*	$OpenBSD: octcf.c,v 1.2 2011/05/08 13:24:55 syuu Exp $ */
+/*	$OpenBSD: octcf.c,v 1.7 2011/07/06 04:49:35 matthew Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -114,8 +114,6 @@ struct octcf_softc {
 	struct buf *sc_bp;
 	struct ataparams sc_params;/* drive characteristics found */
 	int sc_flags;
-#define OCTCFF_WLABEL		0x04 /* label is writable */
-#define OCTCFF_LABELLING	0x08 /* writing label */
 #define OCTCFF_LOADED		0x10 /* parameters loaded */
 	u_int64_t sc_capacity;
 	bus_space_tag_t       sc_iot;
@@ -146,9 +144,6 @@ void  octcfdone(void *);
 
 cdev_decl(octcf);
 bdev_decl(octcf);
-
-#define octcflock(wd)  disk_lock(&(wd)->sc_dk)
-#define octcfunlock(wd)  disk_unlock(&(wd)->sc_dk)
 
 #define octcflookup(unit) (struct octcf_softc *)disk_lookup(&octcf_cd, (unit))
 
@@ -307,28 +302,22 @@ octcfstrategy(struct buf *bp)
 	}
 	OCTCFDEBUG_PRINT(("octcfstrategy (%s)\n", wd->sc_dev.dv_xname),
 	    DEBUG_XFERS);
-	/* Valid request?  */
-	if (bp->b_blkno < 0 ||
-	    (bp->b_bcount % wd->sc_dk.dk_label->d_secsize) != 0 ||
-	    (bp->b_bcount / wd->sc_dk.dk_label->d_secsize) >= (1 << NBBY)) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
 	/* If device invalidated (e.g. media change, door open), error. */
 	if ((wd->sc_flags & OCTCFF_LOADED) == 0) {
 		bp->b_error = EIO;
 		goto bad;
 	}
-	/* If it's a null transfer, return immediately. */
-	if (bp->b_bcount == 0)
+
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, wd->sc_dk.dk_label) == -1)
 		goto done;
-	/*
-	 * Do bounds checking, adjust transfer. if error, process.
-	 * If end of partition, just return.
-	 */
-	if (bounds_check_with_label(bp, wd->sc_dk.dk_label,
-	    (wd->sc_flags & (OCTCFF_WLABEL|OCTCFF_LABELLING)) != 0) <= 0)
-		goto done;
+
+	/* Check that the number of sectors can fit in a byte. */
+	if ((bp->b_bcount / wd->sc_dk.dk_label->d_secsize) >= (1 << NBBY)) {
+		bp->b_error = EINVAL;
+		goto bad;
+	}
+
 	/* Queue transfer on drive, activate drive and controller if idle. */
 	s = splbio();
 	disksort(&wd->sc_q, bp);
@@ -336,11 +325,11 @@ octcfstrategy(struct buf *bp)
 	splx(s);
 	device_unref(&wd->sc_dev);
 	return;
-bad:
+
+ bad:
 	bp->b_flags |= B_ERROR;
-done:
-	/* Toss transfer; we're done early. */
 	bp->b_resid = bp->b_bcount;
+ done:
 	s = splbio();
 	biodone(bp);
 	splx(s);
@@ -446,7 +435,7 @@ octcfopen(dev_t dev, int flag, int fmt, struct proc *p)
 	 * If this is the first open of this device, add a reference
 	 * to the adapter.
 	 */
-	if ((error = octcflock(wd)) != 0) 
+	if ((error = disk_lock(&wd->sc_dk)) != 0) 
 		goto bad4;
 
 	if (wd->sc_dk.dk_openmask != 0) {
@@ -496,7 +485,7 @@ octcfopen(dev_t dev, int flag, int fmt, struct proc *p)
 	wd->sc_dk.dk_openmask =
 	    wd->sc_dk.dk_copenmask | wd->sc_dk.dk_bopenmask;
 
-	octcfunlock(wd);
+	disk_unlock(&wd->sc_dk);
 	device_unref(&wd->sc_dev);
 	return 0;
 
@@ -505,7 +494,7 @@ bad:
 	}
 
 bad3:
-	octcfunlock(wd);
+	disk_unlock(&wd->sc_dk);
 bad4:
 	device_unref(&wd->sc_dev);
 	return error;
@@ -516,15 +505,14 @@ octcfclose(dev_t dev, int flag, int fmt, struct proc *p)
 {
 	struct octcf_softc *wd;
 	int part = DISKPART(dev);
-	int error = 0;
 
 	wd = octcflookup(DISKUNIT(dev));
 	if (wd == NULL)
 		return ENXIO;
 
 	OCTCFDEBUG_PRINT(("octcfclose\n"), DEBUG_FUNCS);
-	if ((error = octcflock(wd)) != 0)
-		goto exit;
+
+	disk_lock_nointr(&wd->sc_dk);
 
 	switch (fmt) {
 	case S_IFCHR:
@@ -537,11 +525,10 @@ octcfclose(dev_t dev, int flag, int fmt, struct proc *p)
 	wd->sc_dk.dk_openmask =
 	    wd->sc_dk.dk_copenmask | wd->sc_dk.dk_bopenmask;
 
-	octcfunlock(wd);
+	disk_unlock(&wd->sc_dk);
 
- exit:
 	device_unref(&wd->sc_dev);
-	return (error);
+	return (0);
 }
 
 void
@@ -633,9 +620,8 @@ octcfioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 			goto exit;
 		}
 
-		if ((error = octcflock(wd)) != 0)
+		if ((error = disk_lock(&wd->sc_dk)) != 0)
 			goto exit;
-		wd->sc_flags |= OCTCFF_LABELLING;
 
 		error = setdisklabel(wd->sc_dk.dk_label,
 		    (struct disklabel *)addr, /*wd->sc_dk.dk_openmask : */0);
@@ -645,20 +631,7 @@ octcfioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 				    octcfstrategy, wd->sc_dk.dk_label);
 		}
 
-		wd->sc_flags &= ~OCTCFF_LABELLING;
-		octcfunlock(wd);
-		goto exit;
-
-	case DIOCWLABEL:
-		if ((flag & FWRITE) == 0) {
-			error = EBADF;
-			goto exit;
-		}
-
-		if (*(int *)addr)
-			wd->sc_flags |= OCTCFF_WLABEL;
-		else
-			wd->sc_flags &= ~OCTCFF_WLABEL;
+		disk_unlock(&wd->sc_dk);
 		goto exit;
 
 #ifdef notyet

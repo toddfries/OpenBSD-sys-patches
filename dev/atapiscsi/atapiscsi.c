@@ -1,4 +1,4 @@
-/*      $OpenBSD: atapiscsi.c,v 1.97 2011/04/15 20:53:28 miod Exp $     */
+/*      $OpenBSD: atapiscsi.c,v 1.99 2011/07/17 22:46:48 matthew Exp $     */
 
 /*
  * This code is derived from code with the copyright below.

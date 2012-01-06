@@ -1,4 +1,4 @@
-/*      $OpenBSD: ata_wdc.c,v 1.39 2011/05/24 23:18:47 matthew Exp $	*/
+/*      $OpenBSD: ata_wdc.c,v 1.44 2011/11/15 17:14:14 deraadt Exp $	*/
 /*	$NetBSD: ata_wdc.c,v 1.21 1999/08/09 09:43:11 bouyer Exp $	*/
 
 /*
@@ -77,6 +77,10 @@
 #include <dev/ic/wdcvar.h>
 #include <dev/ata/wdvar.h>
 
+#ifdef HIBERNATE
+#include <sys/hibernate.h>
+#endif
+
 #define DEBUG_INTR   0x01
 #define DEBUG_XFERS  0x02
 #define DEBUG_STATUS 0x04
@@ -109,8 +113,9 @@ int   wdc_ata_err(struct ata_drive_datas *, struct ata_bio *);
 #define WDC_ATA_RECOV 0x01 /* There was a recovered error */
 #define WDC_ATA_ERR   0x02 /* Drive reports an error */
 
+#ifdef HIBERNATE
 int
-wd_hibernate_io(dev_t dev, daddr_t blkno, caddr_t addr, size_t size, int wr, void *page)
+wd_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size, int op, void *page)
 {
 	struct {
 		struct wd_softc wd;
@@ -122,6 +127,10 @@ wd_hibernate_io(dev_t dev, daddr_t blkno, caddr_t addr, size_t size, int wr, voi
 	struct channel_softc *chp = &my->chp;
 	struct ata_bio *ata_bio;
 	extern struct cfdriver wd_cd;
+
+	/* early call for initialization */
+	if (op == HIB_INIT)
+		return(0);
 
 	real_wd = (struct wd_softc *)disk_lookup(&wd_cd, DISKUNIT(dev));
 	if (real_wd == NULL)
@@ -144,10 +153,10 @@ wd_hibernate_io(dev_t dev, daddr_t blkno, caddr_t addr, size_t size, int wr, voi
 	/* Fill the request and submit it */
 	wd->sc_wdc_bio.blkno = blkno;
 	wd->sc_wdc_bio.flags = ATA_POLL | ATA_LBA48;
-	if (wr == 0)
+	if (op == HIB_R)
 		wd->sc_wdc_bio.flags |= ATA_READ;
 	wd->sc_wdc_bio.bcount = size;
-	wd->sc_wdc_bio.databuf = addr;
+	wd->sc_wdc_bio.databuf = (caddr_t)addr;
 	wd->sc_wdc_bio.wd = wd;
 
 	bzero(&my->xfer, sizeof my->xfer);
@@ -161,8 +170,9 @@ wd_hibernate_io(dev_t dev, daddr_t blkno, caddr_t addr, size_t size, int wr, voi
 	xfer->c_intr = wdc_ata_bio_intr;
 	xfer->c_kill_xfer = wdc_ata_bio_kill_xfer;
 	wdc_exec_xfer(chp, xfer);
-	return (ata_bio->flags & ATA_ITSDONE) ? 0 : 1;
+	return (ata_bio->flags & ATA_ITSDONE) ? 0 : EIO;
 }
+#endif /* HIBERNATE */
 
 /*
  * Handle block I/O operation. Return WDC_COMPLETE, WDC_QUEUED, or
@@ -325,6 +335,12 @@ again:
 			wdc_set_drive(chp, xfer->drive);
 			if (wait_for_ready(chp, ata_delay) < 0)
 				goto timeout;
+
+			/* start the DMA channel (before) */
+			if (chp->ch_flags & WDCF_DMA_BEFORE_CMD)
+				(*chp->wdc->dma_start)(chp->wdc->dma_arg,
+				    chp->channel, xfer->drive);
+
 			if (ata_bio->flags & ATA_LBA48) {
 				wdccommandext(chp, xfer->drive, cmd,
 				    (u_int64_t)ata_bio->blkno, nblks);
@@ -332,9 +348,12 @@ again:
 				wdccommand(chp, xfer->drive, cmd, cyl,
 				    head, sect, nblks, 0);
 			}
-			/* start the DMA channel */
-			(*chp->wdc->dma_start)(chp->wdc->dma_arg,
-			    chp->channel, xfer->drive);
+
+			/* start the DMA channel (after) */
+			if ((chp->ch_flags & WDCF_DMA_BEFORE_CMD) == 0)
+				(*chp->wdc->dma_start)(chp->wdc->dma_arg,
+				    chp->channel, xfer->drive);
+
 			chp->ch_flags |= WDCF_DMA_WAIT;
 			/* wait for irq */
 			goto intr;

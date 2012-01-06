@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_bmap.c,v 1.29 2008/06/12 06:58:40 deraadt Exp $	*/
+/*	$OpenBSD: ufs_bmap.c,v 1.31 2011/09/18 11:18:28 miod Exp $	*/
 /*	$NetBSD: ufs_bmap.c,v 1.3 1996/02/09 22:36:00 christos Exp $	*/
 
 /*
@@ -44,8 +44,7 @@
 #include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/resourcevar.h>
-
-#include <miscfs/specfs/specdev.h>
+#include <sys/specdev.h>
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
@@ -243,7 +242,7 @@ ufs_getlbns(struct vnode *vp, daddr64_t bn, struct indir *ap, int *nump)
 
 #ifdef DIAGNOSTIC
 	if (realbn < 0 && realbn > -NDADDR) {
-		panic ("ufs_getlbns: Invalid indirect block %d specified",
+		panic ("ufs_getlbns: Invalid indirect block %lld specified",
 		    realbn);
 	}
 #endif
@@ -300,7 +299,7 @@ ufs_getlbns(struct vnode *vp, daddr64_t bn, struct indir *ap, int *nump)
 	}
 #ifdef DIAGNOSTIC
 	if (realbn < 0 && metalbn != realbn) {
-		panic("ufs_getlbns: indirect block %d not found", realbn);
+		panic("ufs_getlbns: indirect block %lld not found", realbn);
 	}
 #endif
 	if (nump)

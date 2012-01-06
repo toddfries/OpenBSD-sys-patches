@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.512 2011/04/07 13:42:53 thib Exp $
+#	$OpenBSD: files,v 1.533 2011/12/31 17:06:10 jsing Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -339,8 +339,8 @@ file	dev/ic/lpt.c			lpt & (lpt_isa | lpt_localbus |
 
 # STI (hp graphics)
 device	sti: wsemuldisplaydev
-file	dev/ic/sti.c			sti & (sti_pci | sti_gedoens |
-					       sti_sgc) needs-flag
+file	dev/ic/sti.c			sti & (sti_dio | sti_gedoens |
+					       sti_pci | sti_sgc) needs-flag
 
 # Initio ULTRA WIDE/ULTRA2 WIDE SCSI Controllers
 device	iha: scsi
@@ -450,6 +450,14 @@ device wbsd: sdmmcbus
 file	dev/ic/w83l518d.c		wbsd
 file	dev/ic/w83l518d_sdmmc.c		wbsd
 
+# AMD 7930 audio/ISDN codec
+define	am7930
+file	dev/ic/am7930.c			am7930
+
+# Siemens PSB2160 audio codec, as found in HP systems
+device	arcofi: audio, auconv, mulaw
+file	dev/ic/arcofi.c			arcofi
+
 # radio devices, attaches to radio hardware driver
 device	radio
 attach	radio at radiobus
@@ -483,6 +491,7 @@ file	dev/softraid_raidp.c		softraid
 file	dev/softraid_crypto.c		softraid & crypto
 file	dev/softraid_aoe.c		softraid & ether & aoe
 file	dev/softraid_raid6.c		softraid
+file	dev/softraid_concat.c		softraid
 
 # SPD Memory EEPROM
 device	spdmem
@@ -490,10 +499,9 @@ file	dev/spdmem.c			spdmem
 
 # legitimate pseudo-devices
 pseudo-device vnd: disk
-pseudo-device ccd: disk
 pseudo-device raid: disk
 pseudo-device rd: disk
-file	dev/ramdisk.c			rd needs-flag
+file	dev/rd.c			rd needs-flag
 
 pseudo-device pty: tty
 pseudo-device nmea: tty
@@ -558,10 +566,8 @@ file altq/altq_subr.c			altq
 file altq/altq_red.c			altq
 file altq/altq_cbq.c			altq
 file altq/altq_rmclass.c		altq
-file altq/altq_cdnr.c			altq_cdnr
 file altq/altq_hfsc.c			altq
 file altq/altq_priq.c			altq
-file altq/altq_rio.c			altq_rio
 file ddb/db_access.c			ddb | kgdb
 file ddb/db_aout.c			ddb
 file ddb/db_break.c			ddb
@@ -584,7 +590,6 @@ file ddb/db_write_cmd.c			ddb
 file ddb/db_usrreq.c			ddb
 file dev/auconv.c			auconv
 file dev/audio.c			audio			needs-flag
-file dev/ccd.c				ccd			needs-flag
 file dev/cons.c
 file dev/diskmap.c
 file dev/firmload.c			firmload
@@ -723,6 +728,7 @@ file kern/subr_autoconf.c
 file kern/subr_disk.c
 file kern/subr_evcount.c
 file kern/subr_extent.c
+file kern/subr_hibernate.c		hibernate
 file kern/subr_log.c
 file kern/subr_pool.c
 file kern/dma_alloc.c
@@ -769,18 +775,15 @@ file kern/vfs_syscalls.c
 file kern/vfs_vops.c
 file kern/vfs_vnops.c
 file kern/vfs_getcwd.c
+file kern/spec_vnops.c
 file miscfs/deadfs/dead_vnops.c
 file miscfs/fifofs/fifo_vnops.c		fifo
 file miscfs/procfs/procfs_cmdline.c	procfs
-file miscfs/procfs/procfs_ctl.c		procfs
 file miscfs/procfs/procfs_linux.c	procfs
-file miscfs/procfs/procfs_note.c	procfs
 file miscfs/procfs/procfs_status.c	procfs
 file miscfs/procfs/procfs_subr.c	procfs
 file miscfs/procfs/procfs_vfsops.c	procfs
 file miscfs/procfs/procfs_vnops.c	procfs
-file miscfs/specfs/spec_vnops.c
-file miscfs/specfs/spec_subr.c
 file msdosfs/msdosfs_conv.c		msdosfs
 file msdosfs/msdosfs_denode.c		msdosfs
 file msdosfs/msdosfs_fat.c		msdosfs
@@ -808,7 +811,6 @@ file net/netisr.c
 file net/ppp_tty.c			ppp
 file net/bsd-comp.c			ppp_bsdcomp
 file net/ppp-deflate.c			ppp_deflate
-file net/zlib.c				ppp_deflate | ipsec | crypto
 file net/if_tun.c			tun			needs-count
 file net/if_bridge.c			bridge			needs-count
 file net/bridgestp.c			bridge
@@ -851,6 +853,7 @@ file netinet/igmp.c			inet
 file netinet/in.c			inet
 file netinet/in_pcb.c			inet
 file netinet/in_proto.c			inet
+file netinet/inet_nat64.c		inet & pf
 file netinet/ip_divert.c		inet & pf
 file netinet/ip_icmp.c			inet
 file netinet/ip_id.c			inet
@@ -891,7 +894,7 @@ file crypto/cryptodev.c			((inet & ipsec) | crypto)	needs-flag
 file crypto/criov.c			(inet & ipsec) | crypto
 file crypto/cryptosoft.c		(inet & ipsec) | crypto
 file crypto/xform.c			(inet & ipsec) | crypto
-file crypto/deflate.c			(inet & ipsec) | crypto
+file crypto/xform_ipcomp.c		(inet & ipsec) | crypto
 file crypto/arc4.c			
 file crypto/michael.c			wlan
 file crypto/cmac.c			wlan
@@ -899,12 +902,6 @@ file crypto/hmac.c			wlan | (softraid & crypto)
 file crypto/gmac.c			(inet & ipsec) | crypto
 file crypto/key_wrap.c			wlan
 file crypto/idgen.c			inet6 | nfsclient | nfsserver
-file netatalk/aarp.c			netatalk
-file netatalk/at_control.c		netatalk
-file netatalk/at_proto.c		netatalk
-file netatalk/ddp_input.c		netatalk
-file netatalk/ddp_output.c		netatalk
-file netatalk/ddp_usrreq.c		netatalk
 file netbt/bt_input.c			bluetooth		needs-flag
 file netbt/bt_proto.c			bluetooth
 file netbt/hci_event.c			bluetooth
@@ -1007,7 +1004,6 @@ file uvm/uvm_object.c
 file uvm/uvm_page.c
 file uvm/uvm_pager.c
 file uvm/uvm_pdaemon.c
-file uvm/uvm_pglist.c
 file uvm/uvm_pmemrange.c
 file uvm/uvm_stat.c
 file uvm/uvm_swap.c
@@ -1015,7 +1011,6 @@ file uvm/uvm_swap_encrypt.c		uvm_swap_encrypt
 file uvm/uvm_unix.c
 file uvm/uvm_user.c
 file uvm/uvm_vnode.c
-file dev/rd.c				ramdisk_hooks
 
 # IPv6
 file net/if_faith.c			faith			needs-count
@@ -1056,18 +1051,7 @@ file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
 file compat/common/compat_exec.c	!small_kernel
 file compat/common/compat_util.c	!small_kernel
 file compat/common/compat_dir.c		!small_kernel
-file compat/common/compat_vm.c		!small_kernel & compat_linux
-file compat/common/kern_info_09.c	!small_kernel & compat_linux
-file compat/common/vfs_syscalls_35.c	!small_kernel & compat_35
-file compat/common/kern_ipc_35.c	!small_kernel & compat_35
-file compat/common/kern_exit_43.c	!small_kernel
-file compat/common/kern_info_43.c	!small_kernel
-file compat/common/kern_resource_43.c	!small_kernel
-file compat/common/kern_sig_43.c	!small_kernel
-file compat/common/tty_43.c		!small_kernel
-file compat/common/uipc_syscalls_43.c	!small_kernel
-file compat/common/vfs_syscalls_43.c	!small_kernel
-file compat/common/vm_43.c		!small_kernel
+file compat/common/tty_43.c		compat_43
 
 # libx86emu
 file dev/x86emu/x86emu.c		x86emu
@@ -1111,3 +1095,16 @@ file lib/libkern/arch/${MACHINE_ARCH}/skpc.S | lib/libkern/skpc.c
 file lib/libkern/arch/${MACHINE_ARCH}/htonl.S | lib/libkern/htonl.c
 file lib/libkern/arch/${MACHINE_ARCH}/htons.S | lib/libkern/htons.c
 file lib/libkern/arch/${MACHINE_ARCH}/strncasecmp.S | lib/libkern/strncasecmp.c
+
+file lib/libz/adler32.c			ppp_deflate | ipsec | crypto | bios
+file lib/libz/crc32.c			ppp_deflate | ipsec | crypto
+file lib/libz/infback.c			ppp_deflate | ipsec | crypto
+file lib/libz/inffast.c			ppp_deflate | ipsec | crypto
+file lib/libz/inflate.c			ppp_deflate | ipsec | crypto
+file lib/libz/inftrees.c		ppp_deflate | ipsec | crypto
+file lib/libz/deflate.c			ppp_deflate | ipsec | crypto
+file lib/libz/zutil.c			ppp_deflate | ipsec | crypto
+file lib/libz/zopenbsd.c		ppp_deflate | ipsec | crypto
+file lib/libz/trees.c			ppp_deflate | ipsec | crypto
+file lib/libz/compress.c		ppp_deflate | ipsec | crypto
+

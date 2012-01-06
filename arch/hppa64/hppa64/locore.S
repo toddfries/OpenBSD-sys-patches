@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.27 2011/05/05 20:48:34 kettenis Exp $	*/
+/*	$OpenBSD: locore.S,v 1.41 2011/10/12 18:30:09 miod Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -59,6 +59,9 @@
 
 	.text
 
+#define MFCPU(r,x)    .word   0x140008a0 | ((r) << 21) | ((x))
+#define MTCPU(x,r)    .word   0x14001840 | ((r) << 21) | ((x) << 16)
+		
 /*
  * $start(pdc, boothowto, bootdev, esym)
  */
@@ -90,11 +93,16 @@ $start
 	mtctl	%r1, %eirr
 	mtctl	%r0, %cr10	/* ccr */
 
+	/* disable space-ID hashing */
+	MFCPU(2,28)
+	depdi	0, 54, 1, %r28
+	MTCPU(28,2)
+
 	ldil	L%cpu0_info, %r1
 	ldo	R%cpu0_info(%r1), %r1
 	mtctl	%r1, %cr24
-	ldil	L%(PSL_W|PSL_Q|PSL_P|PSL_C|PSL_D|PSL_S|PSL_O), %r8
-	ldo	R%(PSL_W|PSL_Q|PSL_P|PSL_C|PSL_D|PSL_S|PSL_O)(%r8), %r8
+	ldil	L%(PSL_W|PSL_Q|PSL_P|PSL_C|PSL_D|PSL_O), %r8
+	ldo	R%(PSL_W|PSL_Q|PSL_P|PSL_C|PSL_D|PSL_O)(%r8), %r8
 	stw	%r8, CI_PSW(%r1)
 	ldi	IPL_HIGH, %r8
 	stw	%r8, CI_CPL(%r1)
@@ -397,22 +405,131 @@ gateway_page
 	.align	256
 
 $bsd_syscall
-	mfctl	%eiem, %r1
+	mfctl	%eiem, %ret1
 	mtctl	%r0, %eiem
 	mtsp	%r0, %sr1
-	mfctl	%pidr1, %ret0
 	ldi	HPPA_PID_KERNEL, %ret0
 	mtctl	%ret0, %pidr1
 
-/* TODO prepare for syscall() */
+	.import $syscall, code
+	.call
+	ldil	L%$syscall, %ret0
+	be	R%$syscall(%sr1, %ret0)
+	nop ! nop ! nop ! nop
+	
+gateway_end
+	. = gateway_page + PAGE_SIZE
+	.size	gateway_page, .-gateway_page
 
-	.import syscall,code
+	.export $syscall, entry
+$syscall
+
+	mfsp	%sr0, %ret0
+	mtsp	%r0, %sr0
+	mtsp	%r0, %sr1
+	mtsp	%r0, %sr2
+	mtsp	%r0, %sr3
+	mtsp	%r0, %sr4
+	mtsp	%r0, %sr5
+	mtsp	%r0, %sr6
+	mtsp	%r0, %sr7
+	mtctl	%ret0, %cr28
+	mtctl	%ret1, %cr29
+
+	copy	%sp, %ret1
+
+	mfctl	%cr24, %ret0
+	ldd	CI_CURPROC(%ret0), %ret0
+	ldd	P_ADDR(%ret0), %sp
+	ldo	PAGE_SIZE-TRAPFRAME_SIZEOF(%sp), %sp
+	std	%sp, P_MD_REGS(%ret0)
+	ldo	TRAPFRAME_SIZEOF(%sp), %sp
+
+	std	%ret1, TF_SP-TRAPFRAME_SIZEOF(%sp)
+	mfctl	%cr28, %ret0
+	mfctl	%cr29, %ret1
+	std	%ret0, TF_SR0-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR1-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR2-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR3-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR4-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR5-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_SR6-TRAPFRAME_SIZEOF(%sp)
+	std	%r0, TF_SR7-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_IISQ-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_IISQ+8-TRAPFRAME_SIZEOF(%sp)
+
+	ldo	4(%r31), %ret0
+	std	%r31, TF_IIOQ-TRAPFRAME_SIZEOF(%sp)
+	std	%ret0, TF_IIOQ+8-TRAPFRAME_SIZEOF(%sp)
+	std	%r1, TF_R1-TRAPFRAME_SIZEOF(%sp)
+	std	%arg0, TF_ARGS+(0*8)-TRAPFRAME_SIZEOF(%sp)
+	std	%arg1, TF_ARGS+(1*8)-TRAPFRAME_SIZEOF(%sp)
+	std	%arg2, TF_ARGS+(2*8)-TRAPFRAME_SIZEOF(%sp)
+	std	%arg3, TF_ARGS+(3*8)-TRAPFRAME_SIZEOF(%sp)
+	std	arg4, TF_ARGS+(4*8)-TRAPFRAME_SIZEOF(%sp)
+	std	arg5, TF_ARGS+(5*8)-TRAPFRAME_SIZEOF(%sp)
+	std	arg6, TF_ARGS+(6*8)-TRAPFRAME_SIZEOF(%sp)
+	std	arg7, TF_ARGS+(7*8)-TRAPFRAME_SIZEOF(%sp)
+
+	std	%dp, TF_DP-TRAPFRAME_SIZEOF(%sp)
+
+	mfctl	%pidr2, arg7
+	std	arg7, TF_PIDR1-TRAPFRAME_SIZEOF(%sp)
+	std	arg7, TF_PIDR2-TRAPFRAME_SIZEOF(%sp)
+
+	mfctl	%sar, %arg2
+	mfctl	%cr25, %arg3
+	std	%arg2, TF_SAR-TRAPFRAME_SIZEOF(%sp)
+	std	%arg3, TF_VTOP-TRAPFRAME_SIZEOF(%sp)
+
+	mfctl	%cr30, %arg2
+	mfctl	%cr27, %arg3
+	std	%arg2, TF_CR30-TRAPFRAME_SIZEOF(%sp)
+	std	%arg3, TF_CR27-TRAPFRAME_SIZEOF(%sp)
+	
+	std	%rp, TF_RP-TRAPFRAME_SIZEOF(%sp)
+	std	%r3, TF_R3-TRAPFRAME_SIZEOF(%sp)
+	std	%r4, TF_R4-TRAPFRAME_SIZEOF(%sp)
+	std	%r5, TF_R5-TRAPFRAME_SIZEOF(%sp)
+	std	%r6, TF_R6-TRAPFRAME_SIZEOF(%sp)
+	std	%r7, TF_R7-TRAPFRAME_SIZEOF(%sp)
+	std	%r8, TF_R8-TRAPFRAME_SIZEOF(%sp)
+	std	%r9, TF_R9-TRAPFRAME_SIZEOF(%sp)
+	std	%r10, TF_R10-TRAPFRAME_SIZEOF(%sp)
+	std	%r11, TF_R11-TRAPFRAME_SIZEOF(%sp)
+	std	%r12, TF_R12-TRAPFRAME_SIZEOF(%sp)
+	std	%r13, TF_R13-TRAPFRAME_SIZEOF(%sp)
+	std	%r14, TF_R14-TRAPFRAME_SIZEOF(%sp)
+	std	%r15, TF_R15-TRAPFRAME_SIZEOF(%sp)
+	std	%r16, TF_R16-TRAPFRAME_SIZEOF(%sp)
+	std	%r17, TF_R17-TRAPFRAME_SIZEOF(%sp)
+	std	%r18, TF_R18-TRAPFRAME_SIZEOF(%sp)
+
+	mfctl	%cr0, %arg2
+	mfctl	%cr10, %arg3
+	std	%arg2, TF_RCTR-TRAPFRAME_SIZEOF(%sp)
+	std	%arg3, TF_CCR-TRAPFRAME_SIZEOF(%sp)
+
+	mfctl	%cr24, %r9
+	ldw	CI_PSW(%r9), %r9
+	std	%ret1, TF_EIEM-TRAPFRAME_SIZEOF(%sp)
+	std	%r9, TF_IPSW-TRAPFRAME_SIZEOF(%sp)
+
+	mtctl	%ret1, %eiem
+
+	ldo	-TRAPFRAME_SIZEOF(%sp), %arg0
+
+	ldil	L%__gp, %dp
+	ldo	R%__gp(%dp), %dp
+
+	.import	syscall, code
 	b,l	syscall, %rp
 	nop
 
 	mfctl	%cr24, %arg1
 	ldd	CI_CURPROC(%arg1), %r1
-	ldw	P_MD_REGS(%r1), %arg0
+	ldd	P_MD_REGS(%r1), %arg0
 
 $syscall_return
 	/* %arg0 -- trapframe */
@@ -426,13 +543,13 @@ $syscall_return
 	mfctl	%cr24, %r1
 	ldo	CI_TRAP_SAVE(%r1), %r1
 
-	ldd	TF_ARGS+4*8(%arg0), %arg2	/* arg3 */
-	ldd	TF_ARGS+5*8(%arg0), %arg3	/* arg2 */
+	ldd	TF_ARGS+3*8(%arg0), %arg2	/* arg3 */
+	ldd	TF_ARGS+2*8(%arg0), %arg3	/* arg2 */
 	std	%arg2, 0*8(%r1)
 	std	%arg3, 1*8(%r1)
 
-	ldd	TF_ARGS+6*8(%arg0), %arg2	/* arg1 */
-	ldd	TF_ARGS+7*8(%arg0), %arg3	/* arg0 */
+	ldd	TF_ARGS+1*8(%arg0), %arg2	/* arg1 */
+	ldd	TF_ARGS+0*8(%arg0), %arg3	/* arg0 */
 	std	%arg2, 2*8(%r1)
 	std	%arg3, 3*8(%r1)
 
@@ -485,11 +602,11 @@ $syscall_return
 	ldd	TF_R16(%arg0), %r16
 	ldd	TF_R17(%arg0), %r17
 	ldd	TF_R18(%arg0), %r18
-	ldd	TF_ARGS+0*8(%arg0), %r19
-	ldd	TF_ARGS+1*8(%arg0), %r20
-	ldd	TF_ARGS+2*8(%arg0), %r21
-	ldd	TF_ARGS+3*8(%arg0), %r22
-	/* Restore arg3, arg2, arg1 and arg0 later. */
+	ldd	TF_ARGS+4*8(%arg0), arg4
+	ldd	TF_ARGS+5*8(%arg0), arg5
+	ldd	TF_ARGS+6*8(%arg0), arg6
+	ldd	TF_ARGS+7*8(%arg0), arg7
+	/* Restore arg0, arg1, arg2 and arg3 later. */
 	ldd	TF_DP(%arg0), %r27
 	ldd	TF_RET0(%arg0), %r28
 	ldd	TF_RET1(%arg0), %r29
@@ -501,11 +618,6 @@ $syscall_return
 	ldd	TF_CCR(%arg0), %arg3		/* ccr */
 	mtctl	%arg2, %cr0
 	mtctl	%arg3, %cr10
-
-	ldd	TF_IOR(%arg0), %arg2		/* ior */
-	ldd	TF_ISR(%arg0), %arg3		/* isr */
-	mtctl	%arg2, %cr27
-	mtsp	%arg3, %sr6
 
 	ldd	TF_SAR(%arg0), %arg2		/* sar */
 	ldd	TF_VTOP(%arg0), %arg3		/* vtop */
@@ -576,10 +688,6 @@ $syscall_return
 	nop
 	.size	$bsd_syscall, .-$bsd_syscall
 	.size	$syscall_return, .-$syscall_return
-
-gateway_end
-	. = gateway_page + PAGE_SIZE
-	.size	gateway_page, .-gateway_page
 
 /*
  * interrupt vector table
@@ -787,8 +895,11 @@ ENTRY(TLABEL(all),0)
 	extrd,u	%r8, 63, SID_SHIFT, %r16
 	depd	%r16, 31, SID_SHIFT, %r9
 	depd	%r0, 63, SID_SHIFT, %r8
-	mtsp	%r8, %sr6
-	mtctl	%r9, %cr27
+
+	mfctl	%cr24, %r24
+	ldo	CI_TRAP_SAVE(%r24), %r24
+	std	%r9, 2*8(%r24)		/* ior */
+	std	%r8, 3*8(%r24)		/* isr */
 
 	mfctl	%pcsq, %r24
 	mtctl	%r0, %pcsq
@@ -865,14 +976,14 @@ TLABEL(all_virt)
 	std,ma	%r16, 8(%sr3,%sp)
 	std,ma	%r17, 8(%sr3,%sp)
 	std,ma	%r18, 8(%sr3,%sp)
-	std,ma	%r19, 8(%sr3,%sp)
-	std,ma	%r20, 8(%sr3,%sp)
-	std,ma	%r21, 8(%sr3,%sp)
-	std,ma	%r22, 8(%sr3,%sp)
-	std,ma	%r23, 8(%sr3,%sp)
-	std,ma	%r24, 8(%sr3,%sp)
-	std,ma	%r25, 8(%sr3,%sp)
-	std,ma	%r26, 8(%sr3,%sp)
+	std,ma	%arg0, 8(%sr3,%sp)
+	std,ma	%arg1, 8(%sr3,%sp)
+	std,ma	%arg2, 8(%sr3,%sp)
+	std,ma	%arg3, 8(%sr3,%sp)
+	std,ma	arg4, 8(%sr3,%sp)
+	std,ma	arg5, 8(%sr3,%sp)
+	std,ma	arg6, 8(%sr3,%sp)
+	std,ma	arg7, 8(%sr3,%sp)
 	std,ma	%r27, 8(%sr3,%sp)
 	std,ma	%r28, 8(%sr3,%sp)
 	std,ma	%r29, 8(%sr3,%sp)
@@ -887,7 +998,7 @@ TLABEL(all_virt)
 	std,ma	%arg3, 8(%sr3,%sp)	/* %sr1 */
 
 	mfsp	%sr2, %arg2
-	mfsp	%sr3, %arg3
+	mfsp	%sr2, %arg3		/* XXX */
 	std,ma	%arg2, 8(%sr3,%sp)	/* %sr2 */
 	std,ma	%arg3, 8(%sr3,%sp)	/* %sr3 */
 
@@ -930,12 +1041,7 @@ TLABEL(all_virt)
 	std,ma	%arg2, 8(%sr3,%sp)	/* eiem */
 	std,ma	%arg3, 8(%sr3,%sp)	/* eirr */
 
-	mfctl	%cr27, %arg2
-	mfsp	%sr6, %arg3
-	std,ma	%arg2, 8(%sr3,%sp)	/* ior */
-	std,ma	%arg3, 8(%sr3,%sp)	/* isr */
-
-	ldo	8(%sp), %sp		/* iir */
+	ldo	24(%sp), %sp		/* ior, isr, iir */
 	mfctl	%cr31, %arg3
 	std,ma	%arg3, 8(%sr3,%sp)	/* ipsw */
 
@@ -968,6 +1074,10 @@ TLABEL(all_virt)
 	ldd	1*8(%r1), %arg3
 	std	%arg2, TF_SP(%arg1)
 	std	%arg3, TF_IIR(%arg1)
+	ldd	2*8(%r1), %arg2
+	ldd	3*8(%r1), %arg3
+	std	%arg2, TF_IOR(%arg1)
+	std	%arg3, TF_ISR(%arg1)
 
 	ldo	TRAPFRAME_SIZEOF(%arg1), %sp
 	copy	%sp, %r3
@@ -977,7 +1087,7 @@ TLABEL(all_virt)
 	ldo	R%__gp(%dp), %dp
 	copy	%arg1, %r5
 
-	depd	%r0, T_USER_POS+1, T_USER_POS, %arg0
+	depd	%r0, T_USER_POS-1, T_USER_POS, %arg0
 	.import trap, code
 	b,l	trap, %rp
 	copy	%arg0, %r4
@@ -1020,8 +1130,8 @@ EXIT(TLABEL(all))
 	sub,*=	%r16, %r17, %r0			! \
 	std	%r17, 0(%r25)			! \
 	extrd,s	%r16, 63, 37, %r16		! \
-	depd	%r8, 63, 48, %r17		! \
-	depdi	1, 62, 1, %r17
+	depd	%r8, 62, 47, %r17		! \
+	depdi	2, 63, 2, %r17
 
 TLABEL(itlb)
 	PTPULL(0, TLABEL(all))
@@ -1073,7 +1183,7 @@ ENTRY(TLABEL(excpt),0)
 	copy	%rp, %r1
 	copy	%arg0, %r8
 	mfctl	%cr30, %r9
-#if FP_REGS != 0
+#if HFP_REGS != 0
 	ldo	HFP_REGS(%r9), %r9
 #endif
 	.import	fpu_save, code
@@ -1082,9 +1192,12 @@ ENTRY(TLABEL(excpt),0)
 	copy	%r9, %arg0
 	copy	%r1, %rp
 	copy	%r8, %arg0
+	mfctl	%cr24, %r1
 	mtctl	%r0, %cr10	/* reset ccr: cause a reload after exception */
-	ldil	L%fpu_curpcb, %r1
-	std	%r0, R%fpu_curpcb(%r1)
+	ldd	CI_FPU_STATE(%r1), %r16
+	std	%r0, CI_FPU_STATE(%r1)
+	std	%r0, HFP_CPU(%r16)
+	sync
 
 	/* now, check for trap */
 	ldw	0(%r9), %r1
@@ -1148,13 +1261,17 @@ ENTRY(TLABEL(emu),0)
 
 	/* if we are already enabled and hit again, emulate */
 	mfctl	%cr10, %r1	/* ccr */
-	extru,<> %r1, 25, 2, %r0
+	extrd,u,*<> %r1, 57, 2, %r0
 	b,n	$fpusw_set
 	nop
 
 $fpusw_emu
+	mfctl	%cr24, %r1
 	mtctl	%r0, %cr10	/* reset ccr: cause a reload after exception */
-	std	%r0, R%fpu_curpcb(%r1)
+	ldd	CI_FPU_STATE(%r1), %r16
+	std	%r0, CI_FPU_STATE(%r1)
+	std	%r0, HFP_CPU(%r16)
+	sync
 #if TODO_emulate
 	/* here we emulate the fld/fst */
 	mfctl	%iir, %r1
@@ -1175,9 +1292,10 @@ $fpusw_emu
 	b	TLABEL(all)
 	ldi	T_ILLEGAL, %r1
 #endif
+
 $fpusw_set
 	/* enable coprocessor */
-	depdi	3, 37, 2, %r1
+	depdi	3, 57, 2, %r1
 	mtctl	%r1, %cr10	/* ccr */
 
 	mfctl	%cr24, %r16
@@ -1247,13 +1365,13 @@ $fpusw_nosave
 	sync
 
 $fpusw_done
-	rfir
+	rfi,r
 	nop
 EXIT(TLABEL(emu))
 
 LEAF_ENTRY(fpu_exit)
 	/* enable coprocessor XXX */
-	depi    3, 25, 2, %r1
+	depdi	3, 57, 2, %r1
 	mtctl   %r1, %cr10
 
 	ldil    L%fpu_scratch, %r25
@@ -1297,16 +1415,6 @@ LEAF_ENTRY(fpu_save)
 	fstds,ma %fr29, 8(%arg0)
 	fstds,ma %fr30, 8(%arg0)
 	fstds    %fr31, 0(%arg0)
-	ldo	-24(%arg0), %arg0
-	ldi	-32, %r25	/* gotta be free for all callers */
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
-	fdc,m	%r25(%arg0)
 	bv	%r0(%rp)
 	sync
 EXIT(fpu_save)
@@ -1409,6 +1517,30 @@ LEAF_ENTRY(pitlb)
 	mfsp	%sr1, %arg2
 	mtsp	%arg0, %sr1
 	pitlb	%r0(%sr1, %arg1)
+	bv	%r0(%rp)
+	mtsp	%arg2, %sr1
+EXIT(pitlb)
+
+/*
+ * void  
+ * pdtlbe(pa_space_t sp, vaddr_t va)
+ */
+LEAF_ENTRY(pdtlbe)
+	mfsp	%sr1, %arg2
+	mtsp	%arg0, %sr1
+	pdtlbe	%r0(%sr1, %arg1)
+	bv	%r0(%rp)
+	mtsp	%arg2, %sr1
+EXIT(pdtlb)
+
+/*
+ * void  
+ * pitlbe(pa_space_t sp, vaddr_t va)
+ */
+LEAF_ENTRY(pitlbe)
+	mfsp	%sr1, %arg2
+	mtsp	%arg0, %sr1
+	pitlbe	%r0(%sr1, %arg1)
 	bv	%r0(%rp)
 	mtsp	%arg2, %sr1
 EXIT(pitlb)
@@ -1687,12 +1819,6 @@ Lcspstr
 	.asciz	"cpu_switchto: old=%p, new=%p"
 	.align	8
 kstack_check
-	ldd	P_WCHAN(%arg1), %arg3
-	comb,<>,n %r0, %arg3, switch_error
-	nop
-	ldb	P_STAT(%arg1), %arg3
-	comib,<>,n SRUN, %arg3, switch_error
-	nop
 	/*
 	 * The new process' kernel stack must be reasonable.
 	 */
@@ -1716,7 +1842,7 @@ kstack_ok
 	std	%arg1, CI_CURPROC(%r1)
 
 	/* If old process exited, don't bother. */
-	comb,=,n %r0, %arg2, switch_exited
+	comb,=,n %r0, %arg0, switch_exited
 
 	/*
 	 * 2. save old proc context
@@ -1760,6 +1886,8 @@ switch_exited
 	ldd	TF_PIDR2(%r1), %arg3
 	mtctl	%arg2, %cr30
 	mtctl	%arg3, %pidr2
+	ldd	TF_VTOP(%r1), %arg2
+	mtctl	%arg2, %cr25
 	ldo	-(HPPA_FRAME_SIZE+20*8)(%sp), %r3
 	ldo	-(HPPA_FRAME_SIZE)(%sp), ap
 	ldd	0*8(ap), %arg0
@@ -1830,19 +1958,21 @@ EXIT(switch_trampoline)
  * Signal "trampoline" code. Invoked from RTE setup by sendsig().
  */
 ENTRY(sigcode,0)
-	ldd	0x18(%arg3), %r19
+	ldd	0x18(%arg3), %dp
 	ldd	0x10(%arg3), %arg3
 	.call
 	ble	0(%sr0, %arg3)
 	copy	%r31, %rp
 
 	ldil	L%SYSCALLGATE, %r1
+	depd	%r0, 31, 32, %r1
 	copy	%r4, %arg0
 	.call
 	ble	4(%sr7, %r1)
 	ldi	SYS_sigreturn, %r1
 
 	ldil	L%SYSCALLGATE, %r1
+	depd	%r0, 31, 32, %r1
 	copy	%ret0, %arg0
 	.call
 	ble	4(%sr7, %r1)

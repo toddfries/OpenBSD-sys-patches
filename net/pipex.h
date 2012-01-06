@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.h,v 1.8 2011/04/02 11:52:44 dlg Exp $	*/
+/*	$OpenBSD: pipex.h,v 1.10 2011/10/15 03:24:11 yasuoka Exp $	*/
 
 /*
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -28,6 +28,23 @@
 
 #ifndef NET_PIPEX_H
 #define NET_PIPEX_H 1
+
+/*
+ * Names for pipex sysctl objects
+ */
+#define PIPEXCTL_ENABLE		1
+#define PIPEXCTL_MAXID		2
+
+#define PIPEXCTL_NAMES { \
+        { 0, 0 }, \
+        { "enable", CTLTYPE_INT }, \
+}
+
+#define PIPEXCTL_VARS { \
+	NULL, \
+	&pipex_enable \
+	NULL \
+}
 
 #define PIPEX_ENABLE			1
 #define PIPEX_DISABLE			0
@@ -163,6 +180,7 @@ struct pipex_session_descr_req {
 #define PIPEXSIFDESCR	_IOW ('p',  8, struct pipex_session_descr_req)
 
 #ifdef _KERNEL
+extern int	pipex_enable;
 
 struct pipex_session;
 
@@ -198,6 +216,11 @@ struct pipex_session  *pipex_l2tp_userland_lookup_session_ipv4 (struct mbuf *, s
 struct pipex_session  *pipex_l2tp_userland_lookup_session_ipv6 (struct mbuf *, struct in6_addr);
 struct mbuf           *pipex_l2tp_userland_output (struct mbuf *, struct pipex_session *);
 int                   pipex_ioctl (struct pipex_iface_context *, int, caddr_t);
+void                  pipex_session_init_mppe_recv(struct pipex_session *, int,
+int, u_char *);
+void                  pipex_session_init_mppe_send(struct pipex_session *, int,
+int, u_char *);
+
 __END_DECLS
 
 #endif /* _KERNEL */

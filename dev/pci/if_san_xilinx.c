@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_xilinx.c,v 1.24 2008/11/26 18:01:43 dlg Exp $	*/
+/*	$OpenBSD: if_san_xilinx.c,v 1.26 2011/09/18 11:17:57 miod Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -363,9 +363,7 @@ wan_xilinx_init(sdla_t *card)
 	sdla_getcfg(card->hw, SDLA_DMATAG, &sc->dmatag);
 
 	IFQ_SET_MAXLEN(&sc->wp_tx_pending_list, MAX_TX_BUF);
-	sc->wp_tx_pending_list.ifq_len = 0;
 	IFQ_SET_MAXLEN(&sc->wp_tx_complete_list, MAX_TX_BUF);
-	sc->wp_tx_complete_list.ifq_len = 0;
 
 	aft_alloc_rx_buffers(sc);
 
@@ -486,7 +484,7 @@ wan_xilinx_up(struct ifnet *ifp)
 	sc->dma_mtu = xilinx_valid_mtu(ifp->if_mtu+100);
 
 	if (!sc->dma_mtu) {
-		log(LOG_INFO, "%s:%s: Error invalid MTU %lu\n",
+		log(LOG_INFO, "%s:%s: Error invalid MTU %u\n",
 		    card->devname, sc->if_name, ifp->if_mtu);
 		return (EINVAL);
 	}

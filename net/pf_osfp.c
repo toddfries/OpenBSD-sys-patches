@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_osfp.c,v 1.21 2010/10/18 15:55:28 deraadt Exp $ */
+/*	$OpenBSD: pf_osfp.c,v 1.26 2011/09/28 17:15:45 bluhm Exp $ */
 
 /*
  * Copyright (c) 2003 Mike Frantzen <frantzen@w4g.org>
@@ -82,33 +82,35 @@ void				 pf_osfp_insert(struct pf_osfp_list *,
  * Returns the list of possible OSes.
  */
 struct pf_osfp_enlist *
-pf_osfp_fingerprint(struct pf_pdesc *pd, struct mbuf *m, int off,
-    const struct tcphdr *tcp)
+pf_osfp_fingerprint(struct pf_pdesc *pd)
 {
-	struct ip *ip;
-	struct ip6_hdr *ip6;
-	char hdr[60];
+	struct tcphdr	*th = pd->hdr.tcp;
+	struct ip	*ip = NULL;
+	struct ip6_hdr	*ip6 = NULL;
+	char		 hdr[60];
 
-	if ((pd->af != PF_INET && pd->af != PF_INET6) ||
-	    pd->proto != IPPROTO_TCP || (tcp->th_off << 2) < sizeof(*tcp))
+	if (pd->proto != IPPROTO_TCP)
 		return (NULL);
 
-	if (pd->af == PF_INET) {
-		ip = mtod(m, struct ip *);
-		ip6 = (struct ip6_hdr *)NULL;
-	} else {
-		ip = (struct ip *)NULL;
-		ip6 = mtod(m, struct ip6_hdr *);
+	switch (pd->af) {
+	case AF_INET:
+		ip = mtod(pd->m, struct ip *);
+		break;
+	case AF_INET6:
+		ip6 = mtod(pd->m, struct ip6_hdr *);
+		break;
 	}
-	if (!pf_pull_hdr(m, off, hdr, tcp->th_off << 2, NULL, NULL,
-	    pd->af)) return (NULL);
+	if (!pf_pull_hdr(pd->m, pd->off, hdr, th->th_off << 2, NULL, NULL,
+	    pd->af))
+		return (NULL);
 
 	return (pf_osfp_fingerprint_hdr(ip, ip6, (struct tcphdr *)hdr));
 }
 #endif /* _KERNEL */
 
 struct pf_osfp_enlist *
-pf_osfp_fingerprint_hdr(const struct ip *ip, const struct ip6_hdr *ip6, const struct tcphdr *tcp)
+pf_osfp_fingerprint_hdr(const struct ip *ip, const struct ip6_hdr *ip6,
+    const struct tcphdr *tcp)
 {
 	struct pf_os_fingerprint fp, *fpresult;
 	int cnt, optlen = 0;
@@ -275,7 +277,7 @@ pf_osfp_match(struct pf_osfp_enlist *list, pf_osfp_t os)
 		if ((os_class == PF_OSFP_ANY || en_class == os_class) &&
 		    (os_version == PF_OSFP_ANY || en_version == os_version) &&
 		    (os_subtype == PF_OSFP_ANY || en_subtype == os_subtype)) {
-			DPFPRINTF(LOG_NOTICE, 
+			DPFPRINTF(LOG_NOTICE,
 			    "osfp matched %s %s %s  %x==%x",
 			    entry->fp_class_nm, entry->fp_version_nm,
 			    entry->fp_subtype_nm, os, entry->fp_os);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.36 2010/11/28 20:44:15 miod Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.39 2011/09/20 22:02:10 miod Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -60,7 +60,6 @@
 #include <dev/cons.h>
 
 #include <arm/machdep.h>
-#include <machine/bootconfig.h>
 #include <machine/conf.h>
 
 #ifdef CONF_HAVE_APM
@@ -74,17 +73,6 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 extern int physmem;
-
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
-#endif
-
-#ifdef  BUFPAGES
-int     bufpages = BUFPAGES;
-#else
-int     bufpages = 0;
-#endif
-int     bufcachepercent = BUFCACHEPERCENT;
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
@@ -113,8 +101,6 @@ int allowaperture = 0;
 #endif
 
 #if defined(__zaurus__)
-/* Permit console keyboard to do a nice halt. */
-int kbd_reset;
 int lid_suspend;
 extern int xscale_maxspeed;
 #endif
@@ -249,7 +235,7 @@ cpu_startup()
 	proc0.p_addr = proc0paddr;
 
 	/* Set the cpu control register */
-	cpu_setup(boot_args);
+	cpu_setup();
 
 	/* Lock down zero page */
 	vector_page_setprot(VM_PROT_READ);
@@ -368,12 +354,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &cpu_apmwarn));
 #endif
 #if defined(__zaurus__)
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp,
-			    kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen,
-		    &kbd_reset));
 	case CPU_LIDSUSPEND:
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
 		    &lid_suspend));

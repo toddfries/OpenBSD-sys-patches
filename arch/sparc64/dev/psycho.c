@@ -1,4 +1,4 @@
-/*	$OpenBSD: psycho.c,v 1.67 2010/12/04 17:06:32 miod Exp $	*/
+/*	$OpenBSD: psycho.c,v 1.69 2011/07/06 23:43:14 kettenis Exp $	*/
 /*	$NetBSD: psycho.c,v 1.39 2001/10/07 20:30:41 eeh Exp $	*/
 
 /*
@@ -1027,7 +1027,7 @@ psycho_bus_map(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t offset,
 			continue;
 
 		paddr = pp->pp_range[i].phys_lo + offset;
-		paddr |= ((bus_addr_t)pp->pp_range[i].phys_hi << 32);
+		paddr |= ((bus_addr_t)pp->pp_range[i].phys_hi) << 32;
 		DPRINTF(PDB_BUSMAP,
 		    ("\n_psycho_bus_map: mapping paddr space %lx offset %lx "
 			"paddr %qx",
@@ -1066,7 +1066,7 @@ psycho_bus_mmap(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t paddr,
 			continue;
 
 		paddr = pp->pp_range[i].phys_lo + offset;
-		paddr |= ((bus_addr_t)pp->pp_range[i].phys_hi << 32);
+		paddr |= ((bus_addr_t)pp->pp_range[i].phys_hi) << 32;
 		DPRINTF(PDB_BUSMAP, ("\npsycho_bus_mmap: mapping paddr "
 		    "space %lx offset %lx paddr %qx",
 		    (long)ss, (long)offset,
@@ -1116,8 +1116,22 @@ psycho_conf_size(pci_chipset_tag_t pc, pcitag_t tag)
 pcireg_t
 psycho_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 {
-	return (bus_space_read_4(pc->bustag, pc->bushandle,
-	    PCITAG_OFFSET(tag) + reg));
+	struct cpu_info *ci = curcpu();
+	pcireg_t val;
+	int s;
+
+	s = splhigh();
+	membar(Sync);
+	ci->ci_pci_probe = 1;
+	val = bus_space_read_4(pc->bustag, pc->bushandle,
+	    PCITAG_OFFSET(tag) + reg);
+	membar(Sync);
+	if (ci->ci_pci_fault)
+		val = 0xffffffff;
+	ci->ci_pci_probe = ci->ci_pci_fault = 0;
+	splx(s);
+
+	return (val);
 }
 
 void

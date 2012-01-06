@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.496 2011/05/29 14:50:26 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.506 2011/11/02 23:53:44 jsg Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -99,6 +99,7 @@
 #include <dev/cons.h>
 #include <stand/boot/bootarg.h>
 
+#include <net/if.h>
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_swap.h>
 
@@ -184,17 +185,6 @@ int	cpu_apmhalt = 0;	/* sysctl'd to 1 for halt -p hack */
 #ifdef USER_LDT
 int	user_ldt_enable = 0;	/* sysctl'd to 1 to enable */
 #endif
-
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 10
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
 
 struct uvm_constraint_range  isa_constraint = { 0x0, 0x00ffffffUL };
 struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
@@ -415,13 +405,6 @@ cpu_startup()
 	printf("real mem  = %llu (%lluMB)\n",
 	    (unsigned long long)ptoa((psize_t)physmem),
 	    (unsigned long long)ptoa((psize_t)physmem)/1024U/1024U);
-
-	/*
-	 * Determine how many buffers to allocate.  We use bufcachepercent%
-	 * of the memory below 4GB.
-	 */
-	if (bufpages == 0)
-		bufpages = atop(avail_end) * bufcachepercent / 100;
 
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
@@ -1000,8 +983,17 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 	{ CPUID_SS,	"SS" },
 	{ CPUID_HTT,	"HTT" },
 	{ CPUID_TM,	"TM" },
-	{ CPUID_SBF,	"SBF" },
-	{ CPUID_3DNOW,	"3DNOW" },
+	{ CPUID_SBF,	"SBF" }
+};
+
+const struct cpu_cpuid_feature i386_ecpuid_features[] = {
+	{ CPUID_MPC,	"MPC" },
+	{ CPUID_NXE,	"NXE" },
+	{ CPUID_MMXX,	"MMXX" },
+	{ CPUID_FFXSR,	"FFXSR" },
+	{ CPUID_LONG,	"LONG" },
+	{ CPUID_3DNOW2,	"3DNOW2" },
+	{ CPUID_3DNOW,	"3DNOW" }
 };
 
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
@@ -1029,6 +1021,16 @@ const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_XSAVE,	"XSAVE" },
 	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
 	{ CPUIDECX_AVX,		"AVX" },
+};
+
+const struct cpu_cpuid_feature i386_ecpuid_ecxfeatures[] = {
+	{ CPUIDECX_LAHF,	"LAHF" },
+	{ CPUIDECX_SVM,		"SVM" },
+	{ CPUIDECX_ABM,		"ABM" },
+	{ CPUIDECX_SSE4A,	"SSE4A" },
+	{ CPUIDECX_XOP,		"XOP" },
+	{ CPUIDECX_WDT,		"WDT" },
+	{ CPUIDECX_FMA4,	"FMA4" }
 };
 
 void
@@ -1846,6 +1848,14 @@ identifycpu(struct cpu_info *ci)
 					numbits++;
 				}
 			}
+			for (i = 0; i < nitems(i386_ecpuid_features); i++) {
+				if (ecpu_feature &
+				    i386_ecpuid_features[i].feature_bit) {
+					printf("%s%s", (numbits == 0 ? "" : ","),
+					    i386_ecpuid_features[i].feature_name);
+					numbits++;
+				}
+			}
 			max = sizeof(i386_cpuid_ecxfeatures)
 				/ sizeof(i386_cpuid_ecxfeatures[0]);
 			for (i = 0; i < max; i++) {
@@ -1853,6 +1863,14 @@ identifycpu(struct cpu_info *ci)
 				    i386_cpuid_ecxfeatures[i].feature_bit) {
 					printf("%s%s", (numbits == 0 ? "" : ","),
 					    i386_cpuid_ecxfeatures[i].feature_name);
+					numbits++;
+				}
+			}
+			for (i = 0; i < nitems(i386_ecpuid_ecxfeatures); i++) {
+				if (ecpu_ecxfeature &
+				    i386_ecpuid_ecxfeatures[i].feature_bit) {
+					printf("%s%s", (numbits == 0 ? "" : ","),
+					    i386_ecpuid_ecxfeatures[i].feature_name);
 					numbits++;
 				}
 			}
@@ -2197,7 +2215,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
 	register_t sp;
-	int oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	int oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/*
 	 * Build the argument list for the signal handler.
@@ -2207,10 +2225,10 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !oonstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		sp = (long)psp->ps_sigstk.ss_sp + psp->ps_sigstk.ss_size;
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		sp = (long)p->p_sigstk.ss_sp + p->p_sigstk.ss_size;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		sp = tf->tf_esp;
 
@@ -2385,9 +2403,9 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	}
 
 	if (context.sc_onstack & 01)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = context.sc_mask & ~sigcantmask;
 
 	return (EJUSTRETURN);
@@ -2452,6 +2470,7 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	delay(4*1000000);	/* XXX */
 
@@ -2832,7 +2851,7 @@ extern int IDTVEC(div), IDTVEC(dbg), IDTVEC(nmi), IDTVEC(bpt), IDTVEC(ofl),
     IDTVEC(bnd), IDTVEC(ill), IDTVEC(dna), IDTVEC(dble), IDTVEC(fpusegm),
     IDTVEC(tss), IDTVEC(missing), IDTVEC(stk), IDTVEC(prot), IDTVEC(page),
     IDTVEC(rsvd), IDTVEC(fpu), IDTVEC(align), IDTVEC(syscall), IDTVEC(mchk),
-    IDTVEC(osyscall), IDTVEC(simd);
+    IDTVEC(simd);
 
 extern int IDTVEC(f00f_redirect);
 
@@ -3142,12 +3161,11 @@ init386(paddr_t first_avail)
 #ifdef DEBUG
 		printf(" %x-%x (<16M)", lim, kb);
 #endif
-		uvm_page_physload(lim, kb, lim, kb, VM_FREELIST_FIRST16);
+		uvm_page_physload(lim, kb, lim, kb, 0);
 	}
 
 	for (i = 0; i < ndumpmem; i++) {
 		paddr_t a, e;
-		paddr_t lim;
 
 		a = dumpmem[i].start;
 		e = dumpmem[i].end;
@@ -3157,27 +3175,10 @@ init386(paddr_t first_avail)
 			e = atop(avail_end);
 
 		if (a < e) {
-			if (a < atop(16 * 1024 * 1024)) {
-				lim = MIN(atop(16 * 1024 * 1024), e);
-#ifdef DEBUG
-				printf(" %x-%x (<16M)", a, lim);
-#endif
-				uvm_page_physload(a, lim, a, lim,
-				    VM_FREELIST_FIRST16);
-				if (e > lim) {
-#ifdef DEBUG
-					printf(" %x-%x", lim, e);
-#endif
-					uvm_page_physload(lim, e, lim, e,
-					    VM_FREELIST_DEFAULT);
-				}
-			} else {
 #ifdef DEBUG
 				printf(" %x-%x", a, e);
 #endif
-				uvm_page_physload(a, e, a, e,
-				    VM_FREELIST_DEFAULT);
-			}
+				uvm_page_physload(a, e, a, e, 0);
 		}
 	}
 #ifdef DEBUG

@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip_gre.c,v 1.40 2010/09/28 14:14:54 yasuoka Exp $ */
+/*      $OpenBSD: ip_gre.c,v 1.44 2011/07/09 00:47:18 henning Exp $ */
 /*	$NetBSD: ip_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -66,12 +66,6 @@
 #error "ip_gre used without inet"
 #endif
 
-#ifdef NETATALK
-#include <netatalk/at.h>
-#include <netatalk/at_var.h>
-#include <netatalk/at_extern.h>
-#endif
-
 #ifdef MPLS
 #include <netmpls/mpls.h>
 #endif
@@ -103,10 +97,7 @@ int gre_input2(struct mbuf *, int, u_char);
  */
 
 int
-gre_input2(m , hlen, proto)
-        struct mbuf *m;
-	int hlen;
-	u_char proto;
+gre_input2(struct mbuf *m, int hlen, u_char proto)
 {
 	struct greip *gip;
 	int s;
@@ -173,13 +164,6 @@ gre_input2(m , hlen, proto)
 			ifq = &ipintrq;          /* we are in ip_input */
 			af = AF_INET;
 			break;
-#ifdef NETATALK
-		case ETHERTYPE_AT:
-			ifq = &atintrq1;
-			schednetisr(NETISR_ATALK);
-			af = AF_APPLETALK;
-			break;
-#endif
 #ifdef INET6
 		case ETHERTYPE_IPV6:
 		        ifq = &ip6intrq;
@@ -252,14 +236,14 @@ gre_input(struct mbuf *m, ...)
 	}
 
 #ifdef PIPEX
-    {
-	struct pipex_session *session;
+	if (pipex_enable) {
+		struct pipex_session *session;
 
-	if ((session = pipex_pptp_lookup_session(m)) != NULL) {
-		if (pipex_pptp_input(m, session) == NULL)
-			return;
+		if ((session = pipex_pptp_lookup_session(m)) != NULL) {
+			if (pipex_pptp_input(m, session) == NULL)
+				return;
+		}
 	}
-    }
 #endif
 
 	ret = gre_input2(m, hlen, IPPROTO_GRE);
@@ -275,8 +259,8 @@ gre_input(struct mbuf *m, ...)
 }
 
 /*
- * Input routine for IPPRPOTO_MOBILE.
- * This is a little bit diffrent from the other modes, as the
+ * Input routine for IPPROTO_MOBILE.
+ * This is a little bit different from the other modes, as the
  * encapsulating header was not prepended, but instead inserted
  * between IP header and payload.
  */
@@ -370,9 +354,7 @@ gre_mobile_input(struct mbuf *m, ...)
  * Find the gre interface associated with our src/dst/proto set.
  */
 struct gre_softc *
-gre_lookup(m, proto)
-	struct mbuf *m;
-	u_int8_t proto;
+gre_lookup(struct mbuf *m, u_int8_t proto)
 {
 	struct ip *ip = mtod(m, struct ip *);
 	struct gre_softc *sc;
@@ -391,13 +373,8 @@ gre_lookup(m, proto)
 }
 
 int
-gre_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
-        int *name;
-        u_int namelen;
-        void *oldp;
-        size_t *oldlenp;
-        void *newp;
-        size_t newlen;
+gre_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
+    size_t newlen)
 {
         /* All sysctl names at this level are terminal. */
         if (namelen != 1)
@@ -415,13 +392,8 @@ gre_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
 }
 
 int
-ipmobile_sysctl(name, namelen, oldp, oldlenp, newp, newlen)
-        int *name;
-        u_int namelen;
-        void *oldp;
-        size_t *oldlenp;
-        void *newp;
-        size_t newlen;
+ipmobile_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
+    void *newp, size_t newlen)
 {
         /* All sysctl names at this level are terminal. */
         if (namelen != 1)

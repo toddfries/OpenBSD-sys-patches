@@ -1,4 +1,4 @@
-/* $OpenBSD: pmap.c,v 1.60 2010/11/28 21:01:41 miod Exp $ */
+/* $OpenBSD: pmap.c,v 1.62 2011/11/16 20:50:17 deraadt Exp $ */
 /* $NetBSD: pmap.c,v 1.154 2000/12/07 22:18:55 thorpej Exp $ */
 
 /*-
@@ -618,11 +618,11 @@ do {									\
 #define	PMAP_SYNC_ISTREAM_USER(pmap)					\
 do {									\
 	alpha_multicast_ipi((pmap)->pm_cpus, ALPHA_IPI_AST);		\
-	/* for curcpu, will happen in userret() */			\
+	/* for curcpu, do it before userret() */			\
 } while (0)
 #else
 #define	PMAP_SYNC_ISTREAM_KERNEL()	alpha_pal_imb()
-#define	PMAP_SYNC_ISTREAM_USER(pmap)	/* will happen in userret() */
+#define	PMAP_SYNC_ISTREAM_USER(pmap)	/* done before userret() */
 #endif /* MULTIPROCESSOR */
 
 #define	PMAP_SYNC_ISTREAM(pmap)						\
@@ -1085,7 +1085,7 @@ pmap_steal_memory(vsize_t size, vaddr_t *vstartp, vaddr_t *vendp)
 /*
  * pmap_init:			[ INTERFACE ]
  *
- *	Initialize the pmap module.  Called by vm_init(), to initialize any
+ *	Initialize the pmap module.  Called by uvm_init(), to initialize any
  *	structures that the pmap system needs to map virtual memory.
  *
  *	Note: no locking is necessary in this function.

@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.7 2010/07/03 03:59:17 krw Exp $
+#	$OpenBSD: RAMDISK,v 1.9 2011/09/20 22:11:42 miod Exp $
 
 machine	palm	arm
 
@@ -15,8 +15,6 @@ options	CRYPTO		# Cryptographic framework
 
 options		ARM32
 options		PXAGPIO_HAS_GPION_INTRS
-
-options		CACHE_CLEAN_BLOCK_INTR
 
 makeoptions	KERNEL_BASE_PHYS="0xa0200000"
 makeoptions	KERNEL_BASE_VIRT="0xc0200000"
@@ -83,15 +81,13 @@ upl*		at uhub?		# Prolific PL2301/PL2302 host-to-host
 #uyap*		at uhub?		# Y@P firmware loader
 ugen*		at uhub?		# USB Generic driver
 umass*		at uhub?		# USB Mass Storage devices
-scsibus*	at umass?
 
 # SD/MMC support
 pxammc0		at pxaip? addr 0x41100000	# MMC/SD/SDIO controller
 sdmmc*		at pxammc?		# SD/MMC bus
-scsibus*	at sdmmc?		# SCSI emulation
 softraid0	at root			# Software RAID
-scsibus*	at softraid?
 
+scsibus*	at scsi?
 sd*		at scsibus?
 #st*		at scsibus?
 cd*		at scsibus?

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.122 2011/03/13 15:31:41 stsp Exp $	*/
+/*	$OpenBSD: if.h,v 1.131 2011/12/02 03:15:31 haesbaert Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -80,6 +80,7 @@ struct socket;
 struct ether_header;
 struct arpcom;
 struct rt_addrinfo;
+struct ifnet;
 
 /*
  * Structure describing a `cloning' interface.
@@ -141,18 +142,25 @@ struct	if_data {
 	u_int64_t	ifi_omcasts;		/* packets sent via multicast */
 	u_int64_t	ifi_iqdrops;		/* dropped on input, this interface */
 	u_int64_t	ifi_noproto;		/* destined for unsupported protocol */
+	u_int32_t	ifi_capabilities;	/* interface capabilities */
 	struct	timeval ifi_lastchange;	/* last operational state change */
 
 	struct mclpool	ifi_mclpool[MCLPOOLS];
 };
+
+#define IFQ_NQUEUES	ALTQ_IFQ_NQUEUES
+#define IFQ_MAXPRIO	IFQ_NQUEUES - 1
+#define IFQ_DEFPRIO	3
 
 /*
  * Structure defining a queue for a network interface.
  * XXX keep in sync with struct ifaltq.
  */
 struct	ifqueue {
-	struct	mbuf *ifq_head;
-	struct	mbuf *ifq_tail;
+	struct {
+		struct	mbuf *head;
+		struct	mbuf *tail;
+	}	ifq_q[IFQ_NQUEUES];
 	int	ifq_len;
 	int	ifq_maxlen;
 	int	ifq_drops;
@@ -170,7 +178,8 @@ struct	ifqueue {
 #define LINK_STATE_HALF_DUPLEX	5	/* link is up and half duplex */
 #define LINK_STATE_FULL_DUPLEX	6	/* link is up and full duplex */
 
-#define LINK_STATE_IS_UP(_s)	((_s) >= LINK_STATE_UP)
+#define LINK_STATE_IS_UP(_s)	\
+		((_s) >= LINK_STATE_UP || (_s) == LINK_STATE_UNKNOWN)
 
 /*
  * Status bit descriptions for the various interface types.
@@ -256,7 +265,6 @@ struct ifnet {				/* and the entries */
 	int	if_xflags;		/* extra softnet flags */
 	struct	if_data if_data;	/* stats and other data about if */
 	u_int32_t if_hardmtu;		/* maximum MTU device supports */
-	int	if_capabilities;	/* interface capabilities */
 	u_int	if_rdomain;		/* routing instance */
 	char	if_description[IFDESCRSIZE]; /* interface description */
 	u_short	if_rtlabelid;		/* next route label */
@@ -303,6 +311,7 @@ struct ifnet {				/* and the entries */
 #define	if_iqdrops	if_data.ifi_iqdrops
 #define	if_noproto	if_data.ifi_noproto
 #define	if_lastchange	if_data.ifi_lastchange
+#define	if_capabilities	if_data.ifi_capabilities
 
 #define	IFF_UP		0x1		/* interface is up */
 #define	IFF_BROADCAST	0x2		/* broadcast address valid */
@@ -346,14 +355,10 @@ struct ifnet {				/* and the entries */
 #define	IFCAP_CSUM_IPv4		0x00000001	/* can do IPv4 header csum */
 #define	IFCAP_CSUM_TCPv4	0x00000002	/* can do IPv4/TCP csum */
 #define	IFCAP_CSUM_UDPv4	0x00000004	/* can do IPv4/UDP csum */
-#define	IFCAP_IPSEC		0x00000008	/* can do IPsec */
 #define	IFCAP_VLAN_MTU		0x00000010	/* VLAN-compatible MTU */
 #define	IFCAP_VLAN_HWTAGGING	0x00000020	/* hardware VLAN tag support */
-#define	IFCAP_IPCOMP		0x00000040	/* can do IPcomp */
 #define	IFCAP_CSUM_TCPv6	0x00000080	/* can do IPv6/TCP checksums */
 #define	IFCAP_CSUM_UDPv6	0x00000100	/* can do IPv6/UDP checksums */
-#define	IFCAP_CSUM_TCPv4_Rx	0x00000200	/* can do IPv4/TCP (Rx only) */
-#define	IFCAP_CSUM_UDPv4_Rx	0x00000400	/* can do IPv4/UDP (Rx only) */
 #define	IFCAP_WOL		0x00008000	/* can do wake on lan */
 
 /*
@@ -366,31 +371,44 @@ struct ifnet {				/* and the entries */
 #define	IF_DROP(ifq)		((ifq)->ifq_drops++)
 #define	IF_ENQUEUE(ifq, m)						\
 do {									\
-	(m)->m_nextpkt = 0;						\
-	if ((ifq)->ifq_tail == 0)					\
-		(ifq)->ifq_head = m;					\
+	(m)->m_nextpkt = NULL;						\
+	if ((ifq)->ifq_q[(m)->m_pkthdr.pf.prio].tail == NULL)		\
+		(ifq)->ifq_q[(m)->m_pkthdr.pf.prio].head = m;		\
 	else								\
-		(ifq)->ifq_tail->m_nextpkt = m;				\
-	(ifq)->ifq_tail = m;						\
+		(ifq)->ifq_q[(m)->m_pkthdr.pf.prio].tail->m_nextpkt = m; \
+	(ifq)->ifq_q[(m)->m_pkthdr.pf.prio].tail = m;			\
 	(ifq)->ifq_len++;						\
 } while (/* CONSTCOND */0)
 #define	IF_PREPEND(ifq, m)						\
 do {									\
-	(m)->m_nextpkt = (ifq)->ifq_head;				\
-	if ((ifq)->ifq_tail == 0)					\
-		(ifq)->ifq_tail = (m);					\
-	(ifq)->ifq_head = (m);						\
+	(m)->m_nextpkt = (ifq)->ifq_q[(m)->m_pkthdr.pf.prio].head;	\
+	if ((ifq)->ifq_q[(m)->m_pkthdr.pf.prio].tail == NULL)		\
+		(ifq)->ifq_q[(m)->m_pkthdr.pf.prio].tail = (m);		\
+	(ifq)->ifq_q[(m)->m_pkthdr.pf.prio].head = (m);			\
 	(ifq)->ifq_len++;						\
 } while (/* CONSTCOND */0)
+
+#define	IF_POLL(ifq, m)							\
+do {									\
+	int	if_dequeue_prio = IFQ_MAXPRIO;				\
+	do {								\
+		(m) = (ifq)->ifq_q[if_dequeue_prio].head;		\
+	} while (!(m) && --if_dequeue_prio >= 0); 			\
+} while (/* CONSTCOND */0)
+
 #define	IF_DEQUEUE(ifq, m)						\
 do {									\
-	(m) = (ifq)->ifq_head;						\
-	if (m) {							\
-		if (((ifq)->ifq_head = (m)->m_nextpkt) == 0)		\
-			(ifq)->ifq_tail = 0;				\
-		(m)->m_nextpkt = 0;					\
-		(ifq)->ifq_len--;					\
-	}								\
+	int	if_dequeue_prio = IFQ_MAXPRIO;				\
+	do {								\
+		(m) = (ifq)->ifq_q[if_dequeue_prio].head;		\
+		if (m) {						\
+			if (((ifq)->ifq_q[if_dequeue_prio].head =	\
+			    (m)->m_nextpkt) == NULL)			\
+				(ifq)->ifq_q[if_dequeue_prio].tail = NULL; \
+			(m)->m_nextpkt = NULL;				\
+			(ifq)->ifq_len--;				\
+		}							\
+	} while (!(m) && --if_dequeue_prio >= 0);			\
 } while (/* CONSTCOND */0)
 
 #define	IF_INPUT_ENQUEUE(ifq, m)					\
@@ -404,7 +422,6 @@ do {									\
 		IF_ENQUEUE(ifq, m);					\
 } while (/* CONSTCOND */0)
 
-#define	IF_POLL(ifq, m)		((m) = (ifq)->ifq_head)
 #define	IF_PURGE(ifq)							\
 do {									\
 	struct mbuf *__m0;						\
@@ -417,6 +434,7 @@ do {									\
 			m_freem(__m0);					\
 	}								\
 } while (/* CONSTCOND */0)
+#define	IF_LEN(ifq)		((ifq)->ifq_len)
 #define	IF_IS_EMPTY(ifq)	((ifq)->ifq_len == 0)
 
 #define	IFQ_MAXLEN	256
@@ -682,13 +700,13 @@ do { \
 } while (/* CONSTCOND */0)
 
 #ifdef ALTQ
-#define	ALTQ_DECL(x)		x
 
 #define	IFQ_ENQUEUE(ifq, m, pattr, err)					\
 do {									\
-	if (ALTQ_IS_ENABLED((ifq)))					\
+	if (ALTQ_IS_ENABLED((ifq))) {					\
+		m->m_pkthdr.pf.prio = IFQ_MAXPRIO;			\
 		ALTQ_ENQUEUE((ifq), (m), (pattr), (err));		\
-	else {								\
+	} else {							\
 		if (IF_QFULL((ifq))) {					\
 			m_freem((m));					\
 			(err) = ENOBUFS;				\
@@ -703,8 +721,8 @@ do {									\
 
 #define	IFQ_DEQUEUE(ifq, m)						\
 do {									\
-	if (TBR_IS_ENABLED((ifq)))					\
-		(m) = tbr_dequeue((ifq), ALTDQ_REMOVE);			\
+	if (OLDTBR_IS_ENABLED((ifq)))					\
+		(m) = oldtbr_dequeue((ifq), ALTDQ_REMOVE);			\
 	else if (ALTQ_IS_ENABLED((ifq)))				\
 		ALTQ_DEQUEUE((ifq), (m));				\
 	else								\
@@ -714,7 +732,7 @@ do {									\
 #define	IFQ_POLL(ifq, m)						\
 do {									\
 	if (TBR_IS_ENABLED((ifq)))					\
-		(m) = tbr_dequeue((ifq), ALTDQ_POLL);			\
+		(m) = oldtbr_dequeue((ifq), ALTDQ_POLL);			\
 	else if (ALTQ_IS_ENABLED((ifq)))				\
 		ALTQ_POLL((ifq), (m));					\
 	else								\
@@ -734,19 +752,7 @@ do {									\
 	((ifq)->altq_flags |= ALTQF_READY);				\
 } while (/* CONSTCOND */0)
 
-#define	IFQ_CLASSIFY(ifq, m, af, pa)					\
-do {									\
-	if (ALTQ_IS_ENABLED((ifq))) {					\
-		if (ALTQ_NEEDS_CLASSIFY((ifq)))				\
-			(pa)->pattr_class = (*(ifq)->altq_classify)	\
-				((ifq)->altq_clfier, (m), (af));	\
-		(pa)->pattr_af = (af);					\
-		(pa)->pattr_hdr = mtod((m), caddr_t);			\
-	}								\
-} while (/* CONSTCOND */0)
-
 #else /* !ALTQ */
-#define	ALTQ_DECL(x)		/* nothing */
 
 #define	IFQ_ENQUEUE(ifq, m, pattr, err)					\
 do {									\
@@ -769,10 +775,9 @@ do {									\
 
 #define	IFQ_SET_READY(ifq)	/* nothing */
 
-#define	IFQ_CLASSIFY(ifq, m, af, pa) /* nothing */
-
 #endif /* ALTQ */
 
+#define	IFQ_LEN(ifq)			IF_LEN(ifq)
 #define	IFQ_IS_EMPTY(ifq)		((ifq)->ifq_len == 0)
 #define	IFQ_INC_LEN(ifq)		((ifq)->ifq_len++)
 #define	IFQ_DEC_LEN(ifq)		(--(ifq)->ifq_len)
@@ -809,7 +814,6 @@ void	if_detach(struct ifnet *);
 void	if_down(struct ifnet *);
 void	if_downall(void);
 void	if_link_state_change(struct ifnet *);
-void	if_qflush(struct ifqueue *);
 void	if_slowtimo(void *);
 void	if_up(struct ifnet *);
 int	ifconf(u_long, caddr_t);

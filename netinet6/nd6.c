@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.c,v 1.86 2011/03/09 23:31:24 bluhm Exp $	*/
+/*	$OpenBSD: nd6.c,v 1.91 2012/01/03 23:41:51 bluhm Exp $	*/
 /*	$KAME: nd6.c,v 1.280 2002/06/08 19:52:07 itojun Exp $	*/
 
 /*
@@ -507,7 +507,7 @@ void
 nd6_timer(void *ignored_arg)
 {
 	int s;
-	struct nd_defrouter *dr;
+	struct nd_defrouter *dr, *ndr;
 	struct nd_prefix *pr;
 	struct in6_ifaddr *ia6, *nia6;
 
@@ -516,17 +516,9 @@ nd6_timer(void *ignored_arg)
 	timeout_add_sec(&nd6_timer_ch, nd6_prune);
 
 	/* expire default router list */
-	dr = TAILQ_FIRST(&nd_defrouter);
-	while (dr) {
-		if (dr->expire && dr->expire < time_second) {
-			struct nd_defrouter *t;
-			t = TAILQ_NEXT(dr, dr_entry);
+	TAILQ_FOREACH_SAFE(dr, &nd_defrouter, dr_entry, ndr)
+		if (dr->expire && dr->expire < time_second)
 			defrtrlist_del(dr);
-			dr = t;
-		} else {
-			dr = TAILQ_NEXT(dr, dr_entry);
-		}
-	}
 
 	/*
 	 * expire interface addresses.
@@ -593,16 +585,14 @@ nd6_purge(struct ifnet *ifp)
 	 * in the routing table, in order to keep additional side effects as
 	 * small as possible.
 	 */
-	for (dr = TAILQ_FIRST(&nd_defrouter); dr; dr = ndr) {
-		ndr = TAILQ_NEXT(dr, dr_entry);
+	TAILQ_FOREACH_SAFE(dr, &nd_defrouter, dr_entry, ndr) {
 		if (dr->installed)
 			continue;
 
 		if (dr->ifp == ifp)
 			defrtrlist_del(dr);
 	}
-	for (dr = TAILQ_FIRST(&nd_defrouter); dr; dr = ndr) {
-		ndr = TAILQ_NEXT(dr, dr_entry);
+	TAILQ_FOREACH_SAFE(dr, &nd_defrouter, dr_entry, ndr) {
 		if (!dr->installed)
 			continue;
 
@@ -676,7 +666,7 @@ nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_addr = *addr6;
 
-	rt = rtalloc1((struct sockaddr *)&sin6, create, 0);
+	rt = rtalloc1((struct sockaddr *)&sin6, create, ifp->if_rdomain);
 	if (rt && (rt->rt_flags & RTF_LLINFO) == 0) {
 		/*
 		 * This is the case for the default route.
@@ -720,7 +710,7 @@ nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp)
 			info.rti_info[RTAX_NETMASK] =
 			    (struct sockaddr *)&all1_sa;
 			if ((e = rtrequest1(RTM_ADD, &info, RTP_CONNECTED,
-			    &rt, 0)) != 0) {
+			    &rt, ifp->if_rdomain)) != 0) {
 #if 0
 				log(LOG_ERR,
 				    "nd6_lookup: failed to add route for a "
@@ -808,7 +798,7 @@ nd6_is_addr_neighbor(struct sockaddr_in6 *addr, struct ifnet *ifp)
 	 * XXX: we restrict the condition to hosts, because routers usually do
 	 * not have the "default router list".
 	 */
-	if (!ip6_forwarding && TAILQ_FIRST(&nd_defrouter) == NULL &&
+	if (!ip6_forwarding && TAILQ_EMPTY(&nd_defrouter) &&
 	    nd6_defifindex == ifp->if_index) {
 		return (1);
 	}
@@ -928,7 +918,8 @@ nd6_free(struct rtentry *rt, int gc)
 	bzero(&info, sizeof(info));
 	info.rti_info[RTAX_DST] = rt_key(rt);
 	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
-	rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL, 0);
+	rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
+	    rt->rt_ifp->if_rdomain);
 
 	return (next);
 }
@@ -1184,8 +1175,8 @@ nd6_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 		 * check if rt_key(rt) is one of my address assigned
 		 * to the interface.
 		 */
-		ifa = (struct ifaddr *)in6ifa_ifpwithaddr(rt->rt_ifp,
-		    &SIN6(rt_key(rt))->sin6_addr);
+		ifa = &in6ifa_ifpwithaddr(rt->rt_ifp,
+		    &SIN6(rt_key(rt))->sin6_addr)->ia_ifa;
 		if (ifa) {
 			caddr_t macp = nd6_ifptomac(ifp);
 			nd6_llinfo_settimer(ln, -1);
@@ -1291,8 +1282,9 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 		 */
 		bzero(drl, sizeof(*drl));
 		s = splsoftnet();
-		dr = TAILQ_FIRST(&nd_defrouter);
-		while (dr && i < DRLSTSIZ) {
+		TAILQ_FOREACH(dr, &nd_defrouter, dr_entry) {
+			if (i >= DRLSTSIZ)
+				break;
 			drl->defrouter[i].rtaddr = dr->rtaddr;
 			if (IN6_IS_ADDR_LINKLOCAL(&drl->defrouter[i].rtaddr)) {
 				/* XXX: need to this hack for KAME stack */
@@ -1308,7 +1300,6 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 			drl->defrouter[i].expire = dr->expire;
 			drl->defrouter[i].if_index = dr->ifp->if_index;
 			i++;
-			dr = TAILQ_NEXT(dr, dr_entry);
 		}
 		splx(s);
 		break;
@@ -1425,14 +1416,12 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 	case SIOCSRTRFLUSH_IN6:
 	{
 		/* flush all the default routers */
-		struct nd_defrouter *dr, *next;
+		struct nd_defrouter *dr, *ndr;
 
 		s = splsoftnet();
 		defrouter_reset();
-		for (dr = TAILQ_FIRST(&nd_defrouter); dr; dr = next) {
-			next = TAILQ_NEXT(dr, dr_entry);
+		TAILQ_FOREACH_SAFE(dr, &nd_defrouter, dr_entry, ndr)
 			defrtrlist_del(dr);
-		}
 		defrouter_select();
 		splx(s);
 		break;
@@ -1774,7 +1763,7 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m0,
 	if (rt) {
 		if ((rt->rt_flags & RTF_UP) == 0) {
 			if ((rt0 = rt = rtalloc1((struct sockaddr *)dst,
-			    RT_REPORT, 0)) != NULL)
+			    RT_REPORT, m->m_pkthdr.rdomain)) != NULL)
 			{
 				rt->rt_refcnt--;
 				if (rt->rt_ifp != ifp)
@@ -1813,7 +1802,7 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m0,
 				rtfree(rt); rt = rt0;
 			lookup:
 				rt->rt_gwroute = rtalloc1(rt->rt_gateway,
-				    RT_REPORT, 0);
+				    RT_REPORT, m->m_pkthdr.rdomain);
 				if ((rt = rt->rt_gwroute) == 0)
 					senderr(EHOSTUNREACH);
 			}
@@ -1914,16 +1903,14 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m0,
   sendpkt:
 #ifdef IPSEC
 	/*
-	 * If the packet needs outgoing IPsec crypto processing and the
-	 * interface doesn't support it, drop it.
+	 * If we got here and IPsec crypto processing didn't happen, drop it.
 	 */
 	mtag = m_tag_find(m, PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED, NULL);
 #endif /* IPSEC */
 
 	if ((ifp->if_flags & IFF_LOOPBACK) != 0) {
 #ifdef IPSEC
-		if (mtag != NULL &&
-		    (origifp->if_capabilities & IFCAP_IPSEC) == 0) {
+		if (mtag != NULL) {
 			/* Tell IPsec to do its own crypto. */
 			ipsp_skipcrypto_unmark((struct tdb_ident *)(mtag + 1));
 			error = EACCES;
@@ -1934,8 +1921,7 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m0,
 		    rt));
 	}
 #ifdef IPSEC
-	if (mtag != NULL &&
-	    (ifp->if_capabilities & IFCAP_IPSEC) == 0) {
+	if (mtag != NULL) {
 		/* Tell IPsec to do its own crypto. */
 		ipsp_skipcrypto_unmark((struct tdb_ident *)(mtag + 1));
 		error = EACCES;
@@ -2040,7 +2026,7 @@ nd6_sysctl(int name, void *oldp, size_t *oldlenp, void *newp, size_t newlen)
 	ol = oldlenp ? *oldlenp : 0;
 
 	if (oldp) {
-		p = malloc(*oldlenp, M_TEMP, M_WAITOK);
+		p = malloc(*oldlenp, M_TEMP, M_WAITOK | M_CANFAIL);
 		if (!p)
 			return ENOMEM;
 	} else
@@ -2084,9 +2070,7 @@ fill_drlist(void *oldp, size_t *oldlenp, size_t ol)
 	}
 	l = 0;
 
-	for (dr = TAILQ_FIRST(&nd_defrouter); dr;
-	     dr = TAILQ_NEXT(dr, dr_entry)) {
-
+	TAILQ_FOREACH(dr, &nd_defrouter, dr_entry) {
 		if (oldp && d + 1 <= de) {
 			bzero(d, sizeof(*d));
 			d->rtaddr.sin6_family = AF_INET6;

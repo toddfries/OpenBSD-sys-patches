@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.75 2011/01/05 22:20:22 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.78 2011/06/26 22:39:59 deraadt Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -91,6 +91,7 @@
 
 #include <dev/cons.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include "ksyms.h"
@@ -179,20 +180,6 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 __cpu_simple_lock_t cpu_mutex = __SIMPLELOCK_UNLOCKED;
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 5
-#endif
-
-#ifdef	BUFPAGES
-int bufpages = BUFPAGES;
-#else
-int bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
 
 struct uvm_constraint_range  dma_constraint = { 0x0, (paddr_t)-1 };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
@@ -495,6 +482,7 @@ boot(howto)
 		else
 			printf("WARNING: not updating battery clock\n");
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();			/* Disable interrupts. */
@@ -960,7 +948,7 @@ luna88k_bootstrap()
 	 * luna88k only has one segment.
 	 */
 	uvm_page_physload(atop(avail_start), atop(avail_end),
-	    atop(avail_start), atop(avail_end),VM_FREELIST_DEFAULT);
+	    atop(avail_start), atop(avail_end), 0);
 
 	/*
 	 * Initialize message buffer.

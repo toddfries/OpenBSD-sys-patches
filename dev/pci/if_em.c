@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.256 2011/04/22 10:09:57 jsg Exp $ */
+/* $OpenBSD: if_em.c,v 1.261 2011/10/05 02:52:09 jsg Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -329,6 +329,10 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	/* Determine hardware revision */
 	em_identify_hardware(sc);
 
+	/* Only use MSI on the newer PCIe parts */
+	if (sc->hw.mac_type < em_82571)
+		sc->osdep.em_pa.pa_flags &= ~PCI_FLAGS_MSI_ENABLED;
+
 	/* Parameters (to be read from user) */
 	if (sc->hw.mac_type >= em_82544) {
 		sc->num_tx_desc = EM_MAX_TXD;
@@ -459,6 +463,30 @@ em_attach(struct device *parent, struct device *self, void *aux)
 			    sc->sc_dv.dv_xname);
 			goto err_hw_init;
 		}
+	}
+
+	if (sc->hw.mac_type == em_80003es2lan || sc->hw.mac_type == em_82575 ||
+	    sc->hw.mac_type == em_82580) {
+		uint32_t reg = EM_READ_REG(&sc->hw, E1000_STATUS);
+		sc->hw.bus_func = (reg & E1000_STATUS_FUNC_MASK) >>
+		    E1000_STATUS_FUNC_SHIFT;
+
+		switch (sc->hw.bus_func) {
+		case 0:
+			sc->hw.swfw = E1000_SWFW_PHY0_SM;
+			break;
+		case 1:
+			sc->hw.swfw = E1000_SWFW_PHY1_SM;
+			break;
+		case 2:
+			sc->hw.swfw = E1000_SWFW_PHY2_SM;
+			break;
+		case 3:
+			sc->hw.swfw = E1000_SWFW_PHY3_SM;
+			break;
+		}
+	} else {
+		sc->hw.bus_func = 0;
 	}
 
 	/* Copy the permanent MAC address out of the EEPROM */
@@ -1615,7 +1643,7 @@ em_allocate_pci_resources(struct em_softc *sc)
 		}
         }
 
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) && pci_intr_map(pa, &ih)) {
 		printf(": couldn't map interrupt\n");
 		return (ENXIO);
 	}
@@ -1810,7 +1838,7 @@ em_setup_interface(struct em_softc *sc)
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 #if NVLAN > 0
-	if (sc->hw.mac_type != em_82575)
+	if (sc->hw.mac_type != em_82575 && sc->hw.mac_type != em_82580)
 		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
@@ -2171,7 +2199,7 @@ em_initialize_transmit_unit(struct em_softc *sc)
 	/* Setup Transmit Descriptor Base Settings */   
 	sc->txd_cmd = E1000_TXD_CMD_IFCS;
 
-	if (sc->hw.mac_type == em_82575) {
+	if (sc->hw.mac_type == em_82575 || sc->hw.mac_type == em_82580) {
 		/* 82575/6 need to enable the TX queue and lack the IDE bit */
 		reg_tctl = E1000_READ_REG(&sc->hw, TXDCTL);
 		reg_tctl |= E1000_TXDCTL_QUEUE_ENABLE;
@@ -2626,6 +2654,14 @@ em_initialize_receive_unit(struct em_softc *sc)
 	if (sc->hw.mac_type == em_82573)
 		E1000_WRITE_REG(&sc->hw, RDTR, 0x20);
 
+	if (sc->hw.mac_type == em_82575 || sc->hw.mac_type == em_82580) {
+		/* 82575/6 need to enable the RX queue */
+		uint32_t reg;
+		reg = E1000_READ_REG(&sc->hw, RXDCTL);
+		reg |= E1000_RXDCTL_QUEUE_ENABLE;
+		E1000_WRITE_REG(&sc->hw, RXDCTL, reg);
+	}
+
 	/* Enable Receives */
 	E1000_WRITE_REG(&sc->hw, RCTL, reg_rctl);
 
@@ -2884,8 +2920,7 @@ em_rxeof(struct em_softc *sc, int count)
 #if NVLAN > 0
 				if (desc->status & E1000_RXD_STAT_VP) {
 					m->m_pkthdr.ether_vtag =
-					    (letoh16(desc->special) &
-					     E1000_RXD_SPC_VLAN_MASK);
+					    letoh16(desc->special);
 					m->m_flags |= M_VLANTAG;
 				}
 #endif
@@ -3014,26 +3049,38 @@ void
 em_write_pci_cfg(struct em_hw *hw, uint32_t reg, uint16_t *value)
 {
 	struct pci_attach_args *pa = &((struct em_osdep *)hw->back)->em_pa;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	/* Should we do read/mask/write...?  16 vs 32 bit!!! */
-	pci_conf_write(pc, pa->pa_tag, reg, *value);
+	pcireg_t val;
+
+	val = pci_conf_read(pa->pa_pc, pa->pa_tag, reg & ~0x3);
+	if (reg & 0x2) {
+		val &= 0x0000ffff;
+		val |= (*value << 16);
+	} else {
+		val &= 0xffff0000;
+		val |= *value;
+	}
+	pci_conf_write(pa->pa_pc, pa->pa_tag, reg & ~0x3, val);
 }
 
 void
 em_read_pci_cfg(struct em_hw *hw, uint32_t reg, uint16_t *value)
 {
 	struct pci_attach_args *pa = &((struct em_osdep *)hw->back)->em_pa;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	*value = pci_conf_read(pc, pa->pa_tag, reg);
+	pcireg_t val;
+
+	val = pci_conf_read(pa->pa_pc, pa->pa_tag, reg & ~0x3);
+	if (reg & 0x2)
+		*value = (val >> 16) & 0xffff;
+	else
+		*value = val & 0xffff;
 }
 
 void
 em_pci_set_mwi(struct em_hw *hw)
 {
 	struct pci_attach_args *pa = &((struct em_osdep *)hw->back)->em_pa;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	/* Should we do read/mask/write...?  16 vs 32 bit!!! */
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
 		(hw->pci_cmd_word | CMD_MEM_WRT_INVALIDATE));
 }
 
@@ -3041,9 +3088,8 @@ void
 em_pci_clear_mwi(struct em_hw *hw)
 {
 	struct pci_attach_args *pa = &((struct em_osdep *)hw->back)->em_pa;
-	pci_chipset_tag_t pc = pa->pa_pc;
-	/* Should we do read/mask/write...?  16 vs 32 bit!!! */
-	pci_conf_write(pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
+
+	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG,
 		(hw->pci_cmd_word & ~CMD_MEM_WRT_INVALIDATE));
 }
 

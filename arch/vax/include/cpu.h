@@ -1,5 +1,5 @@
-/*      $OpenBSD: cpu.h,v 1.37 2011/03/23 16:54:37 pirofti Exp $      */
-/*      $NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $      */
+/*	$OpenBSD: cpu.h,v 1.40 2011/09/15 00:48:24 miod Exp $	*/
+/*	$NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $	*/
 
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden
@@ -70,8 +70,8 @@ extern struct cpu_info cpu_info_store;
 #define cpu_unidle(ci)
 
 struct clockframe {
-        int     pc;
-        int     ps;
+	int	pc;
+	int	ps;
 };
 
 /*
@@ -79,19 +79,17 @@ struct clockframe {
  * struct for the current cpu is set up in locore.c.
  */
 struct	cpu_dep {
-	void	(*cpu_init)(void); /* pmap init before mm is on */
-	int	(*cpu_mchk)(caddr_t);   /* Machine check handling */
-	void	(*cpu_memerr)(void); /* Memory subsystem errors */
-	    /* Autoconfiguration */
-	void	(*cpu_conf)(void);
-	int	(*cpu_clkread)(time_t);	/* Read cpu clock time */
+	void	(*cpu_init)(void);	/* pmap init before mm is on */
+	int	(*cpu_mchk)(caddr_t);	/* Machine check handling */
+	void	(*cpu_memerr)(void);	/* Memory subsystem errors */
+	void	(*cpu_conf)(void);	/* Autoconfiguration */
+	int	(*cpu_clkread)(struct timespec *, time_t); /* Read cpu clock time */
 	void	(*cpu_clkwrite)(void);	/* Write system time to cpu */
 	short	cpu_vups;	/* speed of cpu */
 	short	cpu_scbsz;	/* (estimated) size of system control block */
 	void	(*cpu_halt)(void); /* Cpu dependent halt call */
 	void	(*cpu_reboot)(int); /* Cpu dependent reboot call */
 	void	(*cpu_clrf)(void); /* Clear cold/warm start flags */
-	void	(*cpu_subconf)(struct device *);/*config cpu dep. devs */
 	void	(*cpu_hardclock)(struct clockframe *);	/* hardclock handler */
 };
 
@@ -117,9 +115,9 @@ extern int bootdev;
  * process as soon as possible.
  */
 
-#define signotify(p)     mtpr(AST_OK,PR_ASTLVL);
+#define signotify(p)		mtpr(AST_OK,PR_ASTLVL);
 
-extern	int     want_resched;   /* resched() was called */
+extern	int	want_resched;	/* resched() was called */
 
 /*
  * This is used during profiling to integrate system time.
@@ -152,7 +150,6 @@ void	dumpconf(void);
 void	dumpsys(void);
 void	swapconf(void);
 void	disk_printtype(int, int);
-void	disk_reallymapin(struct buf *, pt_entry_t *, int, int);
 vaddr_t	vax_map_physmem(paddr_t, int);
 void	vax_unmap_physmem(vaddr_t, int);
 void	ioaccess(vaddr_t, paddr_t, int);

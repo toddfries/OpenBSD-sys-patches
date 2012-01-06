@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdmmc.c,v 1.24 2010/08/24 14:52:23 blambert Exp $	*/
+/*	$OpenBSD: sdmmc.c,v 1.26 2011/11/14 14:13:45 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -121,11 +121,11 @@ sdmmc_attach(struct device *parent, struct device *self, void *aux)
 
 	/*
 	 * Create the event thread that will attach and detach cards
-	 * and perform other lengthy operations.
+	 * and perform other lengthy operations.  Enter config_pending
+	 * state until the discovery task has run for the first time.
 	 */
-#ifdef DO_CONFIG_PENDING
+	SET(sc->sc_flags, SMF_CONFIG_PENDING);
 	config_pending_incr();
-#endif
 	kthread_create_deferred(sdmmc_create_thread, sc);
 }
 
@@ -146,7 +146,6 @@ int
 sdmmc_activate(struct device *self, int act)
 {
 	struct sdmmc_softc *sc = (struct sdmmc_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_SUSPEND:
@@ -158,7 +157,7 @@ sdmmc_activate(struct device *self, int act)
 		wakeup(&sc->sc_tskq);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 void
@@ -170,9 +169,6 @@ sdmmc_create_thread(void *arg)
 	    "%s", DEVNAME(sc)) != 0)
 		printf("%s: can't create task thread\n", DEVNAME(sc));
 
-#ifdef DO_CONFIG_PENDING
-	config_pending_decr();
-#endif
 }
 
 void
@@ -273,6 +269,11 @@ sdmmc_discover_task(void *arg)
 			sdmmc_card_detach(sc, DETACH_FORCE);
 			rw_exit(&sc->sc_lock);
 		}
+	}
+
+	if (ISSET(sc->sc_flags, SMF_CONFIG_PENDING)) {
+		CLR(sc->sc_flags, SMF_CONFIG_PENDING);
+		config_pending_decr();
 	}
 }
 

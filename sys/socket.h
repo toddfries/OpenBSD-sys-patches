@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.72 2011/04/05 12:50:15 guenther Exp $	*/
+/*	$OpenBSD: socket.h,v 1.78 2011/12/03 12:38:30 fgsch Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -35,10 +35,7 @@
 #ifndef _SYS_SOCKET_H_
 #define	_SYS_SOCKET_H_
 
-/*
- * needed for ALIGNBYTES
- */
-#include <machine/param.h>
+#include <sys/_types.h>
 
 /*
  * Definitions related to sockets: types, address families, options.
@@ -97,13 +94,16 @@ struct	linger {
 	int	l_linger;		/* linger time */
 };
 
+#if __BSD_VISIBLE
 /*
  * Structure used for manipulating splice option.
  */
 struct	splice {
 	int	sp_fd;			/* drain socket file descriptor */
 	off_t	sp_max;			/* if set, maximum bytes to splice */
+	struct	timeval	sp_idle;	/* idle timeout */
 };
+#endif /* __BSD_VISIBLE */
 
 /*
  * Level number for (get/set)sockopt() to apply to socket itself.
@@ -152,7 +152,8 @@ struct	splice {
 #define	AF_BLUETOOTH	32		/* Bluetooth */
 #define AF_MPLS         33              /* MPLS */
 #define pseudo_AF_PFLOW 34		/* pflow */
-#define AF_MAX          35
+#define pseudo_AF_PIPEX 35		/* PIPEX */
+#define AF_MAX          36
 
 /*
  * Structure used by kernel to store most
@@ -233,6 +234,7 @@ struct sockproto {
 #define	PF_BLUETOOTH	AF_BLUETOOTH
 #define PF_MPLS		AF_MPLS
 #define PF_PFLOW	pseudo_AF_PFLOW
+#define PF_PIPEX	pseudo_AF_PIPEX
 #define	PF_MAX		AF_MAX
 
 /*
@@ -315,6 +317,7 @@ struct sockpeercred {
 	{ "bluetooth", CTLTYPE_NODE }, \
 	{ "mpls", CTLTYPE_NODE }, \
 	{ "pflow", CTLTYPE_NODE }, \
+	{ "pipex", CTLTYPE_NODE }, \
 }
 
 /*
@@ -409,6 +412,7 @@ struct msghdr {
 #define	MSG_DONTWAIT	0x80		/* this message should be nonblocking */
 #define	MSG_BCAST	0x100		/* this message rec'd as broadcast */
 #define	MSG_MCAST	0x200		/* this message rec'd as multicast */
+#define	MSG_NOSIGNAL	0x400		/* do not send SIGPIPE */
 
 /*
  * Header for ancillary data objects in msg_control buffer.
@@ -425,15 +429,15 @@ struct cmsghdr {
 
 /* given pointer to struct cmsghdr, return pointer to data */
 #define	CMSG_DATA(cmsg) \
-	((u_char *)(cmsg) + __CMSG_ALIGN(sizeof(struct cmsghdr)))
+	((u_char *)(cmsg) + _ALIGN(sizeof(struct cmsghdr)))
 
 /* given pointer to struct cmsghdr, return pointer to next cmsghdr */
 #define	CMSG_NXTHDR(mhdr, cmsg)	\
-	(((caddr_t)(cmsg) + __CMSG_ALIGN((cmsg)->cmsg_len) + \
-			    __CMSG_ALIGN(sizeof(struct cmsghdr)) > \
+	(((caddr_t)(cmsg) + _ALIGN((cmsg)->cmsg_len) + \
+			    _ALIGN(sizeof(struct cmsghdr)) > \
 	    ((caddr_t)(mhdr)->msg_control) + (mhdr)->msg_controllen) ? \
 	    (struct cmsghdr *)NULL : \
-	    (struct cmsghdr *)((caddr_t)(cmsg) + __CMSG_ALIGN((cmsg)->cmsg_len)))
+	    (struct cmsghdr *)((caddr_t)(cmsg) + _ALIGN((cmsg)->cmsg_len)))
 
 /*
  * RFC 2292 requires to check msg_controllen, in case that the kernel returns
@@ -445,16 +449,15 @@ struct cmsghdr {
 	 (struct cmsghdr *)NULL)
 
 /* Round len up to next alignment boundary */
-#define	__CMSG_ALIGN(len)	ALIGN(len)
 #ifdef _KERNEL
-#define CMSG_ALIGN(n)		__CMSG_ALIGN(n)
+#define CMSG_ALIGN(n)		_ALIGN(n)
 #endif
 
 /* Length of the contents of a control message of length len */
-#define	CMSG_LEN(len)	(__CMSG_ALIGN(sizeof(struct cmsghdr)) + (len))
+#define	CMSG_LEN(len)	(_ALIGN(sizeof(struct cmsghdr)) + (len))
 
 /* Length of the space taken up by a padded control message of length len */
-#define	CMSG_SPACE(len)	(__CMSG_ALIGN(sizeof(struct cmsghdr)) + __CMSG_ALIGN(len))
+#define	CMSG_SPACE(len)	(_ALIGN(sizeof(struct cmsghdr)) + _ALIGN(len))
 
 /* "Socket"-level control message types: */
 #define	SCM_RIGHTS	0x01		/* access rights (array of int) */
@@ -510,12 +513,8 @@ int	socketpair(int, int, int, int *);
 int	getrtable(void);
 int	setrtable(int);
 __END_DECLS
-#else
-# if defined(COMPAT_43) || defined(COMPAT_LINUX)
-#  define COMPAT_OLDSOCK
-#  define MSG_COMPAT	0x8000
-# endif
 
+#else
 void	pfctlinput(int, struct sockaddr *);
 #endif /* !_KERNEL */
 

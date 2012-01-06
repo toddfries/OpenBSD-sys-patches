@@ -1,4 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.11 2011/03/23 16:54:37 pirofti Exp $	*/
+/*	$OpenBSD: _types.h,v 1.14 2011/09/27 20:44:50 miod Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -37,9 +37,23 @@
 
 #if defined(_KERNEL)
 typedef struct label_t {
-	int val[2];
+	long val[2];
 } label_t;
 #endif
+
+/*
+ * _ALIGN(p) rounds p (pointer or byte index) up to a correctly-aligned
+ * value for all data types (int, long, ...).   The result is an
+ * unsigned long and must be cast to any desired pointer type.
+ *
+ * _ALIGNED_POINTER is a boolean macro that checks whether an address
+ * is valid to fetch data elements of type t from on this architecture.
+ * This does not reflect the optimal alignment, just the possibility
+ * (within reasonable limits).
+ */
+#define	_ALIGNBYTES	0xf
+#define	_ALIGN(p)	(((unsigned long)(p) + _ALIGNBYTES) & ~_ALIGNBYTES)
+#define	_ALIGNED_POINTER(p,t)	((((unsigned long)(p)) & (sizeof(t) - 1)) == 0)
 
 /* 7.18.1.1 Exact-width integer types */
 typedef	__signed char		__int8_t;
@@ -72,6 +86,18 @@ typedef	__int32_t		__int_fast32_t;
 typedef	__uint32_t		__uint_fast32_t;
 typedef	__int64_t		__int_fast64_t;
 typedef	__uint64_t		__uint_fast64_t;
+#define	__INT_FAST8_MIN		INT32_MIN
+#define	__INT_FAST16_MIN	INT32_MIN
+#define	__INT_FAST32_MIN	INT32_MIN
+#define	__INT_FAST64_MIN	INT64_MIN
+#define	__INT_FAST8_MAX		INT32_MAX
+#define	__INT_FAST16_MAX	INT32_MAX
+#define	__INT_FAST32_MAX	INT32_MAX
+#define	__INT_FAST64_MAX	INT64_MAX
+#define	__UINT_FAST8_MAX	UINT32_MAX
+#define	__UINT_FAST16_MAX	UINT32_MAX
+#define	__UINT_FAST32_MAX	UINT32_MAX
+#define	__UINT_FAST64_MAX	UINT64_MAX
 
 /* 7.18.1.4 Integer types capable of holding object pointers */
 typedef	long			__intptr_t;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.76 2011/04/07 19:07:42 beck Exp $	*/
+/*	$OpenBSD: buf.h,v 1.78 2011/07/04 04:30:41 tedu Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -260,7 +260,7 @@ struct cluster_info {
 
 #ifdef _KERNEL
 __BEGIN_DECLS
-extern int bufpages;		/* Max number of pages for buffers' data */
+extern long bufpages;		/* Max number of pages for buffers' data */
 extern struct pool bufpool;
 extern struct bufhead bufhead;
 
@@ -268,9 +268,9 @@ void	bawrite(struct buf *);
 void	bdwrite(struct buf *);
 void	biodone(struct buf *);
 int	biowait(struct buf *);
-int bread(struct vnode *, daddr64_t, int, struct ucred *, struct buf **);
+int bread(struct vnode *, daddr64_t, int, struct buf **);
 int breadn(struct vnode *, daddr64_t, int, daddr64_t *, int *, int,
-    struct ucred *, struct buf **);
+    struct buf **);
 void	brelse(struct buf *);
 void	bremfree(struct buf *);
 void	bufinit(void);

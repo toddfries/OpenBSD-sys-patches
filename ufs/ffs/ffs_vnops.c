@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vnops.c,v 1.62 2011/04/12 19:45:43 beck Exp $	*/
+/*	$OpenBSD: ffs_vnops.c,v 1.67 2011/08/16 14:36:39 thib Exp $	*/
 /*	$NetBSD: ffs_vnops.c,v 1.7 1996/05/11 18:27:24 mycroft Exp $	*/
 
 /*
@@ -47,10 +47,10 @@
 #include <sys/signalvar.h>
 #include <sys/pool.h>
 #include <sys/event.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <miscfs/specfs/specdev.h>
 #include <miscfs/fifofs/fifo.h>
 
 #include <ufs/ufs/quota.h>
@@ -245,11 +245,11 @@ ffs_read(void *v)
 			xfersize = bytesinfile;
 
 		if (lblktosize(fs, nextlbn) >= DIP(ip, size))
-			error = bread(vp, lbn, size, NOCRED, &bp);
+			error = bread(vp, lbn, size, &bp);
 		else if (lbn - 1 == ip->i_ci.ci_lastr) {
 			error = bread_cluster(vp, lbn, size, &bp);
 		} else
-			error = bread(vp, lbn, size, NOCRED, &bp);
+			error = bread(vp, lbn, size, &bp);
 
 		if (error)
 			break;
@@ -433,7 +433,7 @@ ffs_write(void *v)
 				 * buffers force a sync on the vnode to prevent
 				 * buffer cache exhaustion.
 				 */
-				VOP_FSYNC(vp, p->p_ucred, MNT_WAIT, p);
+				VOP_FSYNC(vp, NULL, MNT_WAIT, p);
 			}
 	}
 	return (error);

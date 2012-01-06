@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbf.c,v 1.12 2010/10/28 16:07:53 deraadt Exp $	*/
+/*	$OpenBSD: usbf.c,v 1.14 2011/09/27 19:58:38 miod Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -53,6 +53,7 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/kthread.h>
+#include <sys/timeout.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
 

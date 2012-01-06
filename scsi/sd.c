@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.225 2011/04/08 10:37:39 krw Exp $	*/
+/*	$OpenBSD: sd.c,v 1.239 2011/10/10 20:39:20 kettenis Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -68,6 +68,7 @@
 #include <sys/conf.h>
 #include <sys/scsiio.h>
 #include <sys/dkio.h>
+#include <sys/reboot.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsi_disk.h>
@@ -88,6 +89,13 @@ int	sdgetdisklabel(dev_t, struct sd_softc *, struct disklabel *, int);
 void	sdstart(struct scsi_xfer *);
 void	sd_shutdown(void *);
 int	sd_interpret_sense(struct scsi_xfer *);
+int	sd_read_cap_10(struct sd_softc *, int);
+int	sd_read_cap_16(struct sd_softc *, int);
+int	sd_size(struct sd_softc *, int);
+int	sd_thin_pages(struct sd_softc *, int);
+int	sd_vpd_block_limits(struct sd_softc *, int);
+int	sd_vpd_thin(struct sd_softc *, int);
+int	sd_thin_params(struct sd_softc *, int);
 int	sd_get_parms(struct sd_softc *, struct disk_parms *, int);
 void	sd_flush(struct sd_softc *, int);
 
@@ -127,8 +135,6 @@ const struct scsi_inquiry_pattern sd_patterns[] = {
 	 "",         "",                 ""},
 };
 
-#define sdlock(softc)   disk_lock(&(softc)->sc_dk)
-#define sdunlock(softc) disk_unlock(&(softc)->sc_dk)
 #define sdlookup(unit) (struct sd_softc *)disk_lookup(&sd_cd, (unit))
 
 int
@@ -158,7 +164,7 @@ sdattach(struct device *parent, struct device *self, void *aux)
 	int sd_autoconf = scsi_autoconf | SCSI_SILENT |
 	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE;
 	struct dk_cache dkc;
-	int error, result;
+	int error, result, sortby = BUFQ_DEFAULT;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("sdattach:\n"));
 
@@ -168,12 +174,6 @@ sdattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_link = sc_link;
 	sc_link->interpret_sense = sd_interpret_sense;
 	sc_link->device_softc = sc;
-
-	/*
-	 * Initialize disk structures.
-	 */
-	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
-	bufq_init(&sc->sc_bufq, BUFQ_DEFAULT);
 
 	if ((sc_link->flags & SDEV_ATAPI) && (sc_link->flags & SDEV_REMOVABLE))
 		sc_link->quirks |= SDEV_NOSYNCCACHE;
@@ -224,10 +224,15 @@ sdattach(struct device *parent, struct device *self, void *aux)
 
 	switch (result) {
 	case SDGP_RESULT_OK:
-		printf("%s: %lldMB, %lu bytes/sec, %lld sec total\n",
+		printf("%s: %lldMB, %lu bytes/sector, %lld sectors",
 		    sc->sc_dev.dv_xname,
 		    dp->disksize / (1048576 / dp->secsize), dp->secsize,
 		    dp->disksize);
+		if (ISSET(sc->flags, SDF_THIN)) {
+			sortby = BUFQ_FIFO;
+			printf(", thin");
+		}
+		printf("\n");
 		break;
 
 	case SDGP_RESULT_OFFLINE:
@@ -240,6 +245,15 @@ sdattach(struct device *parent, struct device *self, void *aux)
 #endif
 	}
 
+	/*
+	 * Initialize disk structures.
+	 */
+	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
+	bufq_init(&sc->sc_bufq, sortby);
+
+	/*
+	 * Enable write cache by default.
+	 */
 	memset(&dkc, 0, sizeof(dkc));
 	if (sd_ioctl_cache(sc, DIOCGCACHE, &dkc) == 0 && dkc.wrcache == 0) {
 		dkc.wrcache = 1;
@@ -270,8 +284,6 @@ sdactivate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
 	case DVACT_SUSPEND:
 		/*
 		 * Stop the disk.  Stopping the disk should flush the
@@ -299,19 +311,10 @@ int
 sddetach(struct device *self, int flags)
 {
 	struct sd_softc *sc = (struct sd_softc *)self;
-	int bmaj, cmaj, mn;
 
 	bufq_drain(&sc->sc_bufq);
 
-	/* Locate the lowest minor number to be detached. */
-	mn = DISKMINOR(self->dv_unit, 0);
-
-	for (bmaj = 0; bmaj < nblkdev; bmaj++)
-		if (bdevsw[bmaj].d_open == sdopen)
-			vdevgone(bmaj, mn, mn + MAXPARTITIONS - 1, VBLK);
-	for (cmaj = 0; cmaj < nchrdev; cmaj++)
-		if (cdevsw[cmaj].d_open == sdopen)
-			vdevgone(cmaj, mn, mn + MAXPARTITIONS - 1, VCHR);
+	disk_gone(sdopen, self->dv_unit);
 
 	/* Get rid of the shutdown hook. */
 	if (sc->sc_sdhook != NULL)
@@ -357,7 +360,7 @@ sdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	    ("sdopen: dev=0x%x (unit %d (of %d), partition %d)\n", dev, unit,
 	    sd_cd.cd_ndevs, part));
 
-	if ((error = sdlock(sc)) != 0) {
+	if ((error = disk_lock(&sc->sc_dk)) != 0) {
 		device_unref(&sc->sc_dev);
 		return (error);
 	}
@@ -430,24 +433,10 @@ sdopen(dev_t dev, int flag, int fmt, struct proc *p)
 		SC_DEBUG(sc_link, SDEV_DB3, ("Disklabel loaded\n"));
 	}
 
-	/* Check that the partition exists. */
-	if (part != RAW_PART &&
-	    (part >= sc->sc_dk.dk_label->d_npartitions ||
-	    sc->sc_dk.dk_label->d_partitions[part].p_fstype == FS_UNUSED)) {
-		error = ENXIO;
+out:
+	if ((error = disk_openpart(&sc->sc_dk, part, fmt, 1)) != 0)
 		goto bad;
-	}
 
-out:	/* Insure only one open at a time. */
-	switch (fmt) {
-	case S_IFCHR:
-		sc->sc_dk.dk_copenmask |= (1 << part);
-		break;
-	case S_IFBLK:
-		sc->sc_dk.dk_bopenmask |= (1 << part);
-		break;
-	}
-	sc->sc_dk.dk_openmask = sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
 	SC_DEBUG(sc_link, SDEV_DB3, ("open complete\n"));
 
 	/* It's OK to fall through because dk_openmask is now non-zero. */
@@ -460,7 +449,7 @@ bad:
 		sc_link->flags &= ~(SDEV_OPEN | SDEV_MEDIA_LOADED);
 	}
 
-	sdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	device_unref(&sc->sc_dev);
 	return (error);
 }
@@ -474,7 +463,6 @@ sdclose(dev_t dev, int flag, int fmt, struct proc *p)
 {
 	struct sd_softc *sc;
 	int part = DISKPART(dev);
-	int error;
 
 	sc = sdlookup(DISKUNIT(dev));
 	if (sc == NULL)
@@ -484,20 +472,9 @@ sdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		return (ENXIO);
 	}
 
-	if ((error = sdlock(sc)) != 0) {
-		device_unref(&sc->sc_dev);
-		return (error);
-	}
+	disk_lock_nointr(&sc->sc_dk);
 
-	switch (fmt) {
-	case S_IFCHR:
-		sc->sc_dk.dk_copenmask &= ~(1 << part);
-		break;
-	case S_IFBLK:
-		sc->sc_dk.dk_bopenmask &= ~(1 << part);
-		break;
-	}
-	sc->sc_dk.dk_openmask = sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
+	disk_closepart(&sc->sc_dk, part, fmt);
 
 	if (sc->sc_dk.dk_openmask == 0) {
 		if ((sc->flags & SDF_DIRTY) != 0)
@@ -518,7 +495,7 @@ sdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		scsi_xsh_del(&sc->sc_xsh);
 	}
 
-	sdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	device_unref(&sc->sc_dev);
 	return 0;
 }
@@ -556,25 +533,9 @@ sdstrategy(struct buf *bp)
 			bp->b_error = ENODEV;
 		goto bad;
 	}
-	/*
-	 * If it's a null transfer, return immediately
-	 */
-	if (bp->b_bcount == 0)
-		goto done;
 
-	/*
-	 * The transfer must be a whole number of sectors.
-	 */
-	if ((bp->b_bcount % sc->sc_dk.dk_label->d_secsize) != 0) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
-	/*
-	 * Do bounds checking, adjust transfer. if error, process.
-	 * If end of partition, just return.
-	 */
-	if (bounds_check_with_label(bp, sc->sc_dk.dk_label,
-	    (sc->flags & (SDF_WLABEL|SDF_LABELLING)) != 0) <= 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) == -1)
 		goto done;
 
 	/* Place it in the queue of disk activities for this disk. */
@@ -589,13 +550,10 @@ sdstrategy(struct buf *bp)
 	device_unref(&sc->sc_dev);
 	return;
 
-bad:
+ bad:
 	bp->b_flags |= B_ERROR;
-done:
-	/*
-	 * Correctly set the buf to indicate a completed xfer
-	 */
 	bp->b_resid = bp->b_bcount;
+ done:
 	s = splbio();
 	biodone(bp);
 	splx(s);
@@ -881,7 +839,6 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	 */
 	if ((sc->sc_link->flags & SDEV_MEDIA_LOADED) == 0) {
 		switch (cmd) {
-		case DIOCWLABEL:
 		case DIOCLOCK:
 		case DIOCEJECT:
 		case SCIOCIDENTIFY:
@@ -930,31 +887,18 @@ sdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			goto exit;
 		}
 
-		if ((error = sdlock(sc)) != 0)
+		if ((error = disk_lock(&sc->sc_dk)) != 0)
 			goto exit;
-		sc->flags |= SDF_LABELLING;
 
 		error = setdisklabel(sc->sc_dk.dk_label,
-		    (struct disklabel *)addr, /*sd->sc_dk.dk_openmask : */0);
+		    (struct disklabel *)addr, sc->sc_dk.dk_openmask);
 		if (error == 0) {
 			if (cmd == DIOCWDINFO)
 				error = writedisklabel(DISKLABELDEV(dev),
 				    sdstrategy, sc->sc_dk.dk_label);
 		}
 
-		sc->flags &= ~SDF_LABELLING;
-		sdunlock(sc);
-		goto exit;
-
-	case DIOCWLABEL:
-		if ((flag & FWRITE) == 0) {
-			error = EBADF;
-			goto exit;
-		}
-		if (*(int *)addr)
-			sc->flags |= SDF_WLABEL;
-		else
-			sc->flags &= ~SDF_WLABEL;
+		disk_unlock(&sc->sc_dk);
 		goto exit;
 
 	case DIOCLOCK:
@@ -1184,6 +1128,9 @@ sd_shutdown(void *arg)
 	 */
 	if ((sc->flags & SDF_DIRTY) != 0)
 		sd_flush(sc, SCSI_AUTOCONF);
+	if (boothowto & RB_POWERDOWN)
+		scsi_start(sc->sc_link, SSS_STOP,
+		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_AUTOCONF);
 
 	/*
 	 * There should be no outstanding IO at this point, but lets stop
@@ -1399,6 +1346,246 @@ viscpy(u_char *dst, u_char *src, int len)
 	*dst = '\0';
 }
 
+int
+sd_read_cap_10(struct sd_softc *sc, int flags)
+{
+	struct scsi_read_capacity cdb;
+	struct scsi_read_cap_data *rdcap;
+	struct scsi_xfer *xs;
+	int rv = ENOMEM;
+
+	CLR(flags, SCSI_IGNORE_ILLEGAL_REQUEST);
+
+	rdcap = dma_alloc(sizeof(*rdcap), (ISSET(flags, SCSI_NOSLEEP) ?
+	    PR_NOWAIT : PR_WAITOK) | PR_ZERO);
+	if (rdcap == NULL)
+		return (ENOMEM);
+
+	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
+	if (xs == NULL)
+		goto done;
+
+	bzero(&cdb, sizeof(cdb));
+	cdb.opcode = READ_CAPACITY;
+
+	memcpy(xs->cmd, &cdb, sizeof(cdb));
+	xs->cmdlen = sizeof(cdb);
+	xs->data = (void *)rdcap;
+	xs->datalen = sizeof(*rdcap);
+	xs->timeout = 20000;
+
+	rv = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	if (rv == 0) {
+		sc->params.disksize = _4btol(rdcap->addr) + 1ll;
+		sc->params.secsize = _4btol(rdcap->length);
+		CLR(sc->flags, SDF_THIN);
+	}
+
+ done:
+	dma_free(rdcap, sizeof(*rdcap));
+	return (rv);
+}
+
+int
+sd_read_cap_16(struct sd_softc *sc, int flags)
+{
+	struct scsi_read_capacity_16 cdb;
+	struct scsi_read_cap_data_16 *rdcap;
+	struct scsi_xfer *xs;
+	int rv = ENOMEM;
+
+	CLR(flags, SCSI_IGNORE_ILLEGAL_REQUEST);
+
+	rdcap = dma_alloc(sizeof(*rdcap), (ISSET(flags, SCSI_NOSLEEP) ?
+	    PR_NOWAIT : PR_WAITOK) | PR_ZERO);
+	if (rdcap == NULL)
+		return (ENOMEM);
+
+	xs = scsi_xs_get(sc->sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
+	if (xs == NULL)
+		goto done;
+
+	bzero(&cdb, sizeof(cdb));
+	cdb.opcode = READ_CAPACITY_16;
+	cdb.byte2 = SRC16_SERVICE_ACTION;
+	_lto4b(sizeof(*rdcap), cdb.length);
+
+	memcpy(xs->cmd, &cdb, sizeof(cdb));
+	xs->cmdlen = sizeof(cdb);
+	xs->data = (void *)rdcap;
+	xs->datalen = sizeof(*rdcap);
+	xs->timeout = 20000;
+
+	rv = scsi_xs_sync(xs);
+	scsi_xs_put(xs);
+
+	if (rv == 0) {
+		sc->params.disksize = _8btol(rdcap->addr) + 1;
+		sc->params.secsize = _4btol(rdcap->length);
+		if (ISSET(_2btol(rdcap->lowest_aligned), READ_CAP_16_TPE))
+			SET(sc->flags, SDF_THIN);
+		else
+			CLR(sc->flags, SDF_THIN);
+	}
+
+ done:
+	dma_free(rdcap, sizeof(*rdcap));
+	return (rv);
+}
+
+int
+sd_size(struct sd_softc *sc, int flags)
+{
+	int rv;
+
+	if (SCSISPC(sc->sc_link->inqdata.version) >= 3) {
+		rv = sd_read_cap_16(sc, flags);
+		if (rv != 0)
+			rv = sd_read_cap_10(sc, flags);
+	} else {
+		rv = sd_read_cap_10(sc, flags);
+		if (rv == 0 && sc->params.disksize == 0x100000000ll)
+			rv = sd_read_cap_16(sc, flags);
+	}
+
+	return (rv);
+}
+
+int
+sd_thin_pages(struct sd_softc *sc, int flags)
+{
+	struct scsi_vpd_hdr *pg;
+	size_t len = 0;
+	u_int8_t *pages;
+	int i, score = 0;
+	int rv;
+
+	pg = dma_alloc(sizeof(*pg), (ISSET(flags, SCSI_NOSLEEP) ?
+	    PR_NOWAIT : PR_WAITOK) | PR_ZERO);
+	if (pg == NULL)
+		return (ENOMEM);
+
+	rv = scsi_inquire_vpd(sc->sc_link, pg, sizeof(*pg),
+	    SI_PG_SUPPORTED, flags);
+	if (rv != 0)
+		goto done;
+
+	len = _2btol(pg->page_length);
+
+	dma_free(pg, sizeof(*pg));
+	pg = dma_alloc(sizeof(*pg) + len, (ISSET(flags, SCSI_NOSLEEP) ?
+	    PR_NOWAIT : PR_WAITOK) | PR_ZERO);
+	if (pg == NULL)
+		return (ENOMEM);
+
+	rv = scsi_inquire_vpd(sc->sc_link, pg, sizeof(*pg) + len,
+	    SI_PG_SUPPORTED, flags);
+	if (rv != 0)
+		goto done;
+
+	pages = (u_int8_t *)(pg + 1);
+	if (pages[0] != SI_PG_SUPPORTED) {
+		rv = EIO;
+		goto done;
+	}
+
+	for (i = 1; i < len; i++) {
+		switch (pages[i]) {
+		case SI_PG_DISK_LIMITS:
+		case SI_PG_DISK_THIN:
+			score++;
+			break;
+		}
+	}
+
+	if (score < 2)
+		rv = EOPNOTSUPP;
+
+ done:
+	dma_free(pg, sizeof(*pg) + len);
+	return (rv);
+}
+
+int
+sd_vpd_block_limits(struct sd_softc *sc, int flags)
+{
+	struct scsi_vpd_disk_limits *pg;
+	int rv;
+
+	pg = dma_alloc(sizeof(*pg), (ISSET(flags, SCSI_NOSLEEP) ?
+	    PR_NOWAIT : PR_WAITOK) | PR_ZERO);
+	if (pg == NULL)
+		return (ENOMEM);
+
+	rv = scsi_inquire_vpd(sc->sc_link, pg, sizeof(*pg),
+	    SI_PG_DISK_LIMITS, flags);
+	if (rv != 0)
+		goto done;
+
+	if (_2btol(pg->hdr.page_length) == SI_PG_DISK_LIMITS_LEN_THIN) {
+		sc->params.unmap_sectors = _4btol(pg->max_unmap_lba_count);
+		sc->params.unmap_descs = _4btol(pg->max_unmap_desc_count);
+	} else
+		rv = EOPNOTSUPP;
+
+ done:
+	dma_free(pg, sizeof(*pg));
+	return (rv);
+}
+
+int
+sd_vpd_thin(struct sd_softc *sc, int flags)
+{
+	struct scsi_vpd_disk_thin *pg;
+	int rv;
+
+	pg = dma_alloc(sizeof(*pg), (ISSET(flags, SCSI_NOSLEEP) ?
+	    PR_NOWAIT : PR_WAITOK) | PR_ZERO);
+	if (pg == NULL)
+		return (ENOMEM);
+
+	rv = scsi_inquire_vpd(sc->sc_link, pg, sizeof(*pg),
+	    SI_PG_DISK_THIN, flags);
+	if (rv != 0)
+		goto done;
+
+#ifdef notyet
+	if (ISSET(pg->flags, VPD_DISK_THIN_TPU))
+		sc->sc_delete = sd_unmap;
+	else if (ISSET(pg->flags, VPD_DISK_THIN_TPWS)) {
+		sc->sc_delete = sd_write_same_16;
+		sc->params.unmap_descs = 1; /* WRITE SAME 16 only does one */
+	} else
+		rv = EOPNOTSUPP;
+#endif
+
+ done:
+	dma_free(pg, sizeof(*pg));
+	return (rv);
+}
+
+int
+sd_thin_params(struct sd_softc *sc, int flags)
+{
+	int rv;
+
+	rv = sd_thin_pages(sc, flags);
+	if (rv != 0)
+		return (rv);
+
+	rv = sd_vpd_block_limits(sc, flags);
+	if (rv != 0)
+		return (rv);
+
+	rv = sd_vpd_thin(sc, flags);
+	if (rv != 0)
+		return (rv);
+
+	return (0);
+}
+
 /*
  * Fill out the disk parameter structure. Return SDGP_RESULT_OK if the
  * structure is correctly filled in, SDGP_RESULT_OFFLINE otherwise. The caller
@@ -1413,10 +1600,16 @@ sd_get_parms(struct sd_softc *sc, struct disk_parms *dp, int flags)
 	struct page_flex_geometry *flex = NULL;
 	struct page_reduced_geometry *reduced = NULL;
 	u_char *page0 = NULL;
-	u_int32_t heads = 0, sectors = 0, cyls = 0, secsize = 0, sssecsize;
+	u_int32_t heads = 0, sectors = 0, cyls = 0, secsize = 0;
 	int err = 0, big;
 
-	dp->disksize = scsi_size(sc->sc_link, flags, &sssecsize);
+	if (sd_size(sc, flags) != 0)
+		return (SDGP_RESULT_OFFLINE);
+
+	if (ISSET(sc->flags, SDF_THIN) && sd_thin_params(sc, flags) != 0) {
+		/* we dont know the unmap limits, so we cant use thin shizz */
+		CLR(sc->flags, SDF_THIN);
+	}
 
 	buf = dma_alloc(sizeof(*buf), PR_NOWAIT);
 	if (buf == NULL)
@@ -1509,9 +1702,7 @@ validate:
 	if (dp->disksize == 0)
 		return (SDGP_RESULT_OFFLINE);
 
-	if (sssecsize > 0)
-		dp->secsize = sssecsize;
-	else
+	if (dp->secsize == 0)
 		dp->secsize = (secsize == 0) ? 512 : secsize;
 
 	/*

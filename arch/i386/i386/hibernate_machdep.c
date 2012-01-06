@@ -20,448 +20,309 @@
 #include <sys/device.h>
 #include <sys/disk.h>
 #include <sys/disklabel.h>
+#include <sys/hibernate.h>
 #include <sys/timeout.h>
 #include <sys/malloc.h>
+
+#include <dev/acpi/acpivar.h>
 
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_pmemrange.h>
 
 #include <machine/hibernate.h>
+#include <machine/hibernate_var.h>
 #include <machine/kcore.h>
 #include <machine/pmap.h>
-
-#include <dev/ata/atavar.h>
-#include <dev/ata/wdvar.h>
 
 #ifdef MULTIPROCESSOR
 #include <machine/mpbiosvar.h>
 #endif /* MULTIPROCESSOR */
 
+#include "acpi.h"
 #include "wd.h"
+#include "ahci.h"
+#include "sd.h"
 
-#ifndef SMALL_KERNEL
+#if NWD > 0
+#include <dev/ata/atavar.h>
+#include <dev/ata/wdvar.h>
+#endif
+
 /* Hibernate support */
-int	hibernate_write_image(void);
-int	hibernate_read_image(void);
-void	hibernate_unpack_image(void);
-void	*get_hibernate_io_function(void);
-int	get_hibernate_info(struct hibernate_info *);
-void	hibernate_enter_resume_pte(vaddr_t, paddr_t);
-void	hibernate_populate_resume_pt(paddr_t *, paddr_t *);
-int	hibernate_write_signature(void);
-int	hibernate_clear_signature(void);
-struct 	hibernate_info *global_hiber_info;
-paddr_t global_image_start;
+void    hibernate_enter_resume_4k_pte(vaddr_t, paddr_t);
+void    hibernate_enter_resume_4k_pde(vaddr_t);
+void    hibernate_enter_resume_4m_pde(vaddr_t, paddr_t);
 
-extern	void hibernate_resume_machine(void);
-extern	void hibernate_activate_resume_pt(void);
-extern	void hibernate_switch_stack(void);
-extern	char *disk_readlabel(struct disklabel *, dev_t, char *, size_t);
+extern	void hibernate_resume_machdep(void);
+extern	void hibernate_flush(void);
 extern	caddr_t start, end;
 extern	int ndumpmem;
 extern  struct dumpmem dumpmem[];
-
+extern	struct hibernate_state *hibernate_state;
 
 /*
  * i386 MD Hibernate functions
  */
 
-void *
-get_hibernate_io_function()
+/*
+ * Returns the hibernate write I/O function to use on this machine
+ */
+hibio_fn
+get_hibernate_io_function(void)
 {
-
-#if NWD > 0 
+#if NWD > 0
 	/* XXX - Only support wd hibernate presently */
 	if (strcmp(findblkname(major(swdevt[0].sw_dev)), "wd") == 0)
 		return wd_hibernate_io;
-	else
-		return NULL;
-#else
-	return NULL;
 #endif
+#if NAHCI > 0 && NSD > 0
+	if (strcmp(findblkname(major(swdevt[0].sw_dev)), "sd") == 0) {
+		extern struct cfdriver sd_cd;
+		extern int ahci_hibernate_io(dev_t dev, daddr_t blkno,
+		    vaddr_t addr, size_t size, int wr, void *page);
+		struct device *dv;
+
+		dv = disk_lookup(&sd_cd, DISKUNIT(swdevt[0].sw_dev));
+		if (dv && dv->dv_parent && dv->dv_parent->dv_parent &&
+		    strcmp(dv->dv_parent->dv_parent->dv_cfdata->cf_driver->cd_name,
+		    "ahci") == 0)
+		return ahci_hibernate_io;
+	}
+#endif
+	return NULL;
 }
 
+/*
+ * Gather MD-specific data and store into hiber_info
+ */
 int
-get_hibernate_info(struct hibernate_info *hiber_info)
+get_hibernate_info_md(union hibernate_info *hiber_info)
 {
 	int i;
-	struct disklabel dl;
-	char err_string[128], *dl_ret;
-
-	/* Determine I/O function to use */
-	hiber_info->io_func = get_hibernate_io_function();
-	if (hiber_info->io_func == NULL)
-		return (0);
-
-	/* Calculate hibernate device */
-	hiber_info->device = swdevt[0].sw_dev;
 
 	/* Calculate memory ranges */
 	hiber_info->nranges = ndumpmem;
 	hiber_info->image_size = 0;
 
-	for(i=0; i<ndumpmem; i++) {
+	for(i = 0; i < ndumpmem; i++) {
 		hiber_info->ranges[i].base = dumpmem[i].start * PAGE_SIZE;
-		hiber_info->ranges[i].end = 
-			(dumpmem[i].end * PAGE_SIZE);
-		hiber_info->image_size +=
-			hiber_info->ranges[i].end - hiber_info->ranges[i].base;
+		hiber_info->ranges[i].end = dumpmem[i].end * PAGE_SIZE;
+		hiber_info->image_size += hiber_info->ranges[i].end -
+		    hiber_info->ranges[i].base;
 	}
 
 #if NACPI > 0
 	hiber_info->ranges[hiber_info->nranges].base = ACPI_TRAMPOLINE;
-	hiber_info->ranges[hiber_info->nranges].end = 
-		hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
+	hiber_info->ranges[hiber_info->nranges].end =
+	    hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
 	hiber_info->image_size += PAGE_SIZE;
-	hiber_info->nranges ++;
+	hiber_info->nranges++;
 #endif
 #ifdef MULTIPROCESSOR
 	hiber_info->ranges[hiber_info->nranges].base = MP_TRAMPOLINE;
-	hiber_info->ranges[hiber_info->nranges].end = 
-		hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
+	hiber_info->ranges[hiber_info->nranges].end =
+	    hiber_info->ranges[hiber_info->nranges].base + PAGE_SIZE;
 	hiber_info->image_size += PAGE_SIZE;
-#endif	
+	hiber_info->nranges++;
+#endif
 
-	/* Read disklabel (used to calculate signature and image offsets */
-	dl_ret = disk_readlabel(&dl, hiber_info->device, err_string, 128);
-
-	if (dl_ret) {
-		printf("Hibernate error: %s\n", dl_ret);
-		return (0);
-	}
-
-	/* Calculate signature block offset in swap */
-	hiber_info->sig_offset = DL_BLKTOSEC(&dl, 
-					(dl.d_partitions[1].p_size - 1)) * 
-					DL_BLKSPERSEC(&dl);
-
-	/* Calculate memory image offset in swap */
-	hiber_info->image_offset = dl.d_partitions[1].p_offset +
-				   dl.d_partitions[1].p_size -
-				   (hiber_info->image_size / 512) -1;
-
-	/* Stash kernel version information */
-	bcopy(version, &hiber_info->kernel_version, 
-		min(strlen(version), sizeof(hiber_info->kernel_version)));
-
-	return (1);
+	return (0);
 }
 
 /*
- * Enter a 4MB PTE mapping for the supplied VA/PA
- * into the resume-time page table.
+ * Enter a mapping for va->pa in the resume pagetable, using
+ * the specified size.
+ *
+ * size : 0 if a 4KB mapping is desired
+ *        1 if a 4MB mapping is desired
  */
 void
-hibernate_enter_resume_pte(vaddr_t va, paddr_t pa)
+hibernate_enter_resume_mapping(vaddr_t va, paddr_t pa, int size)
+{
+	if (size)
+		return hibernate_enter_resume_4m_pde(va, pa);
+	else
+		return hibernate_enter_resume_4k_pte(va, pa);
+}
+
+/*
+ * Enter a 4MB PDE mapping for the supplied VA/PA into the resume-time pmap
+ */
+void
+hibernate_enter_resume_4m_pde(vaddr_t va, paddr_t pa)
+{
+	pt_entry_t *pde, npde;
+
+	pde = s4pde_4m(va);
+	npde = (pa & PMAP_PA_MASK_4M) | PG_RW | PG_V | PG_u | PG_M | PG_PS;
+	*pde = npde;
+}
+
+/*
+ * Enter a 4KB PTE mapping for the supplied VA/PA into the resume-time pmap.
+ */
+void
+hibernate_enter_resume_4k_pte(vaddr_t va, paddr_t pa)
 {
 	pt_entry_t *pte, npte;
 
-	pte = s4pte_4m(va);
-	npte = (pa & PMAP_PA_MASK_4M) | PG_RW | PG_V | PG_U | PG_M | PG_PS;
+	pte = s4pte_4k(va);
+	npte = (pa & PMAP_PA_MASK) | PG_RW | PG_V | PG_u | PG_M;
 	*pte = npte;
 }
 
 /*
- * Create the resume-time page table. This table maps the image(pig) area,
- * the kernel text area, and various utility pages located in low memory for
- * use during resume, since we cannot overwrite the resuming kernel's 
- * page table and expect things to work properly.
+ * Enter a 4KB PDE mapping for the supplied VA into the resume-time pmap.
  */
 void
-hibernate_populate_resume_pt(paddr_t *image_start, paddr_t *image_end)
+hibernate_enter_resume_4k_pde(vaddr_t va)
 {
-	int phys_page_number;
-	paddr_t pa, pig_start, pig_end;
-	psize_t pig_sz;
+	pt_entry_t *pde, npde;
+
+	pde = s4pde_4k(va);
+	npde = (HIBERNATE_PT_PAGE & PMAP_PA_MASK) | PG_RW | PG_V | PG_u | PG_M;
+	*pde = npde;
+}
+
+/*
+ * Create the resume-time page table. This table maps the image(pig) area,
+ * the kernel text area, and various utility pages for use during resume,
+ * since we cannot overwrite the resuming kernel's page table during inflate
+ * and expect things to work properly.
+ */
+void
+hibernate_populate_resume_pt(union hibernate_info *hib_info,
+    paddr_t image_start, paddr_t image_end)
+{
+	int phys_page_number, i;
+	paddr_t pa, piglet_start, piglet_end;
 	vaddr_t kern_start_4m_va, kern_end_4m_va, page;
 
-	/* Get the pig (largest contiguous physical range) from uvm */
-	if (uvm_pmr_alloc_pig(&pig_start, &pig_sz) == ENOMEM)
-		panic("Insufficient memory for resume");
-
-	*image_start = pig_start;
-	*image_end = pig_end;
+	/* Identity map PD, PT, and stack pages */
+	pmap_kenter_pa(HIBERNATE_PT_PAGE, HIBERNATE_PT_PAGE, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_PD_PAGE, HIBERNATE_PD_PAGE, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_STACK_PAGE, HIBERNATE_STACK_PAGE, VM_PROT_ALL);
+	pmap_activate(curproc);
 
 	bzero((caddr_t)HIBERNATE_PT_PAGE, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_PD_PAGE, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_STACK_PAGE, PAGE_SIZE);
+
+	/* PDE for low pages */
+	hibernate_enter_resume_4k_pde(0);
 
 	/*
-	 * Identity map first 4M physical for tramps and special utility 
-	 * pages
+	 * Identity map first 640KB physical for tramps and special utility
+	 * pages using 4KB mappings
 	 */
-	hibernate_enter_resume_pte(0, 0);	
-	
+	for (i = 0; i < 160; i ++) {
+		hibernate_enter_resume_mapping(i*PAGE_SIZE, i*PAGE_SIZE, 0);
+	}
+
 	/*
 	 * Map current kernel VA range using 4M pages
 	 */
 	kern_start_4m_va = (paddr_t)&start & ~(PAGE_MASK_4M);
 	kern_end_4m_va = (paddr_t)&end & ~(PAGE_MASK_4M);
-	phys_page_number = 0; 
+	phys_page_number = 0;
 
-	for (page = kern_start_4m_va ; page <= kern_end_4m_va ; 
+	for (page = kern_start_4m_va; page <= kern_end_4m_va;
 	    page += NBPD, phys_page_number++) {
-
 		pa = (paddr_t)(phys_page_number * NBPD);
-		hibernate_enter_resume_pte(page, pa);
+		hibernate_enter_resume_mapping(page, pa, 1);
 	}
 
 	/*
 	 * Identity map the image (pig) area
 	 */
-	phys_page_number = pig_start / NBPD;
-	pig_start &= ~(PAGE_MASK_4M);
-	pig_end &= ~(PAGE_MASK_4M);
-	for (page = pig_start; page <= pig_end ;
+	phys_page_number = image_start / NBPD;
+	image_start &= ~(PAGE_MASK_4M);
+	image_end &= ~(PAGE_MASK_4M);
+	for (page = image_start; page <= image_end ;
 	    page += NBPD, phys_page_number++) {
-
 		pa = (paddr_t)(phys_page_number * NBPD);
-		hibernate_enter_resume_pte(page, pa);
-	}
-}
-	
-int
-hibernate_write_image()
-{
-	struct hibernate_info hiber_info;
-	int i, j;
-	paddr_t range_base, range_end, addr;
-	daddr_t blkctr;
-
-	/* Get current running machine's hibernate info */
-	if (!get_hibernate_info(&hiber_info))
-		return (0);
-
-	pmap_kenter_pa(HIBERNATE_TEMP_PAGE, HIBERNATE_TEMP_PAGE, VM_PROT_ALL);	
-	pmap_kenter_pa(HIBERNATE_ALLOC_PAGE, HIBERNATE_ALLOC_PAGE, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_IO_PAGE, HIBERNATE_IO_PAGE, VM_PROT_ALL);
-
-	blkctr = hiber_info.image_offset;
-
-	for (i=0; i < hiber_info.nranges; i++) {
-		range_base = hiber_info.ranges[i].base;
-		range_end = hiber_info.ranges[i].end;
-
-		for (j=0; j < (range_end - range_base);
-		    blkctr += (NBPG/512), j += NBPG) {
-			addr = range_base + j;
-			pmap_kenter_pa(HIBERNATE_TEMP_PAGE, addr,
-				VM_PROT_ALL);
-			bcopy((caddr_t)HIBERNATE_TEMP_PAGE,
-				(caddr_t)HIBERNATE_IO_PAGE,
-				NBPG);
-			hiber_info.io_func(hiber_info.device, blkctr,
-				(vaddr_t)HIBERNATE_IO_PAGE, NBPG, 1,
-				(void *)HIBERNATE_ALLOC_PAGE);
-		}
-	}
-	
-	/* Image write complete, write the signature and return */	
-	return hibernate_write_signature();
-}
-
-int
-hibernate_read_image()
-{
-	struct hibernate_info hiber_info;
-	int i, j;
-	paddr_t range_base, range_end, addr, image_start, image_end;
-	daddr_t blkctr;
-
-	/* Get current running machine's hibernate info */
-	if (!get_hibernate_info(&hiber_info))
-		return (0);
-
-	pmap_kenter_pa(HIBERNATE_TEMP_PAGE, HIBERNATE_TEMP_PAGE, VM_PROT_ALL);	
-	pmap_kenter_pa(HIBERNATE_ALLOC_PAGE, HIBERNATE_ALLOC_PAGE, VM_PROT_ALL);
-
-	blkctr = hiber_info.image_offset;
-
-	/* Prepare the resume-time pagetable */
-	hibernate_populate_resume_pt(&image_start, &image_end);
-
-	for (i=0; i < hiber_info.nranges; i++) {
-		range_base = hiber_info.ranges[i].base;
-		range_end = hiber_info.ranges[i].end;
-
-		for (j=0; j < (range_end - range_base)/NBPG;
-		    blkctr += (NBPG/512), j += NBPG) {
-			addr = range_base + j;
-			pmap_kenter_pa(HIBERNATE_TEMP_PAGE, addr,
-				VM_PROT_ALL);
-			hiber_info.io_func(hiber_info.device, blkctr,
-				(vaddr_t)HIBERNATE_IO_PAGE, NBPG, 1,
-				(void *)HIBERNATE_ALLOC_PAGE);
-			bcopy((caddr_t)HIBERNATE_IO_PAGE,
-				(caddr_t)HIBERNATE_TEMP_PAGE,
-				NBPG);
-		
-		}
+		hibernate_enter_resume_mapping(page, pa, 1);
 	}
 
-	/* Read complete, clear the signature and return */
-	return hibernate_clear_signature();
-}
-
-int
-hibernate_suspend()
-{
 	/*
-	 * On i386, the only thing to do on hibernate suspend is
-	 * to write the image.
+	 * Map the piglet
 	 */
-
-	return hibernate_write_image();
+	phys_page_number = hib_info->piglet_pa / NBPD;
+	piglet_start = hib_info->piglet_va;
+	piglet_end = piglet_start + HIBERNATE_CHUNK_SIZE * 3;
+	piglet_start &= ~(PAGE_MASK_4M);
+	piglet_end &= ~(PAGE_MASK_4M);
+	for (page = piglet_start; page <= piglet_end ;
+	    page += NBPD, phys_page_number++) {
+		pa = (paddr_t)(phys_page_number * NBPD);
+		hibernate_enter_resume_mapping(page, pa, 1);
+	}
 }
 
-/* Unpack image from resumed image to real location */
+/*
+ * MD-specific resume preparation (creating resume time pagetables,
+ * stacks, etc).
+ *
+ * On i386, we use the piglet whose address is contained in hib_info
+ * as per the following layout:
+ *
+ * offset from piglet base      use
+ * -----------------------      --------------------
+ * 0                            i/o allocation area
+ * PAGE_SIZE                    i/o read area
+ * 2*PAGE_SIZE                  temp/scratch page
+ * 5*PAGE_SIZE			resume stack
+ * 6*PAGE_SIZE                  hiballoc arena
+ * 7*PAGE_SIZE to 87*PAGE_SIZE  zlib inflate area
+ * ...
+ * HIBERNATE_CHUNK_SIZE         chunk table
+ * 2*HIBERNATE_CHUNK_SIZE	bounce/copy area
+ */
 void
-hibernate_unpack_image()
+hibernate_prepare_resume_machdep(union hibernate_info *hib_info)
 {
-	struct hibernate_info *hiber_info = global_hiber_info;
-	int i, j;
-	paddr_t base, end, pig_base;
-
-	hibernate_activate_resume_pt();
-
-	for (i=0; i<hiber_info->nranges; i++) {
-		base = hiber_info->ranges[i].base;
-		end = hiber_info->ranges[i].end;
-		pig_base = base + global_image_start;
-
-		for (j=base; j< (end - base)/NBPD; j++) {
-			hibernate_enter_resume_pte(base, base);
-			bcopy((caddr_t)pig_base, (caddr_t)base, NBPD);
-		}
-	}
-}
-
-void
-hibernate_resume()
-{
-	struct hibernate_info hiber_info, disk_hiber_info;
-	u_int8_t *io_page;
-	int s;
-	paddr_t image_start, image_end;
-
-	/* Get current running machine's hibernate info */
-	if (!get_hibernate_info(&hiber_info))
-		return;
-
-	io_page = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
-	if (!io_page)
-		return;
-	
-	/* Read hibernate info from disk */
-	s = splbio();
-	hiber_info.io_func(hiber_info.device, hiber_info.sig_offset,
-		(vaddr_t)&disk_hiber_info, 512, 0, io_page);
-
-	free(io_page, M_DEVBUF);
-
-	if (memcmp(&hiber_info, &disk_hiber_info,
-	    sizeof(struct hibernate_info)) !=0) {
-		return;
-	}
+	paddr_t pa, piglet_end;
+	vaddr_t va;
 
 	/*
-	 * On-disk and in-memory hibernate signatures match,
-	 * this means we should do a resume from hibernate.
+	 * At this point, we are sure that the piglet's phys
+	 * space is going to have been unused by the suspending
+	 * kernel, but the vaddrs used by the suspending kernel
+	 * may or may not be available to us here in the
+	 * resuming kernel, so we allocate a new range of VAs
+	 * for the piglet. Those VAs will be temporary and will
+	 * cease to exist as soon as we switch to the resume
+	 * PT, so we need to ensure that any VAs required during
+	 * inflate are also entered into that map.
 	 */
 
-	disable_intr();
-	cold = 1;
+        hib_info->piglet_va = (vaddr_t)km_alloc(HIBERNATE_CHUNK_SIZE*3,
+	    &kv_any, &kp_none, &kd_nowait);
+        if (!hib_info->piglet_va)
+                panic("Unable to allocate vaddr for hibernate resume piglet\n");
 
-	/*
-	 * Add mappings for resume stack and PT page tables
-	 * into the "resuming" kernel. We use these mappings
-	 * during image read and copy
-	 */
+	piglet_end = hib_info->piglet_pa + HIBERNATE_CHUNK_SIZE*3;
+
+	for (pa = hib_info->piglet_pa,va = hib_info->piglet_va;
+	    pa <= piglet_end; pa += PAGE_SIZE, va += PAGE_SIZE)
+		pmap_kenter_pa(va, pa, VM_PROT_ALL);
+
 	pmap_activate(curproc);
-	pmap_kenter_pa((vaddr_t)HIBERNATE_STACK_PAGE,
-		(paddr_t)HIBERNATE_STACK_PAGE,
-		VM_PROT_ALL);
-	pmap_kenter_pa((vaddr_t)HIBERNATE_PT_PAGE,
-		(paddr_t)HIBERNATE_PT_PAGE,
-		VM_PROT_ALL);
-
-	/*
-	 * Create the resume-time page table (ahead of when we actually
-	 * need it)
-	 */
-	hibernate_populate_resume_pt(&image_start, &image_end);
-	
-
-	/* 
-	 * We can't access any of this function's local variables (via 
-	 * stack) after we switch stacks, so we stash hiber_info and
-	 * the image start area into temporary global variables first.
-	 */
-	global_hiber_info = &hiber_info;
-	global_image_start = image_start;
-
-	/* Switch stacks */
-	hibernate_switch_stack();
-
-	/* Read the image from disk into the image (pig) area */
-	if (!hibernate_read_image())
-		panic("Failed to restore the hibernate image");
-
-	/*
-	 * Image is now in high memory (pig area), copy to "correct" 
-	 * location in memory. We'll eventually end up copying on top
-	 * of ourself, but we are assured the kernel code here is
-	 * the same between the hibernated and resuming kernel, 
-	 * and we are running on our own stack
-	 */
-	hibernate_unpack_image();	
-	
-	/*
-	 * Resume the loaded kernel by jumping to the S3 resume vector
-	 */
-	hibernate_resume_machine();
 }
 
+/*
+ * During inflate, certain pages that contain our bookkeeping information
+ * (eg, the chunk table, scratch pages, etc) need to be skipped over and
+ * not inflated into.
+ *
+ * Returns 1 if the physical page at dest should be skipped, 0 otherwise
+ */
 int
-hibernate_write_signature()
+hibernate_inflate_skip(union hibernate_info *hib_info, paddr_t dest)
 {
-	struct hibernate_info hiber_info;
-	u_int8_t *io_page;
+	if (dest >= hib_info->piglet_pa &&
+	    dest <= (hib_info->piglet_pa + 3 * HIBERNATE_CHUNK_SIZE))
+		return (1);
 
-	/* Get current running machine's hibernate info */
-	if (!get_hibernate_info(&hiber_info))
-		return (0);
-
-	io_page = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
-	if (!io_page)
-		return (0);
-	
-	/* Write hibernate info to disk */
-	hiber_info.io_func(hiber_info.device, hiber_info.sig_offset,
-		(vaddr_t)&hiber_info, 512, 1, io_page);
-
-	free(io_page, M_DEVBUF);
-
-	return (1);
+	return (0);
 }
-
-int
-hibernate_clear_signature()
-{
-	struct hibernate_info hiber_info;
-	u_int8_t *io_page;
-
-	/* Zero out a blank hiber_info */
-	bzero(&hiber_info, sizeof(hiber_info));
-
-	io_page = malloc(PAGE_SIZE, M_DEVBUF, M_NOWAIT);
-	if (!io_page)
-		return (0);
-	
-	/* Write (zeroed) hibernate info to disk */
-	hiber_info.io_func(hiber_info.device, hiber_info.sig_offset,
-		(vaddr_t)&hiber_info, 512, 1, io_page);
-
-	free(io_page, M_DEVBUF);
-
-	return (1);
-}
-#endif /* !SMALL_KERNEL */

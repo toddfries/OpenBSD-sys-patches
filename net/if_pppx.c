@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pppx.c,v 1.7 2011/04/14 05:13:45 dlg Exp $ */
+/*	$OpenBSD: if_pppx.c,v 1.13 2011/10/25 23:54:58 dlg Exp $ */
 
 /*
  * Copyright (c) 2010 Claudio Jeker <claudio@openbsd.org>
@@ -281,8 +281,8 @@ pppxread(dev_t dev, struct uio *uio, int ioflag)
 
 	s = splnet();
 	for (;;) {
-		IF_DEQUEUE(&pxd->pxd_svcq, m);
-		if (m != NULL)
+		IF_DEQUEUE(&pxd->pxd_svcq, m0);
+		if (m0 != NULL)
 			break;
 
 		if (ISSET(ioflag, IO_NDELAY)) {
@@ -513,7 +513,7 @@ pppxkqfilter(dev_t dev, struct knote *kn)
 		kn->kn_fop = &pppx_wr_filtops;
 		break;
 	default:
-		return (1);
+		return (EINVAL);
 	}
 
 	kn->kn_hook = (caddr_t)pxd;
@@ -553,7 +553,7 @@ filt_pppx_read(struct knote *kn, long hint)
 	s = splnet();
 	if (!IF_IS_EMPTY(&pxd->pxd_svcq)) {
 		event = 1;
-		kn->kn_data = pxd->pxd_svcq.ifq_len;
+		kn->kn_data = IF_LEN(&pxd->pxd_svcq);
 	}
 	splx(s);
 
@@ -629,10 +629,19 @@ pppx_if_next_unit(void)
 	rw_assert_wrlock(&pppx_ifs_lk);
 
 	/* this is safe without splnet since we're not modifying it */
-	RB_FOREACH(pxi, pppx_ifs, &pppx_ifs) {
-		if (pxi->pxi_unit >= unit)
-			unit = pxi->pxi_unit + 1;
-	}
+	do {
+		int found = 0;
+		RB_FOREACH(pxi, pppx_ifs, &pppx_ifs) {
+			if (pxi->pxi_unit == unit) {
+				found = 1;
+				break;
+			}
+		}
+
+		if (found == 0)
+			break;
+		unit++;
+	} while (unit > 0);
 
 	return (unit);
 }
@@ -796,9 +805,13 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 #endif
 #ifdef PIPEX_MPPE
 	if ((req->pr_ppp_flags & PIPEX_PPP_MPPE_ACCEPTED) != 0)
-		pipex_mppe_req_init(&req->pr_mppe_recv, &session->mppe_recv);
+		pipex_session_init_mppe_recv(session,
+		    req->pr_mppe_recv.stateless, req->pr_mppe_recv.keylenbits,
+		    req->pr_mppe_recv.master_key);
 	if ((req->pr_ppp_flags & PIPEX_PPP_MPPE_ENABLED) != 0)
-		pipex_mppe_req_init(&req->pr_mppe_send, &session->mppe_send);
+		pipex_session_init_mppe_send(session,
+		    req->pr_mppe_send.stateless, req->pr_mppe_send.keylenbits,
+		    req->pr_mppe_send.master_key);
 
 	if (pipex_session_is_mppe_required(session)) {
 		if (!pipex_session_is_mppe_enabled(session) ||
@@ -812,6 +825,11 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 	/* try to set the interface up */
 	rw_enter_write(&pppx_ifs_lk);
 	unit = pppx_if_next_unit();
+	if (unit < 0) {
+		pool_put(pppx_if_pl, pxi);
+		error = ENOMEM;
+		goto out;
+	}
 
 	pxi->pxi_unit = unit;
 	pxi->pxi_key.pxik_session_id = req->pr_session_id;
@@ -1057,6 +1075,10 @@ pppx_if_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 
 	s = splnet();
 	IFQ_ENQUEUE(&ifp->if_snd, m, NULL, error);
+	if (error) {
+		splx(s);
+		goto out;
+	}
 	if_start(ifp);
 	splx(s);
 

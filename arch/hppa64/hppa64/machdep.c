@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.36 2011/04/18 21:44:55 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.45 2011/09/22 21:48:34 jsing Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -44,6 +44,7 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 #include <uvm/uvm_page.h>
 #include <uvm/uvm_swap.h>
@@ -67,20 +68,6 @@
 #endif
 
 #include <hppa/dev/cpudevs.h>
-
-/*
- * Patchable buffer cache parameters
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 10
-#endif /* BUFCACHEPERCENT */
-
-#ifdef BUFPAGES
-int bufpages = BUFPAGES;
-#else
-int bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
 
 /*
  * Different kinds of flags used throughout the kernel.
@@ -395,7 +382,6 @@ cpu_startup(void)
 	    ptoa((psize_t)physmem) / 1024 / 1024);
 	printf("rsvd mem = %u (%uKB)\n", ptoa(resvmem), ptoa(resvmem) / 1024);
 
-printf("here3\n");
 	/*
 	 * Allocate a submap for exec arguments.  This map effectively
 	 * limits the number of processes exec'ing at any time.
@@ -404,14 +390,12 @@ printf("here3\n");
 	exec_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    16*NCARGS, VM_MAP_PAGEABLE, FALSE, NULL);
 
-printf("here4\n");
 	/*
 	 * Allocate a submap for physio
 	 */
 	phys_map = uvm_km_suballoc(kernel_map, &minaddr, &maxaddr,
 	    VM_PHYS_SIZE, 0, FALSE, NULL);
 
-printf("here5\n");
 	printf("avail mem = %lu (%luMB)\n", ptoa(uvmexp.free),
 	    ptoa(uvmexp.free) / 1024 / 1024);
 
@@ -421,7 +405,6 @@ printf("here5\n");
 	bufinit();
 	vmmap = uvm_km_valloc_wait(kernel_map, NBPG);
 
-printf("here6\n");
 	/*
 	 * Configure the system.
 	 */
@@ -432,7 +415,6 @@ printf("here6\n");
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
-printf("here7\n");
 }
 
 /*
@@ -459,7 +441,6 @@ delay_init(void)
 			mdelta = delta;
 		}
 	}
-printf("nom=%lu denom=%lu\n", cpu_ticksnum, cpu_ticksdenom);
 }
 
 void
@@ -532,7 +513,7 @@ ptlball(void)
 		vaddr_t off = pdc_cache.it_off_base;
 		for (j = 0; j < pdc_cache.it_off_count; j++) {
 			for (k = 0; k < pdc_cache.it_loop; k++)
-				pitlb(sp, off);
+				pitlbe(sp, off);
 			off += pdc_cache.it_off_stride;
 		}
 		sp += pdc_cache.it_sp_stride;
@@ -544,12 +525,14 @@ ptlball(void)
 		vaddr_t off = pdc_cache.dt_off_base;
 		for (j = 0; j < pdc_cache.dt_off_count; j++) {
 			for (k = 0; k < pdc_cache.dt_loop; k++)
-				pdtlb(sp, off);
+				pdtlbe(sp, off);
 			off += pdc_cache.dt_off_stride;
 		}
 		sp += pdc_cache.dt_sp_stride;
 	}
 }
+
+int waittime = -1;
 
 void
 boot(int howto)
@@ -564,6 +547,7 @@ boot(int howto)
 		boothowto = howto | (boothowto & RB_HALT);
 
 		if (!(howto & RB_NOSYNC)) {
+			waittime = 0;
 			vfs_shutdown();
 			/*
 			 * If we've been adjusting the clock, the todr
@@ -575,6 +559,7 @@ boot(int howto)
 			else
 				printf("WARNING: not updating battery clock\n");
 		}
+		if_downall();
 
 		/* XXX probably save howto into stable storage */
 
@@ -610,13 +595,14 @@ boot(int howto)
 		/* ask firmware to reset */
                 pdc_call((iodcio_t)pdc, 0, PDC_BROADCAST_RESET, PDC_DO_RESET);
 
+		/* forcably reset module if that fails */
 		__asm __volatile(".export hppa_reset, entry\n\t"
 		    ".label hppa_reset");
 		__asm __volatile("stwas %0, 0(%1)"
 		    :: "r" (CMD_RESET), "r" (HPPA_LBCAST + iomod_command));
 	}
 
-	for(;;); /* loop while bus reset is comming up */
+	for (;;) ; /* loop while bus reset is comming up */
 	/* NOTREACHED */
 }
 
@@ -837,13 +823,12 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 {
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
+	struct pcb *pcb = &p->p_addr->u_pcb;
 	struct sigacts *psp = p->p_sigacts;
 	struct sigcontext ksc;
 	siginfo_t ksi;
 	register_t scp, sip, zero;
 	int sss;
-
-	/* TODO sendsig */
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) && (!sigpid || p->p_pid == sigpid))
@@ -854,15 +839,15 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	/* Save the FPU context first. */
 	fpu_proc_save(p);
 
-	ksc.sc_onstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	ksc.sc_onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((psp->ps_flags & SAS_ALTSTACK) && !ksc.sc_onstack &&
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !ksc.sc_onstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		scp = (register_t)psp->ps_sigstk.ss_sp;
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		scp = (register_t)p->p_sigstk.ss_sp;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		scp = (tf->tf_sp + 63) & ~63;
 
@@ -895,9 +880,10 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_args[2] = tf->tf_r4 = scp;
 	tf->tf_args[3] = (register_t)catcher;
 	tf->tf_sp = scp + sss;
-	tf->tf_ipsw &= ~(PSL_N|PSL_B);
+	tf->tf_ipsw &= ~(PSL_N|PSL_B|PSL_T);
 	tf->tf_iioq[0] = HPPA_PC_PRIV_USER | p->p_sigcode;
 	tf->tf_iioq[1] = tf->tf_iioq[0] + 4;
+	tf->tf_iisq[0] = tf->tf_iisq[1] = pcb->pcb_space;
 	/* disable tracing in the trapframe */
 
 #ifdef DEBUG
@@ -937,8 +923,6 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	struct trapframe *tf = p->p_md.md_regs;
 	int error;
 
-	/* TODO sigreturn */
-
 	scp = SCARG(uap, sigcntxp);
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) && (!sigpid || p->p_pid == sigpid))
@@ -957,9 +941,9 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		return (EINVAL);
 
 	if (ksc.sc_onstack)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = ksc.sc_mask &~ sigcantmask;
 
 	tf->tf_sar = ksc.sc_regs[0];
@@ -968,9 +952,17 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	bcopy(ksc.sc_fpregs, &p->p_addr->u_pcb.pcb_fpstate->hfp_regs,
 	    sizeof(ksc.sc_fpregs));
 
-	tf->tf_iioq[0] = ksc.sc_pcoqh;
-	tf->tf_iioq[1] = ksc.sc_pcoqt;
-	tf->tf_ipsw = ksc.sc_ps;
+	tf->tf_iioq[0] = ksc.sc_pcoqh | HPPA_PC_PRIV_USER;
+	tf->tf_iioq[1] = ksc.sc_pcoqt | HPPA_PC_PRIV_USER;
+	if ((tf->tf_iioq[0] & ~PAGE_MASK) == SYSCALLGATE)
+		tf->tf_iisq[0] = HPPA_SID_KERNEL;
+	else
+		tf->tf_iisq[0] = p->p_addr->u_pcb.pcb_space;
+	if ((tf->tf_iioq[1] & ~PAGE_MASK) == SYSCALLGATE)
+		tf->tf_iisq[1] = HPPA_SID_KERNEL;
+	else
+		tf->tf_iisq[1] = p->p_addr->u_pcb.pcb_space;
+	tf->tf_ipsw = ksc.sc_ps | (curcpu()->ci_psw & PSL_O);
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) && (!sigpid || p->p_pid == sigpid))

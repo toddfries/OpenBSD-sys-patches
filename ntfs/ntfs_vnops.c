@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_vnops.c,v 1.23 2011/04/05 14:14:07 thib Exp $	*/
+/*	$OpenBSD: ntfs_vnops.c,v 1.25 2011/12/20 09:13:07 mikeb Exp $	*/
 /*	$NetBSD: ntfs_vnops.c,v 1.6 2003/04/10 21:57:26 jdolecek Exp $	*/
 
 /*
@@ -47,13 +47,12 @@
 #include <sys/malloc.h>
 #include <sys/buf.h>
 #include <sys/dirent.h>
+#include <sys/specdev.h>
 
 /*#define NTFS_DEBUG 1*/
 #include <ntfs/ntfs.h>
 #include <ntfs/ntfs_inode.h>
 #include <ntfs/ntfs_subr.h>
-
-#include <miscfs/specfs/specdev.h>
 
 #include <sys/unistd.h> /* for pathconf(2) constants */
 
@@ -73,7 +72,7 @@ static int	ntfs_bmap(void *);
 static int	ntfs_fsync(void *);
 static int	ntfs_pathconf(void *);
 
-int	ntfs_prtactive = 1;	/* 1 => print out reclaim of active vnodes */
+int	ntfs_prtactive = 0;	/* 1 => print out reclaim of active vnodes */
 
 /*
  * This is a noop, simply returning what one has been given.

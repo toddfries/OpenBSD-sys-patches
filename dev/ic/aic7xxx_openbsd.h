@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx_openbsd.h,v 1.19 2007/09/15 10:10:37 martin Exp $	*/
+/*	$OpenBSD: aic7xxx_openbsd.h,v 1.21 2011/07/17 22:46:48 matthew Exp $	*/
 /*	$NetBSD: aic7xxx_osm.h,v 1.7 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*

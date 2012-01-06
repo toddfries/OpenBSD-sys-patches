@@ -1,4 +1,4 @@
-/*	$OpenBSD: ueagle.c,v 1.33 2011/03/22 16:31:19 deraadt Exp $	*/
+/*	$OpenBSD: ueagle.c,v 1.36 2011/11/27 09:20:57 claudio Exp $	*/
 
 /*-
  * Copyright (c) 2003-2006
@@ -28,10 +28,11 @@
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
+#include <sys/kthread.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
 #include <sys/device.h>
-#include <sys/kthread.h>
+#include <sys/timeout.h>
 
 #include <net/bpf.h>
 #include <net/if.h>
@@ -1461,9 +1462,6 @@ ueagle_activate(struct device *self, int act)
 	struct ueagle_softc *sc = (struct ueagle_softc *)self;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		usbd_deactivate(sc->sc_udev);
 		break;

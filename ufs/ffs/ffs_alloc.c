@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_alloc.c,v 1.89 2010/07/13 18:52:25 otto Exp $	*/
+/*	$OpenBSD: ffs_alloc.c,v 1.92 2011/09/18 23:20:28 bluhm Exp $	*/
 /*	$NetBSD: ffs_alloc.c,v 1.11 1996/05/11 18:27:09 mycroft Exp $	*/
 
 /*
@@ -222,8 +222,7 @@ ffs_realloccg(struct inode *ip, daddr64_t lbprev, daddr64_t bpref, int osize,
 	 * Allocate the extra space in the buffer.
 	 */
 	if (bpp != NULL) {
-		if ((error = bread(ITOV(ip), lbprev, fs->fs_bsize,
-		    NOCRED, &bp)) != 0)
+		if ((error = bread(ITOV(ip), lbprev, fs->fs_bsize, &bp)) != 0)
 			goto error;
 		bp->b_bcount = osize;
 	}
@@ -431,7 +430,7 @@ ffs1_reallocblks(void *v)
 		soff = start_lbn;
 	} else {
 		idp = &start_ap[start_lvl - 1];
-		if (bread(vp, idp->in_lbn, (int)fs->fs_bsize, NOCRED, &sbp)) {
+		if (bread(vp, idp->in_lbn, (int)fs->fs_bsize, &sbp)) {
 			brelse(sbp);
 			return (ENOSPC);
 		}
@@ -454,7 +453,7 @@ ffs1_reallocblks(void *v)
 			panic("ffs1_reallocblk: start == end");
 #endif
 		ssize = len - (idp->in_off + 1);
-		if (bread(vp, idp->in_lbn, (int)fs->fs_bsize, NOCRED, &ebp))
+		if (bread(vp, idp->in_lbn, (int)fs->fs_bsize, &ebp))
 			goto fail;
 		ebap = (int32_t *)ebp->b_data;
 	}
@@ -473,7 +472,7 @@ ffs1_reallocblks(void *v)
 	 */
 #ifdef DEBUG
 	if (prtrealloc)
-		printf("realloc: ino %d, lbns %lld-%lld\n\told:", ip->i_number,
+		printf("realloc: ino %u, lbns %lld-%lld\n\told:", ip->i_number,
 		    start_lbn, end_lbn);
 #endif
 	blkno = newblk;
@@ -583,7 +582,7 @@ ffs2_reallocblks(void *v)
 	struct inode *ip;
 	struct vnode *vp;
 	struct buf *sbp, *ebp;
-	daddr64_t *bap, *sbap, *ebap = 0;
+	daddr64_t *bap, *sbap, *ebap = NULL;
 	struct cluster_save *buflist;
 	daddr64_t start_lbn, end_lbn;
 	daddr64_t soff, newblk, blkno, pref;
@@ -640,7 +639,7 @@ ffs2_reallocblks(void *v)
 		soff = start_lbn;
 	} else {
 		idp = &start_ap[start_lvl - 1];
-		if (bread(vp, idp->in_lbn, (int)fs->fs_bsize, NOCRED, &sbp)) {
+		if (bread(vp, idp->in_lbn, (int)fs->fs_bsize, &sbp)) {
 			brelse(sbp);
 			return (ENOSPC);
 		}
@@ -659,7 +658,7 @@ ffs2_reallocblks(void *v)
 			panic("ffs2_reallocblk: start == end");
 #endif
 		ssize = len - (idp->in_off + 1);
-		if (bread(vp, idp->in_lbn, (int)fs->fs_bsize, NOCRED, &ebp))
+		if (bread(vp, idp->in_lbn, (int)fs->fs_bsize, &ebp))
 			goto fail;
 		ebap = (daddr64_t *)ebp->b_data;
 	}
@@ -685,7 +684,7 @@ ffs2_reallocblks(void *v)
 	 */
 #ifdef DEBUG
 	if (prtrealloc)
-		printf("realloc: ino %d, lbns %lld-%lld\n\told:", ip->i_number,
+		printf("realloc: ino %u, lbns %lld-%lld\n\told:", ip->i_number,
 		    start_lbn, end_lbn);
 #endif
 
@@ -874,7 +873,7 @@ ffs_inode_alloc(struct inode *pip, mode_t mode, struct ucred *cred,
 	ip = VTOI(*vpp);
 
 	if (DIP(ip, mode)) {
-		printf("mode = 0%o, inum = %d, fs = %s\n",
+		printf("mode = 0%o, inum = %u, fs = %s\n",
 		    DIP(ip, mode), ip->i_number, fs->fs_fsmnt);
 		panic("ffs_valloc: dup alloc");
 	}
@@ -1190,7 +1189,7 @@ ffs_cgread(struct fs *fs, struct inode *ip, int cg)
 	struct buf *bp;
 
 	if (bread(ip->i_devvp, fsbtodb(fs, cgtod(fs, cg)),
-		(int)fs->fs_cgsize, NOCRED, &bp)) {
+	    (int)fs->fs_cgsize, &bp)) {
 		brelse(bp);
 		return (NULL);
 	}

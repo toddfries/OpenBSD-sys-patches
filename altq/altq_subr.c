@@ -1,4 +1,4 @@
-/*	$OpenBSD: altq_subr.c,v 1.26 2008/05/09 14:10:05 dlg Exp $	*/
+/*	$OpenBSD: altq_subr.c,v 1.28 2011/10/07 17:10:08 henning Exp $	*/
 /*	$KAME: altq_subr.c,v 1.11 2002/01/11 08:11:49 kjc Exp $	*/
 
 /*
@@ -59,10 +59,10 @@
 /*
  * internal function prototypes
  */
-static void	tbr_timeout(void *);
+static void	oldtbr_timeout(void *);
 int (*altq_input)(struct mbuf *, int) = NULL;
-static int tbr_timer = 0;	/* token bucket regulator timer */
-static struct callout tbr_callout = CALLOUT_INITIALIZER;
+static int oldtbr_timer = 0;	/* token bucket regulator timer */
+static struct callout oldtbr_callout = CALLOUT_INITIALIZER;
 
 /*
  * alternate queueing support routines
@@ -195,16 +195,14 @@ altq_assert(file, line, failedexpr)
  *	depth:	byte << 32
  *
  */
-#define	TBR_SHIFT	32
-#define	TBR_SCALE(x)	((int64_t)(x) << TBR_SHIFT)
-#define	TBR_UNSCALE(x)	((x) >> TBR_SHIFT)
+#define	OLDTBR_SHIFT	32
+#define	OLDTBR_SCALE(x)	((int64_t)(x) << OLDTBR_SHIFT)
+#define	OLDTBR_UNSCALE(x)	((x) >> OLDTBR_SHIFT)
 
 struct mbuf *
-tbr_dequeue(ifq, op)
-	struct ifaltq *ifq;
-	int op;
+oldtbr_dequeue(struct ifaltq *ifq, int op)
 {
-	struct tb_regulator *tbr;
+	struct oldtb_regulator *tbr;
 	struct mbuf *m;
 	int64_t interval;
 	u_int64_t now;
@@ -241,7 +239,7 @@ tbr_dequeue(ifq, op)
 	}
 
 	if (m != NULL && op == ALTDQ_REMOVE)
-		tbr->tbr_token -= TBR_SCALE(m_pktlen(m));
+		tbr->tbr_token -= OLDTBR_SCALE(m_pktlen(m));
 	tbr->tbr_lastop = op;
 	return (m);
 }
@@ -251,16 +249,16 @@ tbr_dequeue(ifq, op)
  * if the specified rate is zero, the token bucket regulator is deleted.
  */
 int
-tbr_set(ifq, profile)
+oldtbr_set(ifq, profile)
 	struct ifaltq *ifq;
-	struct tb_profile *profile;
+	struct oldtb_profile *profile;
 {
-	struct tb_regulator *tbr, *otbr;
+	struct oldtb_regulator *tbr, *otbr;
 
 	if (machclk_freq == 0)
 		init_machclk();
 	if (machclk_freq == 0) {
-		printf("tbr_set: no cpu clock available!\n");
+		printf("oldtbr_set: no cpu clock available!\n");
 		return (ENXIO);
 	}
 
@@ -273,10 +271,10 @@ tbr_set(ifq, profile)
 		return (0);
 	}
 
-	tbr = malloc(sizeof(struct tb_regulator), M_DEVBUF, M_WAITOK|M_ZERO);
+	tbr = malloc(sizeof(struct oldtb_regulator), M_DEVBUF, M_WAITOK|M_ZERO);
 
-	tbr->tbr_rate = TBR_SCALE(profile->rate / 8) / machclk_freq;
-	tbr->tbr_depth = TBR_SCALE(profile->depth);
+	tbr->tbr_rate = OLDTBR_SCALE(profile->rate / 8) / machclk_freq;
+	tbr->tbr_depth = OLDTBR_SCALE(profile->depth);
 	if (tbr->tbr_rate > 0)
 		tbr->tbr_filluptime = tbr->tbr_depth / tbr->tbr_rate;
 	else
@@ -291,9 +289,9 @@ tbr_set(ifq, profile)
 	if (otbr != NULL)
 		free(otbr, M_DEVBUF);
 	else {
-		if (tbr_timer == 0) {
-			CALLOUT_RESET(&tbr_callout, 1, tbr_timeout, (void *)0);
-			tbr_timer = 1;
+		if (oldtbr_timer == 0) {
+			CALLOUT_RESET(&oldtbr_callout, 1, oldtbr_timeout, NULL);
+			oldtbr_timer = 1;
 		}
 	}
 	return (0);
@@ -304,7 +302,7 @@ tbr_set(ifq, profile)
  * if necessary.
  */
 static void
-tbr_timeout(arg)
+oldtbr_timeout(arg)
 	void *arg;
 {
 	struct ifnet *ifp;
@@ -313,7 +311,7 @@ tbr_timeout(arg)
 	active = 0;
 	s = splnet();
 	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list)) {
-		if (!TBR_IS_ENABLED(&ifp->if_snd))
+		if (!OLDTBR_IS_ENABLED(&ifp->if_snd))
 			continue;
 		active++;
 		if (!IFQ_IS_EMPTY(&ifp->if_snd) && ifp->if_start != NULL)
@@ -321,28 +319,28 @@ tbr_timeout(arg)
 	}
 	splx(s);
 	if (active > 0)
-		CALLOUT_RESET(&tbr_callout, 1, tbr_timeout, (void *)0);
+		CALLOUT_RESET(&oldtbr_callout, 1, oldtbr_timeout, NULL);
 	else
-		tbr_timer = 0;	/* don't need tbr_timer anymore */
+		oldtbr_timer = 0;	/* don't need tbr_timer anymore */
 }
 
 /*
  * get token bucket regulator profile
  */
 int
-tbr_get(ifq, profile)
+oldtbr_get(ifq, profile)
 	struct ifaltq *ifq;
-	struct tb_profile *profile;
+	struct oldtb_profile *profile;
 {
-	struct tb_regulator *tbr;
+	struct oldtb_regulator *tbr;
 
 	if ((tbr = ifq->altq_tbr) == NULL) {
 		profile->rate = 0;
 		profile->depth = 0;
 	} else {
 		profile->rate =
-		    (u_int)TBR_UNSCALE(tbr->tbr_rate * 8 * machclk_freq);
-		profile->depth = (u_int)TBR_UNSCALE(tbr->tbr_depth);
+		    (u_int)OLDTBR_UNSCALE(tbr->tbr_rate * 8 * machclk_freq);
+		profile->depth = (u_int)OLDTBR_UNSCALE(tbr->tbr_depth);
 	}
 	return (0);
 }
@@ -574,121 +572,6 @@ altq_getqstats(struct pf_altq *a, void *ubuf, int *nbytes)
 
 	return (error);
 }
-
-/*
- * read and write diffserv field in IPv4 or IPv6 header
- */
-u_int8_t
-read_dsfield(m, pktattr)
-	struct mbuf *m;
-	struct altq_pktattr *pktattr;
-{
-	struct mbuf *m0;
-	u_int8_t ds_field = 0;
-
-	if (pktattr == NULL ||
-	    (pktattr->pattr_af != AF_INET && pktattr->pattr_af != AF_INET6))
-		return ((u_int8_t)0);
-
-	/* verify that pattr_hdr is within the mbuf data */
-	for (m0 = m; m0 != NULL; m0 = m0->m_next)
-		if ((pktattr->pattr_hdr >= m0->m_data) &&
-		    (pktattr->pattr_hdr < m0->m_data + m0->m_len))
-			break;
-	if (m0 == NULL) {
-		/* ick, pattr_hdr is stale */
-		pktattr->pattr_af = AF_UNSPEC;
-#ifdef ALTQ_DEBUG
-		printf("read_dsfield: can't locate header!\n");
-#endif
-		return ((u_int8_t)0);
-	}
-
-	if (pktattr->pattr_af == AF_INET) {
-		struct ip *ip = (struct ip *)pktattr->pattr_hdr;
-
-		if (ip->ip_v != 4)
-			return ((u_int8_t)0);	/* version mismatch! */
-		ds_field = ip->ip_tos;
-	}
-#ifdef INET6
-	else if (pktattr->pattr_af == AF_INET6) {
-		struct ip6_hdr *ip6 = (struct ip6_hdr *)pktattr->pattr_hdr;
-		u_int32_t flowlabel;
-
-		flowlabel = ntohl(ip6->ip6_flow);
-		if ((flowlabel >> 28) != 6)
-			return ((u_int8_t)0);	/* version mismatch! */
-		ds_field = (flowlabel >> 20) & 0xff;
-	}
-#endif
-	return (ds_field);
-}
-
-void
-write_dsfield(m, pktattr, dsfield)
-	struct mbuf *m;
-	struct altq_pktattr *pktattr;
-	u_int8_t dsfield;
-{
-	struct mbuf *m0;
-
-	if (pktattr == NULL ||
-	    (pktattr->pattr_af != AF_INET && pktattr->pattr_af != AF_INET6))
-		return;
-
-	/* verify that pattr_hdr is within the mbuf data */
-	for (m0 = m; m0 != NULL; m0 = m0->m_next)
-		if ((pktattr->pattr_hdr >= m0->m_data) &&
-		    (pktattr->pattr_hdr < m0->m_data + m0->m_len))
-			break;
-	if (m0 == NULL) {
-		/* ick, pattr_hdr is stale */
-		pktattr->pattr_af = AF_UNSPEC;
-#ifdef ALTQ_DEBUG
-		printf("write_dsfield: can't locate header!\n");
-#endif
-		return;
-	}
-
-	if (pktattr->pattr_af == AF_INET) {
-		struct ip *ip = (struct ip *)pktattr->pattr_hdr;
-		u_int8_t old;
-		int32_t sum;
-
-		if (ip->ip_v != 4)
-			return;		/* version mismatch! */
-		old = ip->ip_tos;
-		dsfield |= old & 3;	/* leave CU bits */
-		if (old == dsfield)
-			return;
-		ip->ip_tos = dsfield;
-		/*
-		 * update checksum (from RFC1624)
-		 *	   HC' = ~(~HC + ~m + m')
-		 */
-		sum = ~ntohs(ip->ip_sum) & 0xffff;
-		sum += 0xff00 + (~old & 0xff) + dsfield;
-		sum = (sum >> 16) + (sum & 0xffff);
-		sum += (sum >> 16);  /* add carry */
-
-		ip->ip_sum = htons(~sum & 0xffff);
-	}
-#ifdef INET6
-	else if (pktattr->pattr_af == AF_INET6) {
-		struct ip6_hdr *ip6 = (struct ip6_hdr *)pktattr->pattr_hdr;
-		u_int32_t flowlabel;
-
-		flowlabel = ntohl(ip6->ip6_flow);
-		if ((flowlabel >> 28) != 6)
-			return;		/* version mismatch! */
-		flowlabel = (flowlabel & 0xf03fffff) | (dsfield << 20);
-		ip6->ip6_flow = htonl(flowlabel);
-	}
-#endif
-	return;
-}
-
 
 #define	MACHCLK_SHIFT	8
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc.c,v 1.93 2011/04/20 07:13:51 claudio Exp $ */
+/*	$OpenBSD: arc.c,v 1.95 2011/07/17 22:46:48 matthew Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>

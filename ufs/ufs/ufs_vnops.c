@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_vnops.c,v 1.97 2010/12/21 20:14:44 thib Exp $	*/
+/*	$OpenBSD: ufs_vnops.c,v 1.102 2011/09/18 23:20:28 bluhm Exp $	*/
 /*	$NetBSD: ufs_vnops.c,v 1.18 1996/05/11 18:28:04 mycroft Exp $	*/
 
 /*
@@ -55,10 +55,10 @@
 #include <sys/lockf.h>
 #include <sys/event.h>
 #include <sys/poll.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
 
-#include <miscfs/specfs/specdev.h>
 #include <miscfs/fifofs/fifo.h>
 
 #include <ufs/ufs/quota.h>
@@ -160,7 +160,7 @@ ufs_mknod(void *v)
 	vput(*vpp);
 	(*vpp)->v_type = VNON;
 	vgone(*vpp);
-	*vpp = 0;
+	*vpp = NULL;
 	return (0);
 }
 
@@ -1248,7 +1248,7 @@ ufs_rmdir(void *v)
 	/*
 	 * No rmdir "." or of mounted on directories.
 	 */
-	if (dp == ip || vp->v_mountedhere != 0) {
+	if (dp == ip || vp->v_mountedhere != NULL) {
 		if (dp == ip)
 			vrele(dvp);
 		else
@@ -1586,7 +1586,7 @@ ufs_print(void *v)
 	struct vnode *vp = ap->a_vp;
 	struct inode *ip = VTOI(vp);
 
-	printf("tag VT_UFS, ino %d, on dev %d, %d", ip->i_number,
+	printf("tag VT_UFS, ino %u, on dev %d, %d", ip->i_number,
 		major(ip->i_dev), minor(ip->i_dev));
 	printf(" flags 0x%x, effnlink %d, nlink %d\n",
 	       ip->i_flag, ip->i_effnlink, DIP(ip, nlink));
@@ -1782,7 +1782,7 @@ ufs_vinit(struct mount *mntp, struct vops *specops, struct vops *fifoops,
 			nvp->v_data = vp->v_data;
 			vp->v_data = NULL;
 			vp->v_op = &spec_vops;
-#ifdef VFSDEBUG
+#ifdef VFSLCKDEBUG
 			vp->v_flag &= ~VLOCKSWORK;
 #endif
 			vrele(vp);
@@ -1933,7 +1933,7 @@ ufs_kqfilter(void *v)
 		kn->kn_fop = &ufsvnode_filtops;
 		break;
 	default:
-		return (1);
+		return (EINVAL);
 	}
 
 	kn->kn_hook = (caddr_t)vp;

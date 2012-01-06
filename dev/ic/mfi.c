@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.119 2011/04/09 20:23:31 marco Exp $ */
+/* $OpenBSD: mfi.c,v 1.121 2011/07/17 22:46:48 matthew Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.45 2011/05/29 10:47:42 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.53 2011/10/29 19:17:30 kettenis Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -151,6 +151,64 @@ void
 pci_attach_hook(struct device *parent, struct device *self,
     struct pcibus_attach_args *pba)
 {
+	pci_chipset_tag_t pc = pba->pba_pc;
+	pcitag_t tag;
+	pcireg_t id, class;
+
+	if (pba->pba_bus != 0)
+		return;
+
+	/*
+	 * In order to decide whether the system supports MSI we look
+	 * at the host bridge, which should be device 0 function 0 on
+	 * bus 0.  It is better to not enable MSI on systems that
+	 * support it than the other way around, so be conservative
+	 * here.  So we don't enable MSI if we don't find a host
+	 * bridge there.  We also deliberately don't enable MSI on
+	 * chipsets from low-end manifacturers like VIA and SiS.
+	 */
+	tag = pci_make_tag(pc, 0, 0, 0);
+	id = pci_conf_read(pc, tag, PCI_ID_REG);
+	class = pci_conf_read(pc, tag, PCI_CLASS_REG);
+
+	if (PCI_CLASS(class) != PCI_CLASS_BRIDGE ||
+	    PCI_SUBCLASS(class) != PCI_SUBCLASS_BRIDGE_HOST)
+		return;
+
+	switch (PCI_VENDOR(id)) {
+	case PCI_VENDOR_INTEL:
+		/*
+		 * In the wonderful world of virtualization you can
+		 * have the latest 64-bit AMD multicore CPU behind a
+		 * prehistoric Intel host bridge.  Give them what they
+		 * deserve.
+		 */
+		switch (PCI_PRODUCT(id)) {
+		case PCI_PRODUCT_INTEL_82441FX:	/* QEMU */
+		case PCI_PRODUCT_INTEL_82443BX:	/* VMWare */
+			break;
+		default:
+			pba->pba_flags |= PCI_FLAGS_MSI_ENABLED;
+			break;
+		}
+		break;
+	case PCI_VENDOR_NVIDIA:
+	case PCI_VENDOR_AMD:
+		pba->pba_flags |= PCI_FLAGS_MSI_ENABLED;
+		break;
+	}
+
+	/*
+	 * Don't enable MSI on a HyperTransport bus.  In order to
+	 * determine that bus 0 is a HyperTransport bus, we look at
+	 * device 24 function 0, which is the HyperTransport
+	 * host/primary interface integrated on most 64-bit AMD CPUs.
+	 * If that device has a HyperTransport capability, bus 0 must
+	 * be a HyperTransport bus and we disable MSI.
+	 */
+	tag = pci_make_tag(pc, 0, 24, 0);
+	if (pci_get_capability(pc, tag, PCI_CAP_HT, NULL, NULL))
+		pba->pba_flags &= ~PCI_FLAGS_MSI_ENABLED;
 }
 
 int
@@ -211,6 +269,8 @@ pci_conf_read(pci_chipset_tag_t pc, pcitag_t tag, int reg)
 	pcireg_t data;
 	int bus;
 
+	KASSERT((reg & 0x3) == 0);
+
 	if (pci_mcfg_addr && reg >= PCI_CONFIG_SPACE_SIZE) {
 		pci_decompose_tag(pc, tag, &bus, NULL, NULL);
 		if (bus >= pci_mcfg_min_bus && bus <= pci_mcfg_max_bus) {
@@ -235,6 +295,8 @@ pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 {
 	int bus;
 
+	KASSERT((reg & 0x3) == 0);
+
 	if (pci_mcfg_addr && reg >= PCI_CONFIG_SPACE_SIZE) {
 		pci_decompose_tag(pc, tag, &bus, NULL, NULL);
 		if (bus >= pci_mcfg_min_bus && bus <= pci_mcfg_max_bus) {
@@ -254,7 +316,8 @@ pci_conf_write(pci_chipset_tag_t pc, pcitag_t tag, int reg, pcireg_t data)
 
 void msi_hwmask(struct pic *, int);
 void msi_hwunmask(struct pic *, int);
-void msi_setup(struct pic *, struct cpu_info *, int, int, int);
+void msi_addroute(struct pic *, struct cpu_info *, int, int, int);
+void msi_delroute(struct pic *, struct cpu_info *, int, int, int);
 
 struct pic msi_pic = {
 	{0, {NULL}, NULL, 0, "msi", NULL, 0, 0},
@@ -264,8 +327,8 @@ struct pic msi_pic = {
 #endif
 	msi_hwmask,
 	msi_hwunmask,
-	msi_setup,
-	msi_setup,
+	msi_addroute,
+	msi_delroute,
 	NULL,
 	ioapic_edge_stubs
 };
@@ -281,8 +344,40 @@ msi_hwunmask(struct pic *pic, int pin)
 }
 
 void
-msi_setup(struct pic *pic, struct cpu_info *ci, int pin, int idtvec, int type)
+msi_addroute(struct pic *pic, struct cpu_info *ci, int pin, int vec, int type)
 {
+	pci_chipset_tag_t pc = NULL; /* XXX */
+	pcitag_t tag = pin;
+	pcireg_t reg, addr;
+	int off;
+
+	if (pci_get_capability(pc, tag, PCI_CAP_MSI, &off, &reg) == 0)
+		panic("%s: no msi capability", __func__);
+
+	addr = 0xfee00000UL | (ci->ci_apicid << 12);
+
+	if (reg & PCI_MSI_MC_C64) {
+		pci_conf_write(pc, tag, off + PCI_MSI_MA, addr);
+		pci_conf_write(pc, tag, off + PCI_MSI_MAU32, 0);
+		pci_conf_write(pc, tag, off + PCI_MSI_MD64, vec);
+	} else {
+		pci_conf_write(pc, tag, off + PCI_MSI_MA, addr);
+		pci_conf_write(pc, tag, off + PCI_MSI_MD32, vec);
+	}
+	pci_conf_write(pc, tag, off, reg | PCI_MSI_MC_MSIE);
+}
+
+void
+msi_delroute(struct pic *pic, struct cpu_info *ci, int pin, int vec, int type)
+{
+	pci_chipset_tag_t pc = NULL; /* XXX */
+	pcitag_t tag = pin;
+	pcireg_t reg;
+	int off;
+
+	if (pci_get_capability(pc, tag, PCI_CAP_MSI, &off, &reg) == 0)
+		panic("%s: no msi capability", __func__);
+	pci_conf_write(pc, tag, off, reg & ~PCI_MSI_MC_MSIE);
 }
 
 int
@@ -307,8 +402,8 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 	int pin = pa->pa_rawintrpin;
 	int line = pa->pa_intrline;
 #if NIOAPIC > 0
+	struct mp_intr_map *mip;
 	int bus, dev, func;
-	int mppin;
 #endif
 
 	if (pin == 0) {
@@ -327,12 +422,23 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 
 #if NIOAPIC > 0
 	pci_decompose_tag(pa->pa_pc, pa->pa_tag, &bus, &dev, &func);
+
 	if (mp_busses != NULL) {
-		mppin = (dev << 2)|(pin - 1);
-		if (intr_find_mpmapping(bus, mppin, &ihp->line) == 0) {
-			ihp->line |= line;
-			return 0;
+		int mpspec_pin = (dev << 2) | (pin - 1);
+
+		if (bus < mp_nbusses) {
+			for (mip = mp_busses[bus].mb_intrs;
+			     mip != NULL; mip = mip->next) {
+				if (&mp_busses[bus] == mp_isa_bus ||
+				    &mp_busses[bus] == mp_eisa_bus)
+					continue;
+				if (mip->bus_pin == mpspec_pin) {
+					ihp->line = mip->ioapic_ih | line;
+					return 0;
+				}
+			}
 		}
+
 		if (pa->pa_bridgetag) {
 			int swizpin = PPB_INTERRUPT_SWIZZLE(pin, dev);
 			if (pa->pa_bridgeih[swizpin - 1].line != -1) {
@@ -376,21 +482,32 @@ pci_intr_map(struct pci_attach_args *pa, pci_intr_handle_t *ihp)
 
 #if NIOAPIC > 0
 	if (mp_busses != NULL) {
-		if (mp_isa_bus != NULL &&
-		    intr_find_mpmapping(mp_isa_bus->mb_idx, line, &ihp->line) == 0) {
-			ihp->line |= line;
-			return 0;
+		if (mip == NULL && mp_isa_bus) {
+			for (mip = mp_isa_bus->mb_intrs; mip != NULL;
+			    mip = mip->next) {
+				if (mip->bus_pin == line) {
+					ihp->line = mip->ioapic_ih | line;
+					return 0;
+				}
+			}
 		}
 #if NEISA > 0
-		if (mp_eisa_bus != NULL &&
-		    intr_find_mpmapping(mp_eisa_bus->mb_idx, line, &ihp->line) == 0) {
-			ihp->line |= line;
-			return 0;
+		if (mip == NULL && mp_eisa_bus) {
+			for (mip = mp_eisa_bus->mb_intrs;  mip != NULL;
+			    mip = mip->next) {
+				if (mip->bus_pin == line) {
+					ihp->line = mip->ioapic_ih | line;
+					return 0;
+				}
+			}
 		}
 #endif
-		printf("pci_intr_map: bus %d dev %d func %d pin %d; line %d\n",
-		    bus, dev, func, pin, line);
-		printf("pci_intr_map: no MP mapping found\n");
+		if (mip == NULL) {
+			printf("pci_intr_map: "
+			    "bus %d dev %d func %d pin %d; line %d\n",
+			    bus, dev, func, pin, line);
+			printf("pci_intr_map: no MP mapping found\n");
+		}
 	}
 #endif
 
@@ -440,32 +557,8 @@ pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 	struct pic *pic;
 
 	if (ih.line & APIC_INT_VIA_MSG) {
-		struct intrhand *ih;
-		struct intrsource *source;
-		pcireg_t reg;
-		int off, vec;
-
-		if (pci_get_capability(pc, tag, PCI_CAP_MSI, &off, &reg) == 0)
-			panic("%s: no msi capability", __func__);
-
-		ih = intr_establish(-1, &msi_pic, tag, IST_PULSE, level,
+		return intr_establish(-1, &msi_pic, tag, IST_PULSE, level,
 		    func, arg, what);
-		if (ih == NULL)
-			return (NULL);
-
-		source = ih->ih_cpu->ci_isources[ih->ih_slot];
-		vec = source->is_idtvec;
-
-		if (reg & PCI_MSI_MC_C64) {
-			pci_conf_write(pc, tag, off + PCI_MSI_MA, 0xfee00000);
-			pci_conf_write(pc, tag, off + PCI_MSI_MAU32, 0);
-			pci_conf_write(pc, tag, off + PCI_MSI_MD64, vec);
-		} else {
-			pci_conf_write(pc, tag, off + PCI_MSI_MA, 0xfee00000);
-			pci_conf_write(pc, tag, off + PCI_MSI_MD32, vec);
-		}
-		pci_conf_write(pc, tag, off, reg | PCI_MSI_MC_MSIE);
-		return (ih);
 	}
 
 	pci_decompose_tag(pc, ih.tag, &bus, &dev, NULL);

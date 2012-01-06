@@ -1,4 +1,4 @@
-/*	$OpenBSD: sii.c,v 1.11 2010/06/28 18:31:01 krw Exp $	*/
+/*	$OpenBSD: sii.c,v 1.13 2011/07/17 22:46:47 matthew Exp $	*/
 /*	$NetBSD: sii.c,v 1.42 2000/06/02 20:20:29 mhitch Exp $	*/
 /*
  * Copyright (c) 2008 Miodrag Vallat.

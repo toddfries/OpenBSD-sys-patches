@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.129 2010/07/02 19:57:14 tedu Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.135 2011/11/01 21:20:55 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.121 1999/03/26 23:41:29 mycroft Exp $	*/
 
 /*
@@ -84,6 +84,7 @@
 
 #include <dev/cons.h>
 
+#include <net/if.h>
 #include <uvm/uvm_extern.h>
 #include <uvm/uvm_swap.h>
 
@@ -98,20 +99,6 @@ struct vm_map *exec_map = NULL;
 struct vm_map *phys_map = NULL;
 
 extern paddr_t avail_start, avail_end;
-
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5
-#endif
-
-#ifdef	BUFPAGES
-int	bufpages = BUFPAGES;
-#else
-int	bufpages = 0;
-#endif
-int	bufcachepercent = BUFCACHEPERCENT;
 
 int	physmem;		/* size of physical memory, in pages */
 
@@ -177,7 +164,7 @@ hp300_init()
 	 * hp300 only has one segment.
 	 */
 	uvm_page_physload(atop(avail_start), atop(avail_end),
-	    atop(avail_start), atop(avail_end), VM_FREELIST_DEFAULT);
+	    atop(avail_start), atop(avail_end), 0);
 
 	/* Initialize the interrupt handlers. */
 	intr_init();
@@ -338,7 +325,7 @@ const char *hp300_models[] = {
 	"320",		/* HP_320 */
 	"318/319/330",	/* HP_330 */
 	"350",		/* HP_350 */
-	"360",		/* HP_360 */
+	"360",		/* HP_36X */
 	"370",		/* HP_370 */
 	"340",		/* HP_340 */
 	"345",		/* HP_345 */
@@ -348,7 +335,6 @@ const char *hp300_models[] = {
 	"425",		/* HP_425 */
 	"433",		/* HP_433 */
 	"385",		/* HP_385 */
-	"362",		/* HP_362 */
 	"382",		/* HP_382 */
 };
 
@@ -417,9 +403,6 @@ identifycpu()
 		break;
 	case MMU_68851:
 		strlcat(cpu_model, ", MC68851 MMU", sizeof cpu_model);
-		break;
-	case MMU_HP:
-		strlcat(cpu_model, ", HP MMU", sizeof cpu_model);
 		break;
 	default:
 		printf("%s\nunknown MMU type %d\n", cpu_model, mmutype);
@@ -498,11 +481,8 @@ identifycpu()
 #if !defined(HP350)
 	case HP_350:
 #endif
-#if !defined(HP360)
-	case HP_360:
-#endif
-#if !defined(HP362)
-	case HP_362:
+#if !defined(HP360) && !defined(HP_362)
+	case HP_36X:
 #endif
 #if !defined(HP370)
 	case HP_370:
@@ -594,6 +574,14 @@ boot(howto)
 	if (curproc && curproc->p_addr)
 		savectx(&curproc->p_addr->u_pcb);
 
+	/*
+	 * Prevent mi code from spinning disks off, in case the operator
+	 * changes his mind and prefers to reboot - we can't power down
+	 * the machine, and it will not send a spin up command to the
+	 * disks.
+	 */
+	howto &= ~RB_POWERDOWN;
+
 	/* If system is cold, just halt. */
 	if (cold) {
 		/* (Unless the user explicitly asked for reboot.) */
@@ -617,6 +605,7 @@ boot(howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	splhigh();		/* Disable interrupts. */

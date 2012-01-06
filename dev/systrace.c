@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.c,v 1.54 2011/04/02 17:04:35 guenther Exp $	*/
+/*	$OpenBSD: systrace.c,v 1.60 2011/09/18 23:24:14 matthew Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -158,7 +158,7 @@ int	systrace_io(struct str_process *, struct systrace_io *);
 int	systrace_policy(struct fsystrace *, struct systrace_policy *);
 int	systrace_preprepl(struct str_process *, struct systrace_replace *);
 int	systrace_replace(struct str_process *, size_t, register_t []);
-int	systrace_getcwd(struct fsystrace *, struct str_process *);
+int	systrace_getcwd(struct fsystrace *, struct str_process *, int);
 int	systrace_fname(struct str_process *, caddr_t, size_t);
 void	systrace_replacefree(struct str_process *);
 
@@ -199,11 +199,8 @@ int systrace_debug = 0;
 
 /* ARGSUSED */
 int
-systracef_read(fp, poff, uio, cred)
-	struct file *fp;
-	off_t *poff;
-	struct uio *uio;
-	struct ucred *cred;
+systracef_read(struct file *fp, off_t *poff, struct uio *uio,
+    struct ucred *cred)
 {
 	struct fsystrace *fst = (struct fsystrace *)fp->f_data;
 	struct str_process *process;
@@ -250,32 +247,27 @@ systracef_read(fp, poff, uio, cred)
 
 /* ARGSUSED */
 int
-systracef_write(fp, poff, uio, cred)
-	struct file *fp;
-	off_t *poff;
-	struct uio *uio;
-	struct ucred *cred;
+systracef_write(struct file *fp, off_t *poff, struct uio *uio,
+    struct ucred *cred)
 {
 	return (EIO);
 }
 
 #define POLICY_VALID(x)	((x) == SYSTR_POLICY_PERMIT || \
 			 (x) == SYSTR_POLICY_ASK || \
-			 (x) == SYSTR_POLICY_NEVER)
+			 (x) == SYSTR_POLICY_NEVER || \
+			 (x) == SYSTR_POLICY_KILL)
 
 /* ARGSUSED */
 int
-systracef_ioctl(fp, cmd, data, p)
-	struct file *fp;
-	u_long cmd;
-	caddr_t data;
-	struct proc *p;
+systracef_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 {
 	int ret = 0;
 	struct fsystrace *fst = (struct fsystrace *)fp->f_data;
 	struct filedesc *fdp;
 	struct str_process *strp;
 	pid_t pid = 0;
+	int atfd = -1;
 
 	switch (cmd) {
 	case FIONBIO:
@@ -308,11 +300,14 @@ systracef_ioctl(fp, cmd, data, p)
 		if (!pid)
 			ret = EINVAL;
 		break;
-	case STRIOCGETCWD:
-		pid = *(pid_t *)data;
+	case STRIOCGETCWD: {
+		struct systrace_getcwd *gd = (struct systrace_getcwd *)data;
+		pid = gd->strgd_pid;
 		if (!pid)
 			ret = EINVAL;
+		atfd = gd->strgd_atfd;
 		break;
+	}
 	case STRIOCATTACH:
 	case STRIOCRESCWD:
 	case STRIOCPOLICY:
@@ -395,7 +390,7 @@ systracef_ioctl(fp, cmd, data, p)
 		fst->fd_cdir = fst->fd_rdir = NULL;
 		break;
 	case STRIOCGETCWD:
-		ret = systrace_getcwd(fst, strp);
+		ret = systrace_getcwd(fst, strp, atfd);
 		break;
 	default:
 		ret = ENOTTY;
@@ -409,10 +404,7 @@ systracef_ioctl(fp, cmd, data, p)
 
 /* ARGSUSED */
 int
-systracef_poll(fp, events, p)
-	struct file *fp;
-	int events;
-	struct proc *p;
+systracef_poll(struct file *fp, int events, struct proc *p)
 {
 	struct fsystrace *fst = (struct fsystrace *)fp->f_data;
 	int revents = 0;
@@ -434,28 +426,21 @@ systracef_poll(fp, events, p)
 
 /* ARGSUSED */
 int
-systracef_kqfilter(fp, kn)
-	struct file *fp;
-	struct knote *kn;
+systracef_kqfilter(struct file *fp, struct knote *kn)
 {
 	return (1);
 }
 
 /* ARGSUSED */
 int
-systracef_stat(fp, sb, p)
-	struct file *fp;
-	struct stat *sb;
-	struct proc *p;
+systracef_stat(struct file *fp, struct stat *sb, struct proc *p)
 {
 	return (EOPNOTSUPP);
 }
 
 /* ARGSUSED */
 int
-systracef_close(fp, p)
-	struct file *fp;
-	struct proc *p;
+systracef_close(struct file *fp, struct proc *p)
 {
 	struct fsystrace *fst = (struct fsystrace *)fp->f_data;
 	struct str_process *strp;
@@ -510,32 +495,19 @@ systraceattach(int n)
 }
 
 int
-systraceopen(dev, flag, mode, p)
-	dev_t	dev;
-	int	flag;
-	int	mode;
-	struct proc *p;
+systraceopen(dev_t dev, int flag, int mode, struct proc *p)
 {
 	return (0);
 }
 
 int
-systraceclose(dev, flag, mode, p)
-	dev_t	dev;
-	int	flag;
-	int	mode;
-	struct proc *p;
+systraceclose(dev_t dev, int flag, int mode, struct proc *p)
 {
 	return (0);
 }
 
 int
-systraceioctl(dev, cmd, data, flag, p)
-	dev_t	dev;
-	u_long	cmd;
-	caddr_t	data;
-	int	flag;
-	struct proc *p;
+systraceioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct file *f;
 	struct fsystrace *fst = NULL;
@@ -748,7 +720,8 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 
 	/* Fast-path */
 	if (policy != SYSTR_POLICY_ASK) {
-		if (policy != SYSTR_POLICY_PERMIT) {
+		if (policy != SYSTR_POLICY_PERMIT &&
+		    policy != SYSTR_POLICY_KILL) {
 			if (policy > 0)
 				error = policy;
 			else
@@ -756,7 +729,12 @@ systrace_redirect(int code, struct proc *p, void *v, register_t *retval)
 		}
 		systrace_replacefree(strp);
 		rw_exit_write(&fst->lock);
-		if (policy == SYSTR_POLICY_PERMIT)
+		if (policy == SYSTR_POLICY_KILL) {
+			error = EPERM;
+			DPRINTF(("systrace: pid %u killed on syscall %d\n",
+			    p->p_pid, code));
+			psignal(p, SIGKILL);
+		} else if (policy == SYSTR_POLICY_PERMIT)
 			error = (*callp->sy_call)(p, v, retval);
 		return (error);
 	}
@@ -1133,9 +1111,10 @@ systrace_processready(struct str_process *strp)
 }
 
 int
-systrace_getcwd(struct fsystrace *fst, struct str_process *strp)
+systrace_getcwd(struct fsystrace *fst, struct str_process *strp, int atfd)
 {
 	struct filedesc *myfdp, *fdp;
+	struct vnode *dvp;
 	int error;
 
 	DPRINTF(("%s: %d\n", __func__, strp->pid));
@@ -1149,12 +1128,23 @@ systrace_getcwd(struct fsystrace *fst, struct str_process *strp)
 	if (myfdp == NULL || fdp == NULL)
 		return (EINVAL);
 
+	if (atfd == AT_FDCWD)
+		dvp = fdp->fd_cdir;
+	else {
+		struct file *fp = fd_getfile(fdp, atfd);
+		if (fp == NULL || fp->f_type != DTYPE_VNODE)
+			return (EINVAL);
+		dvp = (struct vnode *)fp->f_data;
+		if (dvp->v_type != VDIR)
+			return (EINVAL);
+	}
+
 	/* Store our current values */
 	fst->fd_pid = strp->pid;
 	fst->fd_cdir = myfdp->fd_cdir;
 	fst->fd_rdir = myfdp->fd_rdir;
 
-	if ((myfdp->fd_cdir = fdp->fd_cdir) != NULL)
+	if ((myfdp->fd_cdir = dvp) != NULL)
 		vref(myfdp->fd_cdir);
 	if ((myfdp->fd_rdir = fdp->fd_rdir) != NULL)
 		vref(myfdp->fd_rdir);

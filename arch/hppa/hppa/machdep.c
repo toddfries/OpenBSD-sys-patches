@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.201 2011/04/18 21:44:55 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.205 2011/09/20 09:49:38 miod Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -52,6 +52,7 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 #include <uvm/uvm_page.h>
 #include <uvm/uvm_swap.h>
@@ -75,20 +76,6 @@
 #endif
 
 #include <hppa/dev/cpudevs.h>
-
-/*
- * Patchable buffer cache parameters
- */
-#ifndef BUFCACHEPERCENT
-#define BUFCACHEPERCENT 10
-#endif /* BUFCACHEPERCENT */
-
-#ifdef BUFPAGES
-int bufpages = BUFPAGES;
-#else
-int bufpages = 0;
-#endif
-int bufcachepercent = BUFCACHEPERCENT;
 
 /*
  * Different kinds of flags used throughout the kernel.
@@ -891,6 +878,15 @@ int waittime = -1;
 void
 boot(int howto)
 {
+	/*
+	 * On older systems without software power control, prevent mi code
+	 * from spinning disks off, in case the operator changes his mind
+	 * and prefers to reboot - the firmware will not send a spin up
+	 * command to the disks.
+	 */
+	if (cold_hook == NULL)
+		howto &= ~RB_POWERDOWN;
+
 	/* If system is cold, just halt. */
 	if (cold) {
 		/* (Unless the user explicitly asked for reboot.) */
@@ -913,6 +909,7 @@ boot(int howto)
 			else
 				printf("WARNING: not updating battery clock\n");
 		}
+		if_downall();
 
 		/* XXX probably save howto into stable storage */
 
@@ -1199,15 +1196,15 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	/* Save the FPU context first. */
 	fpu_proc_save(p);
 
-	ksc.sc_onstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	ksc.sc_onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((psp->ps_flags & SAS_ALTSTACK) && !ksc.sc_onstack &&
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !ksc.sc_onstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
-		scp = (register_t)psp->ps_sigstk.ss_sp;
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		scp = (register_t)p->p_sigstk.ss_sp;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	} else
 		scp = (tf->tf_sp + 63) & ~63;
 
@@ -1331,9 +1328,9 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		return (EINVAL);
 
 	if (ksc.sc_onstack)
-		p->p_sigacts->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		p->p_sigacts->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = ksc.sc_mask &~ sigcantmask;
 
 	tf->tf_t1 = ksc.sc_regs[0];		/* r22 */

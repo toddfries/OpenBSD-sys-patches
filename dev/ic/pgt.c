@@ -1,4 +1,4 @@
-/*	$OpenBSD: pgt.c,v 1.66 2010/09/20 07:40:41 deraadt Exp $  */
+/*	$OpenBSD: pgt.c,v 1.68 2011/12/01 23:34:08 miod Exp $  */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -1684,10 +1684,9 @@ pgt_mgmt_request(struct pgt_softc *sc, struct pgt_mgmt_desc *pmd)
 	pmf->pmf_size = htobe32(pmd->pmd_len);
 	/* "set" and "retrieve" operations both send data */
 	if (pmd->pmd_sendbuf != NULL)
-		memcpy((char *)pmf + sizeof(*pmf), pmd->pmd_sendbuf,
-		    pmd->pmd_len);
+		memcpy(pmf + 1, pmd->pmd_sendbuf, pmd->pmd_len);
 	else
-		bzero((char *)pmf + sizeof(*pmf), pmd->pmd_len);
+		bzero(pmf + 1, pmd->pmd_len);
 	pmd->pmd_error = EINPROGRESS;
 	TAILQ_INSERT_TAIL(&sc->sc_mgmtinprog, pmd, pmd_link);
 	if (sc->sc_debug & SC_DEBUG_MGMT)
@@ -2057,14 +2056,14 @@ pgt_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 		    rs_rates[ic->ic_fixed_rate] & IEEE80211_RATE_VAL;
 	} else {
 		if (pgt_oid_get(sc, PGT_OID_LINK_STATE, &rate, sizeof(rate)))
-			return;
+			goto out;
 		rate = letoh32(rate);
 		if (sc->sc_debug & SC_DEBUG_LINK) {
 			DPRINTF(("%s: %s: link rate %u\n",
 			    sc->sc_dev.dv_xname, __func__, rate));
 		}
 		if (rate == 0)
-			return;
+			goto out;
 	}
 
 	imr->ifm_status = IFM_AVALID;
@@ -2095,6 +2094,7 @@ pgt_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 		break;
 	}
 
+out:
 	splx(s);
 }
 

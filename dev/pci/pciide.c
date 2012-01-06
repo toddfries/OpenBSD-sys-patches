@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.330 2011/05/09 22:33:54 matthew Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.336 2012/01/04 03:38:59 jsg Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -749,6 +749,10 @@ const struct pciide_product_desc pciide_sis_products[] =  {
 	{ PCI_PRODUCT_SIS_182,		/* SIS 182 SATA */
 	  0,
 	  sata_chip_map
+	},
+	{ PCI_PRODUCT_SIS_1183,		/* SIS 1183 SATA */
+	  0,
+	  sata_chip_map
 	}
 };
 
@@ -1101,35 +1105,35 @@ const struct pciide_product_desc pciide_nvidia_products[] = {
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP65_SATA,
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA_1,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP65_SATA2,
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA_2,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP65_SATA3,
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA_3,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP65_SATA4,
+	{ PCI_PRODUCT_NVIDIA_MCP65_SATA_4,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP67_SATA,
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA_1,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP67_SATA2,
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA_2,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP67_SATA3,
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA_3,
 	  0,
 	  sata_chip_map
 	},
-	{ PCI_PRODUCT_NVIDIA_MCP67_SATA4,
+	{ PCI_PRODUCT_NVIDIA_MCP67_SATA_4,
 	  0,
 	  sata_chip_map
 	},
@@ -2478,6 +2482,7 @@ sata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	sc->sc_wdcdev.cap |= WDC_CAPABILITY_DATA16 | WDC_CAPABILITY_DATA32 |
 	    WDC_CAPABILITY_MODE | WDC_CAPABILITY_SATA;
 	sc->sc_wdcdev.set_modes = sata_setup_channel;
+	sc->chip_unmap = default_chip_unmap;
 
 	for (channel = 0; channel < sc->sc_wdcdev.nchannels; channel++) {
 		cp = &sc->pciide_channels[channel];
@@ -2653,8 +2658,7 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 	for (channel = 0; channel < sc->sc_wdcdev.nchannels; channel++) {
 		cp = &sc->pciide_channels[channel];
 
-		/* PIIX is compat-only */
-		if (pciide_chansetup(sc, channel, 0) == 0)
+		if (pciide_chansetup(sc, channel, interface) == 0)
 			continue;
 		idetim = pci_conf_read(sc->sc_pc, sc->sc_tag, PIIX_IDETIM);
 		if ((PIIX_IDETIM_READ(idetim, channel) &
@@ -2663,11 +2667,11 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 			    sc->sc_wdcdev.sc_dev.dv_xname, cp->name);
 			continue;
 		}
-		/* PIIX are compat-only pciide devices */
-		pciide_map_compat_intr(pa, cp, channel, 0);
+		pciide_map_compat_intr(pa, cp, channel, interface);
 		if (cp->hw_ok == 0)
 			continue;
-		pciide_mapchan(pa, cp, 0, &cmdsize, &ctlsize, pciide_pci_intr);
+		pciide_mapchan(pa, cp, interface, &cmdsize, &ctlsize,
+		    pciide_pci_intr);
 		if (cp->hw_ok == 0)
 			goto next;
 		if (pciide_chan_candisable(cp)) {
@@ -2681,7 +2685,7 @@ piix_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		sc->sc_wdcdev.set_modes(&cp->wdc_channel);
 next:
 		if (cp->hw_ok == 0)
-			pciide_unmap_compat_intr(pa, cp, channel, 0);
+			pciide_unmap_compat_intr(pa, cp, channel, interface);
 	}
 
 	piix_timing_debug(sc);
@@ -7428,6 +7432,7 @@ serverworks_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		sc->sc_wdcdev.UDMA_cap = 4;
 		break;
 	case PCI_PRODUCT_RCC_CSB6_RAID_IDE:
+	case PCI_PRODUCT_RCC_HT_1000_IDE:
 		sc->sc_wdcdev.UDMA_cap = 5;
 		break;
 	}
@@ -7638,6 +7643,16 @@ svwsata_chip_map(struct pciide_softc *sc, struct pci_attach_args *pa)
 		return;
 	}
 
+	switch (sc->sc_pp->ide_product) {
+	case PCI_PRODUCT_RCC_K2_SATA:
+		bus_space_write_4(ss->ba5_st, ss->ba5_sh, SVWSATA_SICR1,
+		    bus_space_read_4(ss->ba5_st, ss->ba5_sh, SVWSATA_SICR1)
+		    & ~0x00040000);
+		bus_space_write_4(ss->ba5_st, ss->ba5_sh,
+		    SVWSATA_SIM, 0);
+		break;
+	}
+
 	for (channel = 0; channel < sc->sc_wdcdev.nchannels; channel++) {
 		cp = &sc->pciide_channels[channel];
 		if (pciide_chansetup(sc, channel, 0) == 0)
@@ -7733,6 +7748,7 @@ svwsata_mapchan(struct pciide_channel *cp)
 	}
 	wdc_cp->cmd_iot = wdc_cp->ctl_iot = ss->ba5_st;
 	wdc_cp->_vtbl = &wdc_svwsata_vtbl;
+	wdc_cp->ch_flags |= WDCF_DMA_BEFORE_CMD;
 	wdcattach(wdc_cp);
 }
 

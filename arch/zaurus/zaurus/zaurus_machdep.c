@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_machdep.c,v 1.36 2010/10/02 23:31:34 deraadt Exp $	*/
+/*	$OpenBSD: zaurus_machdep.c,v 1.38 2011/10/19 20:18:31 drahn Exp $	*/
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -554,7 +554,7 @@ sysprobe(void)
  *   Relocating the kernel to the bottom of physical memory
  */
 u_int
-initarm(void *arg)
+initarm(void *arg0, void *arg1, void *arg2)
 {
 	extern vaddr_t xscale_cache_clean_addr;
 	extern cpu_kcore_hdr_t cpu_kcore_hdr;
@@ -1090,8 +1090,7 @@ initarm(void *arg)
 #endif
 	uvm_setpagesize();        /* initialize PAGE_SIZE-dependent variables */
 	uvm_page_physload(atop(physical_freestart), atop(physical_freeend),
-	    atop(physical_freestart), atop(physical_freeend),
-	    VM_FREELIST_DEFAULT);
+	    atop(physical_freestart), atop(physical_freeend), 0);
 
 	/* Boot strap pmap telling it where the kernel page table is */
 #ifdef VERBOSE_INIT_ARM

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_spppsubr.c,v 1.86 2011/05/04 16:05:49 blambert Exp $	*/
+/*	$OpenBSD: if_spppsubr.c,v 1.94 2011/07/07 00:08:04 henning Exp $	*/
 /*
  * Synchronous PPP/Cisco link level subroutines.
  * Keepalive protocol implemented in both Cisco and PPP modes.
@@ -933,8 +933,8 @@ sppp_attach(struct ifnet *ifp)
 	sp->pp_if.if_type = IFT_PPP;
 	sp->pp_if.if_output = sppp_output;
 	IFQ_SET_MAXLEN(&sp->pp_if.if_snd, 50);
-	sp->pp_fastq.ifq_maxlen = 50;
-	sp->pp_cpq.ifq_maxlen = 50;
+	IFQ_SET_MAXLEN(&sp->pp_fastq, 50);
+	IFQ_SET_MAXLEN(&sp->pp_cpq, 50);
 	sp->pp_loopcnt = 0;
 	sp->pp_alivecnt = 0;
 	sp->pp_last_activity = 0;
@@ -944,7 +944,6 @@ sppp_attach(struct ifnet *ifp)
 	sp->pp_phase = PHASE_DEAD;
 	sp->pp_up = lcp.Up;
 	sp->pp_down = lcp.Down;
-
 
 	for (i = 0; i < IDX_COUNT; i++)
 		timeout_set(&sp->ch[i], (cps[i])->TO, (void *)sp);
@@ -1012,7 +1011,7 @@ sppp_isempty(struct ifnet *ifp)
 	int empty, s;
 
 	s = splnet();
-	empty = !sp->pp_fastq.ifq_head && !sp->pp_cpq.ifq_head &&
+	empty = IF_IS_EMPTY(&sp->pp_fastq) && IF_IS_EMPTY(&sp->pp_cpq) &&
 		IFQ_IS_EMPTY(&sp->pp_if.if_snd);
 	splx(s);
 	return (empty);
@@ -1057,12 +1056,14 @@ sppp_pick(struct ifnet *ifp)
 	int s;
 
 	s = splnet();
-	m = sp->pp_cpq.ifq_head;
+	IF_POLL(&sp->pp_cpq, m);
 	if (m == NULL &&
 	    (sp->pp_phase == PHASE_NETWORK ||
-	     (sp->pp_flags & PP_CISCO) != 0))
-		if ((m = sp->pp_fastq.ifq_head) == NULL)
+	     (sp->pp_flags & PP_CISCO) != 0)) {
+		IF_POLL(&sp->pp_fastq, m);
+		if ((m) == NULL)
 			IFQ_POLL(&sp->pp_if.if_snd, m);
+	}
 	splx (s);
 	return (m);
 }
@@ -3344,7 +3345,7 @@ sppp_ipv6cp_RCR(struct sppp *sp, struct lcp_header *h, int len)
 				continue;
 			}
 
-			memset(&suggestaddr, 0, sizeof(&suggestaddr));
+			memset(&suggestaddr, 0, sizeof(suggestaddr));
 			if (collision && nohisaddr) {
 				/* collision, hisaddr unknown - Conf-Rej */
 				type = CONF_REJ;
@@ -3796,8 +3797,7 @@ sppp_chap_input(struct sppp *sp, struct mbuf *m)
 		/* Compute reply value. */
 		MD5Init(&ctx);
 		MD5Update(&ctx, &h->ident, 1);
-		MD5Update(&ctx, sp->myauth.secret,
-			  strlen(sp->myauth.secret));
+		MD5Update(&ctx, sp->myauth.secret, strlen(sp->myauth.secret));
 		MD5Update(&ctx, value, value_len);
 		MD5Final(digest, &ctx);
 		dsize = sizeof digest;
@@ -3915,8 +3915,7 @@ sppp_chap_input(struct sppp *sp, struct mbuf *m)
 
 		MD5Init(&ctx);
 		MD5Update(&ctx, &h->ident, 1);
-		MD5Update(&ctx, sp->hisauth.secret,
-			  strlen(sp->hisauth.secret));
+		MD5Update(&ctx, sp->hisauth.secret, strlen(sp->hisauth.secret));
 		MD5Update(&ctx, sp->chap_challenge, AUTHCHALEN);
 		MD5Final(digest, &ctx);
 
@@ -4537,16 +4536,7 @@ sppp_auth_send(const struct cp *cp, struct sppp *sp,
 HIDE void
 sppp_qflush(struct ifqueue *ifq)
 {
-	struct mbuf *m, *n;
-
-	n = ifq->ifq_head;
-	while ((m = n)) {
-		n = m->m_act;
-		m_freem (m);
-	}
-	ifq->ifq_head = 0;
-	ifq->ifq_tail = 0;
-	ifq->ifq_len = 0;
+	IF_PURGE(ifq);
 }
 
 /*
@@ -5124,6 +5114,10 @@ sppp_set_params(struct sppp *sp, struct ifreq *ifr)
 				strlcpy(p, spa->secret, len);
 				if (auth->secret != NULL)
 					free(auth->secret, M_DEVBUF);
+				auth->secret = p;
+			} else if (!auth->secret) {
+				p = malloc(1, M_DEVBUF, M_WAITOK);
+				p[0] = '\0';
 				auth->secret = p;
 			}
 		}

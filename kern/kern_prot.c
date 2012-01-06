@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_prot.c,v 1.48 2011/04/04 13:00:13 guenther Exp $	*/
+/*	$OpenBSD: kern_prot.c,v 1.51 2011/10/15 23:35:29 guenther Exp $	*/
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -54,13 +54,16 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
+#ifdef	__HAVE_MD_TCB
+# include <machine/tcb.h>
+#endif
+
 /* ARGSUSED */
 int
 sys_getpid(struct proc *p, void *v, register_t *retval)
 {
 
-	retval[0] = p->p_p->ps_pid;
-	retval[1] = p->p_p->ps_pptr->ps_pid;
+	*retval = p->p_p->ps_pid;
 	return (0);
 }
 
@@ -96,7 +99,7 @@ sys_getpgrp(struct proc *p, void *v, register_t *retval)
 /*
  * SysVR.4 compatible getpgid()
  */
-pid_t
+int
 sys_getpgid(struct proc *curp, void *v, register_t *retval)
 {
 	struct sys_getpgid_args /* {
@@ -115,7 +118,7 @@ found:
 	return (0);
 }
 
-pid_t
+int
 sys_getsid(struct proc *curp, void *v, register_t *retval)
 {
 	struct sys_getsid_args /* {
@@ -142,8 +145,7 @@ int
 sys_getuid(struct proc *p, void *v, register_t *retval)
 {
 
-	retval[0] = p->p_cred->p_ruid;
-	retval[1] = p->p_ucred->cr_uid;
+	*retval = p->p_cred->p_ruid;
 	return (0);
 }
 
@@ -172,8 +174,7 @@ int
 sys_getgid(struct proc *p, void *v, register_t *retval)
 {
 
-	retval[0] = p->p_cred->p_rgid;
-	retval[1] = p->p_ucred->cr_gid;
+	*retval = p->p_cred->p_rgid;
 	return (0);
 }
 
@@ -892,4 +893,28 @@ proc_cansugid(struct proc *p)
 
 	/* Allow. */
 	return (1);
+}
+
+/*
+ * Set address of the proc's thread-control-block
+ */
+int
+sys___set_tcb(struct proc *p, void *v, register_t *retval)
+{
+	struct sys___set_tcb_args /* {
+		syscallarg(void *) tcb;
+	} */ *uap = v;
+
+	TCB_SET(p, SCARG(uap, tcb));
+	return (0);
+}
+
+/*
+ * Get address of the proc's thread-control-block
+ */
+int
+sys___get_tcb(struct proc *p, void *v, register_t *retval)
+{
+	*retval = (register_t)TCB_GET(p);
+	return (0);
 }

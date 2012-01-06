@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcg.c,v 1.16 2011/04/07 15:30:16 miod Exp $	*/
+/*	$OpenBSD: lcg.c,v 1.19 2011/09/19 21:53:02 miod Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -176,6 +176,8 @@ lcg_match(struct device *parent, void *vcf, void *aux)
 			return (0);
 		break;
 	case VAX_BTYP_48:
+		if (vax_cpustype != VAX_STYP_48)
+			return (0);
 		/* KA48 can't boot without the frame buffer board */
 		break;
 	}
@@ -365,9 +367,9 @@ lcg_probe_screen(u_int32_t cfg, u_int *width, u_int *height)
 			break;
 		case 0x07:
 			if (vax_confdata & 0x80) {
-				w = 1024; h = 864;
-			} else {
 				w = 1024; h = 768;
+			} else {
+				w = 1024; h = 864;
 			}
 			break;
 		default:
@@ -722,47 +724,47 @@ lcgcnprobe()
 	switch (vax_boardtype) {
 	case VAX_BTYP_46:
 		if ((vax_confdata & 0x40) == 0)
-			break;	/* no frame buffer */
-		/* FALLTHROUGH */
-	case VAX_BTYP_48:
-		if ((vax_confdata & 0x100) != 0)
-			break; /* doesn't use graphics console */
-
-		tmp = virtual_avail;
-		ioaccess(tmp, vax_trunc_page(LCG_CONFIG_ADDR), 1);
-		cfg = *(volatile u_int32_t *)
-		    (tmp + (LCG_CONFIG_ADDR & VAX_PGOFSET));
-		iounaccess(tmp, 1);
-
-		if (lcg_probe_screen(cfg, NULL, NULL) <= 0)
-			break;	/* no lcg or unsupported configuration */
-
-#ifdef PARANOIA
-		/*
-		 * Check for video memory.
-		 * We can not use badaddr() on these models.
-		 */
-		rc = 0;
-		ioaccess(tmp, LCG_FB_ADDR, 1);
-		ch = (volatile u_int8_t *)tmp;
-		*ch = 0x01;
-		if ((*ch & 0x01) != 0) {
-			*ch = 0x00;
-			if ((*ch & 0x01) == 0)
-				rc = 1;
-		}
-		iounaccess(tmp, 1);
-		if (rc == 0)
-			break;
-#endif
-
-		return (1);
-
-	default:
+			return (0);	/* no frame buffer */
 		break;
+	case VAX_BTYP_48:
+		if (vax_cpustype != VAX_STYP_48)
+			return (0);
+		break;
+	default:
+		return (0);
 	}
 
-	return (0);
+	if ((vax_confdata & 0x100) != 0)
+		return (0); /* doesn't use graphics console */
+
+	tmp = virtual_avail;
+	ioaccess(tmp, vax_trunc_page(LCG_CONFIG_ADDR), 1);
+	cfg = *(volatile u_int32_t *)(tmp + (LCG_CONFIG_ADDR & VAX_PGOFSET));
+	iounaccess(tmp, 1);
+
+	if (lcg_probe_screen(cfg, NULL, NULL) <= 0)
+		return (0);	/* no lcg or unsupported configuration */
+
+#ifdef PARANOIA
+	/*
+	 * Check for video memory.
+	 * We can not use badaddr() on these models.
+	 */
+	rc = 0;
+	ioaccess(tmp, LCG_FB_ADDR, 1);
+	ch = (volatile u_int8_t *)tmp;
+	*ch = 0x01;
+	if ((*ch & 0x01) != 0) {
+		*ch = 0x00;
+		if ((*ch & 0x01) == 0)
+			rc = 1;
+	}
+	iounaccess(tmp, 1);
+	if (rc == 0)
+		return (0);
+#endif
+
+	return (1);
 }
 
 /*

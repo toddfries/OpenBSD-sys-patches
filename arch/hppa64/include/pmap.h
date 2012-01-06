@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.6 2011/05/07 15:27:01 oga Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.9 2011/09/18 11:55:23 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -24,9 +24,11 @@
 #include <uvm/uvm_page.h>
 #include <uvm/uvm_object.h>
 
+#ifdef _KERNEL
+
 struct pmap {
-	simple_lock_data_t pm_lock;
-	int		pm_refcount;
+	struct uvm_object pm_obj;	/* object (lck by object lock) */
+#define	pm_lock	pm_obj.vmobjlock
 	struct vm_page	*pm_ptphint;
 	struct pglist	pm_pglist;
 	volatile u_int32_t *pm_pdir;	/* page dir (read-only after create) */
@@ -43,15 +45,13 @@ struct pv_entry {			/* locked by its list's pvh_lock */
 	struct vm_page	*pv_ptp;	/* the vm_page of the PTP */
 };
 
-#ifdef	_KERNEL
-
 extern struct pmap kernel_pmap_store;
 
 /*
  * pool quickmaps
  */
 #define	pmap_map_direct(pg)	((vaddr_t)VM_PAGE_TO_PHYS(pg))
-#define	pmap_unmap_direct(va) PHYS_TO_VM_PAGE((paddr_t)(va))
+struct vm_page *pmap_unmap_direct(vaddr_t);
 #define	__HAVE_PMAP_DIRECT
 
 /*
@@ -87,7 +87,6 @@ pmap_prefer(vaddr_t offs, vaddr_t hint)
 #define pmap_is_modified(pg)	pmap_testbit(pg, PTE_DIRTY)
 #define pmap_is_referenced(pg)	pmap_testbit(pg, PTE_REFTRAP)
 
-#define pmap_proc_iflush(p,va,len)	/* nothing */
 #define pmap_unuse_final(p)		/* nothing */
 #define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 

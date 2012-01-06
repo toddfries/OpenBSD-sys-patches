@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.157 2011/05/04 16:05:49 blambert Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.165 2011/12/02 10:55:46 dlg Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -140,8 +140,13 @@ mbinit(void)
 {
 	int i;
 
+#if DIAGNOSTIC
+	if (mclsizes[nitems(mclsizes) - 1] != MAXMCLBYTES)
+		panic("mbinit: the largest cluster size != MAXMCLBYTES");
+#endif
+
 	pool_init(&mbpool, MSIZE, 0, 0, 0, "mbpl", NULL);
-	pool_set_constraints(&mbpool, &kp_dma);
+	pool_set_constraints(&mbpool, &kp_dma_contig);
 	pool_setlowat(&mbpool, mblowat);
 
 	for (i = 0; i < nitems(mclsizes); i++) {
@@ -149,7 +154,7 @@ mbinit(void)
 		    mclsizes[i] >> 10);
 		pool_init(&mclpools[i], mclsizes[i], 0, 0, 0,
 		    mclnames[i], NULL);
-		pool_set_constraints(&mclpools[i], &kp_dma); 
+		pool_set_constraints(&mclpools[i], &kp_dma_contig);
 		pool_setlowat(&mclpools[i], mcllowat);
 	}
 
@@ -246,6 +251,7 @@ m_gethdr(int nowait, int type)
 		m->m_data = m->m_pktdat;
 		m->m_flags = M_PKTHDR;
 		bzero(&m->m_pkthdr, sizeof(m->m_pkthdr));
+		m->m_pkthdr.pf.prio = IFQ_DEFPRIO;
 	}
 	return (m);
 }
@@ -259,6 +265,7 @@ m_inithdr(struct mbuf *m)
 	m->m_data = m->m_pktdat;
 	m->m_flags = M_PKTHDR;
 	bzero(&m->m_pkthdr, sizeof(m->m_pkthdr));
+	m->m_pkthdr.pf.prio = IFQ_DEFPRIO;
 
 	return (m);
 }
@@ -281,7 +288,7 @@ m_clpool(u_int pktlen)
 	int pi;
 
 	for (pi = 0; pi < MCLPOOLS; pi++) {
-                if (pktlen <= mclsizes[pi])
+		if (pktlen <= mclsizes[pi])
 			return (pi);
 	}
 
@@ -868,9 +875,8 @@ m_adj(struct mbuf *mp, int req_len)
 				len = 0;
 			}
 		}
-		m = mp;
 		if (mp->m_flags & M_PKTHDR)
-			m->m_pkthdr.len -= (req_len - len);
+			mp->m_pkthdr.len -= (req_len - len);
 	} else {
 		/*
 		 * Trim from tail.  Scan the mbuf chain,
@@ -922,8 +928,8 @@ m_adj(struct mbuf *mp, int req_len)
  * for a structure of size len).  Returns the resulting
  * mbuf chain on success, frees it and returns null on failure.
  */
-struct mbuf *   
-m_pullup(struct mbuf *n, int len)       
+struct mbuf *
+m_pullup(struct mbuf *n, int len)
 {
 	struct mbuf *m;
 	int count;
@@ -933,28 +939,28 @@ m_pullup(struct mbuf *n, int len)
 	 * without shifting current data, pullup into it,
 	 * otherwise allocate a new mbuf to prepend to the chain.
 	 */
-	if ((n->m_flags & M_EXT) == 0 &&
-	    n->m_data + len < &n->m_dat[MLEN] && n->m_next) {
+	if ((n->m_flags & M_EXT) == 0 && n->m_next &&
+	    n->m_data + len < &n->m_dat[MLEN]) {
 		if (n->m_len >= len)
 			return (n);
 		m = n;
 		n = n->m_next;
 		len -= m->m_len;
-	} else if ((n->m_flags & M_EXT) != 0 && len > MHLEN &&
-	    n->m_data + len < &n->m_data[MCLBYTES] && n->m_next) {
+	} else if ((n->m_flags & M_EXT) != 0 && len > MHLEN && n->m_next &&
+	    n->m_data + len < &n->m_ext.ext_buf[n->m_ext.ext_size]) {
 		if (n->m_len >= len)
 			return (n);
 		m = n;
 		n = n->m_next;
 		len -= m->m_len;
 	} else {
-		if (len > MCLBYTES)
+		if (len > MAXMCLBYTES)
 			goto bad;
 		MGET(m, M_DONTWAIT, n->m_type);
 		if (m == NULL)
 			goto bad;
 		if (len > MHLEN) {
-			MCLGET(m, M_DONTWAIT);
+			MCLGETI(m, M_DONTWAIT, NULL, len);
 			if ((m->m_flags & M_EXT) == 0) {
 				m_free(m);
 				goto bad;
@@ -1012,7 +1018,7 @@ m_getptr(struct mbuf *m, int loc, int *off)
 		  			return (NULL);
 				}
 	    		} else {
-	      			m = m->m_next;
+				m = m->m_next;
 			}
 		}
     	}
@@ -1037,30 +1043,30 @@ m_inject(struct mbuf *m0, int len0, int siz, int wait)
 	unsigned len = len0, remain;
 
 	if ((siz >= MHLEN) || (len0 <= 0))
-	        return (NULL);
+		return (NULL);
 	for (m = m0; m && len > m->m_len; m = m->m_next)
 		len -= m->m_len;
 	if (m == NULL)
 		return (NULL);
 	remain = m->m_len - len;
 	if (remain == 0) {
-	        if ((m->m_next) && (M_LEADINGSPACE(m->m_next) >= siz)) {
-		        m->m_next->m_len += siz;
+		if ((m->m_next) && (M_LEADINGSPACE(m->m_next) >= siz)) {
+			m->m_next->m_len += siz;
 			if (m0->m_flags & M_PKTHDR)
 				m0->m_pkthdr.len += siz;
 			m->m_next->m_data -= siz;
 			return m->m_next;
 		}
 	} else {
-	        n2 = m_copym2(m, len, remain, wait);
+		n2 = m_copym2(m, len, remain, wait);
 		if (n2 == NULL)
-		        return (NULL);
+			return (NULL);
 	}
 
 	MGET(n, wait, MT_DATA);
 	if (n == NULL) {
-	        if (n2)
-		        m_freem(n2);
+		if (n2)
+			m_freem(n2);
 		return (NULL);
 	}
 
@@ -1069,13 +1075,13 @@ m_inject(struct mbuf *m0, int len0, int siz, int wait)
 		m0->m_pkthdr.len += siz;
 	m->m_len -= remain; /* Trim */
 	if (n2)	{
-	        for (n3 = n; n3->m_next != NULL; n3 = n3->m_next)
-		        ;
+		for (n3 = n; n3->m_next != NULL; n3 = n3->m_next)
+			;
 		n3->m_next = n2;
 	} else
-	        n3 = n;
+		n3 = n;
 	for (; n3->m_next != NULL; n3 = n3->m_next)
-	        ;
+		;
 	n3->m_next = m->m_next;
 	m->m_next = n;
 	return n;
@@ -1339,7 +1345,7 @@ m_print(void *v, int (*pr)(const char *, ...))
 	(*pr)("m_dat: %p m_pktdat: %p\n", m->m_dat, m->m_pktdat);
 	if (m->m_flags & M_PKTHDR) {
 		(*pr)("m_pkthdr.len: %i\tm_ptkhdr.rcvif: %p\t"
-		    "m_ptkhdr.rdomain: %u\n", m->m_pkthdr.len, 
+		    "m_ptkhdr.rdomain: %u\n", m->m_pkthdr.len,
 		    m->m_pkthdr.rcvif, m->m_pkthdr.rdomain);
 		(*pr)("m_ptkhdr.tags: %p\tm_pkthdr.tagsset: %hx\n",
 		    SLIST_FIRST(&m->m_pkthdr.tags), m->m_pkthdr.tagsset);
@@ -1353,7 +1359,9 @@ m_print(void *v, int (*pr)(const char *, ...))
 		    m->m_pkthdr.pf.hdr, m->m_pkthdr.pf.statekey);
 		(*pr)("m_pkthdr.pf.qid:\t%u m_pkthdr.pf.tag: %hu\n",
 		    m->m_pkthdr.pf.qid, m->m_pkthdr.pf.tag);
-		(*pr)("m_pkthdr.pf.routed: %hhx\n", m->m_pkthdr.pf.routed);
+		(*pr)("m_pkthdr.pf.prio:\t%u m_pkthdr.pf.tag: %hu\n",
+		    m->m_pkthdr.pf.prio, m->m_pkthdr.pf.tag);
+		(*pr)("m_pkthdr.pf.routed: %hx\n", m->m_pkthdr.pf.routed);
 	}
 	if (m->m_flags & M_EXT) {
 		(*pr)("m_ext.ext_buf: %p\tm_ext.ext_size: %u\n",

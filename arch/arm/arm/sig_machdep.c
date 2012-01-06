@@ -1,4 +1,4 @@
-/*	$OpenBSD: sig_machdep.c,v 1.5 2011/04/18 21:44:55 guenther Exp $	*/
+/*	$OpenBSD: sig_machdep.c,v 1.7 2011/09/20 22:02:11 miod Exp $	*/
 /*	$NetBSD: sig_machdep.c,v 1.22 2003/10/08 00:28:41 thorpej Exp $	*/
 
 /*
@@ -56,9 +56,7 @@
 #include <machine/cpu.h>
 #include <machine/frame.h>
 #include <machine/pcb.h>
-#ifndef acorn26
 #include <arm/cpufunc.h>
-#endif
 
 static __inline struct trapframe *
 process_frame(struct proc *p)
@@ -87,7 +85,7 @@ sendsig(sig_t catcher, int sig, int returnmask, u_long code, int type,
 	struct trapframe *tf;
 	struct sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
-	int oonstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	int oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 	int onstack = 0;
 
 	tf = process_frame(p);
@@ -95,11 +93,11 @@ sendsig(sig_t catcher, int sig, int returnmask, u_long code, int type,
 	/* Do we need to jump onto the signal stack? */
 
 	/* Allocate space for the signal handler context. */
-	if ((psp->ps_flags & SAS_ALTSTACK) && !oonstack &&
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !oonstack &&
 	    (psp->ps_sigonstack & sigmask(sig))) {
 		onstack = 1;
-		fp = (struct sigframe *)((caddr_t)psp->ps_sigstk.ss_sp +
-		    psp->ps_sigstk.ss_size);
+		fp = (struct sigframe *)((caddr_t)p->p_sigstk.ss_sp +
+		    p->p_sigstk.ss_size);
 	} else
 		fp = (struct sigframe *)tf->tf_usr_sp;
 	/* make room on the stack */
@@ -135,7 +133,7 @@ sendsig(sig_t catcher, int sig, int returnmask, u_long code, int type,
 	frame.sf_sc.sc_spsr   = tf->tf_spsr;
 
 	/* Save signal stack. */
-	frame.sf_sc.sc_onstack = psp->ps_sigstk.ss_flags & SS_ONSTACK;
+	frame.sf_sc.sc_onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/* Save signal mask. */
 	frame.sf_sc.sc_mask = returnmask;
@@ -177,7 +175,7 @@ sendsig(sig_t catcher, int sig, int returnmask, u_long code, int type,
 
 	/* Remember that we're now on the signal stack. */
 	if (onstack)
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 }
 
 #if 0
@@ -216,7 +214,6 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	struct sigcontext *scp, context;
 	struct trapframe *tf;
-	struct sigacts *psp = p->p_sigacts;
 
 	/*
 	 * we do a rather scary test in userland
@@ -237,15 +234,9 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	 * Make sure the processor mode has not been tampered with and
 	 * interrupts have not been disabled.
 	 */
-#ifdef __PROG32
 	if ((context.sc_spsr & PSR_MODE) != PSR_USR32_MODE ||
 	    (context.sc_spsr & (I32_bit | F32_bit)) != 0)
 		return (EINVAL);
-#else /* __PROG26 */
-	if ((context.sc_pc & R15_MODE) != R15_MODE_USR ||
-	    (context.sc_pc & (R15_IRQ_DISABLE | R15_FIQ_DISABLE)) != 0)
-		return EINVAL;
-#endif
 
 	/* Restore register context. */
 	tf = process_frame(p);
@@ -270,115 +261,12 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 
 	/* Restore signal stack. */
 	if (context.sc_onstack & SS_ONSTACK)
-		psp->ps_sigstk.ss_flags |= SS_ONSTACK;
+		p->p_sigstk.ss_flags |= SS_ONSTACK;
 	else
-		psp->ps_sigstk.ss_flags &= ~SS_ONSTACK;
+		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask. */
-#if 0
-	(void) sigprocmask1(p, SIG_SETMASK, &context.sc_mask, 0);
-#else
 	p->p_sigmask = context.sc_mask & ~sigcantmask;
-#endif
 
 	return (EJUSTRETURN);
 }
-
-#if 0
-void
-cpu_getmcontext(p, mcp, flags)
-	struct proc *p;
-	mcontext_t *mcp;
-	unsigned int *flags;
-{
-	struct trapframe *tf = process_frame(p);
-	__greg_t *gr = mcp->__gregs;
-	__greg_t ras_pc;
-
-	/* Save General Register context. */
-	gr[_REG_R0]   = tf->tf_r0;
-	gr[_REG_R1]   = tf->tf_r1;
-	gr[_REG_R2]   = tf->tf_r2;
-	gr[_REG_R3]   = tf->tf_r3;
-	gr[_REG_R4]   = tf->tf_r4;
-	gr[_REG_R5]   = tf->tf_r5;
-	gr[_REG_R6]   = tf->tf_r6;
-	gr[_REG_R7]   = tf->tf_r7;
-	gr[_REG_R8]   = tf->tf_r8;
-	gr[_REG_R9]   = tf->tf_r9;
-	gr[_REG_R10]  = tf->tf_r10;
-	gr[_REG_R11]  = tf->tf_r11;
-	gr[_REG_R12]  = tf->tf_r12;
-	gr[_REG_SP]   = tf->tf_usr_sp;
-	gr[_REG_LR]   = tf->tf_usr_lr;
-	gr[_REG_PC]   = tf->tf_pc;
-	gr[_REG_CPSR] = tf->tf_spsr;
-
-	if ((ras_pc = (__greg_t)ras_lookup(l->l_proc,
-	    (caddr_t) gr[_REG_PC])) != -1)
-		gr[_REG_PC] = ras_pc;
-
-	*flags |= _UC_CPU;
-
-#ifdef ARMFPE
-	/* Save Floating Point Register context. */
-	arm_fpe_getcontext(p, (struct fpreg *)(void *)&mcp->fpregs);
-	*flags |= _UC_FPU;
-#endif
-}
-
-int
-cpu_setmcontext(p, mcp, flags)
-	struct proc *p;
-	const mcontext_t *mcp;
-	unsigned int flags;
-{
-	struct trapframe *tf = process_frame(l);
-	__greg_t *gr = mcp->__gregs;
-
-	if ((flags & _UC_CPU) != 0) {
-		/* Restore General Register context. */
-		/* Make sure the processor mode has not been tampered with. */
-#ifdef PROG32
-		if ((gr[_REG_CPSR] & PSR_MODE) != PSR_USR32_MODE ||
-		    (gr[_REG_CPSR] & (I32_bit | F32_bit)) != 0)
-			return (EINVAL);
-#else /* PROG26 */
-		if ((gr[_REG_PC] & R15_MODE) != R15_MODE_USR ||
-		    (gr[_REG_PC] & (R15_IRQ_DISABLE | R15_FIQ_DISABLE)) != 0)
-			return (EINVAL);
-#endif
-
-		tf->tf_r0     = gr[_REG_R0];
-		tf->tf_r1     = gr[_REG_R1];
-		tf->tf_r2     = gr[_REG_R2];
-		tf->tf_r3     = gr[_REG_R3];
-		tf->tf_r4     = gr[_REG_R4];
-		tf->tf_r5     = gr[_REG_R5];
-		tf->tf_r6     = gr[_REG_R6];
-		tf->tf_r7     = gr[_REG_R7];
-		tf->tf_r8     = gr[_REG_R8];
-		tf->tf_r9     = gr[_REG_R9];
-		tf->tf_r10    = gr[_REG_R10];
-		tf->tf_r11    = gr[_REG_R11];
-		tf->tf_r12    = gr[_REG_R12];
-		tf->tf_usr_sp = gr[_REG_SP];
-		tf->tf_usr_lr = gr[_REG_LR];
-		tf->tf_pc     = gr[_REG_PC];
-		tf->tf_spsr   = gr[_REG_CPSR];
-	}
-
-#ifdef ARMFPE
-	if ((flags & _UC_FPU) != 0) {
-		/* Restore Floating Point Register context. */
-		arm_fpe_setcontext(p, (struct fpreg *)(void *)&mcp->__fpregs);
-	}
-#endif
-	if (flags & _UC_SETSTACK)
-		l->l_proc->p_sigctx.ps_sigstk.ss_flags |= SS_ONSTACK;
-	if (flags & _UC_CLRSTACK)
-		l->l_proc->p_sigctx.ps_sigstk.ss_flags &= ~SS_ONSTACK;
-
-	return (0);
-}
-#endif

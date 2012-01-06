@@ -1,4 +1,4 @@
-/*	$OpenBSD: uticom.c,v 1.14 2011/04/05 20:42:43 jsg Exp $	*/
+/*	$OpenBSD: uticom.c,v 1.18 2011/08/17 18:58:45 jasper Exp $	*/
 /*
  * Copyright (c) 2005 Dmitry Komissaroff <dxi@mail.ru>.
  *
@@ -193,6 +193,7 @@ const struct cfattach uticom_ca = {
 
 static const struct usb_devno uticom_devs[] = {
 	{ USB_VENDOR_TI, USB_PRODUCT_TI_TUSB3410 },
+	{ USB_VENDOR_TI, USB_PRODUCT_TI_MSP430_JTAG },
 	{ USB_VENDOR_STARTECH, USB_PRODUCT_STARTECH_ICUSB232X },
 	{ USB_VENDOR_MOXA, USB_PRODUCT_MOXA_UPORT1110 },
 	{ USB_VENDOR_ABBOTT, USB_PRODUCT_ABBOTT_STEREO_PLUG }
@@ -357,7 +358,7 @@ fwload_done:
 	err = usbd_device2interface_handle(sc->sc_udev, UTICOM_IFACE_INDEX,
 	    &sc->sc_iface);
 	if (err) {
-		printf("failed to get interface: %s\n",
+		printf("%s: failed to get interface: %s\n",
 		    sc->sc_dev.dv_xname, usbd_errstr(err));
 		sc->sc_dying = 1;
 		return;
@@ -370,7 +371,7 @@ fwload_done:
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
-			printf("no endpoint descriptor for %d\n",
+			printf("%s: no endpoint descriptor for %d\n",
 			    sc->sc_dev.dv_xname, i);
 			sc->sc_dying = 1;
 			return;
@@ -465,9 +466,6 @@ uticom_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		if (sc->sc_subdev != NULL)
 			rv = config_deactivate(sc->sc_subdev);
@@ -925,7 +923,7 @@ uticom_download_fw(struct uticom_softc *sc, int pipeno,
 		return (error);
 
 	buffer_size = UTICOM_FW_BUFSZ + sizeof(struct uticom_fw_header);
-	buffer = malloc(buffer_size, M_USBDEV, M_WAITOK);
+	buffer = malloc(buffer_size, M_USBDEV, M_WAITOK | M_CANFAIL);
 
 	if (!buffer) {
 		printf("%s: uticom_download_fw: out of memory\n",

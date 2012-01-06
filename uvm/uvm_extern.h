@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.96 2011/05/24 15:27:36 ariane Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.103 2011/07/08 00:10:59 tedu Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -185,7 +185,6 @@ typedef int		vm_prot_t;
 #define UVM_FLAG_AMAPPAD 0x100000 /* for bss: pad amap to reduce malloc() */
 #define UVM_FLAG_TRYLOCK 0x200000 /* fail if we can not lock map */
 #define	UVM_FLAG_HOLE    0x400000 /* no backend */
-#define UVM_FLAG_QUERY   0x800000 /* do everything, except actual execution */
 
 /* macros to extract info */
 #define UVM_PROTECTION(X)	((X) & UVM_PROT_MASK)
@@ -210,13 +209,6 @@ typedef int		vm_prot_t;
 #define UVM_KMF_TRYLOCK	UVM_FLAG_TRYLOCK	/* try locking only */
 
 /*
- * the following defines the strategies for uvm_pagealloc()
- */
-#define	UVM_PGA_STRAT_NORMAL	0	/* high -> low free list walk */
-#define	UVM_PGA_STRAT_ONLY	1	/* only specified free list */
-#define	UVM_PGA_STRAT_FALLBACK	2	/* ONLY falls back on NORMAL */
-
-/*
  * flags for uvm_pagealloc()
  */
 #define UVM_PGA_USERESERVE	0x0001	/* ok to use reserve pages */
@@ -229,6 +221,7 @@ typedef int		vm_prot_t;
 #define UVM_PLA_NOWAIT		0x0002	/* can't sleep (need one of the two) */
 #define UVM_PLA_ZERO		0x0004	/* zero all pages before returning */
 #define UVM_PLA_TRYCONTIG	0x0008	/* try to allocate contig physmem */
+#define UVM_PLA_FAILOK		0x0010	/* caller can handle failure */
 
 /*
  * lockflags that control the locking behavior of various functions.
@@ -261,6 +254,24 @@ struct pmap;
 struct vnode;
 struct pool;
 struct simplelock;
+
+/*
+ * uvm_constraint_range's:
+ * MD code is allowed to setup constraint ranges for memory allocators, the
+ * primary use for this is to keep allocation for certain memory consumers
+ * such as mbuf pools withing address ranges that are reachable by devices
+ * that perform DMA.
+ *
+ * It is also to discourge memory allocations from being satisfied from ranges
+ * such as the ISA memory range, if they can be satisfied with allocation
+ * from other ranges.
+ *
+ * the MD ranges are defined in arch/ARCH/ARCH/machdep.c
+ */
+struct uvm_constraint_range {
+	paddr_t	ucr_low;
+	paddr_t ucr_high;
+};
 
 extern struct pool *uvm_aiobuf_pool;
 
@@ -617,6 +628,7 @@ extern const struct kmem_va_mode kv_page;
 extern const struct kmem_pa_mode kp_dirty;
 extern const struct kmem_pa_mode kp_zero;
 extern const struct kmem_pa_mode kp_dma;
+extern const struct kmem_pa_mode kp_dma_contig;
 extern const struct kmem_pa_mode kp_dma_zero;
 extern const struct kmem_pa_mode kp_pageable;
 extern const struct kmem_pa_mode kp_none;
@@ -632,9 +644,10 @@ void km_free(void *, size_t, const struct kmem_va_mode *,
     const struct kmem_pa_mode *);
 
 /* uvm_map.c */
-int			uvm_map(vm_map_t, vaddr_t *, vsize_t,
+#define	uvm_map(_m, _a, _sz, _u, _f, _al, _fl) uvm_map_p(_m, _a, _sz, _u, _f, _al, _fl, 0)
+int			uvm_map_p(vm_map_t, vaddr_t *, vsize_t,
 				struct uvm_object *, voff_t, vsize_t,
-				uvm_flag_t);
+				uvm_flag_t, struct proc *);
 int			uvm_map_pageable(vm_map_t, vaddr_t, 
 				vaddr_t, boolean_t, int);
 int			uvm_map_pageable_all(vm_map_t, int, vsize_t);
@@ -672,11 +685,11 @@ void			uvm_pagealloc_multi(struct uvm_object *, voff_t,
     			    vsize_t, int);
 void			uvm_pagerealloc(struct vm_page *, 
 					     struct uvm_object *, voff_t);
+void			uvm_pagerealloc_multi(struct uvm_object *, voff_t,
+			    vsize_t, int, struct uvm_constraint_range *);
 /* Actually, uvm_page_physload takes PF#s which need their own type */
-void			uvm_page_physload_flags(paddr_t, paddr_t, paddr_t,
-			    paddr_t, int, int);
-#define uvm_page_physload(s, e, as, ae, fl)	\
-	uvm_page_physload_flags(s, e, as, ae, fl, 0)
+void			uvm_page_physload(paddr_t, paddr_t, paddr_t,
+			    paddr_t, int);
 void			uvm_setpagesize(void);
 void			uvm_shutdown(void);
 

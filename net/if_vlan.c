@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vlan.c,v 1.87 2011/02/18 17:06:45 reyk Exp $	*/
+/*	$OpenBSD: if_vlan.c,v 1.91 2011/11/27 00:46:07 haesbaert Exp $	*/
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -33,8 +33,7 @@
 
 /*
  * if_vlan.c - pseudo-device driver for IEEE 802.1Q virtual LANs.
- * Might be extended some day to also handle IEEE 802.1p priority
- * tagging.  This is sort of sneaky in the implementation, since
+ * This is sort of sneaky in the implementation, since
  * we need to pretend to be enough of an Ethernet implementation
  * to make arp work.  The way we do this is by telling everyone
  * that we are an Ethernet, and then catch the packets that
@@ -226,7 +225,7 @@ vlan_start(struct ifnet *ifp)
 		if ((p->if_capabilities & IFCAP_VLAN_HWTAGGING) &&
 		    (ifv->ifv_type == ETHERTYPE_VLAN)) {
 			m->m_pkthdr.ether_vtag = ifv->ifv_tag +
-			    (ifv->ifv_prio << EVL_PRIO_BITS);
+			    (m->m_pkthdr.pf.prio << EVL_PRIO_BITS);
 			m->m_flags |= M_VLANTAG;
 		} else {
 			struct ether_vlan_header evh;
@@ -235,7 +234,7 @@ vlan_start(struct ifnet *ifp)
 			evh.evl_proto = evh.evl_encap_proto;
 			evh.evl_encap_proto = htons(ifv->ifv_type);
 			evh.evl_tag = htons(ifv->ifv_tag +
-			    (ifv->ifv_prio << EVL_PRIO_BITS));
+			    (m->m_pkthdr.pf.prio << EVL_PRIO_BITS));
 
 			m_adj(m, ETHER_HDR_LEN);
 			M_PREPEND(m, sizeof(evh), M_DONTWAIT);
@@ -251,15 +250,15 @@ vlan_start(struct ifnet *ifp)
 		 * Send it, precisely as ether_output() would have.
 		 * We are already running at splnet.
 		 */
-		p->if_obytes += m->m_pkthdr.len;
-		if (m->m_flags & M_MCAST)
-			p->if_omcasts++;
 		IFQ_ENQUEUE(&p->if_snd, m, NULL, error);
 		if (error) {
 			/* mbuf is already freed */
 			ifp->if_oerrors++;
 			continue;
 		}
+		p->if_obytes += m->m_pkthdr.len;
+		if (m->m_flags & M_MCAST)
+			p->if_omcasts++;
 
 		ifp->if_opackets++;
 		if_start(p);
@@ -284,7 +283,6 @@ vlan_input(struct ether_header *eh, struct mbuf *m)
 	if (m->m_flags & M_VLANTAG) {
 		etype = ETHERTYPE_VLAN;
 		tagh = vlan_tagh;
-		tag = EVL_VLANOFTAG(m->m_pkthdr.ether_vtag);
 	} else {
 		if (m->m_len < EVL_ENCAPLEN &&
 		    (m = m_pullup(m, EVL_ENCAPLEN)) == NULL) {
@@ -294,8 +292,11 @@ vlan_input(struct ether_header *eh, struct mbuf *m)
 
 		etype = ntohs(eh->ether_type);
 		tagh = etype == ETHERTYPE_QINQ ? svlan_tagh : vlan_tagh;
-		tag = EVL_VLANOFTAG(ntohs(*mtod(m, u_int16_t *)));
+		m->m_pkthdr.ether_vtag = ntohs(*mtod(m, u_int16_t *));
 	}
+	/* From now on ether_vtag is fine */
+	tag = EVL_VLANOFTAG(m->m_pkthdr.ether_vtag);
+	m->m_pkthdr.pf.prio = EVL_PRIOFTAG(m->m_pkthdr.ether_vtag);
 
 	LIST_FOREACH(ifv, &tagh[TAG_HASH(tag)], ifv_list) {
 		if (m->m_pkthdr.rcvif == ifv->ifv_p && tag == ifv->ifv_tag &&
@@ -383,7 +384,7 @@ vlan_config(struct ifvlan *ifv, struct ifnet *p, u_int16_t tag)
 		 */
 		ifv->ifv_if.if_mtu = p->if_mtu - EVL_ENCAPLEN;
 #ifdef DIAGNOSTIC
-		printf("%s: initialized with non-standard mtu %lu (parent %s)\n",
+		printf("%s: initialized with non-standard mtu %u (parent %s)\n",
 		    ifv->ifv_if.if_xname, ifv->ifv_if.if_mtu,
 		    ifv->ifv_p->if_xname);
 #endif
@@ -663,29 +664,6 @@ vlan_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			    "%s", ifv->ifv_p->if_xname);
 			vlr.vlr_tag = ifv->ifv_tag;
 		}
-		error = copyout(&vlr, ifr->ifr_data, sizeof vlr);
-		break;
-	case SIOCSETVLANPRIO:
-		if ((error = suser(p, 0)) != 0)
-			break;
-		if ((error = copyin(ifr->ifr_data, &vlr, sizeof vlr)))
-			break;
-		/*
-		 * Don't let the caller set up a VLAN priority
-		 * outside the range 0-7
-		 */
-		if (vlr.vlr_tag > EVL_PRIO_MAX) {
-			error = EINVAL;
-			break;
-		}
-		ifv->ifv_prio = vlr.vlr_tag;
-		break;
-	case SIOCGETVLANPRIO:
-		bzero(&vlr, sizeof vlr);
-		if (ifv->ifv_p)
-			strlcpy(vlr.vlr_parent, ifv->ifv_p->if_xname,
-                            sizeof(vlr.vlr_parent));
-		vlr.vlr_tag = ifv->ifv_prio;
 		error = copyout(&vlr, ifr->ifr_data, sizeof vlr);
 		break;
 	case SIOCSIFFLAGS:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_physio.c,v 1.33 2011/05/08 09:07:06 dlg Exp $	*/
+/*	$OpenBSD: kern_physio.c,v 1.39 2011/07/18 02:49:20 matthew Exp $	*/
 /*	$NetBSD: kern_physio.c,v 1.28 1997/05/19 10:43:28 pk Exp $	*/
 
 /*-
@@ -69,6 +69,9 @@ physio(void (*strategy)(struct buf *), dev_t dev, int flags,
 	int error, done, i, s, todo;
 	struct buf *bp;
 
+	if ((uio->uio_offset % DEV_BSIZE) != 0)
+		return (EINVAL);
+
 	error = 0;
 	flags &= B_READ | B_WRITE;
 
@@ -102,7 +105,8 @@ physio(void (*strategy)(struct buf *), dev_t dev, int flags,
 			 * "Set by physio for raw transfers.", in addition
 			 * to the "busy" and read/write flag.)
 			 */
-			bp->b_flags = B_BUSY | B_PHYS | B_RAW | flags;
+			CLR(bp->b_flags, B_DONE | B_ERROR);
+			bp->b_flags |= (B_BUSY | B_PHYS | B_RAW | flags);
 
 			/* [set up the buffer for a maximum-sized transfer] */
 			bp->b_blkno = btodb(uio->uio_offset);
@@ -141,11 +145,8 @@ physio(void (*strategy)(struct buf *), dev_t dev, int flags,
 			error = uvm_vslock_device(p, iovp->iov_base, todo,
 			    (flags & B_READ) ?
 			    VM_PROT_READ | VM_PROT_WRITE : VM_PROT_READ, &map);
-			if (error) {
-				bp->b_flags |= B_ERROR;
-				bp->b_error = error;
-				goto after_unlock;
-			}
+			if (error)
+				goto done;
 			if (map) {
 				bp->b_data = map;
 			} else {
@@ -183,7 +184,6 @@ physio(void (*strategy)(struct buf *), dev_t dev, int flags,
 			if (!map)
 				vunmapbuf(bp, todo);
 			uvm_vsunlock_device(p, iovp->iov_base, todo, map);
-after_unlock:
 
 			/* remember error value (save a splbio/splx pair) */
 			if (bp->b_flags & B_ERROR)

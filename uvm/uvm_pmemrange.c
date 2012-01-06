@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pmemrange.c,v 1.22 2011/04/06 12:31:10 mlarkin Exp $	*/
+/*	$OpenBSD: uvm_pmemrange.c,v 1.34 2012/01/05 17:49:45 ariane Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Ariane van der Steldt <ariane@stack.nl>
@@ -17,9 +17,11 @@
  */
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <uvm/uvm.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>		/* XXX for atomic */
+#include <sys/kernel.h>
 
 /*
  * 2 trees: addr tree and size tree.
@@ -93,10 +95,6 @@ uvm_pmr_pg_to_memtype(struct vm_page *pg)
 }
 
 /* Trees. */
-RB_PROTOTYPE(uvm_pmr_addr, vm_page, objt, uvm_pmr_addr_cmp);
-RB_PROTOTYPE(uvm_pmr_size, vm_page, objt, uvm_pmr_size_cmp);
-RB_PROTOTYPE(uvm_pmemrange_addr, uvm_pmemrange, pmr_addr,
-    uvm_pmemrange_addr_cmp);
 RB_GENERATE(uvm_pmr_addr, vm_page, objt, uvm_pmr_addr_cmp);
 RB_GENERATE(uvm_pmr_size, vm_page, objt, uvm_pmr_size_cmp);
 RB_GENERATE(uvm_pmemrange_addr, uvm_pmemrange, pmr_addr,
@@ -119,18 +117,6 @@ struct vm_page		*uvm_pmr_nextsz(struct uvm_pmemrange *,
 void			 uvm_pmr_pnaddr(struct uvm_pmemrange *pmr,
 			    struct vm_page *pg, struct vm_page **pg_prev,
 			    struct vm_page **pg_next);
-struct vm_page		*uvm_pmr_insert_addr(struct uvm_pmemrange *,
-			    struct vm_page *, int);
-void			 uvm_pmr_insert_size(struct uvm_pmemrange *,
-			    struct vm_page *);
-struct vm_page		*uvm_pmr_insert(struct uvm_pmemrange *,
-			    struct vm_page *, int);
-void			 uvm_pmr_remove_size(struct uvm_pmemrange *,
-			    struct vm_page *);
-void			 uvm_pmr_remove_addr(struct uvm_pmemrange *,
-			    struct vm_page *);
-void			 uvm_pmr_remove(struct uvm_pmemrange *,
-			    struct vm_page *);
 struct vm_page		*uvm_pmr_findnextsegment(struct uvm_pmemrange *,
 			    struct vm_page *, paddr_t);
 psize_t			 uvm_pmr_remove_1strange(struct pglist *, paddr_t,
@@ -139,9 +125,6 @@ void			 uvm_pmr_split(paddr_t);
 struct uvm_pmemrange	*uvm_pmemrange_find(paddr_t);
 struct uvm_pmemrange	*uvm_pmemrange_use_insert(struct uvm_pmemrange_use *,
 			    struct uvm_pmemrange *);
-struct vm_page		*uvm_pmr_extract_range(struct uvm_pmemrange *,
-			    struct vm_page *, paddr_t, paddr_t,
-			    struct pglist *);
 psize_t			 pow2divide(psize_t, psize_t);
 struct vm_page		*uvm_pmr_rootupdate(struct uvm_pmemrange *,
 			    struct vm_page *, paddr_t, paddr_t, int);
@@ -162,7 +145,8 @@ pow2divide(psize_t num, psize_t denom)
 {
 	int rshift;
 
-	for (rshift = 0; num > denom; rshift++, denom <<= 1);
+	for (rshift = 0; num > denom; rshift++, denom <<= 1)
+		;
 	return (paddr_t)1 << rshift;
 }
 
@@ -685,11 +669,11 @@ uvm_pmr_extract_range(struct uvm_pmemrange *pmr, struct vm_page *pg,
 	uvm_pmr_remove_size(pmr, pg);
 	if (before_sz == 0)
 		uvm_pmr_remove_addr(pmr, pg);
+	after = pg + before_sz + (end - start);
 
 	/* Add selected pages to result. */
-	for (pg_i = pg + before_sz; atop(VM_PAGE_TO_PHYS(pg_i)) < end;
-	    pg_i++) {
-		KDASSERT(pg_i->pg_flags & PQ_FREE);
+	for (pg_i = pg + before_sz; pg_i != after; pg_i++) {
+		KASSERT(pg_i->pg_flags & PQ_FREE);
 		pg_i->fpgsz = 0;
 		TAILQ_INSERT_TAIL(result, pg_i, pageq);
 	}
@@ -701,9 +685,7 @@ uvm_pmr_extract_range(struct uvm_pmemrange *pmr, struct vm_page *pg,
 	}
 
 	/* After handling. */
-	after = NULL;
 	if (after_sz > 0) {
-		after = pg + before_sz + (end - start);
 #ifdef DEBUG
 		for (i = 0; i < after_sz; i++) {
 			KASSERT(!uvm_pmr_isfree(after + i));
@@ -716,7 +698,7 @@ uvm_pmr_extract_range(struct uvm_pmemrange *pmr, struct vm_page *pg,
 	}
 
 	uvm_pmr_assertvalid(pmr);
-	return after;
+	return (after_sz > 0 ? after : NULL);
 }
 
 /*
@@ -746,6 +728,9 @@ uvm_pmr_getpages(psize_t count, paddr_t start, paddr_t end, paddr_t align,
 	int	memtype;		/* Requested memtype. */
 	int	memtype_init;		/* Best memtype. */
 	int	desperate;		/* True if allocation failed. */
+#ifdef DIAGNOSTIC
+	struct	vm_page *diag_prev;	/* Used during validation. */
+#endif /* DIAGNOSTIC */
 
 	/*
 	 * Validate arguments.
@@ -826,11 +811,11 @@ uvm_pmr_getpages(psize_t count, paddr_t start, paddr_t end, paddr_t align,
 	 */
 	desperate = 0;
 
+	uvm_lock_fpageq();
+
 retry:		/* Return point after sleeping. */
 	fcount = 0;
 	fnsegs = 0;
-
-	uvm_lock_fpageq();
 
 retry_desperate:
 	/*
@@ -854,7 +839,7 @@ retry_desperate:
 	}
 
 	/*
-	 * The hart of the contig case.
+	 * The heart of the contig case.
 	 *
 	 * The code actually looks like this:
 	 *
@@ -925,14 +910,14 @@ drain_found:
 
 			fstart = PMR_ALIGN(fstart, align);
 			fend = atop(VM_PAGE_TO_PHYS(found)) + found->fpgsz;
-			if (fstart >= fend)
-				continue;
+			if (end != 0)
+				fend = MIN(end, fend);
 			if (boundary != 0) {
 				fend =
 				    MIN(fend, PMR_ALIGN(fstart + 1, boundary));
 			}
-			if (end != 0)
-				fend = MIN(end, fend);
+			if (fstart >= fend)
+				continue;
 			if (fend - fstart > count - fcount)
 				fend = fstart + (count - fcount);
 
@@ -1027,13 +1012,15 @@ fail:
 
 	while (!TAILQ_EMPTY(result))
 		uvm_pmr_remove_1strange(result, 0, NULL, 0);
-	uvm_unlock_fpageq();
 
 	if (flags & UVM_PLA_WAITOK) {
-		uvm_wait("uvm_pmr_getpages");
-		goto retry;
+		if (uvm_wait_pla(ptoa(start), ptoa(end) - 1, ptoa(count),
+		    flags & UVM_PLA_FAILOK) == 0)
+			goto retry;
+		KASSERT(flags & UVM_PLA_FAILOK);
 	} else
 		wakeup(&uvm.pagedaemon);
+	uvm_unlock_fpageq();
 
 	return ENOMEM;
 
@@ -1048,6 +1035,11 @@ out:
 	uvm_unlock_fpageq();
 
 	/* Update statistics and zero pages if UVM_PLA_ZERO. */
+#ifdef DIAGNOSTIC
+	fnsegs = 0;
+	fcount = 0;
+	diag_prev = NULL;
+#endif /* DIAGNOSTIC */
 	TAILQ_FOREACH(found, result, pageq) {
 		atomic_clearbits_int(&found->pg_flags,
 		    PG_PMAP0|PG_PMAP1|PG_PMAP2|PG_PMAP3);
@@ -1074,7 +1066,37 @@ out:
 		 */
 		KDASSERT(start == 0 || atop(VM_PAGE_TO_PHYS(found)) >= start);
 		KDASSERT(end == 0 || atop(VM_PAGE_TO_PHYS(found)) < end);
+
+#ifdef DIAGNOSTIC
+		/*
+		 * Update fcount (# found pages) and
+		 * fnsegs (# found segments) counters.
+		 */
+		if (diag_prev == NULL ||
+		    /* new segment if it contains a hole */
+		    atop(VM_PAGE_TO_PHYS(diag_prev)) + 1 !=
+		    atop(VM_PAGE_TO_PHYS(found)) ||
+		    /* new segment if it crosses boundary */
+		    (atop(VM_PAGE_TO_PHYS(diag_prev)) & ~(boundary - 1)) !=
+		    (atop(VM_PAGE_TO_PHYS(found)) & ~(boundary - 1)))
+			fnsegs++;
+		fcount++;
+
+		diag_prev = found;
+#endif /* DIAGNOSTIC */
 	}
+
+#ifdef DIAGNOSTIC
+	/*
+	 * Panic on algorithm failure.
+	 */
+	if (fcount != count || fnsegs > maxseg) {
+		panic("pmemrange allocation error: "
+		    "allocated %ld pages in %d segments, "
+		    "but request was %ld pages in %d segments",
+		    fcount, fnsegs, count, maxseg);
+	}
+#endif /* DIAGNOSTIC */
 
 	return 0;
 }
@@ -1087,6 +1109,7 @@ uvm_pmr_freepages(struct vm_page *pg, psize_t count)
 {
 	struct uvm_pmemrange *pmr;
 	psize_t i, pmr_count;
+	struct vm_page *firstpg = pg;
 
 	for (i = 0; i < count; i++) {
 		KASSERT(atop(VM_PAGE_TO_PHYS(&pg[i])) ==
@@ -1105,19 +1128,20 @@ uvm_pmr_freepages(struct vm_page *pg, psize_t count)
 
 	uvm_lock_fpageq();
 
-	while (count > 0) {
+	for (i = count; i > 0; i -= pmr_count) {
 		pmr = uvm_pmemrange_find(atop(VM_PAGE_TO_PHYS(pg)));
 		KASSERT(pmr != NULL);
 
-		pmr_count = MIN(count, pmr->high - atop(VM_PAGE_TO_PHYS(pg)));
+		pmr_count = MIN(i, pmr->high - atop(VM_PAGE_TO_PHYS(pg)));
 		pg->fpgsz = pmr_count;
 		uvm_pmr_insert(pmr, pg, 0);
 
 		uvmexp.free += pmr_count;
-		count -= pmr_count;
 		pg += pmr_count;
 	}
 	wakeup(&uvmexp.free);
+
+	uvm_wakeup_pla(VM_PAGE_TO_PHYS(firstpg), ptoa(count));
 
 	uvm_unlock_fpageq();
 }
@@ -1129,6 +1153,8 @@ void
 uvm_pmr_freepageq(struct pglist *pgl)
 {
 	struct vm_page *pg;
+	paddr_t pstart;
+	psize_t plen;
 
 	TAILQ_FOREACH(pg, pgl, pageq) {
 		if (!((pg->pg_flags & PQ_FREE) == 0 &&
@@ -1143,8 +1169,13 @@ uvm_pmr_freepageq(struct pglist *pgl)
 	}
 
 	uvm_lock_fpageq();
-	while (!TAILQ_EMPTY(pgl))
-		uvmexp.free += uvm_pmr_remove_1strange(pgl, 0, NULL, 0);
+	while (!TAILQ_EMPTY(pgl)) {
+		pstart = VM_PAGE_TO_PHYS(TAILQ_FIRST(pgl));
+		plen = uvm_pmr_remove_1strange(pgl, 0, NULL, 0);
+		uvmexp.free += plen;
+
+		uvm_wakeup_pla(pstart, ptoa(plen));
+	}
 	wakeup(&uvmexp.free);
 	uvm_unlock_fpageq();
 
@@ -1472,6 +1503,7 @@ uvm_pmr_init(void)
 
 	TAILQ_INIT(&uvm.pmr_control.use);
 	RB_INIT(&uvm.pmr_control.addr);
+	TAILQ_INIT(&uvm.pmr_control.allocs);
 
 	/* By default, one range for the entire address space. */
 	new_pmr = uvm_pmr_allocpmr();
@@ -1834,86 +1866,79 @@ uvm_pmr_print(void)
 }
 #endif
 
-#ifndef SMALL_KERNEL
 /*
- * Zero all free memory.
- */
-void
-uvm_pmr_zero_everything(void)
-{
-	struct uvm_pmemrange	*pmr;
-	struct vm_page		*pg;
-	int			 i;
-
-	uvm_lock_fpageq();
-	TAILQ_FOREACH(pmr, &uvm.pmr_control.use, pmr_use) {
-		/* Zero single pages. */
-		while ((pg = TAILQ_FIRST(&pmr->single[UVM_PMR_MEMTYPE_DIRTY]))
-		    != NULL) {
-			uvm_pmr_remove(pmr, pg);
-			uvm_pagezero(pg);
-			atomic_setbits_int(&pg->pg_flags, PG_ZERO);
-			uvmexp.zeropages++;
-			uvm_pmr_insert(pmr, pg, 0);
-		}
-
-		/* Zero multi page ranges. */
-		while ((pg = RB_ROOT(&pmr->size[UVM_PMR_MEMTYPE_DIRTY]))
-		    != NULL) {
-			pg--; /* Size tree always has second page. */
-			uvm_pmr_remove(pmr, pg);
-			for (i = 0; i < pg->fpgsz; i++) {
-				uvm_pagezero(&pg[i]);
-				atomic_setbits_int(&pg[i].pg_flags, PG_ZERO);
-				uvmexp.zeropages++;
-			}
-			uvm_pmr_insert(pmr, pg, 0);
-		}
-	}
-	uvm_unlock_fpageq();
-}
-
-/*
- * Allocate the biggest contig chunk of memory.
+ * uvm_wait_pla: wait (sleep) for the page daemon to free some pages
+ * in a specific physmem area.
+ *
+ * Returns ENOMEM if the pagedaemon failed to free any pages.
+ * If not failok, failure will lead to panic.
+ *
+ * Must be called with fpageq locked.
  */
 int
-uvm_pmr_alloc_pig(paddr_t *addr, psize_t *sz)
+uvm_wait_pla(paddr_t low, paddr_t high, paddr_t size, int failok)
 {
-	struct uvm_pmemrange	*pig_pmr, *pmr;
-	struct vm_page		*pig_pg, *pg;
-	int			 memtype;
+	struct uvm_pmalloc pma;
+	const char *wmsg = "pmrwait";
 
-	uvm_lock_fpageq();
-	pig_pg = NULL;
-	TAILQ_FOREACH(pmr, &uvm.pmr_control.use, pmr_use) {
-		for (memtype = 0; memtype < UVM_PMR_MEMTYPE_MAX; memtype++) {
-			/* Find biggest page in this memtype pmr. */
-			pg = RB_MAX(uvm_pmr_size, &pmr->size[memtype]);
-			if (pg == NULL)
-				pg = TAILQ_FIRST(&pmr->single[memtype]);
-			else
-				pg--;
+	/*
+	 * Prevent deadlock.
+	 */
+	if (curproc == uvm.pagedaemon_proc) {
+		msleep(&uvmexp.free, &uvm.fpageqlock, PVM, wmsg, hz >> 3);
+		return 0;
+	}
 
-			if (pig_pg == NULL || (pg != NULL && pig_pg != NULL &&
-			    pig_pg->fpgsz < pg->fpgsz)) {
-				pig_pmr = pmr;
-				pig_pg = pg;
+	for (;;) {
+		pma.pm_constraint.ucr_low = low;
+		pma.pm_constraint.ucr_high = high;
+		pma.pm_size = size;
+		pma.pm_flags = UVM_PMA_LINKED;
+		TAILQ_INSERT_TAIL(&uvm.pmr_control.allocs, &pma, pmq);
+
+		wakeup(&uvm.pagedaemon);		/* wake the daemon! */
+		while (pma.pm_flags & (UVM_PMA_LINKED | UVM_PMA_BUSY))
+			msleep(&pma, &uvm.fpageqlock, PVM, wmsg, 0);
+
+		if (!(pma.pm_flags & UVM_PMA_FREED) &&
+		    pma.pm_flags & UVM_PMA_FAIL) {
+			if (failok)
+				return ENOMEM;
+			printf("uvm_wait: failed to free %ld pages between "
+			    "0x%lx-0x%lx\n", atop(size), low, high);
+		} else
+			return 0;
+	}
+	/* UNREACHABLE */
+}
+
+/*
+ * Wake up uvm_pmalloc sleepers.
+ */
+void
+uvm_wakeup_pla(paddr_t low, psize_t len)
+{
+	struct uvm_pmalloc *pma, *pma_next;
+	paddr_t high;
+
+	high = low + len;
+
+	/*
+	 * Wake specific allocations waiting for this memory.
+	 */
+	for (pma = TAILQ_FIRST(&uvm.pmr_control.allocs); pma != NULL;
+	    pma = pma_next) {
+		pma_next = TAILQ_NEXT(pma, pmq);
+
+		if (low < pma->pm_constraint.ucr_high &&
+		    high > pma->pm_constraint.ucr_low) {
+			pma->pm_flags |= UVM_PMA_FREED;
+			if (!(pma->pm_flags & UVM_PMA_BUSY)) {
+				pma->pm_flags &= ~UVM_PMA_LINKED;
+				TAILQ_REMOVE(&uvm.pmr_control.allocs, pma,
+				    pmq);
+				wakeup(pma);
 			}
 		}
 	}
-
-	/* Remove page from freelist. */
-	if (pig_pg != NULL) {
-		uvm_pmr_remove(pig_pmr, pig_pg);
-		uvmexp.free -= pig_pg->fpgsz;
-		if (pig_pg->pg_flags & PG_ZERO)
-			uvmexp.zeropages -= pig_pg->fpgsz;
-		*addr = VM_PAGE_TO_PHYS(pig_pg);
-		*sz = pig_pg->fpgsz;
-	}
-	uvm_unlock_fpageq();
-
-	/* Return. */
-	return (pig_pg != NULL ? 0 : ENOMEM);
 }
-#endif /* SMALL_KERNEL */

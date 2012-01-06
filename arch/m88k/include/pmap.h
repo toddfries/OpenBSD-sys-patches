@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.19 2011/01/05 22:20:22 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.21 2011/10/25 18:38:06 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1991 Carnegie Mellon University
@@ -52,9 +52,7 @@ extern	apr_t		default_apr;
 #define	pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
 
 #define pmap_copy(dp,sp,d,l,s)		do { /* nothing */ } while (0)
-#if !defined(M88110)
 #define pmap_update(pmap)		do { /* nothing */ } while (0)
-#endif
 
 #define	pmap_clear_modify(pg)		pmap_unsetbit(pg, PG_M)
 #define	pmap_clear_reference(pg)	pmap_unsetbit(pg, PG_U)
@@ -62,6 +60,7 @@ extern	apr_t		default_apr;
 void	pmap_bootstrap(paddr_t, paddr_t);
 void	pmap_bootstrap_cpu(cpuid_t);
 void	pmap_cache_ctrl(vaddr_t, vaddr_t, u_int);
+void	pmap_page_uncache(paddr_t);
 #define pmap_unuse_final(p)		/* nothing */
 #define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
 int	pmap_set_modify(pmap_t, vaddr_t);

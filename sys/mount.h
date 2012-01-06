@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.103 2011/04/05 18:51:26 thib Exp $	*/
+/*	$OpenBSD: mount.h,v 1.106 2011/09/19 14:48:04 beck Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -483,9 +483,7 @@ struct vfsconf {
 /* buffer cache statistics */
 struct bcachestats {
 	int64_t numbufs;		/* number of buffers allocated */
-	int64_t freebufs;		/* number of free buffers */
 	int64_t numbufpages;		/* number of pages in buffer cache */
-	int64_t numfreepages; 		/* number of free pages */
 	int64_t numdirtypages; 		/* number of dirty free pages */
 	int64_t numcleanpages; 		/* number of clean free pages */
 	int64_t pendingwrites;		/* number of pending writes */
@@ -494,6 +492,11 @@ struct bcachestats {
 	int64_t numreads;		/* total reads started */
 	int64_t cachehits;		/* total reads found in cache */
 	int64_t busymapped;		/* number of busy and mapped buffers */
+	int64_t dmapages;		/* dma reachable pages in buffer cache */
+	int64_t highpages;		/* pages above dma region */
+	int64_t delwribufs;		/* delayed write buffers */
+	int64_t kvaslots;		/* kva slots total */
+	int64_t kvaslots_avail;		/* available kva slots */
 };
 #ifdef _KERNEL
 extern struct bcachestats bcstats;
@@ -504,7 +507,8 @@ extern long buflowpages, bufhighpages, bufbackpages;
     : bcstats.numcleanpages - buflowpages)
 extern int bufcachepercent;
 extern void bufadjust(int);
-extern int bufbackoff(void);
+struct uvm_constraint_range;
+extern int bufbackoff(struct uvm_constraint_range*, long);
 
 /*
  * Operations supported on mounted file system.

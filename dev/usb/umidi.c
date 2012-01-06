@@ -1,4 +1,4 @@
-/*	$OpenBSD: umidi.c,v 1.28 2011/01/25 20:03:36 jakemsr Exp $	*/
+/*	$OpenBSD: umidi.c,v 1.32 2011/07/03 15:47:17 matthew Exp $	*/
 /*	$NetBSD: umidi.c,v 1.16 2002/07/11 21:14:32 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -234,9 +234,6 @@ umidi_activate(struct device *self, int act)
 	struct umidi_softc *sc = (struct umidi_softc *)self;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		DPRINTFN(1,("umidi_activate (activate)\n"));
-		break;
 	case DVACT_DEACTIVATE:
 		DPRINTFN(1,("umidi_activate (deactivate)\n"));
 		sc->sc_dying = 1;
@@ -456,7 +453,7 @@ alloc_all_endpoints_fixed_ep(struct umidi_softc *sc)
 	sc->sc_endpoints = malloc(sizeof(*sc->sc_out_ep)*
 				  (sc->sc_out_num_endpoints+
 				   sc->sc_in_num_endpoints),
-				  M_USBDEV, M_WAITOK);
+				  M_USBDEV, M_WAITOK | M_CANFAIL);
 	if (!sc->sc_endpoints) {
 		return USBD_NOMEM;
 	}
@@ -599,7 +596,7 @@ alloc_all_endpoints_yamaha(struct umidi_softc *sc)
 	sc->sc_endpoints = malloc(sizeof(struct umidi_endpoint)*
 				  (sc->sc_out_num_endpoints+
 				   sc->sc_in_num_endpoints),
-				  M_USBDEV, M_WAITOK);
+				  M_USBDEV, M_WAITOK | M_CANFAIL);
 	if (!sc->sc_endpoints)
 		return USBD_NOMEM;
 	if (sc->sc_out_num_endpoints) {
@@ -641,7 +638,7 @@ alloc_all_endpoints_genuine(struct umidi_softc *sc)
 	interface_desc = usbd_get_interface_descriptor(sc->sc_iface);
 	num_ep = interface_desc->bNumEndpoints;
 	sc->sc_endpoints = p = malloc(sizeof(struct umidi_endpoint) * num_ep,
-				      M_USBDEV, M_WAITOK);
+				      M_USBDEV, M_WAITOK | M_CANFAIL);
 	if (!p)
 		return USBD_NOMEM;
 
@@ -734,7 +731,7 @@ alloc_all_jacks(struct umidi_softc *sc)
 	sc->sc_jacks =
 	    malloc(sizeof(*sc->sc_out_jacks)*(sc->sc_in_num_jacks+
 					      sc->sc_out_num_jacks),
-		   M_USBDEV, M_WAITOK);
+		   M_USBDEV, M_WAITOK | M_CANFAIL);
 	if (!sc->sc_jacks)
 		return USBD_NOMEM;
 	sc->sc_out_jacks =
@@ -975,7 +972,7 @@ alloc_all_mididevs(struct umidi_softc *sc, int nmidi)
 {
 	sc->sc_num_mididevs = nmidi;
 	sc->sc_mididevs = malloc(sizeof(*sc->sc_mididevs)*nmidi, M_USBDEV,
-	    M_WAITOK | M_ZERO);
+	    M_WAITOK | M_CANFAIL | M_ZERO);
 	if (!sc->sc_mididevs)
 		return USBD_NOMEM;
 

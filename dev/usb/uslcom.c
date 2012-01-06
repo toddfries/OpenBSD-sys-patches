@@ -1,4 +1,4 @@
-/*	$OpenBSD: uslcom.c,v 1.22 2011/01/25 20:03:36 jakemsr Exp $	*/
+/*	$OpenBSD: uslcom.c,v 1.24 2011/09/16 13:36:18 yuo Exp $	*/
 
 /*
  * Copyright (c) 2006 Jonathan Gray <jsg@openbsd.org>
@@ -142,7 +142,8 @@ static const struct usb_devno uslcom_devs[] = {
 	{ USB_VENDOR_SILABS,		USB_PRODUCT_SILABS_USBWAVE12 },
 	{ USB_VENDOR_SILABS2,		USB_PRODUCT_SILABS2_DCU11CLONE },
 	{ USB_VENDOR_SILABS3,		USB_PRODUCT_SILABS3_GPRS_MODEM },
-	{ USB_VENDOR_USI,		USB_PRODUCT_USI_MC60 }
+	{ USB_VENDOR_USI,		USB_PRODUCT_USI_MC60 },
+	{ USB_VENDOR_VAISALA,		USB_PRODUCT_VAISALA_USBINSTCABLE }
 };
 
 int uslcom_match(struct device *, void *, void *); 
@@ -265,9 +266,6 @@ uslcom_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		if (sc->sc_subdev != NULL)
 			rv = config_deactivate(sc->sc_subdev);

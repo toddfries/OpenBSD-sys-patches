@@ -1,4 +1,4 @@
-/*	$OpenBSD: ext2fs_alloc.c,v 1.25 2008/01/05 19:49:26 otto Exp $	*/
+/*	$OpenBSD: ext2fs_alloc.c,v 1.27 2011/09/18 23:20:28 bluhm Exp $	*/
 /*	$NetBSD: ext2fs_alloc.c,v 1.10 2001/07/05 08:38:27 toshii Exp $	*/
 
 /*
@@ -162,7 +162,7 @@ ext2fs_inode_alloc(struct inode *pip, mode_t mode, struct ucred *cred,
 	}
 	ip = VTOI(*vpp);
 	if (ip->i_e2fs_mode && ip->i_e2fs_nlink != 0) {
-		printf("mode = 0%o, nlinks %d, inum = %d, fs = %s\n",
+		printf("mode = 0%o, nlinks %u, inum = %u, fs = %s\n",
 			ip->i_e2fs_mode, ip->i_e2fs_nlink, ip->i_number, fs->e2fs_fsmnt);
 		panic("ext2fs_valloc: dup alloc");
 	}
@@ -324,7 +324,7 @@ ext2fs_alloccg(struct inode *ip, int cg, int32_t bpref, int size)
 		return (0);
 	error = bread(ip->i_devvp, fsbtodb(fs,
 		fs->e2fs_gd[cg].ext2bgd_b_bitmap),
-		(int)fs->e2fs_bsize, NOCRED, &bp);
+		(int)fs->e2fs_bsize, &bp);
 	if (error || fs->e2fs_gd[cg].ext2bgd_nbfree == 0) {
 		brelse(bp);
 		return (0);
@@ -409,7 +409,7 @@ ext2fs_nodealloccg(struct inode *ip, int cg, int32_t ipref, int mode)
 		return (0);
 	error = bread(ip->i_devvp, fsbtodb(fs,
 		fs->e2fs_gd[cg].ext2bgd_i_bitmap),
-		(int)fs->e2fs_bsize, NOCRED, &bp);
+		(int)fs->e2fs_bsize, &bp);
 	if (error) {
 		brelse(bp);
 		return (0);
@@ -474,13 +474,13 @@ ext2fs_blkfree(struct inode *ip, int32_t bno)
 	fs = ip->i_e2fs;
 	cg = dtog(fs, bno);
 	if ((u_int)bno >= fs->e2fs.e2fs_bcount) {
-		printf("bad block %d, ino %d\n", bno, ip->i_number);
+		printf("bad block %d, ino %u\n", bno, ip->i_number);
 		ext2fs_fserr(fs, ip->i_e2fs_uid, "bad block");
 		return;
 	}
 	error = bread(ip->i_devvp,
 		fsbtodb(fs, fs->e2fs_gd[cg].ext2bgd_b_bitmap),
-		(int)fs->e2fs_bsize, NOCRED, &bp);
+		(int)fs->e2fs_bsize, &bp);
 	if (error) {
 		brelse(bp);
 		return;
@@ -520,7 +520,7 @@ ext2fs_inode_free(struct inode *pip, ino_t ino, mode_t mode)
 	cg = ino_to_cg(fs, ino);
 	error = bread(pip->i_devvp, 
 	        fsbtodb(fs, fs->e2fs_gd[cg].ext2bgd_i_bitmap),
-		(int)fs->e2fs_bsize, NOCRED, &bp);
+		(int)fs->e2fs_bsize, &bp);
 	if (error) {
 		brelse(bp);
 		return (0);

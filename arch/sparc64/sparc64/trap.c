@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.67 2011/04/03 14:56:28 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.74 2011/11/16 20:50:19 deraadt Exp $	*/
 /*	$NetBSD: trap.c,v 1.73 2001/08/09 01:03:01 eeh Exp $ */
 
 /*
@@ -80,12 +80,6 @@
 #include <machine/db_machdep.h>
 #else
 #include <machine/frame.h>
-#endif
-#ifdef COMPAT_SVR4
-#include <machine/svr4_machdep.h>
-#endif
-#ifdef COMPAT_SVR4_32
-#include <machine/svr4_32_machdep.h>
 #endif
 
 #include <sparc64/fpu/fpu_extern.h>
@@ -320,7 +314,6 @@ const char *trap_type[] = {
 
 #define	N_TRAP_TYPES	(sizeof trap_type / sizeof *trap_type)
 
-static __inline void userret(struct proc *);
 static __inline void share_fpu(struct proc *, struct trapframe64 *);
 
 void trap(struct trapframe64 *tf, unsigned type, vaddr_t pc, long tstate);
@@ -333,22 +326,6 @@ void text_access_fault(struct trapframe64 *tf, unsigned type,
 void text_access_error(struct trapframe64 *tf, unsigned type, 
 	vaddr_t pc, u_long sfsr, vaddr_t afva, u_long afsr);
 void syscall(struct trapframe64 *, register_t code, register_t pc);
-
-/*
- * Define the code needed before returning to user mode, for
- * trap, mem_access_fault, and syscall.
- */
-static __inline void
-userret(struct proc *p)
-{
-	int sig;
-
-	/* take pending signals */
-	while ((sig = CURSIG(p)) != 0)
-		postsig(sig);
-
-	curcpu()->ci_schedstate.spc_curpriority = p->p_priority = p->p_usrpri;
-}
 
 /*
  * If someone stole the FPU while we were away, do not enable it
@@ -472,39 +449,17 @@ dopanic:
 			    pc, (long)tf->tf_npc, pstate, PSTATE_BITS);
 			/* NOTREACHED */
 		}
-#if defined(COMPAT_SVR4) || defined(COMPAT_SVR4_32)
-badtrap:
-#endif
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGILL, type, ILL_ILLOPC, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
-
-#if defined(COMPAT_SVR4) || defined(COMPAT_SVR4_32)
-	case T_SVR4_GETCC:
-	case T_SVR4_SETCC:
-	case T_SVR4_GETPSR:
-	case T_SVR4_SETPSR:
-	case T_SVR4_GETHRTIME:
-	case T_SVR4_GETHRVTIME:
-	case T_SVR4_GETHRESTIME:
-#if defined(COMPAT_SVR4_32)
-		if (svr4_32_trap(type, p))
-			break;
-#endif
-#if defined(COMPAT_SVR4)
-		if (svr4_trap(type, p))
-			break;
-#endif
-		goto badtrap;
-#endif
 
 	case T_AST:
 		p->p_md.md_astpending = 0;
 		if (p->p_flag & P_OWEUPC) {
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			ADDUPROF(p);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 		}
 		if (curcpu()->ci_want_resched)
 			preempt(NULL);
@@ -521,9 +476,9 @@ badtrap:
 		 */
 		write_user_windows();
 		if (rwindow_save(p) == -1) {
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			trapsignal(p, SIGILL, 0, ILL_BADSTK, sv);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 		}
 		break;
 
@@ -533,9 +488,9 @@ badtrap:
 
 		if (copyin((caddr_t)pc, &ins, sizeof(ins)) != 0) {
 			/* XXX Can this happen? */
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			trapsignal(p, SIGILL, 0, ILL_ILLOPC, sv);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 			break;
 		}
 		if (ins.i_any.i_op == IOP_mem &&
@@ -554,9 +509,9 @@ badtrap:
 				ADVANCE;
 			break;
 		}
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGILL, 0, ILL_ILLOPC, sv);	/* XXX code? */
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 	}
 
@@ -564,22 +519,22 @@ badtrap:
 	case T_TEXTFAULT:
 	case T_PRIVINST:
 	case T_PRIVACT:
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGILL, 0, ILL_ILLOPC, sv);	/* XXX code? */
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_FPDISABLED: {
 		struct fpstate64 *fs = p->p_md.md_fpstate;
 
 		if (fs == NULL) {
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			/* NOTE: fpstate must be 64-bit aligned */
 			fs = malloc((sizeof *fs), M_SUBPROC, M_WAITOK);
 			*fs = initfpstate;
 			fs->fs_qsize = 0;
 			p->p_md.md_fpstate = fs;
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 		}
 
 		/*
@@ -606,6 +561,7 @@ badtrap:
 			uvmexp.fpswtch++;
 		}
 		tf->tf_tstate |= (PSTATE_PEF<<TSTATE_PSTATE_SHIFT);
+		sparc_wr(fprs, FPRS_FEF, 0);
 		break;
 	}
 
@@ -616,9 +572,9 @@ badtrap:
 
 		if (copyin((caddr_t)pc, &ins, sizeof(ins)) != 0) {
 			/* XXX Can this happen? */
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			trapsignal(p, SIGILL, 0, ILL_ILLOPC, sv);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 			break;
 		}
 		if (ins.i_any.i_op == IOP_mem &&
@@ -629,9 +585,9 @@ badtrap:
 			if (emul_qf(ins.i_int, p, sv, tf))
 				ADVANCE;
 		} else {
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			trapsignal(p, SIGILL, 0, ILL_ILLOPC, sv);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 		}
 		break;
 	}
@@ -646,7 +602,7 @@ badtrap:
 		 * core from the interrupt stack is not a good idea.
 		 * It causes random crashes.
 		 */
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		sigexit(p, SIGKILL);
 		/* NOTREACHED */
 		break;
@@ -674,9 +630,9 @@ badtrap:
 		}
 		
 		/* XXX sv.sival_ptr should be the fault address! */
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGBUS, 0, BUS_ADRALN, sv);	/* XXX code? */
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_FP_IEEE_754:
@@ -711,22 +667,22 @@ badtrap:
 		break;
 
 	case T_TAGOF:
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGEMT, 0, EMT_TAGOVF, sv);	/* XXX code? */
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_BREAKPOINT:
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGTRAP, 0, TRAP_BRKPT, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_DIV0:
 		ADVANCE;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGFPE, 0, FPE_INTDIV, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_CLEANWIN:
@@ -742,25 +698,25 @@ badtrap:
 
 	case T_RANGECHECK:
 		ADVANCE;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGILL, 0, ILL_ILLOPN, sv);	/* XXX code? */
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_FIXALIGN:
 		uprintf("T_FIXALIGN\n");
 		ADVANCE;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGILL, 0, ILL_ILLOPN, sv);	/* XXX code? */
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 
 	case T_INTOF:
 		uprintf("T_INTOF\n");		/* XXX */
 		ADVANCE;
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGFPE, FPE_INTOVF_TRAP, FPE_INTOVF, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		break;
 	}
 	userret(p);
@@ -881,7 +837,7 @@ data_access_fault(tf, type, pc, addr, sfva, sfsr)
 			goto kfault;
 		}
 	} else {
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		p->p_md.md_tf = tf;
 	}
 
@@ -946,7 +902,7 @@ kfault:
 	}
 
 	if ((tstate & TSTATE_PRIV) == 0) {
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 		userret(p);
 		share_fpu(p, tf);
 	} else {
@@ -979,6 +935,14 @@ data_access_error(tf, type, afva, afsr, sfva, sfsr)
 	uvmexp.traps++;
 	if ((p = curproc) == NULL)	/* safety check */
 		p = &proc0;
+
+	/*
+	 * Catch PCI config space reads.
+	 */
+	if (curcpu()->ci_pci_probe) {
+		curcpu()->ci_pci_fault = 1;
+		goto out;
+	}
 
 	pc = tf->tf_pc;
 	tstate = tf->tf_tstate;
@@ -1020,9 +984,9 @@ data_access_error(tf, type, afva, afsr, sfva, sfsr)
 		return;
 	}
 
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 	trapsignal(p, SIGSEGV, VM_PROT_READ|VM_PROT_WRITE, SEGV_MAPERR, sv);
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 out:
 
 	if ((tstate & TSTATE_PRIV) == 0) {
@@ -1072,7 +1036,7 @@ text_access_fault(tf, type, pc, sfsr)
 	} else
 		p->p_md.md_tf = tf;
 
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 
 	vm = p->p_vmspace;
 	/* alas! must call the horrible vm code */
@@ -1106,7 +1070,7 @@ text_access_fault(tf, type, pc, sfsr)
 		trapsignal(p, SIGSEGV, access_type, SEGV_MAPERR, sv);
 	}
 
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 
 	if ((tstate & TSTATE_PRIV) == 0) {
 		userret(p);
@@ -1159,9 +1123,9 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 			panic("text_access_error: kernel memory error");
 
 		/* User fault -- Berr */
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		trapsignal(p, SIGBUS, 0, BUS_ADRALN, sv);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 	}
 
 	if ((sfsr & SFSR_FV) == 0 || (sfsr & SFSR_FT) == 0)
@@ -1180,7 +1144,7 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 	} else
 		p->p_md.md_tf = tf;
 
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 
 	vm = p->p_vmspace;
 	/* alas! must call the horrible vm code */
@@ -1216,7 +1180,7 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 		trapsignal(p, SIGSEGV, access_type, SEGV_MAPERR, sv);
 	}
 
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 
 out:
 	if ((tstate & TSTATE_PRIV) == 0) {
@@ -1345,9 +1309,9 @@ syscall(tf, code, pc)
 		
 #ifdef KTRACE
 		if (KTRPOINT(p, KTR_SYSCALL)) {
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 			ktrsyscall(p, code, callp->sy_argsize, args);
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 		}
 #endif
 		if (error)
@@ -1358,25 +1322,25 @@ syscall(tf, code, pc)
 	}
 
 #ifdef SYSCALL_DEBUG
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 	scdebug_call(p, code, args);
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 #endif
 	rval[0] = 0;
 	rval[1] = tf->tf_out[1];
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE)) {
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		error = systrace_redirect(code, p, args, rval);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 	} else
 #endif
 	{
 		if (lock)
-			KERNEL_PROC_LOCK(p);
+			KERNEL_LOCK();
 		error = (*callp->sy_call)(p, args, rval);
 		if (lock)
-			KERNEL_PROC_UNLOCK(p);
+			KERNEL_UNLOCK();
 	}
 	switch (error) {
 		vaddr_t dest;
@@ -1418,16 +1382,16 @@ syscall(tf, code, pc)
 	}
 
 #ifdef SYSCALL_DEBUG
-	KERNEL_PROC_LOCK(p);
+	KERNEL_LOCK();
 	scdebug_ret(p, code, error, rval);
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 #endif
 	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		ktrsysret(p, code, error, rval[0]);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 	}
 #endif
 	share_fpu(p, tf);
@@ -1450,17 +1414,17 @@ child_return(arg)
 	tf->tf_out[1] = 0;
 	tf->tf_tstate &= ~(((int64_t)(ICC_C|XCC_C))<<TSTATE_CCR_SHIFT);
 
-	KERNEL_PROC_UNLOCK(p);
+	KERNEL_UNLOCK();
 
 	userret(p);
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_PROC_LOCK(p);
+		KERNEL_LOCK();
 		ktrsysret(p,
 		    (p->p_flag & P_THREAD) ? SYS_rfork :
 		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
 		    0, 0);
-		KERNEL_PROC_UNLOCK(p);
+		KERNEL_UNLOCK();
 	}
 #endif
 }

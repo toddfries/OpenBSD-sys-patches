@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdint.h,v 1.4 2006/12/10 22:17:55 deraadt Exp $	*/
+/*	$OpenBSD: stdint.h,v 1.7 2012/01/05 20:37:50 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 2005 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -136,30 +136,30 @@ typedef	__uintmax_t		uintmax_t;
 #define	UINT_LEAST64_MAX	UINT64_MAX
 
 /* 7.18.2.3 Limits of fastest minimum-width integer types */
-#define	INT_FAST8_MIN		INT8_MIN
-#define	INT_FAST16_MIN		INT16_MIN
-#define	INT_FAST32_MIN		INT32_MIN
-#define	INT_FAST64_MIN		INT64_MIN
+#define	INT_FAST8_MIN		__INT_FAST8_MIN
+#define	INT_FAST16_MIN		__INT_FAST16_MIN
+#define	INT_FAST32_MIN		__INT_FAST32_MIN
+#define	INT_FAST64_MIN		__INT_FAST64_MIN
 
-#define	INT_FAST8_MAX		INT8_MAX
-#define	INT_FAST16_MAX		INT16_MAX
-#define	INT_FAST32_MAX		INT32_MAX
-#define	INT_FAST64_MAX		INT64_MAX
+#define	INT_FAST8_MAX		__INT_FAST8_MAX
+#define	INT_FAST16_MAX		__INT_FAST16_MAX
+#define	INT_FAST32_MAX		__INT_FAST32_MAX
+#define	INT_FAST64_MAX		__INT_FAST64_MAX
 
-#define	UINT_FAST8_MAX		UINT8_MAX
-#define	UINT_FAST16_MAX		UINT16_MAX
-#define	UINT_FAST32_MAX		UINT32_MAX
-#define	UINT_FAST64_MAX		UINT64_MAX
+#define	UINT_FAST8_MAX		__UINT_FAST8_MAX
+#define	UINT_FAST16_MAX		__UINT_FAST16_MAX
+#define	UINT_FAST32_MAX		__UINT_FAST32_MAX
+#define	UINT_FAST64_MAX		__UINT_FAST64_MAX
 
 /* 7.18.2.4 Limits of integer types capable of holding object pointers */
 #ifdef __LP64__
-#define	INTPTR_MIN		INT64_MIN
-#define	INTPTR_MAX		INT64_MAX
-#define	UINTPTR_MAX		UINT64_MAX
+#define	INTPTR_MIN		(-0x7fffffffffffffffL - 1)
+#define	INTPTR_MAX		0x7fffffffffffffffL
+#define	UINTPTR_MAX		0xffffffffffffffffUL
 #else
-#define	INTPTR_MIN		INT32_MIN
-#define	INTPTR_MAX		INT32_MAX
-#define	UINTPTR_MAX		UINT32_MAX
+#define	INTPTR_MIN		(-0x7fffffffL - 1)
+#define	INTPTR_MAX		0x7fffffffL
+#define	UINTPTR_MAX		0xffffffffUL
 #endif
 
 /* 7.18.2.5 Limits of greatest-width integer types */
@@ -189,8 +189,12 @@ typedef	__uintmax_t		uintmax_t;
 #endif
 
 /* Limits of wchar_t */
+#ifndef	WCHAR_MIN
 #define	WCHAR_MIN		INT32_MIN
+#endif
+#ifndef	WCHAR_MAX
 #define	WCHAR_MAX		INT32_MAX
+#endif
 
 /* Limits of wint_t */
 #define	WINT_MIN		INT32_MIN

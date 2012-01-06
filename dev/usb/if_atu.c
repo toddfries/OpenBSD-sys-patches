@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atu.c,v 1.98 2010/12/17 22:38:54 jasper Exp $ */
+/*	$OpenBSD: if_atu.c,v 1.100 2011/09/18 23:24:12 krw Exp $ */
 /*
  * Copyright (c) 2003, 2004
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.
@@ -53,7 +53,7 @@
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
-#include <sys/kthread.h>
+#include <sys/timeout.h>
 #include <sys/queue.h>
 #include <sys/device.h>
 
@@ -1521,8 +1521,6 @@ atu_activate(struct device *self, int act)
 	struct atu_softc *sc = (struct atu_softc *)self;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
 	case DVACT_DEACTIVATE:
 		usbd_deactivate(sc->atu_udev);
 		break;

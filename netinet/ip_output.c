@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.221 2011/05/28 12:51:40 weerd Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.225 2011/12/29 12:10:52 haesbaert Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -605,7 +605,7 @@ sendit:
 #if NPF > 0
 		if ((encif = enc_getif(tdb->tdb_rdomain,
 		    tdb->tdb_tap)) == NULL ||
-		    pf_test(PF_OUT, encif, &m, NULL) != PF_PASS) {
+		    pf_test(AF_INET, PF_OUT, encif, &m, NULL) != PF_PASS) {
 			error = EACCES;
 			splx(s);
 			m_freem(m);
@@ -684,12 +684,10 @@ sendit:
 	}
 
 	/*
-	 * If deferred crypto processing is needed, check that the
-	 * interface supports it.
+	 * If we got here and IPsec crypto processing didn't happen, drop it.
 	 */
 	if (ipsec_in_use && (mtag = m_tag_find(m,
-	    PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED, NULL)) != NULL &&
-	    (ifp->if_capabilities & IFCAP_IPSEC) == 0) {
+	    PACKET_TAG_IPSEC_OUT_CRYPTO_NEEDED, NULL)) != NULL) {
 		/* Notify IPsec to do its own crypto. */
 		ipsp_skipcrypto_unmark((struct tdb_ident *)(mtag + 1));
 		m_freem(m);
@@ -704,7 +702,7 @@ sendit:
 	 * Packet filter
 	 */
 #if NPF > 0
-	if (pf_test(PF_OUT, ifp, &m, NULL) != PF_PASS) {
+	if (pf_test(AF_INET, PF_OUT, ifp, &m, NULL) != PF_PASS) {
 		error = EHOSTUNREACH;
 		m_freem(m);
 		goto done;
@@ -748,7 +746,8 @@ sendit:
 	 */
 	if (ntohs(ip->ip_len) <= mtu) {
 		ip->ip_sum = 0;
-		if ((ifp->if_capabilities & IFCAP_CSUM_IPv4)) {
+		if ((ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
+		    (ifp->if_bridge == NULL)) {
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 			ipstat.ips_outhwcsum++;
 		} else
@@ -894,7 +893,8 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		mhip->ip_off = htons((u_int16_t)mhip->ip_off);
 		mhip->ip_sum = 0;
 		if ((ifp != NULL) &&
-		    (ifp->if_capabilities & IFCAP_CSUM_IPv4)) {
+		    (ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
+		    (ifp->if_bridge == NULL)) {
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 			ipstat.ips_outhwcsum++;
 		} else
@@ -913,7 +913,8 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 	ip->ip_off |= htons(IP_MF);
 	ip->ip_sum = 0;
 	if ((ifp != NULL) &&
-	    (ifp->if_capabilities & IFCAP_CSUM_IPv4)) {
+	    (ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
+	    (ifp->if_bridge == NULL)) {
 		m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 		ipstat.ips_outhwcsum++;
 	} else
@@ -1068,6 +1069,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVIF:
 		case IP_RECVTTL:
 		case IP_RECVDSTPORT:
+		case IP_RECVRTABLE:
 			if (m == NULL || m->m_len != sizeof(int))
 				error = EINVAL;
 			else {
@@ -1116,6 +1118,9 @@ ip_ctloutput(op, so, level, optname, mp)
 					break;
 				case IP_RECVDSTPORT:
 					OPTSET(INP_RECVDSTPORT);
+					break;
+				case IP_RECVRTABLE:
+					OPTSET(INP_RECVRTABLE);
 					break;
 				}
 			}
@@ -1448,6 +1453,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVIF:
 		case IP_RECVTTL:
 		case IP_RECVDSTPORT:
+		case IP_RECVRTABLE:
 			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 			m->m_len = sizeof(int);
 			switch (optname) {
@@ -1485,6 +1491,9 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 			case IP_RECVDSTPORT:
 				optval = OPTBIT(INP_RECVDSTPORT);
+				break;
+			case IP_RECVRTABLE:
+				optval = OPTBIT(INP_RECVRTABLE);
 				break;
 			}
 			*mtod(m, int *) = optval;

@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.51 2010/11/19 20:52:39 miod Exp $
+#	$OpenBSD: GENERIC,v 1.55 2011/12/21 23:12:03 miod Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -55,7 +55,7 @@ hilms*		at hil?		# mice, buttons and tablets
 wsmouse*	at hilms? mux 0
 hilid*		at hil?		# ID module
 
-# Frodo utility chip found on 362, 382 and 4xx's
+# Frodo utility chip found on 382 and 4xx's
 frodo0		at intio?
 #isabr0		at frodo0	# ISA slot on some 4xx models
 
@@ -93,9 +93,13 @@ wsdisplay*	at topcat?
 tvrx*		at dio?
 wsdisplay*	at tvrx?
 
+# 362/382 built-in framebuffer
+sti*		at dio?
+wsdisplay*	at sti?
+
 # SGC framebuffers
 sti*		at sgc?
-wsdisplay*	at sti?
+#wsdisplay*	at sti?		# already done above
 
 dca0		at dio? scode 9 flags 1	# DCA serial interfaces
 dca*		at dio?
@@ -119,8 +123,8 @@ mt*		at hpibbus?			# HP-IB 9-track tape
 ppi0		at hpibbus0 slave 5 punit 0	# HP-IB plotter
 
 spc*		at dio? flags 0x00		# SCSI controller
-scsibus*	at spc?
 
+scsibus*	at scsi?
 sd*		at scsibus?			# SCSI disks
 st*		at scsibus?			# SCSI tapes
 cd*		at scsibus?			# SCSI CD-ROMs
@@ -128,6 +132,10 @@ ch*		at scsibus?			# SCSI changer devices
 safte*		at scsibus?			# SCSI AF-TE
 ses*		at scsibus?			# SCSI enclosure services
 uk*		at scsibus?			# unknown SCSI devices
+
+# 425e digital audio
+arcofi*		at dio?
+audio*		at arcofi?
 
 # ISA devices
 #isa*		at isabr?

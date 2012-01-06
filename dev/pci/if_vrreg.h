@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vrreg.h,v 1.28 2011/03/13 15:38:50 stsp Exp $	*/
+/*	$OpenBSD: if_vrreg.h,v 1.30 2012/01/05 19:08:25 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -481,6 +481,8 @@ struct vr_mii_frame {
 
 struct vr_softc {
 	struct device		sc_dev;		/* generic device structure */
+	pci_chipset_tag_t	sc_pc;		/* PCI registers info */
+	pcitag_t		sc_tag;
 	void *			sc_ih;		/* interrupt handler cookie */
 	struct arpcom		arpcom;		/* interface info */
 	bus_space_handle_t	vr_bhandle;	/* bus space handle */
@@ -493,6 +495,7 @@ struct vr_softc {
 	struct vr_chain_data	vr_cdata;
 	struct mii_data		sc_mii;
 	struct timeout		sc_to;
+	struct timeout		sc_rxto;
 	bus_dmamap_t		sc_listmap;	/* descriptor list map */
 	bus_dma_segment_t	sc_listseg;
 	int			sc_rxbufs;

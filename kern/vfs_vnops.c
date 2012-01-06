@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.65 2010/07/26 01:56:27 guenther Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.70 2011/11/27 21:31:08 guenther Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -53,9 +53,9 @@
 #include <sys/cdio.h>
 #include <sys/poll.h>
 #include <sys/filedesc.h>
+#include <sys/specdev.h>
 
 #include <uvm/uvm_extern.h>
-#include <miscfs/specfs/specdev.h>
 
 int vn_read(struct file *, off_t *, struct uio *, struct ucred *);
 int vn_write(struct file *, off_t *, struct uio *, struct ucred *);
@@ -133,6 +133,10 @@ vn_open(struct nameidata *ndp, int fmode, int cmode)
 	}
 	if (vp->v_type == VLNK) {
 		error = ELOOP;
+		goto bad;
+	}
+	if ((fmode & O_DIRECTORY) && vp->v_type != VDIR) {
+		error = ENOTDIR;
 		goto bad;
 	}
 	if ((fmode & O_CREAT) == 0) {
@@ -255,8 +259,6 @@ vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base, int len, off_t offset,
 	struct iovec aiov;
 	int error;
 
-	if ((ioflg & IO_NODELOCKED) == 0)
-		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	auio.uio_iov = &aiov;
 	auio.uio_iovcnt = 1;
 	aiov.iov_base = base;
@@ -266,18 +268,22 @@ vn_rdwr(enum uio_rw rw, struct vnode *vp, caddr_t base, int len, off_t offset,
 	auio.uio_segflg = segflg;
 	auio.uio_rw = rw;
 	auio.uio_procp = p;
+
+	if ((ioflg & IO_NODELOCKED) == 0)
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	if (rw == UIO_READ) {
 		error = VOP_READ(vp, &auio, ioflg, cred);
 	} else {
 		error = VOP_WRITE(vp, &auio, ioflg, cred);
 	}
+	if ((ioflg & IO_NODELOCKED) == 0)
+		VOP_UNLOCK(vp, 0, p);
+
 	if (aresid)
 		*aresid = auio.uio_resid;
 	else
 		if (auio.uio_resid && error == 0)
 			error = EIO;
-	if ((ioflg & IO_NODELOCKED) == 0)
-		VOP_UNLOCK(vp, 0, p);
 	return (error);
 }
 
@@ -289,12 +295,15 @@ vn_read(struct file *fp, off_t *poff, struct uio *uio, struct ucred *cred)
 {
 	struct vnode *vp = (struct vnode *)fp->f_data;
 	int error = 0;
-	size_t count;
+	size_t count = uio->uio_resid;
 	struct proc *p = uio->uio_procp;
+
+	/* no wrap around of offsets except on character devices */
+	if (vp->v_type != VCHR && count > LLONG_MAX - *poff)
+		return (EINVAL);
 
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 	uio->uio_offset = *poff;
-	count = uio->uio_resid;
 	if (vp->v_type != VDIR)
 		error = VOP_READ(vp, uio,
 		    (fp->f_flag & FNONBLOCK) ? IO_NDELAY : 0, cred);
@@ -314,7 +323,9 @@ vn_write(struct file *fp, off_t *poff, struct uio *uio, struct ucred *cred)
 	int error, ioflag = IO_UNIT;
 	size_t count;
 
-	if (vp->v_type == VREG && (fp->f_flag & O_APPEND))
+	/* note: pwrite/pwritev are unaffected by O_APPEND */
+	if (vp->v_type == VREG && (fp->f_flag & O_APPEND) &&
+	    poff == &fp->f_offset)
 		ioflag |= IO_APPEND;
 	if (fp->f_flag & FNONBLOCK)
 		ioflag |= IO_NDELAY;

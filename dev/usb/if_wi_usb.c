@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_usb.c,v 1.50 2011/01/25 20:03:35 jakemsr Exp $ */
+/*	$OpenBSD: if_wi_usb.c,v 1.55 2011/12/03 03:34:40 krw Exp $ */
 
 /*
  * Copyright (c) 2003 Dale Rahn. All rights reserved.
@@ -38,6 +38,7 @@
 #include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/device.h>
+#include <sys/timeout.h>
 #include <sys/kthread.h>
 #include <sys/tree.h>
 
@@ -913,8 +914,7 @@ wi_write_record_usb(struct wi_softc *wsc, struct wi_ltv_gen *ltv)
 	prid->frmlen = htole16(ltv->wi_len);
 	prid->rid  = htole16(ltv->wi_type);
 	if (ltv->wi_len > 1)
-		bcopy((u_int8_t *)&ltv->wi_val, (u_int8_t *)&prid->data[0],
-		    (ltv->wi_len-1)*2);
+		bcopy(&ltv->wi_val, &prid->data[0], (ltv->wi_len-1)*2);
 
 	bzero(((char*)prid)+total_len, rnd_len - total_len);
 
@@ -963,7 +963,7 @@ wi_alloc_nicmem_usb(struct wi_softc *wsc, int len, int *id)
 		return ENOMEM;
 	}
 
-	sc->wi_usb_txmem[nmem] = malloc(len, M_DEVBUF, M_WAITOK);
+	sc->wi_usb_txmem[nmem] = malloc(len, M_DEVBUF, M_WAITOK | M_CANFAIL);
 	if (sc->wi_usb_txmem[nmem] == NULL) {
 		sc->wi_usb_nummem--;
 		return ENOMEM;
@@ -1339,9 +1339,6 @@ wi_usb_activate(struct device *self, int act)
 	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
-
 	case DVACT_DEACTIVATE:
 		sc->wi_usb_dying = 1;
 		sc->wi_thread_info->dying = 1;
@@ -1593,7 +1590,7 @@ wi_usb_rridresp(struct wi_usb_chain *c)
 	    frmlen));
 
 	if (ltv->wi_len > 1)
-		bcopy(&presp->data[0], (u_int8_t *)&ltv->wi_val,
+		bcopy(&presp->data[0], &ltv->wi_val,
 		    (ltv->wi_len-1)*2);
 
 	sc->ridresperr = 0;
@@ -1888,6 +1885,7 @@ wi_usb_tx_lock_try(struct wi_usb_softc *sc)
 	DPRINTFN(10,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
 	if (sc->wi_lock != 0) {
+		splx(s);
 		return 0; /* failed to aquire lock */
 	}
 

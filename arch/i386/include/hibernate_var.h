@@ -20,12 +20,27 @@
 #define PAGE_MASK_4M (NBPD - 1)
 #define PMAP_PA_MASK_4M ~((paddr_t)PAGE_MASK_4M)
 
-#define HIBERNATE_STACK_PAGE	(PAGE_SIZE * 5)
-#define HIBERNATE_IO_PAGE	(PAGE_SIZE * 6)
-#define HIBERNATE_TEMP_PAGE	(PAGE_SIZE * 10)
-#define HIBERNATE_PT_PAGE	(PAGE_SIZE * 11)
-#define HIBERNATE_ALLOC_PAGE	(PAGE_SIZE * 12)
+#define PIGLET_PAGE_MASK ~((paddr_t)PAGE_MASK_4M)
+
+#define HIBERNATE_PD_PAGE	(PAGE_SIZE * 5)
+#define HIBERNATE_PT_PAGE	(PAGE_SIZE * 6)
+#define HIBERNATE_STACK_PAGE	(PAGE_SIZE * 7)
+#define HIBERNATE_INFLATE_PAGE	(PAGE_SIZE * 8)
+#define HIBERNATE_COPY_PAGE	(PAGE_SIZE * 9)
+
+/* Use 4MB hibernation chunks */
+#define HIBERNATE_CHUNK_SIZE		0x400000
+
+/* 1MB of chunk table from 1MB-2MB phys */
+#define HIBERNATE_CHUNK_TABLE_START		0x100000
+#define HIBERNATE_CHUNK_TABLE_END		0x200000
+#define HIBERNATE_CHUNK_TABLE_SIZE		(HIBERNATE_CHUNK_TABLE_END - \
+						 HIBERNATE_CHUNK_TABLE_START)
+
 #define HIBERNATE_STACK_OFFSET	0x0F00
 
 #define atop_4m(x) ((x) >> PAGE_SHIFT_4M)
-#define s4pte_4m(va) ((pt_entry_t *)HIBERNATE_PT_PAGE + atop_4m(va))
+#define atop_4k(x) ((x) >> PAGE_SHIFT)
+#define s4pde_4m(va) ((pt_entry_t *)HIBERNATE_PD_PAGE + atop_4m(va))
+#define s4pde_4k(va) ((pt_entry_t *)HIBERNATE_PD_PAGE + atop_4k(va))
+#define s4pte_4k(va) ((pt_entry_t *)HIBERNATE_PT_PAGE + atop_4k(va))

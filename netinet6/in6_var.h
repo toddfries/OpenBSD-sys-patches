@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_var.h,v 1.32 2010/07/08 19:42:46 jsg Exp $	*/
+/*	$OpenBSD: in6_var.h,v 1.34 2011/10/13 18:23:40 claudio Exp $	*/
 /*	$KAME: in6_var.h,v 1.55 2001/02/16 12:49:45 itojun Exp $	*/
 
 /*
@@ -572,7 +572,6 @@ struct	in6_multi *in6_addmulti(struct in6_addr *, struct ifnet *, int *);
 void	in6_delmulti(struct in6_multi *);
 struct in6_multi_mship *in6_joingroup(struct ifnet *, struct in6_addr *, int *);
 int	in6_leavegroup(struct in6_multi_mship *);
-int	in6_mask2len(struct in6_addr *, u_char *);
 int	in6_control(struct socket *, u_long, caddr_t, struct ifnet *,
 	struct proc *);
 int	in6_update_ifa(struct ifnet *, struct in6_aliasreq *,
@@ -588,8 +587,7 @@ void	in6_createmkludge(struct ifnet *);
 void	in6_purgemkludge(struct ifnet *);
 struct in6_ifaddr *in6ifa_ifpforlinklocal(struct ifnet *, int);
 struct in6_ifaddr *in6ifa_ifpwithaddr(struct ifnet *, struct in6_addr *);
-struct in6_ifaddr *in6ifa_ifplocaladdr(const struct ifnet *,
-	    const struct in6_addr *);
+int	in6_ifpprefix(const struct ifnet *, const struct in6_addr *);
 char	*ip6_sprintf(struct in6_addr *);
 int	in6_addr2scopeid(struct ifnet *, struct in6_addr *);
 int	in6_matchlen(struct in6_addr *, struct in6_addr *);

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.203 2011/05/23 09:54:20 claudio Exp $
+#	$OpenBSD: files.i386,v 1.209 2011/11/15 22:27:52 deraadt Exp $
 #
 # new style config file for i386 architecture
 #
@@ -7,8 +7,6 @@
 maxpartitions 16
 
 maxusers 2 16 100
-
-major	{ccd = 16}
 
 file	arch/i386/i386/autoconf.c
 file	arch/i386/i386/bus_space.c
@@ -24,7 +22,7 @@ file	arch/i386/i386/est.c		!small_kernel
 file	arch/i386/i386/gdt.c
 file	arch/i386/i386/in_cksum.s	inet
 file	arch/i386/i386/machdep.c
-file	arch/i386/i386/hibernate_machdep.c
+file	arch/i386/i386/hibernate_machdep.c hibernate
 file	arch/i386/i386/via.c
 file	arch/i386/i386/amd64errata.c	!small_kernel
 file	arch/i386/i386/kgdb_machdep.c	kgdb
@@ -45,7 +43,6 @@ file	arch/i386/i386/trap.c
 file	arch/i386/i386/vm_machdep.c
 file	arch/i386/i386/softintr.c
 file	arch/i386/i386/dkcsum.c		bios
-file	lib/libz/adler32.c		!ppp_deflate & !ipsec & !crypto
 file	dev/cninit.c
 file	arch/i386/i386/mptramp.s	multiprocessor
 file	arch/i386/i386/mp_setperf.c	multiprocessor
@@ -181,7 +178,6 @@ file	dev/pci/if_hme_pci.c		hme_pci
 # ISA and mixed ISA+EISA or ISA+PCI or ISA+PCMCIA drivers
 #
 
-major	{mcd = 7}
 major	{wd = 0}
 
 include "dev/isa/files.isa"
@@ -271,10 +267,6 @@ file	arch/i386/i386/kvm86call.S		kvm86
 
 # a.out binary compatibility (COMPAT_AOUT)
 include "compat/aout/files.aout"
-
-# SVR4 binary compatibility (COMPAT_SVR4)
-include "compat/svr4/files.svr4"
-file	arch/i386/i386/svr4_machdep.c		compat_svr4
 
 # Linux binary compatibility (COMPAT_LINUX)
 include "compat/linux/files.linux"
@@ -373,13 +365,6 @@ device	tcic: pcmciabus
 file	dev/ic/tcic2.c			tcic
 attach	tcic at isa with tcic_isa
 file	dev/isa/tcic2_isa.c		tcic_isa
-
-#
-# Machine-independent PUC drivers
-#
-include "dev/puc/files.puc"
-
-# PCMCIA wants to be probed as late as possible.
 
 #
 # Machine-independent PCMCIA drivers

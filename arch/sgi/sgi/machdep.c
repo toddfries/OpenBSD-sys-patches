@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.108 2011/04/21 18:09:49 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.112 2011/06/26 22:40:00 deraadt Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -47,6 +47,7 @@
 #include <sys/sem.h>
 #endif
 
+#include <net/if.h>
 #include <uvm/uvm.h>
 
 #include <machine/db_machdep.h>
@@ -82,19 +83,6 @@ void dump_tlb(void);
 char	machine[] = MACHINE;		/* Machine "architecture" */
 char	cpu_model[30];
 
-/*
- * Declare these as initialized data so we can patch them.
- */
-#ifndef	BUFCACHEPERCENT
-#define	BUFCACHEPERCENT	5	/* Can be changed in config. */
-#endif
-#ifndef	BUFPAGES
-#define BUFPAGES 0		/* Can be changed in config. */
-#endif
-
-int	bufpages = BUFPAGES;
-int	bufcachepercent = BUFCACHEPERCENT;
-
 /* low 32 bits range. */
 struct uvm_constraint_range  dma_constraint = { 0x0, 0x7fffffff };
 struct uvm_constraint_range *uvm_md_constraints[] = {
@@ -119,7 +107,6 @@ int	rsvdmem;		/* Reserved memory not usable. */
 int	ncpu = 1;		/* At least one CPU in the system. */
 struct	user *proc0paddr;
 int	console_ok;		/* Set when console initialized. */
-int	kbd_reset;
 int16_t	masternasid;
 
 int32_t *environment;
@@ -315,7 +302,6 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	for (i = 0; i < MAXMEMSEGS && mem_layout[i].mem_last_page != 0; i++) {
 		uint64_t fp, lp;
 		uint64_t firstkernpage, lastkernpage;
-		unsigned int freelist;
 		paddr_t firstkernpa, lastkernpa;
 
 		if (IS_XKPHYS((vaddr_t)start))
@@ -332,14 +318,13 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 
 		fp = mem_layout[i].mem_first_page;
 		lp = mem_layout[i].mem_last_page;
-		freelist = mem_layout[i].mem_freelist;
 
 		/* Account for kernel and kernel symbol table. */
 		if (fp >= firstkernpage && lp < lastkernpage)
 			continue;	/* In kernel. */
 
 		if (lp < firstkernpage || fp > lastkernpage) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 			continue;	/* Outside kernel. */
 		}
 
@@ -349,11 +334,11 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 			lp = firstkernpage;
 		else { /* Need to split! */
 			uint64_t xp = firstkernpage;
-			uvm_page_physload(fp, xp, fp, xp, freelist);
+			uvm_page_physload(fp, xp, fp, xp, 0);
 			fp = lastkernpage;
 		}
 		if (lp > fp) {
-			uvm_page_physload(fp, lp, fp, lp, freelist);
+			uvm_page_physload(fp, lp, fp, lp, 0);
 		}
 	}
 
@@ -672,10 +657,6 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 		return ENOTDIR;		/* Overloaded */
 
 	switch (name[0]) {
-	case CPU_KBDRESET:
-		if (securelevel > 0)
-			return (sysctl_rdint(oldp, oldlenp, newp, kbd_reset));
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &kbd_reset));
 	default:
 		return EOPNOTSUPP;
 	}
@@ -723,6 +704,7 @@ boot(int howto)
 			printf("WARNING: not updating battery clock\n");
 		}
 	}
+	if_downall();
 
 	uvm_shutdown();
 	(void) splhigh();		/* Extreme priority. */

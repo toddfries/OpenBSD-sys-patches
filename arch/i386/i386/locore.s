@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.135 2011/05/10 11:11:56 kettenis Exp $	*/
+/*	$OpenBSD: locore.s,v 1.141 2011/11/02 23:53:44 jsg Exp $	*/
 /*	$NetBSD: locore.s,v 1.145 1996/05/03 19:41:19 christos Exp $	*/
 
 /*-
@@ -47,9 +47,6 @@
 
 #include <sys/errno.h>
 #include <sys/syscall.h>
-#ifdef COMPAT_SVR4
-#include <compat/svr4/svr4_syscall.h>
-#endif
 #ifdef COMPAT_LINUX
 #include <compat/linux/linux_syscall.h>
 #endif
@@ -159,6 +156,7 @@
 	.globl	_C_LABEL(cpuid_level)
 	.globl	_C_LABEL(cpu_miscinfo)
 	.globl	_C_LABEL(cpu_feature), _C_LABEL(cpu_ecxfeature)
+	.globl	_C_LABEL(ecpu_feature), _C_LABEL(ecpu_ecxfeature)
 	.globl	_C_LABEL(cpu_cache_eax), _C_LABEL(cpu_cache_ebx)
 	.globl	_C_LABEL(cpu_cache_ecx), _C_LABEL(cpu_cache_edx)
 	.globl	_C_LABEL(cold), _C_LABEL(cnvmem), _C_LABEL(extmem)
@@ -196,7 +194,9 @@ _C_LABEL(cpu):		.long	0	# are we 386, 386sx, 486, 586 or 686
 _C_LABEL(cpu_id):	.long	0	# saved from 'cpuid' instruction
 _C_LABEL(cpu_miscinfo):	.long	0	# misc info (apic/brand id) from 'cpuid'
 _C_LABEL(cpu_feature):	.long	0	# feature flags from 'cpuid' instruction
-_C_LABEL(cpu_ecxfeature):.long	0	# extended feature flags from 'cpuid'
+_C_LABEL(ecpu_feature): .long	0	# extended feature flags from 'cpuid'
+_C_LABEL(cpu_ecxfeature):.long	0	# ecx feature flags from 'cpuid'
+_C_LABEL(ecpu_ecxfeature): .long 0	# extended ecx feature flags
 _C_LABEL(cpuid_level):	.long	-1	# max. lvl accepted by 'cpuid' insn
 _C_LABEL(cpu_cache_eax):.long	0
 _C_LABEL(cpu_cache_ebx):.long	0
@@ -410,6 +410,10 @@ try586:	/* Use the `cpuid' instruction. */
 	cpuid
 	cmpl	$0x80000000,%eax
 	jbe	2f
+	movl	$0x80000001,%eax
+	cpuid
+	movl	%edx,RELOC(_C_LABEL(ecpu_feature))
+	movl	%ecx,RELOC(_C_LABEL(ecpu_ecxfeature))
 	movl	$0x80000002,%eax
 	cpuid
 	movl	%eax,RELOC(_C_LABEL(cpu_brandstr))
@@ -646,22 +650,6 @@ _C_LABEL(esigcode):
 
 /*****************************************************************************/
 
-#ifdef COMPAT_SVR4
-NENTRY(svr4_sigcode)
-	call	*SVR4_SIGF_HANDLER(%esp)
-	leal	SVR4_SIGF_UC(%esp),%eax	# ucp (the call may have clobbered the
-					# copy at SIGF_UCP(%esp))
-	pushl	%eax
-	pushl	$1			# setcontext(p) == syscontext(1, p)
-	pushl	%eax			# junk to fake return address
-	movl	$SVR4_SYS_context,%eax
-	int	$0x80			# enter kernel with args on stack
-	movl	$SVR4_SYS_exit,%eax
-	int	$0x80			# exit if sigreturn fails
-	.globl	_C_LABEL(svr4_esigcode)
-_C_LABEL(svr4_esigcode):
-#endif
-
 /*****************************************************************************/
 
 #ifdef COMPAT_LINUX
@@ -855,7 +843,7 @@ ENTRY(copyout)
 	cmpl	$VM_MAXUSER_ADDRESS,%edx
 	ja	_C_LABEL(copy_fault)
 
-3:	GET_CURPCB(%edx)
+	GET_CURPCB(%edx)
 	movl	$_C_LABEL(copy_fault),PCB_ONFAULT(%edx)
 
 	/* bcopy(%esi, %edi, %eax); */
@@ -908,7 +896,7 @@ ENTRY(copyin)
 	cmpl	$VM_MAXUSER_ADDRESS,%edx
 	ja	_C_LABEL(copy_fault)
 
-3:	/* bcopy(%esi, %edi, %eax); */
+	/* bcopy(%esi, %edi, %eax); */
 	cld
 	movl	%eax,%ecx
 	shrl	$2,%ecx
@@ -1179,21 +1167,6 @@ ENTRY(longjmp)
 
 /*****************************************************************************/
 		
-#ifdef DIAGNOSTIC
-NENTRY(switch_error1)
-	pushl	%edi
-	pushl	$1f
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch1 %p"
-NENTRY(switch_error2)
-	pushl	%edi
-	pushl	$1f
-	call	_C_LABEL(panic)
-	/* NOTREACHED */
-1:	.asciz	"cpu_switch2 %p"
-#endif /* DIAGNOSTIC */
-
 /*
  * cpu_switchto(struct proc *old, struct proc *new)
  * Switch from the "old" proc to the "new" proc. If "old" is NULL, we
@@ -1206,14 +1179,6 @@ ENTRY(cpu_switchto)
 
 	movl	16(%esp), %esi
 	movl	20(%esp), %edi
-
-#ifdef	DIAGNOSTIC
-	xorl	%eax, %eax
-	cmpl	%eax,P_WCHAN(%edi)	# Waiting for something?
-	jne	_C_LABEL(switch_error1)	# Yes; shouldn't be queued.
-	cmpb	$SRUN,P_STAT(%edi)	# In run state?
-	jne	_C_LABEL(switch_error2)	# No; shouldn't be queued.
-#endif /* DIAGNOSTIC */
 
 	/* If old process exited, don't bother. */
 	testl	%esi,%esi
@@ -1525,26 +1490,10 @@ calltrap:
 #endif /* DIAGNOSTIC */
 
 /*
- * Old call gate entry for syscall
- */
-IDTVEC(osyscall)
-	/* Set eflags in trap frame. */
-	pushfl
-	popl	8(%esp)
-	/* Turn off trace flag and nested task. */
-	pushfl
-	andb	$~((PSL_T|PSL_NT)>>8),1(%esp)
-	popfl
-	pushl	$7		# size of instruction for restart
-	jmp	syscall1
-IDTVEC(osyscall_end)
-
-/*
  * Trap gate entry for syscall
  */
 IDTVEC(syscall)
 	pushl	$2		# size of instruction for restart
-syscall1:
 	pushl	$T_ASTFLT	# trap # for doing ASTs
 	INTRENTRY
 	pushl	%esp
@@ -1729,6 +1678,40 @@ ENTRY(acpi_release_global_lock)
 	andl	$1, %eax
 	ret
 #endif
+
+/*
+ * ucas_32(volatile int32_t *uptr, int32_t old, int32_t new);
+ */
+ENTRY(ucas_32)
+#ifdef DDB
+	pushl	%ebp
+	movl	%esp,%ebp
+#endif
+	pushl	%esi
+	pushl	%edi
+	pushl	$0	
+	
+	movl	16+FPADD(%esp),%esi
+	movl	20+FPADD(%esp),%eax
+	movl	24+FPADD(%esp),%edi
+
+	cmpl    $VM_MAXUSER_ADDRESS-4, %esi
+	ja      _C_LABEL(copy_fault)
+
+	GET_CURPCB(%edx)
+	movl	$_C_LABEL(copy_fault),PCB_ONFAULT(%edx)
+
+	lock
+	cmpxchgl %edi, (%esi)
+
+	popl	PCB_ONFAULT(%edx)
+	popl	%edi
+	popl	%esi
+	xorl	%eax,%eax
+#ifdef DDB
+	leave
+#endif
+	ret
 
 #if NLAPIC > 0
 #include <i386/i386/apicvec.s>

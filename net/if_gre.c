@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.54 2011/04/29 15:14:10 claudio Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.57 2011/07/12 15:23:50 jsg Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -66,12 +66,6 @@
 #include <netinet/if_ether.h>
 #else
 #error "if_gre used without inet"
-#endif
-
-#ifdef NETATALK
-#include <netatalk/at.h>
-#include <netatalk/at_var.h>
-#include <netatalk/at_extern.h>
 #endif
 
 #if NBPFILTER > 0
@@ -375,11 +369,6 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 			ip_tos = inp->ip_tos;
 			etype = ETHERTYPE_IP;
 			break;
-#ifdef NETATALK
-		case AF_APPLETALK:
-			etype = ETHERTYPE_AT;
-			break;
-#endif
 #ifdef INET6
 		case AF_INET6:
 			etype = ETHERTYPE_IPV6;
@@ -725,7 +714,7 @@ gre_send_keepalive(void *arg)
 	MH_ALIGN(m, m->m_len);
 
 	/* build the ip header */
-	ip = (struct ip *)m->m_data;
+	ip = mtod(m, struct ip *);
 
 	ip->ip_v = IPVERSION;
 	ip->ip_hl = sizeof(*ip) >> 2;
@@ -775,7 +764,8 @@ gre_recv_keepalive(struct gre_softc *sc)
 		}
 		break;
 	case GRE_STATE_UP:
-		sc->sc_ka_holdmax = MAX(sc->sc_ka_holdmax--, sc->sc_ka_cnt);
+		sc->sc_ka_holdmax--;
+		sc->sc_ka_holdmax = MAX(sc->sc_ka_holdmax, sc->sc_ka_cnt);
 		break;
 	}
 

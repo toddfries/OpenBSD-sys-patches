@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.198 2011/03/17 21:30:24 deraadt Exp $	*/
+/*	$OpenBSD: cd.c,v 1.207 2011/07/06 04:49:36 matthew Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -100,10 +100,6 @@ struct cd_softc {
 	struct disk sc_dk;
 
 	int sc_flags;
-#define	CDF_LOCKED	0x01
-#define	CDF_WANTED	0x02
-#define	CDF_WLABEL	0x04		/* label is writable */
-#define	CDF_LABELLING	0x08		/* writing label */
 #define	CDF_ANCIENT	0x10		/* disk is ancient; for minphys */
 #define	CDF_DYING	0x40		/* dying, when deactivated */
 #define CDF_WAITING	0x100
@@ -176,8 +172,6 @@ const struct scsi_inquiry_pattern cd_patterns[] = {
 #endif
 };
 
-#define cdlock(softc)   disk_lock(&(softc)->sc_dk)
-#define cdunlock(softc) disk_unlock(&(softc)->sc_dk)
 #define cdlookup(unit) (struct cd_softc *)disk_lookup(&cd_cd, (unit))
 
 int
@@ -246,8 +240,6 @@ cdactivate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_ACTIVATE:
-		break;
 	case DVACT_RESUME:
 		/*
 		 * When resuming, hardware may have forgotten we locked it. So if
@@ -270,19 +262,10 @@ int
 cddetach(struct device *self, int flags)
 {
 	struct cd_softc *sc = (struct cd_softc *)self;
-	int bmaj, cmaj, mn;
 
 	bufq_drain(&sc->sc_bufq);
 
-	/* Locate the lowest minor number to be detached. */
-	mn = DISKMINOR(self->dv_unit, 0);
-
-	for (bmaj = 0; bmaj < nblkdev; bmaj++)
-		if (bdevsw[bmaj].d_open == cdopen)
-			vdevgone(bmaj, mn, mn + MAXPARTITIONS - 1, VBLK);
-	for (cmaj = 0; cmaj < nchrdev; cmaj++)
-		if (cdevsw[cmaj].d_open == cdopen)
-			vdevgone(cmaj, mn, mn + MAXPARTITIONS - 1, VCHR);
+	disk_gone(cdopen, self->dv_unit);
 
 	/* Detach disk. */
 	bufq_destroy(&sc->sc_bufq);
@@ -319,7 +302,7 @@ cdopen(dev_t dev, int flag, int fmt, struct proc *p)
 	    ("cdopen: dev=0x%x (unit %d (of %d), partition %d)\n", dev, unit,
 	    cd_cd.cd_ndevs, part));
 
-	if ((error = cdlock(sc)) != 0) {
+	if ((error = disk_lock(&sc->sc_dk)) != 0) {
 		device_unref(&sc->sc_dev);
 		return (error);
 	}
@@ -385,23 +368,10 @@ cdopen(dev_t dev, int flag, int fmt, struct proc *p)
 		SC_DEBUG(sc_link, SDEV_DB3, ("Disklabel fabricated\n"));
 	}
 
-	/* Check that the partition exists. */
-	if (part != RAW_PART && (part >= sc->sc_dk.dk_label->d_npartitions ||
-	    sc->sc_dk.dk_label->d_partitions[part].p_fstype == FS_UNUSED)) {
-		error = ENXIO;
+out:
+	if ((error = disk_openpart(&sc->sc_dk, part, fmt, 1)) != 0)
 		goto bad;
-	}
 
-out:	/* Insure only one open at a time. */
-	switch (fmt) {
-	case S_IFCHR:
-		sc->sc_dk.dk_copenmask |= (1 << part);
-		break;
-	case S_IFBLK:
-		sc->sc_dk.dk_bopenmask |= (1 << part);
-		break;
-	}
-	sc->sc_dk.dk_openmask = sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
 	sc_link->flags |= SDEV_OPEN;
 	SC_DEBUG(sc_link, SDEV_DB3, ("open complete\n"));
 
@@ -414,7 +384,7 @@ bad:
 		sc_link->flags &= ~(SDEV_OPEN | SDEV_MEDIA_LOADED);
 	}
 
-	cdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 	device_unref(&sc->sc_dev);
 	return (error);
 }
@@ -428,7 +398,6 @@ cdclose(dev_t dev, int flag, int fmt, struct proc *p)
 {
 	struct cd_softc *sc;
 	int part = DISKPART(dev);
-	int error;
 
 	sc = cdlookup(DISKUNIT(dev));
 	if (sc == NULL)
@@ -438,20 +407,9 @@ cdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		return (ENXIO);
 	}
 
-	if ((error = cdlock(sc)) != 0) {
-		device_unref(&sc->sc_dev);
-		return error;
-	}
+	disk_lock_nointr(&sc->sc_dk);
 
-	switch (fmt) {
-	case S_IFCHR:
-		sc->sc_dk.dk_copenmask &= ~(1 << part);
-		break;
-	case S_IFBLK:
-		sc->sc_dk.dk_bopenmask &= ~(1 << part);
-		break;
-	}
-	sc->sc_dk.dk_openmask = sc->sc_dk.dk_copenmask | sc->sc_dk.dk_bopenmask;
+	disk_closepart(&sc->sc_dk, part, fmt);
 
 	if (sc->sc_dk.dk_openmask == 0) {
 		/* XXXX Must wait for I/O to complete! */
@@ -471,7 +429,7 @@ cdclose(dev_t dev, int flag, int fmt, struct proc *p)
 		scsi_xsh_del(&sc->sc_xsh);
 	}
 
-	cdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 
 	device_unref(&sc->sc_dev);
 	return 0;
@@ -508,25 +466,9 @@ cdstrategy(struct buf *bp)
 		bp->b_error = EIO;
 		goto bad;
 	}
-	/*
-	 * The transfer must be a whole number of blocks.
-	 */
-	if ((bp->b_bcount % sc->sc_dk.dk_label->d_secsize) != 0) {
-		bp->b_error = EINVAL;
-		goto bad;
-	}
-	/*
-	 * If it's a null transfer, return immediately
-	 */
-	if (bp->b_bcount == 0)
-		goto done;
 
-	/*
-	 * Do bounds checking, adjust transfer. if error, process.
-	 * If end of partition, just return.
-	 */
-	if (bounds_check_with_label(bp, sc->sc_dk.dk_label,
-	    (sc->sc_flags & (CDF_WLABEL|CDF_LABELLING)) != 0) <= 0)
+	/* Validate the request. */
+	if (bounds_check_with_label(bp, sc->sc_dk.dk_label) == -1)
 		goto done;
 
 	/* Place it in the queue of disk activities for this disk. */
@@ -541,13 +483,10 @@ cdstrategy(struct buf *bp)
 	device_unref(&sc->sc_dev);
 	return;
 
-bad:
+ bad:
 	bp->b_flags |= B_ERROR;
-done:
-	/*
-	 * Set the buf to indicate no xfer was done.
-	 */
 	bp->b_resid = bp->b_bcount;
+ done:
 	s = splbio();
 	biodone(bp);
 	splx(s);
@@ -812,7 +751,6 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	 */
 	if ((sc->sc_link->flags & SDEV_MEDIA_LOADED) == 0) {
 		switch (cmd) {
-		case DIOCWLABEL:
 		case DIOCLOCK:
 		case DIOCEJECT:
 		case SCIOCIDENTIFY:
@@ -878,22 +816,15 @@ cdioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 			break;
 		}
 
-		if ((error = cdlock(sc)) != 0)
+		if ((error = disk_lock(&sc->sc_dk)) != 0)
 			break;
 
-		sc->sc_flags |= CDF_LABELLING;
-
 		error = setdisklabel(sc->sc_dk.dk_label,
-		    (struct disklabel *)addr, /*cd->sc_dk.dk_openmask : */0);
+		    (struct disklabel *)addr, sc->sc_dk.dk_openmask);
 		if (error == 0) {
 		}
 
-		sc->sc_flags &= ~CDF_LABELLING;
-		cdunlock(sc);
-		break;
-
-	case DIOCWLABEL:
-		error = EBADF;
+		disk_unlock(&sc->sc_dk);
 		break;
 
 	case CDIOCPLAYTRACKS: {
@@ -2199,7 +2130,7 @@ cd_eject(void)
 	if (cd_cd.cd_ndevs == 0 || (sc = cd_cd.cd_devs[0]) == NULL)
 		return (ENXIO);
 
-	if ((error = cdlock(sc)) != 0)
+	if ((error = disk_lock(&sc->sc_dk)) != 0)
 		return (error);
 
 	if (sc->sc_dk.dk_openmask == 0) {
@@ -2214,7 +2145,7 @@ cd_eject(void)
 
 		sc->sc_link->flags &= ~SDEV_EJECTING;
 	}
-	cdunlock(sc);
+	disk_unlock(&sc->sc_dk);
 
 	return (error);
 }

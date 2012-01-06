@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.184 2011/05/04 16:05:49 blambert Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.194 2011/11/19 13:54:53 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -254,6 +254,7 @@ struct if_clone carp_cloner =
     IF_CLONE_INITIALIZER("carp", carp_clone_create, carp_clone_destroy);
 
 #define carp_cksum(_m, _l)	((u_int16_t)in_cksum((_m), (_l)))
+#define CARP_IFQ_PRIO	6
 
 void
 carp_hmac_prepare(struct carp_softc *sc)
@@ -433,7 +434,8 @@ carp_setroute(struct carp_softc *sc, int cmd)
 
 			/* Check for our address on another interface */
 			/* XXX cries for proper API */
-			rnh = rt_gettable(ifa->ifa_addr->sa_family, 0);
+			rnh = rt_gettable(ifa->ifa_addr->sa_family,
+			    sc->sc_if.if_rdomain);
 			rn = rnh->rnh_matchaddr(ifa->ifa_addr, rnh);
 			rt = (struct rtentry *)rn;
 			hr_otherif = (rt && rt->rt_ifp != &sc->sc_if &&
@@ -596,7 +598,7 @@ carp_proto_input(struct mbuf *m, ...)
 		return;
 	}
 	ip = mtod(m, struct ip *);
-	ch = (void *)ip + iplen;
+	ch = (struct carp_header *)(mtod(m, caddr_t) + iplen);
 
 	/* verify the CARP checksum */
 	m->m_data += iplen;
@@ -649,13 +651,12 @@ carp6_proto_input(struct mbuf **mp, int *offp, int proto)
 
 	/* verify that we have a complete carp packet */
 	len = m->m_len;
-	IP6_EXTHDR_GET(ch, struct carp_header *, m, *offp, sizeof(*ch));
-	if (ch == NULL) {
+	if ((m = m_pullup(m, *offp + sizeof(*ch))) == NULL) {
 		carpstats.carps_badlen++;
 		CARP_LOG(LOG_INFO, sc, ("packet size %u too small", len));
 		return (IPPROTO_DONE);
 	}
-
+	ch = (struct carp_header *)(mtod(m, caddr_t) + *offp);
 
 	/* verify the CARP checksum */
 	m->m_data += *offp;
@@ -796,7 +797,7 @@ carp_proto_input_c(struct mbuf *m, struct carp_header *ch, int ismulti,
 		 *  treat him as timed out now.
 		 */
 		sc_tv.tv_sec = sc->sc_advbase * 3;
-		if (timercmp(&sc_tv, &ch_tv, <)) {
+		if (sc->sc_advbase && timercmp(&sc_tv, &ch_tv, <)) {
 			carp_master_down(vhe);
 			break;
 		}
@@ -906,6 +907,7 @@ carp_clone_create(ifc, unit)
 	/* Hook carp_addr_updated to cope with address and route changes. */
 	sc->ah_cookie = hook_establish(sc->sc_if.if_addrhooks, 0,
 	    carp_addr_updated, sc);
+	carp_set_state_all(sc, INIT);
 
 	return (0);
 }
@@ -979,7 +981,7 @@ carpdetach(struct carp_softc *sc)
 	carp_del_all_timeouts(sc);
 
 	if (sc->sc_demote_cnt)
-		carp_group_demote_adj(&sc->sc_if, sc->sc_demote_cnt, "detach");
+		carp_group_demote_adj(&sc->sc_if, -sc->sc_demote_cnt, "detach");
 	sc->sc_suppress = 0;
 	sc->sc_sendad_errors = 0;
 
@@ -1117,7 +1119,10 @@ carp_send_ad(void *v)
 		advbase = sc->sc_advbase;
 		advskew = vhe->advskew;
 		tv.tv_sec = advbase;
-		tv.tv_usec = advskew * 1000000 / 256;
+		if (advbase == 0 && advskew == 0)
+			tv.tv_usec = 1 * 1000000 / 256;
+		else
+			tv.tv_usec = advskew * 1000000 / 256;
 	}
 
 	ch.carp_version = CARP_VERSION;
@@ -1146,6 +1151,7 @@ carp_send_ad(void *v)
 		m->m_pkthdr.len = len;
 		m->m_pkthdr.rcvif = NULL;
 		m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
+		m->m_pkthdr.pf.prio = CARP_IFQ_PRIO;
 		m->m_len = len;
 		MH_ALIGN(m, m->m_len);
 		ip = mtod(m, struct ip *);
@@ -1171,7 +1177,7 @@ carp_send_ad(void *v)
 		if (IN_MULTICAST(ip->ip_dst.s_addr))
 			m->m_flags |= M_MCAST;
 
-		ch_ptr = (void *)ip + sizeof(*ip);
+		ch_ptr = (struct carp_header *)(ip + 1);
 		bcopy(&ch, ch_ptr, sizeof(ch));
 		if (carp_prepare_ad(m, vhe, ch_ptr))
 			goto retry_later;
@@ -1235,6 +1241,7 @@ carp_send_ad(void *v)
 		len = sizeof(*ip6) + sizeof(ch);
 		m->m_pkthdr.len = len;
 		m->m_pkthdr.rcvif = NULL;
+		m->m_pkthdr.pf.prio = CARP_IFQ_PRIO;
 		/* XXX m->m_pkthdr.rdomain = sc->sc_if.if_rdomain; */
 		m->m_len = len;
 		MH_ALIGN(m, m->m_len);
@@ -1260,7 +1267,7 @@ carp_send_ad(void *v)
 		ip6->ip6_dst.s6_addr16[1] = htons(sc->sc_carpdev->if_index);
 		ip6->ip6_dst.s6_addr8[15] = 0x12;
 
-		ch_ptr = (void *)ip6 + sizeof(*ip6);
+		ch_ptr = (struct carp_header *)(ip6 + 1);
 		bcopy(&ch, ch_ptr, sizeof(ch));
 		if (carp_prepare_ad(m, vhe, ch_ptr))
 			goto retry_later;
@@ -1583,6 +1590,8 @@ carp_input(struct mbuf *m, u_int8_t *shost, u_int8_t *dhost, u_int16_t etype)
 		 * for each CARP interface _before_ copying.
 		 */
 		TAILQ_FOREACH(vh, &cif->vhif_vrs, sc_list) {
+			if (!(vh->sc_if.if_flags & IFF_UP))
+				continue;
 			m0 = m_copym2(m, 0, M_COPYALL, M_DONTWAIT);
 			if (m0 == NULL)
 				continue;
@@ -1722,7 +1731,12 @@ carp_setrun(struct carp_vhost_entry *vhe, sa_family_t af)
 	case BACKUP:
 		timeout_del(&vhe->ad_tmo);
 		tv.tv_sec = 3 * sc->sc_advbase;
-		tv.tv_usec = vhe->advskew * 1000000 / 256;
+		if (sc->sc_advbase == 0 && vhe->advskew == 0)
+			tv.tv_usec = 3 * 1000000 / 256;
+		else if (sc->sc_advbase == 0)
+			tv.tv_usec = 3 * vhe->advskew * 1000000 / 256;
+		else
+			tv.tv_usec = vhe->advskew * 1000000 / 256;
 		if (vhe->vhe_leader)
 			sc->sc_delayed_arp = -1;
 		switch (af) {
@@ -1746,7 +1760,10 @@ carp_setrun(struct carp_vhost_entry *vhe, sa_family_t af)
 		break;
 	case MASTER:
 		tv.tv_sec = sc->sc_advbase;
-		tv.tv_usec = vhe->advskew * 1000000 / 256;
+		if (sc->sc_advbase == 0 && vhe->advskew == 0)
+			tv.tv_usec = 1 * 1000000 / 256;
+		else
+			tv.tv_usec = vhe->advskew * 1000000 / 256;
 		timeout_add(&vhe->ad_tmo, tvtohz(&tv));
 		break;
 	}
@@ -1805,7 +1822,7 @@ carp_set_ifp(struct carp_softc *sc, struct ifnet *ifp)
 			return (EINVAL);
 
 		if (ifp->if_carp == NULL) {
-			ncif = malloc(sizeof(*cif), M_IFADDR, M_NOWAIT);
+			ncif = malloc(sizeof(*cif), M_IFADDR, M_NOWAIT|M_ZERO);
 			if (ncif == NULL)
 				return (ENOBUFS);
 			if ((error = ifpromisc(ifp, 1))) {
@@ -2286,7 +2303,7 @@ carp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		}
 		if ((error = carp_vhids_ioctl(sc, &carpr)))
 			return (error);
-		if (carpr.carpr_advbase > 0) {
+		if (carpr.carpr_advbase >= 0) {
 			if (carpr.carpr_advbase > 255) {
 				error = EINVAL;
 				break;
@@ -2557,7 +2574,7 @@ carp_set_state(struct carp_vhost_entry *vhe, int state)
 		sc->sc_if.if_link_state = LINK_STATE_UP;
 		break;
 	default:
-		sc->sc_if.if_link_state = LINK_STATE_UNKNOWN;
+		sc->sc_if.if_link_state = LINK_STATE_INVALID;
 		break;
 	}
 	if_link_state_change(&sc->sc_if);

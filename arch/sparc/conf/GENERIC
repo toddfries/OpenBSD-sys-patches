@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.100 2010/11/19 20:52:41 miod Exp $
+#	$OpenBSD: GENERIC,v 1.103 2011/11/08 12:53:58 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -25,9 +25,6 @@ option		SUN4M		# sun4m - SS10, SS20, Classic, etc.
 #option		KGDB		# support for kernel gdb
 #option		KGDBDEV=0xc01	# kgdb device number (dev_t)
 #option		KGDBRATE=38400	# baud rate
-
-#option		COMPAT_SVR4	# compatibility with SVR4 binaries
-#option		PROCFS		# /proc for SVR4
 
 option		WSEMUL_SUN	# provide sun terminal emulation; required
 option		WSEMUL_NO_VT100	# do not provide vt100 terminal emulation
@@ -337,13 +334,10 @@ ukphy*	at mii?
 
 # SCSI bus layer.  SCSI devices attach to the SCSI bus, which attaches
 # to the underlying hardware controller.
-scsibus* at esp?
-scsibus* at si?
-scsibus* at sw?
-scsibus* at isp?
 
 # These entries find devices on all SCSI busses and assign
 # unit numers dynamically.
+scsibus* at scsi?
 sd*	at scsibus?		# SCSI disks
 st*	at scsibus?		# SCSI tapes
 cd*	at scsibus?		# SCSI CD-ROMs
