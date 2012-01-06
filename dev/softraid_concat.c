@@ -1,6 +1,7 @@
-/* $OpenBSD: softraid_raid0.c,v 1.25 2011/12/26 14:54:52 jsing Exp $ */
+/* $OpenBSD: softraid_concat.c,v 1.1 2011/12/31 17:06:10 jsing Exp $ */
 /*
  * Copyright (c) 2008 Marco Peereboom <marco@peereboom.us>
+ * Copyright (c) 2011 Joel Sing <jsing@openbsd.org>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -19,114 +20,90 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/buf.h>
 #include <sys/device.h>
-#include <sys/ioctl.h>
-#include <sys/proc.h>
-#include <sys/malloc.h>
-#include <sys/kernel.h>
-#include <sys/disk.h>
-#include <sys/rwlock.h>
+#include <sys/buf.h>
 #include <sys/queue.h>
-#include <sys/fcntl.h>
-#include <sys/disklabel.h>
-#include <sys/mount.h>
 #include <sys/sensors.h>
-#include <sys/stat.h>
-#include <sys/conf.h>
-#include <sys/uio.h>
 
 #include <scsi/scsi_all.h>
 #include <scsi/scsiconf.h>
 #include <scsi/scsi_disk.h>
 
 #include <dev/softraidvar.h>
-#include <dev/rndvar.h>
 
-/* RAID 0 functions. */
-int	sr_raid0_create(struct sr_discipline *, struct bioc_createraid *,
+/* CONCAT functions. */
+int	sr_concat_create(struct sr_discipline *, struct bioc_createraid *,
 	    int, int64_t);
-int	sr_raid0_assemble(struct sr_discipline *, struct bioc_createraid *,
+int	sr_concat_assemble(struct sr_discipline *, struct bioc_createraid *,
 	    int);
-int	sr_raid0_alloc_resources(struct sr_discipline *);
-int	sr_raid0_free_resources(struct sr_discipline *);
-int	sr_raid0_rw(struct sr_workunit *);
-void	sr_raid0_intr(struct buf *);
+int	sr_concat_alloc_resources(struct sr_discipline *);
+int	sr_concat_free_resources(struct sr_discipline *);
+int	sr_concat_rw(struct sr_workunit *);
+void	sr_concat_intr(struct buf *);
 
 /* Discipline initialisation. */
 void
-sr_raid0_discipline_init(struct sr_discipline *sd)
+sr_concat_discipline_init(struct sr_discipline *sd)
 {
 
 	/* Fill out discipline members. */
-	sd->sd_type = SR_MD_RAID0;
-	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE;
-	sd->sd_max_wu = SR_RAID0_NOWU;
+	sd->sd_type = SR_MD_CONCAT;
+	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE |
+	    SR_CAP_NON_COERCED;
+	sd->sd_max_wu = SR_CONCAT_NOWU;
 
 	/* Setup discipline specific function pointers. */
-	sd->sd_alloc_resources = sr_raid0_alloc_resources;
-	sd->sd_assemble = sr_raid0_assemble;
-	sd->sd_create = sr_raid0_create;
-	sd->sd_free_resources = sr_raid0_free_resources;
-	sd->sd_scsi_rw = sr_raid0_rw;
+	sd->sd_alloc_resources = sr_concat_alloc_resources;
+	sd->sd_assemble = sr_concat_assemble;
+	sd->sd_create = sr_concat_create;
+	sd->sd_free_resources = sr_concat_free_resources;
+	sd->sd_scsi_rw = sr_concat_rw;
 }
 
 int
-sr_raid0_create(struct sr_discipline *sd, struct bioc_createraid *bc,
+sr_concat_create(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, int64_t coerced_size)
 {
+	int			i;
 
 	if (no_chunk < 2)
 		return EINVAL;
 
-	/*
-	 * XXX add variable strip size later even though MAXPHYS is really
-	 * the clever value, users like to tinker with that type of stuff.
-	 */
-	strlcpy(sd->sd_name, "RAID 0", sizeof(sd->sd_name));
-	sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
-	sd->sd_meta->ssdi.ssd_size = (coerced_size &
-	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) * no_chunk;
+	strlcpy(sd->sd_name, "CONCAT", sizeof(sd->sd_name));
 
-	sd->sd_max_ccb_per_wu =
-	    (MAXPHYS / sd->sd_meta->ssdi.ssd_strip_size + 1) *
-	    SR_RAID0_NOWU * no_chunk;
+	sd->sd_meta->ssdi.ssd_size = 0;
+	for (i = 0; i < no_chunk; i++)
+		sd->sd_meta->ssdi.ssd_size +=
+		    sd->sd_vol.sv_chunks[i]->src_size;
+	sd->sd_max_ccb_per_wu = SR_CONCAT_NOWU * no_chunk;
 
 	return 0;
 }
 
 int
-sr_raid0_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
-    int no_chunks)
+sr_concat_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
+    int no_chunk)
 {
 
-	sd->sd_max_ccb_per_wu =
-	    (MAXPHYS / sd->sd_meta->ssdi.ssd_strip_size + 1) *
-	    SR_RAID0_NOWU * sd->sd_meta->ssdi.ssd_chunk_no;
+	sd->sd_max_ccb_per_wu = SR_CONCAT_NOWU * no_chunk;
 
 	return 0;
 }
 
 int
-sr_raid0_alloc_resources(struct sr_discipline *sd)
+sr_concat_alloc_resources(struct sr_discipline *sd)
 {
 	int			rv = EINVAL;
 
 	if (!sd)
 		return (rv);
 
-	DNPRINTF(SR_D_DIS, "%s: sr_raid0_alloc_resources\n",
+	DNPRINTF(SR_D_DIS, "%s: sr_concat_alloc_resources\n",
 	    DEVNAME(sd->sd_sc));
 
 	if (sr_wu_alloc(sd))
 		goto bad;
 	if (sr_ccb_alloc(sd))
-		goto bad;
-
-	/* setup runtime values */
-	sd->mds.mdd_raid0.sr0_strip_bits =
-	    sr_validate_stripsize(sd->sd_meta->ssdi.ssd_strip_size);
-	if (sd->mds.mdd_raid0.sr0_strip_bits == -1)
 		goto bad;
 
 	rv = 0;
@@ -135,14 +112,14 @@ bad:
 }
 
 int
-sr_raid0_free_resources(struct sr_discipline *sd)
+sr_concat_free_resources(struct sr_discipline *sd)
 {
 	int			rv = EINVAL;
 
 	if (!sd)
 		return (rv);
 
-	DNPRINTF(SR_D_DIS, "%s: sr_raid0_free_resources\n",
+	DNPRINTF(SR_D_DIS, "%s: sr_concat_free_resources\n",
 	    DEVNAME(sd->sd_sc));
 
 	sr_wu_free(sd);
@@ -153,42 +130,50 @@ sr_raid0_free_resources(struct sr_discipline *sd)
 }
 
 int
-sr_raid0_rw(struct sr_workunit *wu)
+sr_concat_rw(struct sr_workunit *wu)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_ccb		*ccb;
 	struct sr_chunk		*scp;
 	int			s;
-	daddr64_t		blk, lbaoffs, strip_no, chunk, stripoffs;
-	daddr64_t		strip_size, no_chunk, chunkoffs, physoffs;
-	daddr64_t		strip_bits, length, leftover;
+	daddr64_t		blk, lbaoffs, chunk, chunksize;
+	daddr64_t		no_chunk, chunkend, physoffs;
+	daddr64_t		length, leftover;
 	u_int8_t		*data;
 
 	/* blk and scsi error will be handled by sr_validate_io */
-	if (sr_validate_io(wu, &blk, "sr_raid0_rw"))
+	if (sr_validate_io(wu, &blk, "sr_concat_rw"))
 		goto bad;
 
-	strip_size = sd->sd_meta->ssdi.ssd_strip_size;
-	strip_bits = sd->mds.mdd_raid0.sr0_strip_bits;
 	no_chunk = sd->sd_meta->ssdi.ssd_chunk_no;
 
 	DNPRINTF(SR_D_DIS, "%s: %s: front end io: lba %lld size %d\n",
 	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
 	    blk, xs->datalen);
 
-	/* all offs are in bytes */
+	/* All offsets are in bytes. */
 	lbaoffs = blk << DEV_BSHIFT;
-	strip_no = lbaoffs >> strip_bits;
-	chunk = strip_no % no_chunk;
-	stripoffs = lbaoffs & (strip_size - 1);
-	chunkoffs = (strip_no / no_chunk) << strip_bits;
-	physoffs = chunkoffs + stripoffs +
-	    (sd->sd_meta->ssd_data_offset << DEV_BSHIFT);
-	length = MIN(xs->datalen, strip_size - stripoffs);
 	leftover = xs->datalen;
 	data = xs->data;
 	for (wu->swu_io_count = 1;; wu->swu_io_count++) {
+
+		chunkend = 0;
+		physoffs = lbaoffs;
+		for (chunk = 0; chunk < no_chunk; chunk++) {
+			chunksize = sd->sd_vol.sv_chunks[chunk]->src_size <<
+			    DEV_BSHIFT;
+			chunkend += chunksize;
+			if (lbaoffs < chunkend)
+				break;
+			physoffs -= chunksize;
+		}
+		if (lbaoffs > chunkend)
+			goto bad;
+
+		length = MIN(MIN(leftover, chunkend - lbaoffs), MAXPHYS);
+		physoffs += sd->sd_meta->ssd_data_offset << DEV_BSHIFT;
+
 		/* make sure chunk is online */
 		scp = sd->sd_vol.sv_chunks[chunk];
 		if (scp->src_meta.scm_status != BIOC_SDONLINE) {
@@ -204,16 +189,14 @@ sr_raid0_rw(struct sr_workunit *wu)
 			goto bad;
 		}
 
-		DNPRINTF(SR_D_DIS, "%s: %s raid io: lbaoffs: %lld "
-		    "strip_no: %lld chunk: %lld stripoffs: %lld "
-		    "chunkoffs: %lld physoffs: %lld length: %lld "
+		DNPRINTF(SR_D_DIS, "%s: %s concat io: lbaoffs: %lld "
+		    "chunk: %lld chunkend: %lld physoffs: %lld length: %lld "
 		    "leftover: %lld data: %p\n",
 		    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, lbaoffs,
-		    strip_no, chunk, stripoffs, chunkoffs, physoffs, length,
-		    leftover, data);
+		    chunk, chunkend, physoffs, length, leftover, data);
 
 		ccb->ccb_buf.b_flags = B_CALL | B_PHYS;
-		ccb->ccb_buf.b_iodone = sr_raid0_intr;
+		ccb->ccb_buf.b_iodone = sr_concat_intr;
 		ccb->ccb_buf.b_blkno = physoffs >> DEV_BSHIFT;
 		ccb->ccb_buf.b_bcount = length;
 		ccb->ccb_buf.b_bufsize = length;
@@ -233,7 +216,7 @@ sr_raid0_rw(struct sr_workunit *wu)
 		LIST_INIT(&ccb->ccb_buf.b_dep);
 		TAILQ_INSERT_TAIL(&wu->swu_ccb, ccb, ccb_link);
 
-		DNPRINTF(SR_D_DIS, "%s: %s: sr_raid0: b_bcount: %d "
+		DNPRINTF(SR_D_DIS, "%s: %s: sr_concat: b_bcount: %d "
 		    "b_blkno: %lld b_flags 0x%0x b_data %p\n",
 		    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
 		    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
@@ -242,23 +225,15 @@ sr_raid0_rw(struct sr_workunit *wu)
 		leftover -= length;
 		if (leftover == 0)
 			break;
-
 		data += length;
-		if (++chunk > no_chunk - 1) {
-			chunk = 0;
-			physoffs += length;
-		} else if (wu->swu_io_count == 1)
-			physoffs -= stripoffs;
-		length = MIN(leftover,strip_size);
+		lbaoffs += length;
 	}
 
 	s = splbio();
 
-	if (sr_check_io_collision(wu))
-		goto queued;
+	if (!sr_check_io_collision(wu))
+		sr_raid_startwu(wu);
 
-	sr_raid_startwu(wu);
-queued:
 	splx(s);
 	return (0);
 bad:
@@ -267,7 +242,7 @@ bad:
 }
 
 void
-sr_raid0_intr(struct buf *bp)
+sr_concat_intr(struct buf *bp)
 {
 	struct sr_ccb		*ccb = (struct sr_ccb *)bp;
 	struct sr_workunit	*wu = ccb->ccb_wu, *wup;
