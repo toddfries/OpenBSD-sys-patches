@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.27 2011/04/05 19:52:02 krw Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.30 2011/12/26 14:54:52 jsing Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -53,6 +53,8 @@ int	sr_raid1_free_resources(struct sr_discipline *);
 int	sr_raid1_rw(struct sr_workunit *);
 void	sr_raid1_intr(struct buf *);
 void	sr_raid1_recreate_wu(struct sr_workunit *);
+void	sr_raid1_set_chunk_state(struct sr_discipline *, int, int);
+void	sr_raid1_set_vol_state(struct sr_discipline *);
 
 /* Discipline initialisation. */
 void
@@ -65,18 +67,11 @@ sr_raid1_discipline_init(struct sr_discipline *sd)
 	    SR_CAP_REBUILD;
 	sd->sd_max_wu = SR_RAID1_NOWU;
 
-	/* Setup discipline pointers. */
-	sd->sd_create = sr_raid1_create;
-	sd->sd_assemble = sr_raid1_assemble;
+	/* Setup discipline specific function pointers. */
 	sd->sd_alloc_resources = sr_raid1_alloc_resources;
+	sd->sd_assemble = sr_raid1_assemble;
+	sd->sd_create = sr_raid1_create;
 	sd->sd_free_resources = sr_raid1_free_resources;
-	sd->sd_start_discipline = NULL;
-	sd->sd_scsi_inquiry = sr_raid_inquiry;
-	sd->sd_scsi_read_cap = sr_raid_read_cap;
-	sd->sd_scsi_tur = sr_raid_tur;
-	sd->sd_scsi_req_sense = sr_raid_request_sense;
-	sd->sd_scsi_start_stop = sr_raid_start_stop;
-	sd->sd_scsi_sync = sr_raid_sync;
 	sd->sd_scsi_rw = sr_raid1_rw;
 	sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
 	sd->sd_set_vol_state = sr_raid1_set_vol_state;
@@ -247,6 +242,13 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 
 	nd = sd->sd_meta->ssdi.ssd_chunk_no;
 
+#ifdef SR_DEBUG
+	for (i = 0; i < nd; i++)
+		DNPRINTF(SR_D_STATE, "%s: chunk %d status = %u\n",
+		    DEVNAME(sd->sd_sc), i,
+		    sd->sd_vol.sv_chunks[i]->src_meta.scm_status);
+#endif
+
 	for (i = 0; i < SR_MAX_STATES; i++)
 		states[i] = 0;
 
@@ -271,14 +273,8 @@ sr_raid1_set_vol_state(struct sr_discipline *sd)
 	else if (states[BIOC_SDOFFLINE] != 0)
 		new_state = BIOC_SVDEGRADED;
 	else {
-#ifdef SR_DEBUG
 		DNPRINTF(SR_D_STATE, "%s: invalid volume state, old state "
 		    "was %d\n", DEVNAME(sd->sd_sc), old_state);
-		for (i = 0; i < nd; i++)
-			DNPRINTF(SR_D_STATE, "%s: chunk %d status = %d\n",
-			    DEVNAME(sd->sd_sc), i,
-			    sd->sd_vol.sv_chunks[i]->src_meta.scm_status);
-#endif
 		panic("invalid volume state");
 	}
 
