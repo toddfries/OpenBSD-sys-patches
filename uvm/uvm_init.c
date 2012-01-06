@@ -51,6 +51,7 @@
 #include <sys/pool.h>
 
 #include <uvm/uvm.h>
+#include <uvm/uvm_addr.h>
 
 /*
  * struct uvm: we store all global vars in this structure to make them
@@ -177,4 +178,15 @@ uvm_init(void)
 	 * init anonymous memory systems
 	 */
 	uvm_anon_init();
+
+	/*
+	 * Switch kernel and kmem_map over to a best-fit allocator,
+	 * instead of walking the tree.
+	 */
+	uvm_map_set_uaddr(kernel_map, &kernel_map->uaddr_any[3],
+	    uaddr_bestfit_create(vm_map_min(kernel_map),
+	    vm_map_max(kernel_map)));
+	uvm_map_set_uaddr(kmem_map, &kmem_map->uaddr_any[3],
+	    uaddr_bestfit_create(vm_map_min(kmem_map),
+	    vm_map_max(kmem_map)));
 }
