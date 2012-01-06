@@ -753,7 +753,7 @@ const struct pciide_product_desc pciide_sis_products[] =  {
 	{ PCI_PRODUCT_SIS_183,		/* SIS 183 SATA */
 	  0,
 	  sata_chip_map
-	}
+	},
 	{ PCI_PRODUCT_SIS_1183,		/* SIS 1183 SATA */
 	  0,
 	  sata_chip_map
