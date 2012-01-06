@@ -261,8 +261,10 @@ sys_shmat(struct proc *p, void *v, register_t *retval)
 			attach_va = (vaddr_t)SCARG(uap, shmaddr);
 		else
 			return (EINVAL);
-	} else
-		attach_va = 0;
+	} else {
+		/* This is just a hint to uvm_map() about where to put it. */
+		attach_va = uvm_map_hint(p, prot);
+	}
 	shm_handle = shmseg->shm_internal;
 	uao_reference(shm_handle->shm_object);
 	error = uvm_map(&p->p_vmspace->vm_map, &attach_va, size,

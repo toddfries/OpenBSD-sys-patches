@@ -326,7 +326,6 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 	int nload, idx = 0;
 	Elf_Addr pos = *last;
 	int file_align;
-	int loop;
 
 	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, path, p);
 	if ((error = namei(&nd)) != 0) {
@@ -378,12 +377,11 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 	 * would (i.e. something safely out of the way).
 	 */
 	if (pos == ELFDEFNNAME(NO_ADDR)) {
-		pos = uvm_map_hint(p->p_vmspace, VM_PROT_EXECUTE);
+		pos = uvm_map_hint(p, VM_PROT_EXECUTE);
 	}
 
 	pos = ELF_ROUND(pos, file_align);
 	*last = epp->ep_interp_pos = pos;
-	loop = 0;
 	for (i = 0; i < nload;/**/) {
 		vaddr_t	addr;
 		struct	uvm_object *uobj;
@@ -411,17 +409,17 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 			addr = round_page((vaddr_t)p->p_vmspace->vm_daddr +
 			    BRKSIZ);
 
-		if (uvm_map_mquery(&p->p_vmspace->vm_map, &addr, size,
-		    (i == 0 ? uoff : UVM_UNKNOWN_OFFSET), 0) != 0) {
-			if (loop == 0) {
-				loop = 1;
-				i = 0;
-				*last = epp->ep_interp_pos = pos = 0;
-				continue;
+		vm_map_lock(&p->p_vmspace->vm_map);
+		if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
+		    &addr, uobj, uoff, 0, UVM_FLAG_FIXED) == NULL) {
+			if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
+			    &addr, uobj, uoff, 0, 0) == NULL) {
+				error = ENOMEM; /* XXX */
+				vm_map_unlock(&p->p_vmspace->vm_map);
+				goto bad1;
 			}
-			error = ENOMEM;
-			goto bad1;
-		}
+		} 
+		vm_map_unlock(&p->p_vmspace->vm_map);
 		if (addr != pos + loadmap[i].vaddr) {
 			/* base changed. */
 			pos = addr - trunc_page(loadmap[i].vaddr);
