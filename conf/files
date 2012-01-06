@@ -987,6 +987,7 @@ file nnpfs/nnpfs_vfsops-openbsd.c	nnpfs
 file nnpfs/nnpfs_vnodeops-bsd.c		nnpfs
 file nnpfs/nnpfs_vnodeops-common.c	nnpfs
 file nnpfs/nnpfs_syscalls-dummy.c	!nnpfs
+file uvm/uvm_addr.c
 file uvm/uvm_amap.c
 file uvm/uvm_anon.c
 file uvm/uvm_aobj.c
