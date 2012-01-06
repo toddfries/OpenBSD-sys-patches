@@ -1,4 +1,4 @@
-/*	$OpenBSD: stdint.h,v 1.5 2011/09/08 02:47:12 guenther Exp $	*/
+/*	$OpenBSD: stdint.h,v 1.7 2012/01/05 20:37:50 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997, 2005 Todd C. Miller <Todd.Miller@courtesan.com>
@@ -153,13 +153,13 @@ typedef	__uintmax_t		uintmax_t;
 
 /* 7.18.2.4 Limits of integer types capable of holding object pointers */
 #ifdef __LP64__
-#define	INTPTR_MIN		INT64_MIN
-#define	INTPTR_MAX		INT64_MAX
-#define	UINTPTR_MAX		UINT64_MAX
+#define	INTPTR_MIN		(-0x7fffffffffffffffL - 1)
+#define	INTPTR_MAX		0x7fffffffffffffffL
+#define	UINTPTR_MAX		0xffffffffffffffffUL
 #else
-#define	INTPTR_MIN		INT32_MIN
-#define	INTPTR_MAX		INT32_MAX
-#define	UINTPTR_MAX		UINT32_MAX
+#define	INTPTR_MIN		(-0x7fffffffL - 1)
+#define	INTPTR_MAX		0x7fffffffL
+#define	UINTPTR_MAX		0xffffffffUL
 #endif
 
 /* 7.18.2.5 Limits of greatest-width integer types */
@@ -189,8 +189,12 @@ typedef	__uintmax_t		uintmax_t;
 #endif
 
 /* Limits of wchar_t */
+#ifndef	WCHAR_MIN
 #define	WCHAR_MIN		INT32_MIN
+#endif
+#ifndef	WCHAR_MAX
 #define	WCHAR_MAX		INT32_MAX
+#endif
 
 /* Limits of wint_t */
 #define	WINT_MIN		INT32_MIN
