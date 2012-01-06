@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.133 2011/09/21 21:43:57 deraadt Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.135 2011/12/28 16:02:45 jsing Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -227,8 +227,8 @@ initdisklabel(struct disklabel *lp)
  * a newer version if needed, etc etc.
  */
 int
-checkdisklabel(void *rlp, struct disklabel *lp,
-	u_int64_t boundstart, u_int64_t boundend)
+checkdisklabel(void *rlp, struct disklabel *lp, u_int64_t boundstart,
+    u_int64_t boundend)
 {
 	struct disklabel *dlp = rlp;
 	struct __partitionv0 *v0pp;
@@ -665,7 +665,8 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 				if (dk->dk_label && bcmp(dk->dk_label->d_uid,
 				    nlp->d_uid, sizeof(nlp->d_uid)) == 0)
 					break;
-		} while (dk != NULL);
+		} while (dk != NULL &&
+		    bcmp(nlp->d_uid, &uid, sizeof(nlp->d_uid)) == 0);
 	}
 
 	nlp->d_checksum = 0;
@@ -865,17 +866,21 @@ disk_attach_callback(void *arg1, void *arg2)
 		if (dk->dk_devno == dev)
 			break;
 	}
-	if (dk == NULL || (dk->dk_flags & (DKF_OPENED | DKF_NOLABELREAD)))
+	if (dk == NULL || (dk->dk_flags & (DKF_OPENED | DKF_NOLABELREAD))) {
+		wakeup(dk);
 		return;
+	}
 
 	/* XXX: Assumes dk is part of the device softc. */
 	device_ref(dk->dk_device);
 
 	/* Read disklabel. */
-	disk_readlabel(&dl, dev, errbuf, sizeof(errbuf));
+	if (disk_readlabel(&dl, dev, errbuf, sizeof(errbuf)) == NULL)
+		dk->dk_flags |= DKF_LABELVALID;
 	dk->dk_flags |= DKF_OPENED;
 
 	device_unref(dk->dk_device);
+	wakeup(dk);
 }
 
 /*
@@ -1264,7 +1269,8 @@ gotswap:
 		bzero(&duid, sizeof(duid));
 		if (bcmp(rootduid, &duid, sizeof(rootduid)) != 0) {
 			TAILQ_FOREACH(dk, &disklist, dk_link)
-				if (dk->dk_label && bcmp(dk->dk_label->d_uid,
+				if ((dk->dk_flags & DKF_LABELVALID) &&
+				    dk->dk_label && bcmp(dk->dk_label->d_uid,
 				    &rootduid, sizeof(rootduid)) == 0)
 					break;
 			if (dk == NULL)
@@ -1496,7 +1502,8 @@ disk_map(char *path, char *mappath, int size, int flags)
 
 	mdk = NULL;
 	TAILQ_FOREACH(dk, &disklist, dk_link) {
-		if (dk->dk_label && bcmp(dk->dk_label->d_uid, uid,
+		if ((dk->dk_flags & DKF_LABELVALID) && dk->dk_label &&
+		    bcmp(dk->dk_label->d_uid, uid,
 		    sizeof(dk->dk_label->d_uid)) == 0) {
 			/* Fail if there are duplicate UIDs! */
 			if (mdk != NULL)
