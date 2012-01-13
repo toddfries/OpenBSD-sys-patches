@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1630 2012/01/04 03:35:58 jsg Exp 
+ *	OpenBSD: pcidevs,v 1.1631 2012/01/07 21:42:47 kettenis Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -6968,6 +6968,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "GT1 Video",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_XEONE3_1200_HB,
+	    "Xeon E3-1200 Host",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_PCIE_3,
 	    "Core 2G PCIE",
 	},
@@ -12374,6 +12378,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_MITSUBISHIELEC, PCI_PRODUCT_MITSUBISHIELEC_GUI,
 	    "GUI Accel",
+	},
+	{
+	    PCI_VENDOR_MOSCHIP, PCI_PRODUCT_MOSCHIP_MCS9865,
+	    "Serial MCS9865",
 	},
 	{
 	    PCI_VENDOR_MOT, PCI_PRODUCT_MOT_MPC105,
@@ -21046,6 +21054,10 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_S3,
 	    "S3",
+	},
+	{
+	    PCI_VENDOR_MOSCHIP,
+	    "MosChip",
 	},
 	{
 	    PCI_VENDOR_XENSOURCE,
