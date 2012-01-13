@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1630 2012/01/04 03:35:58 jsg Exp 
+ *	OpenBSD: pcidevs,v 1.1631 2012/01/07 21:42:47 kettenis Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -337,6 +337,7 @@
 #define	PCI_VENDOR_GEMTEK	0x5046		/* Gemtek */
 #define	PCI_VENDOR_TURTLEBEACH	0x5053		/* Turtle Beach */
 #define	PCI_VENDOR_S3	0x5333		/* S3 */
+#define	PCI_VENDOR_MOSCHIP	0x5372		/* MosChip */
 #define	PCI_VENDOR_XENSOURCE	0x5853		/* XenSource */
 #define	PCI_VENDOR_C4T	0x6374		/* c't Magazin */
 #define	PCI_VENDOR_DCI	0x6666		/* Decision Computer */
@@ -2340,6 +2341,7 @@
 #define	PCI_PRODUCT_INTEL_CORE2G_M_HB	0x0104		/* Core 2G Host */
 #define	PCI_PRODUCT_INTEL_CORE2G_PCIE_2	0x0105		/* Core 2G PCIE */
 #define	PCI_PRODUCT_INTEL_CORE2G_M_GT1	0x0106		/* GT1 Video */
+#define	PCI_PRODUCT_INTEL_XEONE3_1200_HB	0x0108		/* Xeon E3-1200 Host */
 #define	PCI_PRODUCT_INTEL_CORE2G_PCIE_3	0x0109		/* Core 2G PCIE */
 #define	PCI_PRODUCT_INTEL_CORE2G_PCIE_4	0x010d		/* Core 2G PCIE */
 #define	PCI_PRODUCT_INTEL_CORE2G_GT2	0x0112		/* GT2 Video */
@@ -3756,6 +3758,9 @@
 /* Mitsubishi Electronics */
 #define	PCI_PRODUCT_MITSUBISHIELEC_4D30T	0x0301		/* Powerstorm 4D30T */
 #define	PCI_PRODUCT_MITSUBISHIELEC_GUI	0x0304		/* GUI Accel */
+
+/* MosChip products */
+#define	PCI_PRODUCT_MOSCHIP_MCS9865	0x6873		/* Serial MCS9865 */
 
 /* Motorola products */
 #define	PCI_PRODUCT_MOT_MPC105	0x0001		/* MPC105 PCI */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: wsfont.c,v 1.26 2012/01/06 14:55:38 shadchin Exp $ */
+/*	$OpenBSD: wsfont.c,v 1.29 2012/01/10 18:50:40 shadchin Exp $ */
 /*	$NetBSD: wsfont.c,v 1.17 2001/02/07 13:59:24 ad Exp $	*/
 
 /*-
@@ -213,8 +213,7 @@ static struct font *wsfont_find0(int);
  */
 static void	wsfont_revbit(struct wsdisplay_font *);
 static void
-wsfont_revbit(font)
-	struct wsdisplay_font *font;
+wsfont_revbit(struct wsdisplay_font *font)
 {
 	u_char *p, *m;
 
@@ -234,8 +233,7 @@ wsfont_revbit(font)
  */
 static void	wsfont_revbyte(struct wsdisplay_font *);
 static void
-wsfont_revbyte(font)
-	struct wsdisplay_font *font;
+wsfont_revbyte(struct wsdisplay_font *font)
 {
 	int x, l, r, nr;
 	u_char *rp;
@@ -267,8 +265,7 @@ wsfont_revbyte(font)
  * Enumerate the list of fonts
  */
 void
-wsfont_enum(cb)
-	void (*cb)(char *, int, int, int);
+wsfont_enum(void (*cb)(char *, int, int, int))
 {
 	struct wsdisplay_font *f;
 	struct font *ent;
@@ -393,8 +390,7 @@ wsfont_init(void)
  * Find a font by cookie. Called at splhigh.
  */
 static struct font *
-wsfont_find0(cookie)
-	int cookie;
+wsfont_find0(int cookie)
 {
 	struct font *ent;
 
@@ -409,9 +405,7 @@ wsfont_find0(cookie)
  * Find a font.
  */
 int
-wsfont_find(name, width, height, stride)
-	char *name;
-	int width, height, stride;
+wsfont_find(char *name, int width, int height, int stride)
 {
 	struct font *ent;
 	int s;
@@ -443,9 +437,7 @@ wsfont_find(name, width, height, stride)
  * Add a font to the list.
  */
 int
-wsfont_add(font, copy)
-	struct wsdisplay_font *font;
-	int copy;
+wsfont_add(struct wsdisplay_font *font, int copy)
 {
 	static int cookiegen = 666;
 	struct font *ent;
@@ -496,8 +488,7 @@ wsfont_add(font, copy)
  */
 #ifdef notyet
 int
-wsfont_remove(cookie)
-	int cookie;
+wsfont_remove(int cookie)
 {
 	struct font *ent;
 	int s;
@@ -541,10 +532,8 @@ wsfont_remove(cookie)
  * requested by the caller differs.
  */
 int
-wsfont_lock(cookie, ptr, bitorder, byteorder)
-	int cookie;
-	struct wsdisplay_font **ptr;
-	int bitorder, byteorder;
+wsfont_lock(int cookie, struct wsdisplay_font **ptr, int bitorder,
+    int byteorder)
 {
 	struct font *ent;
 	int s, lc;
@@ -590,32 +579,10 @@ wsfont_lock(cookie, ptr, bitorder, byteorder)
 }
 
 /*
- * Get font flags and lockcount.
- */
-int
-wsfont_getflg(cookie, flg, lc)
-	int cookie, *flg, *lc;
-{
-	struct font *ent;
-	int s;
-
-	s = splhigh();
-
-	if ((ent = wsfont_find0(cookie)) != NULL) {
-		*flg = ent->flg;
-		*lc = ent->lockcount;
-	}
-
-	splx(s);
-	return (ent != NULL ? 0 : -1);
-}
-
-/*
  * Unlock a given font and return new lockcount.
  */
 int
-wsfont_unlock(cookie)
-	int cookie;
+wsfont_unlock(int cookie)
 {
 	struct font *ent;
 	int s, lc;
@@ -659,12 +626,6 @@ struct wsfont_level2_glyphmap {
 	void *chars;	/* Pointer to character number entries  */
 	int width;	/* Size of each entry in bytes (1,2,4)  */
 };
-
-#define null16			\
-	NULL, NULL, NULL, NULL,	\
-	NULL, NULL, NULL, NULL,	\
-	NULL, NULL, NULL, NULL,	\
-	NULL, NULL, NULL, NULL
 
 /*
  * IBM 437 maps
@@ -752,7 +713,6 @@ static struct wsfont_level2_glyphmap *ibm437_level1[] = {
 	NULL, &ibm437_level2_37
 };
 
-
 /*
  * ISO-8859-7 maps
  */
@@ -802,7 +762,6 @@ static struct wsfont_level2_glyphmap *iso7_level1[] = {
 	&iso7_level2_32
 };
 
-
 static struct wsfont_level1_glyphmap encodings[] = {
 	{ NULL, 0, 0 },			/* WSDISPLAY_FONTENC_ISO */
 	{ ibm437_level1, 0, 38 },	/* WSDISPLAY_FONTENC_IBM */
@@ -818,9 +777,7 @@ static struct wsfont_level1_glyphmap encodings[] = {
  * Remap Unicode character to glyph
  */
 int
-wsfont_map_unichar(font, c)
-	struct wsdisplay_font *font;
-	int c;
+wsfont_map_unichar(struct wsdisplay_font *font, int c)
 {
 	if (font->encoding == WSDISPLAY_FONTENC_ISO)
 		return c;
