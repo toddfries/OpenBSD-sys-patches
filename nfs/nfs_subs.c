@@ -92,6 +92,7 @@ nfstype nfsv3_type[9] = { NFNON, NFREG, NFDIR, NFBLK, NFCHR, NFLNK, NFSOCK,
 enum vtype nv2tov_type[8] = { VNON, VREG, VDIR, VBLK, VCHR, VLNK, VNON, VNON };
 enum vtype nv3tov_type[8]={ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO };
 int nfs_ticks;
+int nfs_privport = 1;
 struct nfsstats nfsstats;
 
 /*
@@ -1456,10 +1457,12 @@ nfsrv_fhtovp(fhandle_t *fhp, int lockflag, struct vnode **vpp,
 
 	saddr = mtod(nam, struct sockaddr_in *);
 	if (saddr->sin_family == AF_INET &&
-	    (ntohs(saddr->sin_port) >= IPPORT_RESERVED ||
-	    (slp->ns_so->so_type == SOCK_STREAM && ntohs(saddr->sin_port) == 20))) {
-		vput(*vpp);
-		return (NFSERR_AUTHERR | AUTH_TOOWEAK);
+	    (slp->ns_so->so_type == SOCK_STREAM && ntohs(saddr->sin_port) == 20)) {
+		if ((nfs_privport == 1) && (ntohs(saddr->sin_port) >=
+		    IPPORT_RESERVED)) {
+			vput(*vpp);
+			return (NFSERR_AUTHERR | AUTH_TOOWEAK);
+		}
 	}
 
 	/* Check/setup credentials. */
