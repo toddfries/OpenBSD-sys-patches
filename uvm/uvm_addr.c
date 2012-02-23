@@ -1,3 +1,5 @@
+/*	$OpenBSD: uvm_map.c,v 1.144 2011/07/03 18:36:49 oga Exp $	*/
+
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
  *
@@ -795,6 +797,8 @@ uaddr_hint_select(struct vm_map *map, struct uvm_addr_state *uaddr_param,
 	if (high < hint)	/* overflow */
 		high = map->max_offset;
 	high = MIN(high, uaddr->uaddr.uaddr_maxaddr);
+	if (high < sz)
+		return ENOMEM;	/* Protect against underflow. */
 	high -= sz;
 
 	/* Calculate lower bound for selected address. */
@@ -1524,8 +1528,10 @@ uaddr_stack_brk_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 	 * Linear search for space.
 	 */
 	for (s = &strat[0]; s < &strat[nitems(strat)]; s++) {
+		if (s->end - s->start < sz)
+			continue;
 		if (uvm_addr_linsearch(map, uaddr, entry_out, addr_out,
-		    0, sz, align, offset, s->dir, s->start, s->end,
+		    0, sz, align, offset, s->dir, s->start, s->end - sz,
 		    before_gap, after_gap) == 0)
 			return 0;
 	}
