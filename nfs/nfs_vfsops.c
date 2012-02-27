@@ -69,6 +69,7 @@
 
 extern struct nfsstats nfsstats;
 extern int nfs_ticks;
+extern int nfs_privport;
 extern u_int32_t nfs_procids[NFS_NPROCS];
 
 int		nfs_sysctl(int *, u_int, void *, size_t *, void *, size_t, struct proc *);
@@ -853,6 +854,8 @@ nfs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 
 		return rv;
 
+	case NFS_PRIVPORT:
+		return(sysctl_int(oldp, oldlenp, newp, newlen, &nfs_privport));
 	default:
 		return EOPNOTSUPP;
 	}
