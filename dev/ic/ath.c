@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.93 2011/10/14 17:08:10 stsp Exp $  */
+/*      $OpenBSD: ath.c,v 1.95 2012/01/29 12:33:36 stsp Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -3098,6 +3098,8 @@ void
 ath_setcurmode(struct ath_softc *sc, enum ieee80211_phymode mode)
 {
 	const HAL_RATE_TABLE *rt;
+	struct ieee80211com *ic = &sc->sc_ic;
+	struct ieee80211_node *ni;
 	int i;
 
 	memset(sc->sc_rixmap, 0xff, sizeof(sc->sc_rixmap));
@@ -3110,6 +3112,10 @@ ath_setcurmode(struct ath_softc *sc, enum ieee80211_phymode mode)
 		sc->sc_hwmap[i] = rt->info[rt->rateCodeToIndex[i]].dot11Rate;
 	sc->sc_currates = rt;
 	sc->sc_curmode = mode;
+	ni = ic->ic_bss;
+	ni->ni_rates.rs_nrates = sc->sc_currates->rateCount;
+	if (ni->ni_txrate >= ni->ni_rates.rs_nrates)
+		ni->ni_txrate = 0;
 }
 
 void
