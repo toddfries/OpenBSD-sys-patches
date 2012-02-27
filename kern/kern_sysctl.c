@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.211 2012/01/07 05:38:12 guenther Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.214 2012/02/20 22:23:39 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -127,7 +127,7 @@ int (*cpu_cpuspeed)(int *);
 void (*cpu_setperf)(int);
 int perflevel = 100;
 
-int rthreads_enabled = 0;
+int rthreads_enabled = 1;
 
 /*
  * Lock to avoid too many processes vslocking a large amount of memory
@@ -1345,6 +1345,8 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 	if (!error) {
 		if (where == NULL)
 			needed += KERN_FILESLOP * elem_size;
+		else if (*sizep < needed)
+			error = ENOMEM;
 		*sizep = needed;
 	}
 
@@ -1582,7 +1584,7 @@ sysctl_proc_args(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (ESRCH);
 
 	/* Execing - danger. */
-	if ((vp->p_flag & P_INEXEC))
+	if ((vp->p_p->ps_flags & PS_INEXEC))
 		return (EBUSY);
 
 	vm = vp->p_vmspace;
