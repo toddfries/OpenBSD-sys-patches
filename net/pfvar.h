@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.358 2011/12/12 21:30:27 mikeb Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.362 2012/02/03 01:57:51 bluhm Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1254,6 +1254,9 @@ struct pf_pdesc {
 	u_int32_t	 off;		/* protocol header offset */
 	u_int32_t	 hdrlen;	/* protocol header length */
 	u_int32_t	 p_len;		/* length of protocol payload */
+	u_int32_t	 extoff;	/* extentsion header offset */
+	u_int32_t	 fragoff;	/* fragment header offset */
+	u_int32_t	 jumbolen;	/* length from v6 jumbo header */
 	u_int32_t	 badopts;	/* v4 options or v6 routing headers */
 
 	u_int16_t	 rdomain;	/* original routing domain */
@@ -1778,16 +1781,14 @@ void				 pf_purge_rule(struct pf_ruleset *,
 struct pf_divert		*pf_find_divert(struct mbuf *);
 int				 pf_setup_pdesc(struct pf_pdesc *, void *,
 				    sa_family_t, int, struct pfi_kif *,
-				    struct mbuf **, u_short *, u_short *);
+				    struct mbuf *, u_short *);
 
 int	pf_test(sa_family_t, int, struct ifnet *, struct mbuf **,
 	    struct ether_header *);
 
-#ifdef INET6
 void	pf_poolmask(struct pf_addr *, struct pf_addr*,
-	    struct pf_addr *, struct pf_addr *, u_int8_t);
+	    struct pf_addr *, struct pf_addr *, sa_family_t);
 void	pf_addr_inc(struct pf_addr *, sa_family_t);
-#endif /* INET6 */
 
 void   *pf_pull_hdr(struct mbuf *, int, void *, int, u_short *, u_short *,
 	    sa_family_t);
@@ -1806,8 +1807,8 @@ int	pf_match_gid(u_int8_t, gid_t, gid_t, gid_t);
 
 int	pf_refragment6(struct mbuf **, struct m_tag *mtag, int);
 void	pf_normalize_init(void);
-int	pf_normalize_ip(struct mbuf **, int, u_short *);
-int	pf_normalize_ip6(struct mbuf **, int, int, int, u_short *);
+int	pf_normalize_ip(struct pf_pdesc *, u_short *);
+int	pf_normalize_ip6(struct pf_pdesc *, u_short *);
 int	pf_normalize_tcp(struct pf_pdesc *);
 void	pf_normalize_tcp_cleanup(struct pf_state *);
 int	pf_normalize_tcp_init(struct pf_pdesc *, struct pf_state_peer *,
