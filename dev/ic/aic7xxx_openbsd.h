@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx_openbsd.h,v 1.21 2011/07/17 22:46:48 matthew Exp $	*/
+/*	$OpenBSD: aic7xxx_openbsd.h,v 1.23 2012/02/12 14:30:51 deraadt Exp $	*/
 /*	$NetBSD: aic7xxx_osm.h,v 1.7 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -193,7 +193,8 @@ static __inline void ahc_flush_device_writes(struct ahc_softc *);
 static __inline void
 ahc_flush_device_writes(struct ahc_softc *ahc)
 {
-	/* XXX Is this sufficient for all architectures??? */
+	bus_space_barrier(ahc->tag, ahc->bsh, 0, 0x100,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ahc_inb(ahc, INTSTAT);
 }
 
