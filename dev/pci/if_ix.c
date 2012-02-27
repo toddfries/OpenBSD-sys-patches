@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.59 2012/01/13 09:38:23 mikeb Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.62 2012/02/26 16:22:37 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -209,7 +209,7 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 	INIT_DEBUGOUT("ixgbe_attach: begin");
 
 	sc->osdep.os_sc = sc;
-	sc->osdep.os_pa = pa;
+	sc->osdep.os_pa = *pa;
 
 	/* Core Lock Init*/
 	mtx_init(&sc->core_mtx, IPL_NET);
@@ -634,8 +634,8 @@ ixgbe_init(void *arg)
 	struct ix_softc	*sc = (struct ix_softc *)arg;
 	struct ifnet	*ifp = &sc->arpcom.ac_if;
 	struct rx_ring	*rxr = sc->rx_rings;
-	uint32_t	 k, txdctl, rxdctl, rxctrl, mhadd, gpie;
-	int		 i, s, err, llimode = 0;
+	uint32_t	 k, txdctl, rxdctl, rxctrl, mhadd, gpie, itr;
+	int		 i, s, err;
 
 	INIT_DEBUGOUT("ixgbe_init: begin");
 
@@ -703,7 +703,6 @@ ixgbe_init(void *arg)
 		 * interrupts hitting the card when the ring is getting full.
 		 */
 		gpie |= 0xf << IXGBE_GPIE_LLI_DELAY_SHIFT;
-		llimode = IXGBE_EITR_LLI_MOD;
 	}
 
 	if (sc->msix > 1) {
@@ -807,9 +806,14 @@ ixgbe_init(void *arg)
 		}
 	}
 
-	/* Set moderation on the Link interrupt */
-	IXGBE_WRITE_REG(&sc->hw, IXGBE_EITR(sc->linkvec),
-	    IXGBE_LINK_ITR | llimode);
+	/* Setup interrupt moderation */
+	if (sc->hw.mac.type == ixgbe_mac_82598EB)
+		itr = (8000000 / IXGBE_INTS_PER_SEC) & 0xff8;
+	else {
+		itr = (4000000 / IXGBE_INTS_PER_SEC) & 0xff8;
+		itr |= IXGBE_EITR_LLI_MOD | IXGBE_EITR_CNT_WDIS;
+	}
+	IXGBE_WRITE_REG(&sc->hw, IXGBE_EITR(0), itr);
 
 	/* Config/Enable Link */
 	ixgbe_config_link(sc);
@@ -925,7 +929,7 @@ ixgbe_legacy_irq(void *arg)
 	struct tx_ring	*txr = sc->tx_rings;
 	struct ixgbe_hw	*hw = &sc->hw;
 	uint32_t	 reg_eicr;
-	int		 refill = 0;
+	int		 i, refill = 0;
 
 	reg_eicr = IXGBE_READ_REG(&sc->hw, IXGBE_EICR);
 	if (reg_eicr == 0) {
@@ -968,7 +972,9 @@ ixgbe_legacy_irq(void *arg)
 	if (ifp->if_flags & IFF_RUNNING && !IFQ_IS_EMPTY(&ifp->if_snd))
 		ixgbe_start_locked(txr, ifp);
 
-	ixgbe_enable_intr(sc);
+	for (i = 0; i < sc->num_queues; i++, que++)
+		ixgbe_enable_queue(sc, que->msix);
+
 	return (1);
 }
 
@@ -1400,7 +1406,7 @@ void
 ixgbe_identify_hardware(struct ix_softc *sc)
 {
 	struct ixgbe_osdep	*os = &sc->osdep;
-	struct pci_attach_args	*pa = os->os_pa;
+	struct pci_attach_args	*pa = &os->os_pa;
 	uint32_t		 reg;
 
 	/* Save off the information about this board */
@@ -1534,7 +1540,7 @@ ixgbe_allocate_legacy(struct ix_softc *sc)
 {
 	struct ifnet		*ifp = &sc->arpcom.ac_if;
 	struct ixgbe_osdep	*os = &sc->osdep;
-	struct pci_attach_args	*pa = os->os_pa;
+	struct pci_attach_args	*pa = &os->os_pa;
 	const char		*intrstr = NULL;
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
@@ -1576,7 +1582,7 @@ int
 ixgbe_allocate_pci_resources(struct ix_softc *sc)
 {
 	struct ixgbe_osdep	*os = &sc->osdep;
-	struct pci_attach_args	*pa = os->os_pa;
+	struct pci_attach_args	*pa = &os->os_pa;
 	int			 val;
 
 	val = pci_conf_read(pa->pa_pc, pa->pa_tag, PCIR_BAR(0));
@@ -1609,7 +1615,7 @@ void
 ixgbe_free_pci_resources(struct ix_softc * sc)
 {
 	struct ixgbe_osdep	*os = &sc->osdep;
-	struct pci_attach_args	*pa = os->os_pa;
+	struct pci_attach_args	*pa = &os->os_pa;
 	struct ix_queue *que = sc->queues;
 	int i;
 
@@ -1749,7 +1755,7 @@ ixgbe_dma_malloc(struct ix_softc *sc, bus_size_t size,
 	struct ixgbe_osdep	*os = &sc->osdep;
 	int			 r;
 
-	dma->dma_tag = os->os_pa->pa_dmat;
+	dma->dma_tag = os->os_pa.pa_dmat;
 	r = bus_dmamap_create(dma->dma_tag, size, 1,
 	    size, 0, BUS_DMA_NOWAIT, &dma->dma_map);
 	if (r != 0) {
@@ -2832,10 +2838,7 @@ ixgbe_initialize_receive_units(struct ix_softc *sc)
 		    sc->num_rx_desc * sizeof(union ixgbe_adv_rx_desc));
 
 		/* Set up the SRRCTL register */
-		srrctl = IXGBE_READ_REG(&sc->hw, IXGBE_SRRCTL(i));
-		srrctl &= ~IXGBE_SRRCTL_BSIZEHDR_MASK;
-		srrctl &= ~IXGBE_SRRCTL_BSIZEPKT_MASK;
-		srrctl |= bufsz;
+		srrctl = bufsz;
 		if (rxr->hdr_split) {
 			/* Use a standard mbuf for the header */
 			srrctl |= ((IXGBE_RX_HDR <<
@@ -3330,7 +3333,7 @@ ixgbe_read_pci_cfg(struct ixgbe_hw *hw, uint32_t reg)
 		high = 1;
 		reg &= ~0x2;
 	}
-	pa = ((struct ixgbe_osdep *)hw->back)->os_pa;
+	pa = &((struct ixgbe_osdep *)hw->back)->os_pa;
 	value = pci_conf_read(pa->pa_pc, pa->pa_tag, reg);
 
 	if (high)
@@ -3351,7 +3354,7 @@ ixgbe_write_pci_cfg(struct ixgbe_hw *hw, uint32_t reg, uint16_t value)
 		high = 1;
 		reg &= ~0x2;
 	}
-	pa = ((struct ixgbe_osdep *)hw->back)->os_pa;
+	pa = &((struct ixgbe_osdep *)hw->back)->os_pa;
 	rv = pci_conf_read(pa->pa_pc, pa->pa_tag, reg);
 	if (!high)
 		rv = (rv & 0xffff0000) | value;
