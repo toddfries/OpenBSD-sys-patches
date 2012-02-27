@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudio.c,v 1.93 2011/12/01 23:02:12 dhill Exp $ */
+/*	$OpenBSD: uaudio.c,v 1.95 2012/01/31 21:13:32 brynet Exp $ */
 /*	$NetBSD: uaudio.c,v 1.90 2004/10/29 17:12:53 kent Exp $	*/
 
 /*
@@ -206,6 +206,10 @@ struct uaudio_devs {
 	{ { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_IPOD_TOUCH_3G },
 		UAUDIO_FLAG_BAD_AUDIO },
 	{ { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_IPOD_TOUCH_4G },
+		UAUDIO_FLAG_BAD_AUDIO },
+	{ { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_IPAD },
+		UAUDIO_FLAG_BAD_AUDIO },
+	{ { USB_VENDOR_APPLE, USB_PRODUCT_APPLE_IPAD2 },
 		UAUDIO_FLAG_BAD_AUDIO },
 	{ { USB_VENDOR_CREATIVE, USB_PRODUCT_CREATIVE_EMU0202 },
 		UAUDIO_FLAG_VENDOR_CLASS | UAUDIO_FLAG_EMU0202 |
@@ -2984,7 +2988,7 @@ uaudio_chan_pintr(usbd_xfer_handle xfer, usbd_private_handle priv,
 	usbd_get_xfer_status(xfer, NULL, NULL, &count, NULL);
 	DPRINTFN(5,("uaudio_chan_pintr: count=%d, transferred=%d\n",
 		    count, ch->transferred));
-#ifdef DIAGNOSTIC
+#ifdef UAUDIO_DEBUG
 	if (count != cb->size) {
 		printf("uaudio_chan_pintr: count(%d) != size(%d)\n",
 		       count, cb->size);
