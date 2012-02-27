@@ -1,8 +1,9 @@
-/*	$OpenBSD: biovar.h,v 1.40 2011/05/20 14:46:44 marco Exp $	*/
+/*	$OpenBSD: biovar.h,v 1.42 2012/01/20 12:38:19 jsing Exp $	*/
 
 /*
  * Copyright (c) 2002 Niklas Hallqvist.  All rights reserved.
  * Copyright (c) 2005 Marco Peereboom.  All rights reserved.
+ * Copyright (c) 2012 Joel Sing <jsing@openbsd.org>.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -28,32 +29,47 @@
 /*
  * Devices getting ioctls through this interface should use ioctl class 'B'
  * and command numbers starting from 32, lower ones are reserved for generic
- * ioctls.  All ioctl data must be structures which start with a void *
- * cookie.
+ * ioctls. All ioctl data must be structures which start with a struct bio.
  */
 
 #include <sys/types.h>
 
-struct bio_common {
-	void		*bc_cookie;
+#define	BIO_MSG_COUNT	5
+#define	BIO_MSG_LEN	128
+
+struct bio_msg {
+	int		bm_type;
+#define	BIO_MSG_INFO	1
+#define	BIO_MSG_WARN	2
+#define	BIO_MSG_ERROR	3
+	char		bm_msg[BIO_MSG_LEN];
+};
+
+struct bio_status {
+	char		bs_controller[16];
+	int		bs_status;
+#define	BIO_STATUS_UNKNOWN	0
+#define	BIO_STATUS_SUCCESS	1
+#define	BIO_STATUS_ERROR	2
+	int		bs_msg_count;
+	struct bio_msg	bs_msgs[BIO_MSG_COUNT];
+};
+
+struct bio {
+	void			*bio_cookie;
+	struct bio_status	bio_status;
 };
 
 /* convert name to a cookie */
 #define BIOCLOCATE _IOWR('B', 0, struct bio_locate)
 struct bio_locate {
-	void		*bl_cookie;
+	struct bio	bl_bio;
 	char		*bl_name;
 };
 
-#ifdef _KERNEL
-int	bio_register(struct device *, int (*)(struct device *, u_long,
-    caddr_t));
-void	bio_unregister(struct device *);
-#endif
-
 #define BIOCINQ _IOWR('B', 32, struct bioc_inq)
 struct bioc_inq {
-	void		*bi_cookie;
+	struct bio	bi_bio;
 
 	char		bi_dev[16];	/* controller device */
 	int		bi_novol;	/* nr of volumes */
@@ -63,7 +79,7 @@ struct bioc_inq {
 #define BIOCDISK _IOWR('B', 33, struct bioc_disk)
 /* structure that represents a disk in a RAID volume */
 struct bioc_disk {
-	void		*bd_cookie;
+	struct bio	bd_bio;
 
 	u_int16_t	bd_channel;
 	u_int16_t	bd_target;
@@ -99,7 +115,7 @@ struct bioc_disk {
 #define BIOCVOL _IOWR('B', 34, struct bioc_vol)
 /* structure that represents a RAID volume */
 struct bioc_vol {
-	void		*bv_cookie;
+	struct bio	bv_bio;
 	int		bv_volid;	/* volume id */
 
 	int16_t		bv_percent;	/* percent done operation */
@@ -130,7 +146,7 @@ struct bioc_vol {
 
 #define BIOCALARM _IOWR('B', 35, struct bioc_alarm)
 struct bioc_alarm {
-	void		*ba_cookie;
+	struct bio	ba_bio;
 	int		ba_opcode;
 
 	int		ba_status;	/* only used with get state */
@@ -143,7 +159,7 @@ struct bioc_alarm {
 
 #define BIOCBLINK _IOWR('B', 36, struct bioc_blink)
 struct bioc_blink {
-	void		*bb_cookie;
+	struct bio	bb_bio;
 	u_int16_t	bb_channel;
 	u_int16_t	bb_target;
 
@@ -155,7 +171,7 @@ struct bioc_blink {
 
 #define BIOCSETSTATE _IOWR('B', 37, struct bioc_setstate)
 struct bioc_setstate {
-	void		*bs_cookie;
+	struct bio	bs_bio;
 	u_int16_t	bs_channel;
 	u_int16_t	bs_target;
 	u_int16_t	bs_lun;
@@ -174,7 +190,7 @@ struct bioc_setstate {
 
 #define BIOCCREATERAID _IOWR('B', 38, struct bioc_createraid)
 struct bioc_createraid {
-	void		*bc_cookie;
+	struct bio	bc_bio;
 	void		*bc_dev_list;
 	u_int16_t	bc_dev_list_len;
 	int32_t		bc_key_disk;
@@ -198,7 +214,7 @@ struct bioc_createraid {
 
 #define BIOCDELETERAID _IOWR('B', 39, struct bioc_deleteraid)
 struct bioc_deleteraid {
-	void		*bd_cookie;
+	struct bio	bd_bio;
 	u_int32_t	bd_flags;
 #define BIOC_SDCLEARMETA	0x01	/* clear metadata region */
 	char		bd_dev[16];	/* device */
@@ -206,7 +222,7 @@ struct bioc_deleteraid {
 
 #define BIOCDISCIPLINE _IOWR('B', 40, struct bioc_discipline)
 struct bioc_discipline {
-	void		*bd_cookie;
+	struct bio	bd_bio;
 	char		bd_dev[16];
 	u_int32_t	bd_cmd;
 	u_int32_t	bd_size;
@@ -215,7 +231,7 @@ struct bioc_discipline {
 
 #define BIOCINSTALLBOOT _IOWR('B', 41, struct bioc_installboot)
 struct bioc_installboot {
-	void		*bb_cookie;
+	struct bio	bb_bio;
 	char		bb_dev[16];
 	void		*bb_bootblk;
 	void		*bb_bootldr;
@@ -237,3 +253,16 @@ struct bioc_installboot {
 
 /* user space defines */
 #define BIOC_DEVLIST		0x10000
+
+#ifdef _KERNEL
+int	bio_register(struct device *, int (*)(struct device *, u_long,
+	    caddr_t));
+void	bio_unregister(struct device *);
+
+void	bio_status_init(struct bio_status *, struct device *);
+void	bio_status(struct bio_status *, int, int, const char *, va_list *);
+
+void	bio_info(struct bio_status *, int, const char *, ...);
+void	bio_warn(struct bio_status *, int, const char *, ...);
+void	bio_error(struct bio_status *, int, const char *, ...);
+#endif
