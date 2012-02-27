@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflog.c,v 1.46 2011/12/21 14:46:24 mikeb Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.49 2012/02/03 01:57:50 bluhm Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -280,7 +280,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	struct pfloghdr		*pfloghdr;
 	u_int			 count;
 	u_char			*dst, *mdst, *cp;
-	u_short			 action, reason;
+	u_short			 reason;
 	int			 afto, hlen, mlen, off;
 	union pf_headers {
 		struct tcphdr		tcp;
@@ -331,10 +331,12 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	m_inithdr(mhdr);
 	mhdr->m_len = 0;	/* XXX not done in m_inithdr() */
 
+#if INET && INET6
 	/* offset for a new header */
 	if (afto && pfloghdr->af == AF_INET)
 		mhdr->m_data += sizeof(struct ip6_hdr) -
 		    sizeof(struct ip);
+#endif /* INET && INET6 */
 
 	mdst = mtod(mhdr, char *);
 	switch (pfloghdr->af) {
@@ -342,7 +344,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 		struct ip	*h;
 
 		if (m->m_pkthdr.len < sizeof(*h))
-			return;
+			goto copy;
 		m_copydata(m, 0, sizeof(*h), mdst);
 		h = (struct ip *)mdst;
 		hlen = h->ip_hl << 2;
@@ -351,25 +353,26 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 			    mdst + sizeof(*h));
 		break;
 	    }
+#ifdef INET6
 	case AF_INET6: {
 		struct ip6_hdr	*h;
 
 		if (m->m_pkthdr.len < sizeof(*h))
-			return;
+			goto copy;
 		hlen = sizeof(struct ip6_hdr);
 		m_copydata(m, 0, hlen, mdst);
 		h = (struct ip6_hdr *)mdst;
 		proto = h->ip6_nxt;
 		break;
 	    }
+#endif /* INET6 */
 	default:
 		/* shouldn't happen ever :-) */
-		m_copydata(m, 0, min(len, m->m_pkthdr.len), dst);
-		return;
+		goto copy;
 	}
 
 	if (m->m_pkthdr.len < hlen + 8 && proto != IPPROTO_NONE)
-		return;
+		goto copy;
 	else if (proto != IPPROTO_NONE) {
 		/* copy 8 bytes of the protocol header */
 		m_copydata(m, hlen, 8, mdst + hlen);
@@ -393,8 +396,8 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 
 	/* rewrite addresses if needed */
 	if (pf_setup_pdesc(&pd, &pdhdrs, pfloghdr->af, pfloghdr->dir, NULL,
-	    &mhdr, &action, &reason) == -1)
-		return;
+	    mhdr, &reason) != PF_PASS)
+		goto copy;
 	pd.naf = pfloghdr->naf;
 
 	PF_ACPY(&osaddr, pd.src, pd.af);
@@ -410,10 +413,12 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	    pfloghdr->dir))) {
 		m_copyback(pd.m, pd.off, min(pd.m->m_len - pd.off, pd.hdrlen),
 		    pd.hdr.any, M_NOWAIT);
+#if INET && INET6
 		if (afto) {
 			PF_ACPY(&pd.nsaddr, &pfloghdr->saddr, pd.naf);
 			PF_ACPY(&pd.ndaddr, &pfloghdr->daddr, pd.naf);
 		}
+#endif /* INET && INET6 */
 		PF_ACPY(&pfloghdr->saddr, &osaddr, pd.af);
 		PF_ACPY(&pfloghdr->daddr, &odaddr, pd.af);
 		pfloghdr->sport = osport;
@@ -423,11 +428,15 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	pd.tot_len = min(pd.tot_len, len);
 	pd.tot_len -= pd.m->m_data - pd.m->m_pktdat;
 
+#if INET && INET6
 	if (afto && pfloghdr->rewritten)
 		pf_translate_af(&pd);
+#endif /* INET && INET6 */
 
-	mlen = min(pd.m->m_pkthdr.len, len);
-	m_copydata(pd.m, 0, mlen, dst);
+	m = pd.m;
+ copy:
+	mlen = min(m->m_pkthdr.len, len);
+	m_copydata(m, 0, mlen, dst);
 	len -= mlen;
 	if (len > 0)
 		bzero(dst + mlen, len);
