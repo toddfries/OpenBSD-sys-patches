@@ -1,4 +1,4 @@
-/*	$OpenBSD: systrace.c,v 1.60 2011/09/18 23:24:14 matthew Exp $	*/
+/*	$OpenBSD: systrace.c,v 1.62 2012/02/20 22:23:39 guenther Exp $	*/
 /*
  * Copyright 2002 Niels Provos <provos@citi.umich.edu>
  * All rights reserved.
@@ -527,7 +527,9 @@ systraceioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		fst->p_ruid = p->p_cred->p_ruid;
 		fst->p_rgid = p->p_cred->p_rgid;
 
+		fdplock(p->p_fd);
 		error = falloc(p, &f, &fd);
+		fdpunlock(p->p_fd);
 		if (error) {
 			free(fst, M_XDATA);
 			return (error);
@@ -1201,12 +1203,12 @@ systrace_attach(struct fsystrace *fst, pid_t pid)
 	struct proc *proc, *p = curproc;
 	struct str_process *newstrp;
 
-	if ((proc = pfind(pid)) == NULL) {
+	if ((proc = pfind(pid)) == NULL || (proc->p_flag & P_THREAD)) {
 		error = ESRCH;
 		goto out;
 	}
 
-	if (ISSET(proc->p_flag, P_INEXEC)) {
+	if (ISSET(proc->p_p->ps_flags, PS_INEXEC)) {
 		error = EAGAIN;
 		goto out;
 	}
@@ -1215,7 +1217,7 @@ systrace_attach(struct fsystrace *fst, pid_t pid)
 	 * You can't attach to a process if:
 	 *	(1) it's the process that's doing the attaching,
 	 */
-	if (proc->p_pid == p->p_pid) {
+	if (proc->p_p == p->p_p) {
 		error = EINVAL;
 		goto out;
 	}

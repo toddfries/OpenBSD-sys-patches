@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.568 2012/01/05 19:50:05 deraadt Exp $
+$OpenBSD: usbdevs,v 1.572 2012/02/09 01:08:15 jsg Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -879,8 +879,12 @@ product ANYDATA ADU_500A	0x6502	ADU-500A
 product AOX USB101		0x0008	Ethernet
 
 /* Apple Computer products */
+product APPLE FOUNTAIN_ANSI	0x020e	Keyboard/Trackpad
+product APPLE FOUNTAIN_ISO	0x020f	Keyboard/Trackpad
+product APPLE GEYSER_ANSI	0x0214	Keyboard/Trackpad
+product APPLE GEYSER_ISO	0x0215	Keyboard/Trackpad
 product APPLE OPTMOUSE		0x0302	Optical mouse
-product APPLE ADB		0x1000	ADB device
+product APPLE BLUETOOTH_HCI	0x1000	HID-proxy
 product APPLE SPEAKERS		0x1101	Speakers
 product APPLE IPHONE		0x1290	iPhone
 product APPLE IPOD_TOUCH	0x1291	iPod Touch
@@ -889,8 +893,10 @@ product APPLE IPOD_TOUCH_2G	0x1293	iPod Touch 2G
 product APPLE IPHONE_3GS	0x1294	iPhone 3GS
 product APPLE IPHONE_4_GSM	0x1297	iPhone 4 GSM
 product APPLE IPOD_TOUCH_3G	0x1299	iPod Touch 3G
+product APPLE IPAD		0x129a	iPad
 product APPLE IPHONE_4_CDMA	0x129c	iPhone 4 CDMA
 product APPLE IPOD_TOUCH_4G	0x129e	iPod Touch 4G
+product APPLE IPAD2		0x129f	iPad 2
 product APPLE IPHONE_4S		0x12a0	iPhone 4S
 product APPLE ETHERNET		0x1402	Ethernet A1277
 product APPLE BLUETOOTH2	0x8205	Bluetooth
@@ -983,6 +989,7 @@ product ATMEL STK541		0x2109	STK541 Zigbee
 product ATMEL UHB124		0x3301	UHB124 hub
 product ATMEL WN210		0x3301	W-Buddie WN210
 product ATMEL DWL900AP		0x5601	DWL-900AP Wireless access point
+product ATMEL AT91_CDC_ACM	0x6119	AT91 CDC ACM
 product ATMEL AT76C503I1	0x7603	AT76C503 (Intersil 3861 Radio)
 product ATMEL AT76C503I2	0x7604	AT76C503 (Intersil 3863 Radio)
 product ATMEL AT76C503RFMD	0x7605	AT76C503 (RFMD Radio)
@@ -1995,6 +2002,7 @@ product HUAWEI E182		0x1429	HUAWEI Mobile Modem
 product HUAWEI E161		0x1446	HUAWEI Mobile Modem
 product HUAWEI K3765		0x1465	HUAWEI Mobile K3765
 product HUAWEI E1820		0x14ac  HUAWEI Mobile Modem
+product HUAWEI K4510		0x14c5  HUAWEI Mobile Modem
 product HUAWEI K3765_INIT	0x1520	HUAWEI Mobile K3765 Initial
 product HUAWEI E173S		0x1c05	HUAWEI Mobile E173s
 product HUAWEI E173S_INIT	0x1c0b	HUAWEI Mobile E173s Initial

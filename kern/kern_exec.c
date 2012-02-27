@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.122 2011/12/14 07:32:16 guenther Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.124 2012/02/20 22:23:39 guenther Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -275,7 +275,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	 * Cheap solution to complicated problems.
 	 * Mark this process as "leave me alone, I'm execing".
 	 */
-	atomic_setbits_int(&p->p_flag, P_INEXEC);
+	atomic_setbits_int(&pr->ps_flags, PS_INEXEC);
 
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE)) {
@@ -529,6 +529,8 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		 * For set[ug]id processes, a few caveats apply to
 		 * stdin, stdout, and stderr.
 		 */
+		error = 0;
+		fdplock(p->p_fd);
 		for (i = 0; i < 3; i++) {
 			struct file *fp = NULL;
 
@@ -562,7 +564,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 				int indx;
 
 				if ((error = falloc(p, &fp, &indx)) != 0)
-					goto exec_abort;
+					break;
 #ifdef DIAGNOSTIC
 				if (indx != i)
 					panic("sys_execve: falloc indx != i");
@@ -570,13 +572,13 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 				if ((error = cdevvp(getnulldev(), &vp)) != 0) {
 					fdremove(p->p_fd, indx);
 					closef(fp, p);
-					goto exec_abort;
+					break;
 				}
 				if ((error = VOP_OPEN(vp, flags, p->p_ucred, p)) != 0) {
 					fdremove(p->p_fd, indx);
 					closef(fp, p);
 					vrele(vp);
-					goto exec_abort;
+					break;
 				}
 				if (flags & FWRITE)
 					vp->v_writecount++;
@@ -587,6 +589,9 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 				FILE_SET_MATURE(fp);
 			}
 		}
+		fdpunlock(p->p_fd);
+		if (error)
+			goto exec_abort;
 	} else
 		atomic_clearbits_int(&pr->ps_flags, PS_SUGID);
 	p->p_cred->p_svuid = p->p_ucred->cr_uid;
@@ -637,7 +642,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		goto free_pack_abort;
 #endif
 
-	if (p->p_flag & P_TRACED)
+	if (pr->ps_flags & PS_TRACED)
 		psignal(p, SIGTRAP);
 
 	free(pack.ep_hdr, M_EXEC);
@@ -675,7 +680,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		ktremul(p, p->p_emul->e_name);
 #endif
 
-	atomic_clearbits_int(&p->p_flag, P_INEXEC);
+	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
 	single_thread_clear(p);
 
 #if NSYSTRACE > 0
@@ -695,7 +700,9 @@ bad:
 	/* kill any opened file descriptor, if necessary */
 	if (pack.ep_flags & EXEC_HASFD) {
 		pack.ep_flags &= ~EXEC_HASFD;
+		fdplock(p->p_fd);
 		(void) fdrelease(p, pack.ep_fd);
+		fdpunlock(p->p_fd);
 	}
 	if (pack.ep_interp != NULL)
 		pool_put(&namei_pool, pack.ep_interp);
@@ -711,7 +718,7 @@ bad:
 #if NSYSTRACE > 0
  clrflag:
 #endif
-	atomic_clearbits_int(&p->p_flag, P_INEXEC);
+	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
 	single_thread_clear(p);
 
 	if (pathbuf != NULL)
@@ -740,7 +747,7 @@ free_pack_abort:
 	exit1(p, W_EXITCODE(0, SIGABRT), EXIT_NORMAL);
 
 	/* NOTREACHED */
-	atomic_clearbits_int(&p->p_flag, P_INEXEC);
+	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
 	if (pathbuf != NULL)
 		pool_put(&namei_pool, pathbuf);
 
