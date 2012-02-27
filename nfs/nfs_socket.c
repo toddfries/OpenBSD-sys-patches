@@ -1365,8 +1365,10 @@ nfs_realign_fixup(struct mbuf *m, struct mbuf *n, unsigned int *off)
 
 		padding = min(ALIGN(n->m_len) - n->m_len, m->m_len);
 		space = M_TRAILINGSPACE(n);
-		if (padding > space)
-			panic("nfs_realign_fixup: no memory to pad to, padding=%d > space=%d", padding, space);
+		if (padding > space) {
+			printf("nfs_realign_fixup: no memory to pad to, padding=%d > space=%d\n", padding, space);
+			return;
+		}
 
 		bcopy(mtod(m, void *), mtod(n, char *) + n->m_len, padding);
 
