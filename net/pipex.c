@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.c,v 1.23 2011/11/25 13:05:06 yasuoka Exp $	*/
+/*	$OpenBSD: pipex.c,v 1.26 2012/01/31 12:04:20 markus Exp $	*/
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -53,6 +53,11 @@
 #include <net/netisr.h>
 #include <net/ppp_defs.h>
 #include <net/ppp-comp.h>
+
+#include "pf.h"
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
 
 #include "bpfilter.h"
 #if NBPFILTER > 0
@@ -1124,15 +1129,16 @@ pipex_ip_input(struct mbuf *m0, struct pipex_session *session)
 			goto drop;
 	}
 #endif
-
-	/* ingress filter */
-	ip = mtod(m0, struct ip *);
-	if ((ip->ip_src.s_addr & session->ip_netmask.sin_addr.s_addr) !=
-	    session->ip_address.sin_addr.s_addr) {
-		pipex_session_log(session, LOG_DEBUG,
-		    "ip packet discarded by ingress filter (src %s)",
-		    inet_ntoa(ip->ip_src));
-		goto drop;
+	if (ISSET(session->ppp_flags, PIPEX_PPP_INGRESS_FILTER)) {
+		/* ingress filter */
+		ip = mtod(m0, struct ip *);
+		if ((ip->ip_src.s_addr & session->ip_netmask.sin_addr.s_addr) !=
+		    session->ip_address.sin_addr.s_addr) {
+			pipex_session_log(session, LOG_DEBUG,
+			    "ip packet discarded by ingress filter (src %s)",
+			    inet_ntoa(ip->ip_src));
+			goto drop;
+		}
 	}
 
 	/* idle timer */
@@ -1225,6 +1231,10 @@ pipex_ip6_input(struct mbuf *m0, struct pipex_session *session)
 	 * XXX: tcpmss adjustment for IPv6 is required???
 	 *      We may use PMTUD in IPv6....
 	 */
+
+#if NPF > 0
+	pf_pkt_addr_changed(m0);
+#endif  
 
 	len = m0->m_pkthdr.len;
 
@@ -1508,6 +1518,9 @@ pipex_pptp_output(struct mbuf *m0, struct pipex_session *session,
 
 	ip->ip_src = session->local.sin4.sin_addr;
 	ip->ip_dst = session->peer.sin4.sin_addr;
+#if NPF > 0
+	pf_pkt_addr_changed(m0);
+#endif  
 
 	/* setup gre(ver1) header information */
 	gre = PIPEX_SEEK_NEXTHDR(ip, sizeof(struct ip),
@@ -1660,10 +1673,8 @@ pipex_pptp_input(struct mbuf *m0, struct pipex_session *session)
 		} else if (SEQ32_GT(ack, pptp_session->snd_nxt)) {
 			reason = "ack for unknown sequence";
 			goto out_seq;
-		} else {
-			ack++;
-			pptp_session->snd_una = ack;
-		}
+		} else
+			pptp_session->snd_una = ack + 1;
 	}
 	if (!has_seq) {
 		/* ack only packet */
@@ -1706,9 +1717,7 @@ pipex_pptp_input(struct mbuf *m0, struct pipex_session *session)
 		goto out_seq;
 
 not_ours:
-	/* revert original seq/ack values */
-	seq--;
-	ack--;
+	seq--;	/* revert original seq value */
 
 	/*
 	 * overwrite sequence numbers to adjust a gap between pipex and
@@ -1960,6 +1969,9 @@ pipex_l2tp_output(struct mbuf *m0, struct pipex_session *session)
 	udp->uh_ulen = htons(plen);
 
 	m0->m_pkthdr.rcvif = session->pipex_iface->ifnet_this;
+#if NPF > 0
+	pf_pkt_addr_changed(m0);
+#endif  
 	switch (session->peer.sin6.sin6_family) {
 	case AF_INET:
 		ip = mtod(m0, struct ip *);
