@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache_r5k.S,v 1.28 2010/01/09 23:34:29 miod Exp $ */
+/*	$OpenBSD: cache_r5k.S,v 1.31 2012/02/16 20:31:30 miod Exp $ */
 
 /*
  * Copyright (c) 1998-2004 Opsycon AB (www.opsycon.se)
@@ -72,7 +72,7 @@
 #define	IndexStoreTag_T		0x0a
 #define	IndexStoreTag_S		0x0b
 
-#define	CreateDirtyExclusive	0x09
+#define	CreateDirtyExclusive	0x0d
 
 #define	HitInvalidate_I		0x10
 #define	HitInvalidate_D		0x11
@@ -82,14 +82,11 @@
 #define	HitWBInvalidate_D	0x15
 #define	InvalidatePage_T	0x16
 #define	HitWBInvalidate_S	0x17
+#define	InvalidatePage_S	0x17	/* Only RM527[0-1] */
 
 #define	HitWB_I			0x18
 #define	HitWB_D			0x19
 #define	HitWB_S			0x1b
-
-#define	InvalidateSecondaryPage	0x17	/* Only RM527[0-1] */
-
-
 
 /*
  *  R5000 config register bits.
@@ -181,8 +178,8 @@ LEAF(Mips5k_ConfigCache, 0)
 	sllv	ta0, t2, t1			# ta0 = Initial I set size.
 
 	and	t2, v0, 0x20
-	srl	t2, t2, 1			# Get I cache line size.
-	addu	t2, t2, 16
+	srl	t2, 1				# Get I cache line size.
+	addu	t2, 16
 	sw	t2, CI_L1INSTCACHELINE(a0)
 
 	srl	t1, v0, 6			# Get D cache size.
@@ -191,7 +188,7 @@ LEAF(Mips5k_ConfigCache, 0)
 	sllv	ta1, t2, t1
 
 	and	t2, v0, 0x10
-	addu	t2, t2, 16			# Get D cache line size.
+	addu	t2, 16				# Get D cache line size.
 	sw	t2, CI_L1DATACACHELINE(a0)
 
 	li	t2, CTYPE_2WAY			# Assume two way cache
@@ -238,7 +235,7 @@ Conf5K:						# R5xxx type, check for L2 cache
 	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, ta2
 1:
-	cache	InvalidateSecondaryPage, 0(t0)
+	cache	InvalidatePage_S, 0(t0)
 	PTR_ADDU t0, 4096
 	bne	t0, t1, 1b
 	nop
@@ -265,10 +262,11 @@ Conf52K:					# R5200 type, check for L2 cache
 
 	mtc0	v0, COP_0_CONFIG		# Enable L2 cache
 	or	t2, CTYPE_HAS_XL2		# External L2 present.
+	mtc0	zero, COP_0_TAG_LO
 	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, ta2
 1:
-	cache	InvalidateSecondaryPage, 0(t0)
+	cache	InvalidatePage_S, 0(t0)
 	PTR_ADDU t0, 4096
 	bne	t0, t1, 1b
 	nop
@@ -291,7 +289,7 @@ Conf7K:					# RM7000, check for L2 and L3 cache
 	srl	t1, CF_7_TS_AL
 
 	or	t2, CTYPE_HAS_XL3		# External L2 present.
-	li	t3, CF_7_TE			# Set SE in conf
+	li	t3, CF_7_TE			# Set TE in conf
 	or	v0, t3				# Update config register
 	li	ta3, 512*1024			# 512k per 'click'.
 	sll	ta3, t1
@@ -306,6 +304,8 @@ Conf7K:					# RM7000, check for L2 and L3 cache
 	mtc0	v0, COP_0_CONFIG		# Enable L3 cache
 	or	t2, CTYPE_HAS_XL3
 #endif
+
+	mtc0	zero, COP_0_TAG_LO
 	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, ta3
 1:
@@ -368,7 +368,7 @@ ConfResult:
 
 	addu	t1, ta0, -1			# Use icache for alias mask
 	srl	t1, t2				# Some cpus have different
-	and	t1, ~(NBPG - 1)			# i and d cache sizes...
+	and	t1, ~(NBPG - 1)			# I and D cache sizes...
 	PTR_S	t1, CpuCacheAliasMask
 
 	sw	ta0, CI_L1INSTCACHESIZE(a0)	# store cache size.
@@ -428,7 +428,7 @@ LEAF(Mips5k_SyncCache, 0)
 	cache	IndexInvalidate_I, 96(t0)
 
 	bne	t0, t1, 1b
-	PTR_ADDU t0, t0, 128
+	PTR_ADDU t0, 128
 
 /*
  * Sync the data cache. Do L1 first. Indexed only operate on
@@ -437,7 +437,7 @@ LEAF(Mips5k_SyncCache, 0)
 
 	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, t2			# End address
-	PTR_SUBU t1, t1, 128
+	PTR_SUBU t1, 128
 1:
 	cache	IndexWBInvalidate_D, 0(t0)
 	cache	IndexWBInvalidate_D, 32(t0)
@@ -445,7 +445,7 @@ LEAF(Mips5k_SyncCache, 0)
 	cache	IndexWBInvalidate_D, 96(t0)
 
 	bne	t0, t1, 1b
-	PTR_ADDU t0, t0, 128
+	PTR_ADDU t0, 128
 
 /* Do on chip L2 if present */
 	lw	t0, CI_CACHECONFIGURATION(a0)
@@ -456,10 +456,10 @@ LEAF(Mips5k_SyncCache, 0)
 3:
 	LOAD_XKPHYS(t3, CCA_CACHED)
 	lw	ta0, CI_L2SIZE(a0)
-10:
+1:
 	cache	IndexWBInvalidate_S, 0(t3)
 	PTR_SUBU ta0, 32			# Fixed cache line size.
-	bgtz	ta0, 10b
+	bgtz	ta0, 1b
 	PTR_ADDU t3, 32
 
 /* Do off chip L2 if present */
@@ -472,10 +472,10 @@ LEAF(Mips5k_SyncCache, 0)
 	mtc0    zero, COP_0_TAG_LO
 	LOAD_XKPHYS(t3, CCA_CACHED)
 	lw	ta0, CI_L2SIZE(a0)
-21:
-	cache	InvalidateSecondaryPage, 0(t3)
-	PTR_SUBU ta0, 4096			# Fixed cache page size.
-	bgtz	ta0, 21b
+1:
+	cache	InvalidatePage_S, 0(t3)
+	PTR_SUBU ta0, 4096			# Fixed external cache page size
+	bgtz	ta0, 1b
 	PTR_ADDU t3, 4096
 
 /* Do off chip L3 if present */
@@ -488,10 +488,10 @@ LEAF(Mips5k_SyncCache, 0)
 	mtc0    zero, COP_0_TAG_LO
 	LOAD_XKPHYS(t3, CCA_CACHED)
 	lw	ta0, CI_L3SIZE(a0)
-31:
+1:
 	cache	InvalidatePage_T, 0(t3)
-	PTR_SUBU ta0, 4096			# Fixed cache page size.
-	bgtz	ta0, 31b
+	PTR_SUBU ta0, 4096			# Fixed external cache page size
+	bgtz	ta0, 1b
 	PTR_ADDU t3, 4096
 
 99:
@@ -499,6 +499,7 @@ LEAF(Mips5k_SyncCache, 0)
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register.
 	NOP10
 #endif
+	sync
 	j	ra
 	nop
 END(Mips5k_SyncCache)
@@ -534,9 +535,9 @@ LEAF(Mips5k_InvalidateICache, 0)
 	PTR_ADDU a2, 31				# Round up size
 	PTR_ADDU a2, a1				# Add extra from address
 	and	a1, -32				# Align start address
-	PTR_SUBU a2, a2, a1
+	PTR_SUBU a2, a1
 	PTR_ADDU a1, a3				# a1 now new XKPHYS address
-	srl	a2, a2, 5			# Number of unrolled loops
+	srl	a2, 5				# Number of unrolled loops
 	addiu	v0, -2				# <0 1way, 0 = two, >0 four
 1:
 	bltz	v0, 3f
@@ -556,13 +557,14 @@ LEAF(Mips5k_InvalidateICache, 0)
 3:
 	cache	IndexInvalidate_I, 0(a1)	# do set (A if NWay)
 
-	bne	a2, zero, 1b
+	bnez	a2, 1b
 	PTR_ADDU a1, 32
 
 #ifdef CPUR4600
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register.
 	NOP10
 #endif
+	sync
 	j	ra
 	nop
 END(Mips5k_InvalidateICache)
@@ -633,6 +635,7 @@ LEAF(Mips5k_SyncDCachePage, 0)
 #ifdef CPUR4600
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register.
 #endif
+	sync
 	j	ra
 	nop
 END(Mips5k_SyncDCachePage)
@@ -669,17 +672,17 @@ LEAF(Mips5k_HitSyncDCache, 0)
 	mtc0	v0, COP_0_STATUS_REG		# Disable interrupts
 #endif
 
-	beq	a2, zero, 3f			# size is zero!
+	beqz	a2, 3f				# size is zero!
 	PTR_ADDU a2, 31				# Round up
-	PTR_ADDU a2, a2, a1			# Add extra from address
-	and	a1, a1, -32			# align address
-	PTR_SUBU a2, a2, a1
-	srl	a2, a2, 5			# Compute number of cache lines
+	PTR_ADDU a2, a1				# Add extra from address
+	and	a1, -32				# align address
+	PTR_SUBU a2, a1
+	srl	a2, 5				# Compute number of cache lines
 
 1:
 	PTR_ADDU a2, -1
 	cache	HitWBInvalidate_D, 0(a1)
-	bne	a2, zero, 1b
+	bnez	a2, 1b
 	PTR_ADDU a1, 32
 
 3:
@@ -687,6 +690,7 @@ LEAF(Mips5k_HitSyncDCache, 0)
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register.
 	NOP10
 #endif
+	sync
 	j	ra
 	nop
 END(Mips5k_HitSyncDCache)
@@ -724,15 +728,15 @@ LEAF(Mips5k_HitSyncSCache, 0)
 	mtc0	v0, COP_0_STATUS_REG		# Disable interrupts
 #endif
 
-	beq	a2, zero, 3f			# size is zero!
-	PTR_ADDU a2, a2, a1			# Add in extra from align
-	and	a1, a1, -32			# Align address
-	PTR_SUBU a2, a2, a1
+	beqz	a2, 3f				# size is zero!
+	PTR_ADDU a2, a1				# Add in extra from align
+	and	a1, -32				# Align address
+	PTR_SUBU a2, a1
 1:
 	PTR_ADDU a2, -32
 
 	cache	HitWBInvalidate_S, 0(a1)
-	cache	HitWBInvalidate_D, 0(a1)	# Kill any orphans...
+	cache	HitWBInvalidate_D, 0(a1)	# Orphans in L1
 
 	bgtz	a2, 1b
 	PTR_ADDU a1, 32
@@ -742,6 +746,7 @@ LEAF(Mips5k_HitSyncSCache, 0)
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register.
 	NOP10
 #endif
+	sync
 	j	ra
 	nop
 END(Mips5k_HitSyncSCache)
@@ -773,10 +778,10 @@ LEAF(Mips5k_HitInvalidateDCache, 0)
 	mtc0	v0, COP_0_STATUS_REG		# Disable interrupts
 #endif
 
-	beq	a2, zero, 3f			# size is zero!
-	PTR_ADDU a2, a2, a1			# Add in extra from align
-	and	a1, a1, -32			# Align address
-	PTR_SUBU a2, a2, a1
+	beqz	a2, 3f				# size is zero!
+	PTR_ADDU a2, a1				# Add in extra from align
+	and	a1, -32				# Align address
+	PTR_SUBU a2, a1
 
 1:
 	PTR_ADDU a2, -32
@@ -791,6 +796,7 @@ LEAF(Mips5k_HitInvalidateDCache, 0)
 	mtc0	v1, COP_0_STATUS_REG		# Restore the status register.
 	NOP10
 #endif
+	sync
 	j	ra
 	nop
 END(Mips5k_HitInvalidateDCache)
@@ -823,10 +829,10 @@ LEAF(Mips5k_HitInvalidateSCache, 0)
 	mtc0	v0, COP_0_STATUS_REG		# Disable interrupts
 #endif
 
-	beq	a2, zero, 3f			# size is zero!
-	PTR_ADDU a2, a2, a1			# Add in extra from align
-	and	a1, a1, -32			# Align address
-	PTR_SUBU a2, a2, a1
+	beqz	a2, 3f				# size is zero!
+	PTR_ADDU a2, a1				# Add in extra from align
+	and	a1, -32				# Align address
+	PTR_SUBU a2, a1
 1:
 	PTR_ADDU a2, -32
 
@@ -841,6 +847,7 @@ LEAF(Mips5k_HitInvalidateSCache, 0)
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register.
 	NOP10
 #endif
+	sync
 	j	ra
 	nop
 END(Mips5k_HitInvalidateSCache)
@@ -879,7 +886,6 @@ END(Mips5k_HitInvalidateSCache)
  *----------------------------------------------------------------------------
  */
 NON_LEAF(Mips5k_IOSyncDCache, FRAMESZ(CF_SZ+2*REGSZ), ra)
-
 	PTR_SUBU sp, FRAMESZ(CF_SZ+2*REGSZ)
 	PTR_S	ra, CF_RA_OFFS+2*REGSZ(sp)
 	REG_S	a1, CF_ARGSZ(sp)		# save args
@@ -907,7 +913,7 @@ SyncSC:
 SyncRD:
 	and	t0, a1, 31			# check if invalidate possible
 	bnez	t0, SyncRDWB			# both address and size must
-	and	t0, a2, 31			# be aligned at the cache size
+	and	t0, a2, 31			# be aligned to the cache size
 	bnez	t0, SyncRDWB
 	nop
 
@@ -960,15 +966,16 @@ SyncRDXL2:
 	beqz	t0, SyncRDL3			# Nope.
 	REG_L	a1, CF_ARGSZ(sp)
 	REG_L	a2, CF_ARGSZ+REGSZ(sp)
-	and	a3, a1, 4095			# align on page size
+	and	a3, a1, 4095			# align on external page size
+	mtc0	zero, COP_0_TAG_LO
 	PTR_SUBU a1, a3
 	PTR_ADDU a2, a3
-50:
+1:
 	blez	a2, SyncDone
-	PTR_SUBU a2, 4096			# Fixed cache page size.
+	PTR_SUBU a2, 4096			# Fixed external cache page size
 
-	cache	InvalidateSecondaryPage, 0(a1)
-	b	50b
+	cache	InvalidatePage_S, 0(a1)
+	b	1b
 	PTR_ADDU a1, 4096
 
 SyncRDL3:
@@ -977,18 +984,20 @@ SyncRDL3:
 	beqz	t0, SyncDone			# Nope.
 	REG_L	a1, CF_ARGSZ(sp)
 	REG_L	a2, CF_ARGSZ+REGSZ(sp)
-	and	a3, a1, 4095			# align on page size
+	and	a3, a1, 4095			# align on external page size
+	mtc0	zero, COP_0_TAG_LO
 	PTR_SUBU a1, a3
 	PTR_ADDU a2, a3
-40:
+1:
 	blez	a2, SyncDone
-	PTR_SUBU a2, 4096			# Fixed cache page size.
+	PTR_SUBU a2, 4096			# Fixed external cache page size
 
 	cache	InvalidatePage_T, 0(a1)
-	b	40b
+	b	1b
 	PTR_ADDU a1, 4096
 
 SyncDone:
+	sync
 	j	ra
 	PTR_ADDU sp, FRAMESZ(CF_SZ+2*REGSZ)
 END(Mips5k_IOSyncDCache)
