@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.572 2012/02/09 01:08:15 jsg Exp $
+$OpenBSD: usbdevs,v 1.574 2012/03/01 04:28:15 jsg Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -925,7 +925,8 @@ product ASKEY VOYAGER1010	0x0821	Voyager 1010
 product ASIX AX88172		0x1720	USB 2.0 10/100 Ethernet controller
 product ASIX AX88178		0x1780	AX88178
 product ASIX AX88772		0x7720	AX88772
-product ASIX AX88772A		0x772a	AX88772a
+product ASIX AX88772A		0x772a	AX88772A
+product ASIX AX88772B		0x772b	AX88772B
 
 /* ASUS products */
 product ASUS2 USBN11		0x0b05	USB-N11
@@ -3284,6 +3285,7 @@ product ROLAND UM550		0x0023	UM-550 MIDI I/F
 product ROLAND SD20		0x0027	SD-20 MIDI Synth
 product ROLAND SD80		0x0029	SD-80 MIDI Synth
 product ROLAND UA700		0x002b	UA-700 Audio I/F
+product ROLAND UMONE		0x012a	UM-ONE MIDI I/F
 
 /* Rockfire products */
 product ROCKFIRE GAMEPAD	0x2033	Gamepad 203USB
