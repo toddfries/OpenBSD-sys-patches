@@ -163,6 +163,7 @@ struct ucom_methods moscom_methods = {
 
 static const struct usb_devno moscom_devs[] = {
 	{ USB_VENDOR_MOSCHIP,		USB_PRODUCT_MOSCHIP_MCS7703 }
+	{ USB_VENDOR_MOSCHIP,		USB_PRODUCT_MOSCHIP_MCS7840 }
 };
 
 int moscom_match(struct device *, void *, void *); 
