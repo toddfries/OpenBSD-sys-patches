@@ -2788,6 +2788,7 @@
 #define	USB_PRODUCT_MOSCHIP_MCS7730	0x7730		/* MCS7730 Ethernet */
 #define	USB_PRODUCT_MOSCHIP_MCS7830	0x7830		/* MCS7830 Ethernet */
 #define	USB_PRODUCT_MOSCHIP_MCS7832	0x7832		/* MCS7832 Ethernet */
+#define	USB_PRODUCT_MOSCHIP_MCS7840	0x7840		/* MCS7840 Serial */
 
 /* Motorola products */
 #define	USB_PRODUCT_MOTOROLA_MC141555	0x1555		/* MC141555 hub controller */

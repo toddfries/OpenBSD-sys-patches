@@ -2781,6 +2781,7 @@ product	MOSCHIP	MCS7715		0x7715	MCS7715	Serial Parallel
 product MOSCHIP MCS7730		0x7730	MCS7730 Ethernet
 product MOSCHIP MCS7830		0x7830	MCS7830 Ethernet
 product MOSCHIP MCS7832		0x7832	MCS7832 Ethernet
+product MOSCHIP MCS7840		0x7840	MCS7840 Serial
 
 /* Motorola products */
 product MOTOROLA MC141555	0x1555	MC141555 hub controller

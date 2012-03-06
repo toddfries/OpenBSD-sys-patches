@@ -6650,6 +6650,10 @@ const struct usb_known_product usb_known_products[] = {
 	    "MCS7832 Ethernet",
 	},
 	{
+	    USB_VENDOR_MOSCHIP, USB_PRODUCT_MOSCHIP_MCS7840,
+	    "MCS7840 Serial",
+	},
+	{
 	    USB_VENDOR_MOTOROLA, USB_PRODUCT_MOTOROLA_MC141555,
 	    "MC141555 hub controller",
 	},
