@@ -215,6 +215,12 @@ moscom_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_dying = 1;
 		return;
 	}
+	for(i=0; i < 8; i++) {
+		error = usbd_device2interface_handle(sc->sc_udev, i,
+		    &sc->sc_iface);
+		printf("%s: iface=%d: %s\n",
+		    sc->sc_dev.dv_xname, i, (error == 0) ? "ok" : "bad");
+	}
 
 	/* get the first interface handle */
 	error = usbd_device2interface_handle(sc->sc_udev, MOSCOM_IFACE_NO,
@@ -229,6 +235,7 @@ moscom_attach(struct device *parent, struct device *self, void *aux)
 	id = usbd_get_interface_descriptor(sc->sc_iface);
 
 	uca.bulkin = uca.bulkout = -1;
+	printf("%s: %d interface descriptors\n", id->bNumEndPoints;
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
@@ -237,6 +244,8 @@ moscom_attach(struct device *parent, struct device *self, void *aux)
 			sc->sc_dying = 1;
 			return;
 		}
+		printf("%s: id%d: addr=%d, type=%d\n", ed->bEndpointAddress,
+		    ed->bDescriptorType);
 
 		if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
 		    UE_GET_XFERTYPE(ed->bmAttributes) == UE_BULK)
@@ -263,6 +272,7 @@ moscom_attach(struct device *parent, struct device *self, void *aux)
 	uca.info = NULL;
 	
 	sc->sc_subdev = config_found_sm(self, &uca, ucomprint, ucomsubmatch);
+
 }
 
 int
