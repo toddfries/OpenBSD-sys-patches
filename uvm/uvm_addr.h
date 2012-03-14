@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.h,v 1.46 2011/06/06 17:10:23 ariane Exp $	*/
+/*	$OpenBSD: uvm_addr.h,v 1.1 2012/03/09 13:01:29 ariane Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>

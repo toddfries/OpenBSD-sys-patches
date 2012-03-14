@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.144 2011/07/03 18:36:49 oga Exp $	*/
+/*	$OpenBSD: uvm_addr.c,v 1.1 2012/03/09 13:01:29 ariane Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -16,7 +16,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define DEBUG
+/* #define DEBUG */
 
 #include <sys/param.h>
 #include <uvm/uvm.h>

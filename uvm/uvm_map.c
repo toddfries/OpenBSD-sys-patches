@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.144 2011/07/03 18:36:49 oga Exp $	*/
+/*	$OpenBSD: uvm_map.c,v 1.148 2012/03/09 13:01:29 ariane Exp $	*/
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /*
@@ -86,7 +86,7 @@
  * uvm_map.c: uvm map operations
  */
 
-#define DEBUG
+/* #define DEBUG */
 /* #define VMMAP_DEBUG */
 
 #include <sys/param.h>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.124 2012/02/20 22:23:39 guenther Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.125 2012/03/09 13:01:28 ariane Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
