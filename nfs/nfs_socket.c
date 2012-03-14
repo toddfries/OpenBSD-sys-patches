@@ -1358,17 +1358,13 @@ nfs_realign_fixup(struct mbuf *m, struct mbuf *n, unsigned int *off)
 	 * destination chain is aligned, or the end of the source is reached.
 	 */
 	do {
-		int space;
 		m = m->m_next;
 		if (m == NULL)
 			return;
 
 		padding = min(ALIGN(n->m_len) - n->m_len, m->m_len);
-		space = M_TRAILINGSPACE(n);
-		if (padding > space) {
-			printf("nfs_realign_fixup: no memory to pad to, padding=%d > space=%d\n", padding, space);
-			return;
-		}
+		if (padding > M_TRAILINGSPACE(n))
+			panic("nfs_realign_fixup: no memory to pad to");
 
 		bcopy(mtod(m, void *), mtod(n, char *) + n->m_len, padding);
 
@@ -1376,7 +1372,8 @@ nfs_realign_fixup(struct mbuf *m, struct mbuf *n, unsigned int *off)
 		m_adj(m, padding);
 		*off += padding;
 
-	} while (!ALIGNED_POINTER(n->m_len, void *));
+#define ALIGNED(n) ((u_long)(n) & (ALIGNBYTES - 1))
+	} while (!ALIGNED(n->m_len));
 }
 
 /*
@@ -1393,11 +1390,9 @@ nfs_realign(struct mbuf **pm, int hsiz)
 
 	++nfs_realign_test;
 	while ((m = *pm) != NULL) {
-		if (!ALIGNED_POINTER(m->m_data, void *) ||
-		    !ALIGNED_POINTER(m->m_len,  void *)) {
+		if (!ALIGNED(m->m_data) || !ALIGNED(m->m_len)) {
 			MGET(n, M_WAIT, MT_DATA);
-#define ALIGN_POINTER(n) ((u_int)(((n) + sizeof(void *)) & ~sizeof(void *)))
-			if (ALIGN_POINTER(m->m_len) >= MINCLSIZE) {
+			if (ALIGN(m->m_len) >= MINCLSIZE) {
 				MCLGET(n, M_WAIT);
 			}
 			n->m_len = 0;
@@ -1418,7 +1413,7 @@ nfs_realign(struct mbuf **pm, int hsiz)
 			 * If an unaligned amount of memory was copied, fix up
 			 * the last mbuf created by m_copyback().
 			 */
-			if (!ALIGNED_POINTER(m->m_len, void *))
+			if (!ALIGNED(m->m_len))
 				nfs_realign_fixup(m, n, &off);
 
 			off += m->m_len;
