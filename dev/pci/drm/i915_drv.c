@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.118 2011/09/20 14:29:34 kettenis Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.119 2012/03/09 13:01:28 ariane Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *

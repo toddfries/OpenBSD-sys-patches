@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.85 2011/07/05 04:48:02 guenther Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.86 2012/03/09 13:01:28 ariane Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom

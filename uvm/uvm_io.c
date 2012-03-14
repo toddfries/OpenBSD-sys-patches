@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_io.c,v 1.19 2011/06/06 17:10:23 ariane Exp $	*/
+/*	$OpenBSD: uvm_io.c,v 1.20 2012/03/09 13:01:29 ariane Exp $	*/
 /*	$NetBSD: uvm_io.c,v 1.12 2000/06/27 17:29:23 mrg Exp $	*/
 
 /*
