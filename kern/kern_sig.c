@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.134 2012/02/20 22:23:39 guenther Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.136 2012/03/10 06:27:21 guenther Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -756,7 +756,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 	int s, prop;
 	sig_t action;
 	int mask;
-	struct process *pr;
+	struct process *pr = p->p_p;
 	struct proc *q;
 	int wakeparent = 0;
 
@@ -766,12 +766,11 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 #endif
 
 	/* Ignore signal if we are exiting */
-	if (p->p_flag & P_WEXIT)
+	if (pr->ps_flags & PS_EXITING)
 		return;
 
 	mask = sigmask(signum);
 
-	pr = p->p_p;
 	if (type == SPROCESS) {
 		/*
 		 * A process-wide signal can be diverted to a different
@@ -805,15 +804,17 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 
 	/*
 	 * If proc is traced, always give parent a chance.
+	 * XXX give sigwait() priority until it's fixed to do this
+	 * XXX from issignal/postsig
 	 */
-	if (pr->ps_flags & PS_TRACED) {
-		action = SIG_DFL;
-		atomic_setbits_int(&p->p_siglist, mask);
-	} else if (p->p_sigdivert & mask) {
+	if (p->p_sigdivert & mask) {
 		p->p_sigwait = signum;
 		atomic_clearbits_int(&p->p_sigdivert, ~0);
 		action = SIG_CATCH;
 		wakeup(&p->p_sigdivert);
+	} else if (pr->ps_flags & PS_TRACED) {
+		action = SIG_DFL;
+		atomic_setbits_int(&p->p_siglist, mask);
 	} else {
 		/*
 		 * If the signal is being ignored,
