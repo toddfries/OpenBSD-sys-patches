@@ -162,7 +162,7 @@ struct ucom_methods moscom_methods = {
 };
 
 static const struct usb_devno moscom_devs[] = {
-	{ USB_VENDOR_MOSCHIP,		USB_PRODUCT_MOSCHIP_MCS7703 }
+	{ USB_VENDOR_MOSCHIP,		USB_PRODUCT_MOSCHIP_MCS7703 },
 	{ USB_VENDOR_MOSCHIP,		USB_PRODUCT_MOSCHIP_MCS7840 }
 };
 
@@ -235,7 +235,7 @@ moscom_attach(struct device *parent, struct device *self, void *aux)
 	id = usbd_get_interface_descriptor(sc->sc_iface);
 
 	uca.bulkin = uca.bulkout = -1;
-	printf("%s: %d interface descriptors\n", id->bNumEndPoints;
+	printf("%s: %d interface descriptors\n", id->bNumEndpoints);
 	for (i = 0; i < id->bNumEndpoints; i++) {
 		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
