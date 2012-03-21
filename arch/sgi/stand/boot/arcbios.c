@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.c,v 1.14 2011/04/09 20:46:33 miod Exp $	*/
+/*	$OpenBSD: arcbios.c,v 1.16 2012/03/19 19:08:37 miod Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  * Copyright (c) 1996-2004 Opsycon AB.  All rights reserved.
@@ -47,6 +47,8 @@ static const struct systypes {
 	char *sys_name;
 	int  sys_ip;
 } sys_types[] = {
+    { "SGI-IP20", 20 },
+    { "SGI-IP22", 22 },
     { "SGI-IP30", 30 },
     { "SGI-IP32", 32 }
 };
@@ -241,14 +243,19 @@ devopen(struct open_file *f, const char *fname, char **file)
 	int partition = 0;
 	char namebuf[256];
 	char devname[32];
-	int rc, i, n;
+	int rc, i, n, noopen = 0;
 
 	ecp = cp = fname;
+	namebuf[0] = '\0';
 
 	/*
 	 * Scan the component list and find device and partition.
 	 */
-	if (strncmp(cp, "dksc(", 5) == 0) {
+	if (strncmp(cp, "bootp()", 7) == 0) {
+		strlcpy(devname, "bootp", sizeof(devname));
+		strlcpy(namebuf, cp, sizeof(namebuf));
+		noopen = 1;
+	} else if (strncmp(cp, "dksc(", 5) == 0) {
 		strncpy(devname, "scsi", sizeof(devname));
 		cp += 5;
 		cp = boot_getnr(cp, &i);
@@ -257,7 +264,6 @@ devopen(struct open_file *f, const char *fname, char **file)
 			cp = boot_getnr(cp, &i);
 			/* i = target id */
 			if (*cp++ == ',') {
-
 				memcpy(namebuf, fname, cp - fname);
 				namebuf[cp - fname] = '\0';
 				strlcat(namebuf, "0)", sizeof namebuf);
@@ -291,10 +297,13 @@ devopen(struct open_file *f, const char *fname, char **file)
 	 */
 	dp = devsw;
 	n = ndevs;
-	while(n--) {
+	while (n--) {
 		if (strcmp(devname, dp->dv_name) == 0) {
-			rc = (dp->dv_open)(f, namebuf, partition, 0);
-			if (!rc) {
+			if (noopen)
+				rc = 0;
+			else
+				rc = (dp->dv_open)(f, namebuf, partition, 0);
+			if (rc == 0) {
 				f->f_dev = dp;
 				if (file && *cp != '\0')
 					*file = (char *)cp;
