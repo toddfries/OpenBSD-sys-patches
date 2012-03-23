@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_serv.c,v 1.91 2010/09/09 10:37:04 thib Exp $	*/
+/*	$OpenBSD: nfs_serv.c,v 1.92 2012/03/21 16:33:21 kettenis Exp $	*/
 /*     $NetBSD: nfs_serv.c,v 1.34 1997/05/12 23:37:12 fvdl Exp $       */
 
 /*
@@ -894,8 +894,14 @@ nfsrv_create(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 			dirp = NULL;
 		}
 	}
-	if (error)
-		goto out;
+	if (error) {
+		nfsm_reply(NFSX_WCCDATA(info.nmi_v3));
+		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
+		    &info);
+		if (dirp)
+			vrele(dirp);
+		return (0);
+	}
 
 	VATTR_NULL(&va);
 	if (info.nmi_v3) {
@@ -1127,8 +1133,14 @@ nfsrv_mknod(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 	    &info.nmi_dpos, &dirp, procp);
 	if (dirp)
 		dirfor_ret = VOP_GETATTR(dirp, &dirfor, cred, procp);
-	if (error)
-		goto out1;
+	if (error) {
+		nfsm_reply(NFSX_WCCDATA(1));
+		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
+		    &info);
+		if (dirp)
+			vrele(dirp);
+		return (0);
+	}
 
 	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 	vtyp = nfsv3tov_type(*tl);
@@ -1377,8 +1389,16 @@ nfsrv_rename(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 			fdirp = NULL;
 		}
 	}
-	if (error)
-		goto out1;
+	if (error) {
+		nfsm_reply(2 * NFSX_WCCDATA(info.nmi_v3));
+		nfsm_srvwcc(nfsd, fdirfor_ret, &fdirfor, fdiraft_ret, &fdiraft,
+		    &info);
+		nfsm_srvwcc(nfsd, tdirfor_ret, &tdirfor, tdiraft_ret, &tdiraft,
+		    &info);
+		if (fdirp)
+			vrele(fdirp);
+		return (0);
+	}
 
 	fvp = fromnd.ni_vp;
 	nfsm_srvmtofh(tfhp);
@@ -1799,7 +1819,7 @@ nfsrv_mkdir(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 		nfsm_reply(NFSX_WCCDATA(info.nmi_v3));
 		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
 		    &info);
-		if (info.nmi_v3)
+		if (dirp)
 			vrele(dirp);
 		return (0);
 	}
@@ -1912,8 +1932,14 @@ nfsrv_rmdir(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 			dirp = NULL;
 		}
 	}
-	if (error)
-		goto out1;
+	if (error) {
+		nfsm_reply(NFSX_WCCDATA(info.nmi_v3));
+		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
+		    &info);
+		if (dirp)
+			vrele(dirp);
+		return (0);
+	}
 	vp = nd.ni_vp;
 	if (vp->v_type != VDIR) {
 		error = ENOTDIR;
