@@ -267,11 +267,15 @@ filt_proc(struct knote *kn, long hint)
 		kn->kn_fflags |= event;
 
 	/*
-	 * process is gone, so flag the event as finished.
+	 * process is gone, so flag the event as finished and remove it
+	 * from the process's klist
 	 */
 	if (event == NOTE_EXIT) {
+		struct process *pr = kn->kn_ptr.p_proc->p_p;
+
 		kn->kn_status |= KN_DETACHED;
 		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
+		SLIST_REMOVE(&pr->ps_klist, kn, knote, kn_selnext);
 		return (1);
 	}
 
@@ -947,6 +951,19 @@ knote_fdclose(struct proc *p, int fd)
 	struct klist *list = &fdp->fd_knlist[fd];
 
 	knote_remove(p, list);
+}
+
+/*
+ * handle a process exiting, including the triggering of NOTE_EXIT notes
+ * XXX this could be more efficient, doing a single pass down the klist
+ */
+void
+knote_processexit(struct process *pr)
+{
+	KNOTE(&pr->ps_klist, NOTE_EXIT);
+
+	/* remove other knotes hanging off the process */
+	knote_remove(pr->ps_mainproc, &pr->ps_klist);
 }
 
 void
