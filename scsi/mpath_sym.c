@@ -97,8 +97,7 @@ struct sym_device asym_devices[] = {
 /*	  " vendor "  "     device     " */
 /*	  "01234567"  "0123456789012345" */
 	{ "DELL    ", "MD1220          " },
-	{ "Transtec", "PROVIGO1100" },
-	{ "NetBSD",   "NetBSD iSCSI" }
+	{ "Transtec", "PROVIGO1100" }
 };
 
 int
@@ -126,8 +125,6 @@ sym_match(struct device *parent, void *match, void *aux)
 		    bcmp(s->product, inq->product, strlen(s->product)) == 0)
 			return (3);
 	}
-	printf("sym !match: vendor='%s', product='%s'\n",
-	    inq->vendor, inq->product);
 
 	return (0);
 }
