@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_serv.c,v 1.91 2010/09/09 10:37:04 thib Exp $	*/
+/*	$OpenBSD: nfs_serv.c,v 1.92 2012/03/21 16:33:21 kettenis Exp $	*/
 /*     $NetBSD: nfs_serv.c,v 1.34 1997/05/12 23:37:12 fvdl Exp $       */
 
 /*
@@ -371,8 +371,7 @@ nfsrv_lookup(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 	nd.ni_cnd.cn_cred = cred;
 	nd.ni_cnd.cn_nameiop = LOOKUP;
 	nd.ni_cnd.cn_flags = LOCKLEAF | SAVESTART;
-	error = nfs_namei(&nd, fhp, len, slp, nam, &info.nmi_md,
-	    &info.nmi_dpos, &dirp, procp);
+	error = nfs_namei(&nd, fhp, len, slp, nam, &info.nmi_md, &info.nmi_dpos, &dirp, procp);
 	if (dirp) {
 		if (info.nmi_v3)
 			dirattr_ret = VOP_GETATTR(dirp, &dirattr, cred,
@@ -894,8 +893,14 @@ nfsrv_create(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 			dirp = NULL;
 		}
 	}
-	if (error)
-		goto out;
+	if (error) {
+		nfsm_reply(NFSX_WCCDATA(info.nmi_v3));
+		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
+		    &info);
+		if (dirp)
+			vrele(dirp);
+		return (0);
+	}
 
 	VATTR_NULL(&va);
 	if (info.nmi_v3) {
@@ -1048,8 +1053,7 @@ nfsrv_create(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 			error = VOP_GETATTR(vp, &va, cred, procp);
 		vput(vp);
 	}
-out:
-	if (dirp) {
+	if (info.nmi_v3) {
 		if (exclusive_flag && !error &&
 			bcmp(cverf, (caddr_t)&va.va_atime, NFSX_V3CREATEVERF))
 			error = EEXIST;
@@ -1123,12 +1127,17 @@ nfsrv_mknod(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 	nd.ni_cnd.cn_cred = cred;
 	nd.ni_cnd.cn_nameiop = CREATE;
 	nd.ni_cnd.cn_flags = LOCKPARENT | LOCKLEAF | SAVESTART;
-	error = nfs_namei(&nd, fhp, len, slp, nam, &info.nmi_md,
-	    &info.nmi_dpos, &dirp, procp);
+	error = nfs_namei(&nd, fhp, len, slp, nam, &info.nmi_md, &info.nmi_dpos, &dirp, procp);
 	if (dirp)
 		dirfor_ret = VOP_GETATTR(dirp, &dirfor, cred, procp);
-	if (error)
-		goto out1;
+	if (error) {
+		nfsm_reply(NFSX_WCCDATA(1));
+		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
+		    &info);
+		if (dirp)
+			vrele(dirp);
+		return (0);
+	}
 
 	nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 	vtyp = nfsv3tov_type(*tl);
@@ -1207,11 +1216,8 @@ out:
 			error = VOP_GETATTR(vp, &va, cred, procp);
 		vput(vp);
 	}
-out1:
-	if (dirp) {
-		diraft_ret = VOP_GETATTR(dirp, &diraft, cred, procp);
-		vrele(dirp);
-	}
+	diraft_ret = VOP_GETATTR(dirp, &diraft, cred, procp);
+	vrele(dirp);
 	nfsm_reply(NFSX_SRVFH(1) + NFSX_POSTOPATTR(1) + NFSX_WCCDATA(1));
 	if (!error) {
 		nfsm_srvpostop_fh(fhp);
@@ -1270,8 +1276,7 @@ nfsrv_remove(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 	nd.ni_cnd.cn_cred = cred;
 	nd.ni_cnd.cn_nameiop = DELETE;
 	nd.ni_cnd.cn_flags = LOCKPARENT | LOCKLEAF;
-	error = nfs_namei(&nd, fhp, len, slp, nam, &info.nmi_md,
-	    &info.nmi_dpos, &dirp, procp);
+	error = nfs_namei(&nd, fhp, len, slp, nam, &info.nmi_md, &info.nmi_dpos, &dirp, procp);
 	if (dirp) {
 		if (info.nmi_v3)
 			dirfor_ret = VOP_GETATTR(dirp, &dirfor, cred, procp);
@@ -1307,7 +1312,7 @@ out:
 			vput(vp);
 		}
 	}
-	if (dirp) {
+	if (dirp && info.nmi_v3) {
 		diraft_ret = VOP_GETATTR(dirp, &diraft, cred, procp);
 		vrele(dirp);
 	}
@@ -1377,8 +1382,16 @@ nfsrv_rename(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 			fdirp = NULL;
 		}
 	}
-	if (error)
-		goto out1;
+	if (error) {
+		nfsm_reply(2 * NFSX_WCCDATA(info.nmi_v3));
+		nfsm_srvwcc(nfsd, fdirfor_ret, &fdirfor, fdiraft_ret, &fdiraft,
+		    &info);
+		nfsm_srvwcc(nfsd, tdirfor_ret, &tdirfor, tdiraft_ret, &tdiraft,
+		    &info);
+		if (fdirp)
+			vrele(fdirp);
+		return (0);
+	}
 
 	fvp = fromnd.ni_vp;
 	nfsm_srvmtofh(tfhp);
@@ -1799,7 +1812,7 @@ nfsrv_mkdir(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 		nfsm_reply(NFSX_WCCDATA(info.nmi_v3));
 		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
 		    &info);
-		if (info.nmi_v3)
+		if (dirp)
 			vrele(dirp);
 		return (0);
 	}
@@ -1912,8 +1925,14 @@ nfsrv_rmdir(struct nfsrv_descript *nfsd, struct nfssvc_sock *slp,
 			dirp = NULL;
 		}
 	}
-	if (error)
-		goto out1;
+	if (error) {
+		nfsm_reply(NFSX_WCCDATA(info.nmi_v3));
+		nfsm_srvwcc(nfsd, dirfor_ret, &dirfor, diraft_ret, &diraft,
+		    &info);
+		if (dirp)
+			vrele(dirp);
+		return (0);
+	}
 	vp = nd.ni_vp;
 	if (vp->v_type != VDIR) {
 		error = ENOTDIR;
@@ -1942,7 +1961,6 @@ out:
 			vput(nd.ni_dvp);
 		vput(vp);
 	}
-out1:
 	if (dirp) {
 		diraft_ret = VOP_GETATTR(dirp, &diraft, cred, procp);
 		vrele(dirp);
