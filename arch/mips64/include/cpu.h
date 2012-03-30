@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.74 2012/03/19 19:16:06 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.78 2012/03/28 20:44:23 miod Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -555,47 +555,16 @@ struct user;
 
 u_int	cp0_get_count(void);
 uint32_t cp0_get_config(void);
+uint32_t cp0_get_config_1(void);
+uint32_t cp0_get_config_2(void);
+uint32_t cp0_get_config_3(void);
 uint32_t cp0_get_prid(void);
 void	cp0_set_compare(u_int);
+void	cp0_set_config(uint32_t);
 u_int	cp1_get_prid(void);
 void	tlb_set_page_mask(uint32_t);
 void	tlb_set_pid(int);
 void	tlb_set_wired(int);
-
-/*
- * Available cache operation routines. See <machine/cpu.h> for more.
- */
-int	Octeon_ConfigCache(struct cpu_info *);
-void	Octeon_SyncCache(struct cpu_info *);
-void	Octeon_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
-void	Octeon_SyncDCachePage(struct cpu_info *, paddr_t);
-void	Octeon_HitSyncDCache(struct cpu_info *, paddr_t, size_t);
-void	Octeon_HitInvalidateDCache(struct cpu_info *, paddr_t, size_t);
-void	Octeon_IOSyncDCache(struct cpu_info *, paddr_t, size_t, int);
-
-int	Loongson2_ConfigCache(struct cpu_info *);
-void	Loongson2_SyncCache(struct cpu_info *);
-void	Loongson2_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
-void	Loongson2_SyncDCachePage(struct cpu_info *, paddr_t);
-void	Loongson2_HitSyncDCache(struct cpu_info *, paddr_t, size_t);
-void	Loongson2_HitInvalidateDCache(struct cpu_info *, paddr_t, size_t);
-void	Loongson2_IOSyncDCache(struct cpu_info *, paddr_t, size_t, int);
-
-int	Mips5k_ConfigCache(struct cpu_info *);
-void	Mips5k_SyncCache(struct cpu_info *);
-void	Mips5k_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
-void	Mips5k_SyncDCachePage(struct cpu_info *, vaddr_t);
-void	Mips5k_HitSyncDCache(struct cpu_info *, vaddr_t, size_t);
-void	Mips5k_HitInvalidateDCache(struct cpu_info *, vaddr_t, size_t);
-void	Mips5k_IOSyncDCache(struct cpu_info *, vaddr_t, size_t, int);
-
-int	Mips10k_ConfigCache(struct cpu_info *);
-void	Mips10k_SyncCache(struct cpu_info *);
-void	Mips10k_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
-void	Mips10k_SyncDCachePage(struct cpu_info *, vaddr_t);
-void	Mips10k_HitSyncDCache(struct cpu_info *, vaddr_t, size_t);
-void	Mips10k_HitInvalidateDCache(struct cpu_info *, vaddr_t, size_t);
-void	Mips10k_IOSyncDCache(struct cpu_info *, vaddr_t, size_t, int);
 
 void	tlb_flush(int);
 void	tlb_flush_addr(vaddr_t);
@@ -612,6 +581,8 @@ void	save_fpu(void);
 int	fpe_branch_emulate(struct proc *, struct trap_frame *, uint32_t,
 	    vaddr_t);
 
+int	guarded_read_1(paddr_t, uint8_t *);
+int	guarded_read_2(paddr_t, uint16_t *);
 int	guarded_read_4(paddr_t, uint32_t *);
 int	guarded_write_4(paddr_t, uint32_t);
 

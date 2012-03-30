@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.23 2012/03/15 18:57:22 miod Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.25 2012/03/28 20:35:41 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -64,6 +64,7 @@
 #include <uvm/uvm.h>
 
 #include <mips64/archtype.h>
+#include <mips64/cache.h>
 #include <machine/cpu.h>
 #include <machine/autoconf.h>
 
@@ -306,9 +307,6 @@ void
 _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
     bus_size_t size, int op)
 {
-#define SYNC_R 0	/* WB invalidate, WT invalidate */
-#define SYNC_W 1	/* WB writeback + invalidate, WT unaffected */
-#define SYNC_X 2	/* WB writeback + invalidate, WT invalidate */
 	int nsegs;
 	int curseg;
 	struct cpu_info *ci = curcpu();
@@ -354,21 +352,21 @@ _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
 			if (op & BUS_DMASYNC_PREWRITE) {
 #ifdef TGT_COHERENT
 				Mips_IOSyncDCache(ci, vaddr, paddr,
-				    ssize, SYNC_W);
+				    ssize, CACHE_SYNC_W);
 #else
 				if (op & BUS_DMASYNC_PREREAD)
 					Mips_IOSyncDCache(ci, vaddr, paddr,
-					    ssize, SYNC_X);
+					    ssize, CACHE_SYNC_X);
 				else
 					Mips_IOSyncDCache(ci, vaddr, paddr,
-					    ssize, SYNC_W);
+					    ssize, CACHE_SYNC_W);
 #endif
 			} else
 			if (op & (BUS_DMASYNC_PREREAD | BUS_DMASYNC_POSTREAD)) {
 #ifdef TGT_COHERENT
 #else
 				Mips_IOSyncDCache(ci, vaddr, paddr,
-				    ssize, SYNC_R);
+				    ssize, CACHE_SYNC_R);
 #endif
 			}
 			size -= ssize;
@@ -607,7 +605,7 @@ _dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 			map->dm_segs[seg]._ds_vaddr = vaddr;
 			first = 0;
 		} else {
-			if ((bus_addr_t)curaddr == lastaddr &&
+			if ((bus_addr_t)curaddr == lastaddr + 1 &&
 			    (map->dm_segs[seg].ds_len + sgsize) <=
 			     map->_dm_maxsegsz &&
 			     (map->_dm_boundary == 0 ||
@@ -625,7 +623,7 @@ _dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 			}
 		}
 
-		lastaddr = (bus_addr_t)curaddr + sgsize;
+		lastaddr = (bus_addr_t)curaddr + sgsize - 1;
 		vaddr += sgsize;
 		buflen -= sgsize;
 	}
