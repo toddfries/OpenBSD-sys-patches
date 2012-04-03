@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.1 2012/03/28 20:44:23 miod Exp $	*/
+/*	$OpenBSD: zs.c,v 1.3 2012/04/01 16:37:08 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.37 2011/02/20 07:59:50 matt Exp $	*/
 
 /*-
@@ -84,7 +84,7 @@ int zs_major = 19;
 #define ZSHARD_PRI 64
 
 /* SGI shouldn't need ZS_DELAY() as recovery time is done in hardware? */
-#define ZS_DELAY()	delay(3)
+#define ZS_DELAY()	delay(5)
 
 /* The layout of this is hardware-dependent (padding, order). */
 struct zschan {
@@ -288,7 +288,7 @@ zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 
-	zsc->sc_si = softintr_establish(SI_SOFTTTY, zssoft, zsc);
+	zsc->sc_si = softintr_establish(IPL_SOFTTTY, zssoft, zsc);
 	int2_intr_establish(haa->ha_irq, IPL_TTY, zshard, zsc, self->dv_xname);
 
 	/*
@@ -326,16 +326,14 @@ int
 zshard(void *arg)
 {
 	struct zsc_softc *zsc = arg;
-	int rr3, rval;
+	int rval;
 
-	rval = 0;
-	while ((rr3 = zsc_intr_hard(zsc))) {
-		rval |= rr3;
+	rval = zsc_intr_hard(zsc);
+	if (rval != 0) {
+		if (zsc->zsc_cs[0]->cs_softreq ||
+		    zsc->zsc_cs[1]->cs_softreq)
+			softintr_schedule(zsc->sc_si);
 	}
-
-	if (zsc->zsc_cs[0]->cs_softreq ||
-	    zsc->zsc_cs[1]->cs_softreq)
-		softintr_schedule(zsc->sc_si);
 
 	return rval;
 }
@@ -351,7 +349,7 @@ zssoft(void *arg)
 
 	/* Make sure we call the tty layer at spltty. */
 	s = spltty();
-	(void) zsc_intr_soft(zsc);
+	(void)zsc_intr_soft(zsc);
 	splx(s);
 }
 
