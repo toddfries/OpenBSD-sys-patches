@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sgi,v 1.47 2012/03/28 20:44:23 miod Exp $
+#	$OpenBSD: files.sgi,v 1.49 2012/04/18 17:28:24 miod Exp $
 #
 # maxpartitions must be first item in files.${ARCH}
 #
@@ -42,6 +42,8 @@ include	"dev/mii/files.mii"
 include	"dev/atapiscsi/files.atapiscsi"
 include	"dev/ata/files.ata"
 
+include	"dev/pckbc/files.pckbc"
+
 #
 #	System BUS types
 #
@@ -56,6 +58,10 @@ attach	cpu at mainbus
 #	Clock device
 device	clock
 attach	clock at mainbus
+
+# Impact/ImpactSR common code
+device	impact: wsemuldisplaydev, rasops32
+file	arch/sgi/dev/impact.c			impact		needs-flag
 
 #
 #	IP20/22/24 specific devices
@@ -181,7 +187,6 @@ attach	mavb at macebus
 file	arch/sgi/dev/mavb.c			mavb
 
 # MACE PS/2 Controller
-include	"dev/pckbc/files.pckbc"
 device	mkbc: pckbcslot
 attach	mkbc at macebus
 file	arch/sgi/dev/mkbc.c			mkbc	needs-flag

@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpc.c,v 1.1 2012/03/28 20:44:23 miod Exp $	*/
+/*	$OpenBSD: hpc.c,v 1.9 2012/04/17 15:22:02 miod Exp $	*/
 /*	$NetBSD: hpc.c,v 1.66 2011/07/01 18:53:46 dyoung Exp $	*/
 /*	$NetBSD: ioc.c,v 1.9 2011/07/01 18:53:47 dyoung Exp $	 */
 
@@ -93,8 +93,11 @@
 #include <sgi/gio/gioreg.h>
 #include <sgi/gio/giovar.h>
 
-#include <sgi/hpc/hpcvar.h>
 #include <sgi/hpc/hpcreg.h>
+#include <sgi/hpc/hpcvar.h>
+#include <sgi/localbus/imcvar.h>
+#include <sgi/localbus/intreg.h>
+#include <sgi/localbus/intvar.h>
 #include <sgi/hpc/iocreg.h>
 #include <sgi/sgi/ip22.h>
 
@@ -109,151 +112,114 @@ struct hpc_device {
 	int hd_sysmask;
 };
 
-static const struct hpc_device hpc1_devices[] = {
-	/* probe order is important for IP20 zs */
+#define	HPCDEV_IP20		(1U << 1)	/* Indigo R4k */
+#define	HPCDEV_IP22		(1U << 2)	/* Indigo2 */
+#define	HPCDEV_IP24		(1U << 3)	/* Indy, Challenge S */
+#define	HPCDEV_IP24_INDY	(1U << 4)	/* Indy only */
 
-	{ "zs",		/* Indigo serial 0/1 duart 1 */
+/*
+ * On-board HPC1 devices (IP20 only)
+ */
+static const struct hpc_device hpc1_onboard[] = {
+	/* probe order is important for IP20 zs */
+	{ "zs",		/* serial 0/1 duart 1 */
 	  HPC_BASE_ADDRESS_0,
 	  0x0d10, 0,
-	  5,
+	  INT2_L0_INTR(INT2_L0_IP20_SERIAL),
 	  HPCDEV_IP20 },
-
-	{ "zs",		/* Indigo kbd/ms duart 0 */
+	{ "zs",		/* kbd/ms duart 0 */
 	  HPC_BASE_ADDRESS_0,
 	  0x0d00, 0,
-	  5,
+	  INT2_L0_INTR(INT2_L0_IP20_SERIAL),
 	  HPCDEV_IP20 },
-
-	{ "sq",		/* Indigo onboard ethernet */
+	{ "sq",		/* onboard Ethernet */
 	  HPC_BASE_ADDRESS_0,
 	  HPC1_ENET_DEVREGS, HPC1_ENET_REGS,
-	  3,
+	  INT2_L0_INTR(INT2_L0_ENET),
 	  HPCDEV_IP20 },
-	
-	{ "sq",		/* E++ GIO adapter slot 0 (Indigo) */
-	  HPC_BASE_ADDRESS_1,
-	  HPC1_ENET_DEVREGS, HPC1_ENET_REGS,
-	  6,
-	  HPCDEV_IP20 },
-
-	{ "sq",		/* E++ GIO adapter slot 0 (Indy) */
-	  HPC_BASE_ADDRESS_1,
-	  HPC1_ENET_DEVREGS, HPC1_ENET_REGS,
-	  16 + 6,
-	  HPCDEV_IP24 }, 
-
-	{ "sq",		/* E++ GIO adapter slot 1 (Indigo) */
-	  HPC_BASE_ADDRESS_2,
-	  HPC1_ENET_DEVREGS, HPC1_ENET_REGS,
-	  6,
-	  HPCDEV_IP20 },
-
-	{ "sq",		/* E++ GIO adapter slot 1 (Indy/Challenge S) */
-	  HPC_BASE_ADDRESS_2,
-	  HPC1_ENET_DEVREGS, HPC1_ENET_REGS,
-	  16 + 7,
-	  HPCDEV_IP24 },
-
-	{ "wdsc",	/* Indigo onboard SCSI */
+	{ "wdsc",	/* onboard SCSI */
 	  HPC_BASE_ADDRESS_0,
 	  HPC1_SCSI0_DEVREGS, HPC1_SCSI0_REGS,
-	  2,
+	  INT2_L0_INTR(INT2_L0_SCSI1),
 	  HPCDEV_IP20 },
-
-	{ "wdsc",	/* GIO32 SCSI adapter slot 0 (Indigo) */
-	  HPC_BASE_ADDRESS_1,
-	  HPC1_SCSI0_DEVREGS, HPC1_SCSI0_REGS,
-	  6,
-	  HPCDEV_IP20 },
-
-	{ "wdsc",	/* GIO32 SCSI adapter slot 0 (Indy) */
-	  HPC_BASE_ADDRESS_1,
-	  HPC1_SCSI0_DEVREGS, HPC1_SCSI0_REGS,
-	  16 + 6,
-	  HPCDEV_IP24 }, 
-
-	{ "wdsc",	/* GIO32 SCSI adapter slot 1 (Indigo) */
-	  HPC_BASE_ADDRESS_2,
-	  HPC1_SCSI0_DEVREGS, HPC1_SCSI0_REGS,
-	  6,
-	  HPCDEV_IP20 },
-
-	{ "wdsc",	/* GIO32 SCSI adapter slot 1 (Indy/Challenge S) */
-	  HPC_BASE_ADDRESS_2,
-	  HPC1_SCSI0_DEVREGS, HPC1_SCSI0_REGS,
-	  16 + 7,
-	  HPCDEV_IP24 },
-
-	{ NULL,
-	  0,
-	  0, 0,
-	  0,
-	  0
-	}
+	{ NULL }
 };
 
-static const struct hpc_device hpc3_devices[] = {
+/*
+ * On-board HPC3 devices (IP22, IP24)
+ */
+static const struct hpc_device hpc3_onboard[] = {
 	{ "zs",		/* serial 0/1 duart 0 */
 	  HPC_BASE_ADDRESS_0,
-	  /* XXX Magic numbers */
-	  HPC3_PBUS_CH6_DEVREGS + IOC_SERIAL_REGS, 0,
-	  24 + 5,
+	  IOC_BASE + IOC_SERIAL_REGS, 0,
+	  INT2_MAP1_INTR(INT2_MAP_SERIAL),
 	  HPCDEV_IP22 | HPCDEV_IP24 },
-
-	{ "pckbc",	/* Indigo2/Indy ps2 keyboard/mouse controller */
+	{ "pckbc",	/* PS/2 keyboard/mouse controller */
 	  HPC_BASE_ADDRESS_0,
-	  HPC3_PBUS_CH6_DEVREGS + IOC_KB_REGS, 0,
-	  24 + 4,
-	  HPCDEV_IP22 | HPCDEV_IP24 },
-
-	{ "sq",		/* Indigo2/Indy/Challenge S/Challenge M onboard enet */
+	  IOC_BASE + IOC_KB_REGS, 0,
+	  INT2_MAP1_INTR(INT2_MAP_PCKBC),
+	  HPCDEV_IP22 | HPCDEV_IP24_INDY },
+	{ "sq",		/* onboard Ethernet */
 	  HPC_BASE_ADDRESS_0,
 	  HPC3_ENET_DEVREGS, HPC3_ENET_REGS,
-	  3,
+	  INT2_L0_INTR(INT2_L0_ENET),
 	  HPCDEV_IP22 | HPCDEV_IP24 },
-
-	{ "sq",		/* Challenge S IOPLUS secondary ethernet */
-	  HPC_BASE_ADDRESS_1,
-	  HPC3_ENET_DEVREGS, HPC3_ENET_REGS,
-	  0,
-	  HPCDEV_IP24 },
-
-	{ "wdsc",	/* Indigo2/Indy/Challenge S/Challenge M onboard SCSI */
+	{ "wdsc",	/* onboard SCSI */
 	  HPC_BASE_ADDRESS_0,
 	  HPC3_SCSI0_DEVREGS, HPC3_SCSI0_REGS,
-	  1,
+	  INT2_L0_INTR(INT2_L0_IP22_SCSI0),
 	  HPCDEV_IP22 | HPCDEV_IP24 },
-
 	{ "wdsc",	/* Indigo2/Challenge M secondary onboard SCSI */
 	  HPC_BASE_ADDRESS_0,
 	  HPC3_SCSI1_DEVREGS, HPC3_SCSI1_REGS,
-	  2,
+	  INT2_L0_INTR(INT2_L0_SCSI1),
 	  HPCDEV_IP22 },
-
-	{ "haltwo",	/* Indigo2/Indy onboard audio */
+	{ "haltwo",	/* onboard audio */
 	  HPC_BASE_ADDRESS_0,
 	  HPC3_PBUS_CH0_DEVREGS, HPC3_PBUS_DMAREGS,
-	  8 + 4,	/* really the HPC DMA complete interrupt */
-	  HPCDEV_IP22 | HPCDEV_IP24 },
-
-	{ "pione",	/* Indigo2/Indy/Challenge S/Challenge M onboard pport */
+	  INT2_L1_INTR(INT2_L1_IP22_HPC_DMA),
+	  HPCDEV_IP22 | HPCDEV_IP24_INDY },
+	{ "pione",	/* onboard parallel port */
 	  HPC_BASE_ADDRESS_0,
-	  HPC3_PBUS_CH6_DEVREGS + IOC_PLP_REGS, 0,
-	  5,
+	  IOC_BASE + IOC_PLP_REGS, 0,
+	  INT2_L0_INTR(INT2_L0_IP22_PARALLEL),
 	  HPCDEV_IP22 | HPCDEV_IP24 },
-
 	{ "panel",	/* Indy front panel */
 	  HPC_BASE_ADDRESS_0,
-	  HPC3_PBUS_CH6_DEVREGS + IOC_PANEL, 0,
-	  9,
+	  IOC_BASE + IOC_PANEL, 0,
+	  INT2_L1_INTR(INT2_L1_IP22_PANEL),
+	  HPCDEV_IP22 | HPCDEV_IP24 },
+	{ NULL }
+};
+
+/*
+ * Expansion HPC1 devices
+ */
+static const struct hpc_device hpc1_devices[] = {
+	{ "sq",		/* E++ GIO adapter */
+	  0,
+	  HPC1_ENET_DEVREGS, HPC1_ENET_REGS,
+	  -1,
+	  HPCDEV_IP20 | HPCDEV_IP24 },
+	{ "wdsc",	/* GIO32 SCSI adapter */
+	  0,
+	  HPC1_SCSI0_DEVREGS, HPC1_SCSI0_REGS,
+	  -1,
+	  HPCDEV_IP20 | HPCDEV_IP24 },
+	{ NULL }
+};
+
+/*
+ * Expansion HPC3 devices
+ */
+static const struct hpc_device hpc3_devices[] = {
+	{ "sq",		/* Challenge S IO+ secondary ethernet */
+	  HPC_BASE_ADDRESS_1,
+	  HPC3_ENET_DEVREGS, HPC3_ENET_REGS,
+	  INT2_L0_INTR(INT2_L0_GIO_SLOT0),
 	  HPCDEV_IP24 },
 
-	{ NULL,
-	  0,
-	  0, 0,
-	  0,
-	  0
-	}
+	{ NULL }
 };
 
 struct hpc_softc {
@@ -312,10 +278,9 @@ static struct hpc_values hpc1_values = {
 	.enetr_fifo_size =	HPC1_ENETR_FIFO_SIZE,
 	.enetx_fifo =		HPC1_ENETX_FIFO,
 	.enetx_fifo_size =	HPC1_ENETX_FIFO_SIZE,
-	.enet_dma_boundary =	4096,
 	.enet_devregs =		HPC1_ENET_DEVREGS,
 	.enet_devregs_size =	HPC1_ENET_DEVREGS_SIZE,
-	.pbus_fifo =		0,	
+	.pbus_fifo =		0,
 	.pbus_fifo_size =	0,
 	.pbus_bbram =		0,
 #define MAX_SCSI_XFER   (roundup(MAXPHYS, PAGE_SIZE))
@@ -372,7 +337,6 @@ static struct hpc_values hpc3_values = {
 	.enetr_fifo_size =	HPC3_ENETR_FIFO_SIZE,
 	.enetx_fifo =		HPC3_ENETX_FIFO,
 	.enetx_fifo_size =	HPC3_ENETX_FIFO_SIZE,
-	.enet_dma_boundary =	8192,
 	.enet_devregs =		HPC3_ENET_DEVREGS,
 	.enet_devregs_size =	HPC3_ENET_DEVREGS_SIZE,
 	.pbus_fifo =		HPC3_PBUS_FIFO,
@@ -407,34 +371,22 @@ struct cfdriver hpc_cd = {
 	NULL, "hpc", DV_DULL
 };
 
-uint8_t  hpc_read_1(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-uint16_t hpc_read_2(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-void	 hpc_read_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint8_t *, bus_size_t);
-void	 hpc_write_1(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint8_t);
-void	 hpc_write_2(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint16_t);
-void	 hpc_write_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    const uint8_t *, bus_size_t);
-uint32_t hpc_read_4(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-uint64_t hpc_read_8(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-void	 hpc_write_4(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint32_t);
-void	 hpc_write_8(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint64_t);
-void	 hpc_read_raw_4(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint8_t *, bus_size_t);
-void	 hpc_write_raw_4(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    const uint8_t *, bus_size_t);
-void	 hpc_read_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint8_t *, bus_size_t);
-void	 hpc_write_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    const uint8_t *, bus_size_t);
-int	 hpc_space_map(bus_space_tag_t, bus_addr_t, bus_size_t, int,
-	    bus_space_handle_t *);
-void	 hpc_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-int	 hpc_space_region(bus_space_tag_t, bus_space_handle_t, bus_size_t,
-	    bus_size_t, bus_space_handle_t *);
-void	*hpc_space_vaddr(bus_space_tag_t, bus_space_handle_t);
-void	 hpc_space_barrier(bus_space_tag_t, bus_space_handle_t, bus_size_t,
+void	hpc3_space_barrier(bus_space_tag_t, bus_space_handle_t, bus_size_t,
 	    bus_size_t, int);
+
+bus_space_t hpc3bus_tag = {
+	PHYS_TO_XKPHYS(0, CCA_NC),
+	NULL,
+	imc_read_1, imc_write_1,
+	imc_read_2, imc_write_2,
+	imc_read_4, imc_write_4,
+	imc_read_8, imc_write_8,
+	imc_read_raw_2, imc_write_raw_2,
+	imc_read_raw_4, imc_write_raw_4,
+	imc_read_raw_8, imc_write_raw_8,
+	imc_space_map, imc_space_unmap, imc_space_region,
+	imc_space_vaddr, hpc3_space_barrier
+};
 
 int
 hpc_match(struct device *parent, void *vcf, void *aux)
@@ -456,10 +408,13 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 	struct gio_attach_args* ga = aux;
 	struct hpc_attach_args ha;
 	const struct hpc_device *hd;
+	struct hpc_values *hv;
 	uint32_t dummy;
 	uint32_t hpctype;
 	int isonboard;
 	int isioplus;
+	int giofast;
+	int needprobe;
 	int sysmask = 0;
 
 	sc->sc_base = ga->ga_addr;
@@ -474,10 +429,18 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 	case SGI_IP22:
 	case SGI_IP26:
 	case SGI_IP28:
-		if (sys_config.system_subtype == IP22_INDIGO2)
+		switch (sys_config.system_subtype) {
+		default:
+		case IP22_INDIGO2:
 			sysmask = HPCDEV_IP22;
-		else
+			break;
+		case IP22_CHALLS:
 			sysmask = HPCDEV_IP24;
+			break;
+		case IP22_INDY:
+			sysmask = HPCDEV_IP24 | HPCDEV_IP24_INDY;
+			break;
+		}
 		break;
 	};
 
@@ -486,9 +449,19 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	if (hpctype != 3)
+		hpc_old = 1;
+
 	/* force big-endian mode */
 	if (hpctype == 15)
 		bus_space_write_4(sc->sc_ct, sc->sc_ch, HPC1_BIGENDIAN, 0);
+
+	/*
+	 * Select the proper bus_space_tag for child devices. HPC3 need a
+	 * specific barrier function.
+	 */
+	if (hpctype == 3)
+		sc->sc_ct = &hpc3bus_tag;
 
 	/*
 	 * All machines have only one HPC on the mainboard itself. ''Extra''
@@ -496,11 +469,11 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	isonboard = (sc->sc_base == HPC_BASE_ADDRESS_0);
 	isioplus = (sc->sc_base == HPC_BASE_ADDRESS_1 && hpctype == 3 &&
-	    sysmask == HPCDEV_IP24);
-	
+	    (sysmask & HPCDEV_IP24) != 0);
+
 	printf(": SGI HPC%d%s (%s)\n", (hpctype ==  3) ? 3 : 1,
 	    (hpctype == 15) ? ".5" : "", (isonboard) ? "onboard" :
-	    (isioplus) ? "IOPLUS mezzanine" : "GIO slot");
+	    (isioplus) ? "IO+ mezzanine" : "GIO slot");
 
 	/*
 	 * Configure the IOC.
@@ -522,7 +495,7 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 
 		/* XXX: the firmware should have taken care of this already */
 #if 0
-		if (sys_config.system_subtype == IP22_INDY) {
+		if (sys_config.system_subtype != IP22_INDIGO) {
 			bus_space_write_4(sc->sc_ct, sc->sc_ch,
 			    IOC_BASE + IOC_GCSEL, 0xff);
 			bus_space_write_4(sc->sc_ct, sc->sc_ch,
@@ -534,9 +507,9 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 	/*
 	 * Configure the bus arbiter appropriately.
 	 *
-	 * In the case of Challenge S, we must tell the IOPLUS board which
+	 * In the case of Challenge S, we must tell the IO+ board which
 	 * DMA channel to use (we steal it from one of the slots). SGI allows
-	 * an HPC1.5 in slot 1, in which case IOPLUS must use EXP0, or any
+	 * an HPC1.5 in slot 1, in which case IO+ must use EXP0, or any
 	 * other DMA-capable board in slot 0, which leaves us to use EXP1. Of
 	 * course, this means that only one GIO board may use DMA.
 	 *
@@ -587,32 +560,98 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 	hpc_read_eeprom(hpctype, sc->sc_ct, sc->sc_ch,
 	    ha.hpc_eeprom, sizeof(ha.hpc_eeprom));
 
-	hd = hpctype == 3 ? hpc3_devices : hpc1_devices;
+	if (hpctype == 3) {
+		hv = &hpc3_values;
+		if (isonboard) {
+			hd = hpc3_onboard;
+			if (sys_config.system_subtype == IP22_INDIGO2) {
+				/* wild guess */
+				giofast = 1;
+			} else {
+				/*
+				 * According to IRIX hpc3.h, the fast GIO bit
+				 * is active high, but the register value has
+				 * been found to be 0xf8 on slow GIO systems
+				 * and 0xf1 on fast ones, which tends to prove
+				 * the opposite...
+				 */
+				if (bus_space_read_4(sc->sc_ct, sc->sc_ch,
+				    IOC_BASE + IOC_GCREG) & IOC_GCREG_GIO_33MHZ)
+					giofast = 0;
+				else
+					giofast = 1;
+			}
+		} else {
+			hd = hpc3_devices;
+			/*
+			 * XXX should IO+ Mezzanine use the same settings as
+			 * XXX the onboard HPC3?
+			 */
+			giofast = 0;
+		}
+		needprobe = 0;
+	} else {
+		hv = &hpc1_values;
+		hv->revision = hpctype;
+		giofast = 0;
+		if (isonboard) {
+			hd = hpc1_onboard;
+			needprobe = 0;
+		} else {
+			hd = hpc1_devices;
+			/*
+			 * Until a reliable way of telling E++ and GIO32 SCSI
+			 * boards apart is found, we will need to do basic
+			 * chip existence checks before attempting to attach.
+			 */
+			needprobe = 1;
+		}
+	}
 	for (; hd->hd_name != NULL; hd++) {
-		if (!(hd->hd_sysmask & sysmask) || hd->hd_base != sc->sc_base)
+		if ((hd->hd_sysmask & sysmask) == 0 ||
+		    (hd->hd_base != 0 && hd->hd_base != sc->sc_base))
 			continue;
 
 		ha.ha_name = hd->hd_name;
 		ha.ha_devoff = hd->hd_devoff;
 		ha.ha_dmaoff = hd->hd_dmaoff;
-		ha.ha_irq = hd->hd_irq;
+		/*
+		 * Compute the interrupt line for HPC1 expansion boards.
+		 * This allows the hpc1_devices[] array to remain compact.
+		 */
+		if (hd->hd_irq < 0) {
+			if (sys_config.system_type == SGI_IP20)
+				ha.ha_irq = INT2_L0_INTR(INT2_L0_GIO_LVL1);
+			else {
+				if (hd->hd_base == HPC_BASE_ADDRESS_1)
+					ha.ha_irq =
+					    INT2_MAP0_INTR(INT2_MAP_GIO_SLOT0);
+				else
+					ha.ha_irq =
+					    INT2_MAP0_INTR(INT2_MAP_GIO_SLOT1);
+			}
+		} else
+			ha.ha_irq = hd->hd_irq;
 
 		ha.ha_st = sc->sc_ct;
 		ha.ha_sh = sc->sc_ch;
 		ha.ha_dmat = sc->sc_dmat;
-		if (hpctype == 3)
-			ha.hpc_regs = &hpc3_values;
-		else
-			ha.hpc_regs = &hpc1_values;
-		ha.hpc_regs->revision = hpctype;
+		ha.hpc_regs = hv;
+		ha.ha_giofast = giofast;
 
 		/*
-		 * XXX On hpc@gio boards such as the E++, this will cause 
-		 * XXX `wdsc not configured' messages (or sq on SCSI
-		 * XXX boards. We need to move some device detection
-		 * XXX in there, or figure out if there is a way to know
-		 * XXX what is really connected.
+		 * On hpc@gio boards such as the E++, we want to avoid
+		 * `wdsc not configured' messages (or sq on SCSI boards).
+		 * The following check ought to be enough to prevent
+		 * false positives. The strange address computation is
+		 * necessary to correctly test wdsc(4).
 		 */
+		if (needprobe) {
+			if (guarded_read_4(PHYS_TO_XKPHYS((sc->sc_ch +
+			    hd->hd_devoff + 3) & ~3, CCA_NC), &dummy) != 0)
+				continue;
+		}
+
 		config_found_sm(self, &ha, hpc_print, hpc_submatch);
 	}
 
@@ -633,6 +672,7 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 		ha.ha_sh = sc->sc_ch;
 		ha.ha_dmat = sc->sc_dmat;
 		ha.hpc_regs = NULL;
+		ha.ha_giofast = giofast;
 
 		config_found_sm(self, &ha, hpc_print, hpc_submatch);
 
@@ -660,8 +700,8 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
  *		Up to two additional HPC1.5's in GIO slots 0 and 1.
  *	o Challenge S
  * 		One on-board HPC3.
- * 		Up to one additional HPC3 on the IOPLUS board (if installed).
- *		Up to one additional HPC1.5 in slot 1 of the IOPLUS board.
+ * 		Up to one additional HPC3 on the IO+ board (if installed).
+ *		Up to one additional HPC1.5 in slot 1 of the IO+ board.
  *	o Indigo2, Challenge M
  *		One on-board HPC3.
  *
@@ -744,6 +784,45 @@ hpc_print(void *aux, const char *pnp)
 		printf(" irq %d", ha->ha_irq);
 
 	return UNCONF;
+}
+
+void *
+hpc_intr_establish(int irq, int level, int (*handler)(void *), void *arg,
+    const char *what)
+{
+	return int2_intr_establish(irq, level, handler, arg, what);
+}
+
+int
+hpc_is_intr_pending(int irq)
+{
+	return int2_is_intr_pending(irq);
+}
+
+void
+hpc_intr_disable(void *v)
+{
+	int2_intr_disable(v);
+}
+
+void
+hpc_intr_enable(void *v)
+{
+	int2_intr_enable(v);
+}
+
+/*
+ * bus_space_barrier() function for HPC3 (which have a write buffer)
+ */
+void
+hpc3_space_barrier(bus_space_tag_t t, bus_space_handle_t h, bus_size_t offs,
+    bus_size_t sz, int how)
+{
+	__asm__ __volatile__ ("sync" ::: "memory");
+
+	/* just read a side-effect free register */
+	(void)*(volatile uint32_t *)
+	    PHYS_TO_XKPHYS(HPC_BASE_ADDRESS_0 + HPC3_INTRSTAT_40, CCA_NC);
 }
 
 void

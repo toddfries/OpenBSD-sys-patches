@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpcvar.h,v 1.1 2012/03/28 20:44:23 miod Exp $	*/
+/*	$OpenBSD: hpcvar.h,v 1.6 2012/04/17 15:22:02 miod Exp $	*/
 /*	$NetBSD: hpcvar.h,v 1.12 2011/01/25 12:21:04 tsutsui Exp $	*/
 
 /*
@@ -28,69 +28,64 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#define HPCDEV_IP20		(1U << 1)	/* Indigo R4k */
-#define HPCDEV_IP22		(1U << 2)	/* Indigo2 */
-#define HPCDEV_IP24		(1U << 3)	/* Indy */
-
 /* HPC 1.5/3 differ a bit, thus we need an abstraction layer */
 
-struct hpc_values {     
+struct hpc_values {
 	int		revision;
-        uint32_t	scsi0_regs;
-        uint32_t	scsi0_regs_size; 
-        uint32_t	scsi0_cbp;
-        uint32_t	scsi0_ndbp;
-        uint32_t	scsi0_bc;
-        uint32_t	scsi0_ctl;
-        uint32_t	scsi0_gio;
-        uint32_t	scsi0_dev;
-        uint32_t	scsi0_dmacfg;
-        uint32_t	scsi0_piocfg;
-        uint32_t	scsi1_regs;
-        uint32_t	scsi1_regs_size;
-        uint32_t	scsi1_cbp;
-        uint32_t	scsi1_ndbp;
-        uint32_t	scsi1_bc;
-        uint32_t	scsi1_ctl;
-        uint32_t	scsi1_gio;
-        uint32_t	scsi1_dev;
-        uint32_t	scsi1_dmacfg;
-        uint32_t	scsi1_piocfg;
-        uint32_t	enet_regs;
-        uint32_t	enet_regs_size;
-        uint32_t	enet_intdelay;
-        uint32_t	enet_intdelayval;
-        uint32_t	enetr_cbp;
-        uint32_t	enetr_ndbp;
-        uint32_t	enetr_bc;
-        uint32_t	enetr_ctl;
-        uint32_t	enetr_ctl_active;
-        uint32_t	enetr_reset;
-        uint32_t	enetr_dmacfg;
-        uint32_t	enetr_piocfg;
-        uint32_t	enetx_cbp;
-        uint32_t	enetx_ndbp;
-        uint32_t	enetx_bc;
-        uint32_t	enetx_ctl;
-        uint32_t	enetx_ctl_active;
-        uint32_t	enetx_dev;
-        uint32_t	enetr_fifo;
-        uint32_t	enetr_fifo_size;
-        uint32_t	enetx_fifo;
-        uint32_t	enetx_fifo_size;
-	uint32_t	enet_dma_boundary;
-        uint32_t	enet_devregs;
-        uint32_t	enet_devregs_size;
-        uint32_t	pbus_fifo;
-        uint32_t	pbus_fifo_size;
-        uint32_t	pbus_bbram;
+	uint32_t	scsi0_regs;
+	uint32_t	scsi0_regs_size;
+	uint32_t	scsi0_cbp;
+	uint32_t	scsi0_ndbp;
+	uint32_t	scsi0_bc;
+	uint32_t	scsi0_ctl;
+	uint32_t	scsi0_gio;
+	uint32_t	scsi0_dev;
+	uint32_t	scsi0_dmacfg;
+	uint32_t	scsi0_piocfg;
+	uint32_t	scsi1_regs;
+	uint32_t	scsi1_regs_size;
+	uint32_t	scsi1_cbp;
+	uint32_t	scsi1_ndbp;
+	uint32_t	scsi1_bc;
+	uint32_t	scsi1_ctl;
+	uint32_t	scsi1_gio;
+	uint32_t	scsi1_dev;
+	uint32_t	scsi1_dmacfg;
+	uint32_t	scsi1_piocfg;
+	uint32_t	enet_regs;
+	uint32_t	enet_regs_size;
+	uint32_t	enet_intdelay;
+	uint32_t	enet_intdelayval;
+	uint32_t	enetr_cbp;
+	uint32_t	enetr_ndbp;
+	uint32_t	enetr_bc;
+	uint32_t	enetr_ctl;
+	uint32_t	enetr_ctl_active;
+	uint32_t	enetr_reset;
+	uint32_t	enetr_dmacfg;
+	uint32_t	enetr_piocfg;
+	uint32_t	enetx_cbp;
+	uint32_t	enetx_ndbp;
+	uint32_t	enetx_bc;
+	uint32_t	enetx_ctl;
+	uint32_t	enetx_ctl_active;
+	uint32_t	enetx_dev;
+	uint32_t	enetr_fifo;
+	uint32_t	enetr_fifo_size;
+	uint32_t	enetx_fifo;
+	uint32_t	enetx_fifo_size;
+	uint32_t	enet_devregs;
+	uint32_t	enet_devregs_size;
+	uint32_t	pbus_fifo;
+	uint32_t	pbus_fifo_size;
+	uint32_t	pbus_bbram;
 	uint32_t	scsi_dma_segs;
-        uint32_t	scsi_dma_segs_size;
-        uint32_t	scsi_dma_datain_cmd;
-        uint32_t	scsi_dma_dataout_cmd;
-        uint32_t	scsi_dmactl_flush;
-        uint32_t	scsi_dmactl_active;
-        uint32_t	scsi_dmactl_reset;
+	uint32_t	scsi_dma_segs_size;
+	uint32_t	scsi_dma_datain_cmd;
+	uint32_t	scsi_dma_dataout_cmd;
+	uint32_t	scsi_dmactl_flush;
+	uint32_t	scsi_dmactl_active;
+	uint32_t	scsi_dmactl_reset;
 };
 
 struct hpc_attach_args {
@@ -104,6 +99,15 @@ struct hpc_attach_args {
 	bus_dma_tag_t		ha_dmat;	/* HPC DMA tag */
 
 	struct hpc_values	*hpc_regs;	/* HPC register definitions */
+	int			ha_giofast;	/* GIO bus speed */
 
 	uint8_t			hpc_eeprom[256];/* HPC eeprom contents */
 };
+
+void	*hpc_intr_establish(int, int, int (*)(void *),
+	    void *, const char *);
+int	 hpc_is_intr_pending(int);
+void	 hpc_intr_disable(void *);
+void	 hpc_intr_enable(void *);
+
+extern bus_space_t hpc3bus_tag;

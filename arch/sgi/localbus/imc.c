@@ -1,4 +1,4 @@
-/*	$OpenBSD: imc.c,v 1.2 2012/04/02 20:40:52 miod Exp $	*/
+/*	$OpenBSD: imc.c,v 1.6 2012/04/18 10:56:54 miod Exp $	*/
 /*	$NetBSD: imc.c,v 1.32 2011/07/01 18:53:46 dyoung Exp $	*/
 
 /*
@@ -82,36 +82,11 @@ uint32_t imc_bus_error(uint32_t, struct trap_frame *);
 void	 imc_bus_reset(void);
 int	 imc_watchdog_cb(void *, int);
 
-uint8_t  imc_read_1(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-uint16_t imc_read_2(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-void	 imc_read_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint8_t *, bus_size_t);
-void	 imc_write_1(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint8_t);
-void	 imc_write_2(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint16_t);
-void	 imc_write_raw_2(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    const uint8_t *, bus_size_t);
-uint32_t imc_read_4(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-uint64_t imc_read_8(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-void	 imc_write_4(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint32_t);
-void	 imc_write_8(bus_space_tag_t, bus_space_handle_t, bus_size_t, uint64_t);
-void	 imc_read_raw_4(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint8_t *, bus_size_t);
-void	 imc_write_raw_4(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    const uint8_t *, bus_size_t);
-void	 imc_read_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    uint8_t *, bus_size_t);
-void	 imc_write_raw_8(bus_space_tag_t, bus_space_handle_t, bus_addr_t,
-	    const uint8_t *, bus_size_t);
-int	 imc_space_map(bus_space_tag_t, bus_addr_t, bus_size_t, int,
-	    bus_space_handle_t *);
-void	 imc_space_unmap(bus_space_tag_t, bus_space_handle_t, bus_size_t);
-int	 imc_space_region(bus_space_tag_t, bus_space_handle_t, bus_size_t,
-	    bus_size_t, bus_space_handle_t *);
-void	*imc_space_vaddr(bus_space_tag_t, bus_space_handle_t);
 void	 imc_space_barrier(bus_space_tag_t, bus_space_handle_t, bus_size_t,
 	    bus_size_t, int);
 
-bus_space_t imcbus_tag = {/* not static for gio_cnattch() */
+/* can't be static for gio_cnattach() */
+bus_space_t imcbus_tag = {
 	PHYS_TO_XKPHYS(0, CCA_NC),
 	NULL,
 	imc_read_1, imc_write_1,
@@ -178,7 +153,8 @@ static bus_space_t imcbus_eisa_mem_tag = {
 bus_addr_t imc_pa_to_device(paddr_t);
 paddr_t	 imc_device_to_pa(bus_addr_t);
 
-struct machine_bus_dma_tag imc_bus_dma_tag = {/* not static for gio_cnattch() */
+/* can't be static for gio_cnattach() */
+struct machine_bus_dma_tag imc_bus_dma_tag = {
 	NULL,			/* _cookie */
 	_dmamap_create,
 	_dmamap_destroy,
@@ -494,6 +470,16 @@ imc_device_to_pa(bus_addr_t addr)
 }
 
 /*
+ * For some reason, reading the arbitration register sometimes returns
+ * wrong values, at least on IP20 (where the usual value is 0x400, but
+ * nonsense values such as 0x34f have been witnessed).
+ * Because of this, we'll treat the register as write-only, once we have
+ * been able to read a supposedly safe value.
+ * This variable contains the last known value written to this register.
+ */
+uint32_t imc_arb_value;
+
+/*
  * Autoconf glue.
  */
 
@@ -522,7 +508,7 @@ imc_attach(struct device *parent, struct device *self, void *aux)
 #if NEISA > 0
 	struct eisabus_attach_args eba;
 #endif
-	uint32_t reg;
+	uint32_t reg, lastreg;
 	uint32_t id, rev;
 	int have_eisa;
 
@@ -571,7 +557,7 @@ imc_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	switch (sys_config.system_type) {
 	case SGI_IP22:
-		if (sys_config.system_subtype != IP22_INDY)
+		if (sys_config.system_subtype == IP22_INDIGO2)
 			break;
 		/* FALLTHROUGH */
 	case SGI_IP20:
@@ -586,20 +572,29 @@ imc_attach(struct device *parent, struct device *self, void *aux)
 	imc_write(IMC_CPUCTRL1, reg);
 
 	/*
+	 * Try and read the GIO64 arbitrator configuration register value.
+	 * See comments above the declaration of imc_arb_value for why we
+	 * are doing this.
+	 */
+	reg = 0; lastreg = ~reg;
+	while (reg != lastreg || (reg & ~0xffff) != 0) {
+		lastreg = reg;
+		reg = imc_read(IMC_GIO64ARB);
+		/* read another harmless register */
+		(void)imc_read(IMC_CPUCTRL0);
+	}
+
+	/*
 	 * Set GIO64 arbitrator configuration register:
 	 *
 	 * Preserve PROM-set graphics-related bits, as they seem to depend
 	 * on the graphics variant present and I'm not sure how to figure
 	 * that out or 100% sure what the correct settings are for each.
 	 */
-	reg = imc_read(IMC_GIO64ARB);
 	reg &= (IMC_GIO64ARB_GRX64 | IMC_GIO64ARB_GRXRT | IMC_GIO64ARB_GRXMST);
 
 	/*
 	 * Rest of settings are machine/board dependent
-	 * XXX I wonder if this even works as advertized. The logic apparently
-	 * XXX comes from Linux, but the EISA settings look horribly broken to
-	 * XXX me -- miod
 	 */
 	switch (sys_config.system_type) {
 	case SGI_IP20:
@@ -621,11 +616,12 @@ imc_attach(struct device *parent, struct device *self, void *aux)
 		switch (sys_config.system_subtype) {
 		default:
 		case IP22_INDY:
+		case IP22_CHALLS:
 			/* XXX is MST mutually exclusive? */
 			reg |= IMC_GIO64ARB_EXP0RT | IMC_GIO64ARB_EXP1RT;
 			reg |= IMC_GIO64ARB_EXP0MST | IMC_GIO64ARB_EXP1MST;
 
-			/* EISA can bus-master, is 64-bit */
+			/* EISA (VINO, really) can bus-master, is 64-bit */
 			reg |= IMC_GIO64ARB_EISAMST | IMC_GIO64ARB_EISA64;
 			break;
 
@@ -635,6 +631,11 @@ imc_attach(struct device *parent, struct device *self, void *aux)
 			 * EXP0 slot.
 			 */
 			reg |= IMC_GIO64ARB_HPCEXP64 | IMC_GIO64ARB_EXP0PIPE;
+
+			/*
+			 * The EISA bus is the real thing, and is a 32-bit bus.
+			 */
+			reg &= ~IMC_GIO64ARB_EISA64;
 
 			if (rev < 2) {
 				/* EXP0 realtime, EXP1 can master */
@@ -650,6 +651,13 @@ imc_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	imc_write(IMC_GIO64ARB, reg);
+	imc_arb_value = reg;
+
+	memset(&iaa, 0, sizeof(iaa));
+	iaa.iaa_name = "gio";
+	iaa.iaa_st = &imcbus_tag;
+	iaa.iaa_dmat = &imc_bus_dma_tag;
+	config_found(self, &iaa, imc_print);
 
 #if NEISA > 0
 	if (have_eisa) {
@@ -662,12 +670,6 @@ imc_attach(struct device *parent, struct device *self, void *aux)
 		config_found(self, &eba, imc_print);
 	}
 #endif
-
-	memset(&iaa, 0, sizeof(iaa));
-	iaa.iaa_name = "gio";
-	iaa.iaa_st = &imcbus_tag;
-	iaa.iaa_dmat = &imc_bus_dma_tag;
-	config_found(self, &iaa, imc_print);
 
 	/* Clear CPU/GIO error status registers to clear any leftover bits. */
 	imc_bus_reset();
@@ -764,7 +766,7 @@ imc_gio64_arb_config(int slot, uint32_t flags)
 	    sys_config.system_type == SGI_IP20)
 		return EINVAL;
 
-	reg = imc_read(IMC_GIO64ARB);
+	reg = imc_arb_value;
 
 	if (flags & GIO_ARB_RT) {
 		if (slot == GIO_SLOT_EXP0)
@@ -837,6 +839,7 @@ imc_gio64_arb_config(int slot, uint32_t flags)
 		reg |= IMC_GIO64ARB_HPCEXP64;
 
 	imc_write(IMC_GIO64ARB, reg);
+	imc_arb_value = reg;
 
 	return 0;
 }

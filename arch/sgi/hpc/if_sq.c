@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sq.c,v 1.1 2012/03/28 20:44:23 miod Exp $	*/
+/*	$OpenBSD: if_sq.c,v 1.4 2012/04/15 20:40:39 miod Exp $	*/
 /*	$NetBSD: if_sq.c,v 1.42 2011/07/01 18:53:47 dyoung Exp $	*/
 
 /*
@@ -72,7 +72,7 @@
 #include <machine/cpu.h>	/* guarded_read_4 */
 #include <machine/intr.h>
 #include <mips64/arcbios.h>	/* bios_enaddr */
-#include <sgi/localbus/intvar.h>
+#include <sgi/sgi/ip22.h>
 
 #include <dev/ic/seeq8003reg.h>
 
@@ -98,7 +98,7 @@
  *	    the correct thing?
  */
 
-#if defined(SQ_DEBUG)
+#ifdef SQ_DEBUG
 int sq_debug = 0;
 #define SQ_DPRINTF(x) do { if (sq_debug) printf x; } while (0)
 #else
@@ -199,7 +199,7 @@ sq_attach(struct device *parent, struct device *self, void *aux)
 	if ((rc = bus_space_subregion(haa->ha_st, haa->ha_sh,
 	    haa->ha_dmaoff, sc->hpc_regs->enet_regs_size,
 	    &sc->sc_hpch)) != 0) {
-		printf(": can't HPC DMA registers, error = %d\n", rc);
+		printf(": can't map HPC DMA registers, error = %d\n", rc);
 		goto fail_0;
 	}
 
@@ -214,9 +214,7 @@ sq_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_dmat = haa->ha_dmat;
 
 	if ((rc = bus_dmamem_alloc(sc->sc_dmat, sizeof(struct sq_control),
-	    sc->hpc_regs->enet_dma_boundary,
-	    sc->hpc_regs->enet_dma_boundary, &sc->sc_cdseg, 1,
-	    &sc->sc_ncdseg, BUS_DMA_NOWAIT)) != 0) {
+	    0, 0, &sc->sc_cdseg, 1, &sc->sc_ncdseg, BUS_DMA_NOWAIT)) != 0) {
 		printf(": unable to allocate control data, error = %d\n", rc);
 		goto fail_0;
 	}
@@ -230,8 +228,7 @@ sq_attach(struct device *parent, struct device *self, void *aux)
 
 	if ((rc = bus_dmamap_create(sc->sc_dmat,
 	    sizeof(struct sq_control), 1, sizeof(struct sq_control),
-	    sc->hpc_regs->enet_dma_boundary, BUS_DMA_NOWAIT,
-	    &sc->sc_cdmap)) != 0) {
+	    0, BUS_DMA_NOWAIT, &sc->sc_cdmap)) != 0) {
 		printf(": unable to create DMA map for control data, error "
 		    "= %d\n", rc);
 		goto fail_2;
@@ -291,10 +288,48 @@ sq_attach(struct device *parent, struct device *self, void *aux)
 	    sc->sc_ac.ac_enaddr[2] != SGI_OUI_2)
 		enaddr_aton(bios_enaddr, sc->sc_ac.ac_enaddr);
 
-	if ((int2_intr_establish(haa->ha_irq, IPL_NET, sq_intr, sc,
+	if ((hpc_intr_establish(haa->ha_irq, IPL_NET, sq_intr, sc,
 	    self->dv_xname)) == NULL) {
 		printf(": unable to establish interrupt!\n");
 		goto fail_6;
+	}
+
+	/*
+	 * Set up HPC ethernet PIO and DMA configurations.
+	 *
+	 * The PROM appears to do most of this for the onboard HPC3, but
+	 * not for the Challenge S's IOPLUS chip. We copy how the onboard
+	 * chip is configured and assume that it's correct for both.
+	 */
+	if (haa->hpc_regs->revision == 3 &&
+	    sys_config.system_subtype != IP22_INDIGO2) {
+		uint32_t dmareg, pioreg;
+
+		if (haa->ha_giofast) {
+			pioreg =
+			    HPC3_ENETR_PIOCFG_P1(1) |
+			    HPC3_ENETR_PIOCFG_P2(5) |
+			    HPC3_ENETR_PIOCFG_P3(0);
+			dmareg =
+			    HPC3_ENETR_DMACFG_D1(5) |
+			    HPC3_ENETR_DMACFG_D2(1) |
+			    HPC3_ENETR_DMACFG_D3(0);
+		} else {
+			pioreg =
+			    HPC3_ENETR_PIOCFG_P1(1) |
+			    HPC3_ENETR_PIOCFG_P2(6) |
+			    HPC3_ENETR_PIOCFG_P3(1);
+			dmareg =
+			    HPC3_ENETR_DMACFG_D1(6) |
+			    HPC3_ENETR_DMACFG_D2(2) |
+			    HPC3_ENETR_DMACFG_D3(0);
+		}
+		dmareg |= HPC3_ENETR_DMACFG_FIX_RXDC |
+		    HPC3_ENETR_DMACFG_FIX_INTR | HPC3_ENETR_DMACFG_FIX_EOP |
+		    HPC3_ENETR_DMACFG_TIMEOUT;
+
+		sq_hpc_write(sc, HPC3_ENETR_PIOCFG, pioreg);
+		sq_hpc_write(sc, HPC3_ENETR_DMACFG, dmareg);
 	}
 
 	/* Reset the chip to a known state. */
@@ -411,34 +446,6 @@ sq_init(struct ifnet *ifp)
 
 	/* Now write the receive command register. */
 	sq_seeq_write(sc, SEEQ_RXCMD, sc->sc_rxcmd);
-
-	/*
-	 * Set up HPC ethernet PIO and DMA configurations.
-	 *
-	 * The PROM appears to do most of this for the onboard HPC3, but
-	 * not for the Challenge S's IOPLUS chip. We copy how the onboard
-	 * chip is configured and assume that it's correct for both.
-	 */
-	if (sc->hpc_regs->revision == 3) {
-		uint32_t dmareg, pioreg;
-
-		pioreg =
-		    HPC3_ENETR_PIOCFG_P1(1) |
-		    HPC3_ENETR_PIOCFG_P2(6) |
-		    HPC3_ENETR_PIOCFG_P3(1);
-
-		dmareg =
-		    HPC3_ENETR_DMACFG_D1(6) |
-		    HPC3_ENETR_DMACFG_D2(2) |
-		    HPC3_ENETR_DMACFG_D3(0) |
-		    HPC3_ENETR_DMACFG_FIX_RXDC |
-		    HPC3_ENETR_DMACFG_FIX_INTR |
-		    HPC3_ENETR_DMACFG_FIX_EOP |
-		    HPC3_ENETR_DMACFG_TIMEOUT;
-
-		sq_hpc_write(sc, HPC3_ENETR_PIOCFG, pioreg);
-		sq_hpc_write(sc, HPC3_ENETR_DMACFG, dmareg);
-	}
 
 	/* Pass the start of the receive ring to the HPC */
 	sq_hpc_write(sc, sc->hpc_regs->enetr_ndbp, SQ_CDRXADDR(sc, 0));
@@ -767,7 +774,7 @@ sq_start(struct ifnet *ifp)
 		 * descriptor.
 		 *
 		 * HPC1_HDD_CTL_INTR will generate an interrupt on
-		 * HPC1. HPC3 requires HPC3_HDD_CTL_EOPACKET in
+		 * HPC1. HPC3 requires HPC3_HDD_CTL_EOCHAIN in
 		 * addition to HPC3_HDD_CTL_INTR to interrupt.
 		 */
 		KASSERT(lasttx != -1);
@@ -1127,8 +1134,9 @@ sq_txintr(struct sq_softc *sc)
 		}
 
 		if (status & TXSTAT_16COLL) {
-			printf("%s: max collisions reached\n",
-			    sc->sc_dev.dv_xname);
+			if (ifp->if_flags & IFF_DEBUG)
+				printf("%s: max collisions reached\n",
+				    sc->sc_dev.dv_xname);
 			ifp->if_oerrors++;
 			ifp->if_collisions += 16;
 		}

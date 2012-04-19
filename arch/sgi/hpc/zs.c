@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.3 2012/04/01 16:37:08 miod Exp $	*/
+/*	$OpenBSD: zs.c,v 1.6 2012/04/18 11:30:01 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.37 2011/02/20 07:59:50 matt Exp $	*/
 
 /*-
@@ -62,7 +62,6 @@
 
 #include <sgi/hpc/hpcvar.h>
 #include <sgi/hpc/hpcreg.h>
-#include <sgi/localbus/intvar.h>
 
 /*
  * Some warts needed by z8530tty.c -
@@ -84,7 +83,7 @@ int zs_major = 19;
 #define ZSHARD_PRI 64
 
 /* SGI shouldn't need ZS_DELAY() as recovery time is done in hardware? */
-#define ZS_DELAY()	delay(5)
+#define ZS_DELAY()	delay(2)
 
 /* The layout of this is hardware-dependent (padding, order). */
 struct zschan {
@@ -289,7 +288,7 @@ zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 
 
 	zsc->sc_si = softintr_establish(IPL_SOFTTTY, zssoft, zsc);
-	int2_intr_establish(haa->ha_irq, IPL_TTY, zshard, zsc, self->dv_xname);
+	hpc_intr_establish(haa->ha_irq, IPL_TTY, zshard, zsc, self->dv_xname);
 
 	/*
 	 * Set the master interrupt enable and interrupt vector.
@@ -441,9 +440,19 @@ zs_read_reg(struct zs_chanstate *cs, uint8_t reg)
 	struct zs_channel *zsc = (struct zs_channel *)cs;
 
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, reg);
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, 1,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 	val = bus_space_read_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR);
 	ZS_DELAY();
+
+	/*
+	 * According to IRIX <sys/z8530.h>, on Indigo, the CTS and DCD bits
+	 * are inverted.
+	 */
+	if (sys_config.system_type == SGI_IP20 && reg == 0)
+		val ^= ZSRR0_CTS | ZSRR0_DCD;
+
 	return val;
 }
 
@@ -452,9 +461,20 @@ zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val)
 {
 	struct zs_channel *zsc = (struct zs_channel *)cs;
 
+	/*
+	 * According to IRIX <sys/z8530.h>, on Indigo, the RTS and DTR bits
+	 * are inverted.
+	 */
+	if (sys_config.system_type == SGI_IP20 && reg == 5)
+		val ^= ZSWR5_DTR | ZSWR5_RTS;
+
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, reg);
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, 1,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, val);
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, 1,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 }
 
@@ -466,6 +486,14 @@ zs_read_csr(struct zs_chanstate *cs)
 
 	val = bus_space_read_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR);
 	ZS_DELAY();
+
+	/*
+	 * According to IRIX <sys/z8530.h>, on Indigo, the CTS and DCD bits
+	 * are inverted.
+	 */
+	if (sys_config.system_type == SGI_IP20)
+		val ^= ZSRR0_CTS | ZSRR0_DCD;
+
 	return val;
 }
 
@@ -475,6 +503,8 @@ zs_write_csr(struct zs_chanstate *cs, uint8_t val)
 	struct zs_channel *zsc = (struct zs_channel *)cs;
 
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, val);
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, 1,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 }
 
@@ -495,6 +525,8 @@ zs_write_data(struct zs_chanstate *cs, uint8_t val)
 	struct zs_channel *zsc = (struct zs_channel *)cs;
 
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_DATA, val);
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, 1,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 }
 
@@ -618,7 +650,14 @@ zs_putc(void *arg, int c)
 	} while ((rr0 & ZSRR0_TX_READY) == 0);
 
 	zc->zc_data = c;
-	__asm__ __volatile__ ("sync" ::: "memory"); /* wbflush(); */
+
+	/* inline bus_space_barrier() */
+	__asm__ __volatile__ ("sync" ::: "memory");
+	if (sys_config.system_type != SGI_IP20) {
+		(void)*(volatile uint32_t *)PHYS_TO_XKPHYS(HPC_BASE_ADDRESS_0 +
+		    HPC3_INTRSTAT_40, CCA_NC);
+	}
+
 	ZS_DELAY();
 	splx(s);
 }

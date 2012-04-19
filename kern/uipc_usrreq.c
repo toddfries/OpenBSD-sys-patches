@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_usrreq.c,v 1.55 2011/07/06 06:31:38 matthew Exp $	*/
+/*	$OpenBSD: uipc_usrreq.c,v 1.64 2012/04/14 09:42:32 claudio Exp $	*/
 /*	$NetBSD: uipc_usrreq.c,v 1.18 1996/02/09 19:00:50 christos Exp $	*/
 
 /*
@@ -122,7 +122,7 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		if (unp->unp_conn && unp->unp_conn->unp_addr) {
 			nam->m_len = unp->unp_conn->unp_addr->m_len;
 			bcopy(mtod(unp->unp_conn->unp_addr, caddr_t),
-			    mtod(nam, caddr_t), (unsigned)nam->m_len);
+			    mtod(nam, caddr_t), nam->m_len);
 		} else {
 			nam->m_len = sizeof(sun_noname);
 			*(mtod(nam, struct sockaddr *)) = sun_noname;
@@ -286,7 +286,7 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		if (unp->unp_addr) {
 			nam->m_len = unp->unp_addr->m_len;
 			bcopy(mtod(unp->unp_addr, caddr_t),
-			    mtod(nam, caddr_t), (unsigned)nam->m_len);
+			    mtod(nam, caddr_t), nam->m_len);
 		} else
 			nam->m_len = 0;
 		break;
@@ -295,7 +295,7 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		if (unp->unp_conn && unp->unp_conn->unp_addr) {
 			nam->m_len = unp->unp_conn->unp_addr->m_len;
 			bcopy(mtod(unp->unp_conn->unp_addr, caddr_t),
-			    mtod(nam, caddr_t), (unsigned)nam->m_len);
+			    mtod(nam, caddr_t), nam->m_len);
 		} else
 			nam->m_len = 0;
 		break;
@@ -588,13 +588,6 @@ unp_disconnect(struct unpcb *unp)
 	}
 }
 
-#ifdef notdef
-unp_abort(struct unpcb *unp)
-{
-	unp_detach(unp);
-}
-#endif
-
 void
 unp_shutdown(struct unpcb *unp)
 {
@@ -638,7 +631,7 @@ unp_externalize(struct mbuf *rights, socklen_t controllen)
 {
 	struct proc *p = curproc;		/* XXX */
 	struct cmsghdr *cm = mtod(rights, struct cmsghdr *);
-	int i, *fdp;
+	int i, *fdp = NULL;
 	struct file **rp;
 	struct file *fp;
 	int nfds, error = 0;
@@ -649,8 +642,10 @@ unp_externalize(struct mbuf *rights, socklen_t controllen)
 		controllen = 0;
 	else
 		controllen -= CMSG_ALIGN(sizeof(struct cmsghdr));
-	if (nfds > controllen / sizeof(int))
-		nfds = controllen / sizeof(int);
+	if (nfds > controllen / sizeof(int)) {
+		error = EMSGSIZE;
+		goto restart;
+	}
 
 	rp = (struct file **)CMSG_DATA(cm);
 
@@ -752,7 +747,8 @@ restart:
 	rights->m_len = CMSG_LEN(nfds * sizeof(int));
  out:
 	fdpunlock(p->p_fd);
-	free(fdp, M_TEMP);
+	if (fdp)
+		free(fdp, M_TEMP);
 	return (error);
 }
 
@@ -775,23 +771,34 @@ unp_internalize(struct mbuf *control, struct proc *p)
 		return (EINVAL);
 	nfds = (cm->cmsg_len - CMSG_ALIGN(sizeof(*cm))) / sizeof (int);
 
+	if (unp_rights + nfds > maxfiles / 10)
+		return (EMFILE);
+
 	/* Make sure we have room for the struct file pointers */
 morespace:
 	neededspace = CMSG_SPACE(nfds * sizeof(struct file *)) -
 	    control->m_len;
 	if (neededspace > M_TRAILINGSPACE(control)) {
+		char *tmp;
 		/* if we already have a cluster, the message is just too big */
 		if (control->m_flags & M_EXT)
 			return (E2BIG);
 
+		/* copy cmsg data temporarily out of the mbuf */
+		tmp = malloc(control->m_len, M_TEMP, M_WAITOK);
+		memcpy(tmp, mtod(control, caddr_t), control->m_len);
+
 		/* allocate a cluster and try again */
 		MCLGET(control, M_WAIT);
-		if ((control->m_flags & M_EXT) == 0)
+		if ((control->m_flags & M_EXT) == 0) {
+			free(tmp, M_TEMP);
 			return (ENOBUFS);       /* allocation failed */
+		}
 
-		/* copy the data to the cluster */
-		memcpy(mtod(control, char *), cm, cm->cmsg_len);
+		/* copy the data back into the cluster */
 		cm = mtod(control, struct cmsghdr *);
+		memcpy(cm, tmp, control->m_len);
+		free(tmp, M_TEMP);
 		goto morespace;
 	}
 
