@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache_r5k.S,v 1.34 2012/04/06 20:11:18 miod Exp $ */
+/*	$OpenBSD: cache_r5k.S,v 1.36 2012/04/24 20:06:21 miod Exp $ */
 
 /*
  * Copyright (c) 1998-2004 Opsycon AB (www.opsycon.se)
@@ -27,18 +27,17 @@
  */
 
 /*
- * NOTE!
- *
- * This code does not support caches with other linesize than 32.
- * Neither will it support R4000 or R4400 Secondary caches. These
- * configurations will need another set of cache functions.
- *
  * Processors supported:
- * R4600/R4700 (if option CPUR4600)
- * R5000
- * RM52xx
- * RM7xxx
- * RM9xxx
+ * R4600/R4700 (if option CPU_R4600)
+ * R5000, RM52xx, RM7xxx, RM9xxx
+ *
+ * The following assumptions are made:
+ * - L1 I$ is 2 way, 32 bytes/line
+ * - L1 D$ is WB, 2 way, 32 bytes/line
+ * - L2 may not exist
+ * - L3 may not exist
+ * - L3 implies internal L2
+ * - all external caches are WT
  */
 
 #include <sys/errno.h>
@@ -59,50 +58,25 @@
 
 #define	IndexInvalidate_I	0x00
 #define	IndexWBInvalidate_D	0x01
-#define	IndexFlashInvalidate_T	0x02
 #define	IndexWBInvalidate_S	0x03
 
-#define	IndexLoadTag_I		0x04
-#define	IndexLoadTag_D		0x05
-#define	IndexLoadTag_T		0x06
-#define	IndexLoadTag_S		0x07
-
-#define	IndexStoreTag_I		0x08
-#define	IndexStoreTag_D		0x09
-#define	IndexStoreTag_T		0x0a
 #define	IndexStoreTag_S		0x0b
 
-#define	CreateDirtyExclusive	0x0d
-
-#define	HitInvalidate_I		0x10
 #define	HitInvalidate_D		0x11
 #define	HitInvalidate_S		0x13
 
-#define	Fill_I			0x14
 #define	HitWBInvalidate_D	0x15
 #define	InvalidatePage_T	0x16
 #define	HitWBInvalidate_S	0x17
 #define	InvalidatePage_S	0x17	/* Only RM527[0-1] */
 
-#define	HitWB_I			0x18
-#define	HitWB_D			0x19
-#define	HitWB_S			0x1b
-
 /*
- *  R5000 config register bits.
+ *  R5000 and RM52xx config register bits.
  */
 #define	CF_5_SE		(1 << 12)	/* Secondary cache enable */
 #define	CF_5_SC		(1 << 17)	/* Secondary cache not present */
 #define	CF_5_SS		(3 << 20)	/* Secondary cache size */
 #define	CF_5_SS_AL	20		/* Shift to align */
-
-/*
- *  RM52xx config register bits. (like R5000)
- */
-#define	CF_52_SE	(1 << 12)	/* Secondary cache enable */
-#define	CF_52_SC	(1 << 17)	/* Secondary cache not present */
-#define	CF_52_SS	(3 << 20)	/* Secondary cache size */
-#define	CF_52_SS_AL	20		/* Shift to align */
 
 /*
  *  RM7000 config register bits.
@@ -142,9 +116,6 @@
  *
  *	Size and configure the caches.
  *	NOTE: should only be called from mips_init().
- *
- * Results:
- *	Returns the value of the cpu configuration register.
  *
  * Side effects:
  *	The size of the data cache is stored into ci_l1datacachesize.
@@ -196,22 +167,17 @@ LEAF(Mips5k_ConfigCache, 0)
 	li	ta3, 0				# Tertiary size 0.
 
 	and	v1, 0xff00			# Recognize CPU's with
-	li	t1, (MIPS_R4600 << 8)		# N way L1 caches only.
-	beq	v1, t1, ConfResult		# R4K 2 way, no L2 control
-	li	t1, (MIPS_R4700 << 8)
-	beq	v1, t1, ConfResult		# R4K 2 way, No L2 control
-	li	t1, (MIPS_R5000 << 8)
+	li	t1, (MIPS_R5000 << 8)		# N way L1 caches only.
 	beq	v1, t1, Conf5K			# R5K 2 way, check L2
 	li	t1, (MIPS_RM52X0 << 8)
-	beq	v1, t1, Conf52K			# R52K 2 way, check L2
+	beq	v1, t1, Conf5K			# RM52xx 2 way, check L2
 	li	t1, (MIPS_RM7000 << 8)
 	beq	v1, t1, Conf7K
 	li	t1, (MIPS_RM9000 << 8)
 	beq	v1, t1, Conf7K
 	nop
-						# R4000PC/R4400PC or unknown.
-	li	t2, CTYPE_DIR			# default direct mapped cache
-	b	ConfResult
+
+	b	ConfResult			# R4[67]00 2 way, No L2 control
 	nop
 
 #---- R5K ------------------------------
@@ -232,6 +198,7 @@ Conf5K:						# R5xxx type, check for L2 cache
 
 	mtc0	v0, COP_0_CONFIG		# Enable L2 cache
 	or	t2, CTYPE_HAS_XL2		# External L2 present.
+	mtc0	zero, COP_0_TAG_LO		# necessary for RM52xx
 	LOAD_XKPHYS(t0, CCA_CACHED)
 	PTR_ADDU t1, t0, ta2
 1:
@@ -242,38 +209,6 @@ Conf5K:						# R5xxx type, check for L2 cache
 
 	b	ConfResult
 	nop
-
-
-#---- R52K ------------------------------
-Conf52K:					# R5200 type, check for L2 cache
-	and	t1, v0, CF_52_SC
-	bnez	t1, ConfResult			# not present
-	li	ta2, 0				# set size to 0.
-
-	li	t3, CF_52_SS
-	and	t1, t3, v0
-	beq	t1, t3, ConfResult		# No L2 cache
-	srl	t1, CF_52_SS_AL
-
-	li	t3, CF_52_SE			# Set SE in conf
-	or	v0, t3				# Update config register
-	li	ta2, 512*1024			# 512k per 'click'.
-	sll	ta2, t1
-
-	mtc0	v0, COP_0_CONFIG		# Enable L2 cache
-	or	t2, CTYPE_HAS_XL2		# External L2 present.
-	mtc0	zero, COP_0_TAG_LO
-	LOAD_XKPHYS(t0, CCA_CACHED)
-	PTR_ADDU t1, t0, ta2
-1:
-	cache	InvalidatePage_S, 0(t0)
-	PTR_ADDU t0, 4096
-	bne	t0, t1, 1b
-	nop
-
-	b	ConfResult
-	nop
-
 
 #---- RM7K -----------------------------
 Conf7K:					# RM7000, check for L2 and L3 cache
@@ -368,9 +303,9 @@ ConfResult:
 
 	addu	t1, ta0, -1			# Use icache for alias mask
 	srl	t1, t2
-	and	t1, ~(PAGE_SIZE - 1)
+	srl	t1, PAGE_SHIFT
 	beqz	t1, 1f
-	nop
+	sll	t1, PAGE_SHIFT
 	or	t1, (PAGE_SIZE - 1)
 1:
 	PTR_S	t1, cache_valias_mask
@@ -399,9 +334,6 @@ END(Mips5k_ConfigCache)
  *	Sync ALL caches.
  *	No need to look at number of sets since we are cleaning out
  *	the entire cache and thus will address all sets anyway.
- *
- * Results:
- *	None.
  *
  * Side effects:
  *	The contents of ALL caches are Invalidated or Synched.
@@ -511,16 +443,10 @@ END(Mips5k_SyncCache)
 
 /*----------------------------------------------------------------------------
  *
- * Mips5k_InvalidateICache --
+ * Mips5k_SyncICache(struct cpu_info *, vaddr_t va, size_t len)
  *
- *	void Mips5k_SyncICache(struct cpu_info *, vaddr_t addr, size_t len)
- *
- *	Invalidate the L1 instruction cache for at least range
- *	of addr to addr + len - 1.
- *	The address is reduced to a XKPHYS index to avoid TLB faults.
- *
- * Results:
- *	None.
+ *	Invalidate the L1 instruction cache for at least range of va to
+ *	va + len - 1.
  *
  * Side effects:
  *	The contents of the L1 Instruction cache is flushed.
@@ -535,14 +461,16 @@ LEAF(Mips5k_InvalidateICache, 0)
 #endif
 	lw	v0, CI_CACHEWAYS(a0)		# Cache properties
 	lw	t0, CI_L1INSTCACHESET(a0)	# Set size
-	and	a1, 0x00ffffff			# Reduce addr to cache index
+	dsll	a1, (64 - 57)
+	dsrl	a1, (64 - 57)
 	LOAD_XKPHYS(a3, CCA_CACHED)
 	PTR_ADDU a2, 31				# Round up size
 	PTR_ADDU a2, a1				# Add extra from address
-	and	a1, -32				# Align start address
+	dsrl	a1, 5				# Align start address
+	dsll	a1, 5
 	PTR_SUBU a2, a1
 	PTR_ADDU a1, a3				# a1 now new XKPHYS address
-	srl	a2, 5				# Number of unrolled loops
+	dsrl	a2, 5				# Number of unrolled loops
 	addiu	v0, -2				# <0 1way, 0 = two, >0 four
 1:
 	bltz	v0, 3f
@@ -576,15 +504,10 @@ END(Mips5k_InvalidateICache)
 
 /*----------------------------------------------------------------------------
  *
- * Mips5k_SyncDCachePage --
+ * Mips5k_SyncDCachePage(struct cpu_info *ci, vaddr_t va, paddr_t pa)
  *
- *	void Mips5k_SyncDCachePage(struct cpu_info *ci, vaddr_t addr)
- *
- *	Sync the L1 data cache page for address addr.
- *	The address is reduced to a XKPHYS index to avoid TLB faults.
- *
- * Results:
- *	None.
+ *	Sync the L1 data cache page for address va.
+ *	The physical address is used to compute the L2 index.
  *
  * Side effects:
  *	The contents of the cache is written back to primary memory.
@@ -600,11 +523,11 @@ LEAF(Mips5k_SyncDCachePage, 0)
 #endif
 	LOAD_XKPHYS(a3, CCA_CACHED)
 	lw	v0, CI_CACHEWAYS(a0)
-	dsll	a1, 34
-	dsrl	a1, 34
+	dsll	a1, (64 - 57)
+	dsrl	a1, (64 - 57) + PAGE_SHIFT
+	dsll	a1, PAGE_SHIFT			# Page align start address
 	PTR_ADDU a1, a3				# a1 now new XKPHYS address
-	and	a1, ~PAGE_MASK			# Page align start address
-	PTR_ADDU a2, a1, PAGE_SIZE-128
+	PTR_ADDU a4, a1, PAGE_SIZE-128
 	addiu	v0, -2				# <0 1way, 0 = two, >0 four
 	lw	a3, CI_L1DATACACHESET(a0)
 
@@ -634,9 +557,49 @@ LEAF(Mips5k_SyncDCachePage, 0)
 	cache	IndexWBInvalidate_D, 64(a1)
 	cache	IndexWBInvalidate_D, 96(a1)
 
-	bne	a2, a1, 1b
+	bne	a4, a1, 1b
 	PTR_ADDU a1, 128
 
+	lw	t0, CI_CACHECONFIGURATION(a0)
+	and	t0, CTYPE_HAS_IL2		# Have internal L2?
+	beqz	t0, 9f
+
+	LOAD_XKPHYS(a3, CCA_CACHED)		# Yes, do L2 with the physical
+	dsrl	a2, PAGE_SHIFT
+	dsll	a2, PAGE_SHIFT			# Page align start address
+	PTR_ADDU a1, a2, a3			# address for the index
+	PTR_ADDU a4, a1, PAGE_SIZE-128
+	lw	a3, CI_L2SIZE(a0)
+	srl	a3, 2				# Hardcoded 4-way
+
+1:
+	cache	IndexWBInvalidate_S, 0(a1)	# do set A
+	cache	IndexWBInvalidate_S, 32(a1)
+	cache	IndexWBInvalidate_S, 64(a1)
+	cache	IndexWBInvalidate_S, 96(a1)
+
+	PTR_ADDU t1, a1, a3
+	cache	IndexWBInvalidate_S, 0(t1)	# do set B.
+	cache	IndexWBInvalidate_S, 32(t1)
+	cache	IndexWBInvalidate_S, 64(t1)
+	cache	IndexWBInvalidate_S, 96(t1)
+
+	PTR_ADDU t1, a3
+	cache	IndexWBInvalidate_S, 0(t1)	# do set C
+	cache	IndexWBInvalidate_S, 32(t1)
+	cache	IndexWBInvalidate_S, 64(t1)
+	cache	IndexWBInvalidate_S, 96(t1)
+
+	PTR_ADDU t1, a3				# do set D
+	cache	IndexWBInvalidate_S, 0(t1)
+	cache	IndexWBInvalidate_S, 32(t1)
+	cache	IndexWBInvalidate_S, 64(t1)
+	cache	IndexWBInvalidate_S, 96(t1)
+
+	bne	a4, a1, 1b
+	PTR_ADDU a1, 128
+
+9:
 #ifdef CPUR4600
 	mtc0	v1, COP_0_STATUS_REG	# Restore the status register.
 #endif
@@ -647,18 +610,10 @@ END(Mips5k_SyncDCachePage)
 
 /*----------------------------------------------------------------------------
  *
- * Mips5k_HitSyncDCache --
+ * Mips5k_HitSyncDCache(struct cpu_info *ci, vaddr_t va, size_t len)
  *
- *	void Mips5k_HitSyncDCache(struct cpu_info *ci,
- *	    vaddr_t addr, size_t len)
- *
- *	Sync data cache for range of addr to addr + len - 1.
- *	The address can be any valid virtual address as long
- *	as no TLB invalid traps occur. Only lines with matching
- *	addr are flushed.
- *
- * Results:
- *	None.
+ *	Sync data cache for range of va to va + len - 1.
+ *	Only lines with matching addresses are flushed.
  *
  * Side effects:
  *	The contents of the L1 cache is written back to primary memory.
@@ -676,13 +631,13 @@ LEAF(Mips5k_HitSyncDCache, 0)
 	li	v0, SR_DIAG_DE
 	mtc0	v0, COP_0_STATUS_REG		# Disable interrupts
 #endif
-
 	beqz	a2, 3f				# size is zero!
 	PTR_ADDU a2, 31				# Round up
 	PTR_ADDU a2, a1				# Add extra from address
-	and	a1, -32				# align address
+	dsrl	a1, 5
+	dsll	a1, 5				# align address
 	PTR_SUBU a2, a1
-	srl	a2, 5				# Compute number of cache lines
+	dsrl	a2, 5				# Compute number of cache lines
 
 1:
 	PTR_ADDU a2, -1
@@ -703,18 +658,10 @@ END(Mips5k_HitSyncDCache)
 
 /*----------------------------------------------------------------------------
  *
- * Mips5k_HitSyncSCache --
+ * _mips5k_HitSyncSCache(struct cpu_info *ci, vaddr_t va, size_t len)
  *
- *	static void Mips5k_HitSyncSCache(struct cpu_info *ci,
- *	    vaddr_t addr, size_t len)
- *
- *	Sync secondary cache for range of addr to addr + len - 1.
- *	The address can be any valid virtual address as long
- *	as no TLB invalid traps occur. Only lines with matching
- *	addr are flushed.
- *
- * Results:
- *	None.
+ *	Sync secondary cache for range of va to va + len - 1.
+ *	Only lines with matching addresses are flushed.
  *
  * Side effects:
  *	The contents of the L2 cache is written back to primary memory.
@@ -726,7 +673,7 @@ END(Mips5k_HitSyncDCache)
  *
  *----------------------------------------------------------------------------
  */
-LEAF(Mips5k_HitSyncSCache, 0)
+ALEAF(_mips5k_HitSyncSCache)
 #ifdef CPUR4600
 	mfc0	v1, COP_0_STATUS_REG		# Save the status register.
 	li	v0, SR_DIAG_DE
@@ -734,16 +681,17 @@ LEAF(Mips5k_HitSyncSCache, 0)
 #endif
 
 	beqz	a2, 3f				# size is zero!
+	PTR_ADDU a2, 31				# Round up
 	PTR_ADDU a2, a1				# Add in extra from align
-	and	a1, -32				# Align address
+	dsrl	a1, 5
+	dsll	a1, 5				# align address
 	PTR_SUBU a2, a1
+	dsrl	a2, 5				# Compute number of cache lines
 1:
-	PTR_ADDU a2, -32
-
+	PTR_ADDU a2, -1
 	cache	HitWBInvalidate_S, 0(a1)
 	cache	HitWBInvalidate_D, 0(a1)	# Orphans in L1
-
-	bgtz	a2, 1b
+	bnez	a2, 1b
 	PTR_ADDU a1, 32
 
 3:
@@ -754,22 +702,13 @@ LEAF(Mips5k_HitSyncSCache, 0)
 	sync
 	j	ra
 	nop
-END(Mips5k_HitSyncSCache)
 
 /*----------------------------------------------------------------------------
  *
- * Mips5k_HitInvalidateDCache --
+ * Mips5k_HitInvalidateDCache(struct cpu_info *ci, vaddr_t va, size_t len)
  *
- *	void Mips5k_HitInvalidateDCache(struct cpu_info *ci,
- *	    vaddr_t addr, size_t len)
- *
- *	Invalidate data cache for range of addr to addr + len - 1.
- *	The address can be any valid address as long as no TLB misses occur.
- *	(Be sure to use cached K0SEG kernel addresses or mapped addresses)
+ *	Invalidate data cache for range of va to va + len - 1.
  *	Only lines with matching addresses are invalidated.
- *
- * Results:
- *	None.
  *
  * Side effects:
  *	The L1 cache line is invalidated.
@@ -784,16 +723,16 @@ LEAF(Mips5k_HitInvalidateDCache, 0)
 #endif
 
 	beqz	a2, 3f				# size is zero!
+	PTR_ADDU a2, 31				# Round up
 	PTR_ADDU a2, a1				# Add in extra from align
-	and	a1, -32				# Align address
+	dsrl	a1, 5
+	dsll	a1, 5				# align address
 	PTR_SUBU a2, a1
-
+	dsrl	a2, 5				# Compute number of cache lines
 1:
-	PTR_ADDU a2, -32
-
+	PTR_ADDU a2, -1
 	cache	HitInvalidate_D, 0(a1)
-
-	bgtz	a2, 1b
+	bnez	a2, 1b
 	PTR_ADDU a1, 32
 
 3:
@@ -806,28 +745,19 @@ LEAF(Mips5k_HitInvalidateDCache, 0)
 	nop
 END(Mips5k_HitInvalidateDCache)
 
-
 /*----------------------------------------------------------------------------
  *
- * Mips5k_HitInvalidateSCache --
+ * _mips5k_HitInvalidateSCache(struct cpu_info *ci, vaddr_t va, size_t len)
  *
- *	static void Mips5k_HitInvalidateSCache(struct cpu_info *ci,
- *	    vaddr_t addr, size_t len)
- *
- *	Invalidate secondary cache for range of addr to addr + len - 1.
- *	The address can be any valid address as long as no TLB misses occur.
- *	(Be sure to use cached K0SEG kernel addresses or mapped addresses)
+ *	Invalidate secondary cache for range of va to va + len - 1.
  *	Only lines with matching addresses are invalidated.
- *
- * Results:
- *	None.
  *
  * Side effects:
  *	The L2 cache line is invalidated.
  *
  *----------------------------------------------------------------------------
  */
-LEAF(Mips5k_HitInvalidateSCache, 0)
+ALEAF(_mips5k_HitInvalidateSCache)
 #ifdef CPUR4600
 	mfc0	v1, COP_0_STATUS_REG		# Save the status register.
 	li	v0, SR_DIAG_DE
@@ -835,16 +765,17 @@ LEAF(Mips5k_HitInvalidateSCache, 0)
 #endif
 
 	beqz	a2, 3f				# size is zero!
+	PTR_ADDU a2, 31				# Round up
 	PTR_ADDU a2, a1				# Add in extra from align
-	and	a1, -32				# Align address
+	dsrl	a1, 5
+	dsll	a1, 5				# align address
 	PTR_SUBU a2, a1
+	dsrl	a2, 5				# Compute number of cache lines
 1:
-	PTR_ADDU a2, -32
-
+	PTR_ADDU a2, -1
 	cache	HitInvalidate_S, 0(a1)
 	cache	HitInvalidate_D, 0(a1)		# Orphans in L1
-
-	bgtz	a2, 1b
+	bnez	a2, 1b
 	PTR_ADDU a1, 32
 
 3:
@@ -855,38 +786,29 @@ LEAF(Mips5k_HitInvalidateSCache, 0)
 	sync
 	j	ra
 	nop
-END(Mips5k_HitInvalidateSCache)
 
 /*----------------------------------------------------------------------------
  *
- * Mips5k_IOSyncDCache --
+ * Mips5k_IOSyncDCache(struct cpu_info *ci, vaddr_t va, size_t len, int how)
  *
- *	void Mips5k_IOSyncDCache(struct cpu_info *ci,
- *	    vaddr_t addr, size_t len, int rw)
- *
- *	Invalidate or flush data cache for range of addr to addr + len - 1.
- *	The address can be any valid address as long as no TLB misses occur.
- *	(Be sure to use cached K0SEG kernel addresses or mapped addresses)
+ *	Invalidate or flush data cache for range of va to va + len - 1.
  *
  *	In case of the existence of an external cache we invalidate pages
  *	which are in the given range ONLY if transfer direction is READ.
  *	The assumption here is a 'write through' external cache which is
  *	true for all now supported processors.
  *
- * Results:
- *	None.
- *
  * Side effects:
- *	If rw == 0 (read), L1 and on-chip L2 caches are invalidated or
- *		flushed if the area does not match the alignment
- *		requirements. Writethrough L2 and L3 cache are
- *		invalidated for the address range.
- *	If rw == 1 (write), L1 and on-chip L2 caches are written back
- *		to memory and invalidated. Writethrough L2 and L3 caches
- *		are left alone.
- *	If rw == 2 (write-read), L1 and on-chip L2 caches are written back
- *		to memory and invalidated. Writethrough L2 and L3 caches
- *		are invalidated.
+ *	If how == 0 (read), L1 and on-chip L2 caches are invalidated or
+ *		flushed if the area does not match the alignment requirements.
+ *		Writethrough L2 and L3 cache are invalidated for the address
+ *		range.
+ *	If how == 1 (write), L1 and on-chip L2 caches are written back to
+ *		memory and invalidated. Writethrough L2 and L3 caches are
+ *		left alone.
+ *	If how == 2 (write-read), L1 and on-chip L2 caches are written back
+ *		to memory and invalidated. Writethrough L2 and L3 caches are
+ *		invalidated.
  *
  *----------------------------------------------------------------------------
  */
@@ -894,38 +816,32 @@ NON_LEAF(Mips5k_IOSyncDCache, FRAMESZ(CF_SZ+2*REGSZ), ra)
 	PTR_SUBU sp, FRAMESZ(CF_SZ+2*REGSZ)
 	PTR_S	ra, CF_RA_OFFS+2*REGSZ(sp)
 	REG_S	a1, CF_ARGSZ(sp)		# save args
-	beqz	a3, SyncRD			# Sync PREREAD
 	REG_S	a2, CF_ARGSZ+REGSZ(sp)
+	beqz	a3, SyncRD			# Sync PREREAD
+	lw	t0, CI_CACHECONFIGURATION(a0)
+
 	addiu	a3, -1
 	bnez	a3, SyncRDWB			# Sync PREWRITE+PREREAD
 	nop
 
-	lw	t0, CI_CACHECONFIGURATION(a0)	# Sync PREWRITE
-	and	t0, CTYPE_HAS_IL2		# Have internal L2?
-	bnez	t0, SyncSC			# Yes
+	and	t0, CTYPE_HAS_IL2		# Sync PREWRITE
+	bnez	t0, SyncSC			# Have internal L2?
+	PTR_ADDU sp, FRAMESZ(CF_SZ+2*REGSZ)
+	j	Mips5k_HitSyncDCache		# No flush L1.
 	nop
-	jal	Mips5k_HitSyncDCache		# No flush L1.
-	nop
-	b	SyncDone
-	PTR_L	ra, CF_RA_OFFS+2*REGSZ(sp)
-
 SyncSC:
-	jal	Mips5k_HitSyncSCache		# Do internal L2 cache
+	j	_mips5k_HitSyncSCache		# Do internal L2 cache
 	nop					# L1 done in parallel
-	b	SyncDone
-	PTR_L	ra, CF_RA_OFFS+2*REGSZ(sp)
 
 SyncRD:
-	and	t0, a1, 31			# check if invalidate possible
-	bnez	t0, SyncRDWB			# both address and size must
-	and	t0, a2, 31			# be aligned to the cache size
-	bnez	t0, SyncRDWB
+	or	t1, a1, a2			# check if invalidate possible
+	and	t1, 31				# both address and size must
+	bnez	t1, SyncRDWB			# be aligned to the cache size
 	nop
 
 /*
  *  Sync for aligned read, no writeback required.
  */
-	lw	t0, CI_CACHECONFIGURATION(a0)	# Aligned, do invalidate
 	and	t0, CTYPE_HAS_IL2		# Have internal L2?
 	bnez	t0, SyncRDL2
 	nop
@@ -937,7 +853,7 @@ SyncRD:
 	PTR_L	ra, CF_RA_OFFS+2*REGSZ(sp)	# External L2 if present
 
 SyncRDL2:
-	jal	Mips5k_HitInvalidateSCache	# Internal L2 cache
+	jal	_mips5k_HitInvalidateSCache	# Internal L2 cache
 	nop					# L1 done in parallel
 
 	b	SyncRDL3
@@ -947,7 +863,6 @@ SyncRDL2:
  *  Sync for unaligned read or write-read.
  */
 SyncRDWB:
-	lw	t0, CI_CACHECONFIGURATION(a0)
 	and	t0, CTYPE_HAS_IL2		# Have internal L2?
 	bnez	t0, SyncRDWBL2			# Yes, do L2
 	nop
@@ -959,7 +874,7 @@ SyncRDWB:
 	PTR_L	ra, CF_RA_OFFS+2*REGSZ(sp)	# External L2 if present
 
 SyncRDWBL2:
-	jal	Mips5k_HitSyncSCache		# Internal L2 cache
+	jal	_mips5k_HitSyncSCache		# Internal L2 cache
 	nop					# L1 done in parallel
 
 	b	SyncRDL3

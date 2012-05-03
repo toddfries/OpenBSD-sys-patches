@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.6 2012/04/18 11:30:01 miod Exp $	*/
+/*	$OpenBSD: zs.c,v 1.8 2012/04/29 09:01:38 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.37 2011/02/20 07:59:50 matt Exp $	*/
 
 /*-
@@ -125,7 +125,7 @@ static int zs_conschan = -1;
 /* Default speed for all channels */
 static int zs_defspeed = ZS_DEFSPEED;
 
-static uint8_t zs_init_reg[16] = {
+static uint8_t zs_init_reg[17] = {
 	0,				/* 0: CMD (reset, etc.) */
 	0,				/* 1: No interrupts yet. */
 	ZSHARD_PRI,			/* 2: IVECT */
@@ -142,6 +142,7 @@ static uint8_t zs_init_reg[16] = {
 	0,				/*13: BAUDHI (default=9600) */
 	ZSWR14_BAUD_ENA,
 	ZSWR15_BREAK_IE,
+	ZSWR7P_TX_FIFO			/* 7': TX FIFO interrupt level */
 };
 
 
@@ -193,11 +194,13 @@ void
 zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct zsc_softc *zsc = (void *)self;
+	struct cfdata *cf = self->dv_cfdata;
 	struct hpc_attach_args *haa = aux;
 	struct zsc_attach_args zsc_args;
 	struct zs_chanstate *cs;
 	struct zs_channel *ch;
-	int    zs_unit, channel, err, s;
+	int zs_unit, channel, err, s;
+	int has_fifo;
 
 	zsc->zsc_bustag = haa->ha_st;
 	if ((err = bus_space_subregion(haa->ha_st, haa->ha_sh,
@@ -209,7 +212,6 @@ zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	zs_unit = zsc->zsc_dev.dv_unit;
-	printf("\n");
 
 	/*
 	 * Initialize software state for each channel.
@@ -225,6 +227,10 @@ zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 		ch = &zsc->zsc_cs_store[channel];
 		cs = zsc->zsc_cs[channel] = (struct zs_chanstate *)ch;
 
+		/* pick Indigo wiring if requested */
+		if (cf->cf_flags & ZSCFL_INDIGO_WIRING)
+			ch->cs_flags |= ZSCFL_INDIGO_WIRING;
+
 		cs->cs_reg_csr = NULL;
 		cs->cs_reg_data = NULL;
 		cs->cs_channel = channel;
@@ -236,13 +242,31 @@ zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 					zs_chan_offset[channel],
 					sizeof(struct zschan),
 					&ch->cs_regs) != 0) {
-			printf("%s: cannot map regs\n", self->dv_xname);
+			printf(": cannot map regs\n", self->dv_xname);
 			return;
 		}
 		ch->cs_bustag = zsc->zsc_bustag;
 
-		memcpy(cs->cs_creg, zs_init_reg, 16);
-		memcpy(cs->cs_preg, zs_init_reg, 16);
+		/*
+		 * Figure out whether this chip is a 8530 or a 85230.
+		 */
+		if (channel == 1) {
+			zs_write_reg(cs, 15, ZSWR15_ENABLE_ENHANCED);
+			has_fifo = zs_read_reg(cs, 15) & ZSWR15_ENABLE_ENHANCED;
+
+			if (has_fifo) {
+				zs_write_reg(cs, 15, 0);
+				printf(": 85230\n");
+			} else
+				printf(": 8530\n");
+		}
+
+		if (has_fifo)
+			zs_init_reg[15] |= ZSWR15_ENABLE_ENHANCED;
+		else
+			zs_init_reg[15] &= ~ZSWR15_ENABLE_ENHANCED;
+		memcpy(cs->cs_creg, zs_init_reg, 17);
+		memcpy(cs->cs_preg, zs_init_reg, 17);
 
 		/* If console, don't stomp speed, let zstty know */
 		if (zs_unit == zs_consunit && channel == zs_conschan) {
@@ -450,7 +474,7 @@ zs_read_reg(struct zs_chanstate *cs, uint8_t reg)
 	 * According to IRIX <sys/z8530.h>, on Indigo, the CTS and DCD bits
 	 * are inverted.
 	 */
-	if (sys_config.system_type == SGI_IP20 && reg == 0)
+	if ((zsc->cs_flags & ZSCFL_INDIGO_WIRING) && reg == 0)
 		val ^= ZSRR0_CTS | ZSRR0_DCD;
 
 	return val;
@@ -465,7 +489,7 @@ zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val)
 	 * According to IRIX <sys/z8530.h>, on Indigo, the RTS and DTR bits
 	 * are inverted.
 	 */
-	if (sys_config.system_type == SGI_IP20 && reg == 5)
+	if ((zsc->cs_flags & ZSCFL_INDIGO_WIRING) && reg == 5)
 		val ^= ZSWR5_DTR | ZSWR5_RTS;
 
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, reg);
@@ -491,7 +515,7 @@ zs_read_csr(struct zs_chanstate *cs)
 	 * According to IRIX <sys/z8530.h>, on Indigo, the CTS and DCD bits
 	 * are inverted.
 	 */
-	if (sys_config.system_type == SGI_IP20)
+	if (zsc->cs_flags & ZSCFL_INDIGO_WIRING)
 		val ^= ZSRR0_CTS | ZSRR0_DCD;
 
 	return val;
@@ -525,7 +549,7 @@ zs_write_data(struct zs_chanstate *cs, uint8_t val)
 	struct zs_channel *zsc = (struct zs_channel *)cs;
 
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_DATA, val);
-	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, 1,
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_DATA, 1,
 	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 }

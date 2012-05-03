@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_usrreq.c,v 1.64 2012/04/14 09:42:32 claudio Exp $	*/
+/*	$OpenBSD: uipc_usrreq.c,v 1.66 2012/04/26 17:18:17 matthew Exp $	*/
 /*	$NetBSD: uipc_usrreq.c,v 1.18 1996/02/09 19:00:50 christos Exp $	*/
 
 /*
@@ -398,37 +398,45 @@ int
 unp_bind(struct unpcb *unp, struct mbuf *nam, struct proc *p)
 {
 	struct sockaddr_un *soun = mtod(nam, struct sockaddr_un *);
+	struct mbuf *nam2;
 	struct vnode *vp;
 	struct vattr vattr;
-	int error, namelen;
+	int error;
 	struct nameidata nd;
+	size_t pathlen;
 
 	if (unp->unp_vnode != NULL)
 		return (EINVAL);
-	namelen = soun->sun_len - offsetof(struct sockaddr_un, sun_path);
-	if (namelen <= 0 || namelen > sizeof(soun->sun_path))
-		return EINVAL;
-	if (namelen == sizeof(soun->sun_path) &&
-	    memchr(soun->sun_path, '\0', namelen) == NULL)
-		return EINVAL;
-	/*
-	 * if namelen < sizeof(sun_path) then the strncpy below
-	 * will NUL terminate it
-	 */
 
-	unp->unp_addr = m_getclr(M_WAITOK, MT_SONAME);
-	unp->unp_addr->m_len = soun->sun_len;
-	memcpy(mtod(unp->unp_addr, caddr_t *), soun,
+	if (soun->sun_len > sizeof(struct sockaddr_un) ||
+	    soun->sun_len < offsetof(struct sockaddr_un, sun_path))
+		return (EINVAL);
+	if (soun->sun_family != AF_UNIX)
+		return (EAFNOSUPPORT);
+
+	pathlen = strnlen(soun->sun_path, soun->sun_len -
 	    offsetof(struct sockaddr_un, sun_path));
-	strncpy(mtod(unp->unp_addr, caddr_t) +
-	    offsetof(struct sockaddr_un, sun_path), soun->sun_path, namelen);
+	if (pathlen == sizeof(soun->sun_path))
+		return (EINVAL);
 
-	soun = mtod(unp->unp_addr, struct sockaddr_un *);
+	nam2 = m_getclr(M_WAITOK, MT_SONAME);
+	nam2->m_len = sizeof(struct sockaddr_un);
+	memcpy(mtod(nam2, struct sockaddr_un *), soun,
+	    offsetof(struct sockaddr_un, sun_path) + pathlen);
+	/* No need to NUL terminate: m_getclr() returns bzero'd mbufs. */
+
+	soun = mtod(nam2, struct sockaddr_un *);
+
+	/* Fixup sun_len to keep it in sync with m_len. */
+	soun->sun_len = nam2->m_len;
+
 	NDINIT(&nd, CREATE, NOFOLLOW | LOCKPARENT, UIO_SYSSPACE,
 	    soun->sun_path, p);
 /* SHOULD BE ABLE TO ADOPT EXISTING AND wakeup() ALA FIFO's */
-	if ((error = namei(&nd)) != 0)
+	if ((error = namei(&nd)) != 0) {
+		m_freem(nam2);
 		return (error);
+	}
 	vp = nd.ni_vp;
 	if (vp != NULL) {
 		VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
@@ -437,14 +445,18 @@ unp_bind(struct unpcb *unp, struct mbuf *nam, struct proc *p)
 		else
 			vput(nd.ni_dvp);
 		vrele(vp);
+		m_freem(nam2);
 		return (EADDRINUSE);
 	}
 	VATTR_NULL(&vattr);
 	vattr.va_type = VSOCK;
 	vattr.va_mode = ACCESSPERMS &~ p->p_fd->fd_cmask;
 	error = VOP_CREATE(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr);
-	if (error)
+	if (error) {
+		m_freem(nam2);
 		return (error);
+	}
+	unp->unp_addr = nam2;
 	vp = nd.ni_vp;
 	vp->v_socket = unp->unp_socket;
 	unp->unp_vnode = vp;
@@ -465,6 +477,9 @@ unp_connect(struct socket *so, struct mbuf *nam, struct proc *p)
 	struct unpcb *unp, *unp2, *unp3;
 	int error;
 	struct nameidata nd;
+
+	if (soun->sun_family != AF_UNIX)
+		return (EAFNOSUPPORT);
 
 	if (nam->m_len < sizeof(struct sockaddr_un))
 		*(mtod(nam, caddr_t) + nam->m_len) = 0;

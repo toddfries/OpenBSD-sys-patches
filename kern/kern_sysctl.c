@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.221 2012/04/17 23:17:53 pirofti Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.223 2012/05/02 20:42:25 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -1088,7 +1088,7 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		kf->f_gid = fp->f_cred->cr_gid;
 		kf->f_ops = PTRTOINT64(fp->f_ops);
 		kf->f_data = PTRTOINT64(fp->f_data);
-		kf->f_usecount = fp->f_usecount;
+		kf->f_usecount = 0;
 
 		if (suser(p, 0) == 0 || p->p_ucred->cr_uid == fp->f_cred->cr_uid) {
 			kf->f_offset = fp->f_offset;
