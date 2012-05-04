@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.153 2012/03/23 15:51:26 guenther Exp $	*/
+/*	$OpenBSD: proc.h,v 1.158 2012/04/13 16:37:50 kettenis Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -202,6 +202,8 @@ struct process {
 		u_int   pr_scale;	/* pc scaling */
 	} ps_prof;
 
+	u_short	ps_acflag;		/* Accounting flags. */
+
 /* End area that is copied on creation. */
 #define ps_endcopy	ps_refcnt
 
@@ -344,7 +346,6 @@ struct proc {
 	u_long	p_prof_ticks;	/* temp storage for profiling ticks util AST */
 
 	u_short	p_xstat;	/* Exit status for wait; also stop signal. */
-	u_short	p_acflag;	/* Accounting flags. */
 };
 
 /* Status values. */
@@ -374,7 +375,7 @@ struct proc {
 #define	P_SYSTEM	0x000200	/* No sigs, stats or swapping. */
 #define	P_TIMEOUT	0x000400	/* Timing out during sleep. */
 #define	_P_TRACED	0x000800	/* Debugged process being traced. */
-#define	P_WAITED	0x001000	/* Debugging proc has waited for child. */
+#define	_P_WAITED	0x001000	/* Debugging proc has waited for child. */
 #define	P_WEXIT		0x002000	/* Working on exiting. */
 #define	_P_EXEC		0x004000	/* Process called exec. */
 
@@ -470,10 +471,8 @@ struct uidinfo *uid_find(uid_t);
  */
 #define FORK_FORK	0x00000001
 #define FORK_VFORK	0x00000002
-#define FORK_RFORK	0x00000004
 #define FORK_PPWAIT	0x00000008
 #define FORK_SHAREFILES	0x00000010
-#define FORK_CLEANFILES	0x00000020
 #define FORK_NOZOMBIE	0x00000040
 #define FORK_SHAREVM	0x00000080
 #define FORK_TFORK	0x00000100
@@ -493,7 +492,8 @@ extern LIST_HEAD(pgrphashhead, pgrp) *pgrphashtbl;
 extern u_long pgrphash;
 
 extern struct proc proc0;		/* Process slot for swapper. */
-extern int nprocs, maxproc;		/* Current and max number of procs. */
+extern int nprocesses, maxprocess;	/* Cur and max number of processes. */
+extern int nthreads, maxthread;		/* Cur and max number of threads. */
 extern int randompid;			/* fork() should create random pid's */
 
 LIST_HEAD(proclist, proc);
@@ -545,7 +545,7 @@ enum single_thread_mode {
 	SINGLE_EXIT		/* other threads to unwind and then exit */
 };
 int	single_thread_set(struct proc *, enum single_thread_mode, int);
-void	single_thread_clear(struct proc *);
+void	single_thread_clear(struct proc *, int);
 int	single_thread_check(struct proc *, int);
 
 void	child_return(void *);

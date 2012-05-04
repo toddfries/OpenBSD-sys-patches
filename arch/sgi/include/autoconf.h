@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.33 2012/03/28 20:44:23 miod Exp $ */
+/*	$OpenBSD: autoconf.h,v 1.35 2012/04/21 12:20:30 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -46,11 +46,11 @@ struct sys_rec {
 
 	/* Published cache operations. */
 	void    (*_SyncCache)(struct cpu_info *);
-	void    (*_InvalidateICache)(struct cpu_info *, uint64_t, size_t);
-	void    (*_SyncDCachePage)(struct cpu_info *, uint64_t);
-	void    (*_HitSyncDCache)(struct cpu_info *, uint64_t, size_t);
-	void    (*_IOSyncDCache)(struct cpu_info *, uint64_t, size_t, int);
-	void    (*_HitInvalidateDCache)(struct cpu_info *, uint64_t, size_t);
+	void    (*_InvalidateICache)(struct cpu_info *, vaddr_t, size_t);
+	void    (*_SyncDCachePage)(struct cpu_info *, vaddr_t, paddr_t);
+	void    (*_HitSyncDCache)(struct cpu_info *, vaddr_t, size_t);
+	void    (*_IOSyncDCache)(struct cpu_info *, vaddr_t, size_t, int);
+	void    (*_HitInvalidateDCache)(struct cpu_info *, vaddr_t, size_t);
 
 	/* Serial console configuration. */
 	struct mips_bus_space console_io;
@@ -94,6 +94,7 @@ void	dksc_device_register(struct device *, void *);
 extern	void (*_device_register)(struct device *, void *);
 
 void	ip22_setup(void);
+void	ip22_post_autoconf(void);
 void	ip27_setup(void);
 void	ip27_autoconf(struct device *);
 void	ip30_setup(void);
