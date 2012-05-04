@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.40 2012/03/28 20:44:23 miod Exp $ */
+/*	$OpenBSD: cpu.c,v 1.42 2012/04/10 15:59:21 miod Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -47,9 +47,8 @@ struct cpu_info *cpu_info_secondaries;
 struct cpuset cpus_running;
 #endif
 
-vaddr_t	CpuCacheAliasMask;
-
-int cpu_is_rm7k = 0;
+vaddr_t	cache_valias_mask;
+int	cpu_is_rm7k = 0;
 
 struct cfattach cpu_ca = {
 	sizeof(struct device), cpumatch, cpuattach
@@ -297,9 +296,9 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	    ci->ci_l1instcacheset, ci->ci_l1datacacheset);
 	printf("cpu%d: L1 line size %d:%d\n", cpuno,
 	    ci->ci_l1instcacheline, ci->ci_l1datacacheline);
-	printf("cpu%d: Alias mask %p\n", cpuno, CpuCacheAliasMask);
-	printf("cpu%d: Config Register %08x\n", cpuno, cp0_get_config());
-	printf("cpu%d: Cache configuration %x\n",
+	printf("cpu%d: virtual alias mask %p\n", cpuno, cache_valias_mask);
+	printf("cpu%d: config register %08x\n", cpuno, cp0_get_config());
+	printf("cpu%d: cache configuration %x\n",
 	    cpuno, ci->ci_cacheconfiguration);
 	if (ch->type == MIPS_RM7000) {
 		uint32_t tmp = cp0_get_config();
@@ -357,6 +356,7 @@ enable_fpu(struct proc *p)
 		MipsSwitchFPState(ci->ci_fpuproc, p->p_md.md_regs);
 	else
 		MipsSwitchFPState16(ci->ci_fpuproc, p->p_md.md_regs);
+	atomic_add_int(&uvmexp.fpswtch, 1);
 
 	ci->ci_fpuproc = p;
 	p->p_md.md_regs->sr |= SR_COP_1_BIT;
