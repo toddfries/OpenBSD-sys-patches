@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.98 2012/03/23 15:51:26 guenther Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.100 2012/04/24 16:35:08 deraadt Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -407,8 +407,17 @@ sosend(struct socket *so, struct mbuf *addr, struct uio *uio, struct mbuf *top,
 	    (so->so_proto->pr_flags & PR_ATOMIC);
 	if (uio && uio->uio_procp)
 		uio->uio_procp->p_ru.ru_msgsnd++;
-	if (control)
+	if (control) {
 		clen = control->m_len;
+		/* reserve extra space for AF_LOCAL's internalize */
+		if (so->so_proto->pr_domain->dom_family == AF_LOCAL &&
+		    clen >= CMSG_ALIGN(sizeof(struct cmsghdr)) &&
+		    mtod(control, struct cmsghdr *)->cmsg_type == SCM_RIGHTS)
+			clen = CMSG_SPACE(
+			    (clen - CMSG_ALIGN(sizeof(struct cmsghdr))) *
+			    (sizeof(struct file *) / sizeof(int)));
+	}
+
 #define	snderr(errno)	{ error = errno; splx(s); goto release; }
 
 restart:
@@ -437,7 +446,8 @@ restart:
 		if (flags & MSG_OOB)
 			space += 1024;
 		if ((atomic && resid > so->so_snd.sb_hiwat) ||
-		    clen > so->so_snd.sb_hiwat)
+		    (so->so_proto->pr_domain->dom_family != AF_LOCAL &&
+		    clen > so->so_snd.sb_hiwat))
 			snderr(EMSGSIZE);
 		if (space < resid + clen &&
 		    (atomic || space < so->so_snd.sb_lowat || space < clen)) {
@@ -1058,12 +1068,12 @@ sosplice(struct socket *so, int fd, off_t max, struct timeval *tv)
 	/* Lock both receive and send buffer. */
 	if ((error = sblock(&so->so_rcv,
 	    (so->so_state & SS_NBIO) ? M_NOWAIT : M_WAITOK)) != 0) {
-		FRELE(fp);
+		FRELE(fp, curproc);
 		return (error);
 	}
 	if ((error = sblock(&sosp->so_snd, M_WAITOK)) != 0) {
 		sbunlock(&so->so_rcv);
-		FRELE(fp);
+		FRELE(fp, curproc);
 		return (error);
 	}
 	s = splsoftnet();
@@ -1109,7 +1119,7 @@ sosplice(struct socket *so, int fd, off_t max, struct timeval *tv)
 	splx(s);
 	sbunlock(&sosp->so_snd);
 	sbunlock(&so->so_rcv);
-	FRELE(fp);
+	FRELE(fp, curproc);
 	return (error);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.135 2012/03/23 15:51:26 guenther Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.139 2012/04/13 16:37:51 kettenis Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -69,7 +69,8 @@
 # include <machine/tcb.h>
 #endif
 
-int	nprocs = 1;		/* process 0 */
+int	nprocesses = 1;		/* process 0 */
+int	nthreads = 1;		/* proc 0 */
 int	randompid;		/* when set to 1, pid's go random */
 pid_t	lastpid;
 struct	forkstat forkstat;
@@ -113,47 +114,6 @@ sys_vfork(struct proc *p, void *v, register_t *retval)
 }
 
 int
-sys_rfork(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_rfork_args /* {
-		syscallarg(int) flags;
-	} */ *uap = v;
-
-	int rforkflags;
-	int flags;
-
-	flags = FORK_RFORK;
-	rforkflags = SCARG(uap, flags);
-
-	if ((rforkflags & RFPROC) == 0)
-		return (EINVAL);
-
-	switch(rforkflags & (RFFDG|RFCFDG)) {
-	case (RFFDG|RFCFDG):
-		return EINVAL;
-	case RFCFDG:
-		flags |= FORK_CLEANFILES;
-		break;
-	case RFFDG:
-		break;
-	default:
-		flags |= FORK_SHAREFILES;
-		break;
-	}
-
-	if (rforkflags & RFNOWAIT)
-		flags |= FORK_NOZOMBIE;
-
-	if (rforkflags & RFMEM)
-		flags |= FORK_SHAREVM;
-
-	if (rforkflags & RFTHREAD)
-		flags |= FORK_THREAD | FORK_SIGHAND | FORK_NOZOMBIE;
-
-	return (fork1(p, SIGCHLD, flags, NULL, 0, NULL, NULL, retval, NULL));
-}
-
-int
 sys___tfork(struct proc *p, void *v, register_t *retval)
 {
 	struct sys___tfork_args /* {
@@ -166,7 +126,6 @@ sys___tfork(struct proc *p, void *v, register_t *retval)
 	if ((error = copyin(SCARG(uap, param), &param, sizeof(param))))
 		return (error);
 
-	/* XXX will supersede rfork at some point... */
 	if (param.tf_flags != 0)
 		return (EINVAL);
 
@@ -266,28 +225,46 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	/*
 	 * Although process entries are dynamically created, we still keep
 	 * a global limit on the maximum number we will create. We reserve
-	 * the last 5 processes to root. The variable nprocs is the current
-	 * number of processes, maxproc is the limit.
+	 * the last 5 processes to root. The variable nprocesses is the
+	 * current number of processes, maxprocess is the limit.  Similar
+	 * rules for threads (struct proc): we reserve the last 5 to root;
+	 * the variable nthreads is the current number of procs, maxthread is
+	 * the limit.
 	 */
 	uid = curp->p_cred->p_ruid;
-	if ((nprocs >= maxproc - 5 && uid != 0) || nprocs >= maxproc) {
+	if ((nthreads >= maxthread - 5 && uid != 0) || nthreads >= maxthread) {
 		static struct timeval lasttfm;
 
 		if (ratecheck(&lasttfm, &fork_tfmrate))
 			tablefull("proc");
 		return (EAGAIN);
 	}
-	nprocs++;
+	nthreads++;
 
-	/*
-	 * Increment the count of procs running with this uid. Don't allow
-	 * a nonprivileged user to exceed their current limit.
-	 */
-	count = chgproccnt(uid, 1);
-	if (uid != 0 && count > curp->p_rlimit[RLIMIT_NPROC].rlim_cur) {
-		(void)chgproccnt(uid, -1);
-		nprocs--;
-		return (EAGAIN);
+	if ((flags & FORK_THREAD) == 0) {
+		if ((nprocesses >= maxprocess - 5 && uid != 0) ||
+		    nprocesses >= maxprocess) {
+			static struct timeval lasttfm;
+
+			if (ratecheck(&lasttfm, &fork_tfmrate))
+				tablefull("process");
+			nthreads--;
+			return (EAGAIN);
+		}
+		nprocesses++;
+
+		/*
+		 * Increment the count of processes running with
+		 * this uid.  Don't allow a nonprivileged user to
+		 * exceed their current limit.
+		 */
+		count = chgproccnt(uid, 1);
+		if (uid != 0 && count > curp->p_rlimit[RLIMIT_NPROC].rlim_cur) {
+			(void)chgproccnt(uid, -1);
+			nprocesses--;
+			nthreads--;
+			return (EAGAIN);
+		}
 	}
 
 	uaddr = uvm_km_kmemalloc_pla(kernel_map, uvm.kernel_object, USPACE,
@@ -296,7 +273,8 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	    0, 0, USPACE/PAGE_SIZE);
 	if (uaddr == 0) {
 		chgproccnt(uid, -1);
-		nprocs--;
+		nprocesses--;
+		nthreads--;
 		return (ENOMEM);
 	}
 
@@ -310,6 +288,7 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	p->p_stat = SIDL;			/* protect against others */
 	p->p_exitsig = exitsig;
 	p->p_flag = 0;
+	p->p_xstat = 0;
 
 	if (flags & FORK_THREAD) {
 		atomic_setbits_int(&p->p_flag, P_THREAD);
@@ -350,9 +329,7 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	if (p->p_textvp)
 		vref(p->p_textvp);
 
-	if (flags & FORK_CLEANFILES)
-		p->p_fd = fdinit(curp);
-	else if (flags & FORK_SHAREFILES)
+	if (flags & FORK_SHAREFILES)
 		p->p_fd = fdshare(curp);
 	else
 		p->p_fd = fdcopy(curp);
@@ -414,13 +391,8 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	} else if (flags & FORK_VFORK) {
 		forkstat.cntvfork++;
 		forkstat.sizvfork += vm->vm_dsize + vm->vm_ssize;
-#if 0
 	} else if (flags & FORK_TFORK) {
 		forkstat.cnttfork++;
-#endif
-	} else if (flags & FORK_RFORK) {
-		forkstat.cntrfork++;
-		forkstat.sizrfork += vm->vm_dsize + vm->vm_ssize;
 	} else {
 		forkstat.cntkthread++;
 		forkstat.sizkthread += vm->vm_dsize + vm->vm_ssize;
@@ -481,7 +453,8 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	 */
 	SCHED_LOCK(s);
  	getmicrotime(&pr->ps_start);
-	p->p_acflag = AFORK;
+	if ((flags & FORK_THREAD) == 0)
+		pr->ps_acflag = AFORK;
 	p->p_stat = SRUN;
 	p->p_cpu = sched_choosecpu_fork(curp, flags);
 	setrunqueue(p);
