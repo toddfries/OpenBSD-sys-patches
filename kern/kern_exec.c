@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.127 2012/03/26 04:19:55 deraadt Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.131 2012/05/01 03:21:50 guenther Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -269,7 +269,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 
 	/* get other threads to stop */
 	if ((error = single_thread_set(p, SINGLE_UNWIND, 1)))
-		goto bad;
+		return (error);
 
 	/*
 	 * Cheap solution to complicated problems.
@@ -475,7 +475,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	bzero(p->p_comm, sizeof(p->p_comm));
 	len = min(nid.ni_cnd.cn_namelen, MAXCOMLEN);
 	bcopy(nid.ni_cnd.cn_nameptr, p->p_comm, len);
-	p->p_acflag &= ~AFORK;
+	pr->ps_acflag &= ~AFORK;
 
 	/* record proc's vnode, for use by procfs and others */
 	if (p->p_textvp)
@@ -586,7 +586,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 				fp->f_type = DTYPE_VNODE;
 				fp->f_ops = &vnops;
 				fp->f_data = (caddr_t)vp;
-				FILE_SET_MATURE(fp);
+				FILE_SET_MATURE(fp, p);
 			}
 		}
 		fdpunlock(p->p_fd);
@@ -678,7 +678,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 #endif
 
 	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
-	single_thread_clear(p);
+	single_thread_clear(p, P_SUSPSIG);
 
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE) &&
@@ -716,7 +716,7 @@ bad:
  clrflag:
 #endif
 	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
-	single_thread_clear(p);
+	single_thread_clear(p, P_SUSPSIG);
 
 	if (pathbuf != NULL)
 		pool_put(&namei_pool, pathbuf);
