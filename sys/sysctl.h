@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.121 2012/03/23 15:51:26 guenther Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.125 2012/04/17 23:17:53 pirofti Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -130,8 +130,8 @@ struct ctlname {
 #define	KERN_DOMAINNAME		22	/* string: (YP) domainname */
 #define	KERN_MAXPARTITIONS	23	/* int: number of partitions/disk */
 #define	KERN_RAWPARTITION	24	/* int: raw partition number */
-/*define gap			25	*/
-/*define gap			26	*/
+#define	KERN_MAXTHREAD	 	25	/* int: max threads */
+#define	KERN_NTHREADS		26	/* int: number of threads */
 #define	KERN_OSVERSION		27	/* string: kernel build version */
 #define	KERN_SOMAXCONN		28	/* int: listen queue maximum */
 #define	KERN_SOMINCONN		29	/* int: half-open controllable param */
@@ -212,8 +212,8 @@ struct ctlname {
 	{ "domainname", CTLTYPE_STRING }, \
 	{ "maxpartitions", CTLTYPE_INT }, \
 	{ "rawpartition", CTLTYPE_INT }, \
-	{ "gap", 0 }, \
-	{ "gap", 0 }, \
+	{ "maxthread", CTLTYPE_INT }, \
+	{ "nthreads", CTLTYPE_INT }, \
 	{ "osversion", CTLTYPE_STRING }, \
 	{ "somaxconn", CTLTYPE_INT }, \
 	{ "sominconn", CTLTYPE_INT }, \
@@ -288,6 +288,7 @@ struct ctlname {
 #define	KERN_PROC_UID		5	/* by effective uid */
 #define	KERN_PROC_RUID		6	/* by real uid */
 #define	KERN_PROC_KTHREAD	7	/* also return kernel threads */
+#define	KERN_PROC_SHOW_THREADS	0x40000000/* also return normal threads */
 
 /*
  * KERN_SYSVIPC_INFO subtypes
@@ -466,7 +467,7 @@ struct kinfo_proc {
 
 #define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
-#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, sa) \
+#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, sa, isthread) \
 do {									\
 	memset((kp), 0, sizeof(*(kp)));					\
 									\
@@ -498,14 +499,23 @@ do {									\
 	(kp)->p_jobc = (pg)->pg_jobc;					\
 									\
 	(kp)->p_estcpu = (p)->p_estcpu;					\
-	(kp)->p_rtime_sec = (pr)->ps_tu.tu_runtime.tv_sec;		\
-	(kp)->p_rtime_usec = (pr)->ps_tu.tu_runtime.tv_usec;		\
+	if (isthread) {							\
+		(kp)->p_rtime_sec = (p)->p_tu.tu_runtime.tv_sec;	\
+		(kp)->p_rtime_usec = (p)->p_tu.tu_runtime.tv_usec;	\
+		(kp)->p_tid = (p)->p_pid + THREAD_PID_OFFSET;		\
+		(kp)->p_uticks = (p)->p_tu.tu_uticks;			\
+		(kp)->p_sticks = (p)->p_tu.tu_sticks;			\
+		(kp)->p_iticks = (p)->p_tu.tu_iticks;			\
+	} else {							\
+		(kp)->p_rtime_sec = (pr)->ps_tu.tu_runtime.tv_sec;	\
+		(kp)->p_rtime_usec = (pr)->ps_tu.tu_runtime.tv_usec;	\
+		(kp)->p_tid = -1;					\
+		(kp)->p_uticks = (pr)->ps_tu.tu_uticks;			\
+		(kp)->p_sticks = (pr)->ps_tu.tu_sticks;			\
+		(kp)->p_iticks = (pr)->ps_tu.tu_iticks;			\
+	}								\
 	(kp)->p_cpticks = (p)->p_cpticks;				\
 	(kp)->p_pctcpu = (p)->p_pctcpu;					\
-									\
-	(kp)->p_uticks = (p)->p_uticks;					\
-	(kp)->p_sticks = (p)->p_sticks;					\
-	(kp)->p_iticks = (p)->p_iticks;					\
 									\
 	(kp)->p_tracep = PTRTOINT64((pr)->ps_tracevp);			\
 	(kp)->p_traceflag = (pr)->ps_traceflag;				\
@@ -519,7 +529,7 @@ do {									\
 	(kp)->p_nice = (pr)->ps_nice;					\
 									\
 	(kp)->p_xstat = (p)->p_xstat;					\
-	(kp)->p_acflag = (p)->p_acflag;					\
+	(kp)->p_acflag = (pr)->ps_acflag;					\
 									\
 	/* XXX depends on e_name being an array and not a pointer */	\
 	copy_str((kp)->p_emul, (char *)(p)->p_emul +			\
@@ -587,7 +597,6 @@ do {									\
 	}								\
 									\
 	(kp)->p_cpuid = KI_NOCPU;					\
-	(kp)->p_tid = (p)->p_pid + THREAD_PID_OFFSET;			\
 	(kp)->p_rtableid = (pr)->ps_rtableid;				\
 } while (0)
 
@@ -933,7 +942,7 @@ int sysctl_dopool(int *, u_int, char *, size_t *);
 void fill_file2(struct kinfo_file2 *, struct file *, struct filedesc *,
     int, struct vnode *, struct proc *, struct proc *);
 
-void fill_kproc(struct proc *, struct kinfo_proc *);
+void fill_kproc(struct proc *, struct kinfo_proc *, int);
 
 int kern_sysctl(int *, u_int, void *, size_t *, void *, size_t,
 		     struct proc *);
