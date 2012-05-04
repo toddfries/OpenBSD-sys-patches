@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.33 2012/03/25 13:52:52 miod Exp $ */
+/*	$OpenBSD: db_machdep.c,v 1.35 2012/04/21 12:20:30 miod Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)
@@ -66,7 +66,6 @@ int   kdb_trap(int, struct trap_frame *);
 
 void db_trap_trace_cmd(db_expr_t, int, db_expr_t, char *);
 void db_dump_tlb_cmd(db_expr_t, int, db_expr_t, char *);
-
 
 #ifdef MULTIPROCESSOR
 struct mutex ddb_mp_mutex = MUTEX_INITIALIZER(IPL_HIGH);
@@ -336,10 +335,8 @@ db_write_bytes(addr, size, data)
 	if (addr < VM_MAXUSER_ADDRESS) {
 		struct cpu_info *ci = curcpu();
 
-		/* XXX we don't know where this page is mapped... */
-		Mips_HitSyncDCache(ci, addr, PHYS_TO_XKPHYS(addr, CCA_CACHED),
-		    size);
-		Mips_InvalidateICache(ci, PHYS_TO_CKSEG0(addr & 0xffff), size);
+		Mips_HitSyncDCache(ci, addr, size);
+		Mips_InvalidateICache(ci, addr, size);
 	}
 }
 
@@ -508,6 +505,8 @@ if ((tlbp.tlb_hi == tlb.tlb_hi && (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V)) ||
 	}
 	last = tlbno + count;
 
+	if (pid == -1)
+		db_printf("current asid: %d\n", tlb_get_pid());
 	for (; tlbno < ci->ci_hw.tlbsize && tlbno < last; tlbno++) {
 		tlb_read(tlbno, &tlb);
 
