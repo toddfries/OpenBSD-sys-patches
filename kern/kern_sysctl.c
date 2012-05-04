@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.218 2012/03/28 16:01:30 guenther Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.223 2012/05/02 20:42:25 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -316,7 +316,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_MAXVNODES:
 		return(sysctl_int(oldp, oldlenp, newp, newlen, &maxvnodes));
 	case KERN_MAXPROC:
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxproc));
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxprocess));
 	case KERN_MAXFILES:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxfiles));
 	case KERN_NFILES:
@@ -401,6 +401,10 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (sysctl_rdint(oldp, oldlenp, newp, MAXPARTITIONS));
 	case KERN_RAWPARTITION:
 		return (sysctl_rdint(oldp, oldlenp, newp, RAW_PART));
+	case KERN_MAXTHREAD:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxthread));
+	case KERN_NTHREADS:
+		return (sysctl_rdint(oldp, oldlenp, newp, nthreads));
 	case KERN_SOMAXCONN:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &somaxconn));
 	case KERN_SOMINCONN:
@@ -494,7 +498,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_CCPU:
 		return (sysctl_rdint(oldp, oldlenp, newp, ccpu));
 	case KERN_NPROCS:
-		return (sysctl_rdint(oldp, oldlenp, newp, nprocs));
+		return (sysctl_rdint(oldp, oldlenp, newp, nprocesses));
 	case KERN_POOL:
 		return (sysctl_dopool(name + 1, namelen - 1, oldp, oldlenp));
 	case KERN_STACKGAPRANDOM:
@@ -1084,7 +1088,7 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		kf->f_gid = fp->f_cred->cr_gid;
 		kf->f_ops = PTRTOINT64(fp->f_ops);
 		kf->f_data = PTRTOINT64(fp->f_data);
-		kf->f_usecount = fp->f_usecount;
+		kf->f_usecount = 0;
 
 		if (suser(p, 0) == 0 || p->p_ucred->cr_uid == fp->f_cred->cr_uid) {
 			kf->f_offset = fp->f_offset;
@@ -1369,6 +1373,7 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 	char *dp;
 	int arg, buflen, doingzomb, elem_size, elem_count;
 	int error, needed, op;
+	int dothreads = 0;
 
 	dp = where;
 	buflen = where != NULL ? *sizep : 0;
@@ -1381,6 +1386,9 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 	arg = name[1];
 	elem_size = name[2];
 	elem_count = name[3];
+
+	dothreads = op & KERN_PROC_SHOW_THREADS;
+	op &= ~KERN_PROC_SHOW_THREADS;
 
 	if (where != NULL)
 		kproc = malloc(sizeof(*kproc), M_TEMP, M_WAITOK);
@@ -1454,8 +1462,24 @@ again:
 			goto err;
 		}
 
+		if ((p->p_flag & P_THREAD) == 0) {
+			if (buflen >= elem_size && elem_count > 0) {
+				fill_kproc(p, kproc, 0);
+				error = copyout(kproc, dp, elem_size);
+				if (error)
+					goto err;
+				dp += elem_size;
+				buflen -= elem_size;
+				elem_count--;
+			}
+			needed += elem_size;
+		}
+		/* Skip the second entry if not required by op */
+		if (!dothreads)
+			continue;
+
 		if (buflen >= elem_size && elem_count > 0) {
-			fill_kproc(p, kproc);
+			fill_kproc(p, kproc, 1);
 			error = copyout(kproc, dp, elem_size);
 			if (error)
 				goto err;
@@ -1490,7 +1514,7 @@ err:
  * Fill in a kproc structure for the specified process.
  */
 void
-fill_kproc(struct proc *p, struct kinfo_proc *ki)
+fill_kproc(struct proc *p, struct kinfo_proc *ki, int isthread)
 {
 	struct process *pr = p->p_p;
 	struct session *s = pr->ps_session;
@@ -1498,7 +1522,7 @@ fill_kproc(struct proc *p, struct kinfo_proc *ki)
 	struct timeval ut, st;
 
 	FILL_KPROC(ki, strlcpy, p, pr, p->p_cred, p->p_ucred, pr->ps_pgrp,
-	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_sigacts);
+	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_sigacts, isthread);
 
 	/* stuff that's too painful to generalize into the macros */
 	ki->p_pid = pr->ps_pid;
