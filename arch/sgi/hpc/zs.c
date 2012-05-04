@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.1 2012/03/28 20:44:23 miod Exp $	*/
+/*	$OpenBSD: zs.c,v 1.8 2012/04/29 09:01:38 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.37 2011/02/20 07:59:50 matt Exp $	*/
 
 /*-
@@ -62,7 +62,6 @@
 
 #include <sgi/hpc/hpcvar.h>
 #include <sgi/hpc/hpcreg.h>
-#include <sgi/localbus/intvar.h>
 
 /*
  * Some warts needed by z8530tty.c -
@@ -84,7 +83,7 @@ int zs_major = 19;
 #define ZSHARD_PRI 64
 
 /* SGI shouldn't need ZS_DELAY() as recovery time is done in hardware? */
-#define ZS_DELAY()	delay(3)
+#define ZS_DELAY()	delay(2)
 
 /* The layout of this is hardware-dependent (padding, order). */
 struct zschan {
@@ -126,7 +125,7 @@ static int zs_conschan = -1;
 /* Default speed for all channels */
 static int zs_defspeed = ZS_DEFSPEED;
 
-static uint8_t zs_init_reg[16] = {
+static uint8_t zs_init_reg[17] = {
 	0,				/* 0: CMD (reset, etc.) */
 	0,				/* 1: No interrupts yet. */
 	ZSHARD_PRI,			/* 2: IVECT */
@@ -143,6 +142,7 @@ static uint8_t zs_init_reg[16] = {
 	0,				/*13: BAUDHI (default=9600) */
 	ZSWR14_BAUD_ENA,
 	ZSWR15_BREAK_IE,
+	ZSWR7P_TX_FIFO			/* 7': TX FIFO interrupt level */
 };
 
 
@@ -194,11 +194,13 @@ void
 zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct zsc_softc *zsc = (void *)self;
+	struct cfdata *cf = self->dv_cfdata;
 	struct hpc_attach_args *haa = aux;
 	struct zsc_attach_args zsc_args;
 	struct zs_chanstate *cs;
 	struct zs_channel *ch;
-	int    zs_unit, channel, err, s;
+	int zs_unit, channel, err, s;
+	int has_fifo;
 
 	zsc->zsc_bustag = haa->ha_st;
 	if ((err = bus_space_subregion(haa->ha_st, haa->ha_sh,
@@ -210,7 +212,6 @@ zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	zs_unit = zsc->zsc_dev.dv_unit;
-	printf("\n");
 
 	/*
 	 * Initialize software state for each channel.
@@ -226,6 +227,10 @@ zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 		ch = &zsc->zsc_cs_store[channel];
 		cs = zsc->zsc_cs[channel] = (struct zs_chanstate *)ch;
 
+		/* pick Indigo wiring if requested */
+		if (cf->cf_flags & ZSCFL_INDIGO_WIRING)
+			ch->cs_flags |= ZSCFL_INDIGO_WIRING;
+
 		cs->cs_reg_csr = NULL;
 		cs->cs_reg_data = NULL;
 		cs->cs_channel = channel;
@@ -237,13 +242,31 @@ zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 					zs_chan_offset[channel],
 					sizeof(struct zschan),
 					&ch->cs_regs) != 0) {
-			printf("%s: cannot map regs\n", self->dv_xname);
+			printf(": cannot map regs\n", self->dv_xname);
 			return;
 		}
 		ch->cs_bustag = zsc->zsc_bustag;
 
-		memcpy(cs->cs_creg, zs_init_reg, 16);
-		memcpy(cs->cs_preg, zs_init_reg, 16);
+		/*
+		 * Figure out whether this chip is a 8530 or a 85230.
+		 */
+		if (channel == 1) {
+			zs_write_reg(cs, 15, ZSWR15_ENABLE_ENHANCED);
+			has_fifo = zs_read_reg(cs, 15) & ZSWR15_ENABLE_ENHANCED;
+
+			if (has_fifo) {
+				zs_write_reg(cs, 15, 0);
+				printf(": 85230\n");
+			} else
+				printf(": 8530\n");
+		}
+
+		if (has_fifo)
+			zs_init_reg[15] |= ZSWR15_ENABLE_ENHANCED;
+		else
+			zs_init_reg[15] &= ~ZSWR15_ENABLE_ENHANCED;
+		memcpy(cs->cs_creg, zs_init_reg, 17);
+		memcpy(cs->cs_preg, zs_init_reg, 17);
 
 		/* If console, don't stomp speed, let zstty know */
 		if (zs_unit == zs_consunit && channel == zs_conschan) {
@@ -288,8 +311,8 @@ zs_hpc_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 
-	zsc->sc_si = softintr_establish(SI_SOFTTTY, zssoft, zsc);
-	int2_intr_establish(haa->ha_irq, IPL_TTY, zshard, zsc, self->dv_xname);
+	zsc->sc_si = softintr_establish(IPL_SOFTTTY, zssoft, zsc);
+	hpc_intr_establish(haa->ha_irq, IPL_TTY, zshard, zsc, self->dv_xname);
 
 	/*
 	 * Set the master interrupt enable and interrupt vector.
@@ -326,16 +349,14 @@ int
 zshard(void *arg)
 {
 	struct zsc_softc *zsc = arg;
-	int rr3, rval;
+	int rval;
 
-	rval = 0;
-	while ((rr3 = zsc_intr_hard(zsc))) {
-		rval |= rr3;
+	rval = zsc_intr_hard(zsc);
+	if (rval != 0) {
+		if (zsc->zsc_cs[0]->cs_softreq ||
+		    zsc->zsc_cs[1]->cs_softreq)
+			softintr_schedule(zsc->sc_si);
 	}
-
-	if (zsc->zsc_cs[0]->cs_softreq ||
-	    zsc->zsc_cs[1]->cs_softreq)
-		softintr_schedule(zsc->sc_si);
 
 	return rval;
 }
@@ -351,7 +372,7 @@ zssoft(void *arg)
 
 	/* Make sure we call the tty layer at spltty. */
 	s = spltty();
-	(void) zsc_intr_soft(zsc);
+	(void)zsc_intr_soft(zsc);
 	splx(s);
 }
 
@@ -443,9 +464,19 @@ zs_read_reg(struct zs_chanstate *cs, uint8_t reg)
 	struct zs_channel *zsc = (struct zs_channel *)cs;
 
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, reg);
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, 1,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 	val = bus_space_read_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR);
 	ZS_DELAY();
+
+	/*
+	 * According to IRIX <sys/z8530.h>, on Indigo, the CTS and DCD bits
+	 * are inverted.
+	 */
+	if ((zsc->cs_flags & ZSCFL_INDIGO_WIRING) && reg == 0)
+		val ^= ZSRR0_CTS | ZSRR0_DCD;
+
 	return val;
 }
 
@@ -454,9 +485,20 @@ zs_write_reg(struct zs_chanstate *cs, uint8_t reg, uint8_t val)
 {
 	struct zs_channel *zsc = (struct zs_channel *)cs;
 
+	/*
+	 * According to IRIX <sys/z8530.h>, on Indigo, the RTS and DTR bits
+	 * are inverted.
+	 */
+	if ((zsc->cs_flags & ZSCFL_INDIGO_WIRING) && reg == 5)
+		val ^= ZSWR5_DTR | ZSWR5_RTS;
+
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, reg);
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, 1,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, val);
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, 1,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 }
 
@@ -468,6 +510,14 @@ zs_read_csr(struct zs_chanstate *cs)
 
 	val = bus_space_read_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR);
 	ZS_DELAY();
+
+	/*
+	 * According to IRIX <sys/z8530.h>, on Indigo, the CTS and DCD bits
+	 * are inverted.
+	 */
+	if (zsc->cs_flags & ZSCFL_INDIGO_WIRING)
+		val ^= ZSRR0_CTS | ZSRR0_DCD;
+
 	return val;
 }
 
@@ -477,6 +527,8 @@ zs_write_csr(struct zs_chanstate *cs, uint8_t val)
 	struct zs_channel *zsc = (struct zs_channel *)cs;
 
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, val);
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_CSR, 1,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 }
 
@@ -497,6 +549,8 @@ zs_write_data(struct zs_chanstate *cs, uint8_t val)
 	struct zs_channel *zsc = (struct zs_channel *)cs;
 
 	bus_space_write_1(zsc->cs_bustag, zsc->cs_regs, ZS_REG_DATA, val);
+	bus_space_barrier(zsc->cs_bustag, zsc->cs_regs, ZS_REG_DATA, 1,
+	    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 	ZS_DELAY();
 }
 
@@ -620,7 +674,14 @@ zs_putc(void *arg, int c)
 	} while ((rr0 & ZSRR0_TX_READY) == 0);
 
 	zc->zc_data = c;
-	__asm__ __volatile__ ("sync" ::: "memory"); /* wbflush(); */
+
+	/* inline bus_space_barrier() */
+	__asm__ __volatile__ ("sync" ::: "memory");
+	if (sys_config.system_type != SGI_IP20) {
+		(void)*(volatile uint32_t *)PHYS_TO_XKPHYS(HPC_BASE_ADDRESS_0 +
+		    HPC3_INTRSTAT_40, CCA_NC);
+	}
+
 	ZS_DELAY();
 	splx(s);
 }

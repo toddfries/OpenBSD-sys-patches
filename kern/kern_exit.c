@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.109 2012/03/23 15:51:26 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.115 2012/04/14 14:26:39 kettenis Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -276,7 +276,16 @@ exit1(struct proc *p, int rv, int flags)
 			 */
 			if (qr->ps_flags & PS_TRACED) {
 				atomic_clearbits_int(&qr->ps_flags, PS_TRACED);
-				prsignal(qr, SIGKILL);
+				/*
+				 * If single threading is active,
+				 * direct the signal to the active
+				 * thread to avoid deadlock.
+				 */
+				if (qr->ps_single)
+					ptsignal(qr->ps_single, SIGKILL,
+					    STHREAD);
+				else
+					prsignal(qr, SIGKILL);
 			}
 		}
 	}
@@ -297,8 +306,6 @@ exit1(struct proc *p, int rv, int flags)
 		 */
 		calcru(&pr->ps_tu, &rup->ru_utime, &rup->ru_stime, NULL);
 		ruadd(rup, &pr->ps_cru);
-		timeradd(&rup->ru_utime, &pr->ps_cru.ru_utime, &rup->ru_utime);
-		timeradd(&rup->ru_stime, &pr->ps_cru.ru_stime, &rup->ru_stime);
 
 		/* notify interested parties of our demise and clean up */
 		knote_processexit(pr);
@@ -489,11 +496,27 @@ loop:
 			proc_finish_wait(q, p);
 			return (0);
 		}
+		if (pr->ps_flags & PS_TRACED &&
+		    (pr->ps_flags & PS_WAITED) == 0 && pr->ps_single &&
+		    pr->ps_single->p_stat == SSTOP &&
+		    (pr->ps_single->p_flag & P_SUSPSINGLE) == 0) {
+			atomic_setbits_int(&pr->ps_flags, PS_WAITED);
+			retval[0] = p->p_pid;
+
+			if (SCARG(uap, status)) {
+				status = W_STOPCODE(pr->ps_single->p_xstat);
+				error = copyout(&status, SCARG(uap, status),
+				    sizeof(status));
+			} else
+				error = 0;
+			return (error);
+		}
 		if (p->p_stat == SSTOP &&
-		    (p->p_flag & (P_WAITED|P_SUSPSINGLE)) == 0 &&
+		    (pr->ps_flags & PS_WAITED) == 0 &&
+		    (p->p_flag & P_SUSPSINGLE) == 0 &&
 		    (pr->ps_flags & PS_TRACED ||
 		    SCARG(uap, options) & WUNTRACED)) {
-			atomic_setbits_int(&p->p_flag, P_WAITED);
+			atomic_setbits_int(&pr->ps_flags, PS_WAITED);
 			retval[0] = p->p_pid;
 
 			if (SCARG(uap, status)) {
@@ -552,8 +575,6 @@ proc_finish_wait(struct proc *waiter, struct proc *p)
 		p->p_xstat = 0;
 		rup = &waiter->p_p->ps_cru;
 		ruadd(rup, pr->ps_ru);
-		timeradd(&rup->ru_utime, &pr->ps_ru->ru_utime, &rup->ru_utime);
-		timeradd(&rup->ru_stime, &pr->ps_ru->ru_stime, &rup->ru_stime);
 		proc_zap(p);
 	}
 }
@@ -588,13 +609,14 @@ proc_zap(struct proc *p)
 	if ((p->p_flag & P_THREAD) == 0)
 		leavepgrp(pr);
 	LIST_REMOVE(p, p_list);	/* off zombproc */
-	if ((p->p_flag & P_THREAD) == 0)
+	if ((p->p_flag & P_THREAD) == 0) {
 		LIST_REMOVE(pr, ps_sibling);
 
-	/*
-	 * Decrement the count of procs running with this uid.
-	 */
-	(void)chgproccnt(p->p_cred->p_ruid, -1);
+		/*
+		 * Decrement the count of procs running with this uid.
+		 */
+		(void)chgproccnt(p->p_cred->p_ruid, -1);
+	}
 
 	/*
 	 * Release reference to text vnode
@@ -615,8 +637,9 @@ proc_zap(struct proc *p)
 		crfree(pr->ps_cred->pc_ucred);
 		pool_put(&pcred_pool, pr->ps_cred);
 		pool_put(&process_pool, pr);
+		nprocesses--;
 	}
 
 	pool_put(&proc_pool, p);
-	nprocs--;
+	nthreads--;
 }
