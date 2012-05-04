@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC-IP22,v 1.2 2012/03/29 20:18:44 miod Exp $
+#	$OpenBSD: GENERIC-IP22,v 1.11 2012/04/18 17:28:24 miod Exp $
 #
 # THIS KERNEL IS FOR INDIGO (IP20), INDY (IP22) AND INDIGO2 (IP24) SYSTEMS ONLY.
 #
@@ -22,15 +22,17 @@ makeoption	LINK_ADDRESS="0xffffffff88800000"
 # physical memory, all of it fitting within CKSEG0.
 option		PAGE_SHIFT="14"
 
-#option	WSDISPLAY_COMPAT_RAWKBD	# Provide raw scancodes; needed for X11
+option	WSDISPLAY_COMPAT_RAWKBD	# Provide raw scancodes; needed for X11
+
+option		EISAVERBOSE
 
 # Define what targets to support
 option		TGT_INDIGO	# R4x00 Indigo (IP20)
-option		TGT_INDIGO2	# Indigo2 (IP22/IP26/IP28)
-option		TGT_INDY	# Indy (IP24)
+option		TGT_INDIGO2	# Indigo2, Challenge M (IP22)
+option		TGT_INDY	# Indy, Challenge S (IP24)
 option		ARCBIOS		# mandatory
 option		CPU_R4000	# R4000/R4400 support (IP20/IP22/IP24)
-#option		CPU_R4600	# R4600 support (IP22/IP24)
+option		CPU_R4600	# R4600 support (IP22/IP24)
 option		CPU_R5000	# R5000 support (IP24)
 
 config		bsd	swap generic
@@ -45,7 +47,7 @@ clock0		at mainbus0
 int0		at mainbus0	# Interrupt Controller
 imc0		at mainbus0	# Memory Controller
 gio0		at imc0
-#eisa0		at imc0
+eisa0		at imc0
 
 hpc0		at gio? addr 0x1fb80000
 hpc1		at gio? addr 0x1fb00000
@@ -55,21 +57,33 @@ dpclock0	at hpc0		# IP20
 dsclock0	at hpc0		# IP22/24
 sq*		at hpc?		# On-board Ethernet or E++ adapter
 wdsc*		at hpc?		# On-board SCSI or GIO32 SCSI adapter
-#haltwo*	at hpc?		# Indy/Indigo2 Audio
-#panel*		at hpc?		# Indy front panel buttons
-#pckbc*		at hpc?		# Indy/Indigo2 keyboard and mouse
+#haltwo*		at hpc?		# Indy/Indigo2 Audio
+panel*		at hpc?		# Indy front panel buttons
+pckbc*		at hpc?		# Indy/Indigo2 keyboard and mouse
 
-zs*		at hpc?
-zstty*		at zs?		# Serial ports
+zs0		at hpc0
+zs1		at hpc0
+zstty*		at zs0		# Serial ports
+zskbd*		at zs1 channel 0
+wskbd*		at zskbd? mux 1
+zsms*		at zs1 channel 1
+wsmouse*	at zsms? mux 0
 
-#newport*	at gio?		# Indy Newport graphics
-#wsdisplay*	at newport?
+pckbd*		at pckbc?
+wskbd*		at pckbd? mux 1
+pms*		at pckbc?
+wsmouse*	at pms? mux 0
 
-#grtwo*		at gio?		# Express (GR2) graphics
-#wsdisplay*	at grtwo?
+grtwo*		at gio?		# Express (GR2/GR3) graphics
+wsdisplay*	at grtwo?
+impact*		at gio?		# Impact graphics
+wsdisplay*	at impact?
+light*		at gio?		# Light/Starter/Entry (LG1/LG2) graphics
+wsdisplay*	at light?
+newport*	at gio?		# Indy Newport and Indigo2 XL graphics
+wsdisplay*	at newport?
 
-#light*		at gio?		# Light/Starter/Entry (LG1/LG2) graphics
-#wsdisplay*	at light?
+#audio*		at haltwo?
 
 scsibus*	at scsi?
 sd*		at scsibus?
@@ -82,4 +96,4 @@ uk*		at scsibus?
 
 pseudo-device	crypto	1
 #pseudo-device	hotplug	1	# devices hot plugging
-#pseudo-device	wsmux	2       # Mouse and keyboard multiplexor
+pseudo-device	wsmux	2       # Mouse and keyboard multiplexor
