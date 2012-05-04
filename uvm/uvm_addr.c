@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_addr.c,v 1.2 2012/03/15 17:52:28 ariane Exp $	*/
+/*	$OpenBSD: uvm_addr.c,v 1.3 2012/04/11 11:23:22 ariane Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -623,6 +623,7 @@ uaddr_rnd_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 	while (entry != NULL) {
 		/* Test if this fits. */
 		if (VMMAP_FREE_END(entry) > hint &&
+		    uvm_map_uaddr_e(map, entry) == uaddr &&
 		    uvm_addr_fitspace(&low_addr, &high_addr,
 		    MAX(uaddr->uaddr_minaddr, VMMAP_FREE_START(entry)),
 		    MIN(uaddr->uaddr_maxaddr, VMMAP_FREE_END(entry)),
