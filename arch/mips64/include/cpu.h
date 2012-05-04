@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.78 2012/03/28 20:44:23 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.80 2012/04/19 18:15:08 miod Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -547,8 +547,6 @@ void cpu_startclock(struct cpu_info *);
 
 #if defined(_KERNEL) && !defined(_LOCORE)
 
-extern vaddr_t CpuCacheAliasMask;
-
 struct exec_package;
 struct tlb_entry;
 struct user;
@@ -562,8 +560,9 @@ uint32_t cp0_get_prid(void);
 void	cp0_set_compare(u_int);
 void	cp0_set_config(uint32_t);
 u_int	cp1_get_prid(void);
+u_int	tlb_get_pid(void);
 void	tlb_set_page_mask(uint32_t);
-void	tlb_set_pid(int);
+void	tlb_set_pid(u_int);
 void	tlb_set_wired(int);
 
 void	tlb_flush(int);
