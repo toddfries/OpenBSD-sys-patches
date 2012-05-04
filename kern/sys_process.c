@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_process.c,v 1.51 2012/03/10 05:54:28 guenther Exp $	*/
+/*	$OpenBSD: sys_process.c,v 1.57 2012/04/13 19:20:31 kettenis Exp $	*/
 /*	$NetBSD: sys_process.c,v 1.55 1996/05/15 06:17:47 tls Exp $	*/
 
 /*-
@@ -84,11 +84,11 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	struct proc *t;				/* target thread */
 	struct process *tr;			/* target process */
-	struct proc *q;
 	struct uio uio;
 	struct iovec iov;
 	struct ptrace_io_desc piod;
 	struct ptrace_event pe;
+	struct ptrace_thread_state pts;
 	struct reg *regs;
 #if defined (PT_SETFPREGS) || defined (PT_GETFPREGS)
 	struct fpreg *fpregs;
@@ -144,6 +144,12 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 #endif
 #ifdef PT_SETFPREGS
 	case PT_SETFPREGS:
+#endif
+#ifdef PT_GETXMMREGS
+	case PT_GETXMMREGS:
+#endif
+#ifdef PT_SETXMMREGS
+	case PT_SETXMMREGS:
 #endif
 		if (SCARG(uap, pid) > THREAD_PID_OFFSET) {
 			t = pfind(SCARG(uap, pid) - THREAD_PID_OFFSET);
@@ -269,7 +275,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		/*
 		 *	(3) it's not currently stopped.
 		 */
-		if (t->p_stat != SSTOP || !ISSET(t->p_flag, P_WAITED))
+		if (t->p_stat != SSTOP || !ISSET(tr->ps_flags, PS_WAITED))
 			return (EBUSY);
 		break;
 
@@ -291,12 +297,30 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		/*
 		 * Do the work here because the request isn't actually
 		 * associated with 't'
-		 * XXX
 		 */
+		if (SCARG(uap, data) != sizeof(pts))
+			return (EINVAL);
 
-		return (ENOTSUP);	/* XXX */
+		if (req == PT_GET_THREAD_NEXT) {
+			error = copyin(SCARG(uap, addr), &pts, sizeof(pts));
+			if (error)
+				return (error);
 
-		break;
+			t = pfind(pts.pts_tid - THREAD_PID_OFFSET);
+			if (t == NULL || ISSET(t->p_flag, P_WEXIT))
+				return (ESRCH);
+			if (t->p_p != tr)
+				return (EINVAL);
+			t = TAILQ_NEXT(t, p_thr_link);
+		} else {
+			t = TAILQ_FIRST(&tr->ps_threads);
+		}
+
+		if (t == NULL)
+			pts.pts_tid = -1;
+		else
+			pts.pts_tid = t->p_pid + THREAD_PID_OFFSET;
+		return (copyout(&pts, SCARG(uap, addr), sizeof(pts)));
 
 	default:			/* It was not a legal request. */
 		return (EINVAL);
@@ -412,6 +436,9 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		 * from where it stopped."
 		 */
 
+		if (SCARG(uap, pid) < THREAD_PID_OFFSET && tr->ps_single)
+			t = tr->ps_single;
+
 		/* Check that the data is a valid signal number or zero. */
 		if (SCARG(uap, data) < 0 || SCARG(uap, data) >= NSIG)
 			return (EINVAL);
@@ -444,6 +471,9 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 		 * from where it stopped."
 		 */
 
+		if (SCARG(uap, pid) < THREAD_PID_OFFSET && tr->ps_single)
+			t = tr->ps_single;
+
 		/* Check that the data is a valid signal number or zero. */
 		if (SCARG(uap, data) < 0 || SCARG(uap, data) >= NSIG)
 			return (EINVAL);
@@ -467,8 +497,7 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 
 		/* not being traced any more */
 		tr->ps_oppid = 0;
-		atomic_clearbits_int(&tr->ps_flags, PS_TRACED);
-		atomic_clearbits_int(&t->p_flag, P_WAITED);
+		atomic_clearbits_int(&tr->ps_flags, PS_TRACED|PS_WAITED);
 
 	sendsig:
 		bzero(tr->ps_ptstat, sizeof(*tr->ps_ptstat));
@@ -483,19 +512,16 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 			if (SCARG(uap, data) != 0)
 				psignal(t, SCARG(uap, data));
 		}
-		SCHED_LOCK(s);
-		TAILQ_FOREACH(q, &tr->ps_threads, p_thr_link) {
-			if (q != t && q->p_stat == SSTOP) {
-				setrunnable(q);
-			}
-		}
-		SCHED_UNLOCK(s);
+
 		return (0);
 
 	relebad:
 		return (error);
 
 	case  PT_KILL:
+		if (SCARG(uap, pid) < THREAD_PID_OFFSET && tr->ps_single)
+			t = tr->ps_single;
+
 		/* just send the process a KILL signal. */
 		SCARG(uap, data) = SIGKILL;
 		goto sendsig;	/* in PT_CONTINUE, above. */
@@ -537,6 +563,11 @@ sys_ptrace(struct proc *p, void *v, register_t *retval)
 	case  PT_GET_PROCESS_STATE:
 		if (SCARG(uap, data) != sizeof(*tr->ps_ptstat))
 			return (EINVAL);
+
+		if (tr->ps_single)
+			tr->ps_ptstat->pe_tid =
+			    tr->ps_single->p_pid + THREAD_PID_OFFSET;
+
 		return (copyout(tr->ps_ptstat, SCARG(uap, addr),
 		    sizeof(*tr->ps_ptstat)));
 
