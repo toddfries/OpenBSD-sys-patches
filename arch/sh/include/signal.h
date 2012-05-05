@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.3 2011/11/21 18:17:28 deraadt Exp $	*/
+/*	$OpenBSD: signal.h,v 1.5 2012/04/27 17:39:47 pirofti Exp $	*/
 /*	$NetBSD: signal.h,v 1.12 2005/12/11 12:18:58 christos Exp $	*/
 
 /*
@@ -40,7 +40,6 @@
 typedef int sig_atomic_t;
 
 #if __BSD_VISIBLE || __XPG_VISIBLE >= 420
-#include <sh/reg.h>
 
 /*
  * Information pushed on stack when a signal is delivered.
@@ -50,8 +49,8 @@ typedef int sig_atomic_t;
  * a non-standard exit is performed.
  */
 struct sigcontext {
-	struct reg sc_reg;
-	struct fpreg sc_fpreg;
+	int	sc_reg[21];
+	int	sc_fpreg[34];
 
 	int	sc_onstack;	/* sigstack state to restore */
 

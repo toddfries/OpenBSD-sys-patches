@@ -1,6 +1,21 @@
-/*	$OpenBSD: gio.c,v 1.1 2012/03/28 20:44:23 miod Exp $	*/
+/*	$OpenBSD: gio.c,v 1.8 2012/04/28 19:51:46 miod Exp $	*/
 /*	$NetBSD: gio.c,v 1.32 2011/07/01 18:53:46 dyoung Exp $	*/
 
+/*
+ * Copyright (c) 2012 Miodrag Vallat.
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
 /*
  * Copyright (c) 2000 Soren S. Jorvang
  * All rights reserved.
@@ -44,11 +59,35 @@
 
 #include <sgi/gio/gioreg.h>
 #include <sgi/gio/giovar.h>
+#include <sgi/gio/giodevs.h>
 #include <sgi/gio/giodevs_data.h>
 
+#include <sgi/gio/grtworeg.h>
+#include <sgi/gio/lightreg.h>
+#include <sgi/gio/newportreg.h>
+
 #include <sgi/localbus/imcvar.h>
+#include <sgi/localbus/intreg.h>
 #include <sgi/localbus/intvar.h>
 #include <sgi/sgi/ip22.h>
+
+#include "grtwo.h"
+#include "impact.h"
+#include "light.h"
+#include "newport.h"
+
+#if NGRTWO > 0
+#include <sgi/gio/grtwovar.h>
+#endif
+#if NIMPACT_GIO > 0
+#include <sgi/dev/impactvar.h>
+#endif
+#if NLIGHT > 0
+#include <sgi/gio/lightvar.h>
+#endif
+#if NNEWPORT > 0
+#include <sgi/gio/newportvar.h>
+#endif
 
 int	 gio_match(struct device *, void *, void *);
 void	 gio_attach(struct device *, struct device *, void *);
@@ -56,7 +95,8 @@ int	 gio_print(void *, const char *);
 int	 gio_print_fb(void *, const char *);
 int	 gio_search(struct device *, void *, void *);
 int	 gio_submatch(struct device *, void *, void *);
-uint32_t gio_id(paddr_t, int);
+uint32_t gio_id(vaddr_t, paddr_t, int);
+int	 gio_is_framebuffer_id(uint32_t);
 
 struct gio_softc {
 	struct device	sc_dev;
@@ -73,6 +113,13 @@ struct cfdriver gio_cd = {
 	NULL, "gio", DV_DULL
 };
 
+/* Address of the console frame buffer registers, if applicable */
+paddr_t		giofb_consaddr;
+/* Id of the console frame buffer */
+uint32_t	giofb_consid;
+/* Names of the frame buffers, as obtained by ARCBios */
+const char	*giofb_names[GIO_MAX_FB];
+
 struct gio_probe {
 	uint32_t slot;
 	uint64_t base;
@@ -83,7 +130,7 @@ struct gio_probe {
 /*
  * Expansion Slot Base Addresses
  *
- * IP12, IP20 and IP24 have two GIO connectors: GIO_SLOT_EXP0 and
+ * IP20 and IP24 have two GIO connectors: GIO_SLOT_EXP0 and
  * GIO_SLOT_EXP1.
  *
  * On IP24 these slots exist on the graphics board or the IOPLUS
@@ -97,13 +144,17 @@ struct gio_probe {
  * GIO_SLOT_EXP1. See gio(4) for the story.
  */
 static const struct gio_probe slot_bases[] = {
-	{ GIO_SLOT_GFX,  0x1f000000, SGI_IP22, IP22_INDIGO2 },
+	/* GFX is only a slot on Indigo 2 */
+	{ GIO_SLOT_GFX, GIO_ADDR_GFX, SGI_IP22, IP22_INDIGO2 },
 
-	{ GIO_SLOT_EXP0, 0x1f400000, SGI_IP20, -1 },
-	{ GIO_SLOT_EXP0, 0x1f400000, SGI_IP22, -1 },
+	/* EXP0 is available on all systems */
+	{ GIO_SLOT_EXP0, GIO_ADDR_EXP0, SGI_IP20, -1 },
+	{ GIO_SLOT_EXP0, GIO_ADDR_EXP0, SGI_IP22, -1 },
 
-	{ GIO_SLOT_EXP1, 0x1f600000, SGI_IP20, -1 },
-	{ GIO_SLOT_EXP1, 0x1f600000, SGI_IP22, IP22_INDY },
+	/* EXP1 does not exist on Indigo 2 */
+	{ GIO_SLOT_EXP1, GIO_ADDR_EXP1, SGI_IP20, -1 },
+	{ GIO_SLOT_EXP1, GIO_ADDR_EXP1, SGI_IP22, IP22_INDY },
+	{ GIO_SLOT_EXP1, GIO_ADDR_EXP1, SGI_IP22, IP22_CHALLS },
 
 	{ 0, 0, 0, 0 }
 };
@@ -113,38 +164,24 @@ static const struct gio_probe slot_bases[] = {
  *
  * Graphics boards are not treated like expansion slot cards. Their base
  * addresses do not necessarily correspond to GIO slot addresses and they
- * do not contain product identification words. 
+ * do not contain product identification words.
+ *
+ * This list needs to be sorted in address order, to match the descriptions
+ * obtained from ARCBios.
  */
 static const struct gio_probe gfx_bases[] = {
-	/* grtwo, and newport on IP22 */
-	{ -1, 0x1f000000, SGI_IP20, -1 },
-	{ -1, 0x1f000000, SGI_IP22, -1 },
+	{ -1, GIO_ADDR_GFX, SGI_IP20, -1 },
+	{ -1, GIO_ADDR_GFX, SGI_IP22, -1 },
 
-	/* light */
-	{ -1, 0x1f3f0000, SGI_IP20, -1 },
+	/* IP20 LG1/LG2 */
+	{ -1, GIO_ADDR_GFX + 0x003f0000, SGI_IP20, -1 },
+	{ -1, GIO_ADDR_GFX + 0x003f8000, SGI_IP20, -1 }, /* second head */
 
-	/* light (dual headed) */
-	{ -1, 0x1f3f8000, SGI_IP20, -1 },
-
-	/* grtwo, and newport on IP22 */
-	{ -1, 0x1f400000, SGI_IP20, -1 },
-	{ -1, 0x1f400000, SGI_IP22, -1 },
-
-	/* grtwo */
-	{ -1, 0x1f600000, SGI_IP20, -1 },
-	{ -1, 0x1f600000, SGI_IP22, -1 },
-
-	/* newport */
-	{ -1, 0x1f800000, SGI_IP22, IP22_INDIGO2 },
-
-	/* newport */
-	{ -1, 0x1fc00000, SGI_IP22, IP22_INDIGO2 },
+	{ -1, GIO_ADDR_EXP0, SGI_IP22, -1 },
+	{ -1, GIO_ADDR_EXP1, SGI_IP22, -1 },
 
 	{ 0, 0, 0, 0 }
 };
-
-/* maximum number of graphics boards possible (arbitrarily large estimate) */
-#define MAXGFX (nitems(gfx_bases) - 1)
 
 int
 gio_match(struct device *parent, void *match, void *aux)
@@ -163,7 +200,7 @@ gio_attach(struct device *parent, struct device *self, void *aux)
 	struct gio_softc *sc = (struct gio_softc *)self;
 	struct imc_attach_args *iaa = (struct imc_attach_args *)aux;
 	struct gio_attach_args ga;
-	uint32_t gfx[MAXGFX];
+	uint32_t gfx[GIO_MAX_FB], id;
 	uint i, j, ngfx;
 
 	printf("\n");
@@ -183,34 +220,52 @@ gio_attach(struct device *parent, struct device *self, void *aux)
 	 * we do not confuse them with expansion slots, should the
 	 * addresses coincide.
 	 *
-	 * Unfortunately graphics devices for which we have no configured
-	 * driver, which address matches a regular slot number, will show
-	 * up as rogue devices attached to real slots.
-	 *
 	 * If only the ARCBios component tree would be so kind as to give
 	 * us the address of the frame buffer components...
 	 */
-	for (i = 0; gfx_bases[i].base != 0; i++) {
-		/* skip slots that don't apply to us */
-		if (gfx_bases[i].mach_type != sys_config.system_type)
-			continue;
+	if (sys_config.system_type != SGI_IP22 ||
+	    sys_config.system_subtype != IP22_CHALLS) {
+		for (i = 0; gfx_bases[i].base != 0; i++) {
+			/* skip slots that don't apply to us */
+			if (gfx_bases[i].mach_type != sys_config.system_type)
+				continue;
 
-		if (gfx_bases[i].mach_subtype != -1 &&
-		    gfx_bases[i].mach_subtype != sys_config.system_subtype)
-			continue;
+			if (gfx_bases[i].mach_subtype != -1 &&
+			    gfx_bases[i].mach_subtype !=
+			      sys_config.system_subtype)
+				continue;
 
-		ga.ga_slot = -1;
-		ga.ga_addr = gfx_bases[i].base;
-		ga.ga_iot = sc->sc_iot;
-		ga.ga_ioh = PHYS_TO_XKPHYS(ga.ga_addr, CCA_NC);
-		ga.ga_dmat = sc->sc_dmat;
-		ga.ga_product = -1;
+			ga.ga_addr = gfx_bases[i].base;
+			ga.ga_ioh = PHYS_TO_XKPHYS(ga.ga_addr, CCA_NC);
 
-		if (gio_id(ga.ga_ioh, 1) == 0)
-			continue;
-		
-		if (config_found_sm(self, &ga, gio_print_fb, gio_submatch)) {
-			gfx[ngfx++] = gfx_bases[i].base;
+			/* no need to probe a glass console again */
+			if (ga.ga_addr == giofb_consaddr && giofb_consid != 0)
+				id = giofb_consid;
+			else {
+				id = gio_id(ga.ga_ioh, ga.ga_addr, 1);
+				if (!gio_is_framebuffer_id(id))
+					continue;
+			}
+
+			ga.ga_iot = sc->sc_iot;
+			ga.ga_dmat = sc->sc_dmat;
+			ga.ga_slot = -1;
+			ga.ga_product = id;
+			/*
+			 * Note that this relies upon ARCBios listing frame
+			 * buffers in ascending address order, which seems
+			 * to be the case so far on multihead Indigo2 systems.
+			 */
+			if (ngfx < GIO_MAX_FB)
+				ga.ga_descr = giofb_names[ngfx];
+			else
+				ga.ga_descr = NULL;	/* shouldn't happen */
+
+			if (config_found_sm(self, &ga, gio_print_fb,
+			    gio_submatch))
+				gfx[ngfx] = gfx_bases[i].base;
+
+			ngfx++;
 		}
 	}
 
@@ -240,16 +295,17 @@ gio_attach(struct device *parent, struct device *self, void *aux)
 		if (skip)
 			continue;
 
-		ga.ga_slot = slot_bases[i].slot;
 		ga.ga_addr = slot_bases[i].base;
 		ga.ga_iot = sc->sc_iot;
 		ga.ga_ioh = PHYS_TO_XKPHYS(ga.ga_addr, CCA_NC);
-		ga.ga_dmat = sc->sc_dmat;
 
-		if (gio_id(ga.ga_ioh, 0) == 0)
+		if (gio_id(ga.ga_ioh, ga.ga_addr, 0) == 0)
 			continue;
 
+		ga.ga_dmat = sc->sc_dmat;
+		ga.ga_slot = slot_bases[i].slot;
 		ga.ga_product = bus_space_read_4(ga.ga_iot, ga.ga_ioh, 0);
+		ga.ga_descr = NULL;
 
 		config_found_sm(self, &ga, gio_print, gio_submatch);
 	}
@@ -261,37 +317,107 @@ gio_attach(struct device *parent, struct device *self, void *aux)
  * Try and figure out whether there is a device at the given slot address.
  */
 uint32_t
-gio_id(paddr_t pa, int maybe_gfx)
+gio_id(vaddr_t va, paddr_t pa, int maybe_gfx)
 {
-	uint32_t id32;
+	uint32_t id32, mystery;
 	uint16_t id16 = 0;
 	uint8_t id8 = 0;
 
-	if (guarded_read_4(pa, &id32) != 0)
+	/*
+	 * First, attempt to read the address with various sizes.
+	 * If the slot is pipelined, and the address does not hit a
+	 * device register, we will not fault but read the transfer
+	 * width back.
+	 */
+
+	if (guarded_read_4(va, &id32) != 0)
+		return 0;
+	if (guarded_read_2(va | 2, &id16) != 0)
+		return 0;
+	if (guarded_read_1(va | 3, &id8) != 0)
 		return 0;
 
-	id16 = id32 ^ 0xffff;
-	(void)guarded_read_2(pa | 2, &id16);
-	id8 = id16 ^ 0xff;
-	(void)guarded_read_1(pa | 3, &id8);
+	/*
+	 * If the address doesn't match a base slot address, then we are
+	 * only probing for a light(4) frame buffer.
+	 */
+
+	if (pa != GIO_ADDR_GFX && pa != GIO_ADDR_EXP0 && pa != GIO_ADDR_EXP1) {
+		if (maybe_gfx == 0)
+			return 0;
+		else {
+			if (pa == LIGHT_ADDR_0 || pa == LIGHT_ADDR_1) {
+				if (guarded_read_4(va + REX_PAGE1_SET +
+				    REX_P1REG_XYOFFSET, &id32) != 0)
+					return 0;
+				if (id32 == 0x08000800)
+					return GIO_PRODUCT_FAKEID_LIGHT;
+			}
+			return 0;
+		}
+	}
 
 	/*
 	 * If there is a real GIO device at this address (as opposed to
 	 * a graphics card), then the low-order 8 bits of each read need
 	 * to be consistent...
 	 */
+
 	if (id8 == (id16 & 0xff) && id8 == (id32 & 0xff)) {
+		/*
+		 * If we are unlucky, this device will actually be a grtwo(4)
+		 * frame buffer, and we have read the first word of its
+		 * shared memory, which will satisfy the above test.
+		 *
+		 * Check its so-called mystery register to prevent matching
+		 * it as an unknown GIO device.
+		 */
+		if (guarded_read_4(va + HQ2_MYSTERY, &mystery) == 0 &&
+		    mystery == HQ2_MYSTERY_VALUE)
+			return maybe_gfx ? GIO_PRODUCT_FAKEID_GRTWO : 0;
+
 		if (GIO_PRODUCT_32BIT_ID(id8)) {
 			if (id16 == (id32 & 0xffff))
 				return id32;
 		} else {
-			if (id8 != 0)
-				return id32;
+			if (id8 != 0) {
+				if (id8 != GIO_PRODUCT_IMPACT || maybe_gfx)
+					return id8;
+				else
+					return 0;
+			}
 		}
 	}
 
-	if (maybe_gfx)
-		return 1;
+	/*
+	 * If there is a frame buffer device, then either we have hit a
+	 * device register (grtwo), or we did not fault because the slot
+	 * is pipelined (newport).
+	 * In the latter case, we attempt to probe a known register offset.
+	 */
+
+	if (maybe_gfx) {
+		if (id32 != 4 || id16 != 2 || id8 != 1) {
+			if (guarded_read_4(va + HQ2_MYSTERY, &mystery) == 0 &&
+			    mystery == HQ2_MYSTERY_VALUE)
+				return GIO_PRODUCT_FAKEID_GRTWO;
+			else
+				return 0;
+		}
+
+		/* could be newport(4) */
+		if (pa == GIO_ADDR_GFX || pa == GIO_ADDR_EXP0) {
+			va += NEWPORT_REX3_OFFSET;
+			if (guarded_read_4(va, &id32) == 0 &&
+			    guarded_read_2(va | 2, &id16) == 0 &&
+			    guarded_read_1(va | 3, &id8) == 0) {
+				if (id32 != 4 || id16 != 2 || id8 != 1)
+					return GIO_PRODUCT_FAKEID_NEWPORT;
+			}
+		}
+
+		return 0;
+	}
 
 	return 0;
 }
@@ -336,17 +462,33 @@ gio_print(void *aux, const char *pnp)
 int
 gio_print_fb(void *aux, const char *pnp)
 {
-#if 0 /* once we can know for sure there really is a frame buffer here */
-	if (pnp != NULL)
-		printf("framebuffer at %s", pnp);
+	struct gio_attach_args *ga = aux;
+	const char *fbname;
 
-	if (ga->ga_addr != (uint64_t)-1)
-		printf(" addr 0x%lx", ga->ga_addr);
+	if (pnp != NULL) {
+		switch (ga->ga_product) {
+		case GIO_PRODUCT_FAKEID_GRTWO:
+			fbname = "grtwo";
+			break;
+		case GIO_PRODUCT_IMPACT:
+			fbname = "impact";
+			break;
+		case GIO_PRODUCT_FAKEID_LIGHT:
+			fbname = "light";
+			break;
+		case GIO_PRODUCT_FAKEID_NEWPORT:
+			fbname = "newport";
+			break;
+		default:	/* should never happen */
+			fbname = "framebuffer";
+			break;
+		}
+		printf("%s at %s", fbname, pnp);
+	}
+
+	printf(" addr 0x%lx", ga->ga_addr);
 
 	return UNCONF;
-#else
-	return QUIET;
-#endif
 }
 
 int
@@ -360,12 +502,13 @@ gio_search(struct device *parent, void *vcf, void *aux)
 	if (cf->cf_loc[1 /*GIOCF_ADDR*/] == -1)
 		return 0;
 
-	ga.ga_product = -1;
-	ga.ga_slot = cf->cf_loc[0 /*GIOCF_SLOT*/];
 	ga.ga_addr = (uint64_t)cf->cf_loc[1 /*GIOCF_ADDR*/];
 	ga.ga_iot = sc->sc_iot;
 	ga.ga_ioh = PHYS_TO_XKPHYS(ga.ga_addr, CCA_NC);
 	ga.ga_dmat = sc->sc_dmat;
+	ga.ga_slot = cf->cf_loc[0 /*GIOCF_SLOT*/];
+	ga.ga_product = -1;
+	ga.ga_descr = NULL;
 
 	if ((*cf->cf_attach->ca_match)(parent, cf, &ga) == 0)
 		return 0;
@@ -392,17 +535,18 @@ gio_submatch(struct device *parent, void *vcf, void *aux)
 	return (*cf->cf_attach->ca_match)(parent, cf, aux);
 }
 
-#if 0	/* XXX involve wscons_machdep somehow */
 int
-gio_cnattach(void)
+giofb_cnprobe()
 {
-	extern struct machine_bus_dma_tag imc_bus_dma_tag;	/* XXX */
-	extern bus_space_t imcbus_tag;				/* XXX */
 	struct gio_attach_args ga;
-	uint32_t dummy;
+	uint32_t id;
 	int i;
 
 	for (i = 0; gfx_bases[i].base != 0; i++) {
+		if (giofb_consaddr != 0 &&
+		    gfx_bases[i].base != giofb_consaddr)
+			continue;
+
 		/* skip bases that don't apply to us */
 		if (gfx_bases[i].mach_type != sys_config.system_type)
 			continue;
@@ -411,43 +555,114 @@ gio_cnattach(void)
 		    gfx_bases[i].mach_subtype != sys_config.system_subtype)
 			continue;
 
-		ga.ga_slot = -1;
 		ga.ga_addr = gfx_bases[i].base;
-		ga.ga_iot = &imcbus_tag;			/* XXX */
+		ga.ga_iot = &imcbus_tag;
 		ga.ga_ioh = PHYS_TO_XKPHYS(ga.ga_addr, CCA_NC);
-		ga.ga_dmat = &imc_bus_dma_tag;			/* XXX */
-		ga.ga_product = -1;
-		
-		if (gio_id(ga.ga_ioh, 1) == 0)
+		ga.ga_dmat = &imc_bus_dma_tag;
+		ga.ga_slot = -1;
+		ga.ga_descr = NULL;
+
+		id = gio_id(ga.ga_ioh, ga.ga_addr, 1);
+		if (!gio_is_framebuffer_id(id))
 			continue;
 
+		ga.ga_product = giofb_consid = id;
+		switch (id) {
+		case GIO_PRODUCT_IMPACT:
+#if NIMPACT_GIO > 0
+			ga.ga_product = GIO_PRODUCT_IMPACT;
+			if (impact_gio_cnprobe(&ga) != 0)
+				return 0;
+#endif
+			break;
+		case GIO_PRODUCT_FAKEID_GRTWO:
 #if NGRTWO > 0
-		if (grtwo_cnattach(&ga) == 0)
-			return 0;
+			if (grtwo_cnprobe(&ga) != 0)
+				return 0;
 #endif
-
+			break;
+		case GIO_PRODUCT_FAKEID_LIGHT:
 #if NLIGHT > 0
-		if (light_cnattach(&ga) == 0)
-			return 0;
+			if (light_cnprobe(&ga) != 0)
+				return 0;
 #endif
-
+			break;
+		case GIO_PRODUCT_FAKEID_NEWPORT:
 #if NNEWPORT > 0
-		if (newport_cnattach(&ga) == 0)
-			return 0;
+			if (newport_cnprobe(&ga) != 0)
+				return 0;
 #endif
-
+			break;
+		}
 	}
 
 	return ENXIO;
 }
+
+int
+giofb_cnattach()
+{
+	struct gio_attach_args ga;
+
+	ga.ga_addr = giofb_consaddr;
+	ga.ga_iot = &imcbus_tag;
+	ga.ga_ioh = PHYS_TO_XKPHYS(ga.ga_addr, CCA_NC);
+	ga.ga_dmat = &imc_bus_dma_tag;
+	ga.ga_slot = -1;
+	ga.ga_product = giofb_consid;
+	ga.ga_descr = NULL;
+
+	switch (giofb_consid) {
+	case GIO_PRODUCT_IMPACT:
+#if NIMPACT_GIO > 0
+		if (impact_gio_cnattach(&ga) == 0)
+			return 0;
 #endif
+		break;
+	case GIO_PRODUCT_FAKEID_GRTWO:
+#if NGRTWO > 0
+		if (grtwo_cnattach(&ga) == 0)
+			return 0;
+#endif
+		break;
+	case GIO_PRODUCT_FAKEID_LIGHT:
+#if NLIGHT > 0
+		if (light_cnattach(&ga) == 0)
+			return 0;
+#endif
+		break;
+	case GIO_PRODUCT_FAKEID_NEWPORT:
+#if NNEWPORT > 0
+		if (newport_cnattach(&ga) == 0)
+			return 0;
+#endif
+		break;
+	}
+
+	giofb_consaddr = 0;
+	return ENXIO;
+}
+
+int
+gio_is_framebuffer_id(uint32_t id)
+{
+	switch (id) {
+	case GIO_PRODUCT_IMPACT:
+	case GIO_PRODUCT_FAKEID_GRTWO:
+	case GIO_PRODUCT_FAKEID_LIGHT:
+	case GIO_PRODUCT_FAKEID_NEWPORT:
+		return 1;
+	default:
+		return 0;
+	}
+}
 
 /*
  * Devices living in the expansion slots must enable or disable some
  * GIO arbiter settings. This is accomplished via imc(4) registers.
  */
 int
-gio_arb_config(int slot, uint32_t flags) 
+gio_arb_config(int slot, uint32_t flags)
 {
 	if (flags == 0)
 		return (EINVAL);
@@ -468,10 +683,15 @@ gio_arb_config(int slot, uint32_t flags)
 }
 
 /*
- * Establish an interrupt handler for the specified slot.
+ * Establish an interrupt handler for expansion boards (not frame buffers!)
+ * in the specified slot.
  *
- * Indy and Challenge S have an interrupt per GIO slot. Indigo and Indigo2
- * share a single interrupt, however.
+ * Indy and Challenge S have a single GIO interrupt per GIO slot, but
+ * distinct slot interrups. Indigo and Indigo2 have three GIO interrupts per
+ * slot, but at a given GIO interrupt level, all slots share the same
+ * interrupt on the interrupt controller.
+ *
+ * Expansion boards appear to always use the intermediate level.
  */
 void *
 gio_intr_establish(int slot, int level, int (*func)(void *), void *arg,
@@ -483,7 +703,7 @@ gio_intr_establish(int slot, int level, int (*func)(void *), void *arg,
 	case SGI_IP20:
 		if (slot == GIO_SLOT_GFX)
 			return NULL;
-		intr = 6;
+		intr = INT2_L0_INTR(INT2_L0_GIO_LVL1);
 		break;
 	case SGI_IP22:
 	case SGI_IP26:
@@ -491,11 +711,12 @@ gio_intr_establish(int slot, int level, int (*func)(void *), void *arg,
 		if (sys_config.system_subtype == IP22_INDIGO2) {
 			if (slot == GIO_SLOT_EXP1)
 				return NULL;
-			intr = 6;
+			intr = INT2_L0_INTR(INT2_L0_GIO_LVL1);
 		} else {
 			if (slot == GIO_SLOT_GFX)
 				return NULL;
-			intr = (slot == GIO_SLOT_EXP0) ? 22 : 23;
+			intr = INT2_MAP1_INTR(slot == GIO_SLOT_EXP0 ?
+			    INT2_MAP_GIO_SLOT0 : INT2_MAP_GIO_SLOT1);
 		}
 		break;
 	default:

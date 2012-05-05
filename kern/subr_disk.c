@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.143 2012/02/10 18:41:36 phessler Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.145 2012/04/07 16:48:38 krw Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -429,13 +429,13 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 		bcopy(bp->b_data + offset, dp, sizeof(dp));
 
 		if (n == 0 && part_blkno == DOSBBSECTOR) {
-			u_int16_t fattest;
+			u_int16_t mbrtest;
 
 			/* Check the end of sector marker. */
-			fattest = ((bp->b_data[510] << 8) & 0xff00) |
+			mbrtest = ((bp->b_data[510] << 8) & 0xff00) |
 			    (bp->b_data[511] & 0xff);
-			if (fattest != 0x55aa)
-				goto notfat;
+			if (mbrtest != 0x55aa)
+				goto notmbr;
 		}
 
 		if (ourpart == -1) {
@@ -542,13 +542,13 @@ donot:
 			DL_SETPSIZE(pp, letoh32(dp2->dp_size));
 		}
 	}
-	if (partoffp)
-		/* dospartoff has been set and we must not modify *lp. */
-		goto notfat;
 
-	lp->d_npartitions = MAXPARTITIONS;
+notmbr:
+	if (partoffp == NULL)
+		/* Must not modify *lp when partoffp is set. */
+		lp->d_npartitions = MAXPARTITIONS;
 
-	if (n == 0 && part_blkno == DOSBBSECTOR) {
+	if (n == 0 && part_blkno == DOSBBSECTOR && ourpart == -1) {
 		u_int16_t fattest;
 
 		/* Check for a valid initial jmp instruction. */
@@ -578,20 +578,25 @@ donot:
 		if (fattest < 512 || fattest > 4096 || (fattest % 512 != 0))
 			goto notfat;
 
-		/* Looks like a FAT filesystem. Spoof 'i'. */
+		if (partoffp)
+			return (ENXIO);	/* No place for disklabel on FAT! */
+
 		DL_SETPSIZE(&lp->d_partitions['i' - 'a'],
 		    DL_GETPSIZE(&lp->d_partitions[RAW_PART]));
 		DL_SETPOFFSET(&lp->d_partitions['i' - 'a'], 0);
 		lp->d_partitions['i' - 'a'].p_fstype = FS_MSDOS;
+
+		spoofonly = 1;	/* No disklabel to read from disk. */
 	}
+
 notfat:
 	/* record the OpenBSD partition's placement for the caller */
 	if (partoffp)
 		*partoffp = dospartoff;
 	else {
 		DL_SETBSTART(lp, dospartoff);
-		DL_SETBEND(lp,
-		    dospartend < DL_GETDSIZE(lp) ? dospartend : DL_GETDSIZE(lp));
+		DL_SETBEND(lp, (dospartend < DL_GETDSIZE(lp)) ? dospartend :
+		    DL_GETDSIZE(lp));
 	}
 
 	/* don't read the on-disk label if we are in spoofed-only mode */

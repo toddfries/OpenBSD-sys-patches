@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip22.h,v 1.1 2012/03/28 20:44:23 miod Exp $	*/
+/*	$OpenBSD: ip22.h,v 1.4 2012/04/15 20:38:10 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -20,13 +20,17 @@
  * IP20/IP22/IP24 definitions
  */
 
-/* IP22 system types */
+/* IP22/IP24 system types */
 
-#define	IP22_INDY	0	/* Indy, Challenge S */
-#define	IP22_INDIGO2	1	/* Indigo 2 */
+#define	IP22_INDY	0	/* IP24 Indy */
+#define	IP22_CHALLS	1	/* IP24 Challenge S */
+#define	IP22_INDIGO2	2	/* IP22 Indigo 2, Challenge M */
 
 /* Interrupt handling priority */
 
 #define	INTPRI_BUSERR	(INTPRI_CLOCK + 1)
 #define	INTPRI_L1	(INTPRI_BUSERR + 1)
 #define	INTPRI_L0	(INTPRI_L1 + 1)
+
+extern int hpc_old;	/* nonzero if at least one HPC 1.x device found */
+extern int bios_year;
