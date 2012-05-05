@@ -1,4 +1,4 @@
-/*	$OpenBSD: odysseyreg.h,v 1.1 2010/03/04 14:50:35 jsing Exp $ */
+/*	$OpenBSD: odysseyreg.h,v 1.2 2012/04/16 22:17:16 miod Exp $ */
 /*
  * Copyright (c) 2009, 2010 Joel Sing <jsing@openbsd.org>
  *
@@ -41,22 +41,3 @@
 #define OPENGL_COLOR_3UB		0xc580cc08
 
 #define OPENGL_QUADS			0x00000007
-
-/* Logic Operations. */
-#define OPENGL_LOGIC_OP_CLEAR		0
-#define OPENGL_LOGIC_OP_AND		1
-#define OPENGL_LOGIC_OP_AND_REVERSE	2
-#define OPENGL_LOGIC_OP_COPY		3
-#define OPENGL_LOGIC_OP_AND_INVERTED	4
-#define OPENGL_LOGIC_OP_NOOP		5
-#define OPENGL_LOGIC_OP_XOR		6
-#define OPENGL_LOGIC_OP_OR		7
-#define OPENGL_LOGIC_OP_NOR		8
-#define OPENGL_LOGIC_OP_EQUIV		9
-#define OPENGL_LOGIC_OP_INVERT		10
-#define OPENGL_LOGIC_OP_OR_REVERSE	11
-#define OPENGL_LOGIC_OP_COPY_INVERTED	12
-#define OPENGL_LOGIC_OP_OR_INVERTED	13
-#define OPENGL_LOGIC_OP_NAND		14
-#define OPENGL_LOGIC_OP_SET		15
-
