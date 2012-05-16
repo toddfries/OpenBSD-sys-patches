@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.80 2012/01/09 22:31:51 haesbaert Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.82 2012/05/12 15:54:54 kettenis Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -48,8 +48,15 @@
 
 const struct puc_device_description puc_devs[] = {
 
-	{   /* Intel GM45 SOL */
-	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_AMT_SOL, 0x0000, 0x0000 },
+	{   /* Intel GM45 KT */
+	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_KT, 0x0000, 0x0000 },
+	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{   /* Intel 6 Series KT */
+	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_KT, 0x0000, 0x0000 },
 	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
 	    {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
