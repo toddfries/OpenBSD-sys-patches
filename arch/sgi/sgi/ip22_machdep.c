@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip22_machdep.c,v 1.6 2012/04/16 22:28:14 miod Exp $	*/
+/*	$OpenBSD: ip22_machdep.c,v 1.8 2012/05/15 18:17:50 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -133,6 +133,11 @@ ip22_arcbios_walk_component(arc_config_t *cf)
 				id = (const char *)cf64->id;
 			}
 			if (idlen != 0) {
+				/* skip leading spaces */
+				while (idlen > 0 && id[0] == ' ') {
+					id++;
+					idlen--;
+				}
 				/* skip SGI- prefix */
 				if (idlen >= 4 && strncmp(id, "SGI-", 4) == 0) {
 					id += 4;
