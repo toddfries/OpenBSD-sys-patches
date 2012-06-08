@@ -1,4 +1,4 @@
-/*	$OpenBSD: imc.c,v 1.6 2012/04/18 10:56:54 miod Exp $	*/
+/*	$OpenBSD: imc.c,v 1.9 2012/05/27 14:12:55 miod Exp $	*/
 /*	$NetBSD: imc.c,v 1.32 2011/07/01 18:53:46 dyoung Exp $	*/
 
 /*
@@ -534,16 +534,24 @@ imc_attach(struct device *parent, struct device *self, void *aux)
 	set_intr(INTPRI_BUSERR, CR_INT_4, imc_bus_error);
 
 	/*
-	 * Enable parity reporting on GIO/main memory transactions.
+	 * Enable parity reporting on GIO/main memory transactions, except
+	 * on systems with the ECC memory controller, where enabling parity
+	 * interferes with regular operation and causes sticky false errors.
+	 *
 	 * Disable parity checking on CPU bus transactions (as turning
 	 * it on seems to cause spurious bus errors), but enable parity
 	 * checking on CPU reads from main memory (note that this bit
 	 * has the opposite sense... Turning it on turns the checks off!).
+	 *
 	 * Finally, turn on interrupt writes to the CPU from the MC.
 	 */
 	reg = imc_read(IMC_CPUCTRL0);
 	reg &= ~IMC_CPUCTRL0_NCHKMEMPAR;
-	reg |= (IMC_CPUCTRL0_GPR | IMC_CPUCTRL0_MPR | IMC_CPUCTRL0_INTENA);
+	if (ip22_ecc)
+		reg &= ~(IMC_CPUCTRL0_GPR | IMC_CPUCTRL0_MPR);
+	else
+		reg |= IMC_CPUCTRL0_GPR | IMC_CPUCTRL0_MPR;
+	reg |= IMC_CPUCTRL0_INTENA;
 	imc_write(IMC_CPUCTRL0, reg);
 
 	/* Setup the MC write buffer depth */
@@ -699,12 +707,38 @@ imc_bus_reset()
 uint32_t
 imc_bus_error(uint32_t hwpend, struct trap_frame *tf)
 {
-	printf("bus error: cpu_stat %08x addr %08x, gio_stat %08x addr %08x\n",
-	    imc_read(IMC_CPU_ERRSTAT),
-	    imc_read(IMC_CPU_ERRADDR),
-	    imc_read(IMC_GIO_ERRSTAT),
-	    imc_read(IMC_GIO_ERRADDR));
-	imc_bus_reset();
+	uint32_t cpustat, giostat;
+	int quiet = 0;
+
+	cpustat = imc_read(IMC_CPU_ERRSTAT);
+	giostat = imc_read(IMC_GIO_ERRSTAT);
+
+	switch (sys_config.system_type) {
+	case SGI_IP28:
+		/*
+		 * R10000 speculative execution may attempt to access
+		 * non-existing memory when in the kernel. We do not
+		 * want to flood the console about those.
+		 */
+		if (cpustat & IMC_CPU_ERRSTAT_ADDR)
+			quiet = 1;
+		/* This happens. No idea why. */
+		if (cpustat == 0 && giostat == 0)
+			quiet = 1;
+		break;
+	}
+
+	if (quiet == 0) {
+		printf("bus error: "
+		    "cpu_stat %08x addr %08x, gio_stat %08x addr %08x\n",
+		    cpustat, imc_read(IMC_CPU_ERRADDR),
+		    giostat, imc_read(IMC_GIO_ERRADDR));
+	}
+
+	if (cpustat != 0)
+		imc_write(IMC_CPU_ERRSTAT, 0);
+	if (giostat != 0)
+		imc_write(IMC_GIO_ERRSTAT, 0);
 
 	return hwpend;
 }
@@ -855,15 +889,8 @@ imc_disable_sysad_parity(void)
 {
 	uint32_t reg;
 
-	switch (sys_config.system_type) {
-	case SGI_IP20:
-	case SGI_IP22:
-	case SGI_IP26:
-	case SGI_IP28:
-		break;
-	default:
+	if (ip22_ecc)
 		return;
-	}
 
 	reg = imc_read(IMC_CPUCTRL0);
 	reg |= IMC_CPUCTRL0_NCHKMEMPAR;
@@ -875,15 +902,8 @@ imc_enable_sysad_parity(void)
 {
 	uint32_t reg;
 
-	switch (sys_config.system_type) {
-	case SGI_IP20:
-	case SGI_IP22:
-	case SGI_IP26:
-	case SGI_IP28:
-		break;
-	default:
+	if (ip22_ecc)
 		return;
-	}
 
 	reg = imc_read(IMC_CPUCTRL0);
 	reg &= ~IMC_CPUCTRL0_NCHKMEMPAR;
@@ -896,18 +916,10 @@ imc_is_sysad_parity_enabled(void)
 {
 	uint32_t reg;
 
-	switch (sys_config.system_type) {
-	case SGI_IP20:
-	case SGI_IP22:
-	case SGI_IP26:
-	case SGI_IP28:
-		break;
-	default:
+	if (ip22_ecc)
 		return 0;
-	}
 
 	reg = imc_read(IMC_CPUCTRL0);
-
-	return reg & IMC_CPUCTRL0_NCHKMEMPAR;
+	return ~reg & IMC_CPUCTRL0_NCHKMEMPAR;
 }
 #endif
