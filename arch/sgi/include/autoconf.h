@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.35 2012/04/21 12:20:30 miod Exp $ */
+/*	$OpenBSD: autoconf.h,v 1.37 2012/05/29 17:37:09 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -102,6 +102,7 @@ void	ip30_autoconf(struct device *);
 void	ip32_setup(void);
 
 extern char osloadpartition[256];
+extern char osloadoptions[129];
 extern int16_t masternasid;
 extern int16_t currentnasid;
 
@@ -109,5 +110,8 @@ extern struct sgi_device_location console_output, console_input;
 
 int	location_match(struct sgi_device_location *,
 	    struct sgi_device_location *);
+
+extern void (*md_halt)(int);
+void	arcbios_halt(int);
 
 #endif /* _MACHINE_AUTOCONF_H_ */

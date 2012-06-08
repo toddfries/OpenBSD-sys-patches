@@ -1,4 +1,4 @@
-/*	$OpenBSD: hpc.c,v 1.11 2012/04/30 21:31:03 miod Exp $	*/
+/*	$OpenBSD: hpc.c,v 1.13 2012/05/27 14:27:08 miod Exp $	*/
 /*	$NetBSD: hpc.c,v 1.66 2011/07/01 18:53:46 dyoung Exp $	*/
 /*	$NetBSD: ioc.c,v 1.9 2011/07/01 18:53:47 dyoung Exp $	 */
 
@@ -363,6 +363,18 @@ void	hpc_blink_ioc(void *);
 int	hpc_read_eeprom(int, bus_space_tag_t, bus_space_handle_t, uint8_t *,
 	    size_t);
 
+struct hpc_dma_desc *hpc_read_dma_desc_par(struct hpc_dma_desc *,
+	    struct hpc_dma_desc *);
+struct hpc_dma_desc *hpc_read_dma_desc_ecc(struct hpc_dma_desc *,
+	    struct hpc_dma_desc *);
+void	hpc_write_dma_desc_par(struct hpc_dma_desc *, struct hpc_dma_desc *);
+void	hpc_write_dma_desc_ecc(struct hpc_dma_desc *, struct hpc_dma_desc *);
+
+/* globals since they depend upon the system type, not the hpc version */
+struct hpc_dma_desc *(*hpc_read_dma_desc_fn)(struct hpc_dma_desc *,
+	    struct hpc_dma_desc *);
+void	(*hpc_write_dma_desc_fn)(struct hpc_dma_desc *, struct hpc_dma_desc *);
+
 const struct cfattach hpc_ca = {
 	sizeof(struct hpc_softc), hpc_match, hpc_attach
 };
@@ -409,7 +421,8 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 	struct hpc_attach_args ha;
 	const struct hpc_device *hd;
 	struct hpc_values *hv;
-	uint32_t dummy;
+	uint32_t probe32;
+	uint8_t probe8;
 	uint32_t hpctype;
 	int isonboard;
 	int isioplus;
@@ -421,6 +434,17 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ct = ga->ga_iot;
 	sc->sc_ch = PHYS_TO_XKPHYS(sc->sc_base, CCA_NC);
 	sc->sc_dmat = ga->ga_dmat;
+
+	/* setup HPC DMA helpers if not done already */
+	if (hpc_read_dma_desc_fn == NULL) {
+		if (ip22_ecc) {
+			hpc_read_dma_desc_fn = hpc_read_dma_desc_ecc;
+			hpc_write_dma_desc_fn = hpc_write_dma_desc_ecc;
+		} else {
+			hpc_read_dma_desc_fn = hpc_read_dma_desc_par;
+			hpc_write_dma_desc_fn = hpc_write_dma_desc_par;
+		}
+	}
 
 	switch (sys_config.system_type) {
 	case SGI_IP20:
@@ -518,7 +542,7 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 		int arb_slot;
 
 		if (guarded_read_4(PHYS_TO_XKPHYS(HPC_BASE_ADDRESS_2, CCA_NC),
-		    &dummy) != 0)
+		    &probe32) != 0)
 			arb_slot = GIO_SLOT_EXP1;
 		else
 			arb_slot = GIO_SLOT_EXP0;
@@ -612,7 +636,7 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 			continue;
 
 		ha.ha_name = hd->hd_name;
-		ha.ha_base = hd->hd_base;
+		ha.ha_base = sc->sc_base;
 		ha.ha_devoff = hd->hd_devoff;
 		ha.ha_dmaoff = hd->hd_dmaoff;
 		/*
@@ -623,7 +647,7 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 			if (sys_config.system_type == SGI_IP20)
 				ha.ha_irq = INT2_L0_INTR(INT2_L0_GIO_LVL1);
 			else {
-				if (hd->hd_base == HPC_BASE_ADDRESS_1)
+				if (sc->sc_base == HPC_BASE_ADDRESS_1)
 					ha.ha_irq =
 					    INT2_MAP0_INTR(INT2_MAP_GIO_SLOT0);
 				else
@@ -642,14 +666,56 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
 		/*
 		 * On hpc@gio boards such as the E++, we want to avoid
 		 * `wdsc not configured' messages (or sq on SCSI boards).
-		 * The following check ought to be enough to prevent
-		 * false positives. The strange address computation is
-		 * necessary to correctly test wdsc(4).
+		 * The following checks are borrowed from the sq(4) and
+		 * wdsc(4) respective probes.
 		 */
 		if (needprobe) {
-			if (guarded_read_4(PHYS_TO_XKPHYS((sc->sc_ch +
-			    hd->hd_devoff + 3) & ~3, CCA_NC), &dummy) != 0)
-				continue;
+			paddr_t pa;
+			volatile uint32_t *reg;
+
+			if (strcmp(hd->hd_name, "sq") == 0) {
+				/*
+				 * E++ registers aren't accessible until
+				 * the reset register is written to.
+				 */
+				pa = sc->sc_ch + hd->hd_dmaoff +
+				    hv->enetr_reset;
+				reg = (volatile uint32_t *)
+				    PHYS_TO_XKPHYS(pa, CCA_NC);
+				if (guarded_read_4((vaddr_t)reg, &probe32) != 0)
+					continue;
+				*reg = 0x01;
+				delay(20);
+				*reg = 0x00;
+
+				pa = sc->sc_ch + hd->hd_devoff;
+				if (guarded_read_4(PHYS_TO_XKPHYS(pa, CCA_NC),
+				    &probe32) != 0)
+					continue;
+			} else
+			/* if (strcmp(hd->hd_name, "wdsc") == 0) */ {
+				/*
+				 * wdsc registers may not be accessible
+				 * until the dma engine is reset.
+				 */
+				pa = sc->sc_ch + hd->hd_dmaoff +
+				    hv->scsi0_ctl;
+				reg = (volatile uint32_t *)
+				    PHYS_TO_XKPHYS(pa, CCA_NC);
+				if (guarded_read_4((vaddr_t)reg, &probe32) != 0)
+					continue;
+				*reg = hv->scsi_dmactl_reset;
+				delay(1000);
+				*reg = 0;
+				delay(1000);
+
+				pa = sc->sc_ch + hd->hd_devoff + 3;
+				if (guarded_read_1(PHYS_TO_XKPHYS(pa, CCA_NC),
+				    &probe8) != 0)
+					continue;
+				if (probe8 == 0xff)
+					continue;
+			}
 		}
 
 		config_found_sm(self, &ha, hpc_print, hpc_submatch);
@@ -706,7 +772,7 @@ hpc_attach(struct device *parent, struct device *self, void *aux)
  *	o Indigo2, Challenge M
  *		One on-board HPC3.
  *
- * All we really have to worry about is the IP22 case.
+ * All we really have to worry about is the IP24 case.
  */
 int
 hpc_revision(struct hpc_softc *sc, struct gio_attach_args *ga)
@@ -732,12 +798,16 @@ hpc_revision(struct hpc_softc *sc, struct gio_attach_args *ga)
 	case SGI_IP22:
 	case SGI_IP26:
 	case SGI_IP28:
-		/*
-		 * If IP22, probe slot 0 to determine if HPC1.5 or HPC3. Slot 1
-		 * must be HPC1.5.
-		 */
 		if (ga->ga_addr == HPC_BASE_ADDRESS_0)
 			return 3;
+
+		if (sys_config.system_subtype == IP22_INDIGO2)
+			return 0;
+
+		/*
+		 * If IP24, probe slot 0 to determine if HPC1.5 or HPC3. Slot 1
+		 * must be HPC1.5.
+		 */
 
 		if (ga->ga_addr == HPC_BASE_ADDRESS_2)
 			return 15;
@@ -899,4 +969,53 @@ hpc_read_eeprom(int hpctype, bus_space_tag_t t, bus_space_handle_t h,
 	bus_space_unmap(t, bsh, 1);
 
 	return 0;
+}
+
+/*
+ * Routines to copy and update HPC DMA descriptors in uncached memory.
+ */
+
+struct hpc_dma_desc *
+hpc_read_dma_desc(struct hpc_dma_desc *src, struct hpc_dma_desc *store)
+{
+	return (*hpc_read_dma_desc_fn)(src, store);
+}
+
+void
+hpc_write_dma_desc(struct hpc_dma_desc *dst, struct hpc_dma_desc *src)
+{
+	(*hpc_write_dma_desc_fn)(dst, src);
+}
+
+/* parity MC flavour: no copy */
+struct hpc_dma_desc *
+hpc_read_dma_desc_par(struct hpc_dma_desc *src, struct hpc_dma_desc *store)
+{
+	return src;
+}
+
+void
+hpc_write_dma_desc_par(struct hpc_dma_desc *dst, struct hpc_dma_desc *src)
+{
+}
+
+/* ECC MC flavour: copy, and update in slow mode */
+struct hpc_dma_desc *
+hpc_read_dma_desc_ecc(struct hpc_dma_desc *src, struct hpc_dma_desc *store)
+{
+	bcopy(src, store, sizeof(struct hpc_dma_desc));
+	return store;
+}
+
+void
+hpc_write_dma_desc_ecc(struct hpc_dma_desc *dst, struct hpc_dma_desc *src)
+{
+	uint32_t sr;
+	int mode;
+
+	sr = disableintr();
+	mode = ip22_slow_mode();
+	bcopy(src, dst, sizeof(struct hpc_dma_desc));
+	ip22_restore_mode(mode);
+	setsr(sr);
 }
