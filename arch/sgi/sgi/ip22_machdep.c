@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip22_machdep.c,v 1.8 2012/05/15 18:17:50 miod Exp $	*/
+/*	$OpenBSD: ip22_machdep.c,v 1.11 2012/05/27 19:13:04 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -52,9 +52,12 @@ extern char *hw_prod;
 
 int	hpc_old = 0;
 int	bios_year;
+int	ip22_ecc = 0;
 
 void	ip22_arcbios_walk(void);
 int	ip22_arcbios_walk_component(arc_config_t *);
+void	ip22_ecc_halt(int);
+void	ip22_ecc_init(void);
 void	ip22_memory_setup(void);
 void	ip22_video_setup(void);
 
@@ -101,8 +104,7 @@ ip22_arcbios_walk_component(arc_config_t *cf)
 		 * SS is Log2(cache size in 4KB units) (should be 0007)
 		 */
 		ci->ci_l2size = (1 << 12) << (key & 0x0000ffff);
-		/* L2 line size */
-		ci->ci_cacheconfiguration = 1 << ((key >> 16) & 0xff);
+		ci->ci_l2line = 1 << ((key >> 16) & 0xff);
 
 		ip22_arcwalk_results |= IP22_HAS_L2;
 	}
@@ -121,6 +123,7 @@ ip22_arcbios_walk_component(arc_config_t *cf)
 			 * configured for glass console, it will get
 			 * overwritten anyway.
 			 */
+			ip22_arcwalk_results |= IP22_HAS_ENOUGH_FB;
 		} else {
 			const char *id;
 			size_t idlen;
@@ -175,6 +178,10 @@ ip22_arcbios_walk()
 	(void)ip22_arcbios_walk_component((arc_config_t *)Bios_GetChild(NULL));
 }
 
+/*
+ * Parse memory controller settings.
+ */
+
 #define	IMC_NREGION	3
 
 void
@@ -205,10 +212,11 @@ ip22_memory_setup()
 	memc0 = imc_read(IMC_MEMCFG0);
 	memc1 = imc_read(IMC_MEMCFG1);
 
-	shift = IMC_MEMC_LSHIFT;
 	/* Revision D onwards uses larger units, to allow for more memory */
 	if ((imc_read(IMC_SYSID) & IMC_SYSID_REVMASK) >= 5)
 		shift = IMC_MEMC_LSHIFT_HUGE;
+	else
+		shift = IMC_MEMC_LSHIFT;
 
 	for (bank = 0; bank < IMC_NREGION; bank++) {
 		memc = (bank & 2) ? memc1 : memc0;
@@ -339,7 +347,7 @@ ip22_video_setup()
 	 *
 	 * Verified addresses:
 	 * grtwo	slot + 0x00000000
-	 * impact	?
+	 * impact	slot + 0x00000000
 	 * light	?
 	 * newport	slot + 0x000f0000 (NEWPORT_REX3_OFFSET)
 	 */
@@ -366,7 +374,7 @@ void
 ip22_setup()
 {
 	u_long cpuspeed;
-	volatile uint32_t *sysid;
+	uint8_t ip22_sysid;
 
 	/*
 	 * Get CPU information.
@@ -380,6 +388,20 @@ ip22_setup()
 		cpuspeed = 100;		/* reasonable default */
 	bootcpu_hwinfo.clock = cpuspeed * 1000000;
 	bootcpu_hwinfo.type = (bootcpu_hwinfo.c0prid >> 8) & 0xff;
+
+	switch (sys_config.system_type) {
+	case SGI_IP20:
+		ip22_sysid = 0;
+		break;
+	default:
+	case SGI_IP22:
+	case SGI_IP26:
+	case SGI_IP28:
+		ip22_sysid = (uint8_t)*(volatile uint32_t *)
+		    PHYS_TO_XKPHYS(HPC_BASE_ADDRESS_0 + IOC_BASE + IOC_SYSID,
+		      CCA_NC);
+		break;
+	}
 
 	/*
 	 * Scan ARCBios component list for useful information (L2 cache
@@ -398,10 +420,7 @@ ip22_setup()
 			hw_prod = "VME Indigo";
 		break;
 	case SGI_IP22:
-		sysid = (volatile uint32_t *)
-		    PHYS_TO_XKPHYS(HPC_BASE_ADDRESS_0 + IOC_BASE + IOC_SYSID,
-		      CCA_NC);
-		if (*sysid & 0x01) {
+		if (ip22_sysid & 0x01) {
 			sys_config.system_subtype = IP22_INDIGO2;
 			hw_prod = "Indigo2";
 		} else {
@@ -422,6 +441,36 @@ ip22_setup()
 		sys_config.system_subtype = IP22_INDIGO2;
 		hw_prod = "POWER Indigo2 R10000";
 		break;
+	}
+
+	/*
+	 * Figure out whether we are running on an Indigo2 system with the
+	 * ECC board.
+	 */
+
+	switch (sys_config.system_type) {
+	default:
+		break;
+	case SGI_IP26:
+		/*
+		 * According to IRIX <sys/IP22.h>, earlier IP26 systems
+		 * have an incomplete ECC board, and thus run in parity
+		 * mode.
+		 */
+		if (((ip22_sysid & IOC_SYSID_BOARDREV) >>
+		     IOC_SYSID_BOARDREV_SHIFT) >=
+		    (0x18 >> IOC_SYSID_BOARDREV_SHIFT))
+			ip22_ecc = 1;
+		break;
+	case SGI_IP28:
+		/* All IP28 systems use the ECC board */
+		ip22_ecc = 1;
+		break;
+	}
+
+	if (ip22_ecc) {
+		ip22_ecc_init();
+		md_halt = ip22_ecc_halt;
 	}
 
 	/*
@@ -499,4 +548,117 @@ ip22_post_autoconf()
 			bufhighpages = bufpages;
 		}
 	}
+
+	if (ip22_ecc) {
+		ip22_fast_mode();
+	}
+}
+
+/*
+ * ECC board specific routines
+ */
+
+#define	sync() \
+    __asm__ __volatile__ ("sync" ::: "memory");
+
+#define ecc_write(o,v) \
+	*(volatile uint64_t *)PHYS_TO_XKPHYS(ECC_BASE + (o), CCA_NC) = (v)
+
+static __inline__ uint32_t ip22_ecc_map(void);
+static __inline__ void ip22_ecc_unmap(uint32_t);
+
+static int ip22_ecc_mode;	/* 0 if slow mode, 1 if fast mode */
+
+static __inline__ uint32_t
+ip22_ecc_map()
+{
+	uint32_t omemc1, nmemc1;
+
+	omemc1 = imc_read(IMC_MEMCFG1);
+	nmemc1 = omemc1 & ~IMC_MEMC_BANK_MASK;
+	nmemc1 |= IMC_MEMC_VALID | (ECC_BASE >> IMC_MEMC_LSHIFT_HUGE);
+	imc_write(IMC_MEMCFG1, nmemc1);
+	(void)imc_read(IMC_MEMCFG1);
+	sync();
+
+	return omemc1;
+}
+
+static __inline__ void
+ip22_ecc_unmap(uint32_t omemc1)
+{
+	imc_write(IMC_MEMCFG1, omemc1);
+	(void)imc_read(IMC_MEMCFG1);
+	sync();
+}
+
+int
+ip22_fast_mode()
+{
+	uint32_t memc1;
+
+	if (ip22_ecc_mode == 0) {
+		memc1 = ip22_ecc_map();
+		ecc_write(ECC_CTRL, ECC_CTRL_ENABLE);
+		sync();
+		(void)imc_read(IMC_MEMCFG1);
+		imc_write(IMC_CPU_MEMACC, imc_read(IMC_CPU_MEMACC) & ~2);
+		ip22_ecc_unmap(memc1);
+		ip22_ecc_mode = 1;
+		return 0;
+	}
+
+	return 1;
+}
+
+int
+ip22_slow_mode()
+{
+	uint32_t memc1;
+
+	if (ip22_ecc_mode != 0) {
+		memc1 = ip22_ecc_map();
+		imc_write(IMC_CPU_MEMACC, imc_read(IMC_CPU_MEMACC) | 2);
+		ecc_write(ECC_CTRL, ECC_CTRL_DISABLE);
+		sync();
+		(void)imc_read(IMC_MEMCFG1);
+		ip22_ecc_unmap(memc1);
+		ip22_ecc_mode = 0;
+		return 1;
+	}
+
+	return 0;
+}
+
+int
+ip22_restore_mode(int mode)
+{
+	return mode ? ip22_fast_mode() : ip22_slow_mode();
+}
+
+void
+ip22_ecc_init()
+{
+	uint32_t memc1;
+
+	memc1 = ip22_ecc_map();
+	imc_write(IMC_CPU_MEMACC, imc_read(IMC_CPU_MEMACC) | 2);
+	ecc_write(ECC_CTRL, ECC_CTRL_DISABLE);
+	sync();
+	(void)imc_read(IMC_MEMCFG1);
+	ecc_write(ECC_CTRL, ECC_CTRL_INT_CLR);
+	sync();
+	(void)imc_read(IMC_MEMCFG1);
+	ecc_write(ECC_CTRL, ECC_CTRL_CHK_DISABLE);	/* XXX for now */
+	sync();
+	(void)imc_read(IMC_MEMCFG1);
+	ip22_ecc_unmap(memc1);
+	ip22_ecc_mode = 0;
+}
+
+void
+ip22_ecc_halt(int howto)
+{
+	ip22_slow_mode();
+	arcbios_halt(howto);
 }
