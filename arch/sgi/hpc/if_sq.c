@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sq.c,v 1.5 2012/04/30 21:31:03 miod Exp $	*/
+/*	$OpenBSD: if_sq.c,v 1.8 2012/05/28 17:03:35 miod Exp $	*/
 /*	$NetBSD: if_sq.c,v 1.42 2011/07/01 18:53:47 dyoung Exp $	*/
 
 /*
@@ -88,8 +88,6 @@
  *	    contiguous mbuf.
  *	(3) Verify sq_stop() turns off enough stuff; I was still getting
  *	    seeq interrupts after sq_stop().
- *	(4) Implement EDLC modes: especially packet auto-pad and simplex
- *	    mode.
  *	(5) Should the driver filter out its own transmissions in non-EDLC
  *	    mode?
  *	(6) Multicast support -- multicast filter, address management, ...
@@ -97,6 +95,10 @@
  *	    to figure out if RB0 is read-only as stated in one spot in the
  *	    HPC spec or read-write (ie, is the 'write a one to clear it')
  *	    the correct thing?
+ *
+ * Note that it is no use to implement EDLC auto-padding: the HPC glue will
+ * not start a packet transfer until it has been fed 64 bytes, which defeats
+ * the auto-padding purpose.
  */
 
 #ifdef SQ_DEBUG
@@ -227,9 +229,15 @@ sq_attach(struct device *parent, struct device *self, void *aux)
 		goto fail_0;
 	}
 
+	/*
+	 * Note that we need to pass BUS_DMA_BUS1 in order to get this
+	 * allocation to succeed on ECC MC systems. This code is
+	 * uncached-write safe, as all updates of the DMA descriptors are
+	 * handled in RCU style with hpc_{read,write}_dma_desc().
+	 */
 	if ((rc = bus_dmamem_map(sc->sc_dmat, &sc->sc_cdseg, sc->sc_ncdseg,
 	    sizeof(struct sq_control), (caddr_t *)&sc->sc_control,
-	    BUS_DMA_NOWAIT | BUS_DMA_COHERENT)) != 0) {
+	    BUS_DMA_NOWAIT | BUS_DMA_COHERENT | BUS_DMA_BUS1)) != 0) {
 		printf(": unable to map control data, error = %d\n", rc);
 		goto fail_1;
 	}
@@ -303,7 +311,7 @@ sq_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/*
-	 * Set up HPC ethernet PIO and DMA configurations.
+	 * Set up HPC Ethernet PIO and DMA configurations.
 	 *
 	 * The PROM appears to do most of this for the onboard HPC3, but
 	 * not for the Challenge S's IOPLUS chip. We copy how the onboard
@@ -433,12 +441,14 @@ sq_attach(struct device *parent, struct device *self, void *aux)
 		}
 	} else {
 		/*
-		 * HPC1/1.5: IP20 on-board, or E++: AUI connector only
+		 * HPC1/1.5: IP20 on-board, or E++: AUI connector only,
+		 * and career information unreliable.
 		 */
 		ifmedia_init(&sc->sc_ifmedia, 0,
 		    sq_ifmedia_change_singlemedia,
 		    sq_ifmedia_status_singlemedia);
 		media = IFM_ETHER | IFM_10_5;
+		sc->sc_flags |= SQF_NOLINKDOWN;
 	}
 
 	ifmedia_add(&sc->sc_ifmedia, media, 0, NULL);
@@ -524,6 +534,9 @@ sq_init(struct ifnet *ifp)
 		sq_seeq_write(sc, SEEQ_TXCMD, TXCMD_BANK2);
 		sq_seeq_write(sc, SEEQ_TXCTRL, 0);
 		sq_seeq_write(sc, SEEQ_TXCTRL, TXCTRL_SQE | TXCTRL_NOCARR);
+#if 0 /* HPC expects a minimal packet size of ETHER_MIN_LEN anyway */
+		sq_seeq_write(sc, SEEQ_CFG, CFG_TX_AUTOPAD);
+#endif
 		sq_seeq_write(sc, SEEQ_TXCMD, TXCMD_BANK0);
 	}
 
@@ -538,7 +551,7 @@ sq_init(struct ifnet *ifp)
 	/* Pass the start of the receive ring to the HPC */
 	sq_hpc_write(sc, sc->hpc_regs->enetr_ndbp, SQ_CDRXADDR(sc, 0));
 
-	/* And turn on the HPC ethernet receive channel */
+	/* And turn on the HPC Ethernet receive channel */
 	sq_hpc_write(sc, sc->hpc_regs->enetr_ctl,
 	    sc->hpc_regs->enetr_ctl_active);
 
@@ -561,19 +574,9 @@ sq_set_filter(struct sq_softc *sc)
 {
 	struct arpcom *ac = &sc->sc_ac;
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
-	struct ether_multi *enm;
-	struct ether_multistep step;
 
-	/*
-	 * Check for promiscuous mode.  Also implies
-	 * all-multicast.
-	 */
-	if (ifp->if_flags & IFF_PROMISC) {
-		sc->sc_rxcmd &= ~RXCMD_REC_MASK;
-		sc->sc_rxcmd |= RXCMD_REC_ALL;
-		ifp->if_flags |= IFF_ALLMULTI;
-		return;
-	}
+	sc->sc_rxcmd &= ~RXCMD_REC_MASK;
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
 	/*
 	 * The 8003 has no hash table.  If we have any multicast
@@ -582,18 +585,19 @@ sq_set_filter(struct sq_softc *sc)
 	 *
 	 * XXX The 80c03 has a hash table.  We should use it.
 	 */
-
-	ETHER_FIRST_MULTI(step, ac, enm);
-
-	if (enm == NULL) {
-		sc->sc_rxcmd &= ~RXCMD_REC_MASK;
-		sc->sc_rxcmd |= RXCMD_REC_BROAD;
-		ifp->if_flags &= ~IFF_ALLMULTI;
-		return;
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multicnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			sc->sc_rxcmd |= RXCMD_REC_ALL;
+		else
+			sc->sc_rxcmd |= RXCMD_REC_MULTI;
 	}
 
-	sc->sc_rxcmd |= RXCMD_REC_MULTI;
-	ifp->if_flags |= IFF_ALLMULTI;
+	/*
+	 * Unless otherwise specified, always accept broadcast frames.
+	 */
+	if ((sc->sc_rxcmd & ~RXCMD_REC_MASK) == RXCMD_REC_NONE)
+		sc->sc_rxcmd |= RXCMD_REC_BROAD;
 }
 
 int
@@ -660,9 +664,10 @@ void
 sq_start(struct ifnet *ifp)
 {
 	struct sq_softc *sc = ifp->if_softc;
-	uint32_t status;
 	struct mbuf *m0, *m;
+	struct hpc_dma_desc *txd, txd_store;
 	bus_dmamap_t dmamap;
+	uint32_t status;
 	int err, len, totlen, nexttx, firsttx, lasttx = -1, ofree, seg;
 
 	if ((ifp->if_flags & (IFF_RUNNING|IFF_OACTIVE)) != IFF_RUNNING)
@@ -725,7 +730,8 @@ sq_start(struct ifnet *ifp)
 			}
 
 			m_copydata(m0, 0, len, mtod(m, void *));
-			if (len < ETHER_PAD_LEN) {
+			if (len < ETHER_PAD_LEN /* &&
+			    sc->sc_type != SQ_TYPE_80C03 */) {
 				memset(mtod(m, char *) + len, 0,
 				    ETHER_PAD_LEN - len);
 				len = ETHER_PAD_LEN;
@@ -792,31 +798,31 @@ sq_start(struct ifnet *ifp)
 		for (nexttx = sc->sc_nexttx, seg = 0, totlen = 0;
 		     seg < dmamap->dm_nsegs;
 		     seg++, nexttx = SQ_NEXTTX(nexttx)) {
+			txd = hpc_read_dma_desc(sc->sc_txdesc + nexttx,
+			    &txd_store);
 			if (sc->hpc_regs->revision == 3) {
-				sc->sc_txdesc[nexttx].hpc3_hdd_bufptr =
+				txd->hpc3_hdd_bufptr =
 				    dmamap->dm_segs[seg].ds_addr;
-				sc->sc_txdesc[nexttx].hpc3_hdd_ctl =
-				    dmamap->dm_segs[seg].ds_len;
+				txd->hpc3_hdd_ctl = dmamap->dm_segs[seg].ds_len;
 			} else {
-				sc->sc_txdesc[nexttx].hpc1_hdd_bufptr =
+				txd->hpc1_hdd_bufptr =
 				    dmamap->dm_segs[seg].ds_addr;
-				sc->sc_txdesc[nexttx].hpc1_hdd_ctl =
-				    dmamap->dm_segs[seg].ds_len;
+				txd->hpc1_hdd_ctl = dmamap->dm_segs[seg].ds_len;
 			}
-			sc->sc_txdesc[nexttx].hdd_descptr =
-			    SQ_CDTXADDR(sc, SQ_NEXTTX(nexttx));
+			txd->hdd_descptr = SQ_CDTXADDR(sc, SQ_NEXTTX(nexttx));
+			hpc_write_dma_desc(sc->sc_txdesc + nexttx, txd);
 			lasttx = nexttx;
 			totlen += dmamap->dm_segs[seg].ds_len;
 		}
 
 		/* Last descriptor gets end-of-packet */
 		KASSERT(lasttx != -1);
+		/* txd = hpc_read_dma_desc(sc->sc_txdesc + lasttx, &txd_store); */
 		if (sc->hpc_regs->revision == 3)
-			sc->sc_txdesc[lasttx].hpc3_hdd_ctl |=
-			    HPC3_HDD_CTL_EOPACKET;
+			txd->hpc3_hdd_ctl |= HPC3_HDD_CTL_EOPACKET;
 		else
-			sc->sc_txdesc[lasttx].hpc1_hdd_ctl |=
-			    HPC1_HDD_CTL_EOPACKET;
+			txd->hpc1_hdd_ctl |= HPC1_HDD_CTL_EOPACKET;
+		hpc_write_dma_desc(sc->sc_txdesc + lasttx, txd);
 
 		SQ_DPRINTF(("%s: transmit %d-%d, len %d\n",
 		    sc->sc_dev.dv_xname, sc->sc_nexttx, lasttx, totlen));
@@ -872,15 +878,15 @@ sq_start(struct ifnet *ifp)
 		 * addition to HPC3_HDD_CTL_INTR to interrupt.
 		 */
 		KASSERT(lasttx != -1);
+		txd = hpc_read_dma_desc(sc->sc_txdesc + lasttx, &txd_store);
 		if (sc->hpc_regs->revision == 3) {
-			sc->sc_txdesc[lasttx].hpc3_hdd_ctl |=
+			txd->hpc3_hdd_ctl |=
 			    HPC3_HDD_CTL_INTR | HPC3_HDD_CTL_EOCHAIN;
 		} else {
-			sc->sc_txdesc[lasttx].hpc1_hdd_ctl |= HPC1_HDD_CTL_INTR;
-			sc->sc_txdesc[lasttx].hpc1_hdd_bufptr |=
-			    HPC1_HDD_CTL_EOCHAIN;
+			txd->hpc1_hdd_ctl |= HPC1_HDD_CTL_INTR;
+			txd->hpc1_hdd_bufptr |= HPC1_HDD_CTL_EOCHAIN;
 		}
-
+		hpc_write_dma_desc(sc->sc_txdesc + lasttx, txd);
 		SQ_CDTXSYNC(sc, lasttx, 1,
 		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
@@ -901,17 +907,18 @@ sq_start(struct ifnet *ifp)
 		if ((status & sc->hpc_regs->enetx_ctl_active) != 0) {
 			SQ_TRACE(SQ_ADD_TO_DMA, sc, firsttx, status);
 
+			txd = hpc_read_dma_desc(sc->sc_txdesc +
+			    SQ_PREVTX(firsttx), &txd_store);
 			/*
 			 * NB: hpc3_hdd_ctl == hpc1_hdd_bufptr, and
 			 * HPC1_HDD_CTL_EOCHAIN == HPC3_HDD_CTL_EOCHAIN
 			 */
-			sc->sc_txdesc[SQ_PREVTX(firsttx)].hpc3_hdd_ctl &=
-			    ~HPC3_HDD_CTL_EOCHAIN;
-
+			txd->hpc3_hdd_ctl &= ~HPC3_HDD_CTL_EOCHAIN;
 			if (sc->hpc_regs->revision != 3)
-				sc->sc_txdesc[SQ_PREVTX(firsttx)].hpc1_hdd_ctl
-				    &= ~HPC1_HDD_CTL_INTR;
+				txd->hpc1_hdd_ctl &= ~HPC1_HDD_CTL_INTR;
 
+			hpc_write_dma_desc(sc->sc_txdesc + SQ_PREVTX(firsttx),
+			    txd);
 			SQ_CDTXSYNC(sc, SQ_PREVTX(firsttx),  1,
 			    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 		} else if (sc->hpc_regs->revision == 3) {
@@ -1059,8 +1066,10 @@ sq_intr(void *arg)
 	/*
 	 * Check for loss of carrier detected during transmission if we
 	 * can detect it.
+	 * Unfortunately, this does not work on IP20 and E++ designs.
 	 */
-	if (sc->sc_type == SQ_TYPE_80C03) {
+	if (sc->sc_type == SQ_TYPE_80C03 &&
+	    !ISSET(sc->sc_flags, SQF_NOLINKDOWN)) {
 		sqe = sq_seeq_read(sc, SEEQ_SQE) & (SQE_FLAG | SQE_NOCARR);
 		if (sqe != 0) {
 			sq_seeq_write(sc, SEEQ_TXCMD,
@@ -1108,6 +1117,7 @@ sq_rxintr(struct sq_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	struct mbuf* m;
+	struct hpc_dma_desc *rxd, rxd_store;
 	int i, framelen;
 	uint8_t pktstat;
 	uint32_t status;
@@ -1209,12 +1219,16 @@ sq_rxintr(struct sq_softc *sc)
 		 */
 
 		new_end = SQ_PREVRX(i);
-		sc->sc_rxdesc[new_end].hpc3_hdd_ctl |= HPC3_HDD_CTL_EOCHAIN;
+		rxd = hpc_read_dma_desc(sc->sc_rxdesc + new_end, &rxd_store);
+		rxd->hpc3_hdd_ctl |= HPC3_HDD_CTL_EOCHAIN;
+		hpc_write_dma_desc(sc->sc_rxdesc + new_end, rxd);
 		SQ_CDRXSYNC(sc, new_end,
 		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
 		orig_end = SQ_PREVRX(sc->sc_nextrx);
-		sc->sc_rxdesc[orig_end].hpc3_hdd_ctl &= ~HPC3_HDD_CTL_EOCHAIN;
+		rxd = hpc_read_dma_desc(sc->sc_rxdesc + orig_end, &rxd_store);
+		rxd->hpc3_hdd_ctl &= ~HPC3_HDD_CTL_EOCHAIN;
+		hpc_write_dma_desc(sc->sc_rxdesc + orig_end, rxd);
 		SQ_CDRXSYNC(sc, orig_end,
 		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
@@ -1229,7 +1243,7 @@ sq_rxintr(struct sq_softc *sc)
 		sq_hpc_write(sc, sc->hpc_regs->enetr_ndbp,
 		    SQ_CDRXADDR(sc, sc->sc_nextrx));
 
-		/* And turn on the HPC ethernet receive channel */
+		/* And turn on the HPC Ethernet receive channel */
 		sq_hpc_write(sc, sc->hpc_regs->enetr_ctl,
 		    sc->hpc_regs->enetr_ctl_active);
 	}
