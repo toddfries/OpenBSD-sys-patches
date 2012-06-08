@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.27 2012/04/21 12:20:30 miod Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.29 2012/05/27 14:27:10 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -69,6 +69,10 @@
 #include <machine/autoconf.h>
 
 #include <machine/bus.h>
+
+#if defined(TGT_INDIGO2)
+#include <sgi/sgi/ip22.h>
+#endif
 
 /*
  * Common function for DMA map creation.  May be called by bus-specific
@@ -394,7 +398,8 @@ _dmamem_alloc(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
     int flags)
 {
 	return _dmamem_alloc_range(t, size, alignment, boundary,
-	    segs, nsegs, rsegs, flags, (vaddr_t)0, (vaddr_t)-1);
+	    segs, nsegs, rsegs, flags,
+	    dma_constraint.ucr_low, dma_constraint.ucr_high);
 }
 
 /*
@@ -438,6 +443,18 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 	paddr_t pa;
 	bus_addr_t addr;
 	int curseg, error;
+
+#if defined(TGT_INDIGO2)
+	/*
+	 * On ECC MC systems, which do not allow uncached writes to memory
+	 * during regular operation, fail requests for uncached (coherent)
+	 * memory, unless the caller tells us it is aware of this and will
+	 * do the right thing, by passing BUS_DMA_BUS1 as well.
+	 */
+	if ((flags & (BUS_DMA_COHERENT | BUS_DMA_BUS1)) == BUS_DMA_COHERENT &&
+	    ip22_ecc)
+		return EINVAL;
+#endif
 
 	if (nsegs == 1) {
 		pa = (*t->_device_to_pa)(segs[0].ds_addr);
@@ -653,7 +670,7 @@ _dmamap_load_buffer(bus_dma_tag_t t, bus_dmamap_t map, void *buf,
 int
 _dmamem_alloc_range(bus_dma_tag_t t, bus_size_t size, bus_size_t alignment,
     bus_size_t boundary, bus_dma_segment_t *segs, int nsegs, int *rsegs,
-    int flags, vaddr_t low, vaddr_t high)
+    int flags, paddr_t low, paddr_t high)
 {
 	vaddr_t curaddr, lastaddr;
 	vm_page_t m;
