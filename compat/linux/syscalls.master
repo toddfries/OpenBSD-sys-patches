@@ -1,4 +1,4 @@
-	$OpenBSD: syscalls.master,v 1.66 2011/12/14 08:33:18 robert Exp $
+	$OpenBSD: syscalls.master,v 1.69 2012/06/08 14:28:23 pirofti Exp $
 ;	$NetBSD: syscalls.master,v 1.15 1995/12/18 14:35:10 fvdl Exp $
 
 ;	@(#)syscalls.master	8.1 (Berkeley) 7/19/93
@@ -366,7 +366,7 @@
 			    void *arg); }
 222	UNIMPL
 223	UNIMPL
-224	UNIMPL		linux_sys_gettid
+224	STD		{ linux_pid_t linux_sys_gettid(void); }
 225	UNIMPL		linux_sys_readahead
 226	NOARGS		{ int linux_sys_setxattr(void); }
 227	NOARGS		{ int linux_sys_lsetxattr(void); }
@@ -416,8 +416,10 @@
 266	STD		{ int linux_sys_clock_getres(clockid_t which, \
 			    struct l_timespec *tp); }
 267	UNIMPL		linux_sys_clock_nanosleep
-268	UNIMPL		linux_sys_statfs64
-269	UNIMPL		linux_sys_fstatfs64
+268	STD		{ int linux_sys_statfs64(char *path, \
+			    struct linux_statfs64 *sp); }
+269	STD		{ int linux_sys_fstatfs64(int fd, \
+			    struct linux_statfs64 *sp); }
 270	UNIMPL		linux_sys_tgkill
 271	UNIMPL		linux_sys_utimes
 272	UNIMPL		linux_sys_fadvise64_64
