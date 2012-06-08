@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_timeout.c,v 1.33 2011/05/10 00:58:42 dlg Exp $	*/
+/*	$OpenBSD: kern_timeout.c,v 1.35 2012/06/02 00:11:16 guenther Exp $	*/
 /*
  * Copyright (c) 2001 Thomas Nordin <nordin@openbsd.org>
  * Copyright (c) 2000-2001 Artur Grabowski <art@openbsd.org>
@@ -343,6 +343,40 @@ softclock(void *arg)
 	}
 	mtx_leave(&timeout_mutex);
 }
+
+#ifndef SMALL_KERNEL
+void
+timeout_adjust_ticks(int adj)
+{
+	struct timeout *to;
+	struct circq *p;
+	int new_ticks, b, old;
+
+	/* adjusting the monotonic clock backwards would be a Bad Thing */
+	if (adj <= 0)
+		return;
+
+	mtx_enter(&timeout_mutex);
+	new_ticks = ticks + adj;
+	for (b = 0; b < nitems(timeout_wheel); b++) {
+		p = CIRCQ_FIRST(&timeout_wheel[b]);
+		while (p != &timeout_wheel[b]) {
+			to = (struct timeout *)p; /* XXX */
+			p = CIRCQ_FIRST(p);
+
+			old = to->to_time;
+
+			/* when moving a timeout forward need to reinsert it */
+			if (to->to_time - ticks < adj)
+				to->to_time = new_ticks;
+			CIRCQ_REMOVE(&to->to_list);
+			CIRCQ_INSERT(&to->to_list, &timeout_todo);
+		}
+	}
+	ticks = new_ticks;
+	mtx_leave(&timeout_mutex);
+}
+#endif
 
 #ifdef DDB
 void db_show_callout_bucket(struct circq *);
