@@ -1,4 +1,4 @@
-/*	$OpenBSD: unistd.h,v 1.22 2012/05/30 19:34:30 matthew Exp $	*/
+/*	$OpenBSD: unistd.h,v 1.24 2012/06/21 00:56:59 guenther Exp $	*/
 /*	$NetBSD: unistd.h,v 1.10 1994/06/29 06:46:06 cgd Exp $	*/
 
 /*
@@ -63,6 +63,13 @@
 struct __tfork {
 	void	*tf_tcb;
 	pid_t	*tf_tid;
+	void	*tf_stack;
+};
+
+/* COMPAT_O51 */
+struct __tfork51 {
+	void	*tf_tcb;
+	pid_t	*tf_tid;
 	int	tf_flags;
 };
 #endif
@@ -79,5 +86,16 @@ struct __tfork {
 #define	_PC_CHOWN_RESTRICTED	 7
 #define	_PC_NO_TRUNC		 8
 #define	_PC_VDISABLE		 9
+#define	_PC_2_SYMLINKS		10
+#define	_PC_ALLOC_SIZE_MIN	11
+#define	_PC_ASYNC_IO		12
+#define	_PC_FILESIZEBITS	13
+#define	_PC_PRIO_IO		14
+#define	_PC_REC_INCR_XFER_SIZE	15
+#define	_PC_REC_MAX_XFER_SIZE	16
+#define	_PC_REC_MIN_XFER_SIZE	17
+#define	_PC_REC_XFER_ALIGN	18
+#define	_PC_SYMLINK_MAX		19
+#define	_PC_SYNC_IO		20
 
 #endif /* !_SYS_UNISTD_H_ */
