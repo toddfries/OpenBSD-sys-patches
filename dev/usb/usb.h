@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.h,v 1.39 2012/01/08 13:12:38 miod Exp $ */
+/*	$OpenBSD: usb.h,v 1.41 2012/06/20 10:51:27 fgsch Exp $ */
 /*	$NetBSD: usb.h,v 1.69 2002/09/22 23:20:50 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.14 1999/11/17 22:33:46 n_hibma Exp $	*/
 
@@ -481,6 +481,10 @@ typedef struct {
 #define   UIPROTO_BLUETOOTH		0x01
 #define   UIPROTO_RNDIS			0x03
 
+#define UICLASS_MISC		0xef
+#define  UISUBCLASS_SYNC		0x01
+#define   UIPROTO_ACTIVESYNC		0x01
+
 #define UICLASS_APPL_SPEC	0xfe
 #define  UISUBCLASS_FIRMWARE_DOWNLOAD	1
 #define  UISUBCLASS_IRDA		2
@@ -646,29 +650,6 @@ struct usb_ctl_report {
 
 struct usb_device_stats {
 	u_long	uds_requests[4];	/* indexed by transfer type UE_* */
-};
-
-/* Events that can be read from /dev/usb */
-struct usb_event {
-	int			ue_type;
-#define USB_EVENT_CTRLR_ATTACH 1
-#define USB_EVENT_CTRLR_DETACH 2
-#define USB_EVENT_DEVICE_ATTACH 3
-#define USB_EVENT_DEVICE_DETACH 4
-#define USB_EVENT_DRIVER_ATTACH 5
-#define USB_EVENT_DRIVER_DETACH 6
-#define USB_EVENT_IS_ATTACH(n) ((n) == USB_EVENT_CTRLR_ATTACH || (n) == USB_EVENT_DEVICE_ATTACH || (n) == USB_EVENT_DRIVER_ATTACH)
-#define USB_EVENT_IS_DETACH(n) ((n) == USB_EVENT_CTRLR_DETACH || (n) == USB_EVENT_DEVICE_DETACH || (n) == USB_EVENT_DRIVER_DETACH)
-	struct timespec		ue_time;
-	union {
-		struct {
-			int			ue_bus;
-		} ue_ctrlr;
-		struct usb_device_info		ue_device;
-		struct {
-			char			ue_devname[16];
-		} ue_driver;
-	} u;
 };
 
 /* USB controller */
