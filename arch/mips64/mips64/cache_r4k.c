@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache_r4k.c,v 1.5 2012/05/27 19:13:04 miod Exp $	*/
+/*	$OpenBSD: cache_r4k.c,v 1.7 2012/06/24 20:25:58 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -37,7 +37,7 @@
 #define	cache(op,addr) \
     __asm__ __volatile__ ("cache %0, 0(%1)" :: "i"(op), "r"(addr) : "memory")
 #define	sync() \
-    __asm__ __volatile__ ("sync" ::: "memory");
+    __asm__ __volatile__ ("sync" ::: "memory")
 
 static __inline__ void	mips4k_hitinv_primary(vaddr_t, vsize_t, vsize_t);
 static __inline__ void	mips4k_hitinv_secondary(vaddr_t, vsize_t, vsize_t);
@@ -74,9 +74,10 @@ Mips4k_ConfigCache(struct cpu_info *ci)
 
 	if ((cfg & (1 << 17)) == 0) {	/* SC */
 		/*
-		 * We expect the setup code to have set up ci->ci_l2size for
-		 * us. Unfortunately we aren't allowed to panic() there,
-		 * because the console is not available.
+		 * We expect the setup code to have set up ci->ci_l2size and
+		 * ci->ci_l2line for us. Unfortunately we aren't allowed to
+		 * panic() there if it didn't, because the console is not
+		 * available.
 		 */
 
 		/* fixed 32KB aliasing to avoid VCE */
@@ -91,6 +92,13 @@ Mips4k_ConfigCache(struct cpu_info *ci)
 		cache_valias_mask |= PAGE_MASK;
 		pmap_prefer_mask |= cache_valias_mask;
 	}
+
+	ci->ci_SyncCache = Mips4k_SyncCache;
+	ci->ci_InvalidateICache = Mips4k_InvalidateICache;
+	ci->ci_SyncDCachePage = Mips4k_SyncDCachePage;
+	ci->ci_HitSyncDCache = Mips4k_HitSyncDCache;
+	ci->ci_HitInvalidateDCache = Mips4k_HitInvalidateDCache;
+	ci->ci_IOSyncDCache = Mips4k_IOSyncDCache;
 
 	ncfg = (cfg & ~7) | CCA_CACHED;
 	ncfg &= ~(1 << 4);
@@ -375,10 +383,11 @@ Mips4k_IOSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz, int how)
 			sz -= line;
 		}
 		if (sz != 0 && partial_end) {
-			cache(HitWBInvalidate_D, va + sz - line);
 			sz -= line;
+			cache(HitWBInvalidate_D, va + sz);
 		}
-		mips4k_hitinv_primary(va, sz, line);
+		if (sz != 0)
+			mips4k_hitinv_primary(va, sz, line);
 		break;
 	case CACHE_SYNC_X:
 	case CACHE_SYNC_W:
@@ -411,10 +420,11 @@ Mips4k_IOSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz, int how)
 				sz -= line;
 			}
 			if (sz != 0 && partial_end) {
-				cache(HitWBInvalidate_S, va + sz - line);
 				sz -= line;
+				cache(HitWBInvalidate_S, va + sz);
 			}
-			mips4k_hitinv_secondary(va, sz, line);
+			if (sz != 0)
+				mips4k_hitinv_secondary(va, sz, line);
 			break;
 		case CACHE_SYNC_X:
 		case CACHE_SYNC_W:
