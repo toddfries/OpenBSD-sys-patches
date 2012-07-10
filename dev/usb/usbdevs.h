@@ -1,7 +1,11 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
 =======
 /*	$OpenBSD: usbdevs.h,v 1.589 2012/04/08 12:15:59 jsg Exp $	*/
+>>>>>>> master
+=======
+/*	$OpenBSD: usbdevs.h,v 1.590 2012/07/07 17:59:44 jasper Exp $	*/
 >>>>>>> master
 
 /*
@@ -9,9 +13,13 @@
  *
  * generated from:
 <<<<<<< HEAD
+<<<<<<< HEAD
  *	OpenBSD: usbdevs,v 1.577 2012/03/26 19:10:19 claudio Exp 
 =======
  *	OpenBSD: usbdevs,v 1.579 2012/04/08 12:15:21 jsg Exp 
+>>>>>>> master
+=======
+ *	OpenBSD: usbdevs,v 1.580 2012/07/07 17:59:03 jasper Exp 
 >>>>>>> master
  */
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
@@ -1208,6 +1216,7 @@
 
 /* Chicony products */
 #define	USB_PRODUCT_CHICONY_KB8933	0x0001		/* KB-8933 keyboard */
+#define	USB_PRODUCT_CHICONY_CAMERA	0x480c		/* Integrated Camera */
 #define	USB_PRODUCT_CHICONY_RTL8188CUS_1	0xaff7		/* RTL8188CUS */
 #define	USB_PRODUCT_CHICONY_RTL8188CUS_2	0xaff8		/* RTL8188CUS */
 #define	USB_PRODUCT_CHICONY_RTL8188CUS_3	0xaff9		/* RTL8188CUS */

@@ -1,7 +1,11 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
 /*	$OpenBSD$	*/
 =======
 /*	$OpenBSD: usbdevs_data.h,v 1.583 2012/04/08 12:15:59 jsg Exp $	*/
+>>>>>>> master
+=======
+/*	$OpenBSD: usbdevs_data.h,v 1.584 2012/07/07 17:59:45 jasper Exp $	*/
 >>>>>>> master
 
 /*
@@ -9,9 +13,13 @@
  *
  * generated from:
 <<<<<<< HEAD
+<<<<<<< HEAD
  *	OpenBSD: usbdevs,v 1.577 2012/03/26 19:10:19 claudio Exp 
 =======
  *	OpenBSD: usbdevs,v 1.579 2012/04/08 12:15:21 jsg Exp 
+>>>>>>> master
+=======
+ *	OpenBSD: usbdevs,v 1.580 2012/07/07 17:59:03 jasper Exp 
 >>>>>>> master
  */
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
@@ -1632,6 +1640,10 @@ const struct usb_known_product usb_known_products[] = {
 	{
 	    USB_VENDOR_CHICONY, USB_PRODUCT_CHICONY_KB8933,
 	    "KB-8933 keyboard",
+	},
+	{
+	    USB_VENDOR_CHICONY, USB_PRODUCT_CHICONY_CAMERA,
+	    "Integrated Camera",
 	},
 	{
 	    USB_VENDOR_CHICONY, USB_PRODUCT_CHICONY_RTL8188CUS_1,
