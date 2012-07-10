@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.233 2012/05/24 19:59:22 kettenis Exp $ */
+/* $OpenBSD: acpi.c,v 1.236 2012/07/09 15:29:24 deraadt Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -142,7 +142,6 @@ int	acpi_add_device(struct aml_node *node, void *arg);
 
 struct gpe_block *acpi_find_gpe(struct acpi_softc *, int);
 void	acpi_enable_onegpe(struct acpi_softc *, int);
-void	acpi_disable_onegpe(struct acpi_softc *, int);
 int	acpi_gpe(struct acpi_softc *, int, void *);
 
 void	acpi_enable_rungpes(struct acpi_softc *);
@@ -1635,22 +1634,6 @@ acpi_enable_onegpe(struct acpi_softc *sc, int gpe)
 	splx(s);
 }
 
-void
-acpi_disable_onegpe(struct acpi_softc *sc, int gpe)
-{
-	uint8_t mask, en;
-	int s;
-
-	/* Read enabled register */
-	s = spltty();
-	mask = (1L << (gpe & 7));
-	en = acpi_read_pmreg(sc, ACPIREG_GPE_EN, gpe>>3);
-	dnprintf(50, "disabling GPE %.2x (current: %sabled) %.2x\n",
-	    gpe, (en & mask) ? "en" : "dis", en);
-	acpi_write_pmreg(sc, ACPIREG_GPE_EN, gpe>>3, en & ~mask);
-	splx(s);
-}
-
 /* Clear all GPEs */
 void
 acpi_disable_allgpes(struct acpi_softc *sc)
@@ -2516,24 +2499,23 @@ acpiioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case APM_IOC_STANDBY:
 		if ((flag & FWRITE) == 0) {
 			error = EBADF;
-		} else {
-			acpi_addtask(sc, acpi_sleep_task, sc, ACPI_STATE_S3);
-			acpi_wakeup(sc);
+			break;
 		}
+		acpi_addtask(sc, acpi_sleep_task, sc, ACPI_STATE_S3);
+		acpi_wakeup(sc);
 		break;
 #ifdef HIBERNATE
 	case APM_IOC_HIBERNATE:
 		if ((flag & FWRITE) == 0) {
 			error = EBADF;
-		} else {
-			if (get_hibernate_io_function() == NULL) {
-				error = EOPNOTSUPP;
-			} else {
-				acpi_addtask(sc, acpi_sleep_task, sc,
-					ACPI_STATE_S4);
-				acpi_wakeup(sc);
-			}
+			break;
 		}
+		if (get_hibernate_io_function() == NULL) {
+			error = EOPNOTSUPP;
+			break;
+		}
+		acpi_addtask(sc, acpi_sleep_task, sc, ACPI_STATE_S4);
+		acpi_wakeup(sc);
 		break;
 #endif
 	case APM_IOC_GETPOWER:
