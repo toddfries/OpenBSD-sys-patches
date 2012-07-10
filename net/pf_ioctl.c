@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.250 2012/04/03 15:09:03 mikeb Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.253 2012/07/08 07:58:09 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1088,9 +1088,10 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			error = EINVAL;
 		if (rule->rt && !rule->direction)
 			error = EINVAL;
-		if ((rule->prio[0] != PF_PRIO_NOTSET && rule->prio[0] >
-		    IFQ_MAXPRIO) || (rule->prio[1] != PF_PRIO_NOTSET &&
-                    rule->prio[1] > IFQ_MAXPRIO))
+		if ((rule->set_prio[0] != PF_PRIO_NOTSET &&
+		    rule->set_prio[0] > IFQ_MAXPRIO) ||
+		    (rule->set_prio[1] != PF_PRIO_NOTSET &&
+                    rule->set_prio[1] > IFQ_MAXPRIO))
 			error = EINVAL;
 
 		if (error) {
@@ -1346,14 +1347,15 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		for (s = RB_MIN(pf_state_tree_id, &tree_id); s;
 		    s = nexts) {
 			nexts = RB_NEXT(pf_state_tree_id, &tree_id, s);
-			sk = s->key[PF_SK_WIRE];
 
 			if (s->direction == PF_OUT) {
+				sk = s->key[PF_SK_STACK];
 				srcaddr = &sk->addr[1];
 				dstaddr = &sk->addr[0];
 				srcport = sk->port[0];
 				dstport = sk->port[0];
 			} else {
+				sk = s->key[PF_SK_WIRE];
 				srcaddr = &sk->addr[0];
 				dstaddr = &sk->addr[1];
 				srcport = sk->port[0];
@@ -2595,8 +2597,6 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 #if NPFLOG > 0
 	if (!to->log)
 		to->logif = 0;
-	if (to->logif >= PFLOGIFS_MAX)
-		return (EINVAL);
 #endif
 	to->quick = from->quick;
 	to->ifnot = from->ifnot;
@@ -2622,8 +2622,8 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	to->divert.port = from->divert.port;
 	to->divert_packet.addr = from->divert_packet.addr;
 	to->divert_packet.port = from->divert_packet.port;
-	to->prio[0] = from->prio[0];
-	to->prio[1] = from->prio[1];
+	to->set_prio[0] = from->set_prio[0];
+	to->set_prio[1] = from->set_prio[1];
 
 	return (0);
 }
