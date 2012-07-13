@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_hibernate.c,v 1.40 2012/07/09 09:47:42 deraadt Exp $	*/
+/*	$OpenBSD: subr_hibernate.c,v 1.42 2012/07/12 09:44:09 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -30,6 +30,7 @@
 #include <sys/fcntl.h>
 #include <sys/stat.h>
 #include <uvm/uvm.h>
+#include <uvm/uvm_swap.h>
 #include <machine/hibernate.h>
 
 /* Temporary vaddr ranges used during hibernate */
@@ -796,7 +797,7 @@ void
 hibernate_inflate_region(union hibernate_info *hiber_info, paddr_t dest,
     paddr_t src, size_t size)
 {
-	int rle, end_stream = 0 ;
+	int end_stream = 0 ;
 	struct hibernate_zlib_state *hibernate_state;
 
 	hibernate_state = (struct hibernate_zlib_state *)HIBERNATE_HIBALLOC_PAGE;
@@ -807,19 +808,6 @@ hibernate_inflate_region(union hibernate_info *hiber_info, paddr_t dest,
 	do {
 		/* Flush cache and TLB */
 		hibernate_flush();
-
-		/* Consume RLE skipped pages */
-		do {
-			rle = hibernate_get_next_rle();
-			if (rle == -1) {
-				end_stream = 1;
-				goto next_page;
-			}
-	
-			if (rle != 0)
-				dest += (rle * PAGE_SIZE);
-
-		} while (rle != 0);
 
 		/*
 		 * Is this a special page? If yes, redirect the
@@ -837,7 +825,6 @@ hibernate_inflate_region(union hibernate_info *hiber_info, paddr_t dest,
 		hibernate_flush();
 		end_stream = hibernate_inflate_page();
 
-next_page:
 		dest += PAGE_SIZE;
 	} while (!end_stream);
 }
@@ -1251,7 +1238,7 @@ hibernate_write_chunks(union hibernate_info *hiber_info)
 	struct hibernate_disk_chunk *chunks;
 	vaddr_t hibernate_io_page = hiber_info->piglet_va + PAGE_SIZE;
 	daddr_t blkctr = hiber_info->image_offset, offset = 0;
-	int i, rle;
+	int i;
 	struct hibernate_zlib_state *hibernate_state;
 
 	hibernate_state = (struct hibernate_zlib_state *)HIBERNATE_HIBALLOC_PAGE;
@@ -1332,81 +1319,6 @@ hibernate_write_chunks(union hibernate_info *hiber_info)
 				temp_inaddr = (inaddr & PAGE_MASK) +
 				    hibernate_copy_page;
 				
-				if (hibernate_inflate_skip(hiber_info, inaddr))
-					rle = 1;
-				else
-					rle = uvm_page_rle(inaddr);
-
-				while (rle != 0 && inaddr < range_end) {
-					hibernate_state->hib_stream.next_in =
-					    (char *)&rle;
-					hibernate_state->hib_stream.avail_in =
-					    sizeof(rle);
-					hibernate_state->hib_stream.next_out =
-					    (caddr_t)hibernate_io_page +
-					    (PAGE_SIZE - out_remaining);
-					hibernate_state->hib_stream.avail_out =
-					    out_remaining;
-
-					if (deflate(&hibernate_state->hib_stream,
-					    Z_PARTIAL_FLUSH) != Z_OK)
-						return (1);
-
-					out_remaining =
-					    hibernate_state->hib_stream.avail_out;
-					inaddr += (rle * PAGE_SIZE);
-					if (inaddr > range_end)
-						inaddr = range_end;
-					else
-						rle = uvm_page_rle(inaddr);
-				}
-
-				if (out_remaining == 0) {
-					/* Filled up the page */
-					nblocks = PAGE_SIZE / hiber_info->secsize;
-
-					if (hiber_info->io_func(hiber_info->device,
-					    blkctr, (vaddr_t)hibernate_io_page,
-					    PAGE_SIZE, HIB_W, hiber_info->io_page))
-						return (1);
-
-					blkctr += nblocks;
-					out_remaining = PAGE_SIZE;
-				}
-
-				/* Write '0' RLE code */
-				if (inaddr < range_end) {
-					hibernate_state->hib_stream.next_in =
-					    (char *)&rle;
-					hibernate_state->hib_stream.avail_in =
-					    sizeof(rle);
-					hibernate_state->hib_stream.next_out =
-				    	    (caddr_t)hibernate_io_page +
-					    (PAGE_SIZE - out_remaining);
-					hibernate_state->hib_stream.avail_out =
-					    out_remaining;
-
-					if (deflate(&hibernate_state->hib_stream,
-					    Z_PARTIAL_FLUSH) != Z_OK)
-						return (1);
-
-					out_remaining =
-					    hibernate_state->hib_stream.avail_out;
-				}
-
-				if (out_remaining == 0) {
-					/* Filled up the page */
-					nblocks = PAGE_SIZE / hiber_info->secsize;
-
-					if (hiber_info->io_func(hiber_info->device,
-					    blkctr, (vaddr_t)hibernate_io_page,
-					    PAGE_SIZE, HIB_W, hiber_info->io_page))
-						return (1);
-
-					blkctr += nblocks;
-					out_remaining = PAGE_SIZE;
-				}
-
 				/* Deflate from temp_inaddr to IO page */
 				if (inaddr != range_end) {
 					pmap_kenter_pa(hibernate_temp_page,
@@ -1420,18 +1332,18 @@ hibernate_write_chunks(union hibernate_info *hiber_info)
 					inaddr += hibernate_deflate(hiber_info,
 					    temp_inaddr, &out_remaining);
 				}
-			}
 
-			if (out_remaining == 0) {
-				/* Filled up the page */
-				nblocks = PAGE_SIZE / hiber_info->secsize;
+				if (out_remaining == 0) {
+					/* Filled up the page */
+					nblocks = PAGE_SIZE / hiber_info->secsize;
 
-				if (hiber_info->io_func(hiber_info->device,
-				    blkctr, (vaddr_t)hibernate_io_page,
-				    PAGE_SIZE, HIB_W, hiber_info->io_page))
-					return (1);
+					if (hiber_info->io_func(hiber_info->device,
+					    blkctr, (vaddr_t)hibernate_io_page,
+					    PAGE_SIZE, HIB_W, hiber_info->io_page))
+						return (1);
 
-				blkctr += nblocks;
+					blkctr += nblocks;
+				}
 			}
 		}
 
@@ -1835,6 +1747,7 @@ int
 hibernate_suspend(void)
 {
 	union hibernate_info hib_info;
+	size_t swap_size;
 
 	/*
 	 * Calculate memory ranges, swap offsets, etc.
@@ -1844,7 +1757,16 @@ hibernate_suspend(void)
 	if (get_hibernate_info(&hib_info, 1))
 		return (1);
 
-	pmap_kenter_pa(HIBERNATE_HIBALLOC_PAGE, HIBERNATE_HIBALLOC_PAGE, VM_PROT_ALL);
+	swap_size = hib_info.image_size + hib_info.secsize +
+		HIBERNATE_CHUNK_TABLE_SIZE;
+
+	if (uvm_swap_check_range(hib_info.device, swap_size)) {
+		printf("insufficient swap space for hibernate\n");
+		return (1);
+	}
+
+	pmap_kenter_pa(HIBERNATE_HIBALLOC_PAGE, HIBERNATE_HIBALLOC_PAGE,
+		VM_PROT_ALL);
 	pmap_activate(curproc);
 
 	/* Stash the piglet VA so we can free it in the resuming kernel */
