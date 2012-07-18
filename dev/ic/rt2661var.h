@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2661var.h,v 1.14 2011/03/18 06:05:21 deraadt Exp $	*/
+/*	$OpenBSD: rt2661var.h,v 1.16 2012/07/17 14:43:12 stsp Exp $	*/
 
 /*-
  * Copyright (c) 2006
