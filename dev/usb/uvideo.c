@@ -325,12 +325,6 @@ struct uvideo_devs {
 	    NULL,
 	    UVIDEO_FLAG_VENDOR_CLASS
 	},
-	{   /* Incorrectly reports as bInterfaceClass=UICLASS_VENDOR */
-	    { USB_VENDOR_MICRODIA, USB_PRODUCT_MICRODIA_CAM_2 },
-	    NULL,
-	    NULL,
-	    UVIDEO_FLAG_VENDOR_CLASS
-	},
 };
 #define uvideo_lookup(v, p) \
 	((struct uvideo_devs *)usb_lookup(uvideo_devs, v, p))
