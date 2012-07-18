@@ -346,6 +346,8 @@ wdactivate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_SUSPEND:
+		break;
+	case DVACT_POWERDOWN:
 		wd_flushcache(wd, AT_POLL);
 		wd_standby(wd, AT_POLL);
 		break;

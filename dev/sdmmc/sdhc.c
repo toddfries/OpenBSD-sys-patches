@@ -271,6 +271,9 @@ sdhc_activate(struct device *self, int act)
 		}
 		rv = config_activate_children(self, act);
 		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
+		break;
 	case DVACT_RESUME:
 		/* Restore the host controller state. */
 		for (n = 0; n < sc->sc_nhosts; n++) {

@@ -985,6 +985,9 @@ ahci_pci_activate(struct device *self, int act)
 		break;
 	case DVACT_SUSPEND:
 		rv = config_activate_children(self, act);
+		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
 		for (i = 0; i < AHCI_MAX_PORTS; i++) {
 			if (sc->sc_ports[i] != NULL)
 				ahci_port_stop(sc->sc_ports[i], 1);

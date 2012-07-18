@@ -1099,6 +1099,8 @@ hibernate_resume(void)
 		return;
 	}
 
+	printf("Unhibernating...\n");
+
 	/* Read the image from disk into the image (pig) area */
 	if (hibernate_read_image(&disk_hiber_info))
 		goto fail;

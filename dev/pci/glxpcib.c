@@ -426,6 +426,9 @@ glxpcib_activate(struct device *self, int act)
 #endif
 
 		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
+		break;
 	case DVACT_RESUME:
 #ifndef SMALL_KERNEL
 		if (sc->sc_wdog)

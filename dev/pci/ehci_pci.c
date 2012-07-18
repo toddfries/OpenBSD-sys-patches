@@ -77,7 +77,6 @@ int	ehci_pci_detach(struct device *, int);
 int	ehci_pci_activate(struct device *, int);
 void	ehci_pci_givecontroller(struct ehci_pci_softc *);
 void	ehci_pci_takecontroller(struct ehci_pci_softc *, int);
-void	ehci_pci_shutdown(void *);
 
 struct cfattach ehci_pci_ca = {
 	sizeof(struct ehci_pci_softc), ehci_pci_match, ehci_pci_attach,
@@ -215,7 +214,6 @@ ehci_pci_attach(struct device *parent, struct device *self, void *aux)
 		goto disestablish_ret;
 	}
 
-	sc->sc.sc_shutdownhook = shutdownhook_establish(ehci_pci_shutdown, sc);
 	splx(s);
 
 	/* Attach usb device. */
@@ -238,6 +236,12 @@ ehci_pci_activate(struct device *self, int act)
 
 	/* On resume, take ownership from the BIOS */
 	switch (act) {
+	case DVACT_POWERDOWN:
+#if 0
+		ehci_shutdown(&sc->sc);
+		ehci_pci_givecontroller(sc);
+#endif
+		break;
 	case DVACT_RESUME:
 		ehci_pci_takecontroller(sc, 1);
 		break;
@@ -266,12 +270,12 @@ ehci_pci_detach(struct device *self, int flags)
 	return (0);
 }
 
-#if 0	/* not used */
+#if 0
 void
 ehci_pci_givecontroller(struct ehci_pci_softc *sc)
 {
 	u_int32_t cparams, eec, legsup;
-	int eecp;
+	int eecp, i;
 
 	cparams = EREAD4(&sc->sc, EHCI_HCCPARAMS);
 	for (eecp = EHCI_HCC_EECP(cparams); eecp != 0;
@@ -282,6 +286,13 @@ ehci_pci_givecontroller(struct ehci_pci_softc *sc)
 		legsup = eec;
 		pci_conf_write(sc->sc_pc, sc->sc_tag, eecp,
 		    legsup & ~EHCI_LEGSUP_OSOWNED);
+		for (i = 0; i < 5000; i++) {
+			legsup = pci_conf_read(sc->sc_pc, sc->sc_tag,
+			    eecp);
+			if ((legsup & EHCI_LEGSUP_BIOSOWNED) == 0)
+				break;
+			DELAY(1000);
+		}
 	}
 }
 #endif
@@ -317,18 +328,6 @@ ehci_pci_takecontroller(struct ehci_pci_softc *sc, int silent)
 				    sc->sc.sc_bus.bdev.dv_xname);
 		}
 	}
-}
-
-void
-ehci_pci_shutdown(void *v)
-{
-	struct ehci_pci_softc *sc = (struct ehci_pci_softc *)v;
-
-	ehci_shutdown(&sc->sc);
-#if 0
-	/* best not to do this anymore; BIOS SMM spins? */
-	ehci_pci_givecontroller(sc);
-#endif
 }
 
 int
