@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_hibernate.c,v 1.42 2012/07/12 09:44:09 mlarkin Exp $	*/
+/*	$OpenBSD: subr_hibernate.c,v 1.45 2012/07/16 12:31:15 stsp Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -621,6 +621,11 @@ get_hibernate_info(union hibernate_info *hiber_info, int suspend)
 		printf("Hibernate error reading disklabel: %s\n", dl_ret);
 		return (1);
 	}
+
+	/* Make sure we have a swap partition. */
+	if (dl.d_partitions[1].p_fstype != FS_SWAP ||
+	    dl.d_partitions[1].p_size == 0)
+		return (1);
 
 	hiber_info->secsize = dl.d_secsize;
 
