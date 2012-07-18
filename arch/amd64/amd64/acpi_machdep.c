@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.47 2010/11/13 04:16:42 guenther Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.49 2012/07/13 16:02:24 mlarkin Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -23,6 +23,7 @@
 #include <sys/memrange.h>
 #include <sys/proc.h>
 #include <sys/user.h>
+#include <sys/hibernate.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -209,8 +210,6 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 
 	rtcstop();
 
-	/* amd64 does not do lazy pmap_activate */
-
 	/*
 	 * ACPI defines two wakeup vectors. One is used for ACPI 1.0
 	 * implementations - it's in the FACS table as wakeup_vector and
@@ -237,6 +236,13 @@ acpi_sleep_machdep(struct acpi_softc *sc, int state)
 		x86_broadcast_ipi(X86_IPI_HALT);
 #endif
 		wbinvd();
+#ifdef HIBERNATE
+		if (state == ACPI_STATE_S4) {
+			uvm_pmr_zero_everything();
+			if (hibernate_suspend())
+				panic("%s: hibernate failed", DEVNAME(sc));
+		}
+#endif
 		acpi_enter_sleep_state(sc, state);
 		panic("%s: acpi_enter_sleep_state failed", DEVNAME(sc));
 	}
