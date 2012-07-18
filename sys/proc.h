@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.159 2012/06/13 22:47:40 ariane Exp $	*/
+/*	$OpenBSD: proc.h,v 1.161 2012/07/17 21:59:56 guenther Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -330,6 +330,9 @@ struct proc {
 	struct	sigaltstack p_sigstk;	/* sp & on stack state variable */
 	vaddr_t	p_sigcode;		/* user pointer to the signal code. */
 
+	u_long	p_prof_addr;	/* tmp storage for profiling addr until AST */
+	u_long	p_prof_ticks;	/* tmp storage for profiling ticks until AST */
+
 /* End area that is copied on creation. */
 #define	p_endcopy	p_addr
 
@@ -341,9 +344,6 @@ struct proc {
 	int	p_sisig;	/* For core dump/debugger XXX */
 	int	p_sicode;	/* For core dump/debugger XXX */
 	long	p_sitrapno;	/* For core dump/debugger XXX */
-
-	u_long	p_prof_addr;	/* temp storage for profiling addr util AST */
-	u_long	p_prof_ticks;	/* temp storage for profiling ticks util AST */
 
 	u_short	p_xstat;	/* Exit status for wait; also stop signal. */
 };
@@ -480,8 +480,9 @@ struct uidinfo *uid_find(uid_t);
 #define FORK_PTRACE	0x00000400
 #define FORK_THREAD	0x00000800
 
-#define EXIT_NORMAL	0x00000001
-#define EXIT_THREAD	0x00000002
+#define EXIT_NORMAL		0x00000001
+#define EXIT_THREAD		0x00000002
+#define EXIT_THREAD_NOCHECK	0x00000003
 
 #define	PIDHASH(pid)	(&pidhashtbl[(pid) & pidhash])
 extern LIST_HEAD(pidhashhead, proc) *pidhashtbl;
