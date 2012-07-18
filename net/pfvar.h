@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.364 2012/07/07 16:24:32 henning Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.366 2012/07/13 11:14:04 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -840,13 +840,11 @@ struct pf_state {
 #define	PFSTATE_SETTOS		0x0040
 #define	PFSTATE_RANDOMID	0x0080
 #define	PFSTATE_SCRUB_TCP	0x0100
+#define	PFSTATE_SCRUBMASK (PFSTATE_NODF|PFSTATE_RANDOMID|PFSTATE_SCRUB_TCP)
 	u_int8_t		 log;
 	u_int8_t		 timeout;
 	u_int8_t		 sync_state; /* PFSYNC_S_x */
-
-	/* XXX */
 	u_int8_t		 sync_updates;
-
 	int			 rtableid[2];	/* rtables stack and wire */
 	u_int8_t		 min_ttl;
 	u_int8_t		 set_tos;
