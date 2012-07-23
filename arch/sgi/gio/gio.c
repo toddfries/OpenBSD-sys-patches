@@ -1,4 +1,4 @@
-/*	$OpenBSD: gio.c,v 1.11 2012/05/25 11:31:04 miod Exp $	*/
+/*	$OpenBSD: gio.c,v 1.13 2012/07/18 20:56:46 miod Exp $	*/
 /*	$NetBSD: gio.c,v 1.32 2011/07/01 18:53:46 dyoung Exp $	*/
 
 /*
@@ -312,12 +312,13 @@ gio_attach(struct device *parent, struct device *self, void *aux)
 		ga.ga_iot = sc->sc_iot;
 		ga.ga_ioh = PHYS_TO_XKPHYS(ga.ga_addr, CCA_NC);
 
-		if (gio_id(ga.ga_ioh, ga.ga_addr, 0) == 0)
+		id = gio_id(ga.ga_ioh, ga.ga_addr, 0);
+		if (id == 0)
 			continue;
 
 		ga.ga_dmat = sc->sc_dmat;
 		ga.ga_slot = slot_bases[i].slot;
-		ga.ga_product = bus_space_read_4(ga.ga_iot, ga.ga_ioh, 0);
+		ga.ga_product = id;
 		ga.ga_descr = NULL;
 
 		config_found_sm(self, &ga, gio_print, gio_submatch);
@@ -370,17 +371,26 @@ gio_id(vaddr_t va, paddr_t pa, int maybe_gfx)
 	}
 
 	/*
-	 * GIO32 devices will not answer to addresses not aligned on
-	 * 32 bit boundaries.
+	 * GIO32 devices with a 32-bit ID register will not answer to
+	 * addresses not aligned on 32 bit boundaries.
 	 */
 
 	if (guarded_read_2(va | 2, &id16) != 0 ||
 	    guarded_read_1(va | 3, &id8) != 0) {
 		if (GIO_PRODUCT_32BIT_ID(id32))
 			return id32;
-		else
+		else /* not a frame buffer anyway */
 			return GIO_PRODUCT_PRODUCTID(id32);
 	}
+
+	/*
+	 * Of course, GIO32 devices with a 8-bit ID register can use the
+	 * other bytes in the first 32-bit word for other purposes.
+	 */
+
+	if ((id32 & 0xffff) == id16 && (id32 & 0xff) == id8 &&
+	    !GIO_PRODUCT_32BIT_ID(id8))
+		return /*GIO_PRODUCT_PRODUCTID*/(id8);
 
 	/*
 	 * If there is a frame buffer device, then either we have hit a
