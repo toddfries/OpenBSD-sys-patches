@@ -787,4 +787,9 @@ pseudo-device	hotplug		1	# devices hot plugging
 
 # mouse & keyboard multiplexor pseudo-devices
 pseudo-device	wsmux		2
+
+# Virtio devices
+virtio*		at pci? 	# Virtio PCI device
+vioblk*		at virtio?	# Virtio block device
+vioif*		at virtio?	# Virtio network device
 pseudo-device	crypto		1
