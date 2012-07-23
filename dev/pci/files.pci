@@ -810,3 +810,16 @@ file	dev/pci/itherm.c		itherm
 device	glxpcib: isabus, gpiobus, i2cbus
 attach	glxpcib at pci
 file	dev/pci/glxpcib.c		glxpcib
+
+# VirtIO
+device	virtio {}
+attach	virtio at pci
+file	dev/pci/virtio.c		virtio
+
+device	vioif
+attach	vioif at virtio
+file	dev/pci/if_vioif.c		vioif
+
+device	vioblk: scsi
+attach	vioblk at virtio
+file	dev/pci/vioblk.c		vioblk
