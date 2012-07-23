@@ -111,19 +111,31 @@ disksort(struct buf *ap, struct buf *bp)
 {
 	struct buf *bq;
 
+	/* The ILIMIT below controls how many inserts we may do before the
+	 * first inversion. This keeps large sequetial io's from
+	 * completely starving the second list by always inserting
+	 * into the first list faster than IO can get processed.  This
+	 * magic number is chosen based on the io rate of old
+	 * disks, (where this disksort routine is most relevant) and a desire
+	 * to keep IO responsive during large sequential operations.
+	 */
+	#define ILIMIT  128
+
 	/* If the queue is empty, then it's easy. */
 	if (ap->b_actf == NULL) {
 		bp->b_actf = NULL;
 		ap->b_actf = bp;
+		if (bp->b_bq)
+			bp->b_lastcyl = ap->b_actf->b_cylinder;
 		return;
 	}
-
+	bq = ap->b_actf;
 	/*
 	 * If we lie after the first (currently active) request, then we
 	 * must locate the second request list and add ourselves to it.
 	 */
-	bq = ap->b_actf;
-	if (bp->b_cylinder < bq->b_cylinder) {
+	if ((bp->b_bq && (bp->b_icount > ILIMIT)) ||
+	    (bp->b_cylinder < bq->b_cylinder)) {
 		while (bq->b_actf) {
 			/*
 			 * Check for an ``inversion'' in the normally ascending
@@ -171,15 +183,27 @@ disksort(struct buf *ap, struct buf *bp)
 		if (bq->b_actf->b_cylinder < bq->b_cylinder ||
 		    bp->b_cylinder < bq->b_actf->b_cylinder ||
 		    (bp->b_cylinder == bq->b_actf->b_cylinder &&
-		    bp->b_blkno < bq->b_actf->b_blkno))
+		    bp->b_blkno < bq->b_actf->b_blkno)) {
+			/* I am inserting before an inversion */
+			if (bp->b_bq)
+				bp->b_icount++;
 			goto insert;
+		}
 		bq = bq->b_actf;
 	}
 	/*
 	 * Neither a second list nor a larger request... we go at the end of
 	 * the first list, which is the same as the end of the whole schebang.
 	 */
-insert:	bp->b_actf = bq->b_actf;
+
+insert:	if (bp->b_bq) {
+		/* If we just passed an inversion, reset the counter */
+		if (bp->b_lastcyl > ap->b_actf->b_cylinder) {
+			bp->b_icount = 0;
+		}
+		bp->b_lastcyl = ap->b_actf->b_cylinder;
+	}
+	bp->b_actf = bq->b_actf;
 	bq->b_actf = bp;
 }
 
