@@ -20,6 +20,7 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/mount.h>
 #include <sys/mutex.h>
 #include <sys/buf.h>
 #include <sys/errno.h>
@@ -75,12 +76,29 @@ const struct bufq_impl bufq_impls[BUFQ_HOWMANY] = {
 };
 
 int
-bufq_init(struct bufq *bq, int type)
+bufq_init(struct bufq *bq, int type, u_int hi, u_int low)
 {
 	if (type > BUFQ_HOWMANY)
 		panic("bufq_init: type %i unknown", type);
 
+	KASSERT(hi >= low);
+	/*
+	 * Don't allow devices with large openings
+	 * to have lots of stuff in flight if we
+	 * don't have a lot of kva to map it
+	 */
+	if (hi >= (bcstats.kvaslots/16)) {
+		hi = bcstats.kvaslots/16;
+		low = hi / 2;
+		if (hi < BUFQ_DEFHI)
+			hi = BUFQ_DEFHI;
+		if (low < BUFQ_DEFLO)
+			low = BUFQ_DEFLO;
+	}
+
 	mtx_init(&bq->bufq_mtx, IPL_BIO);
+	bq->bufq_hi = hi;
+	bq->bufq_low = low;
 	bq->bufq_type = type;
 	bq->bufq_impl = &bufq_impls[type];
 	bq->bufq_data = bq->bufq_impl->impl_create();
@@ -222,6 +240,22 @@ bufq_drain(struct bufq *bq)
 }
 
 void
+bufq_wait(struct bufq *bq, struct buf *bp)
+{
+	if (bq->bufq_hi) {
+		assertwaitok();
+		mtx_enter(&bq->bufq_mtx);
+		while (bq->bufq_outstanding >= bq->bufq_hi) {
+			bq->bufq_waiting++;
+			msleep(&bq->bufq_waiting, &bq->bufq_mtx,
+			    PRIBIO, "bqwait", 0);
+			bq->bufq_waiting--;
+		}
+		mtx_leave(&bq->bufq_mtx);
+	}
+}
+
+void
 bufq_done(struct bufq *bq, struct buf *bp)
 {
 	mtx_enter(&bq->bufq_mtx);
@@ -229,6 +263,8 @@ bufq_done(struct bufq *bq, struct buf *bp)
 	KASSERT(bq->bufq_outstanding >= 0);
 	if (bq->bufq_stop && bq->bufq_outstanding == 0)
 		wakeup(&bq->bufq_outstanding);
+	if (bq->bufq_waiting && bq->bufq_outstanding < bq->bufq_low)
+		wakeup(&bq->bufq_waiting);
 	mtx_leave(&bq->bufq_mtx);
 	bp->b_bq = NULL;
 }

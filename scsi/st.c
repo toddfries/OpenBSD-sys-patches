@@ -308,6 +308,7 @@ stattach(struct device *parent, struct device *self, void *aux)
 	struct st_softc *st = (void *)self;
 	struct scsi_attach_args *sa = aux;
 	struct scsi_link *sc_link = sa->sa_sc_link;
+	int bhi, blo;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("stattach:\n"));
 
@@ -328,9 +329,16 @@ stattach(struct device *parent, struct device *self, void *aux)
 	scsi_xsh_set(&st->sc_xsh, sc_link, ststart);
 	timeout_set(&st->sc_timeout, (void (*)(void *))scsi_xsh_set,
 	    &st->sc_xsh);
-	
+
 	/* Set up the buf queue for this device. */
-	bufq_init(&st->sc_bufq, BUFQ_FIFO);
+	/* Allow ourselves to have enough writes in flight
+	 * to keep the device going on big writes, but not
+	 * to build such deficit of stuff we can't get reads
+	 * and interactive response.
+	 */
+	bhi = sc_link->openings * 4;
+	blo = sc_link->openings * 2;
+	bufq_init(&st->sc_bufq, BUFQ_FIFO, bhi, blo);
 
 	/* Start up with media position unknown. */
 	st->media_fileno = -1;
