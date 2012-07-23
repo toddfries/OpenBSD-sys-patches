@@ -125,17 +125,16 @@ disksort(struct buf *ap, struct buf *bp)
 	if (ap->b_actf == NULL) {
 		bp->b_actf = NULL;
 		ap->b_actf = bp;
-		if (bp->b_bq)
-			bp->b_lastcyl = ap->b_actf->b_cylinder;
+		ap->b_lastcyl = bp->b_cylinder;
 		return;
 	}
-	bq = ap->b_actf;
+
 	/*
 	 * If we lie after the first (currently active) request, then we
 	 * must locate the second request list and add ourselves to it.
 	 */
-	if ((bp->b_bq && (bp->b_icount > ILIMIT)) ||
-	    (bp->b_cylinder < bq->b_cylinder)) {
+	bq = ap->b_actf;
+	if ((ap->b_icount > ILIMIT) || (bp->b_cylinder < bq->b_cylinder)) {
 		while (bq->b_actf) {
 			/*
 			 * Check for an ``inversion'' in the normally ascending
@@ -185,8 +184,7 @@ disksort(struct buf *ap, struct buf *bp)
 		    (bp->b_cylinder == bq->b_actf->b_cylinder &&
 		    bp->b_blkno < bq->b_actf->b_blkno)) {
 			/* I am inserting before an inversion */
-			if (bp->b_bq)
-				bp->b_icount++;
+			ap->b_icount++;
 			goto insert;
 		}
 		bq = bq->b_actf;
@@ -196,13 +194,11 @@ disksort(struct buf *ap, struct buf *bp)
 	 * the first list, which is the same as the end of the whole schebang.
 	 */
 
-insert:	if (bp->b_bq) {
-		/* If we just passed an inversion, reset the counter */
-		if (bp->b_lastcyl > ap->b_actf->b_cylinder) {
-			bp->b_icount = 0;
-		}
-		bp->b_lastcyl = ap->b_actf->b_cylinder;
+insert:	/* If we just passed an inversion, reset the counter */
+	if (ap->b_lastcyl > bp->b_cylinder) {
+		ap->b_icount = 0;
 	}
+	ap->b_lastcyl = bp->b_cylinder;
 	bp->b_actf = bq->b_actf;
 	bq->b_actf = bp;
 }
