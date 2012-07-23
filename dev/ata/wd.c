@@ -179,7 +179,7 @@ wdattach(struct device *parent, struct device *self, void *aux)
 	struct wd_softc *wd = (void *)self;
 	struct ata_atapi_attach *aa_link= aux;
 	struct wdc_command wdc_c;
-	int i, blank;
+	int i, blank, bhi, blo;
 	char buf[41], c, *p, *q;
 	WDCDEBUG_PRINT(("wdattach\n"), DEBUG_FUNCS | DEBUG_PROBE);
 
@@ -326,7 +326,14 @@ wdattach(struct device *parent, struct device *self, void *aux)
 	 * Initialize disk structures.
 	 */
 	wd->sc_dk.dk_name = wd->sc_dev.dv_xname;
-	bufq_init(&wd->sc_bufq, BUFQ_DEFAULT);
+	/* allow ourselves to have enough writes in flight
+	 * to keep the device going on big writes, but not
+	 * to build such deficit of stuff we can't get reads
+	 * and interactive response in..
+	 */
+	bhi = wd->openings * 4;
+	blo = wd->openings * 2;
+	bufq_init(&wd->sc_bufq, BUFQ_DEFAULT, bhi, blo);
 	wd->sc_sdhook = shutdownhook_establish(wd_shutdown, wd);
 	if (wd->sc_sdhook == NULL)
 		printf("%s: WARNING: unable to establish shutdown hook\n",

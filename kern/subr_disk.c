@@ -110,20 +110,38 @@ void
 disksort(struct buf *ap, struct buf *bp)
 {
 	struct buf *bq;
+	struct bufq *bufq;
+
+	/* the ilimit controls how many inserts we may do before
+	 * the first inversion. this keeps large sequetial io's
+	 * from completely starving the second list, and making it where
+	 * stuff on the end of the list can never be processed
+	 * This magic is basically chosen based on the io rate
+	 * of old disks. (where this disksort routine is
+	 * most relevant.) and on interactive performance on slow disks
+	 * in presence of high sequential IO load.
+	 */
+	#define ILIMIT  128
+
+	bufq = bp->b_bq;
 
 	/* If the queue is empty, then it's easy. */
 	if (ap->b_actf == NULL) {
 		bp->b_actf = NULL;
 		ap->b_actf = bp;
+		if (bufq)
+			bufq->bufq_lastcyl = ap->b_actf->b_cylinder;
 		return;
 	}
+
+	bq = ap->b_actf;
 
 	/*
 	 * If we lie after the first (currently active) request, then we
 	 * must locate the second request list and add ourselves to it.
 	 */
-	bq = ap->b_actf;
-	if (bp->b_cylinder < bq->b_cylinder) {
+	if ((bufq && (bufq->bufq_icount > ILIMIT)) ||
+	    (bp->b_cylinder < bq->b_cylinder)) {
 		while (bq->b_actf) {
 			/*
 			 * Check for an ``inversion'' in the normally ascending
@@ -171,15 +189,28 @@ disksort(struct buf *ap, struct buf *bp)
 		if (bq->b_actf->b_cylinder < bq->b_cylinder ||
 		    bp->b_cylinder < bq->b_actf->b_cylinder ||
 		    (bp->b_cylinder == bq->b_actf->b_cylinder &&
-		    bp->b_blkno < bq->b_actf->b_blkno))
+		    bp->b_blkno < bq->b_actf->b_blkno)) {
+			/* I am inserting before an inversion */
+			if (bufq)
+				bufq->bufq_icount++;
 			goto insert;
+		}
 		bq = bq->b_actf;
 	}
 	/*
 	 * Neither a second list nor a larger request... we go at the end of
 	 * the first list, which is the same as the end of the whole schebang.
 	 */
-insert:	bp->b_actf = bq->b_actf;
+
+insert:
+	if (bufq) {
+		/* If we just passed an inversion, reset the counter */
+		if (bufq->bufq_lastcyl > ap->b_actf->b_cylinder) {
+			bufq->bufq_icount = 0;
+		}
+		bufq->bufq_lastcyl = ap->b_actf->b_cylinder;
+	}
+	bp->b_actf = bq->b_actf;
 	bq->b_actf = bp;
 }
 

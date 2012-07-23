@@ -196,6 +196,7 @@ cdattach(struct device *parent, struct device *self, void *aux)
 	struct cd_softc *sc = (struct cd_softc *)self;
 	struct scsi_attach_args *sa = aux;
 	struct scsi_link *sc_link = sa->sa_sc_link;
+	int bhi, blo;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("cdattach:\n"));
 
@@ -212,7 +213,14 @@ cdattach(struct device *parent, struct device *self, void *aux)
 	 * Initialize disk structures.
 	 */
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
-	bufq_init(&sc->sc_bufq, BUFQ_DEFAULT);
+	/* allow ourselves to have enough writes in flight
+	 * to keep the device going on big writes, but not
+	 * to build such deficit of stuff we can't get reads
+	 * and interactive response in..
+	 */
+	bhi = sc_link->openings * 4;
+	blo = sc_link->openings * 2;
+	bufq_init(&sc->sc_bufq, BUFQ_DEFAULT, bhi, blo);
 
 	/*
 	 * Note if this device is ancient.  This is used in cdminphys().
