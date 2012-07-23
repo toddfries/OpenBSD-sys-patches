@@ -70,7 +70,6 @@
 
 TAILQ_HEAD(bqueues, buf) bufqueues[BQUEUES];
 int needbuffer;
-
 struct bio_ops bioops;
 
 /*
@@ -627,15 +626,6 @@ bwrite(struct buf *bp)
 	splx(s);
 	SET(bp->b_flags, B_WRITEINPROG);
 	VOP_STRATEGY(bp);
-
-	/* XXX BBB */
-	/*
-	 * if the queue is above the high water mark, wait till
-	 * the number of outstanding io's drops below the low
-	 * water mark
-	 */
-	if (bp->b_bq)
-		bufq_wait(bp->b_bq, bp);
 
 	if (async)
 		return (0);

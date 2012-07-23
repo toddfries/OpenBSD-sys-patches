@@ -956,7 +956,7 @@ swap_on(struct proc *p, struct swapdev *sdp)
 		else
 #endif /* defined(NFSCLIENT) */
 			sdp->swd_maxactive = 8; /* XXX */
-		bufq_init(&sdp->swd_bufq, BUFQ_FIFO, BUFQ_NOLIM, BUFQ_NOLIM);
+		bufq_init(&sdp->swd_bufq, BUFQ_FIFO);
 		break;
 
 	default:
