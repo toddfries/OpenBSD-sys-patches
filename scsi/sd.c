@@ -164,7 +164,7 @@ sdattach(struct device *parent, struct device *self, void *aux)
 	int sd_autoconf = scsi_autoconf | SCSI_SILENT |
 	    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_IGNORE_MEDIA_CHANGE;
 	struct dk_cache dkc;
-	int error, result, bhi, blo, sortby = BUFQ_DEFAULT;
+	int error, result, sortby = BUFQ_DEFAULT;
 
 	SC_DEBUG(sc_link, SDEV_DB2, ("sdattach:\n"));
 
@@ -249,15 +249,7 @@ sdattach(struct device *parent, struct device *self, void *aux)
 	 * Initialize disk structures.
 	 */
 	sc->sc_dk.dk_name = sc->sc_dev.dv_xname;
-	sortby = BUFQ_DEFAULT;
-	/* allow ourselves to have enough writes in flight
-	 * to keep the device going on big writes, but not
-	 * to build such deficit of stuff we can't get reads
-	 * and interactive response in..
-	 */
-	bhi = sc_link->openings * 4;
-	blo = sc_link->openings * 2;
-	bufq_init(&sc->sc_bufq, sortby, bhi, blo);
+	bufq_init(&sc->sc_bufq, sortby);
 
 	/*
 	 * Enable write cache by default.
