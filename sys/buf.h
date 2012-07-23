@@ -67,6 +67,10 @@ LIST_HEAD(workhead, worklist);
 #define	BUFQ_FIFO	1
 #define BUFQ_DEFAULT	BUFQ_DISKSORT
 #define BUFQ_HOWMANY	2
+/* Write limits for bufqueue */
+#define BUFQ_DEFHI	2
+#define BUFQ_DEFLO	1
+#define BUFQ_NOLIM	0
 
 struct bufq_impl;
 
@@ -75,12 +79,15 @@ struct bufq {
 	struct mutex	 	 bufq_mtx;
 	void			*bufq_data;
 	u_int			 bufq_outstanding;
+	u_int			 bufq_hi;
+	u_int			 bufq_low;
+	int			 bufq_waiting;
 	int			 bufq_stop;
 	int			 bufq_type;
 	const struct bufq_impl	*bufq_impl;
 };
 
-int		 bufq_init(struct bufq *, int);
+int		 bufq_init(struct bufq *, int, u_int, u_int);
 int		 bufq_switch(struct bufq *, int);
 void		 bufq_destroy(struct bufq *);
 
@@ -90,6 +97,7 @@ void		 bufq_requeue(struct bufq *, struct buf *);
 int		 bufq_peek(struct bufq *);
 void		 bufq_drain(struct bufq *);
 
+void		 bufq_wait(struct bufq *, struct buf *);
 void		 bufq_done(struct bufq *, struct buf *);
 void		 bufq_quiesce(void);
 void		 bufq_restart(void);
