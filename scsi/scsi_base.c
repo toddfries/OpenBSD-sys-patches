@@ -557,7 +557,6 @@ scsi_xsh_runqueue(struct scsi_link *link)
 		    link->pending < link->openings &&
 		    ((ioh = TAILQ_FIRST(&link->queue)) != NULL)) {
 			link->pending++;
-
 			TAILQ_REMOVE(&link->queue, ioh, q_entry);
 			TAILQ_INSERT_TAIL(&link->pool->queue, ioh, q_entry);
 			ioh->q_state = RUNQ_POOLQ;
