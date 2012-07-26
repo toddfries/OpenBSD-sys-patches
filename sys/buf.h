@@ -98,8 +98,6 @@ void		 bufq_restart(void);
 struct bufq_disksort {
 	struct buf	 *bqd_actf;
 	struct buf	**bqd_actb;
-	size_t 		bqd_icount;
-	size_t 		bqd_lastcyl;
 };
 
 /* fifo */
@@ -137,10 +135,8 @@ extern struct bio_ops {
 } bioops;
 
 /* XXX: disksort(); */
-#define b_actf		b_bufq.bufq_data_disksort.bqd_actf
-#define b_actb		b_bufq.bufq_data_disksort.bqd_actb
-#define b_lastcyl	b_bufq.bufq_data_disksort.bqd_lastcyl
-#define b_icount	b_bufq.bufq_data_disksort.bqd_icount
+#define b_actf	b_bufq.bufq_data_disksort.bqd_actf
+#define b_actb	b_bufq.bufq_data_disksort.bqd_actb
 
 /* The buffer header describes an I/O operation in the kernel. */
 struct buf {
