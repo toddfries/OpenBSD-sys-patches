@@ -813,8 +813,10 @@ file	dev/pci/glxpcib.c		glxpcib
 
 # VirtIO
 device	virtio {}
-attach	virtio at pci
 file	dev/pci/virtio.c		virtio
+
+attach	virtio at pci with virtio_pci
+file	dev/pci/virtio_pci.c		virtio_pci
 
 device	vioif
 attach	vioif at virtio

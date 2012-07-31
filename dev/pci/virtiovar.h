@@ -68,7 +68,11 @@
 
 #include <sys/types.h>
 #include <sys/queue.h>
-//#include <sys/bus.h>
+#include <sys/param.h>
+#include <sys/device.h>
+#include <sys/mutex.h>
+#include <machine/bus.h>
+
 #include <dev/pci/virtioreg.h>
 
 struct vq_entry {
@@ -76,20 +80,20 @@ struct vq_entry {
 	uint16_t		qe_index; /* index in vq_desc array */
 	/* followings are used only when it is the `head' entry */
 	int16_t			qe_next;     /* next enq slot */
-	_Bool			qe_indirect; /* 1 if using indirect */
+	int			qe_indirect; /* 1 if using indirect */
 	struct vring_desc	*qe_desc_base;
 };
 
 struct virtqueue {
 	struct virtio_softc	*vq_owner;
-        unsigned int		vq_num;  /* queue size (# of entries) */
-        unsigned int		vq_mask; /* (1 << vq_num - 1) */
+	unsigned int		vq_num;  /* queue size (# of entries) */
+	unsigned int		vq_mask; /* (1 << vq_num - 1) */
 	int			vq_index; /* queue number (0, 1, ...) */
 
 	/* vring pointers (KVA) */
-        struct vring_desc	*vq_desc;
-        struct vring_avail	*vq_avail;
-        struct vring_used	*vq_used;
+	struct vring_desc	*vq_desc;
+	struct vring_avail	*vq_avail;
+	struct vring_used	*vq_used;
 	void			*vq_indirect;
 
 	/* virtqueue allocation info */
@@ -120,50 +124,66 @@ struct virtqueue {
 	int			(*vq_done)(struct virtqueue*);
 };
 
+struct virtio_feature_name {
+	uint32_t	 bit;
+	const char	*name;
+};
+
+struct virtio_ops {
+	void		(*kick)(struct virtio_softc *, uint16_t);
+	uint8_t		(*read_dev_cfg_1)(struct virtio_softc *, int);
+	uint16_t	(*read_dev_cfg_2)(struct virtio_softc *, int);
+	uint32_t	(*read_dev_cfg_4)(struct virtio_softc *, int);
+	uint64_t	(*read_dev_cfg_8)(struct virtio_softc *, int);
+	void		(*write_dev_cfg_1)(struct virtio_softc *, int, uint8_t);
+	void		(*write_dev_cfg_2)(struct virtio_softc *, int, uint16_t);
+	void		(*write_dev_cfg_4)(struct virtio_softc *, int, uint32_t);
+	void		(*write_dev_cfg_8)(struct virtio_softc *, int, uint64_t);
+	uint16_t	(*read_queue_size)(struct virtio_softc *, uint16_t);
+	void		(*write_queue_addr)(struct virtio_softc *, uint16_t, uint32_t);
+	void		(*set_status)(struct virtio_softc *, int);
+	uint32_t	(*neg_features)(struct virtio_softc *, uint32_t, const struct virtio_feature_name *);
+	int		(*intr)(void *);
+};
+
+#define VIRTIO_CHILD_ERROR	((void*)1)
+
 struct virtio_softc {
 	struct device		sc_dev;
-	pci_chipset_tag_t	sc_pc;
-	pcitag_t		sc_tag;
-	bus_dma_tag_t		sc_dmat;
+	bus_dma_tag_t		sc_dmat; /* set by transport */
+	struct virtio_ops	*sc_ops; /* set by transport */
 
 	int			sc_ipl; /* set by child */
-	void			*sc_ih;
-
-	bus_space_tag_t		sc_iot;
-	bus_space_handle_t	sc_ioh;
-	bus_size_t		sc_iosize;
-	int			sc_config_offset;
+	void			*sc_ih; /* set by transport */
 
 	uint32_t		sc_features;
-	_Bool		sc_indirect;
+	int			sc_indirect;
 
 	int			sc_nvqs; /* set by child */
 	struct virtqueue	*sc_vqs; /* set by child */
 
-	int			sc_childdevid;
-	struct device		*sc_child; /* set by child */
+	int			sc_childdevid; /* set by transport */
+	struct device		*sc_child; /* set by child,
+					    * VIRTIO_CHILD_ERROR on error
+					    */
 	int			(*sc_config_change)(struct virtio_softc*);
 					 /* set by child */
 	int			(*sc_intrhand)(struct virtio_softc*);
 					 /* set by child */
 };
 
-struct virtio_feature_name {
-	uint32_t	 bit;
-	const char	*name;
-};
 /* public interface */
-uint32_t virtio_negotiate_features(struct virtio_softc*, uint32_t,
-				   const struct virtio_feature_name*);
-
-uint8_t virtio_read_device_config_1(struct virtio_softc *, int);
-uint16_t virtio_read_device_config_2(struct virtio_softc *, int);
-uint32_t virtio_read_device_config_4(struct virtio_softc *, int);
-uint64_t virtio_read_device_config_8(struct virtio_softc *, int);
-void virtio_write_device_config_1(struct virtio_softc *, int, uint8_t);
-void virtio_write_device_config_2(struct virtio_softc *, int, uint16_t);
-void virtio_write_device_config_4(struct virtio_softc *, int, uint32_t);
-void virtio_write_device_config_8(struct virtio_softc *, int, uint64_t);
+#define	virtio_read_device_config_1(sc, o)	(sc)->sc_ops->read_dev_cfg_1(sc, o)
+#define	virtio_read_device_config_2(sc, o)	(sc)->sc_ops->read_dev_cfg_2(sc, o)
+#define	virtio_read_device_config_4(sc, o)	(sc)->sc_ops->read_dev_cfg_4(sc, o)
+#define	virtio_read_device_config_8(sc, o)	(sc)->sc_ops->read_dev_cfg_8(sc, o)
+#define	virtio_write_device_config_1(sc, o, v)	(sc)->sc_ops->write_dev_cfg_1(sc, o, v)
+#define	virtio_write_device_config_2(sc, o, v)	(sc)->sc_ops->write_dev_cfg_2(sc, o, v)
+#define	virtio_write_device_config_4(sc, o, v)	(sc)->sc_ops->write_dev_cfg_4(sc, o, v)
+#define	virtio_write_device_config_8(sc, o, v)	(sc)->sc_ops->write_device_config_8(sc, o, v)
+#define	virtio_read_queue_size(sc, i)		(sc)->sc_ops->read_queue_size(sc, i)
+#define	virtio_write_queue_address(sc, i, v)	(sc)->sc_ops->write_queue_addr(sc, i, v)
+#define	virtio_negotiate_features(sc, f, n)	(sc)->sc_ops->neg_features(sc, f, n)
 
 int virtio_alloc_vq(struct virtio_softc*, struct virtqueue*, int, int, int,
 		    const char*);
@@ -172,31 +192,36 @@ void virtio_reset(struct virtio_softc *);
 void virtio_reinit_start(struct virtio_softc *);
 void virtio_reinit_end(struct virtio_softc *);
 
-int virtio_enqueue_prep(struct virtio_softc*, struct virtqueue*, int*);
-int virtio_enqueue_reserve(struct virtio_softc*, struct virtqueue*, int, int);
-int virtio_enqueue(struct virtio_softc*, struct virtqueue*, int,
-		   bus_dmamap_t, _Bool);
-int virtio_enqueue_p(struct virtio_softc*, struct virtqueue*, int,
-		     bus_dmamap_t, bus_addr_t, bus_size_t, _Bool);
-int virtio_enqueue_commit(struct virtio_softc*, struct virtqueue*, int, _Bool);
+int virtio_enqueue_prep(struct virtqueue*, int*);
+int virtio_enqueue_reserve(struct virtqueue*, int, int);
+int virtio_enqueue(struct virtqueue*, int, bus_dmamap_t, int);
+int virtio_enqueue_p(struct virtqueue*, int, bus_dmamap_t, bus_addr_t,
+		     bus_size_t, int);
+int virtio_enqueue_commit(struct virtio_softc*, struct virtqueue*, int, int);
 #define		virtio_notify(sc,vq)	virtio_enqueue_commit(sc, vq, -1, 1)
 
-int virtio_enqueue_abort(struct virtio_softc*, struct virtqueue*, int);
+int virtio_enqueue_abort(struct virtqueue*, int);
 
 int virtio_dequeue(struct virtio_softc*, struct virtqueue*, int *, int *);
-int virtio_dequeue_commit(struct virtio_softc*, struct virtqueue*, int);
+int virtio_dequeue_commit(struct virtqueue*, int);
 
 int virtio_intr(void *arg);
 int virtio_vq_intr(struct virtio_softc *);
 void virtio_stop_vq_intr(struct virtio_softc *, struct virtqueue *);
 void virtio_start_vq_intr(struct virtio_softc *, struct virtqueue *);
 
-#define PCI_IS_VIRTIO(pa) (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_QUMRANET &&	\
-			   PCI_PRODUCT(pa->pa_id) >= 0x1000 &&			\
-			   PCI_PRODUCT(pa->pa_id) <= 0x103f &&			\
-			   PCI_REVISION(pa->pa_class) == 0)
+const char *virtio_device_string(int);
+void virtio_log_features(uint32_t, uint32_t, const struct virtio_feature_name *);
 
-/* Memory barriers are also necessary with UP kernels: the host system may be SMP */
+/*
+ * XXX: This is not optimal:
+ * XXX: We need remory barriers are also with UP kernels,
+ * XXX: because the host system may be SMP. However, OpenBSD does not seem to
+ * XXX: provide suitable functions.
+ * XXX: On x86/amd64, membar_producer() could probably be a no-op because
+ * XXX: writes are always ordered.
+ * XXX: Also, gcc does not have __sync_synchronize() for all architectures.
+ */
 #define membar_consumer() __sync_synchronize()
 #define membar_producer() __sync_synchronize()
 

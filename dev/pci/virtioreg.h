@@ -74,7 +74,11 @@
 #define PCI_PRODUCT_VIRTIO_CONSOLE	3
 #define PCI_PRODUCT_VIRTIO_ENTROPY	4
 #define PCI_PRODUCT_VIRTIO_BALLOON	5
+#define PCI_PRODUCT_VIRTIO_IOMEM	6
+#define PCI_PRODUCT_VIRTIO_RPMSG	7
+#define PCI_PRODUCT_VIRTIO_SCSI		8
 #define PCI_PRODUCT_VIRTIO_9P		9
+#define PCI_PRODUCT_VIRTIO_MAC80211	10
 
 /* Virtio header */
 #define VIRTIO_CONFIG_DEVICE_FEATURES	0 /* 32bit */
@@ -95,9 +99,11 @@
 #define  VIRTIO_CONFIG_DEVICE_STATUS_FAILED	128
 #define VIRTIO_CONFIG_ISR_STATUS	19 /* 8bit */
 #define  VIRTIO_CONFIG_ISR_CONFIG_CHANGE	2
-#define VIRTIO_CONFIG_CONFIG_VECTOR	20 /* 16bit, optional */
 #define VIRTIO_CONFIG_DEVICE_CONFIG_NOMSI	20
-#define VIRTIO_CONFIG_DEVICE_CONFIG_MSI		22
+/* Only if MSIX is enabled: */
+#define VIRTIO_MSI_CONFIG_VECTOR	20 /* 16bit, optional */
+#define VIRTIO_MSI_QUEUE_VECTOR		22 /* 16bit, optional */
+#define VIRTIO_CONFIG_DEVICE_CONFIG_MSI		24
 
 /* Virtqueue */
 /* This marks a buffer as continuing via the next field. */
@@ -128,6 +134,7 @@
  *      __u16 avail_flags;
  *      __u16 avail_idx;
  *      __u16 available[num];
+ *      __u16 used_event_idx
  *
  *      // Padding to the next align boundary.
  *      char pad[];
@@ -136,6 +143,7 @@
  *      __u16 used_flags;
  *      __u16 used_idx;
  *      struct vring_used_elem used[num];
+ *      __u16 avail_event_idx;
  * };
  * Note: for virtio PCI, align is 4096.
  */

@@ -284,13 +284,13 @@ vioblk_attach(struct device *parent, struct device *self, void *aux)
 		sc->sc_readonly = 0;
 
 	if (features & VIRTIO_BLK_F_SIZE_MAX)
-		sc->sc_size_max = virtio_read_device_config_2(vsc,
+		sc->sc_size_max = virtio_read_device_config_4(vsc,
 		    VIRTIO_BLK_CONFIG_SIZE_MAX);
 	else
 		sc->sc_size_max = MAXPHYS;
 
 	if (features & VIRTIO_BLK_F_SEG_MAX)
-		sc->sc_seg_max = virtio_read_device_config_2(vsc,
+		sc->sc_seg_max = virtio_read_device_config_4(vsc,
 		    VIRTIO_BLK_CONFIG_SEG_MAX);
 	else
 		sc->sc_seg_max = 1;
@@ -350,7 +350,7 @@ vioblk_attach(struct device *parent, struct device *self, void *aux)
 
 	return;
 err:
-	vsc->sc_child = (void*)1;
+	vsc->sc_child = VIRTIO_CHILD_ERROR;
 	return;
 }
 
@@ -410,7 +410,7 @@ vioblk_vq_done1(struct vioblk_softc *sc, struct virtio_softc *vsc,
 	scsi_done(xs);
 	vr->vr_len = VIOBLK_DONE;
 
-	virtio_dequeue_commit(vsc, vq, slot);
+	virtio_dequeue_commit(vq, slot);
 
 	if (--sc->sc_queued == 0)
 		timeout_del(&sc->sc_timeout);
@@ -487,7 +487,7 @@ vioblk_scsi_cmd(struct scsi_xfer *xs)
 	int slot, ret, nsegs;
 
 	s = splbio();
-	ret = virtio_enqueue_prep(vsc, vq, &slot);
+	ret = virtio_enqueue_prep(vq, &slot);
 	if (ret) {
 		DBGPRINT("virtio_enqueue_prep: %d, vq_num: %d, sc_queued: %d",
 		    ret, vq->vq_num, sc->sc_queued);
@@ -512,7 +512,7 @@ vioblk_scsi_cmd(struct scsi_xfer *xs)
 		len = 0;
 		nsegs = 2;
 	}
-	ret = virtio_enqueue_reserve(vsc, vq, slot, nsegs);
+	ret = virtio_enqueue_reserve(vq, slot, nsegs);
 	if (ret) {
 		DBGPRINT("virtio_enqueue_reserve: %d", ret);
 		bus_dmamap_unload(vsc->sc_dmat, vr->vr_payload);
@@ -538,12 +538,12 @@ vioblk_scsi_cmd(struct scsi_xfer *xs)
 			sizeof(uint8_t),
 			BUS_DMASYNC_PREREAD);
 
-	virtio_enqueue_p(vsc, vq, slot, vr->vr_cmdsts,
+	virtio_enqueue_p(vq, slot, vr->vr_cmdsts,
 			0, sizeof(struct virtio_blk_req_hdr),
 			1);
 	if (operation != VIRTIO_BLK_T_FLUSH)
-		virtio_enqueue(vsc, vq, slot, vr->vr_payload, !isread);
-	virtio_enqueue_p(vsc, vq, slot, vr->vr_cmdsts,
+		virtio_enqueue(vq, slot, vr->vr_payload, !isread);
+	virtio_enqueue_p(vq, slot, vr->vr_cmdsts,
 			offsetof(struct virtio_blk_req, vr_status),
 			sizeof(uint8_t),
 			0);
@@ -560,7 +560,7 @@ vioblk_scsi_cmd(struct scsi_xfer *xs)
 
 	timeout = 1000;
 	do {
-		if (virtio_intr(sc->sc_virtio) && vr->vr_len == VIOBLK_DONE)
+		if (vsc->sc_ops->intr(vsc) && vr->vr_len == VIOBLK_DONE)
 			break;
 
 		delay(1000);
