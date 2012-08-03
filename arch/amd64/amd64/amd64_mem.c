@@ -1,4 +1,4 @@
-/* $OpenBSD: amd64_mem.c,v 1.5 2012/07/08 22:11:39 deraadt Exp $ */
+/* $OpenBSD: amd64_mem.c,v 1.6 2012/08/01 15:44:14 mikeb Exp $ */
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * All rights reserved.
