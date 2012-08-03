@@ -98,6 +98,7 @@ struct sym_device asym_devices[] = {
 /*	  "01234567"  "0123456789012345" */
 	{ "DELL    ", "MD1220          " },
 	{ "Transtec", "PROVIGO1100" },
+	{ "EQLOGIC", "100E-00" }, /* Equalogic */
 	{ "NetBSD", "NetBSD iSCSI" }
 };
 
