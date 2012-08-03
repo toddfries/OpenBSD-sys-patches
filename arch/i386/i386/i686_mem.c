@@ -1,4 +1,4 @@
-/* $OpenBSD: i686_mem.c,v 1.13 2010/03/23 19:31:18 kettenis Exp $ */
+/* $OpenBSD: i686_mem.c,v 1.14 2012/08/01 15:44:14 mikeb Exp $ */
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * All rights reserved.
