@@ -96,7 +96,7 @@ struct sym_device sym_devices[] = {
 struct sym_device asym_devices[] = {
 /*	  " vendor "  "     device     " */
 /*	  "01234567"  "0123456789012345" */
-	{ "EQLOGIC", "100E-00" },
+	{ "EQLOGIC", "100E-00" }, /* XXX move to mpath_t10 once implemented */
 	{ "DELL    ", "MD1220          " },
 	{ "Transtec", "PROVIGO1100" },
 	{ "NetBSD", "NetBSD iSCSI" }
