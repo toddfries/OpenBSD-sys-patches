@@ -181,6 +181,13 @@ struct vring_used {
         struct vring_used_elem ring[0];
 } __packed;
 
+/*
+ * We publish the used event index at the end of the available ring, and vice
+ * versa. They are at the end for backwards compatibility.
+ */
+#define VQ_USED_EVENT(vq)	*(uint16_t*)(&(vq)->vq_avail->ring[(vq)->vq_num])
+#define VQ_AVAIL_EVENT(vq)	*(uint16_t*)(&(vq)->vq_used->ring[(vq)->vq_num])
+
 #define VIRTIO_PAGE_SIZE	(4096)
 
 #endif /* _DEV_PCI_VIRTIOREG_H_ */

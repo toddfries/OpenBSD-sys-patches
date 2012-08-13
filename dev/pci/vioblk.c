@@ -232,11 +232,12 @@ vioblk_timeout(void *v)
 {
 	struct vioblk_softc *sc = v;
 	struct virtqueue *vq = &sc->sc_vq[0];
+	int s;
 	printf("virtio timeout %s: sc_queued %u vq_num %u\n",
 	       sc->sc_dev.dv_xname, sc->sc_queued, vq->vq_num);
-	DBGPRINT("vq_avail_idx: %hu vq_avail->idx: %hu vq_avail->flags: %hu",
+	printf("vq_avail_idx: %hu vq_avail->idx: %hu vq_avail->flags: %hu",
 		 vq->vq_avail_idx, vq->vq_avail->idx, vq->vq_avail->flags);
-	DBGPRINT("vq_used_idx:  %hu vq_used->idx:  %hu vq_used->flags:  %hu",
+	printf("vq_used_idx:  %hu vq_used->idx:  %hu vq_used->flags:  %hu",
 		 vq->vq_used_idx,  vq->vq_used->idx,  vq->vq_used->flags);
 	if (vq->vq_used_idx != vq->vq_used->idx) {
 		int idx, i = vq->vq_used_idx & vq->vq_mask;
@@ -246,8 +247,15 @@ vioblk_timeout(void *v)
 		idx = e->id & vq->vq_mask;
 		vioblk_dumpreq(sc, vq, idx, __func__);
 		vioblk_dumpdesc(sc, vq, idx, e->len, __func__);
+		s = splbio();
+		vioblk_vq_done(vq);
+		splx(s);
 	}
-	// XXX can we recover somehow???
+	s = splbio();
+	if (sc->sc_queued)
+		timeout_add_sec(&sc->sc_timeout, 1);
+	splx(s);
+	// XXX anything else to do to recover?
 }
 
 
@@ -491,9 +499,7 @@ vioblk_scsi_cmd(struct scsi_xfer *xs)
 	if (ret) {
 		DBGPRINT("virtio_enqueue_prep: %d, vq_num: %d, sc_queued: %d",
 		    ret, vq->vq_num, sc->sc_queued);
-		vioblk_scsi_done(xs, XS_NO_CCB);
-		splx(s);
-		return;
+		goto out_enq_abort;
 	}
 	vr = &sc->sc_reqs[slot];
 	if (operation != VIRTIO_BLK_T_FLUSH) {
@@ -504,8 +510,7 @@ vioblk_scsi_cmd(struct scsi_xfer *xs)
 		    ((isread?BUS_DMA_READ:BUS_DMA_WRITE) | BUS_DMA_NOWAIT));
 		if (ret) {
 			DBGPRINT("bus_dmamap_load: %d", ret);
-			vioblk_scsi_done(xs, XS_NO_CCB);
-			return;
+			goto out_enq_abort;
 		}
 		nsegs = vr->vr_payload->dm_nsegs + 2;
 	} else {
@@ -516,8 +521,7 @@ vioblk_scsi_cmd(struct scsi_xfer *xs)
 	if (ret) {
 		DBGPRINT("virtio_enqueue_reserve: %d", ret);
 		bus_dmamap_unload(vsc->sc_dmat, vr->vr_payload);
-		vioblk_scsi_done(xs, XS_NO_CCB);
-		return;
+		goto out_enq_abort;
 	}
 	vr->vr_xs = xs;
 	vr->vr_hdr.type = operation;
@@ -547,10 +551,11 @@ vioblk_scsi_cmd(struct scsi_xfer *xs)
 			offsetof(struct virtio_blk_req, vr_status),
 			sizeof(uint8_t),
 			0);
-	//vioblk_dumpdesc(sc, vq, slot, nsegs, __func__);
-	//vioblk_dumpreq(sc, vq, slot, __func__);
 	virtio_enqueue_commit(vsc, vq, slot, 1);
 	sc->sc_queued++;
+	/* check if some xfers are done: */
+	if (sc->sc_queued > 1)
+		vioblk_vq_done(vq);
 	timeout_add_sec(&sc->sc_timeout, 1);
 
 	if (!ISSET(xs->flags, SCSI_POLL)) {
@@ -565,6 +570,12 @@ vioblk_scsi_cmd(struct scsi_xfer *xs)
 
 		delay(1000);
 	} while(--timeout > 0);
+	splx(s);
+	return;
+
+out_enq_abort:
+	virtio_enqueue_abort(vq, slot);
+	vioblk_scsi_done(xs, XS_NO_CCB);
 	splx(s);
 }
 }
