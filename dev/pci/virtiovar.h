@@ -208,10 +208,16 @@ int virtio_dequeue_commit(struct virtqueue*, int);
 int virtio_intr(void *arg);
 int virtio_vq_intr(struct virtio_softc *);
 void virtio_stop_vq_intr(struct virtio_softc *, struct virtqueue *);
-void virtio_start_vq_intr(struct virtio_softc *, struct virtqueue *);
+int virtio_start_vq_intr(struct virtio_softc *, struct virtqueue *);
 
 const char *virtio_device_string(int);
 void virtio_log_features(uint32_t, uint32_t, const struct virtio_feature_name *);
+
+void virtio_vq_dump(struct virtqueue *vq);
+int virtio_nused(struct virtqueue *vq);
+int virtio_postpone_intr(struct virtqueue *vq, uint16_t nslots);
+int virtio_postpone_intr_smart(struct virtqueue *vq);
+int virtio_postpone_intr_far(struct virtqueue *vq);
 
 /*
  * XXX: This is not optimal:
@@ -221,8 +227,16 @@ void virtio_log_features(uint32_t, uint32_t, const struct virtio_feature_name *)
  * XXX: On x86/amd64, membar_producer() could probably be a no-op because
  * XXX: writes are always ordered.
  * XXX: Also, gcc does not have __sync_synchronize() for all architectures.
+ * XXX: Also, for gcc < 4.4, __sync_synchronize() is broken
  */
+
+#if defined(__i386__) || defined(__amd64__)
+#include <machine/cpufunc.h>
+#define membar_consumer() lfence()
+#define membar_producer() sfence()
+#else
 #define membar_consumer() __sync_synchronize()
 #define membar_producer() __sync_synchronize()
+#endif
 
 #endif /* _DEV_PCI_VIRTIOVAR_H_ */

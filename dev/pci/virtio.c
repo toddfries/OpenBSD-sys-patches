@@ -1,7 +1,7 @@
 /*	$NetBSD: virtio.c,v 1.3 2011/11/02 23:05:52 njoly Exp $	*/
 
 /*
- * Copyright (c) 2012 Stefan Fritsch.
+ * Copyright (c) 2012 Stefan Fritsch, Alexander Fiveg.
  * Copyright (c) 2010 Minoura Makoto.
  * All rights reserved.
  *
@@ -248,27 +248,6 @@ virtio_vq_intr(struct virtio_softc *sc)
 	}
 
 	return r;
-}
-
-/*
- * Start/stop vq interrupt.  No guarantee.
- */
-void
-virtio_stop_vq_intr(struct virtio_softc *sc, struct virtqueue *vq)
-{
-	vq->vq_avail->flags |= VRING_AVAIL_F_NO_INTERRUPT;
-	vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
-	membar_producer();
-	vq->vq_queued = 1;
-}
-
-void
-virtio_start_vq_intr(struct virtio_softc *sc, struct virtqueue *vq)
-{
-	vq->vq_avail->flags &= ~VRING_AVAIL_F_NO_INTERRUPT;
-	vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
-	membar_producer();
-	vq->vq_queued = 1;
 }
 
 /*
@@ -681,6 +660,20 @@ virtio_enqueue_p(struct virtqueue *vq, int slot, bus_dmamap_t dmamap,
 	return 0;
 }
 
+static void
+publish_avail_idx(struct virtio_softc *sc, struct virtqueue *vq)
+{
+	vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
+	vq_sync_uring(sc, vq, BUS_DMASYNC_PREREAD);
+	membar_producer();
+	vq->vq_avail->idx = vq->vq_avail_idx;
+	vq_sync_aring(sc, vq, BUS_DMASYNC_POSTWRITE);
+	membar_producer();
+	vq->vq_queued = 1;
+	vq_sync_uring(sc, vq, BUS_DMASYNC_POSTREAD);
+	membar_consumer();
+}
+
 /*
  * enqueue_commit: add it to the aring.
  */
@@ -703,17 +696,20 @@ virtio_enqueue_commit(struct virtio_softc *sc, struct virtqueue *vq,
 
 notify:
 	if (notifynow) {
-		vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
-		vq_sync_uring(sc, vq, BUS_DMASYNC_PREREAD);
-		membar_producer();
-		vq->vq_avail->idx = vq->vq_avail_idx;
-		vq_sync_aring(sc, vq, BUS_DMASYNC_POSTWRITE);
-		membar_producer();
-		vq->vq_queued = 1;
-		vq_sync_uring(sc, vq, BUS_DMASYNC_POSTREAD);
-		membar_consumer();
-		if (!(vq->vq_used->flags & VRING_USED_F_NO_NOTIFY))
-			sc->sc_ops->kick(sc, vq->vq_index);
+		if (vq->vq_owner->sc_features & VIRTIO_F_RING_EVENT_IDX) {
+			uint16_t o = vq->vq_avail->idx;
+			uint16_t n = vq->vq_avail_idx;
+			uint16_t t = VQ_AVAIL_EVENT(vq) + 1;
+			publish_avail_idx(sc, vq);
+			if ((o < n && o < t && t <= n)
+			    || (o > n && (o < t || t <= n))) {
+				sc->sc_ops->kick(sc, vq->vq_index);
+			}
+		} else {
+			publish_avail_idx(sc, vq);
+			if (!(vq->vq_used->flags & VRING_USED_F_NO_NOTIFY))
+				sc->sc_ops->kick(sc, vq->vq_index);
+		}
 	}
 	mutex_exit(&vq->vq_aring_lock);
 
@@ -804,4 +800,138 @@ virtio_dequeue_commit(struct virtqueue *vq, int slot)
 	mutex_exit(&vq->vq_freelist_lock);
 
 	return 0;
+}
+
+/*
+ * Increase the event index in order to delay interrupt.
+ * Then check whether we have new buffers in the used ring
+ * since last evaluation of vq_used_idx. If the number of
+ * available buffers in the used ring more then nslots we
+ * must tell it to our caller. Else the caller set the event
+ * index behind used->idx without to know about it.
+ */
+int
+virtio_postpone_intr(struct virtqueue *vq, uint16_t nslots)
+{
+	uint16_t	idx;
+
+	if (nslots >= vq->vq_num)
+		nslots = vq->vq_num - 1;
+	idx = vq->vq_used_idx + nslots;
+
+	/* set the new event index: avail_ring->used_event = idx */
+	VQ_USED_EVENT(vq) = idx;
+
+	vq_sync_aring(vq->vq_owner, vq, BUS_DMASYNC_PREWRITE);
+	membar_producer();
+	vq->vq_queued++;
+
+	if (nslots < virtio_nused(vq))
+		return 1;
+
+	return 0;
+}
+
+/*
+ * Wait until 3/4 of the available descriptors have been consumed.
+ */
+int
+virtio_postpone_intr_smart(struct virtqueue *vq)
+{
+	uint16_t	nslots;
+
+	nslots = (uint16_t)(vq->vq_avail->idx - vq->vq_used_idx) / 4 * 3;
+
+	return virtio_postpone_intr(vq, nslots);
+}
+
+/*
+ * Postpone interrupt as far as possible
+ */
+int
+virtio_postpone_intr_far(struct virtqueue *vq)
+{
+	uint16_t	nslots;
+
+	nslots = vq->vq_num - 1;
+
+	return virtio_postpone_intr(vq, nslots);
+}
+
+
+/*
+ * Start/stop vq interrupt.  No guarantee.
+ */
+void
+virtio_stop_vq_intr(struct virtio_softc *sc, struct virtqueue *vq)
+{
+	/*
+	* If event index feature is negotiated the device should
+	* ignore flags field in the available ring structure
+	*/
+	if (!(sc->sc_features & VIRTIO_F_RING_EVENT_IDX)) {
+		vq->vq_avail->flags |= VRING_AVAIL_F_NO_INTERRUPT;
+		vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
+		membar_producer();
+		vq->vq_queued++;
+	}
+}
+
+int
+virtio_start_vq_intr(struct virtio_softc *sc, struct virtqueue *vq)
+{
+	/*
+	 * If event index feature is negotiated, enabling
+	 * interrupts is done through setting the latest
+	 * consumed index in the used_event field
+	 */
+	if (sc->sc_features & VIRTIO_F_RING_EVENT_IDX)
+		VQ_USED_EVENT(vq) = vq->vq_used_idx;
+	else
+		vq->vq_avail->flags &= ~VRING_AVAIL_F_NO_INTERRUPT;
+
+	vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
+	membar_producer();
+	vq->vq_queued++;
+
+	if (vq->vq_used_idx != vq->vq_used->idx)
+		return 1;
+
+	return 0;
+}
+
+/*
+ * Returns a number of slots in the used ring available to
+ * be supplied to the avail ring.
+ */
+int
+virtio_nused(struct virtqueue *vq)
+{
+	uint16_t	n;
+
+	n = (uint16_t)(vq->vq_used->idx - vq->vq_used_idx);
+	KASSERT(n <= vq->vq_num);
+
+	return n;
+}
+
+void
+virtio_vq_dump(struct virtqueue *vq)
+{
+	/* Common fields */
+	printf(" + vq num: %d\n", vq->vq_num);
+	printf(" + vq mask: 0x%X\n", vq->vq_mask);
+	printf(" + vq index: %d\n", vq->vq_index);
+	printf(" + vq used idx: %d\n", vq->vq_used_idx);
+	printf(" + vq avail idx: %d\n", vq->vq_avail_idx);
+	printf(" + vq queued: %d\n",vq->vq_queued);
+	/* Avail ring fields */
+	printf(" + avail flags: 0x%X\n", vq->vq_avail->flags);
+	printf(" + avail idx: %d\n", vq->vq_avail->idx);
+	printf(" + avail event: %d\n", VQ_AVAIL_EVENT(vq));
+	/* Used ring fields */
+	printf(" + used flags: 0x%X\n",vq->vq_used->flags);
+	printf(" + used idx: %d\n",vq->vq_used->idx);
+	printf(" + used event: %d\n", VQ_USED_EVENT(vq));
+	printf(" +++++++++++++++++++++++++++\n");
 }
