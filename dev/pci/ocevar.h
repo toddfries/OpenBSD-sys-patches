@@ -1,4 +1,4 @@
-/* 	$OpenBSD: ocevar.h,v 1.3 2012/08/02 22:14:31 mikeb Exp $	*/
+/* 	$OpenBSD: ocevar.h,v 1.10 2012/08/09 19:23:35 mikeb Exp $	*/
 
 /*-
  * Copyright (C) 2012 Emulex
@@ -65,22 +65,21 @@
 #define OCE_MAX_CQ			OCE_MAX_RQ + OCE_MAX_WQ + 1 /* one MCC queue */
 #define OCE_MAX_CQ_EQ			8 /* Max CQ that can attached to an EQ */
 
-#define OCE_DEFAULT_WQ_EQD		64
+#define OCE_DEFAULT_WQ_EQD		80
 #define OCE_MAX_PACKET_Q		16
 #define OCE_RQ_BUF_SIZE			2048
 #define OCE_LSO_MAX_SIZE		(64 * 1024)
 #define LONG_TIMEOUT			30
 #define OCE_MAX_JUMBO_FRAME_SIZE	16360
 #define OCE_MAX_MTU			(OCE_MAX_JUMBO_FRAME_SIZE - \
-						ETHER_VLAN_ENCAP_LEN - \
-						ETHER_HDR_LEN)
+					    ETHER_VLAN_ENCAP_LEN - \
+					    ETHER_HDR_LEN - ETHER_CRC_LEN)
 
 #define OCE_MAX_TX_ELEMENTS		29
 #define OCE_MAX_TX_DESC			1024
 #define OCE_MAX_TX_SIZE			65535
 #define OCE_MAX_RX_SIZE			4096
 #define OCE_MAX_RQ_POSTS		255
-#define OCE_DEFAULT_PROMISCUOUS		0
 
 #define RSS_ENABLE_IPV4			0x1
 #define RSS_ENABLE_TCP_IPV4		0x2
@@ -217,27 +216,6 @@ struct oce_ring {
 #define OCE_BROADCAST_PACKET	2
 #define OCE_RSVD_PACKET		3
 
-struct oce_rx_stats {
-	/* Total Receive Stats */
-	uint64_t t_rx_pkts;
-	uint64_t t_rx_bytes;
-	uint32_t t_rx_frags;
-	uint32_t t_rx_mcast_pkts;
-	uint32_t t_rx_ucast_pkts;
-	uint32_t t_rxcp_errs;
-};
-
-struct oce_tx_stats {
-	/*Total Transmit Stats */
-	uint64_t t_tx_pkts;
-	uint64_t t_tx_bytes;
-	uint32_t t_tx_reqs;
-	uint32_t t_tx_stops;
-	uint32_t t_tx_wrbs;
-	uint32_t t_tx_compl;
-	uint32_t t_ipv6_ext_hdr_tx_drop;
-};
-
 struct oce_be_stats {
 	uint8_t  be_on_die_temperature;
 	uint32_t be_tx_events;
@@ -279,7 +257,7 @@ struct oce_be_stats {
 	uint32_t jabber_events;
 };
 
-struct oce_xe201_stats {
+struct oce_xe_stats {
 	uint64_t tx_pkts;
 	uint64_t tx_unicast_pkts;
 	uint64_t tx_multicast_pkts;
@@ -373,15 +351,6 @@ struct oce_xe201_stats {
 	uint64_t rx_pkts_8192_to_9216_bytes;
 };
 
-struct oce_drv_stats {
-	struct oce_rx_stats rx;
-	struct oce_tx_stats tx;
-	union {
-		struct oce_be_stats be;
-		struct oce_xe201_stats xe201;
-	} u0;
-};
-
 typedef int boolean_t;
 #define TRUE					1
 #define FALSE					0
@@ -441,7 +410,6 @@ struct oce_eq {
 	void *parent;
 	void *cb_context;
 	struct oce_ring *ring;
-	uint32_t ref_count;
 	qstate_t qstate;
 	struct oce_cq *cq[OCE_MAX_CQ_EQ];
 	int cq_valid;
@@ -473,7 +441,6 @@ struct oce_cq {
 	struct oce_ring *ring;
 	qstate_t qstate;
 	struct cq_config cq_cfg;
-	uint32_t ref_count;
 };
 
 struct mq_config {
@@ -537,7 +504,6 @@ struct oce_wq {
 	uint16_t wq_id;
 	struct wq_config cfg;
 	int queue_index;
-	struct oce_tx_queue_stats tx_stats;
 };
 
 struct rq_config {
@@ -584,7 +550,6 @@ struct oce_rq {
 	int fragsleft;
 #endif
 	qstate_t qstate;
-	struct oce_rx_queue_stats rx_stats;
 #ifdef OCE_LRO
 	struct lro_ctrl lro;
 	int lro_pkts_queued;
@@ -678,13 +643,15 @@ struct oce_softc {
 	uint32_t if_cap_flags;
 
 	uint32_t flow_control;
-	char promisc;
 
 	char be3_native;
 	uint32_t pvid;
 
 	struct oce_dma_mem stats_mem;
-	struct oce_drv_stats oce_stats_info;
+
+	uint64_t rx_errors;
+	uint64_t tx_errors;
+
 	struct timeout timer;
 	struct timeout rxrefill;
 };
@@ -810,8 +777,6 @@ oce_bus_write_1(bus_space_tag_t tag, bus_space_handle_t handle, bus_size_t reg,
  ***********************************************************/
 #define oce_dma_sync(d, f) \
 	bus_dmamap_sync((d)->tag, (d)->map, 0, (d)->map->dm_mapsize, f)
-#define oce_dmamap_sync(t, m, f) \
-	bus_dmamap_sync(t, m, 0, (m)->dm_mapsize, f)
 int  oce_dma_alloc(struct oce_softc *sc, bus_size_t size,
     struct oce_dma_mem *dma, int flags);
 void oce_dma_free(struct oce_softc *sc, struct oce_dma_mem *dma);
@@ -869,10 +834,9 @@ void mbx_common_req_hdr_init(struct mbx_hdr *hdr, uint8_t dom, uint8_t port,
 /************************************************************
  * Statistics functions
  ************************************************************/
-void oce_refresh_queue_stats(struct oce_softc *sc);
-int  oce_refresh_nic_stats(struct oce_softc *sc);
 int  oce_stats_init(struct oce_softc *sc);
 void oce_stats_free(struct oce_softc *sc);
+int  oce_stats_get(struct oce_softc *sc, u_int64_t *rxe, u_int64_t *txe);
 
 /* Capabilities */
 #define OCE_MAX_RSP_HANDLED		64
