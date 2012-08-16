@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.66 2012/07/29 13:49:03 mikeb Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.71 2012/08/13 13:14:50 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -72,7 +72,9 @@ const struct pci_matchid ixgbe_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_T3_LOM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP_EM },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP_FCOE }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP_SF2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP_FCOE },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_X540T },
 #if 0
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599VF }
 #endif
@@ -85,7 +87,6 @@ int	ixgbe_probe(struct device *, void *, void *);
 void	ixgbe_attach(struct device *, struct device *, void *);
 int	ixgbe_detach(struct device *, int);
 void	ixgbe_start(struct ifnet *);
-void	ixgbe_start_locked(struct tx_ring *, struct ifnet *);
 int	ixgbe_ioctl(struct ifnet *, u_long, caddr_t);
 void	ixgbe_watchdog(struct ifnet *);
 void	ixgbe_init(void *);
@@ -121,7 +122,7 @@ void	ixgbe_enable_intr(struct ix_softc *);
 void	ixgbe_disable_intr(struct ix_softc *);
 void	ixgbe_update_stats_counters(struct ix_softc *);
 int	ixgbe_txeof(struct tx_ring *);
-int	ixgbe_rxeof(struct ix_queue *, int);
+int	ixgbe_rxeof(struct ix_queue *);
 void	ixgbe_rx_checksum(uint32_t, struct mbuf *, uint32_t);
 void	ixgbe_iff(struct ix_softc *);
 #ifdef IX_DEBUG
@@ -222,7 +223,6 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 	/* Indicate to RX setup to use Jumbo Clusters */
 	sc->num_tx_desc = DEFAULT_TXD;
 	sc->num_rx_desc = DEFAULT_RXD;
-	sc->rx_process_limit = 100;	// XXX
 
 	/* Do base PCI setup - map BAR0 */
 	if (ixgbe_allocate_pci_resources(sc))
@@ -253,6 +253,9 @@ ixgbe_attach(struct device *parent, struct device *self, void *aux)
 		error = ixgbe_init_ops_vf(hw);
 		break;
 #endif
+	case ixgbe_mac_X540:
+		error = ixgbe_init_ops_X540(hw);
+		break;
 	default:
 		error = IXGBE_ERR_DEVICE_NOT_SUPPORTED;
 		break;
@@ -388,17 +391,32 @@ ixgbe_detach(struct device *self, int flags)
  **********************************************************************/
 
 void
-ixgbe_start_locked(struct tx_ring *txr, struct ifnet * ifp)
+ixgbe_start(struct ifnet * ifp)
 {
+	struct ix_softc		*sc = ifp->if_softc;
+	struct tx_ring		*txr = sc->tx_rings;
 	struct mbuf  		*m_head;
-	struct ix_softc		*sc = txr->sc;
+	uint32_t		 queue = 0;
 	int			 post = 0;
 
 	if ((ifp->if_flags & (IFF_RUNNING|IFF_OACTIVE)) != IFF_RUNNING)
 		return;
-
 	if (!sc->link_active)
 		return;
+
+#if 0
+	/*
+	 * This is really just here for testing
+	 * TX multiqueue, ultimately what is
+	 * needed is the flow support in the stack
+	 * and appropriate logic here to deal with
+	 * it. -jfv
+	 */
+	if (sc->num_queues > 1)
+		queue = (curcpu % sc->num_queues);
+#endif
+
+	txr = &sc->tx_rings[queue];
 
 	bus_dmamap_sync(txr->txdma.dma_tag, txr->txdma.dma_map, 0,
 	    txr->txdma.dma_map->dm_mapsize,
@@ -439,34 +457,6 @@ ixgbe_start_locked(struct tx_ring *txr, struct ifnet * ifp)
 	if (post)
 		IXGBE_WRITE_REG(&sc->hw, IXGBE_TDT(txr->me),
 		    txr->next_avail_desc);
-}
-
-
-void
-ixgbe_start(struct ifnet *ifp)
-{
-	struct ix_softc *sc = ifp->if_softc;
-	struct tx_ring	*txr = sc->tx_rings;
-	uint32_t queue = 0;
-
-#if 0
-	/*
-	 * This is really just here for testing
-	 * TX multiqueue, ultimately what is
-	 * needed is the flow support in the stack
-	 * and appropriate logic here to deal with
-	 * it. -jfv
-	 */
-	if (sc->num_queues > 1)
-		queue = (curcpu % sc->num_queues);
-#endif
-
-	txr = &sc->tx_rings[queue];
-
-	if (ifp->if_flags & IFF_RUNNING)
-		ixgbe_start_locked(txr, ifp);
-
-	return;
 }
 
 /*********************************************************************
@@ -689,8 +679,19 @@ ixgbe_init(void *arg)
 	gpie |= IXGBE_SDP1_GPIEN;
 
 	if (sc->hw.mac.type == ixgbe_mac_82599EB) {
-		/* Add for Thermal detection */
+		/* Add for Module detection */
 		gpie |= IXGBE_SDP2_GPIEN;
+
+		/*
+		 * Set LL interval to max to reduce the number of low latency
+		 * interrupts hitting the card when the ring is getting full.
+		 */
+		gpie |= 0xf << IXGBE_GPIE_LLI_DELAY_SHIFT;
+	}
+
+	if (sc->hw.mac.type == ixgbe_mac_X540) {
+		/* Thermal Failure Detection */
+		gpie |= IXGBE_SDP0_GPIEN;
 
 		/*
 		 * Set LL interval to max to reduce the number of low latency
@@ -897,7 +898,7 @@ ixgbe_handle_que(void *context, int pending)
 	struct ifnet	*ifp = &que->sc->arpcom.ac_if;
 
 	if (ifp->if_flags & IFF_RUNNING) {
-		ixgbe_rxeof(que, -1 /* XXX sc->rx_process_limit */);
+		ixgbe_rxeof(que);
 		ixgbe_txeof(txr);
 
 		if (ixgbe_rxfill(que->rxr)) {
@@ -907,7 +908,7 @@ ixgbe_handle_que(void *context, int pending)
 		}
 
 		if (!IFQ_IS_EMPTY(&ifp->if_snd))
-			ixgbe_start_locked(txr, ifp);
+			ixgbe_start(ifp);
 	}
 
 	/* Reenable this interrupt */
@@ -937,9 +938,8 @@ ixgbe_legacy_irq(void *arg)
 		return (0);
 	}
 
-	++que->irqs;
 	if (ifp->if_flags & IFF_RUNNING) {
-		ixgbe_rxeof(que, -1);
+		ixgbe_rxeof(que);
 		ixgbe_txeof(txr);
 		refill = 1;
 	}
@@ -947,10 +947,18 @@ ixgbe_legacy_irq(void *arg)
 	/* Check for fan failure */
 	if ((hw->phy.media_type == ixgbe_media_type_copper) &&
 	    (reg_eicr & IXGBE_EICR_GPI_SDP1)) {
-		printf("\n%s: CRITICAL: FAN FAILURE!! "
+		printf("%s: CRITICAL: FAN FAILURE!! "
 		    "REPLACE IMMEDIATELY!!\n", ifp->if_xname);
 		IXGBE_WRITE_REG(&sc->hw, IXGBE_EIMS,
 		    IXGBE_EICR_GPI_SDP1);
+	}
+
+	/* Check for over temp condition */
+	if ((hw->mac.type == ixgbe_mac_X540) &&
+	    (reg_eicr & IXGBE_EICR_GPI_SDP0)) {
+		printf("%s: CRITICAL: OVER TEMP!! "
+		    "PHY IS SHUT DOWN!!\n", ifp->if_xname);
+		IXGBE_WRITE_REG(hw, IXGBE_EICR, IXGBE_EICR_GPI_SDP0);
 	}
 
 	/* Link status change */
@@ -970,7 +978,7 @@ ixgbe_legacy_irq(void *arg)
 	}
 
 	if (ifp->if_flags & IFF_RUNNING && !IFQ_IS_EMPTY(&ifp->if_snd))
-		ixgbe_start_locked(txr, ifp);
+		ixgbe_start(ifp);
 
 	for (i = 0; i < sc->num_queues; i++, que++)
 		ixgbe_enable_queue(sc, que->msix);
@@ -1001,6 +1009,9 @@ ixgbe_media_status(struct ifnet * ifp, struct ifmediareq * ifmr)
 		ifmr->ifm_status |= IFM_ACTIVE;
 
 		switch (sc->link_speed) {
+		case IXGBE_LINK_SPEED_100_FULL:
+			ifmr->ifm_active |= IFM_100_TX | IFM_FDX;
+			break;
 		case IXGBE_LINK_SPEED_1GB_FULL:
 			ifmr->ifm_active |= IFM_1000_T | IFM_FDX;
 			break;
@@ -1082,11 +1093,7 @@ ixgbe_encap(struct tx_ring *txr, struct mbuf *m_head)
 	 */
 	error = bus_dmamap_load_mbuf(txr->txdma.dma_tag, map,
 	    m_head, BUS_DMA_NOWAIT);
-	/* XXX EFBIG */
-	if (error == ENOMEM) {
-		sc->no_tx_dma_setup++;
-		return (error);
-	} else if (error != 0) {
+	if (error != 0) {
 		sc->no_tx_dma_setup++;
 		return (error);
 	}
@@ -1404,6 +1411,7 @@ ixgbe_identify_hardware(struct ix_softc *sc)
 	case PCI_PRODUCT_INTEL_82599_SFP:
 	case PCI_PRODUCT_INTEL_82599_SFP_EM:
 	case PCI_PRODUCT_INTEL_82599_SFP_FCOE:
+	case PCI_PRODUCT_INTEL_82599_SFP_SF2:
 		sc->hw.mac.type = ixgbe_mac_82599EB;
 		sc->optics = IFM_10G_SR;
 		sc->hw.phy.smart_speed = ixgbe_smart_speed;
@@ -1430,6 +1438,11 @@ ixgbe_identify_hardware(struct ix_softc *sc)
 	case PCI_PRODUCT_INTEL_82599VF:
 		sc->hw.mac.type = ixgbe_mac_82599_vf;
 		sc->optics = IFM_AUTO;
+		sc->hw.phy.smart_speed = ixgbe_smart_speed;
+		break;
+	case PCI_PRODUCT_INTEL_X540T:
+		sc->hw.mac.type = ixgbe_mac_X540;
+		sc->optics = IFM_10G_T;
 		sc->hw.phy.smart_speed = ixgbe_smart_speed;
 		break;
 	default:
@@ -1686,8 +1699,13 @@ ixgbe_config_link(struct ix_softc *sc)
 		if (sc->hw.mac.ops.check_link)
 			err = sc->hw.mac.ops.check_link(&sc->hw, &autoneg,
 			    &sc->link_up, FALSE);
-			if (err)
-				return;
+		if (err)
+			return;
+		if ((!autoneg) && (sc->hw.mac.ops.get_link_capabilities))
+			err = sc->hw.mac.ops.get_link_capabilities(&sc->hw,
+			    &autoneg, &negotiate);
+		if (err)
+			return;
 		if (sc->hw.mac.ops.setup_link)
 			err = sc->hw.mac.ops.setup_link(&sc->hw, autoneg,
 			    negotiate, sc->link_up);
@@ -2047,6 +2065,7 @@ ixgbe_initialize_transmit_units(struct ix_softc *sc)
 			txctrl = IXGBE_READ_REG(hw, IXGBE_DCA_TXCTRL(i));
 			break;
 		case ixgbe_mac_82599EB:
+		case ixgbe_mac_X540:
 		default:
 			txctrl = IXGBE_READ_REG(hw, IXGBE_DCA_TXCTRL_82599(i));
 			break;
@@ -2057,6 +2076,7 @@ ixgbe_initialize_transmit_units(struct ix_softc *sc)
 			IXGBE_WRITE_REG(hw, IXGBE_DCA_TXCTRL(i), txctrl);
 			break;
 		case ixgbe_mac_82599EB:
+		case ixgbe_mac_X540:
 		default:
 			IXGBE_WRITE_REG(hw, IXGBE_DCA_TXCTRL_82599(i), txctrl);
 			break;
@@ -2064,7 +2084,7 @@ ixgbe_initialize_transmit_units(struct ix_softc *sc)
 	}
 	ifp->if_timer = 0;
 
-	if (hw->mac.type == ixgbe_mac_82599EB) {
+	if (hw->mac.type != ixgbe_mac_82598EB) {
 		uint32_t dmatxctl, rttdcs;
 		dmatxctl = IXGBE_READ_REG(hw, IXGBE_DMATXCTL);
 		dmatxctl |= IXGBE_DMATXCTL_TE;
@@ -2930,12 +2950,9 @@ ixgbe_free_receive_buffers(struct rx_ring *rxr)
  *  the mbufs in the descriptor and sends data which has been
  *  dma'ed into host memory to upper layer.
  *
- *  We loop at most count times if count is > 0, or until done if
- *  count < 0.
- *
  *********************************************************************/
 int
-ixgbe_rxeof(struct ix_queue *que, int count)
+ixgbe_rxeof(struct ix_queue *que)
 {
 	struct ix_softc 	*sc = que->sc;
 	struct rx_ring		*rxr = que->rxr;
@@ -2953,7 +2970,7 @@ ixgbe_rxeof(struct ix_queue *que, int count)
 		return FALSE;
 
 	i = rxr->next_to_check;
-	while (count != 0 && rxr->rx_ndescs > 0) {
+	while (rxr->rx_ndescs > 0) {
 		bus_dmamap_sync(rxr->rxdma.dma_tag, rxr->rxdma.dma_map,
 		    dsize * i, dsize, BUS_DMASYNC_POSTREAD);
 
@@ -3230,6 +3247,7 @@ ixgbe_enable_intr(struct ix_softc *sc)
 		    mask |= IXGBE_EIMS_GPI_SDP1;
 	else {
 		mask |= IXGBE_EIMS_ECC;
+		mask |= IXGBE_EIMS_GPI_SDP0;
 		mask |= IXGBE_EIMS_GPI_SDP1;
 		mask |= IXGBE_EIMS_GPI_SDP2;
 	}
@@ -3345,6 +3363,7 @@ ixgbe_set_ivar(struct ix_softc *sc, uint8_t entry, uint8_t vector, int8_t type)
 		break;
 
 	case ixgbe_mac_82599EB:
+	case ixgbe_mac_X540:
 		if (type == -1) { /* MISC IVAR */
 			index = (entry & 1) * 8;
 			ivar = IXGBE_READ_REG(hw, IXGBE_IVAR_MISC);
