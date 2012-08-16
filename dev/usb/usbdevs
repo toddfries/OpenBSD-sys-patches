@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.582 2012/08/03 12:42:40 jsg Exp $
+$OpenBSD: usbdevs,v 1.584 2012/08/14 07:22:48 dcoppa Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -404,6 +404,7 @@ vendor ATI2		0x0b6f	ATI
 vendor KURUSUGAWA	0x0b7e	Kurusugawa Electronics
 vendor SMART		0x0b8c	Smart Technologies
 vendor ASIX		0x0b95	ASIX Electronics
+vendor O2MICRO		0x0b97	O2 Micro
 vendor USR		0x0baf	U.S. Robotics
 vendor AMBIT		0x0bb2	Ambit Microsystems
 vendor HTC		0x0bb4	HTC
@@ -1645,7 +1646,7 @@ product FTDI ASK_RDR4X7_6	0xc995	ASK RDR 4X7
 product FTDI ASK_RDR4X7_7	0xc996	ASK RDR 4X7
 product FTDI ASK_RDR4X7_8	0xc997	ASK RDR 4X7
 product FTDI MJS_SIRIUS_PC_1	0xca81	MJS Sirius To PC Interface
-product FTDI CHAMELEON		0xcaa0	µChameleon
+product FTDI CHAMELEON		0xcaa0	uChameleon
 product FTDI OPENPORT_13M	0xcc48	OpenPort 1.3 Mitsubishi
 product FTDI OPENPORT_13S	0xcc49	OpenPort 1.3 Subaru
 product FTDI OPENPORT_13U	0xcc4a	OpenPort 1.3 Universal
@@ -2963,6 +2964,10 @@ product NOVATEL MC760		0x6002	MC760
 /* Novatel Wireless(1) products */
 product NOVATEL1 FLEXPACKGPS	0x0100	NovAtel FlexPack GPS
 
+/* O2 Micro products */
+product O2MICRO OZ776HUB	0x7761	OZ776 Hub
+
+/* Olimex products */
 product OLIMEX  OPENOCD_JTAG	0x0003	OpenOCD JTAG
 
 /* Olympus products */
