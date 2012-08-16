@@ -65,6 +65,8 @@ static __inline void write_eflags(u_int);
 static __inline void wbinvd(void);
 static __inline void clflush(u_int32_t addr);
 static __inline void mfence(void);
+static __inline void sfence(void);
+static __inline void lfence(void);
 static __inline void wrmsr(u_int, u_int64_t);
 static __inline u_int64_t rdmsr(u_int);
 static __inline void breakpoint(void);
@@ -232,6 +234,18 @@ static __inline void
 mfence(void)
 {
 	__asm __volatile("mfence" : : : "memory");
+}
+
+static __inline void
+sfence(void)
+{
+	__asm __volatile("sfence" : : : "memory");
+}
+
+static __inline void
+lfence(void)
+{
+	__asm __volatile("lfence" : : : "memory");
 }
 
 static __inline void

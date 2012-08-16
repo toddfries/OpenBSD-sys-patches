@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Stefan Fritsch.
+ * Copyright (c) 2012 Stefan Fritsch, Alexander Fiveg.
  * Copyright (c) 2010 Minoura Makoto.
  * All rights reserved.
  *
@@ -191,36 +191,46 @@ struct vioif_softc {
 	short			sc_ifflags;
 
 	/* bus_dmamem */
-	bus_dma_segment_t	sc_hdr_segs[1];
-	struct virtio_net_hdr	*sc_hdrs;
-#define sc_rx_hdrs	sc_hdrs
+	bus_dma_segment_t	sc_dma_seg;
+	bus_dmamap_t		sc_dma_map;
+	size_t			sc_dma_size;
+	caddr_t			sc_dma_kva;
+
+	struct virtio_net_hdr	*sc_rx_hdrs;
 	struct virtio_net_hdr	*sc_tx_hdrs;
 	struct virtio_net_ctrl_cmd *sc_ctrl_cmd;
 	struct virtio_net_ctrl_status *sc_ctrl_status;
 	struct virtio_net_ctrl_rx *sc_ctrl_rx;
 	struct virtio_net_ctrl_mac_tbl *sc_ctrl_mac_tbl_uc;
+#define sc_ctrl_mac_info sc_ctrl_mac_tbl_uc
 	struct virtio_net_ctrl_mac_tbl *sc_ctrl_mac_tbl_mc;
 
 	/* kmem */
 	bus_dmamap_t		*sc_arrays;
-#define sc_rxhdr_dmamaps sc_arrays
-	bus_dmamap_t		*sc_txhdr_dmamaps;
-	bus_dmamap_t		*sc_rx_dmamaps;
+#define sc_rx_dmamaps sc_arrays
 	bus_dmamap_t		*sc_tx_dmamaps;
 	struct mbuf		**sc_rx_mbufs;
 	struct mbuf		**sc_tx_mbufs;
 
-	bus_dmamap_t		sc_ctrl_cmd_dmamap;
-	bus_dmamap_t		sc_ctrl_status_dmamap;
-	bus_dmamap_t		sc_ctrl_rx_dmamap;
-	bus_dmamap_t		sc_ctrl_tbl_uc_dmamap;
-	bus_dmamap_t		sc_ctrl_tbl_mc_dmamap;
-
 	enum vioif_ctrl_state	sc_ctrl_inuse;
 	struct mutex		sc_ctrl_lock;
 };
+
+#define VIOIF_DMAMEM_OFFSET(sc, p) ((caddr_t)(p) - (sc)->sc_dma_kva)
+#define VIOIF_DMAMEM_SYNC(vsc, sc, p, size, flags)		\
+	bus_dmamap_sync((vsc)->sc_dmat, (sc)->sc_dma_map,	\
+	    VIOIF_DMAMEM_OFFSET((sc), (p)), (size), (flags))
+#define VIOIF_DMAMEM_ENQUEUE(sc, vq, slot, p, size, write)	\
+	virtio_enqueue_p((vq), (slot), (sc)->sc_dma_map,	\
+	    VIOIF_DMAMEM_OFFSET((sc), (p)), (size), (write))
+
 #define VIRTIO_NET_TX_MAXNSEGS		(16) /* XXX */
 #define VIRTIO_NET_CTRL_MAC_MAXENTRIES	(64) /* XXX */
+
+/* for now, sc_ctrl_mac_tbl_uc has always 0 entries */
+#define VIOIF_CTRL_MAC_INFO_SIZE 				\
+	(2*sizeof(struct virtio_net_ctrl_mac_tbl) + 		\
+	 0 + VIRTIO_NET_CTRL_MAC_MAXENTRIES * ETHER_ADDR_LEN)
 
 /* cfattach interface functions */
 int	vioif_match(struct device *, void *, void *);
@@ -246,6 +256,7 @@ void	vioif_rx_drain(struct vioif_softc *);
 
 /* tx */
 int	vioif_tx_vq_done(struct virtqueue *);
+int	vioif_tx_deq(struct virtqueue *);
 void	vioif_tx_drain(struct vioif_softc *);
 int	vioif_tx_load(struct vioif_softc *, int, struct mbuf *, struct mbuf **);
 
@@ -263,6 +274,8 @@ void	vioif_wait_ctrl(struct vioif_softc *sc);
 void	vioif_wait_ctrl_done(struct vioif_softc *sc);
 void	vioif_ctrl_wakeup(struct vioif_softc *, enum vioif_ctrl_state);
 int	vioif_alloc_mems(struct vioif_softc *);
+int	vioif_alloc_dmamem(struct vioif_softc *);
+void	vioif_free_dmamem(struct vioif_softc *);
 
 
 int
@@ -285,6 +298,46 @@ struct cfdriver vioif_cd = {
 	NULL, "vioif", DV_IFNET
 };
 
+int
+vioif_alloc_dmamem(struct vioif_softc *sc)
+{
+	struct virtio_softc *vsc = sc->sc_virtio;
+	int nsegs;
+
+	if (bus_dmamap_create(vsc->sc_dmat, sc->sc_dma_size, 1,
+	    sc->sc_dma_size, 0, BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW,
+	    &sc->sc_dma_map) != 0)
+		goto err;
+	if (bus_dmamem_alloc(vsc->sc_dmat, sc->sc_dma_size, 16, 0,
+	    &sc->sc_dma_seg, 1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0)
+		goto destroy;
+	if (bus_dmamem_map(vsc->sc_dmat, &sc->sc_dma_seg, nsegs,
+	    sc->sc_dma_size, &sc->sc_dma_kva, BUS_DMA_NOWAIT) != 0)
+		goto free;
+	if (bus_dmamap_load(vsc->sc_dmat, sc->sc_dma_map, sc->sc_dma_kva,
+	    sc->sc_dma_size, NULL, BUS_DMA_NOWAIT) != 0)
+		goto unmap;
+	return (0);
+
+unmap:
+	bus_dmamem_unmap(vsc->sc_dmat, sc->sc_dma_kva, sc->sc_dma_size);
+free:
+	bus_dmamem_free(vsc->sc_dmat, &sc->sc_dma_seg, 1);
+destroy:
+	bus_dmamap_destroy(vsc->sc_dmat, sc->sc_dma_map);
+err:
+	return (1);
+}
+
+void
+vioif_free_dmamem(struct vioif_softc *sc)
+{
+	struct virtio_softc *vsc = sc->sc_virtio;
+	bus_dmamap_unload(vsc->sc_dmat, sc->sc_dma_map);
+	bus_dmamem_unmap(vsc->sc_dmat, sc->sc_dma_kva, sc->sc_dma_size);
+	bus_dmamem_free(vsc->sc_dmat, &sc->sc_dma_seg, 1);
+	bus_dmamap_destroy(vsc->sc_dmat, sc->sc_dma_map);
+}
 
 /* allocate memory */
 /*
@@ -304,8 +357,6 @@ struct cfdriver vioif_cd = {
  */
 /*
  * dynamically allocated memory is used for:
- *   sc_rxhdr_dmamaps[slot]:	bus_dmamap_t array for sc_rx_hdrs[slot]
- *   sc_txhdr_dmamaps[slot]:	bus_dmamap_t array for sc_tx_hdrs[slot]
  *   sc_rx_dmamaps[slot]:	bus_dmamap_t array for recieved payload
  *   sc_tx_dmamaps[slot]:	bus_dmamap_t array for sent payload
  *   sc_rx_mbufs[slot]:		mbuf pointer array for recieved frames
@@ -315,10 +366,10 @@ int
 vioif_alloc_mems(struct vioif_softc *sc)
 {
 	struct virtio_softc *vsc = sc->sc_virtio;
-	int allocsize, allocsize2, r, rsegs, i;
-	void *vaddr;
-	char *p;
+	int allocsize, r, i;
+	unsigned int offset = 0;
 	int rxqsize, txqsize;
+	caddr_t kva;
 
 	rxqsize = vsc->sc_vqs[0].vq_num;
 	txqsize = vsc->sc_vqs[1].vq_num;
@@ -333,165 +384,77 @@ vioif_alloc_mems(struct vioif_softc *sc)
 			+ sizeof(struct virtio_net_ctrl_mac_tbl)
 			+ ETHER_ADDR_LEN * VIRTIO_NET_CTRL_MAC_MAXENTRIES;
 	}
-	r = bus_dmamem_alloc(vsc->sc_dmat, allocsize, 0, 0,
-			     &sc->sc_hdr_segs[0], 1, &rsegs, BUS_DMA_NOWAIT);
-	if (r != 0) {
-		printf("DMA memory allocation failed, size %d, error %d\n",
-		       allocsize, r);
-		goto err_none;
-	}
-	r = bus_dmamem_map(vsc->sc_dmat,
-			   &sc->sc_hdr_segs[0], 1, allocsize,
-			   (caddr_t*)&vaddr, BUS_DMA_NOWAIT);
-	if (r != 0) {
-		printf("DMA memory map failed, error %d\n", r);
-		goto err_dmamem_alloc;
-	}
-	sc->sc_hdrs = vaddr;
-	memset(vaddr, 0, allocsize);
-	p = (char *)vaddr;
-	p += sizeof(struct virtio_net_hdr) * rxqsize;
-#define P(name,size)	do { sc->sc_ ##name = (void*) p;	\
-			     p += size; } while (0)
-	P(tx_hdrs, sizeof(struct virtio_net_hdr) * txqsize);
-	if (vsc->sc_nvqs == 3) {
-		P(ctrl_cmd, sizeof(struct virtio_net_ctrl_cmd));
-		P(ctrl_status, sizeof(struct virtio_net_ctrl_status));
-		P(ctrl_rx, sizeof(struct virtio_net_ctrl_rx));
-		P(ctrl_mac_tbl_uc, sizeof(struct virtio_net_ctrl_mac_tbl));
-		P(ctrl_mac_tbl_mc,
-		  (sizeof(struct virtio_net_ctrl_mac_tbl)
-		   + ETHER_ADDR_LEN * VIRTIO_NET_CTRL_MAC_MAXENTRIES));
-	}
-#undef P
+	sc->sc_dma_size = allocsize;
 
-	allocsize2 = sizeof(bus_dmamap_t) * (rxqsize + txqsize);
-	allocsize2 += sizeof(bus_dmamap_t) * (rxqsize + txqsize);
-	allocsize2 += sizeof(struct mbuf*) * (rxqsize + txqsize);
-	sc->sc_arrays = malloc(allocsize2, M_DEVBUF, M_WAITOK|M_CANFAIL|M_ZERO);
-	if (sc->sc_arrays == NULL)
-		goto err_dmamem_map;
-	sc->sc_txhdr_dmamaps = sc->sc_arrays + rxqsize;
-	sc->sc_rx_dmamaps = sc->sc_txhdr_dmamaps + txqsize;
-	sc->sc_tx_dmamaps = sc->sc_rx_dmamaps + rxqsize;
+	if (vioif_alloc_dmamem(sc) != 0) {
+		printf("unable to allocate dma region\n");
+		return  -1;
+	}
+
+	kva = sc->sc_dma_kva;
+	sc->sc_rx_hdrs = (struct virtio_net_hdr*)kva;
+	offset += sizeof(struct virtio_net_hdr) * rxqsize;
+	sc->sc_tx_hdrs = (struct virtio_net_hdr*)(kva + offset);
+	offset += sizeof(struct virtio_net_hdr) * txqsize;
+	if (vsc->sc_nvqs == 3) {
+		sc->sc_ctrl_cmd = (void*)(kva + offset);
+		offset += sizeof(*sc->sc_ctrl_cmd);
+		sc->sc_ctrl_status = (void*)(kva + offset);
+		offset += sizeof(*sc->sc_ctrl_status);
+		sc->sc_ctrl_rx = (void*)(kva + offset);
+		offset += sizeof(*sc->sc_ctrl_rx);
+		sc->sc_ctrl_mac_tbl_uc = (void*)(kva + offset);
+		offset += sizeof(*sc->sc_ctrl_mac_tbl_uc);
+		/* For now, sc_ctrl_mac_tbl_uc is followed by 0 MAC entries */
+		sc->sc_ctrl_mac_tbl_mc = (void*)(kva + offset);
+	}
+
+	allocsize = (rxqsize + txqsize) *
+	    (2 * sizeof(bus_dmamap_t) + sizeof(struct mbuf *));
+	sc->sc_arrays = malloc(allocsize, M_DEVBUF, M_WAITOK|M_CANFAIL|M_ZERO);
+	if (sc->sc_arrays == NULL) {
+		printf("unable to allocate mem for dmamaps\n");
+		goto err_hdr;
+	}
+
+	sc->sc_tx_dmamaps = sc->sc_arrays + rxqsize;
 	sc->sc_rx_mbufs = (void*) (sc->sc_tx_dmamaps + txqsize);
 	sc->sc_tx_mbufs = sc->sc_rx_mbufs + rxqsize;
 
-#define C(map, buf, size, nsegs, rw, usage)				\
-	do {								\
-		r = bus_dmamap_create(vsc->sc_dmat, size, nsegs, size, 0, \
-				      BUS_DMA_NOWAIT|BUS_DMA_ALLOCNOW,	\
-				      &sc->sc_ ##map);			\
-		if (r != 0) {						\
-			printf(usage " dmamap creation failed, error "	\
-			       "%d\n", r);				\
-			goto err_reqs;					\
-		}							\
-	} while (0)
-#define C_L1(map, buf, size, nsegs, rw, usage)				\
-	C(map, buf, size, nsegs, rw, usage);				\
-	do {								\
-		r = bus_dmamap_load(vsc->sc_dmat, sc->sc_ ##map,	\
-				    &sc->sc_ ##buf, size, NULL,		\
-				    BUS_DMA_ ##rw | BUS_DMA_NOWAIT);	\
-		if (r != 0) {						\
-			printf(usage " dmamap load failed, error %d\n", \
-			       r);					\
-			goto err_reqs;					\
-		}							\
-	} while (0)
-#define C_L2(map, buf, size, nsegs, rw, usage)				\
-	C(map, buf, size, nsegs, rw, usage);				\
-	do {								\
-		r = bus_dmamap_load(vsc->sc_dmat, sc->sc_ ##map,	\
-				    sc->sc_ ##buf, size, NULL,		\
-				    BUS_DMA_ ##rw | BUS_DMA_NOWAIT);	\
-		if (r != 0) {						\
-			printf(usage " dmamap load failed, error %d\n",	\
-			       r);					\
-			goto err_reqs;					\
-		}							\
-	} while (0)
 	for (i = 0; i < rxqsize; i++) {
-		C_L1(rxhdr_dmamaps[i], rx_hdrs[i],
-		    sizeof(struct virtio_net_hdr), 1,
-		    READ, "rx header");
-		C(rx_dmamaps[i], NULL, MCLBYTES, 1, 0, "rx payload");
+		r = bus_dmamap_create(vsc->sc_dmat, MCLBYTES, 1, MCLBYTES, 0,
+		    BUS_DMA_NOWAIT|BUS_DMA_ALLOCNOW, &sc->sc_rx_dmamaps[i]);
+		if (r != 0)
+			goto err_reqs;
 	}
 
 	for (i = 0; i < txqsize; i++) {
-		C_L1(txhdr_dmamaps[i], rx_hdrs[i],
-		    sizeof(struct virtio_net_hdr), 1,
-		    WRITE, "tx header");
-		C(tx_dmamaps[i], NULL, ETHER_MAX_LEN, 256 /* XXX */, 0,
-		  "tx payload");
+		r = bus_dmamap_create(vsc->sc_dmat, ETHER_MAX_LEN,
+		    256 /* XXX */, ETHER_MAX_LEN, 0,
+		    BUS_DMA_NOWAIT|BUS_DMA_ALLOCNOW,
+		    &sc->sc_tx_dmamaps[i]);
+		if (r != 0)
+			goto err_reqs;
 	}
-
-	if (vsc->sc_nvqs == 3) {
-		/* control vq class & command */
-		C_L2(ctrl_cmd_dmamap, ctrl_cmd,
-		    sizeof(struct virtio_net_ctrl_cmd), 1, WRITE,
-		    "control command");
-
-		/* control vq status */
-		C_L2(ctrl_status_dmamap, ctrl_status,
-		    sizeof(struct virtio_net_ctrl_status), 1, READ,
-		    "control status");
-
-		/* control vq rx mode command parameter */
-		C_L2(ctrl_rx_dmamap, ctrl_rx,
-		    sizeof(struct virtio_net_ctrl_rx), 1, WRITE,
-		    "rx mode control command");
-
-		/* control vq MAC filter table for unicast */
-		/* do not load now since its length is variable */
-		C(ctrl_tbl_uc_dmamap, NULL,
-		  sizeof(struct virtio_net_ctrl_mac_tbl) + 0, 1, WRITE,
-		  "unicast MAC address filter command");
-
-		/* control vq MAC filter table for multicast */
-		C(ctrl_tbl_mc_dmamap, NULL,
-		  (sizeof(struct virtio_net_ctrl_mac_tbl)
-		   + ETHER_ADDR_LEN * VIRTIO_NET_CTRL_MAC_MAXENTRIES),
-		  1, WRITE, "multicast MAC address filter command");
-	}
-#undef C_L2
-#undef C_L1
-#undef C
 
 	return 0;
 
 err_reqs:
-#define D(map)								\
-	do {								\
-		if (sc->sc_ ##map) {					\
-			bus_dmamap_destroy(vsc->sc_dmat, sc->sc_ ##map); \
-			sc->sc_ ##map = NULL;				\
-		}							\
-	} while (0)
-	D(ctrl_tbl_mc_dmamap);
-	D(ctrl_tbl_uc_dmamap);
-	D(ctrl_rx_dmamap);
-	D(ctrl_status_dmamap);
-	D(ctrl_cmd_dmamap);
+	printf("dmamap creation failed, error %d\n", r);
 	for (i = 0; i < txqsize; i++) {
-		D(tx_dmamaps[i]);
-		D(txhdr_dmamaps[i]);
+		if (sc->sc_tx_dmamaps[i])
+			bus_dmamap_destroy(vsc->sc_dmat, sc->sc_tx_dmamaps[i]);
 	}
 	for (i = 0; i < rxqsize; i++) {
-		D(rx_dmamaps[i]);
-		D(rxhdr_dmamaps[i]);
+		if (sc->sc_tx_dmamaps[i])
+			bus_dmamap_destroy(vsc->sc_dmat, sc->sc_rx_dmamaps[i]);
 	}
-#undef D
 	if (sc->sc_arrays) {
 		free(sc->sc_arrays, M_DEVBUF);
 		sc->sc_arrays = 0;
 	}
-err_dmamem_map:
-	bus_dmamem_unmap(vsc->sc_dmat, (caddr_t)sc->sc_hdrs, allocsize);
-err_dmamem_alloc:
-	bus_dmamem_free(vsc->sc_dmat, &sc->sc_hdr_segs[0], 1);
-err_none:
+err_hdr:
+	vioif_free_dmamem(sc);
 	return -1;
 }
 
@@ -537,13 +500,17 @@ vioif_attach(struct device *parent, struct device *self, void *aux)
 	vsc->sc_config_change = 0;
 	vsc->sc_intrhand = virtio_vq_intr;
 
-	features = virtio_negotiate_features(vsc,
-					     (VIRTIO_NET_F_MAC |
-					      VIRTIO_NET_F_STATUS |
-					      VIRTIO_NET_F_CTRL_VQ |
-					      VIRTIO_NET_F_CTRL_RX |
-					      VIRTIO_F_NOTIFY_ON_EMPTY),
-					     virtio_net_feature_names);
+	features = VIRTIO_NET_F_MAC | VIRTIO_NET_F_STATUS |
+	    VIRTIO_NET_F_CTRL_VQ | VIRTIO_NET_F_CTRL_RX;
+	/*
+	 * VIRTIO_F_RING_EVENT_IDX can be switched off by setting bit 2 in the
+	 * driver flags, see config(8)
+	 */
+	if (!(vsc->sc_dev.dv_cfdata->cf_flags & 2))
+		features |= VIRTIO_F_RING_EVENT_IDX;
+
+	features = virtio_negotiate_features(vsc, features,
+	    virtio_net_feature_names);
 	if (features & VIRTIO_NET_F_MAC) {
 		viof_get_lladr(&sc->sc_ac, vsc);
 	} else {
@@ -569,7 +536,10 @@ vioif_attach(struct device *parent, struct device *self, void *aux)
 	vsc->sc_nvqs = 2;
 	sc->sc_vq[1].vq_done = vioif_tx_vq_done;
 	virtio_start_vq_intr(vsc, &sc->sc_vq[0]);
-	virtio_stop_vq_intr(vsc, &sc->sc_vq[1]); /* not urgent; do it later */
+	if (features & VIRTIO_F_RING_EVENT_IDX)
+		virtio_postpone_intr_far(&sc->sc_vq[1]);
+	else
+		virtio_stop_vq_intr(vsc, &sc->sc_vq[1]);
 	if ((features & VIRTIO_NET_F_CTRL_VQ)
 	    && (features & VIRTIO_NET_F_CTRL_RX)) {
 		if (virtio_alloc_vq(vsc, &sc->sc_vq[2], 2,
@@ -593,6 +563,9 @@ vioif_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = vioif_ioctl;
 	ifp->if_capabilities = 0;
 	ifp->if_watchdog = vioif_watchdog;
+	/* XXX: is this incompatible to postponing the tx irq? */
+	IFQ_SET_MAXLEN(&ifp->if_snd, vsc->sc_vqs[1].vq_num - 1);
+	IFQ_SET_READY(&ifp->if_snd);
 	ifmedia_init(&sc->sc_media, 0, vioif_media_change, vioif_media_status);
 	ifmedia_add(&sc->sc_media, IFM_ETHER | IFM_AUTO, 0, NULL);
 	ifmedia_set(&sc->sc_media, IFM_ETHER | IFM_AUTO);
@@ -729,6 +702,7 @@ vioif_start(struct ifnet *ifp)
 
 	for (;;) {
 		int slot, r;
+		struct virtio_net_hdr *hdr;
 
 		IFQ_POLL(&ifp->if_snd, m);
 		if (m == NULL)
@@ -737,7 +711,7 @@ vioif_start(struct ifnet *ifp)
 		r = virtio_enqueue_prep(vq, &slot);
 		if (r == EAGAIN) {
 			ifp->if_flags |= IFF_OACTIVE;
-			if (vioif_tx_vq_done(vq) && retry++ == 0)
+			if (vioif_tx_deq(vq) && retry++ == 0)
 				continue;
 			else
 				break;
@@ -749,30 +723,29 @@ vioif_start(struct ifnet *ifp)
 			virtio_enqueue_abort(vq, slot);
 			break;
 		}
-		IFQ_DEQUEUE(&ifp->if_snd, m);
 		r = virtio_enqueue_reserve(vq, slot,
 					sc->sc_tx_dmamaps[slot]->dm_nsegs + 1);
 		if (r != 0) {
 			bus_dmamap_unload(vsc->sc_dmat,
 					  sc->sc_tx_dmamaps[slot]);
-			m_freem(sc->sc_tx_mbufs[slot]);
+			virtio_enqueue_abort(vq, slot);
 			sc->sc_tx_mbufs[slot] = NULL;
-			ifp->if_oerrors++;
 			ifp->if_flags |= IFF_OACTIVE;
-			if (vioif_tx_vq_done(vq) && retry++ == 0)
+			if (vioif_tx_deq(vq) && retry++ == 0)
 				continue;
 			else
 				break;
 		}
+		IFQ_DEQUEUE(&ifp->if_snd, m);
 
-		memset(&sc->sc_tx_hdrs[slot], 0, sizeof(struct virtio_net_hdr));
+		hdr = &sc->sc_tx_hdrs[slot];
+		memset(hdr, 0, sizeof(*hdr));
 		bus_dmamap_sync(vsc->sc_dmat, sc->sc_tx_dmamaps[slot],
 				0, sc->sc_tx_dmamaps[slot]->dm_mapsize,
 				BUS_DMASYNC_PREWRITE);
-		bus_dmamap_sync(vsc->sc_dmat, sc->sc_txhdr_dmamaps[slot],
-				0, sc->sc_txhdr_dmamaps[slot]->dm_mapsize,
-				BUS_DMASYNC_PREWRITE);
-		virtio_enqueue(vq, slot, sc->sc_txhdr_dmamaps[slot], 1);
+		VIOIF_DMAMEM_SYNC(vsc, sc, hdr, sizeof(*hdr),
+		    BUS_DMASYNC_PREWRITE);
+		VIOIF_DMAMEM_ENQUEUE(sc, vq, slot, hdr, sizeof(*hdr), 1);
 		virtio_enqueue(vq, slot, sc->sc_tx_dmamaps[slot], 1);
 		virtio_enqueue_commit(vsc, vq, slot, 0);
 		queued++;
@@ -894,6 +867,7 @@ vioif_populate_rx_mbufs(struct vioif_softc *sc)
 
 	for (i = 0; i < vq->vq_num; i++) {
 		int slot;
+		struct virtio_net_hdr *hdr;
 		r = virtio_enqueue_prep(vq, &slot);
 		if (r == EAGAIN)
 			break;
@@ -901,9 +875,8 @@ vioif_populate_rx_mbufs(struct vioif_softc *sc)
 			panic("enqueue_prep for rx buffers: %d", r);
 		if (sc->sc_rx_mbufs[slot] == NULL) {
 			r = vioif_add_rx_mbuf(sc, slot);
-			if (r != 0) {
+			if (r != 0)
 				break;
-			}
 		}
 		r = virtio_enqueue_reserve(vq, slot,
 					sc->sc_rx_dmamaps[slot]->dm_nsegs + 1);
@@ -911,11 +884,12 @@ vioif_populate_rx_mbufs(struct vioif_softc *sc)
 			vioif_free_rx_mbuf(sc, slot);
 			break;
 		}
-		bus_dmamap_sync(vsc->sc_dmat, sc->sc_rxhdr_dmamaps[slot],
-			0, sizeof(struct virtio_net_hdr), BUS_DMASYNC_PREREAD);
+		hdr = &sc->sc_rx_hdrs[slot];
+		VIOIF_DMAMEM_SYNC(vsc, sc, hdr, sizeof(*hdr),
+		    BUS_DMASYNC_PREREAD);
 		bus_dmamap_sync(vsc->sc_dmat, sc->sc_rx_dmamaps[slot],
-			0, MCLBYTES, BUS_DMASYNC_PREREAD);
-		virtio_enqueue(vq, slot, sc->sc_rxhdr_dmamaps[slot], 0);
+		    0, MCLBYTES, BUS_DMASYNC_PREREAD);
+		VIOIF_DMAMEM_ENQUEUE(sc, vq, slot, hdr, sizeof(*hdr), 0);
 		virtio_enqueue(vq, slot, sc->sc_rx_dmamaps[slot], 0);
 		virtio_enqueue_commit(vsc, vq, slot, 0);
 		ndone++;
@@ -936,14 +910,13 @@ vioif_rx_deq(struct vioif_softc *sc)
 	int slot, len;
 
 	while (virtio_dequeue(vsc, vq, &slot, &len) == 0) {
+		struct virtio_net_hdr *hdr =  &sc->sc_rx_hdrs[slot];
 		len -= sizeof(struct virtio_net_hdr);
 		r = 1;
-		bus_dmamap_sync(vsc->sc_dmat, sc->sc_rxhdr_dmamaps[slot],
-				0, sizeof(struct virtio_net_hdr),
-				BUS_DMASYNC_POSTREAD);
+		VIOIF_DMAMEM_SYNC(vsc, sc, hdr, sizeof(*hdr),
+		    BUS_DMASYNC_POSTREAD);
 		bus_dmamap_sync(vsc->sc_dmat, sc->sc_rx_dmamaps[slot],
-				0, MCLBYTES,
-				BUS_DMASYNC_POSTREAD);
+		    0, MCLBYTES, BUS_DMASYNC_POSTREAD);
 		m = sc->sc_rx_mbufs[slot];
 		KASSERT(m != NULL);
 		bus_dmamap_unload(vsc->sc_dmat, sc->sc_rx_dmamaps[slot]);
@@ -968,13 +941,21 @@ vioif_rx_vq_done(struct virtqueue *vq)
 {
 	struct virtio_softc *vsc = vq->vq_owner;
 	struct vioif_softc *sc = (struct vioif_softc *)vsc->sc_child;
-	int r;
+	int r, sum = 0;
 
+again:
 	r = vioif_rx_deq(sc);
-	if (r)
+	sum += r;
+	if (r) {
 		vioif_populate_rx_mbufs(sc);
+		/* set used event index to the next slot */
+		if (vsc->sc_features & VIRTIO_F_RING_EVENT_IDX) {
+			if (virtio_start_vq_intr(vq->vq_owner, vq))
+				goto again;
+		}
+	}
 
-	return r;
+	return sum;
 }
 
 /* free all the mbufs; called from if_stop(disable) */
@@ -1006,14 +987,30 @@ vioif_tx_vq_done(struct virtqueue *vq)
 	struct virtio_softc *vsc = vq->vq_owner;
 	struct vioif_softc *sc = (struct vioif_softc *)vsc->sc_child;
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
+	int r;
+
+	r = vioif_tx_deq(vq);
+	if (!IFQ_IS_EMPTY(&ifp->if_snd))
+		vioif_start(ifp);
+	return r;
+}
+
+int
+vioif_tx_deq(struct virtqueue *vq)
+{
+	struct virtio_softc *vsc = vq->vq_owner;
+	struct vioif_softc *sc = (struct vioif_softc *)vsc->sc_child;
+	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	struct mbuf *m;
-	int r = 0;
+	int r, sum = 0;
 	int slot, len;
 
+again:
+	r = 0;
 	while (virtio_dequeue(vsc, vq, &slot, &len) == 0) {
+		struct virtio_net_hdr *hdr = &sc->sc_tx_hdrs[slot];
 		r++;
-		bus_dmamap_sync(vsc->sc_dmat, sc->sc_txhdr_dmamaps[slot],
-				0, sizeof(struct virtio_net_hdr),
+		VIOIF_DMAMEM_SYNC(vsc, sc, hdr, sizeof(*hdr),
 				BUS_DMASYNC_POSTWRITE);
 		bus_dmamap_sync(vsc->sc_dmat, sc->sc_tx_dmamaps[slot],
 				0, sc->sc_tx_dmamaps[slot]->dm_mapsize,
@@ -1025,10 +1022,17 @@ vioif_tx_vq_done(struct virtqueue *vq)
 		ifp->if_opackets++;
 		m_freem(m);
 	}
+	sum += r;
 
-	if (r)
+	if (r) {
 		ifp->if_flags &= ~IFF_OACTIVE;
-	return r;
+		/* delay the next interrupt */
+		if (vsc->sc_features & VIRTIO_F_RING_EVENT_IDX) {
+			if (virtio_postpone_intr_far(vq))
+				goto again;
+		}
+	}
+	return sum;
 }
 
 int
@@ -1110,15 +1114,12 @@ vioif_ctrl_rx(struct vioif_softc *sc, int cmd, int onoff)
 	sc->sc_ctrl_cmd->command = cmd;
 	sc->sc_ctrl_rx->onoff = onoff;
 
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_cmd_dmamap,
-			0, sizeof(struct virtio_net_ctrl_cmd),
-			BUS_DMASYNC_PREWRITE);
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_rx_dmamap,
-			0, sizeof(struct virtio_net_ctrl_rx),
-			BUS_DMASYNC_PREWRITE);
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_status_dmamap,
-			0, sizeof(struct virtio_net_ctrl_status),
-			BUS_DMASYNC_PREREAD);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_cmd,
+	    sizeof(*sc->sc_ctrl_cmd), BUS_DMASYNC_PREWRITE);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_rx,
+	    sizeof(*sc->sc_ctrl_rx), BUS_DMASYNC_PREWRITE);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_status,
+	    sizeof(*sc->sc_ctrl_status), BUS_DMASYNC_PREREAD);
 
 	r = virtio_enqueue_prep(vq, &slot);
 	if (r != 0)
@@ -1126,22 +1127,22 @@ vioif_ctrl_rx(struct vioif_softc *sc, int cmd, int onoff)
 	r = virtio_enqueue_reserve(vq, slot, 3);
 	if (r != 0)
 		panic("%s: control vq busy!?", sc->sc_dev.dv_xname);
-	virtio_enqueue(vq, slot, sc->sc_ctrl_cmd_dmamap, 1);
-	virtio_enqueue(vq, slot, sc->sc_ctrl_rx_dmamap, 1);
-	virtio_enqueue(vq, slot, sc->sc_ctrl_status_dmamap, 0);
+	VIOIF_DMAMEM_ENQUEUE(sc, vq, slot, sc->sc_ctrl_cmd,
+	    sizeof(*sc->sc_ctrl_cmd), 1);
+	VIOIF_DMAMEM_ENQUEUE(sc, vq, slot, sc->sc_ctrl_rx,
+	    sizeof(*sc->sc_ctrl_rx), 1);
+	VIOIF_DMAMEM_ENQUEUE(sc, vq, slot, sc->sc_ctrl_status,
+	    sizeof(*sc->sc_ctrl_status), 0);
 	virtio_enqueue_commit(vsc, vq, slot, 1);
 
 	vioif_wait_ctrl_done(sc);
 
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_cmd_dmamap, 0,
-			sizeof(struct virtio_net_ctrl_cmd),
-			BUS_DMASYNC_POSTWRITE);
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_rx_dmamap, 0,
-			sizeof(struct virtio_net_ctrl_rx),
-			BUS_DMASYNC_POSTWRITE);
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_status_dmamap, 0,
-			sizeof(struct virtio_net_ctrl_status),
-			BUS_DMASYNC_POSTREAD);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_cmd,
+	    sizeof(*sc->sc_ctrl_cmd), BUS_DMASYNC_POSTWRITE);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_rx,
+	    sizeof(*sc->sc_ctrl_rx), BUS_DMASYNC_POSTWRITE);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_status,
+	    sizeof(*sc->sc_ctrl_status), BUS_DMASYNC_POSTREAD);
 
 	if (sc->sc_ctrl_status->ack == VIRTIO_NET_OK)
 		r = 0;
@@ -1212,15 +1213,19 @@ vioif_ctrl_vq_done(struct virtqueue *vq)
 {
 	struct virtio_softc *vsc = vq->vq_owner;
 	struct vioif_softc *sc = (struct vioif_softc *)vsc->sc_child;
-	int r, slot;
+	int r = 0, ret, slot;
 
-	r = virtio_dequeue(vsc, vq, &slot, NULL);
-	if (r == ENOENT)
-		return 0;
+again:
+	ret = virtio_dequeue(vsc, vq, &slot, NULL);
+	if (ret == ENOENT)
+		return r;
 	virtio_dequeue_commit(vq, slot);
+	r++;
 	vioif_ctrl_wakeup(sc, DONE);
+	if (virtio_start_vq_intr(vsc, vq))
+		goto again;
 
-	return 1;
+	return r;
 }
 
 /* issue VIRTIO_NET_CTRL_MAC_TABLE_SET command and wait for completion */
@@ -1240,42 +1245,12 @@ vioif_set_rx_filter(struct vioif_softc *sc)
 	sc->sc_ctrl_cmd->class = VIRTIO_NET_CTRL_MAC;
 	sc->sc_ctrl_cmd->command = VIRTIO_NET_CTRL_MAC_TABLE_SET;
 
-	r = bus_dmamap_load(vsc->sc_dmat, sc->sc_ctrl_tbl_uc_dmamap,
-			    sc->sc_ctrl_mac_tbl_uc,
-			    (sizeof(struct virtio_net_ctrl_mac_tbl)
-			  + ETHER_ADDR_LEN * sc->sc_ctrl_mac_tbl_uc->nentries),
-			    NULL, BUS_DMA_WRITE|BUS_DMA_NOWAIT);
-	if (r) {
-		printf("%s: control command dmamap load failed, error %d\n",
-		       sc->sc_dev.dv_xname, r);
-		goto out;
-	}
-	r = bus_dmamap_load(vsc->sc_dmat, sc->sc_ctrl_tbl_mc_dmamap,
-			    sc->sc_ctrl_mac_tbl_mc,
-			    (sizeof(struct virtio_net_ctrl_mac_tbl)
-			  + ETHER_ADDR_LEN * sc->sc_ctrl_mac_tbl_mc->nentries),
-			    NULL, BUS_DMA_WRITE|BUS_DMA_NOWAIT);
-	if (r) {
-		printf("%s: control command dmamap load failed, error %d\n",
-		       sc->sc_dev.dv_xname, r);
-		bus_dmamap_unload(vsc->sc_dmat, sc->sc_ctrl_tbl_uc_dmamap);
-		goto out;
-	}
-
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_cmd_dmamap,
-			0, sizeof(struct virtio_net_ctrl_cmd),
-			BUS_DMASYNC_PREWRITE);
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_tbl_uc_dmamap, 0,
-			(sizeof(struct virtio_net_ctrl_mac_tbl)
-			 + ETHER_ADDR_LEN * sc->sc_ctrl_mac_tbl_uc->nentries),
-			BUS_DMASYNC_PREWRITE);
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_tbl_mc_dmamap, 0,
-			(sizeof(struct virtio_net_ctrl_mac_tbl)
-			 + ETHER_ADDR_LEN * sc->sc_ctrl_mac_tbl_mc->nentries),
-			BUS_DMASYNC_PREWRITE);
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_status_dmamap,
-			0, sizeof(struct virtio_net_ctrl_status),
-			BUS_DMASYNC_PREREAD);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_cmd,
+	    sizeof(*sc->sc_ctrl_cmd), BUS_DMASYNC_PREWRITE);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_mac_info,
+	    VIOIF_CTRL_MAC_INFO_SIZE, BUS_DMASYNC_PREWRITE);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_status,
+	    sizeof(*sc->sc_ctrl_status), BUS_DMASYNC_PREREAD);
 
 	r = virtio_enqueue_prep(vq, &slot);
 	if (r != 0)
@@ -1283,39 +1258,34 @@ vioif_set_rx_filter(struct vioif_softc *sc)
 	r = virtio_enqueue_reserve(vq, slot, 4);
 	if (r != 0)
 		panic("%s: control vq busy!?", sc->sc_dev.dv_xname);
-	virtio_enqueue(vq, slot, sc->sc_ctrl_cmd_dmamap, 1);
-	virtio_enqueue(vq, slot, sc->sc_ctrl_tbl_uc_dmamap, 1);
-	virtio_enqueue(vq, slot, sc->sc_ctrl_tbl_mc_dmamap, 1);
-	virtio_enqueue(vq, slot, sc->sc_ctrl_status_dmamap, 0);
+	VIOIF_DMAMEM_ENQUEUE(sc, vq, slot, sc->sc_ctrl_cmd,
+			sizeof(*sc->sc_ctrl_cmd), 1);
+	VIOIF_DMAMEM_ENQUEUE(sc, vq, slot, sc->sc_ctrl_mac_tbl_uc,
+	    sizeof(*sc->sc_ctrl_mac_tbl_uc) +
+	    sc->sc_ctrl_mac_tbl_uc->nentries * ETHER_ADDR_LEN, 1);
+	VIOIF_DMAMEM_ENQUEUE(sc, vq, slot, sc->sc_ctrl_mac_tbl_mc,
+	    sizeof(*sc->sc_ctrl_mac_tbl_mc) +
+	    sc->sc_ctrl_mac_tbl_mc->nentries * ETHER_ADDR_LEN, 1);
+	VIOIF_DMAMEM_ENQUEUE(sc, vq, slot, sc->sc_ctrl_status,
+	    sizeof(*sc->sc_ctrl_status), 0);
 	virtio_enqueue_commit(vsc, vq, slot, 1);
 
 	vioif_wait_ctrl_done(sc);
 
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_cmd_dmamap, 0,
-			sizeof(struct virtio_net_ctrl_cmd),
-			BUS_DMASYNC_POSTWRITE);
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_tbl_uc_dmamap, 0,
-			(sizeof(struct virtio_net_ctrl_mac_tbl)
-			 + ETHER_ADDR_LEN * sc->sc_ctrl_mac_tbl_uc->nentries),
-			BUS_DMASYNC_POSTWRITE);
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_tbl_mc_dmamap, 0,
-			(sizeof(struct virtio_net_ctrl_mac_tbl)
-			 + ETHER_ADDR_LEN * sc->sc_ctrl_mac_tbl_mc->nentries),
-			BUS_DMASYNC_POSTWRITE);
-	bus_dmamap_sync(vsc->sc_dmat, sc->sc_ctrl_status_dmamap, 0,
-			sizeof(struct virtio_net_ctrl_status),
-			BUS_DMASYNC_POSTREAD);
-	bus_dmamap_unload(vsc->sc_dmat, sc->sc_ctrl_tbl_uc_dmamap);
-	bus_dmamap_unload(vsc->sc_dmat, sc->sc_ctrl_tbl_mc_dmamap);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_cmd,
+	    sizeof(*sc->sc_ctrl_cmd), BUS_DMASYNC_POSTWRITE);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_mac_info,
+	    VIOIF_CTRL_MAC_INFO_SIZE, BUS_DMASYNC_POSTWRITE);
+	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_status,
+	    sizeof(*sc->sc_ctrl_status), BUS_DMASYNC_POSTREAD);
 
-	if (sc->sc_ctrl_status->ack == VIRTIO_NET_OK)
+	if (sc->sc_ctrl_status->ack == VIRTIO_NET_OK) {
 		r = 0;
-	else {
+	} else {
 		printf("%s: failed setting rx filter\n", sc->sc_dev.dv_xname);
 		r = EIO;
 	}
 
-out:
 	vioif_ctrl_wakeup(sc, FREE);
 	return r;
 }
