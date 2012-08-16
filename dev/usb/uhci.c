@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhci.c,v 1.90 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: uhci.c,v 1.91 2012/08/07 23:51:36 krw Exp $	*/
 /*	$NetBSD: uhci.c,v 1.172 2003/02/23 04:19:26 simonb Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/uhci.c,v 1.33 1999/11/17 22:33:41 n_hibma Exp $	*/
 
@@ -2140,6 +2140,7 @@ uhci_device_ctrl_start(usbd_xfer_handle xfer)
 
 	if (sc->sc_bus.use_polling)
 		uhci_waitintr(sc, xfer);
+
 	return (USBD_IN_PROGRESS);
 }
 
@@ -2243,6 +2244,9 @@ uhci_device_intr_start(usbd_xfer_handle xfer)
 		uhci_dump_qh(upipe->u.intr.qhs[0]);
 	}
 #endif
+
+	if (sc->sc_bus.use_polling)
+		uhci_waitintr(sc, xfer);
 
 	return (USBD_IN_PROGRESS);
 }
@@ -2591,6 +2595,11 @@ uhci_device_isoc_start(usbd_xfer_handle xfer)
 	uhci_add_intr_info(sc, ii);
 
 	splx(s);
+
+	if (sc->sc_bus.use_polling) {
+		DPRINTF(("Starting ohci isoc xfer with polling. Bad idea?\n"));
+		uhci_waitintr(sc, xfer);
+	}
 
 	return (USBD_IN_PROGRESS);
 }
