@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1656 2012/08/02 17:26:13 mikeb Exp 
+ *	OpenBSD: pcidevs,v 1.1658 2012/08/11 06:48:30 mikeb Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -3852,7 +3852,11 @@ static const struct pci_known_product pci_known_products[] = {
 	    "RS690 HD Audio",
 	},
 	{
-	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1250,
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1250_1,
+	    "Radeon X1250",
+	},
+	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_X1250_2,
 	    "Radeon X1250",
 	},
 	{
@@ -8158,6 +8162,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_BPLANE_FCOE,
 	    "FCOE (82599)",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_SFP_SF2,
+	    "10GbE SFP+ (82599)",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80960RP_ATU,
