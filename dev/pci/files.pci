@@ -810,12 +810,6 @@ file	dev/pci/auglx.c			auglx
 # Intel 3400 Thermal 
 device	itherm
 attach	itherm at pci
-file	dev/pci/itherm.c		itherm
-
-# AMD Geode CS5536 PCI-ISA bridge
-device	glxpcib: isabus, gpiobus, i2cbus
-attach	glxpcib at pci
-file	dev/pci/glxpcib.c		glxpcib
 
 # VirtIO
 device	virtio {}
@@ -831,3 +825,9 @@ file	dev/pci/if_vioif.c		vioif
 device	vioblk: scsi
 attach	vioblk at virtio
 file	dev/pci/vioblk.c		vioblk
+file	dev/pci/itherm.c		itherm
+
+# AMD Geode CS5536 PCI-ISA bridge
+device	glxpcib: isabus, gpiobus, i2cbus
+attach	glxpcib at pci
+file	dev/pci/glxpcib.c		glxpcib

@@ -183,6 +183,9 @@ struct vioif_softc {
 	struct device		sc_dev;
 
 	struct virtio_softc	*sc_virtio;
+#define	VQRX	0
+#define	VQTX	1
+#define	VQCTL	2
 	struct virtqueue	sc_vq[3];
 
 	struct arpcom		sc_ac;
@@ -232,6 +235,7 @@ struct vioif_softc {
 	(2*sizeof(struct virtio_net_ctrl_mac_tbl) + 		\
 	 0 + VIRTIO_NET_CTRL_MAC_MAXENTRIES * ETHER_ADDR_LEN)
 
+#define	VIOIF_WATCHDOG_TIMEOUT		5
 /* cfattach interface functions */
 int	vioif_match(struct device *, void *, void *);
 void	vioif_attach(struct device *, struct device *, void *);
@@ -506,8 +510,10 @@ vioif_attach(struct device *parent, struct device *self, void *aux)
 	 * VIRTIO_F_RING_EVENT_IDX can be switched off by setting bit 2 in the
 	 * driver flags, see config(8)
 	 */
-	if (!(vsc->sc_dev.dv_cfdata->cf_flags & 2))
+	if (!(sc->sc_dev.dv_cfdata->cf_flags & 2))
 		features |= VIRTIO_F_RING_EVENT_IDX;
+	else
+		printf("RingEventIdx disabled by UKC\n");
 
 	features = virtio_negotiate_features(vsc, features,
 	    virtio_net_feature_names);
@@ -519,14 +525,14 @@ vioif_attach(struct device *parent, struct device *self, void *aux)
 	}
 	printf(" %s\n", ether_sprintf(sc->sc_ac.ac_enaddr));
 
-	if (virtio_alloc_vq(vsc, &sc->sc_vq[0], 0,
+	if (virtio_alloc_vq(vsc, &sc->sc_vq[VQRX], 0,
 			    MCLBYTES+sizeof(struct virtio_net_hdr), 2,
 			    "rx") != 0) {
 		goto err;
 	}
 	vsc->sc_nvqs = 1;
-	sc->sc_vq[0].vq_done = vioif_rx_vq_done;
-	if (virtio_alloc_vq(vsc, &sc->sc_vq[1], 1,
+	sc->sc_vq[VQRX].vq_done = vioif_rx_vq_done;
+	if (virtio_alloc_vq(vsc, &sc->sc_vq[VQTX], 1,
 			    (sizeof(struct virtio_net_hdr)
 			     + (ETHER_MAX_LEN - ETHER_HDR_LEN)),
 			    VIRTIO_NET_TX_MAXNSEGS + 1,
@@ -534,19 +540,19 @@ vioif_attach(struct device *parent, struct device *self, void *aux)
 		goto err;
 	}
 	vsc->sc_nvqs = 2;
-	sc->sc_vq[1].vq_done = vioif_tx_vq_done;
-	virtio_start_vq_intr(vsc, &sc->sc_vq[0]);
+	sc->sc_vq[VQTX].vq_done = vioif_tx_vq_done;
+	virtio_start_vq_intr(vsc, &sc->sc_vq[VQRX]);
 	if (features & VIRTIO_F_RING_EVENT_IDX)
-		virtio_postpone_intr_far(&sc->sc_vq[1]);
+		virtio_postpone_intr_far(&sc->sc_vq[VQTX]);
 	else
-		virtio_stop_vq_intr(vsc, &sc->sc_vq[1]);
+		virtio_stop_vq_intr(vsc, &sc->sc_vq[VQTX]);
 	if ((features & VIRTIO_NET_F_CTRL_VQ)
 	    && (features & VIRTIO_NET_F_CTRL_RX)) {
-		if (virtio_alloc_vq(vsc, &sc->sc_vq[2], 2,
+		if (virtio_alloc_vq(vsc, &sc->sc_vq[VQCTL], 2,
 				    NBPG, 1, "control") == 0) {
 			mtx_init(&sc->sc_ctrl_lock, IPL_NET);
-			sc->sc_vq[2].vq_done = vioif_ctrl_vq_done;
-			virtio_start_vq_intr(vsc, &sc->sc_vq[2]);
+			sc->sc_vq[VQCTL].vq_done = vioif_ctrl_vq_done;
+			virtio_start_vq_intr(vsc, &sc->sc_vq[VQCTL]);
 			vsc->sc_nvqs = 3;
 		}
 	}
@@ -569,6 +575,7 @@ vioif_attach(struct device *parent, struct device *self, void *aux)
 	ifmedia_init(&sc->sc_media, 0, vioif_media_change, vioif_media_status);
 	ifmedia_add(&sc->sc_media, IFM_ETHER | IFM_AUTO, 0, NULL);
 	ifmedia_set(&sc->sc_media, IFM_ETHER | IFM_AUTO);
+	m_clsetwms(ifp, MCLBYTES, 4, sc->sc_vq[VQRX].vq_num);
 
 	if_attach(ifp);
 	ether_ifattach(ifp);
@@ -681,10 +688,10 @@ vioif_stop(struct ifnet *ifp, int disable)
 
 	virtio_reinit_start(vsc);
 	virtio_negotiate_features(vsc, vsc->sc_features, NULL);
-	virtio_start_vq_intr(vsc, &sc->sc_vq[0]);
-	virtio_stop_vq_intr(vsc, &sc->sc_vq[1]);
+	virtio_start_vq_intr(vsc, &sc->sc_vq[VQRX]);
+	virtio_stop_vq_intr(vsc, &sc->sc_vq[VQTX]);
 	if (vsc->sc_nvqs >= 3)
-		virtio_start_vq_intr(vsc, &sc->sc_vq[2]);
+		virtio_start_vq_intr(vsc, &sc->sc_vq[VQCTL]);
 	virtio_reinit_end(vsc);
 }
 
@@ -693,7 +700,7 @@ vioif_start(struct ifnet *ifp)
 {
 	struct vioif_softc *sc = ifp->if_softc;
 	struct virtio_softc *vsc = sc->sc_virtio;
-	struct virtqueue *vq = &sc->sc_vq[1]; /* tx vq */
+	struct virtqueue *vq = &sc->sc_vq[VQTX];
 	struct mbuf *m;
 	int queued = 0, retry = 0;
 
@@ -710,17 +717,19 @@ vioif_start(struct ifnet *ifp)
 
 		r = virtio_enqueue_prep(vq, &slot);
 		if (r == EAGAIN) {
-			ifp->if_flags |= IFF_OACTIVE;
-			if (vioif_tx_deq(vq) && retry++ == 0)
+			if (vioif_tx_deq(vq) && retry++ == 0) {
 				continue;
-			else
+			} else {
+				ifp->if_flags |= IFF_OACTIVE;
 				break;
+			}
 		}
 		if (r != 0)
 			panic("enqueue_prep for a tx buffer: %d", r);
 		r = vioif_tx_load(sc, slot, m, &sc->sc_tx_mbufs[slot]);
 		if (r != 0) {
 			virtio_enqueue_abort(vq, slot);
+			ifp->if_flags |= IFF_OACTIVE;
 			break;
 		}
 		r = virtio_enqueue_reserve(vq, slot,
@@ -730,11 +739,12 @@ vioif_start(struct ifnet *ifp)
 					  sc->sc_tx_dmamaps[slot]);
 			virtio_enqueue_abort(vq, slot);
 			sc->sc_tx_mbufs[slot] = NULL;
-			ifp->if_flags |= IFF_OACTIVE;
-			if (vioif_tx_deq(vq) && retry++ == 0)
+			if (vioif_tx_deq(vq) && retry++ == 0) {
 				continue;
-			else
+			} else {
+				ifp->if_flags |= IFF_OACTIVE;
 				break;
+			}
 		}
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 
@@ -754,10 +764,16 @@ vioif_start(struct ifnet *ifp)
 			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_OUT);
 #endif
 	}
+	if (ifp->if_flags & IFF_OACTIVE) {
+		if (vsc->sc_features & VIRTIO_F_RING_EVENT_IDX)
+			virtio_postpone_intr_smart(&sc->sc_vq[VQTX]);
+		else
+			virtio_start_vq_intr(vsc, &sc->sc_vq[VQTX]);
+	}
 
 	if (queued > 0) {
 		virtio_notify(vsc, vq);
-		ifp->if_timer = 5;
+		ifp->if_timer = VIOIF_WATCHDOG_TIMEOUT;
 	}
 }
 
@@ -807,19 +823,16 @@ vioif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	return r;
 }
 
+/* The watchdog is only used to remove used buffers from the tx queue */
 void
 vioif_watchdog(struct ifnet *ifp)
 {
 	struct vioif_softc *sc = ifp->if_softc;
-	int s;
-
-	if (ifp->if_flags & IFF_RUNNING) {
-		s = splnet();
-		vioif_tx_vq_done(&sc->sc_vq[1]);
-		splx(s);
-	}
+	int s = splnet();
+	if (ifp->if_flags & IFF_RUNNING)
+		vioif_tx_vq_done(&sc->sc_vq[VQTX]);
+	splx(s);
 }
-
 
 /*
  * Recieve implementation
@@ -863,7 +876,7 @@ vioif_populate_rx_mbufs(struct vioif_softc *sc)
 {
 	struct virtio_softc *vsc = sc->sc_virtio;
 	int i, r, ndone = 0;
-	struct virtqueue *vq = &sc->sc_vq[0]; /* rx vq */
+	struct virtqueue *vq = &sc->sc_vq[VQRX];
 
 	for (i = 0; i < vq->vq_num; i++) {
 		int slot;
@@ -903,7 +916,7 @@ int
 vioif_rx_deq(struct vioif_softc *sc)
 {
 	struct virtio_softc *vsc = sc->sc_virtio;
-	struct virtqueue *vq = &sc->sc_vq[0];
+	struct virtqueue *vq = &sc->sc_vq[VQRX];
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	struct mbuf *m;
 	int r = 0;
@@ -935,7 +948,6 @@ vioif_rx_deq(struct vioif_softc *sc)
 	return r;
 }
 
-/* rx interrupt; call _dequeue above and schedule a softint */
 int
 vioif_rx_vq_done(struct virtqueue *vq)
 {
@@ -962,7 +974,7 @@ again:
 void
 vioif_rx_drain(struct vioif_softc *sc)
 {
-	struct virtqueue *vq = &sc->sc_vq[0];
+	struct virtqueue *vq = &sc->sc_vq[VQRX];
 	int i;
 
 	for (i = 0; i < vq->vq_num; i++) {
@@ -1030,8 +1042,14 @@ again:
 		if (vsc->sc_features & VIRTIO_F_RING_EVENT_IDX) {
 			if (virtio_postpone_intr_far(vq))
 				goto again;
+		} else {
+			virtio_stop_vq_intr(vsc, &sc->sc_vq[VQTX]);
 		}
 	}
+	if (sum)
+		ifp->if_timer = VIOIF_WATCHDOG_TIMEOUT;
+	else if (vq->vq_queued == 0)
+		ifp->if_timer = 0;
 	return sum;
 }
 
@@ -1082,7 +1100,7 @@ void
 vioif_tx_drain(struct vioif_softc *sc)
 {
 	struct virtio_softc *vsc = sc->sc_virtio;
-	struct virtqueue *vq = &sc->sc_vq[1];
+	struct virtqueue *vq = &sc->sc_vq[VQTX];
 	int i;
 
 	for (i = 0; i < vq->vq_num; i++) {
@@ -1102,7 +1120,7 @@ int
 vioif_ctrl_rx(struct vioif_softc *sc, int cmd, int onoff)
 {
 	struct virtio_softc *vsc = sc->sc_virtio;
-	struct virtqueue *vq = &sc->sc_vq[2];
+	struct virtqueue *vq = &sc->sc_vq[VQCTL];
 	int r, slot;
 
 	if (vsc->sc_nvqs < 3)
@@ -1144,9 +1162,9 @@ vioif_ctrl_rx(struct vioif_softc *sc, int cmd, int onoff)
 	VIOIF_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_status,
 	    sizeof(*sc->sc_ctrl_status), BUS_DMASYNC_POSTREAD);
 
-	if (sc->sc_ctrl_status->ack == VIRTIO_NET_OK)
+	if (sc->sc_ctrl_status->ack == VIRTIO_NET_OK) {
 		r = 0;
-	else {
+	} else {
 		printf("%s: failed setting rx mode\n", sc->sc_dev.dv_xname);
 		r = EIO;
 	}
@@ -1234,7 +1252,7 @@ vioif_set_rx_filter(struct vioif_softc *sc)
 {
 	/* filter already set in sc_ctrl_mac_tbl */
 	struct virtio_softc *vsc = sc->sc_virtio;
-	struct virtqueue *vq = &sc->sc_vq[2];
+	struct virtqueue *vq = &sc->sc_vq[VQCTL];
 	int r, slot;
 
 	if (vsc->sc_nvqs < 3)

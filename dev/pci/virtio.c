@@ -56,14 +56,6 @@ struct cfdriver virtio_cd = {
 	NULL, "virtio", DV_DULL
 };
 
-/*
- * The mutexes are not necessary with OpenBSD's big kernel lock.
- */
-#define mutex_enter(x)
-#define mutex_destroy(x)
-#define mutex_exit(x)
-#define mutex_init(x,y,z)
-
 #define virtio_set_status(sc, s) (sc)->sc_ops->set_status(sc, s)
 #define virtio_device_reset(sc)	virtio_set_status((sc), 0)
 
@@ -240,7 +232,6 @@ virtio_vq_intr(struct virtio_softc *sc)
 			vq_sync_aring(sc, vq, BUS_DMASYNC_POSTWRITE);
 		}
 		vq_sync_uring(sc, vq, BUS_DMASYNC_POSTREAD);
-		membar_consumer();
 		if (vq->vq_used_idx != vq->vq_used->idx) {
 			if (vq->vq_done)
 				r |= (vq->vq_done)(vq);
@@ -280,17 +271,10 @@ virtio_init_vq(struct virtio_softc *sc, struct virtqueue *vq, int reinit)
 				    &vq->vq_entries[i], qe_list);
 		vq->vq_entries[i].qe_index = i;
 	}
-	if (!reinit) {
-		mutex_init(&vq->vq_freelist_lock, MUTEX_SPIN, sc->sc_ipl);
-	}
 
 	/* enqueue/dequeue status */
 	vq->vq_avail_idx = 0;
 	vq->vq_used_idx = 0;
-	if (!reinit) {
-		mutex_init(&vq->vq_aring_lock, MUTEX_SPIN, sc->sc_ipl);
-		mutex_init(&vq->vq_uring_lock, MUTEX_SPIN, sc->sc_ipl);
-	}
 	vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
 	vq_sync_uring(sc, vq, BUS_DMASYNC_PREREAD);
 	vq->vq_queued = 1;
@@ -446,9 +430,6 @@ virtio_free_vq(struct virtio_softc *sc, struct virtqueue *vq)
 	bus_dmamap_destroy(sc->sc_dmat, vq->vq_dmamap);
 	bus_dmamem_unmap(sc->sc_dmat, vq->vq_vaddr, vq->vq_bytesize);
 	bus_dmamem_free(sc->sc_dmat, &vq->vq_segs[0], 1);
-	mutex_destroy(&vq->vq_freelist_lock);
-	mutex_destroy(&vq->vq_uring_lock);
-	mutex_destroy(&vq->vq_aring_lock);
 	memset(vq, 0, sizeof(*vq));
 
 	return 0;
@@ -462,14 +443,10 @@ vq_alloc_entry(struct virtqueue *vq)
 {
 	struct vq_entry *qe;
 
-	mutex_enter(&vq->vq_freelist_lock);
-	if (SIMPLEQ_EMPTY(&vq->vq_freelist)) {
-		mutex_exit(&vq->vq_freelist_lock);
+	if (SIMPLEQ_EMPTY(&vq->vq_freelist))
 		return NULL;
-	}
 	qe = SIMPLEQ_FIRST(&vq->vq_freelist);
 	SIMPLEQ_REMOVE_HEAD(&vq->vq_freelist, qe_list);
-	mutex_exit(&vq->vq_freelist_lock);
 
 	return qe;
 }
@@ -477,10 +454,7 @@ vq_alloc_entry(struct virtqueue *vq)
 void
 vq_free_entry(struct virtqueue *vq, struct vq_entry *qe)
 {
-	mutex_enter(&vq->vq_freelist_lock);
 	SIMPLEQ_INSERT_TAIL(&vq->vq_freelist, qe, qe_list);
-	mutex_exit(&vq->vq_freelist_lock);
-
 	return;
 }
 
@@ -665,13 +639,10 @@ publish_avail_idx(struct virtio_softc *sc, struct virtqueue *vq)
 {
 	vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
 	vq_sync_uring(sc, vq, BUS_DMASYNC_PREREAD);
-	membar_producer();
 	vq->vq_avail->idx = vq->vq_avail_idx;
 	vq_sync_aring(sc, vq, BUS_DMASYNC_POSTWRITE);
-	membar_producer();
 	vq->vq_queued = 1;
 	vq_sync_uring(sc, vq, BUS_DMASYNC_POSTREAD);
-	membar_consumer();
 }
 
 /*
@@ -683,15 +654,12 @@ virtio_enqueue_commit(struct virtio_softc *sc, struct virtqueue *vq,
 {
 	struct vq_entry *qe1;
 
-	if (slot < 0) {
-		mutex_enter(&vq->vq_aring_lock);
+	if (slot < 0)
 		goto notify;
-	}
 	vq_sync_descs(sc, vq, BUS_DMASYNC_PREWRITE);
 	qe1 = &vq->vq_entries[slot];
 	if (qe1->qe_indirect)
 		vq_sync_indirect(sc, vq, slot, BUS_DMASYNC_PREWRITE);
-	mutex_enter(&vq->vq_aring_lock);
 	vq->vq_avail->ring[(vq->vq_avail_idx++) & vq->vq_mask] = slot;
 
 notify:
@@ -711,7 +679,6 @@ notify:
 				sc->sc_ops->kick(sc, vq->vq_index);
 		}
 	}
-	mutex_exit(&vq->vq_aring_lock);
 
 	return 0;
 }
@@ -733,14 +700,12 @@ virtio_enqueue_abort(struct virtqueue *vq, int slot)
 
 	s = slot;
 	vd = &vq->vq_desc[0];
-	mutex_enter(&vq->vq_freelist_lock);
 	while (vd[s].flags & VRING_DESC_F_NEXT) {
 		s = vd[s].next;
 		vq_free_entry_locked(vq, qe);
 		qe = &vq->vq_entries[s];
 	}
 	vq_free_entry_locked(vq, qe);
-	mutex_exit(&vq->vq_freelist_lock);
 	return 0;
 }
 
@@ -758,12 +723,9 @@ virtio_dequeue(struct virtio_softc *sc, struct virtqueue *vq,
 	uint16_t slot, usedidx;
 	struct vq_entry *qe;
 
-	membar_consumer();
 	if (vq->vq_used_idx == vq->vq_used->idx)
 		return ENOENT;
-	mutex_enter(&vq->vq_uring_lock);
 	usedidx = vq->vq_used_idx++;
-	mutex_exit(&vq->vq_uring_lock);
 	usedidx &= vq->vq_mask;
 	slot = vq->vq_used->ring[usedidx].id;
 	qe = &vq->vq_entries[slot];
@@ -790,14 +752,12 @@ virtio_dequeue_commit(struct virtqueue *vq, int slot)
 	struct vring_desc *vd = &vq->vq_desc[0];
 	int s = slot;
 
-	mutex_enter(&vq->vq_freelist_lock);
 	while (vd[s].flags & VRING_DESC_F_NEXT) {
 		s = vd[s].next;
 		vq_free_entry_locked(vq, qe);
 		qe = &vq->vq_entries[s];
 	}
 	vq_free_entry_locked(vq, qe);
-	mutex_exit(&vq->vq_freelist_lock);
 
 	return 0;
 }
@@ -823,7 +783,6 @@ virtio_postpone_intr(struct virtqueue *vq, uint16_t nslots)
 	VQ_USED_EVENT(vq) = idx;
 
 	vq_sync_aring(vq->vq_owner, vq, BUS_DMASYNC_PREWRITE);
-	membar_producer();
 	vq->vq_queued++;
 
 	if (nslots < virtio_nused(vq))
@@ -872,7 +831,6 @@ virtio_stop_vq_intr(struct virtio_softc *sc, struct virtqueue *vq)
 	if (!(sc->sc_features & VIRTIO_F_RING_EVENT_IDX)) {
 		vq->vq_avail->flags |= VRING_AVAIL_F_NO_INTERRUPT;
 		vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
-		membar_producer();
 		vq->vq_queued++;
 	}
 }
@@ -891,7 +849,6 @@ virtio_start_vq_intr(struct virtio_softc *sc, struct virtqueue *vq)
 		vq->vq_avail->flags &= ~VRING_AVAIL_F_NO_INTERRUPT;
 
 	vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
-	membar_producer();
 	vq->vq_queued++;
 
 	if (vq->vq_used_idx != vq->vq_used->idx)
