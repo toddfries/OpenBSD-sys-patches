@@ -115,6 +115,7 @@ struct virtqueue {
 
 	/* enqueue/dequeue status */
 	uint16_t		vq_avail_idx;
+	uint16_t		vq_avail_signalled;
 	uint16_t		vq_used_idx;
 	int			vq_queued;
 	struct mutex		*vq_aring_lock;
@@ -180,7 +181,7 @@ struct virtio_softc {
 #define	virtio_write_device_config_1(sc, o, v)	(sc)->sc_ops->write_dev_cfg_1(sc, o, v)
 #define	virtio_write_device_config_2(sc, o, v)	(sc)->sc_ops->write_dev_cfg_2(sc, o, v)
 #define	virtio_write_device_config_4(sc, o, v)	(sc)->sc_ops->write_dev_cfg_4(sc, o, v)
-#define	virtio_write_device_config_8(sc, o, v)	(sc)->sc_ops->write_device_config_8(sc, o, v)
+#define	virtio_write_device_config_8(sc, o, v)	(sc)->sc_ops->write_dev_cfg_8(sc, o, v)
 #define	virtio_read_queue_size(sc, i)		(sc)->sc_ops->read_queue_size(sc, i)
 #define	virtio_write_queue_address(sc, i, v)	(sc)->sc_ops->write_queue_addr(sc, i, v)
 #define	virtio_negotiate_features(sc, f, n)	(sc)->sc_ops->neg_features(sc, f, n)
@@ -218,25 +219,5 @@ int virtio_nused(struct virtqueue *vq);
 int virtio_postpone_intr(struct virtqueue *vq, uint16_t nslots);
 int virtio_postpone_intr_smart(struct virtqueue *vq);
 int virtio_postpone_intr_far(struct virtqueue *vq);
-
-/*
- * XXX: This is not optimal:
- * XXX: We need remory barriers are also with UP kernels,
- * XXX: because the host system may be SMP. However, OpenBSD does not seem to
- * XXX: provide suitable functions.
- * XXX: On x86/amd64, membar_producer() could probably be a no-op because
- * XXX: writes are always ordered.
- * XXX: Also, gcc does not have __sync_synchronize() for all architectures.
- * XXX: Also, for gcc < 4.4, __sync_synchronize() is broken
- */
-
-#if defined(__i386__) || defined(__amd64__)
-#include <machine/cpufunc.h>
-#define membar_consumer() lfence()
-#define membar_producer() sfence()
-#else
-#define membar_consumer() __sync_synchronize()
-#define membar_producer() __sync_synchronize()
-#endif
 
 #endif /* _DEV_PCI_VIRTIOVAR_H_ */

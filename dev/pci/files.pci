@@ -810,6 +810,21 @@ file	dev/pci/gcu.c			gcu
 
 # AMD Geode CS5536 Audio
 device	auglx: audio, ac97
+
+# VirtIO
+device	virtio {}
+file	dev/pci/virtio.c		virtio
+
+attach	virtio at pci with virtio_pci
+file	dev/pci/virtio_pci.c		virtio_pci
+
+device	vio
+attach	vio at virtio
+file	dev/pci/if_vio.c		vio
+
+device	vioblk: scsi
+attach	vioblk at virtio
+file	dev/pci/vioblk.c		vioblk
 attach	auglx at pci
 file	dev/pci/auglx.c			auglx
 
@@ -822,18 +837,3 @@ file	dev/pci/itherm.c		itherm
 device	glxpcib: isabus, gpiobus, i2cbus
 attach	glxpcib at pci
 file	dev/pci/glxpcib.c		glxpcib
-
-# VirtIO
-device	virtio {}
-file	dev/pci/virtio.c		virtio
-
-attach	virtio at pci with virtio_pci
-file	dev/pci/virtio_pci.c		virtio_pci
-
-device	vioif
-attach	vioif at virtio
-file	dev/pci/if_vioif.c		vioif
-
-device	vioblk: scsi
-attach	vioblk at virtio
-file	dev/pci/vioblk.c		vioblk
