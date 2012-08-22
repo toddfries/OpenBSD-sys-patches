@@ -276,8 +276,11 @@ virtio_pci_negotiate_features(struct virtio_softc *vsc, uint32_t guest_features,
 	 * driver flags, see config(8)
 	 */
 	if (!(vsc->sc_dev.dv_cfdata->cf_flags & 1) &&
-	    !(vsc->sc_child->dv_cfdata->cf_flags & 1))
+	    !(vsc->sc_child->dv_cfdata->cf_flags & 1)) {
 		guest_features |= VIRTIO_F_RING_INDIRECT_DESC;
+	} else {
+		printf("RingIndirectDesc disabled by UKC\n");
+	}
 	host = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 				VIRTIO_CONFIG_DEVICE_FEATURES);
 	neg = host & guest_features;
