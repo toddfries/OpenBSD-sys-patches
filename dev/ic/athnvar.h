@@ -83,6 +83,7 @@ struct athn_tx_buf {
 	struct ieee80211_node		*bf_ni;
 	int				bf_txflags;
 #define ATHN_TXFLAG_PAPRD	(1 << 0)
+#define ATHN_TXFLAG_CAB		(1 << 1) 
 };
 
 struct athn_txq {

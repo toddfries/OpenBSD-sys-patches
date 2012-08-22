@@ -204,6 +204,9 @@ ieee80211_node_lateattach(struct ifnet *ifp)
 	ni->ni_chan = IEEE80211_CHAN_ANYC;
 	ic->ic_bss = ieee80211_ref_node(ni);
 	ic->ic_txpower = IEEE80211_TXPOWER_MAX;
+#ifndef IEEE80211_STA_ONLY
+	IFQ_SET_MAXLEN(&ni->ni_savedq, IEEE80211_PS_MAX_QUEUE);
+#endif
 }
 
 void
