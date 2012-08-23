@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpii.c,v 1.60 2012/08/22 16:59:27 mikeb Exp $	*/
+/*	$OpenBSD: mpii.c,v 1.62 2012/08/23 15:42:50 mikeb Exp $	*/
 /*
  * Copyright (c) 2010 Mike Belopuhov <mkb@crypt.org.ru>
  * Copyright (c) 2009 James Giannoules
@@ -919,7 +919,6 @@ mpii_wait_ne(struct mpii_softc *sc, bus_size_t r, u_int32_t mask,
 	return (1);
 }
 
-
 int
 mpii_init(struct mpii_softc *sc)
 {
@@ -1203,28 +1202,27 @@ mpii_iocfacts(struct mpii_softc *sc)
 
 	sc->sc_request_depth = MIN(letoh16(ifp.request_credit),
 	    MPII_MAX_REQUEST_CREDIT);
-
-	/* should not be multiple of 16 */
 	sc->sc_num_reply_frames = sc->sc_request_depth + 32;
-	if (!(sc->sc_num_reply_frames % 16))
-		sc->sc_num_reply_frames--;
 
 	/* must be multiple of 16 */
-	sc->sc_reply_free_qdepth = sc->sc_num_reply_frames +
-	    (16 - (sc->sc_num_reply_frames % 16));
-	sc->sc_reply_post_qdepth = ((sc->sc_request_depth +
-	    sc->sc_num_reply_frames + 1 + 15) / 16) * 16;
+	sc->sc_reply_post_qdepth = sc->sc_request_depth +
+	    sc->sc_num_reply_frames;
+	sc->sc_reply_post_qdepth += (16 - (sc->sc_reply_post_qdepth % 16));
 
 	if (sc->sc_reply_post_qdepth >
-	    ifp.max_reply_descriptor_post_queue_depth)
+	    letoh16(ifp.max_reply_descriptor_post_queue_depth)) {
 		sc->sc_reply_post_qdepth =
-		    ifp.max_reply_descriptor_post_queue_depth;
+		    letoh16(ifp.max_reply_descriptor_post_queue_depth);
+		if (sc->sc_reply_post_qdepth < 16) {
+			printf("%s: RDPQ is too shallow\n", DEVNAME(sc));
+			return (1);
+		}
+		sc->sc_request_depth = sc->sc_reply_post_qdepth / 2 - 4;
+		sc->sc_num_reply_frames = sc->sc_request_depth + 4;
+	}
 
-	DNPRINTF(MPII_D_MISC, "%s: sc_request_depth: %d "
-	    "sc_num_reply_frames: %d sc_reply_free_qdepth: %d "
-	    "sc_reply_post_qdepth: %d\n", DEVNAME(sc), sc->sc_request_depth,
-	    sc->sc_num_reply_frames, sc->sc_reply_free_qdepth,
-	    sc->sc_reply_post_qdepth);
+	sc->sc_reply_free_qdepth = sc->sc_num_reply_frames +
+	    (16 - (sc->sc_num_reply_frames % 16));
 
 	/*
 	 * you can fit sg elements on the end of the io cmd if they fit in the
@@ -1246,8 +1244,6 @@ mpii_iocfacts(struct mpii_softc *sc)
 	/* the sgl chains lose an entry for each chain element */
 	sc->sc_max_sgl_len -= (MPII_MAX_SGL - sc->sc_first_sgl_len) /
 	    sc->sc_chain_len;
-	DNPRINTF(MPII_D_MISC, "%s:   max sgl len: %d\n", DEVNAME(sc),
-	    sc->sc_max_sgl_len);
 
 	/* XXX we're ignoring the max chain depth */
 
@@ -2255,7 +2251,7 @@ mpii_dmamem_alloc(struct mpii_softc *sc, size_t size)
 		goto mdmfree;
 
 	if (bus_dmamem_alloc(sc->sc_dmat, size, PAGE_SIZE, 0, &mdm->mdm_seg,
-	    1, &nsegs, BUS_DMA_NOWAIT) != 0)
+	    1, &nsegs, BUS_DMA_NOWAIT | BUS_DMA_ZERO) != 0)
 		goto destroy;
 
 	if (bus_dmamem_map(sc->sc_dmat, &mdm->mdm_seg, nsegs, size,
@@ -2265,12 +2261,6 @@ mpii_dmamem_alloc(struct mpii_softc *sc, size_t size)
 	if (bus_dmamap_load(sc->sc_dmat, mdm->mdm_map, mdm->mdm_kva, size,
 	    NULL, BUS_DMA_NOWAIT) != 0)
 		goto unmap;
-
-	DNPRINTF(MPII_D_MEM, "  kva: %p  dva: %p  map: %p  size: %d\n",
-	    mdm->mdm_kva, mdm->mdm_map->dm_segs[0].ds_addr, mdm->mdm_map,
-	    size);
-
-	bzero(mdm->mdm_kva, size);
 
 	return (mdm);
 
@@ -2379,7 +2369,6 @@ mpii_alloc_ccbs(struct mpii_softc *sc)
 		goto free_ccbs;
 	}
 	cmd = MPII_DMA_KVA(sc->sc_requests);
-	bzero(cmd, MPII_REQUEST_SIZE * sc->sc_request_depth);
 
 	/*
 	 * we have sc->sc_request_depth system request message
