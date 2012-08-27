@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.73 2011/11/06 12:10:04 guenther Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.78 2012/07/09 17:51:08 claudio Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -217,7 +217,7 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	if (needfree)
 		free(needfree, M_IOV);
  out:
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -373,7 +373,7 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 	if (needfree)
 		free(needfree, M_IOV);
  out:
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -408,10 +408,13 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 
 	switch (com = SCARG(uap, com)) {
 	case FIONCLEX:
-		fdp->fd_ofileflags[SCARG(uap, fd)] &= ~UF_EXCLOSE;
-		return (0);
 	case FIOCLEX:
-		fdp->fd_ofileflags[SCARG(uap, fd)] |= UF_EXCLOSE;
+		fdplock(fdp);
+		if (com == FIONCLEX)
+			fdp->fd_ofileflags[SCARG(uap, fd)] &= ~UF_EXCLOSE;
+		else
+			fdp->fd_ofileflags[SCARG(uap, fd)] |= UF_EXCLOSE;
+		fdpunlock(fdp);
 		return (0);
 	}
 
@@ -510,7 +513,7 @@ sys_ioctl(struct proc *p, void *v, register_t *retval)
 	if (error == 0 && (com&IOC_OUT) && size)
 		error = copyout(data, SCARG(uap, data), (u_int)size);
 out:
-	FRELE(fp);
+	FRELE(fp, p);
 	if (memp)
 		free(memp, M_IOCTLOPS);
 	return (error);
@@ -543,7 +546,7 @@ sys_select(struct proc *p, void *v, register_t *retval)
 		nd = p->p_fd->fd_nfiles;
 	}
 	ni = howmany(nd, NFDBITS) * sizeof(fd_mask);
-	if (nd > sizeof(bits[0])) {
+	if (ni > sizeof(bits[0])) {
 		caddr_t mbits;
 
 		mbits = malloc(ni * 6, M_TEMP, M_WAITOK|M_ZERO);
@@ -571,11 +574,22 @@ sys_select(struct proc *p, void *v, register_t *retval)
 	getbits(ou, 1);
 	getbits(ex, 2);
 #undef	getbits
+#ifdef KTRACE
+	if (ni > 0 && KTRPOINT(p, KTR_STRUCT)) {
+		if (SCARG(uap, in)) ktrfdset(p, pibits[0], ni);
+		if (SCARG(uap, ou)) ktrfdset(p, pibits[1], ni);
+		if (SCARG(uap, ex)) ktrfdset(p, pibits[2], ni);
+	}
+#endif
 
 	if (SCARG(uap, tv)) {
 		error = copyin(SCARG(uap, tv), &atv, sizeof (atv));
 		if (error)
 			goto done;
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktrreltimeval(p, &atv);
+#endif
 		if (itimerfix(&atv)) {
 			error = EINVAL;
 			goto done;
@@ -631,6 +645,13 @@ done:
 		putbits(ou, 1);
 		putbits(ex, 2);
 #undef putbits
+#ifdef KTRACE
+		if (ni > 0 && KTRPOINT(p, KTR_STRUCT)) {
+			if (SCARG(uap, in)) ktrfdset(p, pobits[0], ni);
+			if (SCARG(uap, ou)) ktrfdset(p, pobits[1], ni);
+			if (SCARG(uap, ex)) ktrfdset(p, pobits[2], ni);
+		}
+#endif
 	}
 
 	if (pibits[0] != (fd_set *)&bits[0])
@@ -665,7 +686,7 @@ selscan(struct proc *p, fd_set *ibits, fd_set *obits, int nfd, int ni,
 					FD_SET(fd, pobits);
 					n++;
 				}
-				FRELE(fp);
+				FRELE(fp, p);
 			}
 		}
 	}
@@ -760,7 +781,7 @@ pollscan(struct proc *p, struct pollfd *pl, u_int nfd, register_t *retval)
 		}
 		FREF(fp);
 		pl->revents = (*fp->f_ops->fo_poll)(fp, pl->events, p);
-		FRELE(fp);
+		FRELE(fp, p);
 		if (pl->revents != 0)
 			n++;
 	}

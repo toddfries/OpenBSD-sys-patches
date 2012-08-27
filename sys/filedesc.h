@@ -1,4 +1,4 @@
-/*	$OpenBSD: filedesc.h,v 1.20 2008/09/19 12:24:55 art Exp $	*/
+/*	$OpenBSD: filedesc.h,v 1.25 2012/07/11 23:07:19 guenther Exp $	*/
 /*	$NetBSD: filedesc.h,v 1.14 1996/04/09 20:55:28 cgd Exp $	*/
 
 /*
@@ -62,13 +62,16 @@ struct filedesc {
 	struct	vnode *fd_cdir;		/* current directory */
 	struct	vnode *fd_rdir;		/* root directory */
 	int	fd_nfiles;		/* number of open files allocated */
+	int	fd_openfd;		/* number of files currently open */
 	u_int	*fd_himap;		/* each bit points to 32 fds */
 	u_int	*fd_lomap;		/* bitmap of free fds */
 	int	fd_lastfile;		/* high-water mark of fd_ofiles */
 	int	fd_freefile;		/* approx. next free file */
 	u_short	fd_cmask;		/* mask for file creation */
 	u_short	fd_refcnt;		/* reference count */
-	struct rwlock fd_lock;		/* lock for the file descs */
+	struct rwlock fd_lock;		/* lock for the file descs; must be */
+					/* held when writing to fd_ofiles, */
+					/* fd_ofileflags, or fd_{hi,lo}map */
 
 	int	fd_knlistsize;		/* size of knlist */
 	struct	klist *fd_knlist;	/* list of attached knotes */
@@ -118,8 +121,7 @@ struct filedesc0 {
  * Kernel global variables and routines.
  */
 void	filedesc_init(void);
-int	dupfdopen(struct filedesc *fdp, int indx, int dfd, int mode,
-	    int error);
+int	dupfdopen(struct filedesc *, int, int, int);
 int	fdalloc(struct proc *p, int want, int *result);
 void	fdexpand(struct proc *);
 int	falloc(struct proc *p, struct file **resultfp, int *resultfd);
@@ -137,4 +139,5 @@ int	getsock(struct filedesc *, int, struct file **);
 
 #define	fdplock(fdp)	rw_enter_write(&(fdp)->fd_lock)
 #define	fdpunlock(fdp)	rw_exit_write(&(fdp)->fd_lock)
+#define	fdpassertlocked(fdp)	rw_assert_wrlock(&(fdp)->fd_lock)
 #endif

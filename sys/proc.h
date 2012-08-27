@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.149 2012/01/07 05:38:12 guenther Exp $	*/
+/*	$OpenBSD: proc.h,v 1.162 2012/08/02 03:18:48 guenther Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -46,6 +46,7 @@
 #include <sys/timeout.h>		/* For struct timeout */
 #include <sys/event.h>			/* For struct klist */
 #include <sys/mutex.h>			/* For struct mutex */
+#include <sys/resource.h>		/* For struct rusage */
 #include <machine/atomic.h>
 
 #ifdef _KERNEL
@@ -119,6 +120,18 @@ extern struct emul *emulsw[];		/* All emuls in system */
 extern int nemuls;			/* Number of emuls */
 
 /*
+ * time usage: accumulated times in ticks
+ * One a second, each thread's immediate counts (p_[usi]ticks) are
+ * accumulated into these.
+ */
+struct tusage {
+	struct	timeval tu_runtime;	/* Realtime. */
+	uint64_t	tu_uticks;	/* Statclock hits in user mode. */
+	uint64_t	tu_sticks;	/* Statclock hits in system mode. */
+	uint64_t	tu_iticks;	/* Statclock hits processing intr. */
+};
+
+/*
  * Description of a process.
  *
  * These structures contain the information needed to manage a thread of
@@ -162,6 +175,15 @@ struct process {
 	struct	vnode *ps_tracevp;	/* Trace to vnode. */
 	struct	ucred *ps_tracecred;	/* Creds for writing trace */
 
+	pid_t	ps_oppid;	 	/* Save parent pid during ptrace. */
+	int	ps_ptmask;		/* Ptrace event mask */
+	struct	ptrace_state *ps_ptstat;/* Ptrace state */
+
+	struct	rusage *ps_ru;		/* sum of stats for dead threads. */
+	struct	tusage ps_tu;		/* accumulated times. */
+	struct	rusage ps_cru;		/* sum of stats for reaped children */
+	struct	itimerval ps_timer[3];	/* timers, indexed by ITIMER_* */
+
 /* End area that is zeroed on creation. */
 #define	ps_endzero	ps_startcopy
 
@@ -173,8 +195,22 @@ struct process {
 	u_int	ps_rtableid;		/* Process routing table/domain. */
 	char	ps_nice;		/* Process "nice" value. */
 
+	struct uprof {			/* profile arguments */
+		caddr_t	pr_base;	/* buffer base */
+		size_t  pr_size;	/* buffer size */
+		u_long	pr_off;		/* pc offset */
+		u_int   pr_scale;	/* pc scaling */
+	} ps_prof;
+
+	u_short	ps_acflag;		/* Accounting flags. */
+
 /* End area that is copied on creation. */
 #define ps_endcopy	ps_refcnt
+
+	struct	timeval ps_start;	/* starting time. */
+	struct	timeout ps_realit_to;	/* real-time itimer trampoline. */
+	struct	timeout ps_virt_to;	/* virtual itimer trampoline. */
+	struct	timeout ps_prof_to;	/* prof itimer trampoline. */
 
 	int	ps_refcnt;		/* Number of references. */
 };
@@ -208,6 +244,7 @@ struct process {
 #define	PS_STOPPED	_P_STOPPED
 #define	PS_SINGLEEXIT	_P_SINGLEEXIT
 #define	PS_SINGLEUNWIND	_P_SINGLEUNWIND
+#define	PS_EXITING	_P_EXITING
 
 struct proc {
 	TAILQ_ENTRY(proc) p_runq;
@@ -218,7 +255,6 @@ struct proc {
 
 	/* substructures: */
 	struct	filedesc *p_fd;		/* Ptr to open files structure. */
-	struct	pstats *p_stats;	/* Accounting/statistics */
 	struct	vmspace *p_vmspace;	/* Address space. */
 	struct	sigacts *p_sigacts;	/* Signal actions, state */
 #define	p_cred		p_p->ps_cred
@@ -236,19 +272,12 @@ struct proc {
 	LIST_ENTRY(proc) p_hash;	/* Hash chain. */
 
 /* The following fields are all zeroed upon creation in fork. */
-#define	p_startzero	p_oppid
+#define	p_startzero	p_dupfd
 
-	pid_t	p_oppid;	 /* Save parent pid during ptrace. XXX */
 	int	p_dupfd;	 /* Sideways return value from filedescopen. XXX */
 
 	long 	p_thrslpid;	/* for thrsleep syscall */
 	int	p_sigwait;	/* signal handled by sigwait() */
-
-#ifndef	__HAVE_MD_TCB
-	void	*p_tcb;		/* user-space thread-control-block address */
-# define TCB_SET(p, addr)	((p)->p_tcb = (addr))
-# define TCB_GET(p)		((p)->p_tcb)
-#endif
 
 	/* scheduling */
 	u_int	p_estcpu;	 /* Time averaged value of p_cpticks. */
@@ -261,17 +290,14 @@ struct proc {
 	u_int	p_slptime;	 /* Time since last blocked. */
 	struct	cpu_info * __volatile p_cpu; /* CPU we're running on. */
 
-	struct	itimerval p_realtimer;	/* Alarm timer. */
-	struct	timeout p_realit_to;	/* Alarm timeout. */
+	struct	rusage p_ru;		/* Statistics */
+	struct	tusage p_tu;		/* accumulated times. */
 	struct	timeval p_rtime;	/* Real time. */
-	u_quad_t p_uticks;		/* Statclock hits in user mode. */
-	u_quad_t p_sticks;		/* Statclock hits in system mode. */
-	u_quad_t p_iticks;		/* Statclock hits processing intr. */
+	u_int	p_uticks;		/* Statclock hits in user mode. */
+	u_int	p_sticks;		/* Statclock hits in system mode. */
+	u_int	p_iticks;		/* Statclock hits processing intr. */
 
 	void	*p_systrace;		/* Back pointer to systrace */
-
-	int	p_ptmask;		/* Ptrace event mask */
-	struct	ptrace_state *p_ptstat;	/* Ptrace state */
 
 	int	p_siglist;		/* Signals arrived but not delivered. */
 
@@ -294,12 +320,24 @@ struct proc {
 	u_char	p_usrpri;	/* User-priority based on p_cpu and ps_nice. */
 	char	p_comm[MAXCOMLEN+1];
 
+#ifndef	__HAVE_MD_TCB
+	void	*p_tcb;		/* user-space thread-control-block address */
+# define TCB_SET(p, addr)	((p)->p_tcb = (addr))
+# define TCB_GET(p)		((p)->p_tcb)
+#endif
+
 	struct	emul *p_emul;		/* Emulation information */
 	struct	sigaltstack p_sigstk;	/* sp & on stack state variable */
 	vaddr_t	p_sigcode;		/* user pointer to the signal code. */
 
+	u_long	p_prof_addr;	/* tmp storage for profiling addr until AST */
+	u_long	p_prof_ticks;	/* tmp storage for profiling ticks until AST */
+
 /* End area that is copied on creation. */
 #define	p_endcopy	p_addr
+
+	struct	user *p_addr;	/* Kernel virtual addr of u-area */
+	struct	mdproc p_md;	/* Any machine-dependent fields. */
 
 	sigset_t p_oldmask;	/* Saved mask from before sigpause */
 	union sigval p_sigval;	/* For core dump/debugger XXX */
@@ -307,12 +345,7 @@ struct proc {
 	int	p_sicode;	/* For core dump/debugger XXX */
 	long	p_sitrapno;	/* For core dump/debugger XXX */
 
-	struct	user *p_addr;	/* Kernel virtual addr of u-area */
-	struct	mdproc p_md;	/* Any machine-dependent fields. */
-
 	u_short	p_xstat;	/* Exit status for wait; also stop signal. */
-	u_short	p_acflag;	/* Accounting flags. */
-	struct	rusage *p_ru;	/* Exit information. XXX */
 };
 
 /* Status values. */
@@ -335,15 +368,14 @@ struct proc {
 #define	P_INMEM		0x000004	/* Loaded into memory. UNUSED */
 #define	P_SIGSUSPEND	0x000008	/* Need to restore before-suspend mask*/
 #define	_P_PPWAIT	0x000010	/* Parent waits for exec/exit. */
-#define	P_PROFIL	0x000020	/* Has started profiling. */
+#define	_P_PROFIL	0x000020	/* Has started profiling. */
 #define	P_SELECT	0x000040	/* Selecting; wakeup/waiting danger. */
 #define	P_SINTR		0x000080	/* Sleep is interruptible. */
 #define	_P_SUGID	0x000100	/* Had set id privs since last exec. */
 #define	P_SYSTEM	0x000200	/* No sigs, stats or swapping. */
 #define	P_TIMEOUT	0x000400	/* Timing out during sleep. */
-#define	P_TRACED	0x000800	/* Debugged process being traced. */
-#define	P_WAITED	0x001000	/* Debugging proc has waited for child. */
-/* XXX - Should be merged with INEXEC */
+#define	_P_TRACED	0x000800	/* Debugged process being traced. */
+#define	_P_WAITED	0x001000	/* Debugging proc has waited for child. */
 #define	P_WEXIT		0x002000	/* Working on exiting. */
 #define	_P_EXEC		0x004000	/* Process called exec. */
 
@@ -357,7 +389,7 @@ struct proc {
 
 #define	P_SUSPSINGLE	0x080000	/* Need to stop for single threading. */
 #define	P_NOZOMBIE	0x100000	/* Pid 1 waits for me instead of dad */
-#define P_INEXEC	0x200000	/* Process is doing an exec right now */
+#define _P_INEXEC	0x200000	/* Process is doing an exec right now */
 #define P_SYSTRACE	0x400000	/* Process system call tracing active*/
 #define P_CONTINUED	0x800000	/* Proc has continued from a stopped state. */
 #define	_P_SINGLEEXIT	0x1000000	/* Other threads must die. */
@@ -367,13 +399,17 @@ struct proc {
 #define	P_SOFTDEP	0x10000000	/* Stuck processing softdep worklist */
 #define P_STOPPED	0x20000000	/* Just stopped, need sig to parent. */
 #define P_CPUPEG	0x40000000	/* Do not move to another cpu. */
+#define _P_EXITING	0x80000000	/* Process is exiting. */
 
 #ifndef _KERNEL
 #define	P_CONTROLT	_P_CONTROLT
 #define	P_PPWAIT	_P_PPWAIT
+#define	P_PROFIL	_P_PROFIL
 #define	P_SUGID		_P_SUGID
+#define	P_TRACED	_P_TRACED
 #define	P_EXEC		_P_EXEC
 #define	P_SUGIDEXEC	_P_SUGIDEXEC
+#define	P_INEXEC	_P_INEXEC
 #endif
 
 #define	P_BITS \
@@ -386,7 +422,7 @@ struct proc {
 
 /* Macro to compute the exit signal to be delivered. */
 #define P_EXITSIG(p) \
-    (((p)->p_flag & P_TRACED) ? SIGCHLD : (p)->p_exitsig)
+    (((p)->p_p->ps_flags & PS_TRACED) ? SIGCHLD : (p)->p_exitsig)
 
 #define	THREAD_PID_OFFSET	1000000
 
@@ -436,10 +472,8 @@ struct uidinfo *uid_find(uid_t);
  */
 #define FORK_FORK	0x00000001
 #define FORK_VFORK	0x00000002
-#define FORK_RFORK	0x00000004
 #define FORK_PPWAIT	0x00000008
 #define FORK_SHAREFILES	0x00000010
-#define FORK_CLEANFILES	0x00000020
 #define FORK_NOZOMBIE	0x00000040
 #define FORK_SHAREVM	0x00000080
 #define FORK_TFORK	0x00000100
@@ -447,8 +481,9 @@ struct uidinfo *uid_find(uid_t);
 #define FORK_PTRACE	0x00000400
 #define FORK_THREAD	0x00000800
 
-#define EXIT_NORMAL	0x00000001
-#define EXIT_THREAD	0x00000002
+#define EXIT_NORMAL		0x00000001
+#define EXIT_THREAD		0x00000002
+#define EXIT_THREAD_NOCHECK	0x00000003
 
 #define	PIDHASH(pid)	(&pidhashtbl[(pid) & pidhash])
 extern LIST_HEAD(pidhashhead, proc) *pidhashtbl;
@@ -459,14 +494,17 @@ extern LIST_HEAD(pgrphashhead, pgrp) *pgrphashtbl;
 extern u_long pgrphash;
 
 extern struct proc proc0;		/* Process slot for swapper. */
-extern int nprocs, maxproc;		/* Current and max number of procs. */
+extern struct process process0;		/* Process slot for kernel threads. */
+extern int nprocesses, maxprocess;	/* Cur and max number of processes. */
+extern int nthreads, maxthread;		/* Cur and max number of threads. */
 extern int randompid;			/* fork() should create random pid's */
 
 LIST_HEAD(proclist, proc);
 extern struct proclist allproc;		/* List of all processes. */
 extern struct proclist zombproc;	/* List of zombie processes. */
 
-extern struct proc *initproc;		/* Process slots for init, pager. */
+extern struct proc *initproc;		/* Process slot for init. */
+extern struct proc *reaperproc;		/* Process slot for reaper. */
 extern struct proc *syncerproc;		/* filesystem syncer daemon */
 
 extern struct pool process_pool;	/* memory pool for processes */
@@ -511,7 +549,7 @@ enum single_thread_mode {
 	SINGLE_EXIT		/* other threads to unwind and then exit */
 };
 int	single_thread_set(struct proc *, enum single_thread_mode, int);
-void	single_thread_clear(struct proc *);
+void	single_thread_clear(struct proc *, int);
 int	single_thread_check(struct proc *, int);
 
 void	child_return(void *);

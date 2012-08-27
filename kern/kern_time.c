@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_time.c,v 1.71 2010/06/30 01:47:35 tedu Exp $	*/
+/*	$OpenBSD: kern_time.c,v 1.75 2012/05/24 07:17:42 guenther Exp $	*/
 /*	$NetBSD: kern_time.c,v 1.20 1996/02/18 11:57:06 fvdl Exp $	*/
 
 /*
@@ -37,6 +37,7 @@
 #include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/ktrace.h>
 #include <sys/vnode.h>
 #include <sys/signalvar.h>
 #ifdef __HAVE_TIMECOUNTER
@@ -114,7 +115,7 @@ settime(struct timespec *ts)
 		return (EPERM);
 	}
 
-	tc_setclock(ts);
+	tc_setrealtimeclock(ts);
 	resettodr();
 
 	return (0);
@@ -219,7 +220,15 @@ sys_clock_gettime(struct proc *p, void *v, register_t *retval)
 	if ((error = clock_gettime(p, SCARG(uap, clock_id), &ats)) != 0)
 		return (error);
 
-	return copyout(&ats, SCARG(uap, tp), sizeof(ats));
+	error = copyout(&ats, SCARG(uap, tp), sizeof(ats));
+#ifdef KTRACE
+	if (error == 0 && KTRPOINT(p, KTR_STRUCT)) {
+		KERNEL_LOCK();
+		ktrabstimespec(p, &ats);
+		KERNEL_UNLOCK();
+	}
+#endif
+	return (error);
 }
 
 /* ARGSUSED */
@@ -275,8 +284,16 @@ sys_clock_getres(struct proc *p, void *v, register_t *retval)
 		return (EINVAL);
 	}
 
-	if (SCARG(uap, tp))
+	if (SCARG(uap, tp)) {
 		error = copyout(&ts, SCARG(uap, tp), sizeof (ts));
+#ifdef KTRACE
+		if (error == 0 && KTRPOINT(p, KTR_STRUCT)) {
+			KERNEL_LOCK();
+			ktrreltimespec(p, &ts);
+			KERNEL_UNLOCK();
+		}
+#endif
+	}
 
 	return error;
 }
@@ -300,6 +317,13 @@ sys_nanosleep(struct proc *p, void *v, register_t *retval)
 	error = copyin(SCARG(uap, rqtp), &rqt, sizeof(struct timespec));
 	if (error)
 		return (error);
+#ifdef KTRACE
+        if (KTRPOINT(p, KTR_STRUCT)) {
+		KERNEL_LOCK();
+		ktrreltimespec(p, &rqt);
+		KERNEL_UNLOCK();
+	}
+#endif
 
 	TIMESPEC_TO_TIMEVAL(&tv, &rqt);
 	if (itimerfix(&tv))
@@ -327,6 +351,13 @@ sys_nanosleep(struct proc *p, void *v, register_t *retval)
 		error1 = copyout(&rmt, rmtp, sizeof(rmt));
 		if (error1 != 0)
 			error = error1;
+#ifdef KTRACE
+		if (error1 == 0 && KTRPOINT(p, KTR_STRUCT)) {
+			KERNEL_LOCK();
+			ktrreltimespec(p, &rmt);
+			KERNEL_UNLOCK();
+		}
+#endif
 	}
 
 	return error;
@@ -352,6 +383,13 @@ sys_gettimeofday(struct proc *p, void *v, register_t *retval)
 		microtime(&atv);
 		if ((error = copyout(&atv, tp, sizeof (atv))))
 			return (error);
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT)) {
+			KERNEL_LOCK();
+			ktrabstimeval(p, &atv);
+			KERNEL_UNLOCK();
+		}
+#endif
 	}
 	if (tzp)
 		error = copyout(&tz, tzp, sizeof (tz));
@@ -550,12 +588,10 @@ out:
 
 /*
  * Get value of an interval timer.  The process virtual and
- * profiling virtual time timers are kept in the p_stats area, since
- * they can be swapped out.  These are kept internally in the
+ * profiling virtual time timers are kept internally in the
  * way they are specified externally: in time until they expire.
  *
- * The real time interval timer is kept in the process table slot
- * for the process, and its value (it_value) is kept as an
+ * The real time interval timer's it_value, in contast, is kept as an 
  * absolute time rather than as a delta, so that it is easy to keep
  * periodic real-time signals from drifting.
  *
@@ -586,6 +622,8 @@ sys_getitimer(struct proc *p, void *v, register_t *retval)
 	if (which < ITIMER_REAL || which > ITIMER_PROF)
 		return (EINVAL);
 	s = splclock();
+	aitv = p->p_p->ps_timer[which];
+
 	if (which == ITIMER_REAL) {
 		struct timeval now;
 
@@ -596,7 +634,6 @@ sys_getitimer(struct proc *p, void *v, register_t *retval)
 		 * has passed return 0, else return difference between
 		 * current time and time for the timer to go off.
 		 */
-		aitv = p->p_realtimer;
 		if (timerisset(&aitv.it_value)) {
 			if (timercmp(&aitv.it_value, &now, <))
 				timerclear(&aitv.it_value);
@@ -604,8 +641,7 @@ sys_getitimer(struct proc *p, void *v, register_t *retval)
 				timersub(&aitv.it_value, &now,
 				    &aitv.it_value);
 		}
-	} else
-		aitv = p->p_stats->p_timer[which];
+	}
 	splx(s);
 	return (copyout(&aitv, SCARG(uap, itv), sizeof (struct itimerval)));
 }
@@ -623,6 +659,7 @@ sys_setitimer(struct proc *p, void *v, register_t *retval)
 	struct itimerval aitv;
 	const struct itimerval *itvp;
 	struct itimerval *oitv;
+	struct process *pr = p->p_p;
 	int error;
 	int timo;
 	int which;
@@ -649,24 +686,24 @@ sys_setitimer(struct proc *p, void *v, register_t *retval)
 	if (which == ITIMER_REAL) {
 		struct timeval ctv;
 
-		timeout_del(&p->p_realit_to);
+		timeout_del(&pr->ps_realit_to);
 		getmicrouptime(&ctv);
 		if (timerisset(&aitv.it_value)) {
 			timo = tvtohz(&aitv.it_value);
-			timeout_add(&p->p_realit_to, timo);
+			timeout_add(&pr->ps_realit_to, timo);
 			timeradd(&aitv.it_value, &ctv, &aitv.it_value);
 		}
-		p->p_realtimer = aitv;
+		pr->ps_timer[ITIMER_REAL] = aitv;
 	} else {
 		int s;
 
 		itimerround(&aitv.it_interval);
 		s = splclock();
-		p->p_stats->p_timer[which] = aitv;
+		pr->ps_timer[which] = aitv;
 		if (which == ITIMER_VIRTUAL)
-			timeout_del(&p->p_stats->p_virt_to);
+			timeout_del(&pr->ps_virt_to);
 		if (which == ITIMER_PROF)
-			timeout_del(&p->p_stats->p_prof_to);
+			timeout_del(&pr->ps_prof_to);
 		splx(s);
 	}
 
@@ -684,29 +721,28 @@ sys_setitimer(struct proc *p, void *v, register_t *retval)
 void
 realitexpire(void *arg)
 {
-	struct proc *p;
+	struct process *pr = arg;
+	struct itimerval *tp = &pr->ps_timer[ITIMER_REAL];
 
-	p = (struct proc *)arg;
-	psignal(p, SIGALRM);
-	if (!timerisset(&p->p_realtimer.it_interval)) {
-		timerclear(&p->p_realtimer.it_value);
+	psignal(pr->ps_mainproc, SIGALRM);
+	if (!timerisset(&tp->it_interval)) {
+		timerclear(&tp->it_value);
 		return;
 	}
 	for (;;) {
 		struct timeval ctv, ntv;
 		int timo;
 
-		timeradd(&p->p_realtimer.it_value,
-		    &p->p_realtimer.it_interval, &p->p_realtimer.it_value);
+		timeradd(&tp->it_value, &tp->it_interval, &tp->it_value);
 		getmicrouptime(&ctv);
-		if (timercmp(&p->p_realtimer.it_value, &ctv, >)) {
-			ntv = p->p_realtimer.it_value;
+		if (timercmp(&tp->it_value, &ctv, >)) {
+			ntv = tp->it_value;
 			timersub(&ntv, &ctv, &ntv);
 			timo = tvtohz(&ntv) - 1;
 			if (timo <= 0)
 				timo = 1;
-			if ((p->p_flag & P_WEXIT) == 0)
-				timeout_add(&p->p_realit_to, timo);
+			if ((pr->ps_flags & PS_EXITING) == 0)
+				timeout_add(&pr->ps_realit_to, timo);
 			return;
 		}
 	}

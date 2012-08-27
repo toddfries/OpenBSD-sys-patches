@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.79 2011/07/04 20:35:35 deraadt Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.82 2012/07/11 12:39:20 guenther Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-
@@ -78,6 +78,12 @@
 
 static uint32_t fileidhash(uint64_t);
 
+int msdosfs_kqfilter(void *);
+int filt_msdosfsreadwrite(struct knote *, long);
+int filt_msdosfsvnode(struct knote *, long);
+void filt_msdosfsdetach(struct knote *);
+
+
 /*
  * Some general notes:
  *
@@ -156,6 +162,7 @@ msdosfs_create(void *v)
 		goto bad;
 	if ((cnp->cn_flags & SAVESTART) == 0)
 		pool_put(&namei_pool, cnp->cn_pnbuf);
+	VN_KNOTE(ap->a_dvp, NOTE_WRITE);
 	vput(ap->a_dvp);
 	*ap->a_vpp = DETOV(dep);
 	return (0);
@@ -172,6 +179,7 @@ msdosfs_mknod(void *v)
 	struct vop_mknod_args *ap = v;
 
 	pool_put(&namei_pool, ap->a_cnp->cn_pnbuf);
+	VN_KNOTE(ap->a_dvp, NOTE_WRITE);
 	vput(ap->a_dvp);
 	return (EINVAL);
 }
@@ -413,6 +421,7 @@ msdosfs_setattr(void *v)
 			dep->de_Attributes |= ATTR_ARCHIVE;
 		dep->de_flag |= DE_MODIFIED;
 	}
+	VN_KNOTE(ap->a_vp, NOTE_ATTRIB);
 	return (deupdat(dep, 1));
 }
 
@@ -508,6 +517,8 @@ msdosfs_write(void *v)
 	int n;
 	int croffset;
 	int resid;
+	int overrun;
+	int extended = 0;
 	uint32_t osize;
 	int error = 0;
 	uint32_t count, lastcn;
@@ -515,7 +526,6 @@ msdosfs_write(void *v)
 	struct buf *bp;
 	int ioflag = ap->a_ioflag;
 	struct uio *uio = ap->a_uio;
-	struct proc *p = uio->uio_procp;
 	struct vnode *vp = ap->a_vp;
 	struct vnode *thisvp;
 	struct denode *dep = VTODE(vp);
@@ -551,15 +561,9 @@ msdosfs_write(void *v)
 	if (uio->uio_offset + uio->uio_resid > MSDOSFS_FILESIZE_MAX)
 		return (EFBIG);
 
-	/*
-	 * If they've exceeded their filesize limit, tell them about it.
-	 */
-	if (p &&
-	    ((uio->uio_offset + uio->uio_resid) >
-	    p->p_rlimit[RLIMIT_FSIZE].rlim_cur)) {
-		psignal(p, SIGXFSZ);
-		return (EFBIG);
-	}
+	/* do the filesize rlimit check */
+	if ((error = vn_fsizechk(vp, uio, ioflag, &overrun)))
+		return (error);
 
 	/*
 	 * If the offset we are starting the write at is beyond the end of
@@ -569,7 +573,7 @@ msdosfs_write(void *v)
 	 */
 	if (uio->uio_offset > dep->de_FileSize) {
 		if ((error = deextend(dep, uio->uio_offset, cred)) != 0)
-			return (error);
+			goto out;
 	}
 
 	/*
@@ -583,6 +587,7 @@ msdosfs_write(void *v)
 	 * size ahead of the time to hopefully get a contiguous area.
 	 */
 	if (uio->uio_offset + resid > osize) {
+		extended = 1;
 		count = de_clcount(pmp, uio->uio_offset + resid) -
 			de_clcount(pmp, osize);
 		if ((error = extendfile(dep, count, NULL, NULL, 0)) &&
@@ -670,6 +675,12 @@ msdosfs_write(void *v)
 		dep->de_flag |= DE_UPDATE;
 	} while (error == 0 && uio->uio_resid > 0);
 
+	if (resid > uio->uio_resid)
+		 VN_KNOTE(ap->a_vp, NOTE_WRITE | (extended ? NOTE_EXTEND : 0));
+
+	if (dep->de_FileSize < osize)
+		VN_KNOTE(ap->a_vp, NOTE_TRUNCATE);
+
 	/*
 	 * If the write failed and they want us to, truncate the file back
 	 * to the size it was before the write was attempted.
@@ -687,6 +698,10 @@ errexit:
 		}
 	} else if (ioflag & IO_SYNC)
 		error = deupdat(dep, 1);
+
+out:
+	/* correct the result for writes clamped by vn_fsizechk() */
+	uio->uio_resid += overrun;
 	return (error);
 }
 
@@ -749,6 +764,10 @@ msdosfs_remove(void *v)
 		error = EPERM;
 	else
 		error = removede(ddep, dep);
+
+	VN_KNOTE(ap->a_vp, NOTE_DELETE);
+	VN_KNOTE(ap->a_dvp, NOTE_WRITE);
+
 #ifdef MSDOSFS_DEBUG
 	printf("msdosfs_remove(), dep %08x, v_usecount %d\n", dep, ap->a_vp->v_usecount);
 #endif
@@ -915,6 +934,7 @@ abortit:
 		ip->de_flag |= DE_RENAME;
 		doingdirectory++;
 	}
+	VN_KNOTE(fdvp, NOTE_WRITE);	/* XXX right place? */
 
 	/*
 	 * When the target exists, both the directory
@@ -962,6 +982,8 @@ abortit:
 		xp = tvp ? VTODE(tvp) : NULL;
 	}
 
+	VN_KNOTE(tdvp, NOTE_WRITE);
+
 	if (xp != NULL) {
 		/*
 		 * Target must be empty if a directory and have no links
@@ -984,6 +1006,7 @@ abortit:
 		}
 		if ((error = removede(dp, xp)) != 0)
 			goto bad1;
+		VN_KNOTE(tvp, NOTE_DELETE);
 		vput(tvp);
 		xp = NULL;
 	}
@@ -1121,6 +1144,8 @@ abortit:
 			goto bad;
 		}
 	}
+
+	VN_KNOTE(fvp, NOTE_RENAME);
 
 bad:
 	VOP_UNLOCK(fvp, 0, p);
@@ -1261,6 +1286,7 @@ msdosfs_mkdir(void *v)
 		goto bad;
 	if ((cnp->cn_flags & SAVESTART) == 0)
 		pool_put(&namei_pool, cnp->cn_pnbuf);
+	VN_KNOTE(ap->a_dvp, NOTE_WRITE | NOTE_LINK);
 	vput(ap->a_dvp);
 	*ap->a_vpp = DETOV(dep);
 	return (0);
@@ -1305,6 +1331,9 @@ msdosfs_rmdir(void *v)
 		error = ENOTEMPTY;
 		goto out;
 	}
+
+	VN_KNOTE(dvp, NOTE_WRITE | NOTE_LINK);
+
 	/*
 	 * Delete the entry from the directory.  For dos filesystems this
 	 * gets rid of the directory entry on disk, the in memory copy
@@ -1331,6 +1360,7 @@ msdosfs_rmdir(void *v)
 out:
 	if (dvp)
 		vput(dvp);
+	VN_KNOTE(vp, NOTE_DELETE);
 	vput(vp);
 	return (error);
 }
@@ -1766,27 +1796,30 @@ msdosfs_pathconf(void *v)
 {
 	struct vop_pathconf_args *ap = v;
 	struct msdosfsmount *pmp = VTODE(ap->a_vp)->de_pmp;
+	int error = 0;
 
 	switch (ap->a_name) {
 	case _PC_LINK_MAX:
 		*ap->a_retval = 1;
-		return (0);
+		break;
 	case _PC_NAME_MAX:
 		*ap->a_retval = pmp->pm_flags & MSDOSFSMNT_LONGNAME ? WIN_MAXLEN : 12;
-		return (0);
+		break;
 	case _PC_PATH_MAX:
 		*ap->a_retval = PATH_MAX;
-		return (0);
+		break;
 	case _PC_CHOWN_RESTRICTED:
 		*ap->a_retval = 1;
-		return (0);
+		break;
 	case _PC_NO_TRUNC:
 		*ap->a_retval = 0;
-		return (0);
+		break;
 	default:
-		return (EINVAL);
+		error = EINVAL;
+		break;
 	}
-	/* NOTREACHED */
+
+	return (error);
 }
 
 /*
@@ -1826,6 +1859,7 @@ struct vops msdosfs_vops = {
 	.vop_write	= msdosfs_write,
 	.vop_ioctl	= msdosfs_ioctl,
 	.vop_poll	= msdosfs_poll,
+	.vop_kqfilter	= msdosfs_kqfilter,
 	.vop_fsync	= msdosfs_fsync,
 	.vop_remove	= msdosfs_remove,
 	.vop_link	= msdosfs_link,
@@ -1846,5 +1880,73 @@ struct vops msdosfs_vops = {
 	.vop_islocked	= msdosfs_islocked,
 	.vop_pathconf	= msdosfs_pathconf,
 	.vop_advlock	= msdosfs_advlock,
-	.vop_bwrite	= vop_generic_bwrite 
+	.vop_bwrite	= vop_generic_bwrite
 };
+
+struct filterops msdosfsreadwrite_filtops =
+	{ 1, NULL, filt_msdosfsdetach, filt_msdosfsreadwrite };
+struct filterops msdosfsvnode_filtops =
+	{ 1, NULL, filt_msdosfsdetach, filt_msdosfsvnode };
+
+int
+msdosfs_kqfilter(void *v)
+{
+	struct vop_kqfilter_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct knote *kn = ap->a_kn;
+
+	switch (kn->kn_filter) {
+	case EVFILT_READ:
+		kn->kn_fop = &msdosfsreadwrite_filtops;
+		break;
+	case EVFILT_WRITE:
+		kn->kn_fop = &msdosfsreadwrite_filtops;
+		break;
+	case EVFILT_VNODE:
+		kn->kn_fop = &msdosfsvnode_filtops;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	kn->kn_hook = (caddr_t)vp;
+
+	SLIST_INSERT_HEAD(&vp->v_selectinfo.si_note, kn, kn_selnext);
+
+	return (0);
+}
+
+void
+filt_msdosfsdetach(struct knote *kn)
+{
+	struct vnode *vp = (struct vnode *)kn->kn_hook;
+
+	SLIST_REMOVE(&vp->v_selectinfo.si_note, kn, knote, kn_selnext);
+}
+
+int
+filt_msdosfsreadwrite(struct knote *kn, long hint)
+{
+	/*
+	 * filesystem is gone, so set the EOF flag and schedule
+	 * the knote for deletion.
+	 */
+	if (hint == NOTE_REVOKE) {
+		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
+		return (1);
+	}
+
+	return (kn->kn_data != 0);
+}
+
+int
+filt_msdosfsvnode(struct knote *kn, long hint)
+{
+	if (kn->kn_sfflags & hint)
+		kn->kn_fflags |= hint;
+	if (hint == NOTE_REVOKE) {
+		kn->kn_flags |= EV_EOF;
+		return (1);
+	}
+	return (kn->kn_fflags != 0);
+}

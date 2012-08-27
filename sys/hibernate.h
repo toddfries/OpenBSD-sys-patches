@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate.h,v 1.19 2011/11/29 05:21:10 deraadt Exp $	*/
+/*	$OpenBSD: hibernate.h,v 1.22 2012/07/08 12:22:26 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -105,7 +105,7 @@ void	 uvm_pmr_dirty_everything(void);
 int	 uvm_pmr_alloc_pig(paddr_t*, psize_t);
 int	 uvm_pmr_alloc_piglet(vaddr_t*, paddr_t*, vsize_t, paddr_t);
 void	 uvm_pmr_free_piglet(vaddr_t, vsize_t);
-u_char	 uvm_page_rle(paddr_t);
+int	 uvm_page_rle(paddr_t);
 
 hibio_fn get_hibernate_io_function(void);
 int	get_hibernate_info(union hibernate_info *, int);
@@ -113,10 +113,15 @@ int	get_hibernate_info(union hibernate_info *, int);
 int	hibernate_zlib_reset(union hibernate_info *, int);
 void	*hibernate_zlib_alloc(void *, int, int);
 void	hibernate_zlib_free(void *, void *);
-void	hibernate_inflate(union hibernate_info *, paddr_t, paddr_t, size_t);
+void	hibernate_inflate_region(union hibernate_info *, paddr_t, paddr_t,
+	    size_t);
 size_t	hibernate_deflate(union hibernate_info *, paddr_t, size_t *);
+void	hibernate_process_chunk(union hibernate_info *,
+	    struct hibernate_disk_chunk *, paddr_t);
+int	hibernate_get_next_rle(void);
+int	hibernate_inflate_page(void);
 
-int	hibernate_read_block(union hibernate_info *, daddr_t, size_t, vaddr_t);
+int	hibernate_block_io(union hibernate_info *, daddr_t, size_t, vaddr_t, int);
 int	hibernate_write_signature(union hibernate_info *);
 int	hibernate_write_chunktable(union hibernate_info *);
 int	hibernate_write_chunks(union hibernate_info *);

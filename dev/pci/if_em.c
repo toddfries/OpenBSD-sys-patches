@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.261 2011/10/05 02:52:09 jsg Exp $ */
+/* $OpenBSD: if_em.c,v 1.267 2012/08/16 09:31:53 mikeb Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -136,6 +136,10 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SGMII },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER_DUAL },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82583V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_COPPER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_FIBER },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_SERDES },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I350_SGMII },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_82567V_3 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ICH8_IFE_G },
@@ -204,7 +208,7 @@ void em_realign(struct em_softc *, struct mbuf *, u_int16_t *);
 #define em_realign(a, b, c) /* a, b, c */
 #endif
 int  em_rxfill(struct em_softc *);
-void em_rxeof(struct em_softc *, int);
+void em_rxeof(struct em_softc *);
 void em_receive_checksum(struct em_softc *, struct em_rx_desc *,
 			 struct mbuf *);
 #ifdef EM_CSUM_OFFLOAD
@@ -329,8 +333,11 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	/* Determine hardware revision */
 	em_identify_hardware(sc);
 
-	/* Only use MSI on the newer PCIe parts */
-	if (sc->hw.mac_type < em_82571)
+	/*
+	 * Only use MSI on the newer PCIe parts, with the exception
+	 * of 82571/82572 due to "Byte Enables 2 and 3 Are Not Set" errata
+	 */
+	if (sc->hw.mac_type <= em_82572)
 		sc->osdep.em_pa.pa_flags &= ~PCI_FLAGS_MSI_ENABLED;
 
 	/* Parameters (to be read from user) */
@@ -399,6 +406,7 @@ em_attach(struct device *parent, struct device *self, void *aux)
 		case em_82574:
 		case em_82575:
 		case em_82580:
+		case em_i350:
 		case em_ich9lan:
 		case em_ich10lan:
 		case em_80003es2lan:
@@ -466,7 +474,7 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	if (sc->hw.mac_type == em_80003es2lan || sc->hw.mac_type == em_82575 ||
-	    sc->hw.mac_type == em_82580) {
+	    sc->hw.mac_type == em_82580 || sc->hw.mac_type == em_i350) {
 		uint32_t reg = EM_READ_REG(&sc->hw, E1000_STATUS);
 		sc->hw.bus_func = (reg & E1000_STATUS_FUNC_MASK) >>
 		    E1000_STATUS_FUNC_SHIFT;
@@ -769,6 +777,7 @@ em_init(void *arg)
 	case em_82575:
 	case em_82580:
 	case em_80003es2lan:
+	case em_i350:
 		pba = E1000_PBA_32K; /* 32K for Rx, 16K for Tx */
 		break;
 	case em_82573: /* 82573: Total Packet Buffer is 32K */
@@ -872,11 +881,8 @@ em_intr(void *arg)
 		return (0);
 
 	if (ifp->if_flags & IFF_RUNNING) {
-		em_rxeof(sc, -1);
+		em_rxeof(sc);
 		em_txeof(sc);
-		if (!IFQ_IS_EMPTY(&ifp->if_snd))
-			em_start(ifp);
-
 		refill = 1;
 	}
 
@@ -893,6 +899,9 @@ em_intr(void *arg)
 		sc->rx_overruns++;
 		refill = 1;
 	}
+
+	if (ifp->if_flags & IFF_RUNNING && !IFQ_IS_EMPTY(&ifp->if_snd))
+		em_start(ifp);
 
 	if (refill && em_rxfill(sc)) {
 		/* Advance the Rx Queue #0 "Tail Pointer". */
@@ -1758,7 +1767,8 @@ em_hardware_init(struct em_softc *sc)
 	     (sc->hw.mac_type == em_82571 ||
 	      sc->hw.mac_type == em_82572 ||
 	      sc->hw.mac_type == em_82575 ||
-	      sc->hw.mac_type == em_82580)) {
+	      sc->hw.mac_type == em_82580 ||
+	      sc->hw.mac_type == em_i350)) {
 		uint16_t phy_tmp = 0;
 
 		/* Speed up time to link by disabling smart power down */
@@ -1838,7 +1848,8 @@ em_setup_interface(struct em_softc *sc)
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 #if NVLAN > 0
-	if (sc->hw.mac_type != em_82575 && sc->hw.mac_type != em_82580)
+	if (sc->hw.mac_type != em_82575 && sc->hw.mac_type != em_82580 &&
+	    sc->hw.mac_type != em_i350)
 		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
@@ -2199,7 +2210,8 @@ em_initialize_transmit_unit(struct em_softc *sc)
 	/* Setup Transmit Descriptor Base Settings */   
 	sc->txd_cmd = E1000_TXD_CMD_IFCS;
 
-	if (sc->hw.mac_type == em_82575 || sc->hw.mac_type == em_82580) {
+	if (sc->hw.mac_type == em_82575 || sc->hw.mac_type == em_82580 ||
+	    sc->hw.mac_type == em_i350) {
 		/* 82575/6 need to enable the TX queue and lack the IDE bit */
 		reg_tctl = E1000_READ_REG(&sc->hw, TXDCTL);
 		reg_tctl |= E1000_TXDCTL_QUEUE_ENABLE;
@@ -2621,6 +2633,14 @@ em_initialize_receive_unit(struct em_softc *sc)
 	if (sc->hw.tbi_compatibility_on == TRUE)
 		reg_rctl |= E1000_RCTL_SBP;
 
+	/*
+	 * The i350 has a bug where it always strips the CRC whether
+	 * asked to or not.  So ask for stripped CRC here and
+	 * cope in rxeof
+	 */
+	if (sc->hw.mac_type == em_i350)
+		reg_rctl |= E1000_RCTL_SECRC;
+
 	switch (sc->rx_buffer_len) {
 	default:
 	case EM_RXBUFFER_2048:
@@ -2654,7 +2674,8 @@ em_initialize_receive_unit(struct em_softc *sc)
 	if (sc->hw.mac_type == em_82573)
 		E1000_WRITE_REG(&sc->hw, RDTR, 0x20);
 
-	if (sc->hw.mac_type == em_82575 || sc->hw.mac_type == em_82580) {
+	if (sc->hw.mac_type == em_82575 || sc->hw.mac_type == em_82580 ||
+	    sc->hw.mac_type == em_i350) {
 		/* 82575/6 need to enable the RX queue */
 		uint32_t reg;
 		reg = E1000_READ_REG(&sc->hw, RXDCTL);
@@ -2786,12 +2807,9 @@ em_rxfill(struct em_softc *sc)
  *  the mbufs in the descriptor and sends data which has been
  *  dma'ed into host memory to upper layer.
  *
- *  We loop at most count times if count is > 0, or until done if
- *  count < 0.
- *
  *********************************************************************/
 void
-em_rxeof(struct em_softc *sc, int count)
+em_rxeof(struct em_softc *sc)
 {
 	struct ifnet	    *ifp = &sc->interface_data.ac_if;
 	struct mbuf	    *m;
@@ -2812,7 +2830,7 @@ em_rxeof(struct em_softc *sc, int count)
 
 	i = sc->next_rx_desc_to_check;
 
-	while (count != 0 && sc->rx_ndescs > 0) {
+	while (sc->rx_ndescs > 0) {
 		m = NULL;
 
 		desc = &sc->rx_desc_base[i];
@@ -2851,12 +2869,13 @@ em_rxeof(struct em_softc *sc, int count)
 		desc_len = letoh16(desc->length);
 
 		if (status & E1000_RXD_STAT_EOP) {
-			count--;
 			eop = 1;
 			if (desc_len < ETHER_CRC_LEN) {
 				len = 0;
 				prev_len_adj = ETHER_CRC_LEN - desc_len;
-			} else
+			} else if (sc->hw.mac_type == em_i350)
+				len = desc_len;
+			else
 				len = desc_len - ETHER_CRC_LEN;
 		} else {
 			eop = 0;

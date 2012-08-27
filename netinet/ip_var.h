@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_var.h,v 1.42 2011/04/19 03:47:29 dlg Exp $	*/
+/*	$OpenBSD: ip_var.h,v 1.44 2012/07/16 18:05:36 markus Exp $	*/
 /*	$NetBSD: ip_var.h,v 1.16 1996/02/13 23:43:20 christos Exp $	*/
 
 /*
@@ -141,9 +141,9 @@ struct	ipstat {
 #define	IP_RAWOUTPUT		0x2		/* raw ip header exists */
 #define	IP_ROUTETOIF		SO_DONTROUTE	/* bypass routing tables */
 #define	IP_ALLOWBROADCAST	SO_BROADCAST	/* can send broadcast packets */
-#define IP_JUMBO		SO_JUMBO	/* try to use the jumbo mtu */
 #define	IP_MTUDISC		0x0800		/* pmtu discovery, set DF */
 #define IP_ROUTETOETHER		0x1000		/* ether addresses given */
+#define IP_IPSECFLOW		0x2000		/* IPsec flow info */
 
 extern struct ipstat ipstat;
 extern LIST_HEAD(ipqhead, ipq)	ipq;	/* ip reass. queue */

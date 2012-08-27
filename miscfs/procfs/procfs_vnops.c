@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_vnops.c,v 1.53 2011/12/24 04:34:20 guenther Exp $	*/
+/*	$OpenBSD: procfs_vnops.c,v 1.55 2012/06/20 17:30:22 matthew Exp $	*/
 /*	$NetBSD: procfs_vnops.c,v 1.40 1996/03/16 23:52:55 christos Exp $	*/
 
 /*
@@ -198,7 +198,7 @@ procfs_open(void *v)
 		    ((pfs->pfs_flags & O_EXCL) && (ap->a_mode & FWRITE)))
 			return (EBUSY);
 
-		if ((error = process_checkioperm(p1, p2)) != 0)
+		if ((error = process_checkioperm(p1, p2->p_p)) != 0)
 			return (error);
 
 		if (ap->a_mode & FWRITE)
@@ -314,30 +314,33 @@ int
 procfs_pathconf(void *v)
 {
 	struct vop_pathconf_args *ap = v;
+	int error = 0;
 
 	switch (ap->a_name) {
 	case _PC_LINK_MAX:
 		*ap->a_retval = LINK_MAX;
-		return (0);
+		break;
 	case _PC_MAX_CANON:
 		*ap->a_retval = MAX_CANON;
-		return (0);
+		break;
 	case _PC_MAX_INPUT:
 		*ap->a_retval = MAX_INPUT;
-		return (0);
+		break;
 	case _PC_PIPE_BUF:
 		*ap->a_retval = PIPE_BUF;
-		return (0);
+		break;
 	case _PC_CHOWN_RESTRICTED:
 		*ap->a_retval = 1;
-		return (0);
+		break;
 	case _PC_VDISABLE:
 		*ap->a_retval = _POSIX_VDISABLE;
-		return (0);
+		break;
 	default:
-		return (EINVAL);
+		error = EINVAL;
+		break;
 	}
-	/* NOTREACHED */
+
+	return (error);
 }
 
 /*

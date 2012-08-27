@@ -1,3 +1,4 @@
+/*	$OpenBSD: cache_octeon.c,v 1.5 2012/06/24 16:26:04 miod Exp $	*/
 /*
  * Copyright (c) 2010 Takuya ASADA.
  *
@@ -45,9 +46,10 @@
 
 #include <uvm/uvm_extern.h>
 
+#include <mips64/cache.h>
 #include <machine/cpu.h>
 
-#define SYNC() asm volatile("sync\n")
+#define SYNC() asm volatile("sync\n" ::: "memory")
 #define SYNCI() \
 	asm volatile( \
 		".set push\n" \
@@ -56,7 +58,7 @@
 		"nop\n" \
 		".set pop")
 
-int 
+void 
 Octeon_ConfigCache(struct cpu_info *ci)
 {
 	ci->ci_cacheways = 4;
@@ -65,8 +67,15 @@ Octeon_ConfigCache(struct cpu_info *ci)
 	ci->ci_l1datacachesize = 16 * 1024;
 	ci->ci_l1datacacheline = 128;
 	ci->ci_l2size = 128 * 1024;
+	ci->ci_l2line = 128;
 	ci->ci_l3size = 0;
-	return 0;
+
+	ci->ci_SyncCache = Octeon_SyncCache;
+	ci->ci_InvalidateICache = Octeon_InvalidateICache;
+	ci->ci_SyncDCachePage = Octeon_SyncDCachePage;
+	ci->ci_HitSyncDCache = Octeon_HitSyncDCache;
+	ci->ci_HitInvalidateDCache = Octeon_HitInvalidateDCache;
+	ci->ci_IOSyncDCache = Octeon_IOSyncDCache;
 }
 
 void
@@ -76,37 +85,37 @@ Octeon_SyncCache(struct cpu_info *ci)
 }
 
 void
-Octeon_InvalidateICache(struct cpu_info *ci, vaddr_t addr, size_t len)
+Octeon_InvalidateICache(struct cpu_info *ci, vaddr_t va, size_t len)
 {
 	/* A SYNCI flushes the entire icache on OCTEON */
 	SYNCI();
 }
 
 void
-Octeon_SyncDCachePage(struct cpu_info *ci, paddr_t addr)
+Octeon_SyncDCachePage(struct cpu_info *ci, vaddr_t va, paddr_t pa)
 {
 }
 
 void
-Octeon_HitSyncDCache(struct cpu_info *ci, paddr_t addr, size_t len)
+Octeon_HitSyncDCache(struct cpu_info *ci, vaddr_t va, size_t len)
 {
 }
 
 void
-Octeon_HitInvalidateDCache(struct cpu_info *ci, paddr_t addr, size_t len)
+Octeon_HitInvalidateDCache(struct cpu_info *ci, vaddr_t va, size_t len)
 {
 }
 
 void
-Octeon_IOSyncDCache(struct cpu_info *ci, paddr_t addr, size_t len, int how)
+Octeon_IOSyncDCache(struct cpu_info *ci, vaddr_t va, size_t len, int how)
 {
 	switch (how) {
-		default:
-		case 0:
-			break;
-		case 1: /* writeback */
-		case 2: /* writeback and invalidate */
-			SYNC();
-			break;
+	default:
+	case CACHE_SYNC_R:
+		break;
+	case CACHE_SYNC_W: /* writeback */
+	case CACHE_SYNC_X: /* writeback and invalidate */
+		SYNC();
+		break;
 	}
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.c,v 1.63 2011/03/28 14:49:40 kettenis Exp $	*/
+/*	$OpenBSD: ieee80211_node.c,v 1.72 2012/08/17 14:49:17 stsp Exp $	*/
 /*	$NetBSD: ieee80211_node.c,v 1.14 2004/05/09 09:18:47 dyoung Exp $	*/
 
 /*-
@@ -95,9 +95,43 @@ void ieee80211_node_leave_ht(struct ieee80211com *, struct ieee80211_node *);
 void ieee80211_node_leave_rsn(struct ieee80211com *, struct ieee80211_node *);
 void ieee80211_node_leave_11g(struct ieee80211com *, struct ieee80211_node *);
 void ieee80211_set_tim(struct ieee80211com *, int, int);
+void ieee80211_inact_timeout(void *);
+void ieee80211_node_cache_timeout(void *);
 #endif
 
 #define M_80211_NODE	M_DEVBUF
+
+#ifndef IEEE80211_STA_ONLY
+void
+ieee80211_inact_timeout(void *arg)
+{
+	struct ieee80211com *ic = arg;
+	struct ieee80211_node *ni, *next_ni;
+	int s;
+
+	s = splnet();
+	for (ni = RB_MIN(ieee80211_tree, &ic->ic_tree);
+	    ni != NULL; ni = next_ni) {
+		next_ni = RB_NEXT(ieee80211_tree, &ic->ic_tree, ni);
+		if (ni->ni_refcnt > 0)
+			continue;
+		if (ni->ni_inact < IEEE80211_INACT_MAX)
+			ni->ni_inact++;
+	}
+	splx(s);
+
+	timeout_add_sec(&ic->ic_inact_timeout, IEEE80211_INACT_WAIT);
+}
+
+void
+ieee80211_node_cache_timeout(void *arg)
+{
+	struct ieee80211com *ic = arg;
+
+	ieee80211_clean_nodes(ic, 1);
+	timeout_add_sec(&ic->ic_node_cache_timeout, IEEE80211_CACHE_WAIT);
+}
+#endif
 
 void
 ieee80211_node_attach(struct ifnet *ifp)
@@ -138,6 +172,10 @@ ieee80211_node_attach(struct ifnet *ifp)
 			ic->ic_set_tim = ieee80211_set_tim;
 		timeout_set(&ic->ic_rsn_timeout,
 		    ieee80211_gtk_rekey_timeout, ic);
+		timeout_set(&ic->ic_inact_timeout,
+		    ieee80211_inact_timeout, ic);
+		timeout_set(&ic->ic_node_cache_timeout,
+		    ieee80211_node_cache_timeout, ic);
 	}
 #endif
 }
@@ -147,12 +185,10 @@ ieee80211_alloc_node_helper(struct ieee80211com *ic)
 {
 	struct ieee80211_node *ni;
 	if (ic->ic_nnodes >= ic->ic_max_nnodes)
-		ieee80211_clean_nodes(ic);
+		ieee80211_clean_nodes(ic, 0);
 	if (ic->ic_nnodes >= ic->ic_max_nnodes)
 		return NULL;
 	ni = (*ic->ic_node_alloc)(ic);
-	if (ni != NULL)
-		ic->ic_nnodes++;
 	return ni;
 }
 
@@ -185,6 +221,8 @@ ieee80211_node_detach(struct ifnet *ifp)
 		free(ic->ic_aid_bitmap, M_DEVBUF);
 	if (ic->ic_tim_bitmap != NULL)
 		free(ic->ic_tim_bitmap, M_DEVBUF);
+	timeout_del(&ic->ic_inact_timeout);
+	timeout_del(&ic->ic_node_cache_timeout);
 #endif
 	timeout_del(&ic->ic_rsn_timeout);
 }
@@ -311,6 +349,7 @@ ieee80211_create_ibss(struct ieee80211com* ic, struct ieee80211_channel *chan)
 	ic->ic_flags |= IEEE80211_F_SIBSS;
 	ni->ni_chan = chan;
 	ni->ni_rates = ic->ic_sup_rates[ieee80211_chan2mode(ic, ni->ni_chan)];
+	ni->ni_txrate = 0;
 	IEEE80211_ADDR_COPY(ni->ni_macaddr, ic->ic_myaddr);
 	IEEE80211_ADDR_COPY(ni->ni_bssid, ic->ic_myaddr);
 	if (ic->ic_opmode == IEEE80211_M_IBSS) {
@@ -378,6 +417,8 @@ ieee80211_create_ibss(struct ieee80211com* ic, struct ieee80211_channel *chan)
 		/* schedule a GTK/IGTK rekeying after 3600s */
 		timeout_add_sec(&ic->ic_rsn_timeout, 3600);
 	}
+	timeout_add_sec(&ic->ic_inact_timeout, IEEE80211_INACT_WAIT);
+	timeout_add_sec(&ic->ic_node_cache_timeout, IEEE80211_CACHE_WAIT);
 	ieee80211_new_state(ic, IEEE80211_S_RUN, -1);
 }
 #endif	/* IEEE80211_STA_ONLY */
@@ -771,21 +812,9 @@ ieee80211_setup_node(struct ieee80211com *ic,
 	timeout_set(&ni->ni_eapol_to, ieee80211_eapol_timeout, ni);
 	timeout_set(&ni->ni_sa_query_to, ieee80211_sa_query_timeout, ni);
 #endif
-
-	/*
-	 * Note we don't enable the inactive timer when acting
-	 * as a station.  Nodes created in this mode represent
-	 * AP's identified while scanning.  If we time them out
-	 * then several things happen: we can't return the data
-	 * to users to show the list of AP's we encountered, and
-	 * more importantly, we'll incorrectly deauthenticate
-	 * ourself because the inactivity timer will kick us off.
-	 */
 	s = splnet();
-	if (ic->ic_opmode != IEEE80211_M_STA &&
-	    RB_EMPTY(&ic->ic_tree))
-		ic->ic_inact_timer = IEEE80211_INACT_WAIT;
 	RB_INSERT(ieee80211_tree, &ic->ic_tree, ni);
+	ic->ic_nnodes++;
 	splx(s);
 }
 
@@ -1052,6 +1081,8 @@ ieee80211_free_node(struct ieee80211com *ic, struct ieee80211_node *ni)
 	if (ni == ic->ic_bss)
 		panic("freeing bss node");
 
+	splassert(IPL_NET);
+
 	DPRINTF(("%s\n", ether_sprintf(ni->ni_macaddr)));
 #ifndef IEEE80211_STA_ONLY
 	timeout_del(&ni->ni_eapol_to);
@@ -1067,8 +1098,6 @@ ieee80211_free_node(struct ieee80211com *ic, struct ieee80211_node *ni)
 			(*ic->ic_set_tim)(ic, ni->ni_associd, 0);
 	}
 #endif
-	if (RB_EMPTY(&ic->ic_tree))
-		ic->ic_inact_timer = 0;
 	(*ic->ic_node_free)(ic, ni);
 	/* TBD indicate to drivers that a new node can be allocated */
 }
@@ -1080,12 +1109,12 @@ ieee80211_release_node(struct ieee80211com *ic, struct ieee80211_node *ni)
 
 	DPRINTF(("%s refcnt %d\n", ether_sprintf(ni->ni_macaddr),
 	    ni->ni_refcnt));
+	s = splnet();
 	if (ieee80211_node_decref(ni) == 0 &&
 	    ni->ni_state == IEEE80211_STA_COLLECT) {
-		s = splnet();
 		ieee80211_free_node(ic, ni);
-		splx(s);
 	}
+	splx(s);
 }
 
 void
@@ -1106,32 +1135,80 @@ ieee80211_free_allnodes(struct ieee80211com *ic)
 
 /*
  * Timeout inactive nodes.
+ *
+ * If called because of a cache timeout, which happens only in hostap and ibss
+ * modes, clean all inactive cached or authenticated nodes but don't de-auth
+ * any associated nodes.
+ *
+ * Else, this function is called because a new node must be allocated but the
+ * node cache is full. In this case, return as soon as a free slot was made
+ * available. If acting as hostap, clean cached nodes regardless of their
+ * recent activity and also allow de-authing of authenticated nodes older
+ * than one cache wait interval, and de-authing of inactive associated nodes.
  */
 void
-ieee80211_clean_nodes(struct ieee80211com *ic)
+ieee80211_clean_nodes(struct ieee80211com *ic, int cache_timeout)
 {
 	struct ieee80211_node *ni, *next_ni;
 	u_int gen = ic->ic_scangen++;		/* NB: ok 'cuz single-threaded*/
 	int s;
+#ifndef IEEE80211_STA_ONLY
+	int nnodes = 0;
+	struct ifnet *ifp = &ic->ic_if;
+#endif
 
 	s = splnet();
 	for (ni = RB_MIN(ieee80211_tree, &ic->ic_tree);
 	    ni != NULL; ni = next_ni) {
 		next_ni = RB_NEXT(ieee80211_tree, &ic->ic_tree, ni);
-		if (ic->ic_nnodes < ic->ic_max_nnodes)
+		if (!cache_timeout && ic->ic_nnodes < ic->ic_max_nnodes)
 			break;
 		if (ni->ni_scangen == gen)	/* previously handled */
 			continue;
+#ifndef IEEE80211_STA_ONLY
+		nnodes++;
+#endif
 		ni->ni_scangen = gen;
 		if (ni->ni_refcnt > 0)
 			continue;
-		DPRINTF(("station %s purged from LRU cache\n",
-		    ether_sprintf(ni->ni_macaddr)));
+#ifndef IEEE80211_STA_ONLY
+		if ((ic->ic_opmode == IEEE80211_M_HOSTAP ||
+		    ic->ic_opmode == IEEE80211_M_IBSS) &&
+		    ic->ic_state == IEEE80211_S_RUN) {
+			if (cache_timeout) {
+				if (ni->ni_state != IEEE80211_STA_COLLECT &&
+				    (ni->ni_state == IEEE80211_STA_ASSOC ||
+				    ni->ni_inact < IEEE80211_INACT_MAX))
+					continue;
+			} else {
+				if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
+				    ((ni->ni_state == IEEE80211_STA_ASSOC &&
+				    ni->ni_inact < IEEE80211_INACT_MAX) ||
+				    (ni->ni_state == IEEE80211_STA_AUTH &&
+				     ni->ni_inact == 0)))
+				    	continue;
+
+				if (ic->ic_opmode == IEEE80211_M_IBSS &&
+				    ni->ni_state != IEEE80211_STA_COLLECT &&
+				    ni->ni_state != IEEE80211_STA_CACHE &&
+				    ni->ni_inact < IEEE80211_INACT_MAX)
+					continue;
+			}
+		}
+		if (ifp->if_flags & IFF_DEBUG)
+			printf("%s: station %s purged from node cache\n",
+			    ifp->if_xname, ether_sprintf(ni->ni_macaddr));
+#endif
 		/*
-		 * Send a deauthenticate frame.
+		 * If we're hostap and the node is authenticated, send
+		 * a deauthentication frame. The node will be freed when
+		 * the driver calls ieee80211_release_node().
 		 */
 #ifndef IEEE80211_STA_ONLY
-		if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
+		nnodes--;
+		if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
+		    ni->ni_state >= IEEE80211_STA_AUTH &&
+		    ni->ni_state != IEEE80211_STA_COLLECT) {
 			splx(s);
 			IEEE80211_SEND_MGMT(ic, ni,
 			    IEEE80211_FC0_SUBTYPE_DEAUTH,
@@ -1143,6 +1220,20 @@ ieee80211_clean_nodes(struct ieee80211com *ic)
 			ieee80211_free_node(ic, ni);
 		ic->ic_stats.is_node_timeout++;
 	}
+
+#ifndef IEEE80211_STA_ONLY
+	/* 
+	 * During a cache timeout we iterate over all nodes.
+	 * Check for node leaks by comparing the actual number of cached
+	 * nodes with the ic_nnodes count, which is maintained while adding
+	 * and removing nodes from the cache.
+	 */
+	if ((ifp->if_flags & IFF_DEBUG) && cache_timeout &&
+	    nnodes != ic->ic_nnodes)
+		printf("%s: number of cached nodes is %d, expected %d,"
+		    "possible nodes leak\n", ifp->if_xname, nnodes,
+		    ic->ic_nnodes);
+#endif
 	splx(s);
 }
 
@@ -1507,8 +1598,10 @@ ieee80211_node_leave(struct ieee80211com *ic, struct ieee80211_node *ni)
 	 * If node wasn't previously associated all we need to do is
 	 * reclaim the reference.
 	 */
-	if (ni->ni_associd == 0)
+	if (ni->ni_associd == 0) {
+		ieee80211_node_newstate(ni, IEEE80211_STA_COLLECT);
 		return;
+	}
 
 	if (ni->ni_pwrsave == IEEE80211_PS_DOZE)
 		ic->ic_pssta--;

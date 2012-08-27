@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb_pci.c,v 1.22 2011/09/29 20:57:43 miod Exp $	*/
+/*	$OpenBSD: vgafb_pci.c,v 1.25 2012/06/21 10:08:16 mpi Exp $	*/
 /*	$NetBSD: vga_pci.c,v 1.4 1996/12/05 01:39:38 cgd Exp $	*/
 
 /*
@@ -65,9 +65,6 @@ int vgafb_pci_probe(struct pci_attach_args *pa, int id, u_int32_t *ioaddr,
     u_int32_t *cacheable, u_int32_t *mmioaddr, u_int32_t *mmiosize);
 int	vgafb_pci_match(struct device *, void *, void *);
 void	vgafb_pci_attach(struct device *, struct device *, void *);
-
-paddr_t	vgafbpcimmap(void *, off_t, int);
-int	vgafbpciioctl(void *, u_long, caddr_t, int, struct proc *);
 
 struct cfattach vgafb_pci_ca = {
 	sizeof(struct vgafb_pci_softc), (cfmatch_t)vgafb_pci_match, vgafb_pci_attach,
@@ -222,20 +219,15 @@ vgafb_pci_probe(struct pci_attach_args *pa, int id, u_int32_t *ioaddr,
 }
 
 int
-vgafb_pci_match(parent, match, aux)
-	struct device *parent;
-	void *match;
-	void *aux;
+vgafb_pci_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
-	static int id = 0;
 
 	if (DEVICE_IS_VGA_PCI(pa->pa_class) == 0)
 		return (0);
 
 	/* If it's the console, we have a winner! */
 	if (!bcmp(&pa->pa_tag, &vgafb_pci_console_tag, sizeof(pa->pa_tag))) {
-		id++;
 		return (1);
 	}
 
@@ -280,11 +272,11 @@ vgafb_pci_attach(struct device *parent, struct device  *self, void *aux)
 		    malloc(sizeof(struct vgafb_config), M_DEVBUF, M_WAITOK);
 
 		/* set up bus-independent VGA configuration */
-		vgafb_common_setup(pa->pa_iot, pa->pa_memt, vc, 
-		ioaddr, iosize, memaddr, memsize, mmioaddr, mmiosize);
+		vgafb_init(pa->pa_iot, pa->pa_memt, vc,
+		    memaddr, memsize, mmioaddr, mmiosize);
 	}
-	vc->vc_mmap = vgafbpcimmap;
-	vc->vc_ioctl = vgafbpciioctl;
+	vc->vc_mmap = vgafb_mmap;
+	vc->vc_ioctl = vgafb_ioctl;
 	vc->membase = memaddr;
 	vc->memsize = memsize;
 	vc->mmiobase = mmioaddr;
@@ -302,97 +294,4 @@ vgafb_pci_attach(struct device *parent, struct device  *self, void *aux)
 
 	vgafb_wsdisplay_attach(self, vc, console);
 	id++;
-}
-
-void
-vgafb_pci_console(bus_space_tag_t iot, u_int32_t ioaddr, u_int32_t iosize,
-    bus_space_tag_t  memt, u_int32_t memaddr, u_int32_t memsize,
-    pci_chipset_tag_t pc, int bus, int device, int function)
-{
-	struct vgafb_config *vc = &vgafb_pci_console_vc;
-	u_int32_t mmioaddr;
-	u_int32_t mmiosize;
-	static struct pci_attach_args spa;
-	struct pci_attach_args *pa = &spa;
-
-	/* for later recognition */
-	vgafb_pci_console_tag = pci_make_tag(pc, bus, device, function);
-
-	pa->pa_iot = iot;
-	pa->pa_memt = memt;
-	pa->pa_tag = vgafb_pci_console_tag;
-	/* 
-	pa->pa_pc = XXX;
-	 */
-
-/* XXX probe pci before pci bus config? */
-
-	mmioaddr =0;
-	mmiosize =0;
-#if 0
-	vgafb_pci_probe(pa, 0, &ioaddr, &iosize,
-		&memaddr, &memsize, &cacheable, mmioaddr, mmiosize);
-#endif
-
-
-	/* set up bus-independent VGA configuration */
-	vgafb_common_setup(iot, memt, vc,
-		ioaddr, iosize, memaddr, memsize, mmioaddr, mmiosize);
-
-	vgafb_cnattach(iot, memt, pc, bus, device, function);
-	vc->nscreens++;
-}
-
-int
-vgafbpciioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
-{
-	struct vgafb_pci_softc *sc = v;
-
-	return (vgafb_ioctl(sc->sc_vc, cmd, data, flag, p));
-}
-
-paddr_t
-vgafbpcimmap(void *v, off_t offset, int prot)
-{
-	struct vgafb_pci_softc *sc = v;
-
-	return (vgafb_mmap(sc->sc_vc, offset, prot));
-}
-
-int
-vgafb_alloc_screen(void *v, const struct wsscreen_descr *type, void **cookiep,
-    int *curxp, int *curyp, long *attrp)
-{
-	struct vgafb_config *vc = v;
-	long defattr;
-
-	if (vc->nscreens > 0)
-		return (ENOMEM);
-  
-	*cookiep = &vc->dc_rinfo; /* one and only for now */
-	*curxp = 0;
-	*curyp = 0;
-	vc->dc_rinfo.ri_ops.alloc_attr(&vc->dc_rinfo, 0, 0, 0, &defattr);
-	*attrp = defattr;
-	vc->nscreens++; 
-	return (0);
-}
-  
-void
-vgafb_free_screen(void *v, void *cookie)
-{
-	struct vgafb_config *vc = v;
-
-	if (vc == &vgafb_pci_console_vc)
-		panic("vgafb_free_screen: console");
-
-	vc->nscreens--;
-}
-        
-int
-vgafb_show_screen(void *v, void *cookie, int waitok,
-    void (*cb)(void *, int, int), void *cbarg)
-{
-
-	return (0);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.131 2011/12/11 19:42:28 guenther Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.143 2012/07/11 08:45:21 guenther Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -223,6 +223,9 @@ sys_sigaction(struct proc *p, void *v, register_t *retval)
 		syscallarg(struct sigaction *) osa;
 	} */ *uap = v;
 	struct sigaction vec;
+#ifdef KTRACE
+	struct sigaction ovec;
+#endif
 	struct sigaction *sa;
 	const struct sigaction *nsa;
 	struct sigaction *osa;
@@ -263,13 +266,25 @@ sys_sigaction(struct proc *p, void *v, register_t *retval)
 		error = copyout(sa, osa, sizeof (vec));
 		if (error)
 			return (error);
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ovec = vec;
+#endif
 	}
 	if (nsa) {
 		error = copyin(nsa, sa, sizeof (vec));
 		if (error)
 			return (error);
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktrsigaction(p, sa);
+#endif
 		setsigvec(p, signum, sa);
 	}
+#ifdef KTRACE
+	if (osa && KTRPOINT(p, KTR_STRUCT))
+		ktrsigaction(p, &ovec);
+#endif
 	return (0);
 }
 
@@ -694,7 +709,8 @@ trapsignal(struct proc *p, int signum, u_long trapno, int code,
 	int mask;
 
 	mask = sigmask(signum);
-	if ((p->p_flag & P_TRACED) == 0 && (ps->ps_sigcatch & mask) != 0 &&
+	if ((p->p_p->ps_flags & PS_TRACED) == 0 &&
+	    (ps->ps_sigcatch & mask) != 0 &&
 	    (p->p_sigmask & mask) == 0) {
 #ifdef KTRACE
 		if (KTRPOINT(p, KTR_PSIG)) {
@@ -705,7 +721,7 @@ trapsignal(struct proc *p, int signum, u_long trapno, int code,
 			    p->p_sigmask, code, &si);
 		}
 #endif
-		p->p_stats->p_ru.ru_nsignals++;
+		p->p_ru.ru_nsignals++;
 		(*p->p_emul->e_sendsig)(ps->ps_sigact[signum], signum,
 		    p->p_sigmask, trapno, code, sigval);
 		p->p_sigmask |= ps->ps_catchmask[signum];
@@ -755,6 +771,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 	int s, prop;
 	sig_t action;
 	int mask;
+	struct process *pr = p->p_p;
 	struct proc *q;
 	int wakeparent = 0;
 
@@ -764,40 +781,55 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 #endif
 
 	/* Ignore signal if we are exiting */
-	if (p->p_flag & P_WEXIT)
+	if (pr->ps_flags & PS_EXITING)
 		return;
 
 	mask = sigmask(signum);
 
 	if (type == SPROCESS) {
-		TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
+		/*
+		 * A process-wide signal can be diverted to a different
+		 * thread that's in sigwait() for this signal.  If there
+		 * isn't such a thread, then pick a thread that doesn't
+		 * have it blocked so that the stop/kill consideration
+		 * isn't delayed.  Otherwise, mark it pending on the
+		 * main thread.
+		 */
+		TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
 			/* ignore exiting threads */
 			if (q->p_flag & P_WEXIT)
 				continue;
+
+			/* sigwait: definitely go to this thread */
 			if (q->p_sigdivert & mask) {
-				/* sigwait: convert to thread-specific */
-				type = STHREAD;
 				p = q;
 				break;
 			}
+
+			/* unblocked: possibly go to this thread */
+			if ((q->p_sigmask & mask) == 0)
+				p = q;
 		}
 	}
 
 	if (type != SPROPAGATED)
-		KNOTE(&p->p_p->ps_klist, NOTE_SIGNAL | signum);
+		KNOTE(&pr->ps_klist, NOTE_SIGNAL | signum);
 
 	prop = sigprop[signum];
 
 	/*
 	 * If proc is traced, always give parent a chance.
+	 * XXX give sigwait() priority until it's fixed to do this
+	 * XXX from issignal/postsig
 	 */
-	if (p->p_flag & P_TRACED)
-		action = SIG_DFL;
-	else if (p->p_sigdivert & mask) {
+	if (p->p_sigdivert & mask) {
 		p->p_sigwait = signum;
 		atomic_clearbits_int(&p->p_sigdivert, ~0);
 		action = SIG_CATCH;
 		wakeup(&p->p_sigdivert);
+	} else if (pr->ps_flags & PS_TRACED) {
+		action = SIG_DFL;
+		atomic_setbits_int(&p->p_siglist, mask);
 	} else {
 		/*
 		 * If the signal is being ignored,
@@ -815,8 +847,8 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		else {
 			action = SIG_DFL;
 
-			if (prop & SA_KILL &&  p->p_p->ps_nice > NZERO)
-				 p->p_p->ps_nice = NZERO;
+			if (prop & SA_KILL &&  pr->ps_nice > NZERO)
+				 pr->ps_nice = NZERO;
 
 			/*
 			 * If sending a tty stop signal to a member of an
@@ -824,9 +856,11 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 			 * the action is default; don't stop the process below
 			 * if sleeping, and don't clear any pending SIGCONT.
 			 */
-			if (prop & SA_TTYSTOP && p->p_p->ps_pgrp->pg_jobc == 0)
+			if (prop & SA_TTYSTOP && pr->ps_pgrp->pg_jobc == 0)
 				return;
 		}
+
+		atomic_setbits_int(&p->p_siglist, mask);
 	}
 
 	if (prop & SA_CONT) {
@@ -838,13 +872,11 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		atomic_clearbits_int(&p->p_flag, P_CONTINUED);
 	}
 
-	atomic_setbits_int(&p->p_siglist, mask);
-
 	/*
 	 * XXX delay processing of SA_STOP signals unless action == SIG_DFL?
 	 */
 	if (prop & (SA_CONT | SA_STOP) && type != SPROPAGATED) {
-		TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
+		TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
 			if (q != p)
 				ptsignal(q, signum, SPROPAGATED);
 		}
@@ -875,7 +907,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		 * so it can discover the signal in issignal() and stop
 		 * for the parent.
 		 */
-		if (p->p_flag & P_TRACED)
+		if (pr->ps_flags & PS_TRACED)
 			goto run;
 		/*
 		 * If SIGCONT is default (or ignored) and process is
@@ -895,7 +927,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 			 * If a child holding parent blocked,
 			 * stopping could cause deadlock.
 			 */
-			if (p->p_p->ps_flags & PS_PPWAIT)
+			if (pr->ps_flags & PS_PPWAIT)
 				goto out;
 			atomic_clearbits_int(&p->p_siglist, mask);
 			p->p_xstat = signum;
@@ -914,14 +946,16 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		 * If traced process is already stopped,
 		 * then no further action is necessary.
 		 */
-		if (p->p_flag & P_TRACED)
+		if (pr->ps_flags & PS_TRACED)
 			goto out;
 
 		/*
 		 * Kill signal always sets processes running.
 		 */
-		if (signum == SIGKILL)
+		if (signum == SIGKILL) {
+			atomic_clearbits_int(&p->p_flag, P_SUSPSIG);
 			goto runfast;
+		}
 
 		if (prop & SA_CONT) {
 			/*
@@ -935,6 +969,7 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 			 * Otherwise, process goes back to sleep state.
 			 */
 			atomic_setbits_int(&p->p_flag, P_CONTINUED);
+			atomic_clearbits_int(&p->p_flag, P_SUSPSIG);
 			wakeparent = 1;
 			if (action == SIG_DFL)
 				atomic_clearbits_int(&p->p_siglist, mask);
@@ -989,7 +1024,7 @@ run:
 out:
 	SCHED_UNLOCK(s);
 	if (wakeparent)
-		wakeup(p->p_p->ps_pptr);
+		wakeup(pr->ps_pptr);
 }
 
 /*
@@ -1007,13 +1042,14 @@ out:
 int
 issignal(struct proc *p)
 {
+	struct process *pr = p->p_p;
 	int signum, mask, prop;
 	int dolock = (p->p_flag & P_SINTR) == 0;
 	int s;
 
 	for (;;) {
 		mask = p->p_siglist & ~p->p_sigmask;
-		if (p->p_p->ps_flags & PS_PPWAIT)
+		if (pr->ps_flags & PS_PPWAIT)
 			mask &= ~stopsigmask;
 		if (mask == 0)	 	/* no signal to send */
 			return (0);
@@ -1026,16 +1062,19 @@ issignal(struct proc *p)
 		 * only if P_TRACED was on when they were posted.
 		 */
 		if (mask & p->p_sigacts->ps_sigignore &&
-		    (p->p_flag & P_TRACED) == 0)
+		    (pr->ps_flags & PS_TRACED) == 0)
 			continue;
 
-		if (p->p_flag & P_TRACED &&
-		    (p->p_p->ps_flags & PS_PPWAIT) == 0) {
+		if ((pr->ps_flags & (PS_TRACED | PS_PPWAIT)) == PS_TRACED) {
 			/*
 			 * If traced, always stop, and stay
 			 * stopped until released by the debugger.
 			 */
 			p->p_xstat = signum;
+
+			KERNEL_LOCK();
+			single_thread_set(p, SINGLE_SUSPEND, 0);
+			KERNEL_UNLOCK();
 
 			if (dolock)
 				SCHED_LOCK(s);
@@ -1043,11 +1082,15 @@ issignal(struct proc *p)
 			if (dolock)
 				SCHED_UNLOCK(s);
 
+			KERNEL_LOCK();
+			single_thread_clear(p, 0);
+			KERNEL_UNLOCK();
+
 			/*
 			 * If we are no longer being traced, or the parent
 			 * didn't give us a signal, look for more signals.
 			 */
-			if ((p->p_flag & P_TRACED) == 0 || p->p_xstat == 0)
+			if ((pr->ps_flags & PS_TRACED) == 0 || p->p_xstat == 0)
 				continue;
 
 			/*
@@ -1095,8 +1138,8 @@ issignal(struct proc *p)
 			 * process group, ignore tty stop signals.
 			 */
 			if (prop & SA_STOP) {
-				if (p->p_flag & P_TRACED ||
-		    		    (p->p_p->ps_pgrp->pg_jobc == 0 &&
+				if (pr->ps_flags & PS_TRACED ||
+		    		    (pr->ps_pgrp->pg_jobc == 0 &&
 				    prop & SA_TTYSTOP))
 					break;	/* == ignore */
 				p->p_xstat = signum;
@@ -1123,7 +1166,7 @@ issignal(struct proc *p)
 			 * than SIGCONT, unless process is traced.
 			 */
 			if ((prop & SA_CONT) == 0 &&
-			    (p->p_flag & P_TRACED) == 0)
+			    (pr->ps_flags & PS_TRACED) == 0)
 				printf("issignal\n");
 			break;		/* == ignore */
 
@@ -1157,7 +1200,7 @@ proc_stop(struct proc *p, int sw)
 #endif
 
 	p->p_stat = SSTOP;
-	atomic_clearbits_int(&p->p_flag, P_WAITED);
+	atomic_clearbits_int(&p->p_p->ps_flags, PS_WAITED);
 	atomic_setbits_int(&p->p_flag, P_STOPPED|P_SUSPSIG);
 	if (!timeout_pending(&proc_stop_to)) {
 		timeout_add(&proc_stop_to, 0);
@@ -1281,7 +1324,7 @@ postsig(int signum)
 			ps->ps_sigact[signum] = SIG_DFL;
 		}
 		splx(s);
-		p->p_stats->p_ru.ru_nsignals++;
+		p->p_ru.ru_nsignals++;
 		if (p->p_sisig == signum) {
 			p->p_sisig = 0;
 			p->p_sitrapno = 0;
@@ -1310,7 +1353,7 @@ sigexit(struct proc *p, int signum)
 	/* Mark process as going away */
 	atomic_setbits_int(&p->p_flag, P_WEXIT);
 
-	p->p_acflag |= AXSIG;
+	p->p_p->ps_acflag |= AXSIG;
 	if (sigprop[signum] & SA_CORE) {
 		p->p_sisig = signum;
 
@@ -1409,7 +1452,7 @@ coredump(struct proc *p)
 	VATTR_NULL(&vattr);
 	vattr.va_size = 0;
 	VOP_SETATTR(vp, &vattr, cred, p);
-	p->p_acflag |= ACORE;
+	p->p_p->ps_acflag |= ACORE;
 
 	io.io_proc = p;
 	io.io_vp = vp;
@@ -1503,9 +1546,9 @@ sys_nosys(struct proc *p, void *v, register_t *retval)
 }
 
 int
-sys_thrsigdivert(struct proc *p, void *v, register_t *retval)
+sys___thrsigdivert(struct proc *p, void *v, register_t *retval)
 {
-	struct sys_thrsigdivert_args /* {
+	struct sys___thrsigdivert_args /* {
 		syscallarg(sigset_t) sigmask;
 		syscallarg(siginfo_t *) info;
 		syscallarg(const struct timespec *) timeout;
@@ -1537,6 +1580,10 @@ sys_thrsigdivert(struct proc *p, void *v, register_t *retval)
 		struct timespec ts;
 		if ((error = copyin(SCARG(uap, timeout), &ts, sizeof(ts))) != 0)
 			return (error);
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktrreltimespec(p, &ts);
+#endif
 		to_ticks = (long long)hz * ts.tv_sec +
 		    ts.tv_nsec / (tick * 1000);
 		if (to_ticks > INT_MAX)
@@ -1600,13 +1647,13 @@ initsiginfo(siginfo_t *si, int sig, u_long trapno, int code, union sigval val)
 int
 filt_sigattach(struct knote *kn)
 {
-	struct proc *p = curproc;
+	struct process *pr = curproc->p_p;
 
-	kn->kn_ptr.p_proc = p;
+	kn->kn_ptr.p_process = pr;
 	kn->kn_flags |= EV_CLEAR;		/* automatically set */
 
 	/* XXX lock the proc here while adding to the list? */
-	SLIST_INSERT_HEAD(&p->p_p->ps_klist, kn, kn_selnext);
+	SLIST_INSERT_HEAD(&pr->ps_klist, kn, kn_selnext);
 
 	return (0);
 }
@@ -1614,9 +1661,9 @@ filt_sigattach(struct knote *kn)
 void
 filt_sigdetach(struct knote *kn)
 {
-	struct proc *p = kn->kn_ptr.p_proc;
+	struct process *pr = kn->kn_ptr.p_process;
 
-	SLIST_REMOVE(&p->p_p->ps_klist, kn, knote, kn_selnext);
+	SLIST_REMOVE(&pr->ps_klist, kn, knote, kn_selnext);
 }
 
 /*
@@ -1675,7 +1722,7 @@ single_thread_check(struct proc *p, int deep)
 			if (--pr->ps_singlecount == 0)
 				wakeup(&pr->ps_singlecount);
 			if (pr->ps_flags & PS_SINGLEEXIT)
-				exit1(p, 0, EXIT_THREAD);
+				exit1(p, 0, EXIT_THREAD_NOCHECK);
 
 			/* not exiting and don't need to unwind, so suspend */
 			SCHED_LOCK(s);
@@ -1727,7 +1774,7 @@ single_thread_set(struct proc *p, enum single_thread_mode mode, int deep)
 	TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
 		int s;
 
-		if (q == p)
+		if (q == p || ISSET(q->p_flag, P_WEXIT))
 			continue;
 		SCHED_LOCK(s);
 		atomic_setbits_int(&q->p_flag, P_SUSPSINGLE);
@@ -1773,7 +1820,7 @@ single_thread_set(struct proc *p, enum single_thread_mode mode, int deep)
 }
 
 void
-single_thread_clear(struct proc *p)
+single_thread_clear(struct proc *p, int flag)
 {
 	struct process *pr = p->p_p;
 	struct proc *q;
@@ -1795,7 +1842,7 @@ single_thread_clear(struct proc *p)
 		 * it back into some sleep queue
 		 */
 		SCHED_LOCK(s);
-		if (q->p_stat == SSTOP && (q->p_flag & P_SUSPSIG) == 0) {
+		if (q->p_stat == SSTOP && (q->p_flag & flag) == 0) {
 			if (q->p_wchan == 0)
 				setrunnable(q);
 			else

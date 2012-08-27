@@ -1,33 +1,33 @@
-/*	$OpenBSD: if_ix.h,v 1.13 2011/06/15 00:03:00 dlg Exp $	*/
+/*	$OpenBSD: if_ix.h,v 1.17 2012/08/08 14:44:13 mikeb Exp $	*/
 
 /******************************************************************************
 
-  Copyright (c) 2001-2008, Intel Corporation 
+  Copyright (c) 2001-2008, Intel Corporation
   All rights reserved.
-  
-  Redistribution and use in source and binary forms, with or without 
+
+  Redistribution and use in source and binary forms, with or without
   modification, are permitted provided that the following conditions are met:
-  
-   1. Redistributions of source code must retain the above copyright notice, 
+
+   1. Redistributions of source code must retain the above copyright notice,
       this list of conditions and the following disclaimer.
-  
-   2. Redistributions in binary form must reproduce the above copyright 
-      notice, this list of conditions and the following disclaimer in the 
+
+   2. Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
       documentation and/or other materials provided with the distribution.
-  
-   3. Neither the name of the Intel Corporation nor the names of its 
-      contributors may be used to endorse or promote products derived from 
+
+   3. Neither the name of the Intel Corporation nor the names of its
+      contributors may be used to endorse or promote products derived from
       this software without specific prior written permission.
-  
+
   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE 
-  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE 
-  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE 
-  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR 
-  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF 
-  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS 
-  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN 
-  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
+  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
   POSSIBILITY OF SUCH DAMAGE.
 
@@ -57,9 +57,9 @@
  * RxDescriptors Valid Range: 64-4096 Default Value: 256 This value is the
  * number of receive descriptors allocated for each RX queue. Increasing this
  * value allows the driver to buffer more incoming packets. Each descriptor
- * is 16 bytes.  A receive buffer is also allocated for each descriptor. 
- * 
- * Note: with 8 rings and a dual port card, it is possible to bump up 
+ * is 16 bytes.  A receive buffer is also allocated for each descriptor.
+ *
+ * Note: with 8 rings and a dual port card, it is possible to bump up
  *	against the system mbuf pool limit, you can tune nmbclusters
  *	to adjust for this.
  */
@@ -80,7 +80,7 @@
  * This parameters control when the driver calls the routine to reclaim
  * transmit descriptors.
  */
-#define IXGBE_TX_CLEANUP_THRESHOLD	(sc->num_tx_desc / 8)
+#define IXGBE_TX_CLEANUP_THRESHOLD	(sc->num_tx_desc / 16)
 #define IXGBE_TX_OP_THRESHOLD		(sc->num_tx_desc / 32)
 
 #define IXGBE_MAX_FRAME_SIZE	0x3F00
@@ -119,12 +119,9 @@
 #define IXGBE_QUEUE_HUNG                2
 
 /*
- * Interrupt Moderation parameters 
+ * Interrupt Moderation parameters
  */
-#define IXGBE_LOW_LATENCY       128
-#define IXGBE_AVE_LATENCY       400
-#define IXGBE_BULK_LATENCY      1200
-#define IXGBE_LINK_ITR          2000
+#define IXGBE_INTS_PER_SEC		8000
 
 /* Used for auto RX queue configuration */
 extern int mp_ncpus;
@@ -168,14 +165,13 @@ struct ix_queue {
 	void			*tag;
 	struct tx_ring		*txr;
 	struct rx_ring		*rxr;
-	uint64_t		irqs;
 };
 
 /*
  * The transmit ring, one per tx queue
  */
 struct tx_ring {
-        struct ix_softc		*sc;
+	struct ix_softc		*sc;
 	struct mutex		tx_mtx;
 	uint32_t		me;
 	int			queue_status;
@@ -191,7 +187,6 @@ struct tx_ring {
 	uint32_t		bytes; /* Used for AIM calc */
 	uint32_t		packets;
 	/* Soft Stats */
-	uint64_t		no_desc_avail;
 	uint64_t		tx_packets;
 };
 
@@ -200,7 +195,7 @@ struct tx_ring {
  * The Receive ring, one per rx queue
  */
 struct rx_ring {
-        struct ix_softc		*sc;
+	struct ix_softc		*sc;
 	struct mutex		rx_mtx;
 	uint32_t		me;
 	union ixgbe_adv_rx_desc	*rx_base;
@@ -212,8 +207,8 @@ struct rx_ring {
 	int			hdr_split;
 	int			hw_rsc;
 	int			discard;
-        unsigned int		next_to_refresh;
-        unsigned int		next_to_check;
+	unsigned int		next_to_refresh;
+	unsigned int		next_to_check;
 	unsigned int		last_desc_filled;
 	int			rx_ndescs;
 	struct ixgbe_rx_buf	*rx_buffers;
@@ -304,7 +299,6 @@ struct ix_softc {
 	struct rx_ring	*rx_rings;
 	uint64_t	que_mask;
 	int		num_rx_desc;
-	uint32_t	rx_process_limit;
 
 	/* Multicast array memory */
 	uint8_t		*mta;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_fault.c,v 1.62 2011/07/03 18:34:14 oga Exp $	*/
+/*	$OpenBSD: uvm_fault.c,v 1.65 2012/04/12 11:55:43 ariane Exp $	*/
 /*	$NetBSD: uvm_fault.c,v 1.51 2000/08/06 00:22:53 thorpej Exp $	*/
 
 /*
@@ -178,6 +178,7 @@ static struct uvm_advice uvmadvice[] = {
 static void uvmfault_amapcopy(struct uvm_faultinfo *);
 static __inline void uvmfault_anonflush(struct vm_anon **, int);
 void	uvmfault_unlockmaps(struct uvm_faultinfo *, boolean_t);
+void	uvmfault_update_stats(struct uvm_faultinfo *);
 
 /*
  * inline functions
@@ -302,9 +303,9 @@ uvmfault_anonget(struct uvm_faultinfo *ufi, struct vm_amap *amap,
 	uvmexp.fltanget++;
         /* bump rusage counters */
 	if (anon->an_page)
-		curproc->p_addr->u_stats.p_ru.ru_minflt++;
+		curproc->p_ru.ru_minflt++;
 	else
-		curproc->p_addr->u_stats.p_ru.ru_majflt++;
+		curproc->p_ru.ru_majflt++;
 
 	/* 
 	 * loop until we get it, or fail.
@@ -518,6 +519,49 @@ uvmfault_anonget(struct uvm_faultinfo *ufi, struct vm_amap *amap,
 	} /* while (1) */
 
 	/*NOTREACHED*/
+}
+
+/*
+ * Update statistics after fault resolution.
+ * - maxrss
+ */
+void
+uvmfault_update_stats(struct uvm_faultinfo *ufi)
+{
+	struct vm_map		*map;
+	struct proc		*p;
+	vsize_t			 res;
+#ifndef pmap_resident_count
+	struct vm_space		*vm;
+#endif
+
+	map = ufi->orig_map;
+
+	/*
+	 * Update the maxrss for the process.
+	 */
+	if (map->flags & VM_MAP_ISVMSPACE) {
+		p = curproc;
+		KASSERT(p != NULL && &p->p_vmspace->vm_map == map);
+
+#ifdef pmap_resident_count
+		res = pmap_resident_count(map->pmap);
+#else
+		/*
+		 * Rather inaccurate, but this is the current anon size
+		 * of the vmspace.  It's basically the resident size
+		 * minus the mmapped in files/text.
+		 */
+		vm = (struct vmspace*)map;
+		res = vm->dsize;
+#endif
+
+		/* Convert res from pages to kilobytes. */
+		res <<= (PAGE_SHIFT - 10);
+
+		if (p->p_ru.ru_maxrss < res)
+			p->p_ru.ru_maxrss = res;
+	}
 }
 
 /*
@@ -1268,10 +1312,10 @@ Case2:
 
 	if (uobjpage) {
 		/* update rusage counters */
-		curproc->p_addr->u_stats.p_ru.ru_minflt++;
+		curproc->p_ru.ru_minflt++;
 	} else {
 		/* update rusage counters */
-		curproc->p_addr->u_stats.p_ru.ru_majflt++;
+		curproc->p_ru.ru_majflt++;
 		
 		/* locked: maps(read), amap(if there), uobj */
 		uvmfault_unlockall(&ufi, amap, NULL, NULL);
@@ -1701,7 +1745,7 @@ uvm_fault_unwire(vm_map_t map, vaddr_t start, vaddr_t end)
 void
 uvm_fault_unwire_locked(vm_map_t map, vaddr_t start, vaddr_t end)
 {
-	vm_map_entry_t entry;
+	vm_map_entry_t entry, next;
 	pmap_t pmap = vm_map_pmap(map);
 	vaddr_t va;
 	paddr_t pa;
@@ -1734,9 +1778,9 @@ uvm_fault_unwire_locked(vm_map_t map, vaddr_t start, vaddr_t end)
 		 */
 		KASSERT(va >= entry->start);
 		while (va >= entry->end) {
-			KASSERT(entry->next != &map->header &&
-				entry->next->start <= entry->end);
-			entry = entry->next;
+			next = RB_NEXT(uvm_map_addr, &map->addr, entry);
+			KASSERT(next != NULL && next->start <= entry->end);
+			entry = next;
 		}
 
 		/*
@@ -1768,6 +1812,7 @@ uvmfault_unlockmaps(struct uvm_faultinfo *ufi, boolean_t write_locked)
 		return;
 	}
 
+	uvmfault_update_stats(ufi);
 	if (write_locked) {
 		vm_map_unlock(ufi->map);
 	} else {
@@ -1825,6 +1870,9 @@ uvmfault_lookup(struct uvm_faultinfo *ufi, boolean_t write_lock)
 	 */
 
 	while (1) {
+		if (ufi->orig_rvaddr < ufi->map->min_offset ||
+		    ufi->orig_rvaddr >= ufi->map->max_offset)
+			return(FALSE);
 
 		/*
 		 * lock map
@@ -1839,7 +1887,7 @@ uvmfault_lookup(struct uvm_faultinfo *ufi, boolean_t write_lock)
 		 * lookup
 		 */
 		if (!uvm_map_lookup_entry(ufi->map, ufi->orig_rvaddr, 
-								&ufi->entry)) {
+		    &ufi->entry)) {
 			uvmfault_unlockmaps(ufi, write_lock);
 			return(FALSE);
 		}

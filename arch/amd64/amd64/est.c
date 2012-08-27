@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.25 2011/04/19 22:14:54 jsg Exp $ */
+/*	$OpenBSD: est.c,v 1.28 2012/03/27 07:04:33 jsg Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -63,9 +63,6 @@
 #include <machine/cpufunc.h>
 #include <machine/specialreg.h>
 #include <machine/bus.h>
-
-#define CPUVENDOR_INTEL 0
-#define CPUVENDOR_VIA 8
 
 #include "acpicpu.h"
 
@@ -170,6 +167,7 @@ p3_get_bus_clock(struct cpu_info *ci)
 	case 0xf: /* Core Xeon */
 	case 0x16: /* 65nm Celeron */
 	case 0x17: /* Core 2 Extreme/45nm Xeon */
+	case 0x1d: /* Xeon MP 7400 */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
@@ -198,6 +196,8 @@ p3_get_bus_clock(struct cpu_info *ci)
 		}
 		break;
 	case 0x1c: /* Atom */
+	case 0x26: /* Atom Z6xx */
+	case 0x36: /* Atom [DN]2xxx */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
@@ -219,19 +219,20 @@ p3_get_bus_clock(struct cpu_info *ci)
 			break;
 		}
 		break;
+	/* nehalem */
 	case 0x1a: /* Core i7, Xeon 3500/5500 */
 	case 0x1e: /* Core i5/i7, Xeon 3400 */
 	case 0x1f: /* Core i5/i7 */
+	case 0x2e: /* Xeon 6500/7500 */
+	/* westmere */
 	case 0x25: /* Core i3/i5, Xeon 3400 */
 	case 0x2c: /* Core i7, Xeon 3600/5600 */
-		/* BUS133 */
-		break;
+	case 0x2f: /* Xeon E7 */
+	/* sandy bridge */
 	case 0x2a: /* Core i5/i7 2nd Generation */
 	case 0x2d: /* Xeon E5 */
-		/* BUS100 */
-		break;
-	case 0x1d: /* Xeon MP 7400 */
-	case 0x2e: /* Xeon 6500/7500 */
+	/* ivy bridge */
+	case 0x3a: /* Core i3/i5/i7 3rd Generation */
 		break;
 	default:
 		printf("%s: unknown i686 model 0x%x, can't get bus clock\n",
@@ -340,10 +341,13 @@ est_init(struct cpu_info *ci)
 #if NACPICPU > 0
 	est_fqlist = est_acpi_init();
 #endif
-	if (ci->ci_family == 0xf) {
-		p4_get_bus_clock(ci);
-	} else if (ci->ci_family == 6) {
-		p3_get_bus_clock(ci);
+
+	/* bus_clock is only used if we can't get values from ACPI */
+	if (est_fqlist == NULL) {
+		if (ci->ci_family == 0xf)
+			p4_get_bus_clock(ci);
+		else if (ci->ci_family == 6)
+			p3_get_bus_clock(ci);
 	}
 
 	/*

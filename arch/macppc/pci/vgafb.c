@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb.c,v 1.38 2010/11/27 18:31:53 miod Exp $	*/
+/*	$OpenBSD: vgafb.c,v 1.40 2012/06/21 10:08:16 mpi Exp $	*/
 /*	$NetBSD: vga.c,v 1.3 1996/12/02 22:24:54 cgd Exp $	*/
 
 /*
@@ -62,6 +62,7 @@ struct vgafb_devconfig {
 	int dc_blanked;			/* currently had video disabled */
 };
 
+extern struct vgafb_config vgafb_pci_console_vc;
 struct vgafb_devconfig vgafb_console_dc;
 
 struct wsscreen_descr vgafb_stdscreen = {
@@ -103,84 +104,25 @@ int	vgafb_putcmap(struct vgafb_config *vc, struct wsdisplay_cmap *cm);
 extern int allowaperture;
 #endif
 
-/*
- * The following functions implement back-end configuration grabbing
- * and attachment.
- */
-int
-vgafb_common_probe(bus_space_tag_t iot, bus_space_tag_t memt, u_int32_t iobase,
-    size_t iosize, u_int32_t membase, size_t memsize, u_int32_t mmiobase,
-    size_t mmiosize)
-{
-	bus_space_handle_t ioh_b, ioh_c, ioh_d, memh, mmioh;
-	int gotio_b, gotio_c, gotio_d, gotmem, gotmmio, rv;
-
-	gotio_b = gotio_c = gotio_d = gotmem = gotmmio = rv = 0;
-
-	if (iosize != 0) {
-		if (bus_space_map(iot, iobase+0x3b0, 0xc, 0, &ioh_b))
-			goto bad;
-		gotio_b = 1;
-		if (bus_space_map(iot, iobase+0x3c0, 0x10, 0, &ioh_c))
-			goto bad;
-		gotio_c = 1;
-		if (bus_space_map(iot, iobase+0x3d0, 0x10, 0, &ioh_d))
-			goto bad;
-		gotio_d = 1;
-	}
-	if (mmiosize != 0) {
-		if (bus_space_map(iot, mmiobase, mmiosize, 0, &mmioh))
-			goto bad;
-		gotmmio = 1;
-	}
-
-	rv = 1;
-
-bad:
-	if (gotio_b)
-		bus_space_unmap(iot, ioh_b, 0xc);
-	if (gotio_c)
-		bus_space_unmap(iot, ioh_c, 0x10);
-	if (gotio_d)
-		bus_space_unmap(iot, ioh_d, 0x10);
-	if (gotmmio)
-		bus_space_unmap(memt, mmioh, mmiosize);
-	if (gotmem)
-		bus_space_unmap(memt, memh, memsize);
-
-	return (rv);
-}
 
 void
-vgafb_common_setup(bus_space_tag_t iot, bus_space_tag_t  memt,
-    struct vgafb_config *vc, u_int32_t iobase, size_t iosize,
+vgafb_init(bus_space_tag_t iot, bus_space_tag_t memt, struct vgafb_config *vc,
     u_int32_t  membase, size_t memsize, u_int32_t mmiobase, size_t mmiosize)
 {
         vc->vc_iot = iot;
         vc->vc_memt = memt;
 	vc->vc_paddr = membase;
 
-	if (iosize != 0) {
-           if (bus_space_map(vc->vc_iot, iobase+0x3b0, 0xc, 0, &vc->vc_ioh_b))
-		panic("vgafb_common_setup: couldn't map io b");
-           if (bus_space_map(vc->vc_iot, iobase+0x3c0, 0x10, 0, &vc->vc_ioh_c))
-		panic("vgafb_common_setup: couldn't map io c");
-           if (bus_space_map(vc->vc_iot, iobase+0x3d0, 0x10, 0, &vc->vc_ioh_d))
-		panic("vgafb_common_setup: couldn't map io d");
-	}
 	if (mmiosize != 0)
 	       if (bus_space_map(vc->vc_memt, mmiobase, mmiosize, 0,
 		   &vc->vc_mmioh))
-			panic("vgafb_common_setup: couldn't map mmio");
+			panic("vgafb_init: couldn't map mmio");
 
 	/* memsize should only be visible region for console */
 	memsize = cons_height * cons_linebytes;
         if (bus_space_map(vc->vc_memt, membase, memsize, 
 	    /* XXX */ppc_proc_is_64b ? 0 : 1, &vc->vc_memh))
-		panic("vgafb_common_setup: can't map mem space"); 
-	cons_display_mem_h = vc->vc_memh;
-	vc->vc_ofh = cons_display_ofh;
-
+		panic("vgafb_init: can't map mem space"); 
 
 	vc->vc_crow = vc->vc_ccol = 0; /* Has to be some onscreen value */
 	vc->vc_so = 0;
@@ -338,83 +280,75 @@ vgafb_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 }
 
 paddr_t
-vgafb_mmap(void *v, off_t offset, int prot)
+vgafb_mmap(void *v, off_t off, int prot)
 {
 	struct vgafb_config *vc = v;
-	bus_space_handle_t h;
+
+	if (off & PGOFSET)
+		return (-1);
 
 	switch (vc->vc_mode) {
 	case WSDISPLAYIO_MODE_MAPPED:
 #ifdef APERTURE
-		if (allowaperture == 0) {
-			h = -1;
-			break;
-		}
-#endif	
-		if (offset >= 0xa0000 && offset < 0xfffff)
-			h = offset;
-		/* XXX the following are probably wrong. 
-		   we want physical addresses here, not virtual ones */
-		else if (offset >= 0x10000000 && offset < 0x10040000 )
-			/* 256KB of iohb */
-			h = vc->vc_ioh_b;
-		else if (offset >= 0x10040000 && offset < 0x10080000)
-			/* 256KB of iohc */
-			h = vc->vc_ioh_c;
-		else if (offset >= 0x10080000 && offset < 0x100c0000)
-			/* 256KB of iohd */
-			h = vc->vc_ioh_d;
-		else if (offset >= 0x20000000 && offset < 0x20000000+vc->mmiosize)
-			/* mmiosize... */
-			h = vc->vc_mmioh + (offset - 0x20000000);
-		else if (offset >= vc->membase && (offset < vc->membase+vc->memsize)) {
-		/* allow mmapping of memory */
-			h = offset;
-		} else if (offset >= vc->mmiobase &&
-		    (offset < vc->mmiobase+vc->mmiosize)) {
-			/* allow mmapping of mmio space */
-			h = offset;
-		} else {
-			h = -1;
-		}
+		if (allowaperture == 0)
+			return (-1);
+#endif
+
+		if (vc->mmiosize == 0)
+			return (-1);
+
+		if (off >= vc->membase && off < (vc->membase + vc->memsize))
+			return (off);
+
+		 if (off >= vc->mmiobase && off < (vc->mmiobase+vc->mmiosize))
+			return (off);
 		break;
 
 	case WSDISPLAYIO_MODE_DUMBFB:
-		if (offset >= 0x00000 && offset < vc->memsize)
-			h = vc->vc_paddr + offset;
-		else
-			h = -1;
+		if (off >= 0x00000 && off < vc->memsize)
+			return (vc->vc_paddr + off);
 		break;
 
 	}
-	return h;
+
+	return (-1);
 }
 
-void
-vgafb_cnattach(bus_space_tag_t iot, bus_space_tag_t  memt, void *pc, int bus,
-    int  device, int function)
+int
+vgafb_cnattach(bus_space_tag_t iot, bus_space_tag_t memt, int type, int check)
 {
-        long defattr;
-
+	struct vgafb_config *vc = &vgafb_pci_console_vc;
 	struct vgafb_devconfig *dc = &vgafb_console_dc;
         struct rasops_info *ri = &dc->dc_rinfo;
+        long defattr;
+        int i;
+
+	vgafb_init(iot, memt, vc, cons_addr, cons_linebytes * cons_height,0, 0);
 
 	ri->ri_flg = RI_CENTER;
 	ri->ri_depth = cons_depth;
-	ri->ri_bits = (void *)cons_display_mem_h;
+	ri->ri_bits = (void *)vc->vc_memh;
 	ri->ri_width = cons_width;
 	ri->ri_height = cons_height;
 	ri->ri_stride = cons_linebytes;
 	ri->ri_hw = dc;
+
+	/* Clear the screen */
+	for (i = 0; i < cons_linebytes * cons_height; i++)
+		bus_space_write_1(memt,	vc->vc_memh, i, 0);
 
 	rasops_init(ri, 160, 160);	/* XXX */
 
 	vgafb_stdscreen.nrows = ri->ri_rows;
 	vgafb_stdscreen.ncols = ri->ri_cols;
 	vgafb_stdscreen.textops = &ri->ri_ops;
+
 	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
 
 	wsdisplay_cnattach(&vgafb_stdscreen, ri, 0, 0, defattr);
+	vc->nscreens++;
+
+	return (0);
 }
 
 struct {
@@ -509,4 +443,43 @@ vgafb_burn(void *v, u_int on, u_int flags)
 		}
 		vc->vc_backlight_on = on;
 	}
+}
+
+int
+vgafb_alloc_screen(void *v, const struct wsscreen_descr *type, void **cookiep,
+    int *curxp, int *curyp, long *attrp)
+{
+	struct vgafb_config *vc = v;
+	long defattr;
+
+	if (vc->nscreens > 0)
+		return (ENOMEM);
+
+	*cookiep = &vc->dc_rinfo; /* one and only for now */
+	*curxp = 0;
+	*curyp = 0;
+	vc->dc_rinfo.ri_ops.alloc_attr(&vc->dc_rinfo, 0, 0, 0, &defattr);
+	*attrp = defattr;
+
+	vc->nscreens++;
+
+	return (0);
+}
+
+void
+vgafb_free_screen(void *v, void *cookie)
+{
+	struct vgafb_config *vc = v;
+
+	if (vc == &vgafb_pci_console_vc)
+		panic("vgafb_free_screen: console");
+
+	vc->nscreens--;
+}
+
+int
+vgafb_show_screen(void *v, void *cookie, int waitok,
+    void (*cb)(void *, int, int), void *cbarg)
+{
+	return (0);
 }

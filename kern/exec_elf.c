@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.85 2011/07/05 04:48:02 guenther Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.87 2012/08/20 23:25:07 matthew Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -129,6 +129,9 @@ extern char *syscallnames[];
  * be a reasonable limit for ELF, the most we have seen so far is 12
  */
 #define ELF_MAX_VALID_PHDR 32
+
+/* Limit on total PT_OPENBSD_RANDOMIZE bytes. */
+#define ELF_RANDOMIZE_LIMIT 1024
 
 /*
  * This is the basic elf emul. elf_probe_funcs may change to other emuls.
@@ -326,6 +329,8 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 	int nload, idx = 0;
 	Elf_Addr pos = *last;
 	int file_align;
+	int loop;
+	size_t randomizequota = ELF_RANDOMIZE_LIMIT;
 
 	NDINIT(&nd, LOOKUP, FOLLOW | LOCKLEAF, UIO_SYSSPACE, path, p);
 	if ((error = namei(&nd)) != 0) {
@@ -377,11 +382,12 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 	 * would (i.e. something safely out of the way).
 	 */
 	if (pos == ELFDEFNNAME(NO_ADDR)) {
-		pos = uvm_map_hint(p, VM_PROT_EXECUTE);
+		pos = uvm_map_hint(p->p_vmspace, VM_PROT_EXECUTE);
 	}
 
 	pos = ELF_ROUND(pos, file_align);
 	*last = epp->ep_interp_pos = pos;
+	loop = 0;
 	for (i = 0; i < nload;/**/) {
 		vaddr_t	addr;
 		struct	uvm_object *uobj;
@@ -409,17 +415,17 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 			addr = round_page((vaddr_t)p->p_vmspace->vm_daddr +
 			    BRKSIZ);
 
-		vm_map_lock(&p->p_vmspace->vm_map);
-		if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
-		    &addr, uobj, uoff, 0, UVM_FLAG_FIXED) == NULL) {
-			if (uvm_map_findspace(&p->p_vmspace->vm_map, addr, size,
-			    &addr, uobj, uoff, 0, 0) == NULL) {
-				error = ENOMEM; /* XXX */
-				vm_map_unlock(&p->p_vmspace->vm_map);
-				goto bad1;
+		if (uvm_map_mquery(&p->p_vmspace->vm_map, &addr, size,
+		    (i == 0 ? uoff : UVM_UNKNOWN_OFFSET), 0) != 0) {
+			if (loop == 0) {
+				loop = 1;
+				i = 0;
+				*last = epp->ep_interp_pos = pos = 0;
+				continue;
 			}
-		} 
-		vm_map_unlock(&p->p_vmspace->vm_map);
+			error = ENOMEM;
+			goto bad1;
+		}
 		if (addr != pos + loadmap[i].vaddr) {
 			/* base changed. */
 			pos = addr - trunc_page(loadmap[i].vaddr);
@@ -467,6 +473,16 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 		case PT_NOTE:
 			break;
 
+		case PT_OPENBSD_RANDOMIZE:
+			if (ph[i].p_memsz > randomizequota) {
+				error = ENOMEM;
+				goto bad1;
+			}
+			randomizequota -= ph[i].p_memsz;
+			NEW_VMCMD(&epp->ep_vmcmds, vmcmd_randomize,
+			    ph[i].p_memsz, ph[i].p_vaddr + pos, NULLVP, 0, 0);
+			break;
+
 		default:
 			break;
 		}
@@ -504,6 +520,7 @@ ELFNAME2(exec,makecmds)(struct proc *p, struct exec_package *epp)
 	char *interp = NULL;
 	u_long pos = 0, phsize;
 	u_int8_t os = OOS_NULL;
+	size_t randomizequota = ELF_RANDOMIZE_LIMIT;
 
 	if (epp->ep_hdrvalid < sizeof(Elf_Ehdr))
 		return (ENOEXEC);
@@ -688,6 +705,16 @@ native:
 		case PT_PHDR:
 			/* Note address of program headers (in text segment) */
 			phdr = pp->p_vaddr;
+			break;
+
+		case PT_OPENBSD_RANDOMIZE:
+			if (ph[i].p_memsz > randomizequota) {
+				error = ENOMEM;
+				goto bad;
+			}
+			randomizequota -= ph[i].p_memsz;
+			NEW_VMCMD(&epp->ep_vmcmds, vmcmd_randomize,
+			    ph[i].p_memsz, ph[i].p_vaddr + exe_base, NULLVP, 0, 0);
 			break;
 
 		default:

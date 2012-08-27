@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.44 2011/04/13 02:49:12 guenther Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.50 2012/07/09 15:25:39 deraadt Exp $	*/
 /* $NetBSD: cpu.c,v 1.1 2003/04/26 18:39:26 fvdl Exp $ */
 
 /*-
@@ -72,6 +72,7 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
+#include <sys/memrange.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -333,7 +334,6 @@ cpu_attach(struct device *parent, struct device *self, void *aux)
 		cpu_start_secondary(ci);
 		ncpus++;
 		if (ci->ci_flags & CPUF_PRESENT) {
-			identifycpu(ci);
 			ci->ci_next = cpu_info_list->ci_next;
 			cpu_info_list->ci_next = ci;
 		}
@@ -394,13 +394,13 @@ cpu_boot_secondary_processors(void)
 		ci = cpu_info[i];
 		if (ci == NULL)
 			continue;
-		ci->ci_randseed = random();
 		if (ci->ci_idle_pcb == NULL)
 			continue;
 		if ((ci->ci_flags & CPUF_PRESENT) == 0)
 			continue;
 		if (ci->ci_flags & (CPUF_BSP|CPUF_SP|CPUF_PRIMARY))
 			continue;
+		ci->ci_randseed = random();
 		cpu_boot_secondary(ci);
 	}
 }
@@ -446,6 +446,18 @@ cpu_start_secondary(struct cpu_info *ci)
 #endif
 	}
 
+	if ((ci->ci_flags & CPUF_IDENTIFIED) == 0) {
+		atomic_setbits_int(&ci->ci_flags, CPUF_IDENTIFY);
+
+		/* wait for it to identify */
+		for (i = 100000; (ci->ci_flags & CPUF_IDENTIFY) && i > 0; i--)
+			delay(10);
+
+		if (ci->ci_flags & CPUF_IDENTIFY)
+			printf("%s: failed to identify\n",
+			    ci->ci_dev->dv_xname);
+	}
+
 	CPU_START_CLEANUP(ci);
 }
 
@@ -454,7 +466,7 @@ cpu_boot_secondary(struct cpu_info *ci)
 {
 	int i;
 
-	ci->ci_flags |= CPUF_GO; /* XXX atomic */
+	atomic_setbits_int(&ci->ci_flags, CPUF_GO);
 
 	for (i = 100000; (!(ci->ci_flags & CPUF_RUNNING)) && i>0;i--) {
 		delay(10);
@@ -484,9 +496,6 @@ cpu_hatch(void *v)
 
 	cpu_init_msrs(ci);
 
-	cpu_probe_features(ci);
-	cpu_feature &= ci->ci_feature_flags;
-
 #ifdef DEBUG
 	if (ci->ci_flags & CPUF_PRESENT)
 		panic("%s: already running!?", ci->ci_dev->dv_xname);
@@ -496,6 +505,22 @@ cpu_hatch(void *v)
 
 	lapic_enable();
 	lapic_startclock();
+
+	if ((ci->ci_flags & CPUF_IDENTIFIED) == 0) {
+		/*
+		 * We need to wait until we can identify, otherwise dmesg
+		 * output will be messy.
+		 */
+		while ((ci->ci_flags & CPUF_IDENTIFY) == 0)
+			delay(10);
+
+		identifycpu(ci);
+
+		/* Signal we're done */
+		atomic_clearbits_int(&ci->ci_flags, CPUF_IDENTIFY);
+		/* Prevent identifycpu() from running again */
+		atomic_setbits_int(&ci->ci_flags, CPUF_IDENTIFIED);
+	}
 
 	while ((ci->ci_flags & CPUF_GO) == 0)
 		delay(10);
@@ -511,6 +536,10 @@ cpu_hatch(void *v)
 	fpuinit(ci);
 
 	lldt(0);
+
+	/* Re-initialise memory range handling on AP */
+	if (mem_range_softc.mr_op != NULL)
+		mem_range_softc.mr_op->initAP(&mem_range_softc);
 
 	cpu_init(ci);
 
@@ -657,7 +686,6 @@ cpu_init_msrs(struct cpu_info *ci)
 	wrmsr(MSR_CSTAR, (uint64_t)Xsyscall32);
 	wrmsr(MSR_SFMASK, PSL_NT|PSL_T|PSL_I|PSL_C);
 
-	ci->ci_cur_fsbase = 0;
 	wrmsr(MSR_FSBASE, 0);
 	wrmsr(MSR_GSBASE, (u_int64_t)ci);
 	wrmsr(MSR_KERNELGSBASE, 0);

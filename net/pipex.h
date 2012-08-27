@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.h,v 1.10 2011/10/15 03:24:11 yasuoka Exp $	*/
+/*	$OpenBSD: pipex.h,v 1.13 2012/07/17 03:18:57 yasuoka Exp $	*/
 
 /*
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -89,6 +89,7 @@ struct pipex_session_req {
 #define	PIPEX_PPP_MPPE_REQUIRED		0x00000040
 #define	PIPEX_PPP_HAS_ACF		0x00000080
 #define	PIPEX_PPP_ADJUST_TCPMSS		0x00000100
+#define	PIPEX_PPP_INGRESS_FILTER	0x00000200
 	int8_t		pr_ccp_id;		/* CCP current packet id */
 	int		pr_ppp_id;		/* PPP Id. */
 	uint16_t	pr_peer_mru; 		/* Peer's MRU */
@@ -121,6 +122,7 @@ struct pipex_session_req {
 			uint32_t nr_nxt;	/* receive next */
 			uint32_t ns_una;	/* unacked */
 			uint32_t nr_acked;	/* recv acked */
+			uint32_t ipsecflowinfo;	/* IPsec flow id for NAT-T */
 		} l2tp;
 		struct {
 			char over_ifname[IF_NAMESIZE]; 	/* ethernet i/f name */
@@ -209,9 +211,10 @@ struct pipex_session  *pipex_pptp_lookup_session (struct mbuf *);
 struct mbuf           *pipex_pptp_input (struct mbuf *, struct pipex_session *);
 struct pipex_session  *pipex_pptp_userland_lookup_session_ipv4 (struct mbuf *, struct in_addr);
 struct pipex_session  *pipex_pptp_userland_lookup_session_ipv6 (struct mbuf *, struct in6_addr);
+struct pipex_session  *pipex_l2tp_userland_lookup_session(struct mbuf *, struct sockaddr *);
 struct mbuf           *pipex_pptp_userland_output (struct mbuf *, struct pipex_session *);
 struct pipex_session  *pipex_l2tp_lookup_session (struct mbuf *, int);
-struct mbuf           *pipex_l2tp_input (struct mbuf *, int off, struct pipex_session *);
+struct mbuf           *pipex_l2tp_input (struct mbuf *, int off, struct pipex_session *, uint32_t);
 struct pipex_session  *pipex_l2tp_userland_lookup_session_ipv4 (struct mbuf *, struct in_addr);
 struct pipex_session  *pipex_l2tp_userland_lookup_session_ipv6 (struct mbuf *, struct in6_addr);
 struct mbuf           *pipex_l2tp_userland_output (struct mbuf *, struct pipex_session *);

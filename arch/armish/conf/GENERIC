@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.44 2011/11/14 15:28:46 deraadt Exp $ 
+# $OpenBSD: GENERIC,v 1.46 2012/04/06 15:10:39 jsing Exp $ 
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -20,7 +20,7 @@ makeoptions	KERNEL_BASE_VIRT="0xc0200000"
 
 options	CPU_XSCALE_80321	# Support the XScale core
 options	XSCALE_CACHE_READ_WRITE_ALLOCATE
-makeoptions	CPUFLAGS="-mcpu=xscale"
+#makeoptions	CPUFLAGS="-mcpu=xscale"
 
 #options	PERFCTRS	# performance counters
 
@@ -207,5 +207,3 @@ owctr*	at onewire?		# Counter device
 pseudo-device	wsmux		2
 pseudo-device	crypto		1
 pseudo-device	hotplug		1	# devices hot plugging
-#pseudo-device	raid		4	# RAIDframe disk driver
-

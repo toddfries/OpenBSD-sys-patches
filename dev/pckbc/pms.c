@@ -1,4 +1,4 @@
-/* $OpenBSD: pms.c,v 1.26 2011/12/04 00:53:49 shadchin Exp $ */
+/* $OpenBSD: pms.c,v 1.31 2012/07/22 18:28:36 shadchin Exp $ */
 /* $NetBSD: psm.c,v 1.11 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -87,12 +87,19 @@ struct synaptics_softc {
 
 struct alps_softc {
 	int model;
+#define ALPS_GLIDEPOINT		(1 << 1)
+#define ALPS_DUALPOINT		(1 << 2)
+#define ALPS_PASSTHROUGH	(1 << 3)
+#define ALPS_INTERLEAVED	(1 << 4)
+
 	int mask;
 	int version;
 
 	int min_x, min_y;
 	int max_x, max_y;
 	int old_fin;
+
+	u_int sec_buttons;	/* trackpoint */
 
 	/* Compat mode */
 	int wsmode;
@@ -145,30 +152,33 @@ static const struct alps_model {
 	int mask;
 	int model;
 } alps_models[] = {
-#if 0
-	/* FIXME some clipads are not working yet */
-	{ 0x5212, 0xff, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
-	{ 0x6222, 0xcf, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
-#endif
 	{ 0x2021, 0xf8, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
 	{ 0x2221, 0xf8, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
 	{ 0x2222, 0xff, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
 	{ 0x3222, 0xf8, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
+	{ 0x5212, 0xff, ALPS_DUALPOINT | ALPS_PASSTHROUGH | ALPS_INTERLEAVED },
 	{ 0x5321, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x5322, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x603b, 0xf8, ALPS_GLIDEPOINT },
+	{ 0x6222, 0xcf, ALPS_DUALPOINT | ALPS_PASSTHROUGH | ALPS_INTERLEAVED },
 	{ 0x6321, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x6322, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x6323, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x6324, 0x8f, ALPS_GLIDEPOINT },
 	{ 0x6325, 0xef, ALPS_GLIDEPOINT },
 	{ 0x6326, 0xf8, ALPS_GLIDEPOINT },
-	{ 0x633b, 0xf8, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
 	{ 0x7301, 0xf8, ALPS_DUALPOINT },
 	{ 0x7321, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x7322, 0xf8, ALPS_GLIDEPOINT },
 	{ 0x7325, 0xcf, ALPS_GLIDEPOINT },
 #if 0
+	/*
+	 * This model has a clitpad sending almost compatible PS2
+	 * packets but not compatible enough to be used with the
+	 * ALPS protocol.
+	 */
+	{ 0x633b, 0xf8, ALPS_DUALPOINT | ALPS_PASSTHROUGH },
+
 	{ 0x7326, 0, 0 },	/* XXX Uses unknown v3 protocol */
 #endif
 };
@@ -222,6 +232,7 @@ int	synaptics_query(struct pms_softc *, int, int *);
 int	synaptics_get_hwinfo(struct pms_softc *);
 void	synaptics_sec_proc(struct pms_softc *);
 
+int	alps_sec_proc(struct pms_softc *);
 int	alps_get_hwinfo(struct pms_softc *);
 
 struct cfattach pms_ca = {
@@ -720,6 +731,7 @@ pmsinput(void *vsc, int data)
 		return;
 	}
 
+	sc->packet[sc->inputstate] = data;
 	if (sc->protocol->sync(sc, data)) {
 #ifdef DIAGNOSTIC
 		printf("%s: not in sync yet, discard input\n", DEVNAME(sc));
@@ -728,13 +740,13 @@ pmsinput(void *vsc, int data)
 		return;
 	}
 
-	sc->packet[sc->inputstate++] = data;
+	sc->inputstate++;
 
 	if (sc->inputstate != sc->protocol->packetsize)
 		return;
 
-	sc->protocol->proc(sc);
 	sc->inputstate = 0;
+	sc->protocol->proc(sc);
 }
 
 int
@@ -1014,7 +1026,8 @@ pms_proc_synaptics(struct pms_softc *sc)
 	if (syn->wsmode == WSMOUSE_NATIVE) {
 		wsmouse_input(sc->sc_wsmousedev, buttons, x, y, z, w,
 		    WSMOUSE_INPUT_ABSOLUTE_X | WSMOUSE_INPUT_ABSOLUTE_Y |
-		    WSMOUSE_INPUT_ABSOLUTE_Z | WSMOUSE_INPUT_ABSOLUTE_W);
+		    WSMOUSE_INPUT_ABSOLUTE_Z | WSMOUSE_INPUT_ABSOLUTE_W |
+		    WSMOUSE_INPUT_SYNC);
 	} else {
 		dx = dy = 0;
 		if (z > SYNAPTICS_PRESSURE) {
@@ -1041,6 +1054,40 @@ pms_disable_synaptics(struct pms_softc *sc)
 	if (syn->capabilities & SYNAPTICS_CAP_SLEEP)
 		synaptics_set_mode(sc, SYNAPTICS_SLEEP_MODE |
 		    SYNAPTICS_DISABLE_GESTURE);
+}
+
+int
+alps_sec_proc(struct pms_softc *sc)
+{
+	struct alps_softc *alps = sc->alps;
+	int dx, dy, pos = 0;
+
+	if ((sc->packet[0] & PMS_ALPS_PS2_MASK) == PMS_ALPS_PS2_VALID) {
+		/*
+		 * We need to keep buttons states because interleaved
+		 * packets only signalize x/y movements.
+		 */
+		alps->sec_buttons = butmap[sc->packet[0] & PMS_PS2_BUTTONSMASK];
+	} else if ((sc->packet[3] & PMS_ALPS_INTERLEAVED_MASK) ==
+	    PMS_ALPS_INTERLEAVED_VALID) {
+		sc->inputstate = 3;
+		pos = 3;
+	} else {
+		return (0);
+	}
+
+	if ((sc->sc_dev_enable & PMS_DEV_SECONDARY) == 0)
+		return (1);
+
+	dx = (sc->packet[pos] & PMS_PS2_XNEG) ?
+	    (int)sc->packet[pos + 1] - 256 : sc->packet[pos + 1];
+	dy = (sc->packet[pos] & PMS_PS2_YNEG) ?
+	    (int)sc->packet[pos + 2] - 256 : sc->packet[pos + 2];
+
+	wsmouse_input(sc->sc_sec_wsmousedev, alps->sec_buttons,
+	    dx, dy, 0, 0, WSMOUSE_INPUT_DELTA);
+
+	return (1);
 }
 
 int
@@ -1085,7 +1132,8 @@ pms_enable_alps(struct pms_softc *sc)
 	    pms_get_status(sc, resp) ||
 	    resp[0] != PMS_ALPS_MAGIC1 ||
 	    resp[1] != PMS_ALPS_MAGIC2 ||
-	    (resp[2] != PMS_ALPS_MAGIC3_1 && resp[2] != PMS_ALPS_MAGIC3_2))
+	    (resp[2] != PMS_ALPS_MAGIC3_1 && resp[2] != PMS_ALPS_MAGIC3_2 &&
+	    resp[2] != PMS_ALPS_MAGIC3_3))
 		return (0);
 
 	if (sc->alps == NULL) {
@@ -1155,6 +1203,8 @@ pms_enable_alps(struct pms_softc *sc)
 		goto err;
 	}
 
+	alps->sec_buttons = 0;
+
 	return (1);
 
 err:
@@ -1199,6 +1249,13 @@ pms_sync_alps(struct pms_softc *sc, int data)
 {
 	struct alps_softc *alps = sc->alps;
 
+	if ((alps->model & ALPS_DUALPOINT) &&
+	    (sc->packet[0] & PMS_ALPS_PS2_MASK) == PMS_ALPS_PS2_VALID) {
+		if (sc->inputstate == 2)
+			sc->inputstate += 3;
+		return (0);
+	}
+
 	switch (sc->inputstate) {
 	case 0:
 		if ((data & alps->mask) != alps->mask)
@@ -1207,9 +1264,13 @@ pms_sync_alps(struct pms_softc *sc, int data)
 	case 1:
 	case 2:
 	case 3:
+		if ((data & PMS_ALPS_MASK) != PMS_ALPS_VALID)
+			return (-1);
+		break;
 	case 4:
 	case 5:
-		if ((data & 0x80) != 0)
+		if ((alps->model & ALPS_INTERLEAVED) == 0 &&
+		    (data & PMS_ALPS_MASK) != PMS_ALPS_VALID)
 			return (-1);
 		break;
 	}
@@ -1221,9 +1282,12 @@ void
 pms_proc_alps(struct pms_softc *sc)
 {
 	struct alps_softc *alps = sc->alps;
-	int x, y, z, dx, dy;
+	int x, y, z, w, dx, dy;
 	u_int buttons;
 	int fin, ges;
+
+	if ((alps->model & ALPS_DUALPOINT) && alps_sec_proc(sc))
+		return;
 
 	x = sc->packet[1] | ((sc->packet[2] & 0x78) << 4);
 	y = sc->packet[4] | ((sc->packet[3] & 0x70) << 3);
@@ -1266,9 +1330,14 @@ pms_proc_alps(struct pms_softc *sc)
 		if (ges && fin && !alps->old_fin)
 			z = 0;
 
-		wsmouse_input(sc->sc_wsmousedev, buttons, x, y, z, 0,
+		/* Generate a width value corresponding to one finger */
+		if (z > 0)
+			w = 4;
+
+		wsmouse_input(sc->sc_wsmousedev, buttons, x, y, z, w,
 		    WSMOUSE_INPUT_ABSOLUTE_X | WSMOUSE_INPUT_ABSOLUTE_Y |
-		    WSMOUSE_INPUT_ABSOLUTE_Z);
+		    WSMOUSE_INPUT_ABSOLUTE_Z | WSMOUSE_INPUT_ABSOLUTE_W |
+		    WSMOUSE_INPUT_SYNC);
 
 		alps->old_fin = fin;
 	} else {

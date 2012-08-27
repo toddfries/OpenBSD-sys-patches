@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.122 2011/12/14 07:32:16 guenther Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.132 2012/08/02 03:18:48 guenther Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -269,13 +269,13 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 
 	/* get other threads to stop */
 	if ((error = single_thread_set(p, SINGLE_UNWIND, 1)))
-		goto bad;
+		return (error);
 
 	/*
 	 * Cheap solution to complicated problems.
 	 * Mark this process as "leave me alone, I'm execing".
 	 */
-	atomic_setbits_int(&p->p_flag, P_INEXEC);
+	atomic_setbits_int(&pr->ps_flags, PS_INEXEC);
 
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE)) {
@@ -466,16 +466,16 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	if (copyout(&arginfo, (char *)PS_STRINGS, sizeof(arginfo)))
 		goto exec_abort;
 
-	stopprofclock(p);	/* stop profiling */
+	stopprofclock(pr);	/* stop profiling */
 	fdcloseexec(p);		/* handle close on exec */
 	execsigs(p);		/* reset caught signals */
 	TCB_SET(p, NULL);	/* reset the TCB address */
 
 	/* set command name & other accounting info */
+	bzero(p->p_comm, sizeof(p->p_comm));
 	len = min(nid.ni_cnd.cn_namelen, MAXCOMLEN);
 	bcopy(nid.ni_cnd.cn_nameptr, p->p_comm, len);
-	p->p_comm[len] = 0;
-	p->p_acflag &= ~AFORK;
+	pr->ps_acflag &= ~AFORK;
 
 	/* record proc's vnode, for use by procfs and others */
 	if (p->p_textvp)
@@ -529,6 +529,8 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		 * For set[ug]id processes, a few caveats apply to
 		 * stdin, stdout, and stderr.
 		 */
+		error = 0;
+		fdplock(p->p_fd);
 		for (i = 0; i < 3; i++) {
 			struct file *fp = NULL;
 
@@ -562,7 +564,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 				int indx;
 
 				if ((error = falloc(p, &fp, &indx)) != 0)
-					goto exec_abort;
+					break;
 #ifdef DIAGNOSTIC
 				if (indx != i)
 					panic("sys_execve: falloc indx != i");
@@ -570,13 +572,13 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 				if ((error = cdevvp(getnulldev(), &vp)) != 0) {
 					fdremove(p->p_fd, indx);
 					closef(fp, p);
-					goto exec_abort;
+					break;
 				}
 				if ((error = VOP_OPEN(vp, flags, p->p_ucred, p)) != 0) {
 					fdremove(p->p_fd, indx);
 					closef(fp, p);
 					vrele(vp);
-					goto exec_abort;
+					break;
 				}
 				if (flags & FWRITE)
 					vp->v_writecount++;
@@ -584,9 +586,12 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 				fp->f_type = DTYPE_VNODE;
 				fp->f_ops = &vnops;
 				fp->f_data = (caddr_t)vp;
-				FILE_SET_MATURE(fp);
+				FILE_SET_MATURE(fp, p);
 			}
 		}
+		fdpunlock(p->p_fd);
+		if (error)
+			goto exec_abort;
 	} else
 		atomic_clearbits_int(&pr->ps_flags, PS_SUGID);
 	p->p_cred->p_svuid = p->p_ucred->cr_uid;
@@ -595,13 +600,10 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	if (pr->ps_flags & PS_SUGIDEXEC) {
 		int i, s = splclock();
 
-		timeout_del(&p->p_realit_to);
-		timerclear(&p->p_realtimer.it_interval);
-		timerclear(&p->p_realtimer.it_value);
-		for (i = 0; i < sizeof(p->p_stats->p_timer) /
-		    sizeof(p->p_stats->p_timer[0]); i++) {
-			timerclear(&p->p_stats->p_timer[i].it_interval);
-			timerclear(&p->p_stats->p_timer[i].it_value);
+		timeout_del(&pr->ps_realit_to);
+		for (i = 0; i < nitems(pr->ps_timer); i++) {
+			timerclear(&pr->ps_timer[i].it_interval);
+			timerclear(&pr->ps_timer[i].it_value);
 		}
 		splx(s);
 	}
@@ -637,7 +639,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		goto free_pack_abort;
 #endif
 
-	if (p->p_flag & P_TRACED)
+	if (pr->ps_flags & PS_TRACED)
 		psignal(p, SIGTRAP);
 
 	free(pack.ep_hdr, M_EXEC);
@@ -675,8 +677,8 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		ktremul(p, p->p_emul->e_name);
 #endif
 
-	atomic_clearbits_int(&p->p_flag, P_INEXEC);
-	single_thread_clear(p);
+	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
+	single_thread_clear(p, P_SUSPSIG);
 
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE) &&
@@ -695,7 +697,9 @@ bad:
 	/* kill any opened file descriptor, if necessary */
 	if (pack.ep_flags & EXEC_HASFD) {
 		pack.ep_flags &= ~EXEC_HASFD;
+		fdplock(p->p_fd);
 		(void) fdrelease(p, pack.ep_fd);
+		fdpunlock(p->p_fd);
 	}
 	if (pack.ep_interp != NULL)
 		pool_put(&namei_pool, pack.ep_interp);
@@ -711,8 +715,8 @@ bad:
 #if NSYSTRACE > 0
  clrflag:
 #endif
-	atomic_clearbits_int(&p->p_flag, P_INEXEC);
-	single_thread_clear(p);
+	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
+	single_thread_clear(p, P_SUSPSIG);
 
 	if (pathbuf != NULL)
 		pool_put(&namei_pool, pathbuf);
@@ -740,7 +744,7 @@ free_pack_abort:
 	exit1(p, W_EXITCODE(0, SIGABRT), EXIT_NORMAL);
 
 	/* NOTREACHED */
-	atomic_clearbits_int(&p->p_flag, P_INEXEC);
+	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
 	if (pathbuf != NULL)
 		pool_put(&namei_pool, pathbuf);
 
@@ -814,7 +818,6 @@ exec_sigcode_map(struct proc *p, struct emul *e)
 		e->e_sigobject = uao_create(sz, 0);
 		uao_reference(e->e_sigobject);	/* permanent reference */
 
-		va = vm_map_min(kernel_map);	/* hint */
 		if ((r = uvm_map(kernel_map, &va, round_page(sz), e->e_sigobject,
 		    0, 0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
 		    UVM_INH_SHARE, UVM_ADV_RANDOM, 0)))) {
@@ -825,8 +828,7 @@ exec_sigcode_map(struct proc *p, struct emul *e)
 		uvm_unmap(kernel_map, va, va + round_page(sz));
 	}
 
-	/* Just a hint to uvm_mmap where to put it. */
-	p->p_sigcode = uvm_map_hint(p, VM_PROT_READ|VM_PROT_EXECUTE);
+	p->p_sigcode = 0; /* no hint */
 	uao_reference(e->e_sigobject);
 	if (uvm_map(&p->p_vmspace->vm_map, &p->p_sigcode, round_page(sz),
 	    e->e_sigobject, 0, 0, UVM_MAPFLAG(UVM_PROT_RX, UVM_PROT_RX,

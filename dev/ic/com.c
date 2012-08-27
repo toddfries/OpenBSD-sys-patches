@@ -1,4 +1,4 @@
-/*	$OpenBSD: com.c,v 1.148 2011/07/03 15:47:16 matthew Exp $	*/
+/*	$OpenBSD: com.c,v 1.150 2012/08/19 18:38:12 kettenis Exp $	*/
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*
@@ -123,7 +123,6 @@ bus_addr_t comsiraddr;
 #ifdef COM_CONSOLE
 int	comconsfreq;
 int	comconsrate = TTYDEF_SPEED;
-int	comconsinit;
 bus_addr_t comconsaddr = 0;
 int	comconsattached;
 bus_space_tag_t comconsiot;
@@ -541,26 +540,28 @@ compwroff(struct com_softc *sc)
 	bus_space_write_1(iot, ioh, com_fifo,
 			  FIFO_RCV_RST | FIFO_XMT_RST);
 
-	switch (sc->sc_uarttype) {
-	case COM_UART_ST16650:
-	case COM_UART_ST16650V2:
-		bus_space_write_1(iot, ioh, com_lcr, LCR_EFR);
-		bus_space_write_1(iot, ioh, com_efr, EFR_ECB);
-		bus_space_write_1(iot, ioh, com_ier, IER_SLEEP);
-		bus_space_write_1(iot, ioh, com_lcr, 0);
-		break;
-	case COM_UART_TI16750:
-		bus_space_write_1(iot, ioh, com_ier, IER_SLEEP);
-		break;
+	if (!ISSET(sc->sc_hwflags, COM_HW_CONSOLE)) {
+		switch (sc->sc_uarttype) {
+		case COM_UART_ST16650:
+		case COM_UART_ST16650V2:
+			bus_space_write_1(iot, ioh, com_lcr, LCR_EFR);
+			bus_space_write_1(iot, ioh, com_efr, EFR_ECB);
+			bus_space_write_1(iot, ioh, com_ier, IER_SLEEP);
+			bus_space_write_1(iot, ioh, com_lcr, 0);
+			break;
+		case COM_UART_TI16750:
+			bus_space_write_1(iot, ioh, com_ier, IER_SLEEP);
+			break;
 #ifdef COM_PXA2X0
-	case COM_UART_PXA2X0:
-		bus_space_write_1(iot, ioh, com_ier, 0);
+		case COM_UART_PXA2X0:
+			bus_space_write_1(iot, ioh, com_ier, 0);
 #ifdef __zaurus__
-		if (ISSET(sc->sc_hwflags, COM_HW_SIR))
-			scoop_set_irled(0);
+			if (ISSET(sc->sc_hwflags, COM_HW_SIR))
+				scoop_set_irled(0);
 #endif
-		break;
+			break;
 #endif
+		}
 	}
 }
 
@@ -1436,7 +1437,6 @@ comcninit(struct consdev *cp)
 		comconsfreq = COM_FREQ;
 
 	cominit(comconsiot, comconsioh, comconsrate, comconsfreq);
-	comconsinit = 0;
 }
 
 int

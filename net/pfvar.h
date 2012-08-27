@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.358 2011/12/12 21:30:27 mikeb Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.367 2012/07/26 12:25:31 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -531,7 +531,7 @@ struct pf_rule_actions {
 	u_int8_t	log;
 	u_int8_t	set_tos;
 	u_int8_t	min_ttl;
-	u_int8_t	prio[2];
+	u_int8_t	set_prio[2];
 	u_int8_t	pad[3];
 };
 
@@ -649,7 +649,7 @@ struct pf_rule {
 #define PF_FLUSH_GLOBAL		0x02
 	u_int8_t		 flush;
 #define PF_PRIO_NOTSET		0xff
-	u_int8_t		 prio[2];
+	u_int8_t		 set_prio[2];
 	sa_family_t		 naf;
 
 	struct {
@@ -840,18 +840,16 @@ struct pf_state {
 #define	PFSTATE_SETTOS		0x0040
 #define	PFSTATE_RANDOMID	0x0080
 #define	PFSTATE_SCRUB_TCP	0x0100
+#define	PFSTATE_SCRUBMASK (PFSTATE_NODF|PFSTATE_RANDOMID|PFSTATE_SCRUB_TCP)
 	u_int8_t		 log;
 	u_int8_t		 timeout;
 	u_int8_t		 sync_state; /* PFSYNC_S_x */
-
-	/* XXX */
 	u_int8_t		 sync_updates;
-
 	int			 rtableid[2];	/* rtables stack and wire */
 	u_int8_t		 min_ttl;
 	u_int8_t		 set_tos;
+	u_int8_t		 set_prio[2];
 	u_int16_t		 max_mss;
-	u_int8_t		 prio[2];
 	u_int8_t		 pad2[2];
 };
 
@@ -908,13 +906,13 @@ struct pfsync_state {
 	u_int8_t	 proto;
 	u_int8_t	 direction;
 	u_int8_t	 log;
-	u_int8_t	 state_flags; /* XXX remove after 5.0 */
+	u_int8_t	 pad0;
 	u_int8_t	 timeout;
 	u_int8_t	 sync_flags;
 	u_int8_t	 updates;
 	u_int8_t	 min_ttl;
 	u_int8_t	 set_tos;
-	u_int16_t	 all_state_flags;
+	u_int16_t	 state_flags;
 	u_int8_t	 pad[2];
 } __packed;
 
@@ -1254,6 +1252,9 @@ struct pf_pdesc {
 	u_int32_t	 off;		/* protocol header offset */
 	u_int32_t	 hdrlen;	/* protocol header length */
 	u_int32_t	 p_len;		/* length of protocol payload */
+	u_int32_t	 extoff;	/* extentsion header offset */
+	u_int32_t	 fragoff;	/* fragment header offset */
+	u_int32_t	 jumbolen;	/* length from v6 jumbo header */
 	u_int32_t	 badopts;	/* v4 options or v6 routing headers */
 
 	u_int16_t	 rdomain;	/* original routing domain */
@@ -1762,6 +1763,8 @@ void				 pf_state_rm_src_node(struct pf_state *,
 extern struct pf_state		*pf_find_state_byid(struct pf_state_cmp *);
 extern struct pf_state		*pf_find_state_all(struct pf_state_key_cmp *,
 				    u_int, int *);
+extern void			 pf_state_export(struct pfsync_state *,
+				    struct pf_state *);
 extern void			 pf_print_state(struct pf_state *);
 extern void			 pf_print_flags(u_int8_t);
 extern u_int16_t		 pf_cksum_fixup(u_int16_t, u_int16_t, u_int16_t,
@@ -1778,16 +1781,14 @@ void				 pf_purge_rule(struct pf_ruleset *,
 struct pf_divert		*pf_find_divert(struct mbuf *);
 int				 pf_setup_pdesc(struct pf_pdesc *, void *,
 				    sa_family_t, int, struct pfi_kif *,
-				    struct mbuf **, u_short *, u_short *);
+				    struct mbuf *, u_short *);
 
 int	pf_test(sa_family_t, int, struct ifnet *, struct mbuf **,
 	    struct ether_header *);
 
-#ifdef INET6
 void	pf_poolmask(struct pf_addr *, struct pf_addr*,
-	    struct pf_addr *, struct pf_addr *, u_int8_t);
+	    struct pf_addr *, struct pf_addr *, sa_family_t);
 void	pf_addr_inc(struct pf_addr *, sa_family_t);
-#endif /* INET6 */
 
 void   *pf_pull_hdr(struct mbuf *, int, void *, int, u_short *, u_short *,
 	    sa_family_t);
@@ -1806,8 +1807,8 @@ int	pf_match_gid(u_int8_t, gid_t, gid_t, gid_t);
 
 int	pf_refragment6(struct mbuf **, struct m_tag *mtag, int);
 void	pf_normalize_init(void);
-int	pf_normalize_ip(struct mbuf **, int, u_short *);
-int	pf_normalize_ip6(struct mbuf **, int, int, int, u_short *);
+int	pf_normalize_ip(struct pf_pdesc *, u_short *);
+int	pf_normalize_ip6(struct pf_pdesc *, u_short *);
 int	pf_normalize_tcp(struct pf_pdesc *);
 void	pf_normalize_tcp_cleanup(struct pf_state *);
 int	pf_normalize_tcp_init(struct pf_pdesc *, struct pf_state_peer *,

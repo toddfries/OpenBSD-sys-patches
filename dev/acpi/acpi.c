@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.228 2011/09/20 14:06:26 deraadt Exp $ */
+/* $OpenBSD: acpi.c,v 1.238 2012/07/13 11:51:41 pirofti Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -29,6 +29,11 @@
 #include <sys/kthread.h>
 #include <sys/workq.h>
 #include <sys/sched.h>
+#include <sys/reboot.h>
+
+#ifdef HIBERNATE
+#include <sys/hibernate.h>
+#endif
 
 #include <machine/conf.h>
 #include <machine/cpufunc.h>
@@ -94,7 +99,9 @@ void	acpi_pbtn_task(void *, int);
 
 int	acpi_thinkpad_enabled;
 int	acpi_toshiba_enabled;
+int	acpi_asus_enabled;
 int	acpi_saved_spl;
+int	acpi_saved_boothowto;
 int	acpi_enabled;
 
 int	acpi_matchhids(struct acpi_attach_args *aa, const char *hids[],
@@ -136,7 +143,6 @@ int	acpi_add_device(struct aml_node *node, void *arg);
 
 struct gpe_block *acpi_find_gpe(struct acpi_softc *, int);
 void	acpi_enable_onegpe(struct acpi_softc *, int);
-void	acpi_disable_onegpe(struct acpi_softc *, int);
 int	acpi_gpe(struct acpi_softc *, int, void *);
 
 void	acpi_enable_rungpes(struct acpi_softc *);
@@ -397,8 +403,12 @@ acpi_getminbus(union acpi_resource *crs, void *arg)
 	int typ = AML_CRSTYPE(crs);
 
 	/* Check for embedded bus number */
-	if (typ == LR_WORD && crs->lr_word.type == 2)
+	if (typ == LR_WORD && crs->lr_word.type == 2) {
+		/* If _MIN > _MAX, the resource is considered to be invalid. */
+		if (crs->lr_word._min > crs->lr_word._max)
+			return -1;
 		*bbn = crs->lr_word._min;
+	}
 	return 0;
 }
 
@@ -783,7 +793,8 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	aml_find_node(&aml_root, "GBRT", acpi_foundsony, sc);
 
 	/* attach video only if this is not a stinkpad or toshiba */
-	if (!acpi_thinkpad_enabled && !acpi_toshiba_enabled)
+	if (!acpi_thinkpad_enabled && !acpi_toshiba_enabled &&
+	    !acpi_asus_enabled)
 		aml_find_node(&aml_root, "_DOS", acpi_foundvideo, sc);
 
 	/* create list of devices we want to query when APM come in */
@@ -1625,22 +1636,6 @@ acpi_enable_onegpe(struct acpi_softc *sc, int gpe)
 	splx(s);
 }
 
-void
-acpi_disable_onegpe(struct acpi_softc *sc, int gpe)
-{
-	uint8_t mask, en;
-	int s;
-
-	/* Read enabled register */
-	s = spltty();
-	mask = (1L << (gpe & 7));
-	en = acpi_read_pmreg(sc, ACPIREG_GPE_EN, gpe>>3);
-	dnprintf(50, "disabling GPE %.2x (current: %sabled) %.2x\n",
-	    gpe, (en & mask) ? "en" : "dis", en);
-	acpi_write_pmreg(sc, ACPIREG_GPE_EN, gpe>>3, en & ~mask);
-	splx(s);
-}
-
 /* Clear all GPEs */
 void
 acpi_disable_allgpes(struct acpi_softc *sc)
@@ -1835,30 +1830,23 @@ acpi_sleep_state(struct acpi_softc *sc, int state)
 
 	switch (state) {
 	case ACPI_STATE_S0:
-		return (0);
-	case ACPI_STATE_S4:
-		return (EOPNOTSUPP);
-	case ACPI_STATE_S5:
-		break;
 	case ACPI_STATE_S1:
 	case ACPI_STATE_S2:
-	case ACPI_STATE_S3:
-		if (sc->sc_sleeptype[state].slp_typa == -1 ||
-		    sc->sc_sleeptype[state].slp_typb == -1)
-			return (EOPNOTSUPP);
+	case ACPI_STATE_S5:
+		return (0);
 	}
+
+	if (sc->sc_sleeptype[state].slp_typa == -1 ||
+	    sc->sc_sleeptype[state].slp_typb == -1)
+		return (EOPNOTSUPP);
 
 	if ((ret = acpi_prepare_sleep_state(sc, state)) != 0)
 		return (ret);
 
-	if (state != ACPI_STATE_S1)
-		ret = acpi_sleep_machdep(sc, state);
-	else
-		ret = acpi_enter_sleep_state(sc, state);
+	ret = acpi_sleep_machdep(sc, state);
 
 #ifndef SMALL_KERNEL
-	if (state == ACPI_STATE_S3)
-		acpi_resume(sc, state);
+	acpi_resume(sc, state);
 #endif /* !SMALL_KERNEL */
 	return (ret);
 }
@@ -1951,6 +1939,9 @@ acpi_resume(struct acpi_softc *sc, int state)
 	/* Enable runtime GPEs */
 	acpi_disable_allgpes(sc);
 	acpi_enable_rungpes(sc);
+
+	if (state == ACPI_STATE_S4)
+		boothowto = acpi_saved_boothowto;
 
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
 
@@ -2059,12 +2050,16 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 			return (ENXIO);
 		}
 
+	if (state == ACPI_STATE_S4)
+		printf("%s: hibernating to disk ...\n", DEVNAME(sc));
+
 #if NWSDISPLAY > 0
-	if (state == ACPI_STATE_S3)
+	if (state == ACPI_STATE_S3 || state == ACPI_STATE_S4)
 		wsdisplay_suspend();
 #endif /* NWSDISPLAY > 0 */
 
-	resettodr();
+	if (state == ACPI_STATE_S3)
+		resettodr();
 
 	bufq_quiesce();
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE);
@@ -2072,7 +2067,11 @@ acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 	acpi_saved_spl = splhigh();
 	disable_intr();
 	cold = 1;
-	if (state == ACPI_STATE_S3)
+	if (state == ACPI_STATE_S4) {
+		acpi_saved_boothowto = boothowto;
+		boothowto = RB_RDONLY;
+	}
+	if (state == ACPI_STATE_S3 || state == ACPI_STATE_S4)
 		if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND) != 0) {
 			acpi_handle_suspend_failure(sc);
 			error = ENXIO;
@@ -2333,9 +2332,10 @@ acpi_foundhid(struct aml_node *node, void *arg)
 	    !strcmp(dev, ACPI_DEV_PBD) ||
 	    !strcmp(dev, ACPI_DEV_SBD))
 		aaa.aaa_name = "acpibtn";
-	else if (!strcmp(dev, ACPI_DEV_ASUS))
+	else if (!strcmp(dev, ACPI_DEV_ASUS) || !strcmp(dev, ACPI_DEV_ASUS1)) {
 		aaa.aaa_name = "acpiasus";
-	else if (!strcmp(dev, ACPI_DEV_IBM) ||
+		acpi_asus_enabled = 1;
+	} else if (!strcmp(dev, ACPI_DEV_IBM) ||
 	    !strcmp(dev, ACPI_DEV_LENOVO)) {
 		aaa.aaa_name = "acpithinkpad";
 		acpi_thinkpad_enabled = 1;
@@ -2502,11 +2502,27 @@ acpiioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case APM_IOC_STANDBY:
 		if ((flag & FWRITE) == 0) {
 			error = EBADF;
-		} else {
-			acpi_addtask(sc, acpi_sleep_task, sc, ACPI_STATE_S3);
-			acpi_wakeup(sc);
+			break;
 		}
+		acpi_addtask(sc, acpi_sleep_task, sc, ACPI_STATE_S3);
+		acpi_wakeup(sc);
 		break;
+#ifdef HIBERNATE
+	case APM_IOC_HIBERNATE:
+		if (suser(p, 0) != 0)
+			return (EPERM);
+		if ((flag & FWRITE) == 0) {
+			error = EBADF;
+			break;
+		}
+		if (get_hibernate_io_function() == NULL) {
+			error = EOPNOTSUPP;
+			break;
+		}
+		acpi_addtask(sc, acpi_sleep_task, sc, ACPI_STATE_S4);
+		acpi_wakeup(sc);
+		break;
+#endif
 	case APM_IOC_GETPOWER:
 		/* A/C */
 		pi->ac_state = APM_AC_UNKNOWN;

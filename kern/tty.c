@@ -1,4 +1,4 @@
-/*	$OpenBSD: tty.c,v 1.93 2011/07/05 04:48:02 guenther Exp $	*/
+/*	$OpenBSD: tty.c,v 1.95 2012/04/22 02:26:11 matthew Exp $	*/
 /*	$NetBSD: tty.c,v 1.68.4.2 1996/06/06 16:04:52 thorpej Exp $	*/
 
 /*-
@@ -181,6 +181,7 @@ ttyopen(dev_t device, struct tty *tp, struct proc *p)
 	if (!ISSET(tp->t_state, TS_ISOPEN)) {
 		SET(tp->t_state, TS_ISOPEN);
 		bzero(&tp->t_winsize, sizeof(tp->t_winsize));
+		tp->t_column = 0;
 #ifdef COMPAT_OLDTTY
 		tp->t_flags = 0;
 #endif
@@ -2115,7 +2116,7 @@ ttyinfo(struct tty *tp)
 		rss = pick->p_stat == SIDL || P_ZOMBIE(pick) ? 0 :
 		    vm_resident_count(pick->p_vmspace);
 
-		calcru(pick, &utime, &stime, NULL);
+		calcru(&pick->p_p->ps_tu, &utime, &stime, NULL);
 
 		/* Round up and print user time. */
 		utime.tv_usec += 5000;

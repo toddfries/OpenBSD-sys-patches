@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sched.c,v 1.24 2011/10/12 18:30:09 miod Exp $	*/
+/*	$OpenBSD: kern_sched.c,v 1.27 2012/07/10 18:20:37 kettenis Exp $	*/
 /*
  * Copyright (c) 2007, 2008 Artur Grabowski <art@openbsd.org>
  *
@@ -43,6 +43,16 @@ struct proc *sched_steal_proc(struct cpu_info *);
 struct cpuset sched_idle_cpus;
 struct cpuset sched_queued_cpus;
 struct cpuset sched_all_cpus;
+
+/*
+ * Some general scheduler counters.
+ */
+uint64_t sched_nmigrations;	/* Cpu migration counter */
+uint64_t sched_nomigrations;	/* Cpu no migration counter */
+uint64_t sched_noidle;		/* Times we didn't pick the idle task */
+uint64_t sched_stolen;		/* Times we stole proc from other cpus */
+uint64_t sched_choose;		/* Times we chose a cpu */
+uint64_t sched_wasidle;		/* Times we came out of idle */
 
 /*
  * A few notes about cpu_switchto that is implemented in MD code.
@@ -275,6 +285,7 @@ again:
 		queue = ffs(spc->spc_whichqs) - 1;
 		p = TAILQ_FIRST(&spc->spc_qs[queue]);
 		remrunqueue(p);
+		sched_noidle++;
 		KASSERT(p->p_stat == SRUN);
 	} else if ((p = sched_steal_proc(curcpu())) == NULL) {
 		p = spc->spc_idleproc;
@@ -300,14 +311,6 @@ again:
 	KASSERT(p->p_wchan == NULL);
 	return (p);	
 }
-
-uint64_t sched_nmigrations;
-uint64_t sched_noidle;
-uint64_t sched_stolen;
-
-uint64_t sched_choose;
-uint64_t sched_wasidle;
-uint64_t sched_nomigrations;
 
 struct cpu_info *
 sched_choosecpu_fork(struct proc *parent, int flags)
@@ -340,6 +343,7 @@ sched_choosecpu_fork(struct proc *parent, int flags)
 	 * then the one with lowest load average.
 	 */
 	cpuset_complement(&set, &sched_queued_cpus, &sched_idle_cpus);
+	cpuset_intersection(&set, &set, &sched_all_cpus);
 	if (cpuset_first(&set) == NULL)
 		cpuset_copy(&set, &sched_all_cpus);
 
@@ -383,6 +387,7 @@ sched_choosecpu(struct proc *p)
 	 * at this moment and haven't had time to leave idle yet).
 	 */
 	cpuset_complement(&set, &sched_queued_cpus, &sched_idle_cpus);
+	cpuset_intersection(&set, &set, &sched_all_cpus);
 
 	/*
 	 * First, just check if our current cpu is in that set, if it is,
@@ -429,6 +434,8 @@ sched_steal_proc(struct cpu_info *self)
 	int bestcost = INT_MAX;
 	struct cpu_info *ci;
 	struct cpuset set;
+
+	KASSERT((self->ci_schedstate.spc_schedflags & SPCF_SHOULDHALT) == 0);
 
 	cpuset_copy(&set, &sched_queued_cpus);
 
@@ -517,9 +524,8 @@ sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
 		    sched_cost_priority;
 		cost += sched_cost_runnable;
 	}
-	if (cpuset_isset(&sched_queued_cpus, ci)) {
+	if (cpuset_isset(&sched_queued_cpus, ci))
 		cost += spc->spc_nrun * sched_cost_runnable;
-	}
 
 	/*
 	 * Higher load on the destination means we don't want to go there.
@@ -554,7 +560,7 @@ sched_peg_curproc(struct cpu_info *ci)
 	p->p_cpu = ci;
 	atomic_setbits_int(&p->p_flag, P_CPUPEG);
 	setrunqueue(p);
-	p->p_stats->p_ru.ru_nvcsw++;
+	p->p_ru.ru_nvcsw++;
 	mi_switch();
 	SCHED_UNLOCK(s);
 }

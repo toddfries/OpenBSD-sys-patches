@@ -1,6 +1,7 @@
-#	$OpenBSD: Makefile,v 1.11 2009/05/14 18:57:43 miod Exp $
+#	$OpenBSD: Makefile,v 1.14 2012/08/21 14:46:19 pascal Exp $
 
 NOMAN=		noman
+NOPIE=
 
 CFLAGS+=	${SAABI} -mno-abicalls -D_NO_ABICALLS -nostdinc -D__sgi__ \
 		-I${.CURDIR}/../include -I${.CURDIR}/../../../.. \
@@ -11,7 +12,8 @@ CFLAGS+=	-D__INTERNAL_LIBSA_CREAD ${STANDALONE}
 AFLAGS+=	${SAABI}
 
 S=		${.CURDIR}/../../../..
-SRCS=		start.S boot.c filesystem.c conf.c diskio.c arcbios.c strstr.c
+SRCS=		start.S arcbios.c boot.c conf.c diskio.c filesystem.c \
+		netfs.c netio.c strchr.c strstr.c
 
 .PATH:		${S}/lib/libsa
 SRCS+=		loadfile.c

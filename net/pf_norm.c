@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_norm.c,v 1.149 2012/01/13 11:24:35 bluhm Exp $ */
+/*	$OpenBSD: pf_norm.c,v 1.154 2012/05/12 13:08:48 mpf Exp $ */
 
 /*
  * Copyright 2001 Niels Provos <provos@citi.umich.edu>
@@ -128,7 +128,7 @@ int			 pf_reassemble(struct mbuf **, int, u_short *);
 #ifdef INET6
 int			 pf_reassemble6(struct mbuf **, struct ip6_frag *,
 			    u_int16_t, u_int16_t, int, u_short *);
-#endif
+#endif /* INET6 */
 
 /* Globals */
 struct pool		 pf_frent_pl, pf_frag_pl;
@@ -326,15 +326,7 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 		return (frag);
 	}
 
-	if (TAILQ_EMPTY(&frag->fr_queue)) {
-		/*
-		 * Overlapping IPv6 fragments have been detected.  Do not
-		 * reassemble packet but also drop future fragments.
-		 * This will be done for this ident/src/dst combination
-		 * until fragment queue timeout.
-		 */
-		goto drop_fragment;
-	}
+	KASSERT(!TAILQ_EMPTY(&frag->fr_queue));
 
 	/* Remember maximum fragment len for refragmentation */
 	if (frent->fe_len > frag->fr_maxlen)
@@ -371,8 +363,10 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 	if (prev != NULL && prev->fe_off + prev->fe_len > frent->fe_off) {
 		u_int16_t	precut;
 
+#ifdef INET6
 		if (frag->fr_af == AF_INET6)
-			goto flush_fragentries;
+			goto free_fragment;
+#endif /* INET6 */
 
 		precut = prev->fe_off + prev->fe_len - frent->fe_off;
 		if (precut >= frent->fe_len) {
@@ -390,8 +384,10 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 	{
 		u_int16_t	aftercut;
 
+#ifdef INET6
 		if (frag->fr_af == AF_INET6)
-			goto flush_fragentries;
+			goto free_fragment;
+#endif /* INET6 */
 
 		aftercut = frent->fe_off + frent->fe_len - after->fe_off;
 		if (aftercut < after->fe_len) {
@@ -419,22 +415,17 @@ pf_fillup_fragment(struct pf_fragment_cmp *key, struct pf_frent *frent,
 
 	return (frag);
 
- flush_fragentries:
+#ifdef INET6
+ free_fragment:
 	/*
-	 * RFC5722:  When reassembling an IPv6 datagram, if one or
-	 * more its constituent fragments is determined to be an
-	 * overlapping fragment, the entire datagram (and any constituent
-	 * fragments, including those not yet received) MUST be
-	 * silently discarded.
+	 * RFC 5722, Errata 3089:  When reassembling an IPv6 datagram, if one
+	 * or more its constituent fragments is determined to be an overlapping
+	 * fragment, the entire datagram (and any constituent fragments) MUST
+	 * be silently discarded.
 	 */
 	DPFPRINTF(LOG_NOTICE, "flush overlapping fragments");
-	while ((prev = TAILQ_FIRST(&frag->fr_queue)) != NULL) {
-		TAILQ_REMOVE(&frag->fr_queue, prev, fr_next);
-
-		m_freem(prev->fe_m);
-		pool_put(&pf_frent_pl, prev);
-		pf_nfrents--;
-	}
+	pf_free_fragment(frag);
+#endif /* INET6 */
  bad_fragment:
 	REASON_SET(reason, PFRES_FRAG);
  drop_fragment:
@@ -771,14 +762,12 @@ pf_refragment6(struct mbuf **m0, struct m_tag *mtag, int dir)
 #endif /* INET6 */
 
 int
-pf_normalize_ip(struct mbuf **m0, int dir, u_short *reason)
+pf_normalize_ip(struct pf_pdesc *pd, u_short *reason)
 {
-	struct mbuf		*m = *m0;
-	struct ip		*h = mtod(m, struct ip *);
+	struct ip		*h = mtod(pd->m, struct ip *);
 	u_int16_t		 fragoff = (ntohs(h->ip_off) & IP_OFFMASK) << 3;
 	u_int16_t		 mff = (ntohs(h->ip_off) & IP_MF);
 
-	/* We will need other tests here */
 	if (!fragoff && !mff)
 		goto no_fragment;
 
@@ -799,14 +788,13 @@ pf_normalize_ip(struct mbuf **m0, int dir, u_short *reason)
 	if (!pf_status.reass)
 		return (PF_PASS);	/* no reassembly */
 
-	/* Returns PF_DROP or *m0 is NULL or completely reassembled mbuf */
-	if (pf_reassemble(m0, dir, reason) != PF_PASS)
+	/* Returns PF_DROP or m is NULL or completely reassembled mbuf */
+	if (pf_reassemble(&pd->m, pd->dir, reason) != PF_PASS)
 		return (PF_DROP);
-	m = *m0;
-	if (m == NULL)
+	if (pd->m == NULL)
 		return (PF_PASS);  /* packet has been reassembled, no error */
 
-	h = mtod(m, struct ip *);
+	h = mtod(pd->m, struct ip *);
 
  no_fragment:
 	/* At this point, only IP_DF is allowed in ip_off */
@@ -818,21 +806,28 @@ pf_normalize_ip(struct mbuf **m0, int dir, u_short *reason)
 
 #ifdef INET6
 int
-pf_normalize_ip6(struct mbuf **m0, int dir, int off, int extoff,
-    u_short *reason)
+pf_normalize_ip6(struct pf_pdesc *pd, u_short *reason)
 {
-	struct mbuf		*m = *m0;
 	struct ip6_frag		 frag;
 
-	if (!pf_pull_hdr(m, off, &frag, sizeof(frag), NULL, reason, AF_INET6))
-		return (PF_DROP);
-	/* offset now points to data portion */
-	off += sizeof(frag);
+	if (pd->fragoff == 0)
+		goto no_fragment;
 
-	/* Returns PF_DROP or *m0 is NULL or completely reassembled mbuf */
-	if (pf_reassemble6(m0, &frag, off, extoff, dir, reason) != PF_PASS)
+	if (!pf_pull_hdr(pd->m, pd->fragoff, &frag, sizeof(frag), NULL, reason,
+	    AF_INET6))
 		return (PF_DROP);
 
+	if (!pf_status.reass)
+		return (PF_PASS);	/* no reassembly */
+
+	/* Returns PF_DROP or m is NULL or completely reassembled mbuf */
+	if (pf_reassemble6(&pd->m, &frag, pd->fragoff + sizeof(frag),
+	    pd->extoff, pd->dir, reason) != PF_PASS)
+		return (PF_DROP);
+	if (pd->m == NULL)
+		return (PF_PASS);  /* packet has been reassembled, no error */
+
+ no_fragment:
 	return (PF_PASS);
 }
 #endif /* INET6 */
@@ -1471,7 +1466,7 @@ pf_scrub(struct mbuf *m, u_int16_t flags, sa_family_t af, u_int8_t min_ttl,
 	/* Enforce tos */
 	if (flags & PFSTATE_SETTOS) {
 		if (af == AF_INET)
-			h->ip_tos = tos;
+			h->ip_tos = tos | (h->ip_tos & IPTOS_ECN_MASK);
 #ifdef INET6
 		if (af == AF_INET6) {
 			/* drugs are unable to explain such idiocy */

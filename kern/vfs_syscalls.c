@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.180 2011/11/06 15:09:02 guenther Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.187 2012/07/11 23:07:19 guenther Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -607,12 +607,12 @@ sys_fstatfs(struct proc *p, void *v, register_t *retval)
 		return (error);
 	mp = ((struct vnode *)fp->f_data)->v_mount;
 	if (!mp) {
-		FRELE(fp);
+		FRELE(fp, p);
 		return (ENOENT);
 	}
 	sp = &mp->mnt_stat;
 	error = VFS_STATFS(mp, sp, p);
-	FRELE(fp);
+	FRELE(fp, p);
 	if (error)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
@@ -859,8 +859,10 @@ doopenat(struct proc *p, int fd, const char *path, int oflags, mode_t mode,
 
 	if ((error = falloc(p, &fp, &indx)) != 0)
 		goto out;
-
 	flags = FFLAGS(oflags);
+	if (flags & O_CLOEXEC)
+		fdp->fd_ofileflags[indx] |= UF_EXCLOSE;
+
 	cmode = ((mode &~ fdp->fd_cmask) & ALLPERMS) &~ S_ISTXT;
 	NDINITAT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, fd, path, p);
 	p->p_dupfd = -1;			/* XXX check for fdopen */
@@ -869,10 +871,10 @@ doopenat(struct proc *p, int fd, const char *path, int oflags, mode_t mode,
 		flags &= ~O_TRUNC;	/* Must do truncate ourselves */
 	}
 	if ((error = vn_open(&nd, flags, cmode)) != 0) {
-		if ((error == ENODEV || error == ENXIO) &&
+		if (error == ENODEV &&
 		    p->p_dupfd >= 0 &&			/* XXX from fdopen */
 		    (error =
-			dupfdopen(fdp, indx, p->p_dupfd, flags, error)) == 0) {
+			dupfdopen(fdp, indx, p->p_dupfd, flags)) == 0) {
 			closef(fp, p);
 			*retval = indx;
 			goto out;
@@ -932,10 +934,8 @@ doopenat(struct proc *p, int fd, const char *path, int oflags, mode_t mode,
 		}
 	}
 	VOP_UNLOCK(vp, 0, p);
-	if (flags & O_CLOEXEC)
-		fdp->fd_ofileflags[indx] |= UF_EXCLOSE;
 	*retval = indx;
-	FILE_SET_MATURE(fp);
+	FILE_SET_MATURE(fp, p);
 out:
 	fdpunlock(fdp);
 	return (error);
@@ -1019,6 +1019,8 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 		fp = NULL;
 		goto bad;
 	}
+	if (flags & O_CLOEXEC)
+		fdp->fd_ofileflags[indx] |= UF_EXCLOSE;
 
 	if ((error = copyin(SCARG(uap, fhp), &fh, sizeof(fhandle_t))) != 0)
 		goto bad;
@@ -1037,6 +1039,10 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 
 	if (vp->v_type == VSOCK) {
 		error = EOPNOTSUPP;
+		goto bad;
+	}
+	if ((flags & O_DIRECTORY) && vp->v_type != VDIR) {
+		error = ENOTDIR;
 		goto bad;
 	}
 	if (flags & FREAD) {
@@ -1091,7 +1097,7 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 	}
 	VOP_UNLOCK(vp, 0, p);
 	*retval = indx;
-	FILE_SET_MATURE(fp);
+	FILE_SET_MATURE(fp, p);
 
 	fdpunlock(fdp);
 	return (0);
@@ -1599,7 +1605,7 @@ sys_lseek(struct proc *p, void *v, register_t *retval)
 	fp->f_seek++;
 	error = 0;
  bad:
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -1928,7 +1934,7 @@ sys_fchflags(struct proc *p, void *v, register_t *retval)
 	}
 out:
 	VOP_UNLOCK(vp, 0, p);
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -2024,7 +2030,7 @@ sys_fchmod(struct proc *p, void *v, register_t *retval)
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
 	}
 	VOP_UNLOCK(vp, 0, p);
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -2199,7 +2205,7 @@ sys_fchown(struct proc *p, void *v, register_t *retval)
 	}
 out:
 	VOP_UNLOCK(vp, 0, p);
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -2286,6 +2292,15 @@ dovutimens(struct proc *p, struct vnode *vp, struct timespec ts[2],
 	struct vattr vattr;
 	struct timespec now;
 	int error;
+
+#ifdef KTRACE
+	/* if they're both UTIME_NOW, then don't report either */
+	if ((ts[0].tv_nsec != UTIME_NOW || ts[1].tv_nsec != UTIME_NOW) &&
+	    KTRPOINT(p, KTR_STRUCT)) {
+		ktrabstimespec(p, &ts[0]);
+		ktrabstimespec(p, &ts[1]);
+	}
+#endif
 
 	VATTR_NULL(&vattr);
 	if (ts[0].tv_nsec == UTIME_NOW || ts[1].tv_nsec == UTIME_NOW) {
@@ -2388,7 +2403,7 @@ dofutimens(struct proc *p, int fd, struct timespec ts[2], register_t *retval)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
 	vref(vp);
-	FRELE(fp);
+	FRELE(fp, p);
 
 	return (dovutimens(p, vp, ts, retval));
 }
@@ -2463,7 +2478,7 @@ sys_ftruncate(struct proc *p, void *v, register_t *retval)
 	}
 	VOP_UNLOCK(vp, 0, p);
 bad:
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -2492,7 +2507,7 @@ sys_fsync(struct proc *p, void *v, register_t *retval)
 #endif
 
 	VOP_UNLOCK(vp, 0, p);
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -2728,7 +2743,7 @@ getdirentries_internal(struct proc *p, int fd, char *buf, int count,
 		goto bad;
 	*retval = count - auio.uio_resid;
 bad:
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 

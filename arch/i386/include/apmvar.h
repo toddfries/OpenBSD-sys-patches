@@ -1,4 +1,4 @@
-/*	$OpenBSD: apmvar.h,v 1.17 2011/03/23 16:54:35 pirofti Exp $	*/
+/*	$OpenBSD: apmvar.h,v 1.19 2012/07/08 18:02:45 guenther Exp $	*/
 
 /*
  *  Copyright (c) 1995 John T. Kohl
@@ -289,6 +289,7 @@ struct apm_ctl {
 					   if the percentage changes */
 #define	APM_IOC_STANDBY_REQ	_IO('A', 7)	/* request standby */
 #define	APM_IOC_SUSPEND_REQ	_IO('A', 8)	/* request suspend */
+#define	APM_IOC_HIBERNATE	_IO('A', 9)	/* put system into hibernate */
 
 
 #ifdef _KERNEL
@@ -296,7 +297,6 @@ extern void apm_cpu_busy(void);
 extern void apm_cpu_idle(void);
 extern void apminit(void);
 int apm_set_powstate(u_int devid, u_int powstate);
-int apm_kqfilter(dev_t dev, struct knote *kn);
 #endif /* _KERNEL */
 
 #endif /* _MACHINE_APMVAR_H_ */

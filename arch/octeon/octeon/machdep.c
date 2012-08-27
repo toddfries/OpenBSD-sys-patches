@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.15 2011/06/26 22:40:00 deraadt Exp $ */
+/*	$OpenBSD: machdep.c,v 1.19 2012/07/16 16:06:40 miod Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -71,6 +71,7 @@
 #include <ddb/db_interface.h>
 
 #include <machine/autoconf.h>
+#include <mips64/cache.h>
 #include <machine/cpu.h>
 #include <machine/memconf.h>
 
@@ -152,13 +153,7 @@ struct boot_info {
 /* The following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* Machine "architecture" */
 char	cpu_model[30];
-char	pmon_bootp[80];
 
-/*
- * Even though the system is 64bit, the hardware is constrained to up
- * to 2G of contigous physical memory (direct 2GB DMA area), so there
- * is no particular constraint. paddr_t is long so: 
- */
 struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
@@ -172,7 +167,6 @@ vm_map_t phys_map;
 int   safepri = 0;
 
 caddr_t	msgbufbase;
-vaddr_t	uncached_base;
 
 int	physmem;		/* Max supported memory, changes to actual. */
 int	ncpu = 1;		/* At least one CPU in the system. */
@@ -189,7 +183,6 @@ struct phys_mem_desc mem_layout[MAXMEMSEGS];
 
 void	dumpsys(void);
 void	dumpconf(void);
-extern	void parsepmonbp(void);
 vaddr_t	mips_init(__register_t, __register_t, __register_t, __register_t);
 boolean_t is_memory_range(paddr_t, psize_t, psize_t);
 void	octeon_memory_init(struct boot_info *);
@@ -256,7 +249,7 @@ octeon_memory_init(struct boot_info *boot_info)
 	 * 0000 0003 FFFF FFFF     to  0000 0003 FFFF FFFF
 	 *
 	 */
-	physmem = btoc(phys_avail[1] - phys_avail[0]);
+	physmem = atop(phys_avail[1] - phys_avail[0]);
 
 	if (boot_info->board_type != BOARD_TYPE_SIM) {
 		if(realmem_bytes > OCTEON_DRAM_FIRST_256_END){
@@ -372,8 +365,6 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 	 */
 	boothowto = RB_AUTOBOOT;
 
-	uncached_base = PHYS_TO_XKPHYS(0, CCA_NC);
-
 	octeon_memory_init(boot_info);
 
 	/*
@@ -424,9 +415,8 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 
 	bootcpu_hwinfo.c0prid = prid;
 	bootcpu_hwinfo.type = (prid >> 8) & 0xff;
-	/* FPU reports itself as type 5, version 0.1... */
-	bootcpu_hwinfo.c1prid = bootcpu_hwinfo.c0prid;
-	bootcpu_hwinfo.tlbsize = 64;
+	bootcpu_hwinfo.c1prid = 0;	/* No FPU */
+	bootcpu_hwinfo.tlbsize = 1 + ((cp0_get_config_1() >> 25) & 0x3f);
 	bcopy(&bootcpu_hwinfo, &curcpu()->ci_hw, sizeof(struct cpu_hwinfo));
 
 	/*
@@ -826,7 +816,7 @@ hw_cpu_hatch(struct cpu_info *ci)
 
 	printf("cpu%d launched\n", cpu_number());
 
-	cpu_startclock(ci);
+	(*md_startclock)(ci);
 	ncpus++;
 	cpuset_add(&cpus_running, ci);
 	octeon_intr_init();

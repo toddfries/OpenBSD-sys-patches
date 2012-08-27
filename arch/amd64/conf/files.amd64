@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.66 2011/11/15 22:27:52 deraadt Exp $
+#	$OpenBSD: files.amd64,v 1.68 2012/07/13 10:32:03 mlarkin Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -8,6 +8,7 @@ file	arch/amd64/amd64/conf.c
 file	arch/amd64/amd64/disksubr.c		disk
 file	arch/amd64/amd64/gdt.c			multiprocessor
 file	arch/amd64/amd64/machdep.c
+file	arch/amd64/amd64/hibernate_machdep.c	hibernate
 file	arch/amd64/amd64/identcpu.c
 file	arch/amd64/amd64/via.c
 file	arch/amd64/amd64/aes_intel.S		crypto
@@ -147,12 +148,17 @@ include	"dev/pcmcia/files.pcmcia"
 # PCI-ISA bridges
 device	pcib: isabus
 attach	pcib at pci
-file	arch/amd64/pci/pcib.c			pcib | amdpcib
+file	arch/amd64/pci/pcib.c			pcib | amdpcib | tcpcib
 
 # AMD 8111 LPC bridge
 device	amdpcib: isabus
 attach	amdpcib at pci
 file	dev/pci/amdpcib.c			amdpcib
+
+# Intel Atom E600 LPC bridge
+device	tcpcib: isabus
+attach	tcpcib at pci
+file	dev/pci/tcpcib.c			tcpcib
 
 device	aapic
 attach	aapic at pci

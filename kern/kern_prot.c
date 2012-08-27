@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_prot.c,v 1.51 2011/10/15 23:35:29 guenther Exp $	*/
+/*	$OpenBSD: kern_prot.c,v 1.54 2012/04/12 10:11:41 mikeb Exp $	*/
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -391,8 +391,8 @@ sys_setresuid(struct proc *p, void *v, register_t *retval)
 		/*
 		 * Transfer proc count to new user.
 		 */
-		(void)chgproccnt(pc->p_ruid, -p->p_p->ps_refcnt);
-		(void)chgproccnt(ruid, p->p_p->ps_refcnt);
+		(void)chgproccnt(pc->p_ruid, -1);
+		(void)chgproccnt(ruid, 1);
 		pc->p_ruid = ruid;
 	}
 	if (euid != (uid_t)-1 && euid != pc->pc_ucred->cr_uid) {
@@ -596,8 +596,8 @@ sys_setuid(struct proc *p, void *v, register_t *retval)
 		 * Transfer proc count to new user.
 		 */
 		if (uid != pc->p_ruid) {
-			(void)chgproccnt(pc->p_ruid, -p->p_p->ps_refcnt);
-			(void)chgproccnt(uid, p->p_p->ps_refcnt);
+			(void)chgproccnt(pc->p_ruid, -1);
+			(void)chgproccnt(uid, 1);
 		}
 		pc->p_ruid = uid;
 		pc->p_svuid = uid;
@@ -763,7 +763,7 @@ suser(struct proc *p, u_int flags)
 
 	if (cred->cr_uid == 0) {
 		if (!(flags & SUSER_NOACCT))
-			p->p_acflag |= ASU;
+			p->p_p->ps_acflag |= ASU;
 		return (0);
 	}
 	return (EPERM);
@@ -884,7 +884,7 @@ int
 proc_cansugid(struct proc *p)
 {
 	/* ptrace(2)d processes shouldn't. */
-	if ((p->p_flag & P_TRACED) != 0)
+	if ((p->p_p->ps_flags & PS_TRACED) != 0)
 		return (0);
 
 	/* processes with shared filedescriptors shouldn't. */
