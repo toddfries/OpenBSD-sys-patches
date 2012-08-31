@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_misc.c,v 1.73 2011/12/14 08:33:18 robert Exp $	*/
+/*	$OpenBSD: linux_misc.c,v 1.79 2012/06/08 14:28:23 pirofti Exp $	*/
 /*	$NetBSD: linux_misc.c,v 1.27 1996/05/20 01:59:21 fvdl Exp $	*/
 
 /*-
@@ -364,9 +364,7 @@ linux_sys_time(p, v, retval)
  * we fake (probably the wrong way).
  */
 static void
-bsd_to_linux_statfs(bsp, lsp)
-	struct statfs *bsp;
-	struct linux_statfs *lsp;
+bsd_to_linux_statfs(struct statfs *bsp, struct linux_statfs *lsp)
 {
 
 	/*
@@ -376,19 +374,25 @@ bsd_to_linux_statfs(bsp, lsp)
 	 */
 	if (!strcmp(bsp->f_fstypename, MOUNT_FFS) ||
 	    !strcmp(bsp->f_fstypename, MOUNT_MFS))
-		lsp->l_ftype = 0x11954;
+		lsp->l_ftype = LINUX_FSTYPE_FFS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_NFS))
-		lsp->l_ftype = 0x6969;
+		lsp->l_ftype = LINUX_FSTYPE_NFS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_MSDOS))
-		lsp->l_ftype = 0x4d44;
+		lsp->l_ftype = LINUX_FSTYPE_MSDOS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_PROCFS))
-		lsp->l_ftype = 0x9fa0;
+		lsp->l_ftype = LINUX_FSTYPE_PROCFS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_EXT2FS))
-		lsp->l_ftype = 0xef53;
+		lsp->l_ftype = LINUX_FSTYPE_EXT2FS;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_CD9660))
-		lsp->l_ftype = 0x9660;
+		lsp->l_ftype = LINUX_FSTYPE_CD9660;
 	else if (!strcmp(bsp->f_fstypename, MOUNT_NCPFS))
-		lsp->l_ftype = 0x6969;
+		lsp->l_ftype = LINUX_FSTYPE_NCPFS;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_NTFS))
+		lsp->l_ftype = LINUX_FSTYPE_NTFS;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_UDF))
+		lsp->l_ftype = LINUX_FSTYPE_UDF;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_AFS))
+		lsp->l_ftype = LINUX_FSTYPE_AFS;
 	else
 		lsp->l_ftype = -1;
 
@@ -441,6 +445,82 @@ linux_sys_statfs(p, v, retval)
 	return copyout((caddr_t) &ltmp, (caddr_t) SCARG(uap, sp), sizeof ltmp);
 }
 
+static void
+bsd_to_linux_statfs64(struct statfs *bsp, struct linux_statfs64 *lsp)
+{
+
+	/*
+	 * Convert BSD filesystem names to Linux filesystem type numbers
+	 * where possible.  Linux statfs uses a value of -1 to indicate
+	 * an unsupported field.
+	 */
+	if (!strcmp(bsp->f_fstypename, MOUNT_FFS) ||
+	    !strcmp(bsp->f_fstypename, MOUNT_MFS))
+		lsp->l_ftype = LINUX_FSTYPE_FFS;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_NFS))
+		lsp->l_ftype = LINUX_FSTYPE_NFS;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_MSDOS))
+		lsp->l_ftype = LINUX_FSTYPE_MSDOS;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_PROCFS))
+		lsp->l_ftype = LINUX_FSTYPE_PROCFS;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_EXT2FS))
+		lsp->l_ftype = LINUX_FSTYPE_EXT2FS;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_CD9660))
+		lsp->l_ftype = LINUX_FSTYPE_CD9660;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_NCPFS))
+		lsp->l_ftype = LINUX_FSTYPE_NCPFS;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_NTFS))
+		lsp->l_ftype = LINUX_FSTYPE_NTFS;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_UDF))
+		lsp->l_ftype = LINUX_FSTYPE_UDF;
+	else if (!strcmp(bsp->f_fstypename, MOUNT_AFS))
+		lsp->l_ftype = LINUX_FSTYPE_AFS;
+	else
+		lsp->l_ftype = -1;
+
+	lsp->l_fbsize = bsp->f_bsize;
+	lsp->l_fblocks = bsp->f_blocks;
+	lsp->l_fbfree = bsp->f_bfree;
+	lsp->l_fbavail = bsp->f_bavail;
+	lsp->l_ffiles = bsp->f_files;
+	lsp->l_fffree = bsp->f_ffree;
+	lsp->l_ffsid.val[0] = bsp->f_fsid.val[0];
+	lsp->l_ffsid.val[1] = bsp->f_fsid.val[1];
+	lsp->l_fnamelen = MAXNAMLEN;	/* XXX */
+}
+
+int
+linux_sys_statfs64(struct proc *p, void *v, register_t *retval)
+{
+	struct linux_sys_statfs64_args /* {
+		syscallarg(char *) path;
+		syscallarg(struct linux_statfs64 *) sp;
+	} */ *uap = v;
+	struct statfs btmp, *bsp;
+	struct linux_statfs64 ltmp;
+	struct sys_statfs_args bsa;
+	caddr_t sg;
+	int error;
+
+	sg = stackgap_init(p->p_emul);
+	bsp = (struct statfs *) stackgap_alloc(&sg, sizeof (struct statfs));
+
+	LINUX_CHECK_ALT_EXIST(p, &sg, SCARG(uap, path));
+
+	SCARG(&bsa, path) = SCARG(uap, path);
+	SCARG(&bsa, buf) = bsp;
+
+	if ((error = sys_statfs(p, &bsa, retval)))
+		return error;
+
+	if ((error = copyin((caddr_t) bsp, (caddr_t) &btmp, sizeof btmp)))
+		return error;
+
+	bsd_to_linux_statfs64(&btmp, &ltmp);
+
+	return copyout((caddr_t) &ltmp, (caddr_t) SCARG(uap, sp), sizeof ltmp);
+}
+
 int
 linux_sys_fstatfs(p, v, retval)
 	struct proc *p;
@@ -474,6 +554,35 @@ linux_sys_fstatfs(p, v, retval)
 	return copyout((caddr_t) &ltmp, (caddr_t) SCARG(uap, sp), sizeof ltmp);
 }
 
+int
+linux_sys_fstatfs64(struct proc *p, void *v, register_t *retval)
+{
+	struct linux_sys_fstatfs64_args /* {
+		syscallarg(int) fd;
+		syscallarg(struct linux_statfs64 *) sp;
+	} */ *uap = v;
+	struct statfs btmp, *bsp;
+	struct linux_statfs64 ltmp;
+	struct sys_fstatfs_args bsa;
+	caddr_t sg;
+	int error;
+
+	sg = stackgap_init(p->p_emul);
+	bsp = (struct statfs *) stackgap_alloc(&sg, sizeof (struct statfs));
+
+	SCARG(&bsa, fd) = SCARG(uap, fd);
+	SCARG(&bsa, buf) = bsp;
+
+	if ((error = sys_fstatfs(p, &bsa, retval)))
+		return error;
+
+	if ((error = copyin((caddr_t) bsp, (caddr_t) &btmp, sizeof btmp)))
+		return error;
+
+	bsd_to_linux_statfs64(&btmp, &ltmp);
+
+	return copyout((caddr_t) &ltmp, (caddr_t) SCARG(uap, sp), sizeof ltmp);
+}
 /*
  * uname(). Just copy the info from the various strings stored in the
  * kernel, and put it in the Linux utsname structure. That structure
@@ -744,17 +853,16 @@ linux_sys_times(p, v, retval)
 	struct linux_sys_times_args /* {
 		syscallarg(struct times *) tms;
 	} */ *uap = v;
-	struct timeval t;
+	struct timeval t, ut, st;
 	struct linux_tms ltms;
-	struct rusage ru;
 	int error;
 
-	calcru(p, &ru.ru_utime, &ru.ru_stime, NULL);
-	ltms.ltms_utime = CONVTCK(ru.ru_utime);
-	ltms.ltms_stime = CONVTCK(ru.ru_stime);
+	calcru(&p->p_p->ps_tu, &ut, &st, NULL);
+	ltms.ltms_utime = CONVTCK(ut);
+	ltms.ltms_stime = CONVTCK(st);
 
-	ltms.ltms_cutime = CONVTCK(p->p_stats->p_cru.ru_utime);
-	ltms.ltms_cstime = CONVTCK(p->p_stats->p_cru.ru_stime);
+	ltms.ltms_cutime = CONVTCK(p->p_p->ps_cru.ru_utime);
+	ltms.ltms_cstime = CONVTCK(p->p_p->ps_cru.ru_stime);
 
 	if ((error = copyout(&ltms, SCARG(uap, tms), sizeof ltms)))
 		return error;
@@ -778,18 +886,20 @@ linux_sys_alarm(p, v, retval)
 	struct linux_sys_alarm_args /* {
 		syscallarg(unsigned int) secs;
 	} */ *uap = v;
-	int s;
+	struct process *pr;
 	struct itimerval *itp, it;
 	struct timeval tv;
+	int s;
 	int timo;
 
-	itp = &p->p_realtimer;
+	pr = p->p_p;
+	itp = &pr->ps_timer[ITIMER_REAL];
 	s = splclock();
 	/*
 	 * Clear any pending timer alarms.
 	 */
 	getmicrouptime(&tv);
-	timeout_del(&p->p_realit_to);
+	timeout_del(&pr->ps_realit_to);
 	timerclear(&itp->it_interval);
 	if (timerisset(&itp->it_value) &&
 	    timercmp(&itp->it_value, &tv, >))
@@ -816,7 +926,7 @@ linux_sys_alarm(p, v, retval)
 	timerclear(&it.it_interval);
 	it.it_value.tv_sec = SCARG(uap, secs);
 	it.it_value.tv_usec = 0;
-	if (itimerfix(&it.it_value) || itimerfix(&it.it_interval)) {
+	if (itimerfix(&it.it_value)) {
 		splx(s);
 		return (EINVAL);
 	}
@@ -824,9 +934,9 @@ linux_sys_alarm(p, v, retval)
 	if (timerisset(&it.it_value)) {
 		timo = tvtohz(&it.it_value);
 		timeradd(&it.it_value, &tv, &it.it_value);
-		timeout_add(&p->p_realit_to, timo);
+		timeout_add(&pr->ps_realit_to, timo);
 	}
-	p->p_realtimer = it;
+	pr->ps_timer[ITIMER_REAL] = it;
 	splx(s);
 
 	return 0;
@@ -1022,7 +1132,7 @@ getdents_common(p, v, retval, is64bit)
 	if (nbytes == 1) {	/* emulating old, broken behaviour */
 		/* readdir(2) case. Always struct dirent. */
 		if (is64bit) {
-			FRELE(fp);
+			FRELE(fp, p);
 			return (EINVAL);
 		}
 		nbytes = sizeof(struct linux_dirent);
@@ -1042,7 +1152,7 @@ getdents_common(p, v, retval, is64bit)
 	*retval = nbytes - args.resid;
 
  exit:
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -1383,6 +1493,13 @@ linux_sys_getpid(p, v, retval)
 	return (0);
 }
 
+linux_pid_t
+linux_sys_gettid(struct proc *p, void *v, register_t *retval)
+{
+	*retval = p->p_pid + THREAD_PID_OFFSET;
+	return (0);
+}
+
 int
 linux_sys_getuid(p, v, retval)
 	struct proc *p;
@@ -1436,7 +1553,7 @@ linux_sys_sysinfo(p, v, retval)
 	si.bufferram = bufpages * PAGE_SIZE;
 	si.totalswap = uvmexp.swpages * PAGE_SIZE;
 	si.freeswap = (uvmexp.swpages - uvmexp.swpginuse) * PAGE_SIZE;
-	si.procs = nprocs;
+	si.procs = nthreads;
 	/* The following are only present in newer Linux kernels. */
 	si.totalbig = 0;
 	si.freebig = 0;

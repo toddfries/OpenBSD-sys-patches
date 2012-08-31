@@ -1,4 +1,4 @@
-/* $OpenBSD: pms.c,v 1.28 2012/03/05 18:42:55 shadchin Exp $ */
+/* $OpenBSD: pms.c,v 1.31 2012/07/22 18:28:36 shadchin Exp $ */
 /* $NetBSD: psm.c,v 1.11 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -1026,7 +1026,8 @@ pms_proc_synaptics(struct pms_softc *sc)
 	if (syn->wsmode == WSMOUSE_NATIVE) {
 		wsmouse_input(sc->sc_wsmousedev, buttons, x, y, z, w,
 		    WSMOUSE_INPUT_ABSOLUTE_X | WSMOUSE_INPUT_ABSOLUTE_Y |
-		    WSMOUSE_INPUT_ABSOLUTE_Z | WSMOUSE_INPUT_ABSOLUTE_W);
+		    WSMOUSE_INPUT_ABSOLUTE_Z | WSMOUSE_INPUT_ABSOLUTE_W |
+		    WSMOUSE_INPUT_SYNC);
 	} else {
 		dx = dy = 0;
 		if (z > SYNAPTICS_PRESSURE) {
@@ -1131,7 +1132,8 @@ pms_enable_alps(struct pms_softc *sc)
 	    pms_get_status(sc, resp) ||
 	    resp[0] != PMS_ALPS_MAGIC1 ||
 	    resp[1] != PMS_ALPS_MAGIC2 ||
-	    (resp[2] != PMS_ALPS_MAGIC3_1 && resp[2] != PMS_ALPS_MAGIC3_2))
+	    (resp[2] != PMS_ALPS_MAGIC3_1 && resp[2] != PMS_ALPS_MAGIC3_2 &&
+	    resp[2] != PMS_ALPS_MAGIC3_3))
 		return (0);
 
 	if (sc->alps == NULL) {
@@ -1280,7 +1282,7 @@ void
 pms_proc_alps(struct pms_softc *sc)
 {
 	struct alps_softc *alps = sc->alps;
-	int x, y, z, dx, dy;
+	int x, y, z, w, dx, dy;
 	u_int buttons;
 	int fin, ges;
 
@@ -1328,9 +1330,14 @@ pms_proc_alps(struct pms_softc *sc)
 		if (ges && fin && !alps->old_fin)
 			z = 0;
 
-		wsmouse_input(sc->sc_wsmousedev, buttons, x, y, z, 0,
+		/* Generate a width value corresponding to one finger */
+		if (z > 0)
+			w = 4;
+
+		wsmouse_input(sc->sc_wsmousedev, buttons, x, y, z, w,
 		    WSMOUSE_INPUT_ABSOLUTE_X | WSMOUSE_INPUT_ABSOLUTE_Y |
-		    WSMOUSE_INPUT_ABSOLUTE_Z);
+		    WSMOUSE_INPUT_ABSOLUTE_Z | WSMOUSE_INPUT_ABSOLUTE_W |
+		    WSMOUSE_INPUT_SYNC);
 
 		alps->old_fin = fin;
 	} else {

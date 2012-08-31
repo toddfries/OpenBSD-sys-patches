@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.78 2011/12/03 12:38:30 fgsch Exp $	*/
+/*	$OpenBSD: socket.h,v 1.81 2012/04/11 17:10:20 deraadt Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -66,7 +66,6 @@
 #define	SO_LINGER	0x0080		/* linger on close if data present */
 #define	SO_OOBINLINE	0x0100		/* leave received OOB data in line */
 #define	SO_REUSEPORT	0x0200		/* allow local address & port reuse */
-#define SO_JUMBO	0x0400		/* try to use jumbograms */
 #define SO_TIMESTAMP	0x0800		/* timestamp received dgram traffic */
 #define SO_BINDANY	0x1000		/* allow bind to any address */
 
@@ -244,18 +243,6 @@ struct sockproto {
 #define	SHUT_WR		1
 #define	SHUT_RDWR	2
 
-/*
- * Socket credentials.
- */
-struct sockcred {
-	uid_t	sc_uid;			/* real user id */
-	uid_t	sc_euid;		/* effective user id */
-	gid_t	sc_gid;			/* real group id */
-	gid_t	sc_egid;		/* effective group id */
-	int	sc_ngroups;		/* number of supplemental groups */
-	gid_t	sc_groups[1];		/* variable length */
-};
-
 #if __BSD_VISIBLE
 /* Read using getsockopt() with SOL_SOCKET, SO_PEERCRED */
 struct sockpeercred {
@@ -264,12 +251,6 @@ struct sockpeercred {
 	pid_t		pid;
 };
 #endif /* __BSD_VISIBLE */
-
-/*
- * Compute size of a sockcred structure with groups.
- */
-#define SOCKCREDSIZE(ngrps) \
-	(sizeof(struct sockcred) + (sizeof(gid_t) * ((ngrps) - 1)))
 
 /*
  * Definitions for network related sysctl, CTL_NET.
@@ -461,7 +442,6 @@ struct cmsghdr {
 
 /* "Socket"-level control message types: */
 #define	SCM_RIGHTS	0x01		/* access rights (array of int) */
-#define SCM_CREDS	0x02		/* credentials (struct sockcred) */
 #define	SCM_TIMESTAMP	0x04		/* timestamp (struct timeval) */
 
 /*
@@ -470,18 +450,6 @@ struct cmsghdr {
 struct osockaddr {
 	unsigned short	sa_family;	/* address family */
 	char		sa_data[14];	/* up to 14 bytes of direct address */
-};
-
-/*
- * 4.3-compat message header (move to compat file later).
- */
-struct omsghdr {
-	caddr_t	msg_name;		/* optional address */
-	int	msg_namelen;		/* size of address */
-	struct	iovec *msg_iov;		/* scatter/gather array */
-	int	msg_iovlen;		/* # elements in msg_iov */
-	caddr_t	msg_accrights;		/* access rights sent/received */
-	int	msg_accrightslen;
 };
 
 #define SA_LEN(x) ((x)->sa_len)

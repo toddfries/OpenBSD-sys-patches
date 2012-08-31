@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.72 2011/06/24 19:47:48 naddy Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.83 2012/07/14 19:50:11 miod Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -100,8 +100,6 @@
 #define	SP_SPECIAL		2UL	/* Memory Special space */
 #define	SP_NC			3UL	/* Memory Uncached space */
 
-extern vaddr_t uncached_base;
-
 #define	XKSSSEG_BASE		0x4000000000000000UL
 #define	XKPHYS_BASE		0x8000000000000000UL
 #define	XKSSEG_BASE		0xc000000000000000UL
@@ -110,7 +108,6 @@ extern vaddr_t uncached_base;
 #define	PHYS_TO_XKPHYS(x,c)	((paddr_t)(x) | XKPHYS_BASE | ((c) << 59))
 #define	PHYS_TO_XKPHYS_UNCACHED(x,s) \
 	(PHYS_TO_XKPHYS(x, CCA_NC) | ((s) << 57))
-#define	PHYS_TO_UNCACHED(x)	((paddr_t)(x) | uncached_base)
 #define	IS_XKPHYS(va)		(((va) >> 62) == 2)
 #define	XKPHYS_TO_CCA(x)	(((x) >> 59) & 0x07)
 #define	XKPHYS_TO_SP(x)		(((x) >> 57) & 0x03)
@@ -213,10 +210,10 @@ extern vaddr_t uncached_base;
  * Location of exception vectors.
  */
 #define	RESET_EXC_VEC		(CKSEG1_BASE + 0x1fc00000)
-#define	TLB_MISS_EXC_VEC	(CKSEG0_BASE + 0x00000000)
-#define	XTLB_MISS_EXC_VEC	(CKSEG0_BASE + 0x00000080)
-#define	CACHE_ERR_EXC_VEC	(CKSEG0_BASE + 0x00000100)
-#define	GEN_EXC_VEC		(CKSEG0_BASE + 0x00000180)
+#define	TLB_MISS_EXC_VEC	(CKSEG1_BASE + 0x00000000)
+#define	XTLB_MISS_EXC_VEC	(CKSEG1_BASE + 0x00000080)
+#define	CACHE_ERR_EXC_VEC	(CKSEG1_BASE + 0x00000100)
+#define	GEN_EXC_VEC		(CKSEG1_BASE + 0x00000180)
 
 /*
  * Coprocessor 0 registers:
@@ -267,6 +264,15 @@ extern vaddr_t uncached_base;
 #define COP_0_CVMCTL		$9, 7
 #define COP_0_CVMMEMCTL		$11, 7
 #define COP_0_EBASE		$15, 1
+
+/*
+ * COP_0_COUNT speed divider.
+ */
+#if defined(CPU_OCTEON)
+#define CP0_CYCLE_DIVIDER       1
+#else
+#define CP0_CYCLE_DIVIDER       2
+#endif
 
 /*
  * Values for the code field in a break instruction.
@@ -368,7 +374,20 @@ struct cpu_info {
 	uint		ci_l1datacacheline;
 	uint		ci_l1datacacheset;
 	uint		ci_l2size;
+	uint		ci_l2line;
 	uint		ci_l3size;
+
+	/* function pointers for the cache handling routines */
+	void		(*ci_SyncCache)(struct cpu_info *);
+	void		(*ci_InvalidateICache)(struct cpu_info *, vaddr_t,
+			    size_t);
+	void		(*ci_SyncDCachePage)(struct cpu_info *, vaddr_t,
+			    paddr_t);
+	void		(*ci_HitSyncDCache)(struct cpu_info *, vaddr_t, size_t);
+	void		(*ci_HitInvalidateDCache)(struct cpu_info *, vaddr_t,
+			    size_t);
+	void		(*ci_IOSyncDCache)(struct cpu_info *, vaddr_t, size_t,
+			    int);
 
 	struct schedstate_percpu
 			ci_schedstate;
@@ -448,7 +467,8 @@ void	smp_rendezvous_cpus(unsigned long, void (*)(void *), void *arg);
 #define get_cpu_info(i)			(&cpu_info_primary)
 #endif
 
-void cpu_startclock(struct cpu_info *);
+extern void (*md_startclock)(struct cpu_info *);
+void	cp0_calibrate(struct cpu_info *);
 
 #include <machine/frame.h>
 
@@ -550,55 +570,23 @@ void cpu_startclock(struct cpu_info *);
 
 #if defined(_KERNEL) && !defined(_LOCORE)
 
-extern vaddr_t CpuCacheAliasMask;
-
 struct exec_package;
 struct tlb_entry;
 struct user;
 
 u_int	cp0_get_count(void);
 uint32_t cp0_get_config(void);
+uint32_t cp0_get_config_1(void);
+uint32_t cp0_get_config_2(void);
+uint32_t cp0_get_config_3(void);
 uint32_t cp0_get_prid(void);
 void	cp0_set_compare(u_int);
+void	cp0_set_config(uint32_t);
 u_int	cp1_get_prid(void);
+u_int	tlb_get_pid(void);
 void	tlb_set_page_mask(uint32_t);
-void	tlb_set_pid(int);
+void	tlb_set_pid(u_int);
 void	tlb_set_wired(int);
-
-/*
- * Available cache operation routines. See <machine/cpu.h> for more.
- */
-int	Octeon_ConfigCache(struct cpu_info *);
-void	Octeon_SyncCache(struct cpu_info *);
-void	Octeon_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
-void	Octeon_SyncDCachePage(struct cpu_info *, paddr_t);
-void	Octeon_HitSyncDCache(struct cpu_info *, paddr_t, size_t);
-void	Octeon_HitInvalidateDCache(struct cpu_info *, paddr_t, size_t);
-void	Octeon_IOSyncDCache(struct cpu_info *, paddr_t, size_t, int);
-
-int	Loongson2_ConfigCache(struct cpu_info *);
-void	Loongson2_SyncCache(struct cpu_info *);
-void	Loongson2_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
-void	Loongson2_SyncDCachePage(struct cpu_info *, paddr_t);
-void	Loongson2_HitSyncDCache(struct cpu_info *, paddr_t, size_t);
-void	Loongson2_HitInvalidateDCache(struct cpu_info *, paddr_t, size_t);
-void	Loongson2_IOSyncDCache(struct cpu_info *, paddr_t, size_t, int);
-
-int	Mips5k_ConfigCache(struct cpu_info *);
-void	Mips5k_SyncCache(struct cpu_info *);
-void	Mips5k_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
-void	Mips5k_SyncDCachePage(struct cpu_info *, vaddr_t);
-void	Mips5k_HitSyncDCache(struct cpu_info *, vaddr_t, size_t);
-void	Mips5k_HitInvalidateDCache(struct cpu_info *, vaddr_t, size_t);
-void	Mips5k_IOSyncDCache(struct cpu_info *, vaddr_t, size_t, int);
-
-int	Mips10k_ConfigCache(struct cpu_info *);
-void	Mips10k_SyncCache(struct cpu_info *);
-void	Mips10k_InvalidateICache(struct cpu_info *, vaddr_t, size_t);
-void	Mips10k_SyncDCachePage(struct cpu_info *, vaddr_t);
-void	Mips10k_HitSyncDCache(struct cpu_info *, vaddr_t, size_t);
-void	Mips10k_HitInvalidateDCache(struct cpu_info *, vaddr_t, size_t);
-void	Mips10k_IOSyncDCache(struct cpu_info *, vaddr_t, size_t, int);
 
 void	tlb_flush(int);
 void	tlb_flush_addr(vaddr_t);
@@ -607,6 +595,7 @@ int	tlb_update(vaddr_t, unsigned);
 void	tlb_read(int, struct tlb_entry *);
 
 void	build_trampoline(vaddr_t, vaddr_t);
+void	cpu_switchto_asm(struct proc *, struct proc *);
 int	exec_md_map(struct proc *, struct exec_package *);
 void	savectx(struct user *, int);
 
@@ -614,7 +603,13 @@ void	enable_fpu(struct proc *);
 void	save_fpu(void);
 int	fpe_branch_emulate(struct proc *, struct trap_frame *, uint32_t,
 	    vaddr_t);
+void	MipsSaveCurFPState(struct proc *);
+void	MipsSaveCurFPState16(struct proc *);
+void	MipsSwitchFPState(struct proc *, struct trap_frame *);
+void	MipsSwitchFPState16(struct proc *, struct trap_frame *);
 
+int	guarded_read_1(paddr_t, uint8_t *);
+int	guarded_read_2(paddr_t, uint16_t *);
 int	guarded_read_4(paddr_t, uint32_t *);
 int	guarded_write_4(paddr_t, uint32_t);
 
@@ -622,7 +617,7 @@ void	MipsFPTrap(struct trap_frame *);
 register_t MipsEmulateBranch(struct trap_frame *, vaddr_t, uint32_t, uint32_t);
 
 /*
- *  Low level access routines to CPU registers
+ * Low level access routines to CPU registers
  */
 
 void	setsoftintr0(void);
@@ -634,5 +629,34 @@ uint32_t disableintr(void);
 uint32_t getsr(void);
 uint32_t setsr(uint32_t);
 
+/*
+ * Cache routines (may be overriden)
+ */
+
+#ifndef	Mips_SyncCache
+#define	Mips_SyncCache(ci) \
+	((ci)->ci_SyncCache)(ci)
+#endif
+#ifndef	Mips_InvalidateICache
+#define	Mips_InvalidateICache(ci, va, l) \
+	((ci)->ci_InvalidateICache)(ci, va, l)
+#endif
+#ifndef	Mips_SyncDCachePage
+#define	Mips_SyncDCachePage(ci, va, pa) \
+	((ci)->ci_SyncDCachePage)(ci, va, pa)
+#endif
+#ifndef	Mips_HitSyncDCache
+#define	Mips_HitSyncDCache(ci, va, l) \
+	((ci)->ci_HitSyncDCache)(ci, va, l)
+#endif
+#ifndef	Mips_HitInvalidateDCache
+#define	Mips_HitInvalidateDCache(ci, va, l) \
+	((ci)->ci_HitInvalidateDCache)(ci, va, l)
+#endif
+#ifndef	Mips_IOSyncDCache
+#define	Mips_IOSyncDCache(ci, va, l, h) \
+	((ci)->ci_IOSyncDCache)(ci, va, l, h)
+#endif
+ 
 #endif /* _KERNEL && !_LOCORE */
 #endif /* !_MIPS64_CPU_H_ */

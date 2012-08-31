@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.108 2012/03/10 05:54:28 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.118 2012/08/02 03:18:48 guenther Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -120,6 +120,7 @@ void
 exit1(struct proc *p, int rv, int flags)
 {
 	struct process *pr, *qr, *nqr;
+	struct rusage *rup;
 
 	if (p->p_pid == 1)
 		panic("init died (signal %d, exit %d)",
@@ -137,6 +138,8 @@ exit1(struct proc *p, int rv, int flags)
 		/* nope, multi-threaded */
 		if (flags == EXIT_NORMAL)
 			single_thread_set(p, SINGLE_EXIT, 0);
+		else if (flags == EXIT_THREAD)
+			single_thread_check(p, 0);
 	}
 
 	if (flags == EXIT_NORMAL) {
@@ -161,16 +164,23 @@ exit1(struct proc *p, int rv, int flags)
 		/* main thread gotta wait because it has the pid, et al */
 		while (! TAILQ_EMPTY(&pr->ps_threads))
 			tsleep(&pr->ps_threads, PUSER, "thrdeath", 0);
+		if (pr->ps_flags & PS_PROFIL)
+			stopprofclock(pr);
 	} else if (TAILQ_EMPTY(&pr->ps_threads))
 		wakeup(&pr->ps_threads);
 
-	if (p->p_flag & P_PROFIL)
-		stopprofclock(p);
-	p->p_ru = pool_get(&rusage_pool, PR_WAITOK);
+	rup = pr->ps_ru;
+	if (rup == NULL) {
+		rup = pool_get(&rusage_pool, PR_WAITOK | PR_ZERO);
+
+		if (pr->ps_ru == NULL)
+			pr->ps_ru = rup;
+		else {
+			pool_put(&rusage_pool, rup);
+			rup = pr->ps_ru;
+		}
+	}
 	p->p_siglist = 0;
-	timeout_del(&p->p_realit_to);
-	timeout_del(&p->p_stats->p_virt_to);
-	timeout_del(&p->p_stats->p_prof_to);
 
 	/*
 	 * Close open files and release open-file table.
@@ -178,6 +188,9 @@ exit1(struct proc *p, int rv, int flags)
 	fdfree(p);
 
 	if ((p->p_flag & P_THREAD) == 0) {
+		timeout_del(&pr->ps_realit_to);
+		timeout_del(&pr->ps_virt_to);
+		timeout_del(&pr->ps_prof_to);
 #ifdef SYSVSEM
 		semexit(pr);
 #endif
@@ -233,6 +246,13 @@ exit1(struct proc *p, int rv, int flags)
 	if (ISSET(p->p_flag, P_SYSTRACE))
 		systrace_exit(p);
 #endif
+
+	/*
+	 * If emulation has process exit hook, call it now.
+	 */
+	if (p->p_emul->e_proc_exit)
+		(*p->p_emul->e_proc_exit)(p);
+
         /*
          * Remove proc from pidhash chain so looking it up won't
          * work.  Move it from allproc to zombproc, but do not yet
@@ -265,19 +285,23 @@ exit1(struct proc *p, int rv, int flags)
 			 */
 			if (qr->ps_flags & PS_TRACED) {
 				atomic_clearbits_int(&qr->ps_flags, PS_TRACED);
-				prsignal(qr, SIGKILL);
+				/*
+				 * If single threading is active,
+				 * direct the signal to the active
+				 * thread to avoid deadlock.
+				 */
+				if (qr->ps_single)
+					ptsignal(qr->ps_single, SIGKILL,
+					    STHREAD);
+				else
+					prsignal(qr, SIGKILL);
 			}
 		}
 	}
 
 
-	/*
-	 * Save exit status and final rusage info, adding in child rusage
-	 * info and self times.
-	 */
-	*p->p_ru = p->p_stats->p_ru;
-	calcru(p, &p->p_ru->ru_utime, &p->p_ru->ru_stime, NULL);
-	ruadd(p->p_ru, &p->p_stats->p_cru);
+	/* add thread's accumulated rusage into the process's total */
+	ruadd(rup, &p->p_ru);
 
 	/*
 	 * clear %cpu usage during swap
@@ -285,8 +309,15 @@ exit1(struct proc *p, int rv, int flags)
 	p->p_pctcpu = 0;
 
 	if ((p->p_flag & P_THREAD) == 0) {
-		/* notify interested parties of our demise */
-		KNOTE(&pr->ps_klist, NOTE_EXIT);
+		/*
+		 * Final thread has died, so add on our children's rusage
+		 * and calculate the total times
+		 */
+		calcru(&pr->ps_tu, &rup->ru_utime, &rup->ru_stime, NULL);
+		ruadd(rup, &pr->ps_cru);
+
+		/* notify interested parties of our demise and clean up */
+		knote_processexit(pr);
 
 		/*
 		 * Notify parent that we're gone.  If we have P_NOZOMBIE
@@ -316,12 +347,6 @@ exit1(struct proc *p, int rv, int flags)
 	/*
 	 * Other substructures are freed from reaper and wait().
 	 */
-
-	/*
-	 * If emulation has process exit hook, call it now.
-	 */
-	if (p->p_emul->e_proc_exit)
-		(*p->p_emul->e_proc_exit)(p);
 
 	/*
 	 * Finally, call machine-dependent code to switch to a new
@@ -468,17 +493,33 @@ loop:
 					return (error);
 			}
 			if (SCARG(uap, rusage) &&
-			    (error = copyout(p->p_ru,
+			    (error = copyout(pr->ps_ru,
 			    SCARG(uap, rusage), sizeof(struct rusage))))
 				return (error);
 			proc_finish_wait(q, p);
 			return (0);
 		}
+		if (pr->ps_flags & PS_TRACED &&
+		    (pr->ps_flags & PS_WAITED) == 0 && pr->ps_single &&
+		    pr->ps_single->p_stat == SSTOP &&
+		    (pr->ps_single->p_flag & P_SUSPSINGLE) == 0) {
+			atomic_setbits_int(&pr->ps_flags, PS_WAITED);
+			retval[0] = p->p_pid;
+
+			if (SCARG(uap, status)) {
+				status = W_STOPCODE(pr->ps_single->p_xstat);
+				error = copyout(&status, SCARG(uap, status),
+				    sizeof(status));
+			} else
+				error = 0;
+			return (error);
+		}
 		if (p->p_stat == SSTOP &&
-		    (p->p_flag & (P_WAITED|P_SUSPSINGLE)) == 0 &&
+		    (pr->ps_flags & PS_WAITED) == 0 &&
+		    (p->p_flag & P_SUSPSINGLE) == 0 &&
 		    (pr->ps_flags & PS_TRACED ||
 		    SCARG(uap, options) & WUNTRACED)) {
-			atomic_setbits_int(&p->p_flag, P_WAITED);
+			atomic_setbits_int(&pr->ps_flags, PS_WAITED);
 			retval[0] = p->p_pid;
 
 			if (SCARG(uap, status)) {
@@ -517,6 +558,7 @@ void
 proc_finish_wait(struct proc *waiter, struct proc *p)
 {
 	struct process *pr, *tr;
+	struct rusage *rup;
 
 	/*
 	 * If we got the child via a ptrace 'attach',
@@ -534,7 +576,8 @@ proc_finish_wait(struct proc *waiter, struct proc *p)
 	} else {
 		scheduler_wait_hook(waiter, p);
 		p->p_xstat = 0;
-		ruadd(&waiter->p_stats->p_cru, p->p_ru);
+		rup = &waiter->p_p->ps_cru;
+		ruadd(rup, pr->ps_ru);
 		proc_zap(p);
 	}
 }
@@ -562,10 +605,6 @@ proc_zap(struct proc *p)
 {
 	struct process *pr = p->p_p;
 
-	pool_put(&rusage_pool, p->p_ru);
-	if ((p->p_flag & P_THREAD) == 0 && pr->ps_ptstat)
-		free(pr->ps_ptstat, M_SUBPROC);
-
 	/*
 	 * Finally finished with old proc entry.
 	 * Unlink it from its process group and free it.
@@ -573,13 +612,14 @@ proc_zap(struct proc *p)
 	if ((p->p_flag & P_THREAD) == 0)
 		leavepgrp(pr);
 	LIST_REMOVE(p, p_list);	/* off zombproc */
-	if ((p->p_flag & P_THREAD) == 0)
+	if ((p->p_flag & P_THREAD) == 0) {
 		LIST_REMOVE(pr, ps_sibling);
 
-	/*
-	 * Decrement the count of procs running with this uid.
-	 */
-	(void)chgproccnt(p->p_cred->p_ruid, -1);
+		/*
+		 * Decrement the count of procs running with this uid.
+		 */
+		(void)chgproccnt(p->p_cred->p_ruid, -1);
+	}
 
 	/*
 	 * Release reference to text vnode
@@ -592,13 +632,17 @@ proc_zap(struct proc *p)
 	 * in the process (pun intended).
 	 */
 	if (--pr->ps_refcnt == 0) {
+		if (pr->ps_ptstat != NULL)
+			free(pr->ps_ptstat, M_SUBPROC);
+		pool_put(&rusage_pool, pr->ps_ru);
 		KASSERT(TAILQ_EMPTY(&pr->ps_threads));
 		limfree(pr->ps_limit);
 		crfree(pr->ps_cred->pc_ucred);
 		pool_put(&pcred_pool, pr->ps_cred);
 		pool_put(&process_pool, pr);
+		nprocesses--;
 	}
 
 	pool_put(&proc_pool, p);
-	nprocs--;
+	nthreads--;
 }

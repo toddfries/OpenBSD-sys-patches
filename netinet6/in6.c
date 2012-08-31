@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.96 2012/01/17 02:07:32 stsp Exp $	*/
+/*	$OpenBSD: in6.c,v 1.98 2012/07/14 17:23:16 sperreault Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -177,8 +177,7 @@ in6_ifloop_request(int cmd, struct ifaddr *ifa)
 		log(LOG_ERR, "in6_ifloop_request: "
 		    "%s operation failed for %s (errno=%d)\n",
 		    cmd == RTM_ADD ? "ADD" : "DELETE",
-		    ip6_sprintf(&((struct in6_ifaddr *)ifa)->ia_addr.sin6_addr),
-		    e);
+		    ip6_sprintf(&ifatoia6(ifa)->ia_addr.sin6_addr), e);
 	}
 
 	/*
@@ -323,9 +322,6 @@ in6_mask2len(struct in6_addr *mask, u_char *lim0)
 
 	return x * 8 + y;
 }
-
-#define ifa2ia6(ifa)	((struct in6_ifaddr *)(ifa))
-#define ia62ifa(ia6)	(&((ia6)->ia_ifa))
 
 int
 in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
@@ -720,45 +716,9 @@ in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 	}
 
 	case SIOCDIFADDR_IN6:
-	{
-		int i = 0, purgeprefix = 0;
-		struct nd_prefix pr0, *pr = NULL;
-
-		/*
-		 * If the address being deleted is the only one that owns
-		 * the corresponding prefix, expire the prefix as well.
-		 * XXX: theoretically, we don't have to worry about such
-		 * relationship, since we separate the address management
-		 * and the prefix management.  We do this, however, to provide
-		 * as much backward compatibility as possible in terms of
-		 * the ioctl operation.
-		 */
-		bzero(&pr0, sizeof(pr0));
-		pr0.ndpr_ifp = ifp;
-		pr0.ndpr_plen = in6_mask2len(&ia->ia_prefixmask.sin6_addr,
-		    NULL);
-		if (pr0.ndpr_plen == 128)
-			goto purgeaddr;
-		pr0.ndpr_prefix = ia->ia_addr;
-		pr0.ndpr_mask = ia->ia_prefixmask.sin6_addr;
-		for (i = 0; i < 4; i++) {
-			pr0.ndpr_prefix.sin6_addr.s6_addr32[i] &=
-			    ia->ia_prefixmask.sin6_addr.s6_addr32[i];
-		}
-		if ((pr = nd6_prefix_lookup(&pr0)) != NULL &&
-		    pr == ia->ia6_ndpr) {
-			pr->ndpr_refcnt--;
-			if (pr->ndpr_refcnt == 0)
-				purgeprefix = 1;
-		}
-
-	  purgeaddr:
 		in6_purgeaddr(&ia->ia_ifa);
-		if (pr && purgeprefix)
-			prelist_remove(pr);
 		dohooks(ifp->if_addrhooks, 0);
 		break;
-	}
 
 	default:
 		if (ifp == NULL || ifp->if_ioctl == 0)
@@ -1228,7 +1188,7 @@ void
 in6_purgeaddr(struct ifaddr *ifa)
 {
 	struct ifnet *ifp = ifa->ifa_ifp;
-	struct in6_ifaddr *ia = (struct in6_ifaddr *) ifa;
+	struct in6_ifaddr *ia = ifatoia6(ifa);
 	struct in6_multi_mship *imm;
 
 	/* stop DAD processing */
@@ -1296,21 +1256,18 @@ in6_unlink_ifa(struct in6_ifaddr *ia, struct ifnet *ifp)
 
 	/*
 	 * When an autoconfigured address is being removed, release the
-	 * reference to the base prefix.  Also, since the release might
-	 * affect the status of other (detached) addresses, call
-	 * pfxlist_onlink_check().
+	 * reference to the base prefix.
 	 */
 	if ((oia->ia6_flags & IN6_IFF_AUTOCONF) != 0) {
 		if (oia->ia6_ndpr == NULL) {
 			log(LOG_NOTICE, "in6_unlink_ifa: autoconf'ed address "
 			    "%p has no prefix\n", oia);
 		} else {
-			oia->ia6_ndpr->ndpr_refcnt--;
 			oia->ia6_flags &= ~IN6_IFF_AUTOCONF;
+			if (--oia->ia6_ndpr->ndpr_refcnt == 0)
+				prelist_remove(oia->ia6_ndpr);
 			oia->ia6_ndpr = NULL;
 		}
-
-		pfxlist_onlink_check();
 	}
 
 	/*
@@ -1511,7 +1468,7 @@ in6_lifaddr_ioctl(struct socket *so, u_long cmd, caddr_t data,
 		}
 		if (!ifa)
 			return EADDRNOTAVAIL;
-		ia = ifa2ia6(ifa);
+		ia = ifatoia6(ifa);
 
 		if (cmd == SIOCGLIFADDR) {
 			/* fill in the if_laddrreq structure */
@@ -1899,8 +1856,7 @@ in6ifa_ifpforlinklocal(struct ifnet *ifp, int ignoreflags)
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 		if (IN6_IS_ADDR_LINKLOCAL(IFA_IN6(ifa))) {
-			if ((((struct in6_ifaddr *)ifa)->ia6_flags &
-			     ignoreflags) != 0)
+			if ((ifatoia6(ifa)->ia6_flags & ignoreflags) != 0)
 				continue;
 			break;
 		}
@@ -2236,17 +2192,14 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst, u_int rdomain)
 			 * Don't use an address before completing DAD
 			 * nor a duplicated address.
 			 */
-			if (((struct in6_ifaddr *)ifa)->ia6_flags &
-			    IN6_IFF_NOTREADY)
+			if (ifatoia6(ifa)->ia6_flags & IN6_IFF_NOTREADY)
 				continue;
 
 			/* XXX: is there any case to allow anycasts? */
-			if (((struct in6_ifaddr *)ifa)->ia6_flags &
-			    IN6_IFF_ANYCAST)
+			if (ifatoia6(ifa)->ia6_flags & IN6_IFF_ANYCAST)
 				continue;
 
-			if (((struct in6_ifaddr *)ifa)->ia6_flags &
-			    IN6_IFF_DETACHED)
+			if (ifatoia6(ifa)->ia6_flags & IN6_IFF_DETACHED)
 				continue;
 
 			/*
@@ -2282,8 +2235,7 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst, u_int rdomain)
 			 * address is available and has sufficient scope.
 			 * RFC 2462, Section 5.5.4.
 			 */
-			if (((struct in6_ifaddr *)ifa)->ia6_flags &
-			    IN6_IFF_DEPRECATED) {
+			if (ifatoia6(ifa)->ia6_flags & IN6_IFF_DEPRECATED) {
 				/*
 				 * Ignore any deprecated addresses if
 				 * specified by configuration.
@@ -2306,7 +2258,7 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst, u_int rdomain)
 			 * address matching.
 			 */
 			if ((ifa_best->ia6_flags & IN6_IFF_DEPRECATED) &&
-			    (((struct in6_ifaddr *)ifa)->ia6_flags &
+			    (ifatoia6(ifa)->ia6_flags &
 			     IN6_IFF_DEPRECATED) == 0)
 				goto replace;
 
@@ -2392,14 +2344,14 @@ in6_ifawithscope(struct ifnet *oifp, struct in6_addr *dst, u_int rdomain)
 				/* Do not replace temporary autoconf addresses
 				 * with non-temporary addresses. */
 				if ((ifa_best->ia6_flags & IN6_IFF_PRIVACY) &&
-			            !(((struct in6_ifaddr *)ifa)->ia6_flags &
+			            !(ifatoia6(ifa)->ia6_flags &
 				    IN6_IFF_PRIVACY))
 					continue;
 
 				/* Replace non-temporary autoconf addresses
 				 * with temporary addresses. */
 				if (!(ifa_best->ia6_flags & IN6_IFF_PRIVACY) &&
-			            (((struct in6_ifaddr *)ifa)->ia6_flags &
+			            (ifatoia6(ifa)->ia6_flags &
 				    IN6_IFF_PRIVACY))
 					goto replace;
 			}
@@ -2461,7 +2413,7 @@ in6_if_up(struct ifnet *ifp)
 	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
-		ia = (struct in6_ifaddr *)ifa;
+		ia = ifatoia6(ifa);
 		if (ia->ia6_flags & IN6_IFF_TENTATIVE)
 			nd6_dad_start(ifa, &dad_delay);
 	}

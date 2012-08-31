@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.36 2011/10/06 20:49:27 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.38 2012/08/23 06:12:49 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1994, 1995 Charles M. Hannum.  All rights reserved.
@@ -52,7 +52,6 @@ bdev_decl(fd);
 #include "cd.h"
 #include "uk.h"
 #include "vnd.h"
-#include "raid.h"
 #include "rd.h"
 
 struct bdevsw	bdevsw[] =
@@ -76,7 +75,7 @@ struct bdevsw	bdevsw[] =
 	bdev_notdef(),			/* 16: was: concatenated disk driver */
 	bdev_disk_init(NRD,rd),		/* 17: ram disk driver */
 	bdev_lkm_dummy(),		/* 18 */
-	bdev_disk_init(NRAID,raid),	/* 19: RAIDframe disk driver */
+	bdev_notdef(),			/* 19 was: RAIDframe disk driver */
 };
 int	nblkdev = nitems(bdevsw);
 
@@ -148,10 +147,6 @@ cdev_decl(music);
 #include "bthub.h"
 #include "pctr.h"
 #include "iop.h"
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 #include "bktr.h"
 #include "ksyms.h"
 #include "usb.h"
@@ -245,14 +240,10 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_bktr_init(NBKTR,bktr),     /* 49: Bt848 video capture device */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 50: Kernel symbols device */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 	cdev_midi_init(NMIDI,midi),	/* 52: MIDI I/O */
 	cdev_midi_init(NSEQUENCER,sequencer),	/* 53: sequencer I/O */
-	cdev_disk_init(NRAID,raid),	/* 54: RAIDframe disk driver */
+	cdev_notdef(),			/* 54 was: RAIDframe disk driver */
 	cdev_notdef(),			/* 55: */
 	/* The following slots are reserved for isdn4bsd. */
 	cdev_notdef(),			/* 56: i4b main device */

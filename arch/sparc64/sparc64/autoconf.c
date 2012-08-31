@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.114 2011/07/17 22:46:47 matthew Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.117 2012/08/29 20:33:16 kettenis Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.51 2001/07/24 19:32:11 eeh Exp $ */
 
 /*
@@ -343,6 +343,23 @@ bootstrap(nctx)
 
 		cacheinfo.c_dcache_flush_page = no_dcache_flush_page;
 	}
+
+#ifdef MULTIPROCESSOR
+	if (impl >= IMPL_OLYMPUS_C && impl <= IMPL_JUPITER) {
+		struct sun4u_patch {
+			u_int32_t addr;
+			u_int32_t insn;
+		} *p;
+
+		extern struct sun4u_patch sun4u_mtp_patch;
+		extern struct sun4u_patch sun4u_mtp_patch_end;
+
+		for (p = &sun4u_mtp_patch; p < &sun4u_mtp_patch_end; p++) {
+			*(u_int32_t *)(vaddr_t)p->addr = p->insn;
+			flush((void *)(vaddr_t)p->addr);
+		}
+	}
+#endif
 
 #ifdef SUN4V
 	if (CPU_ISSUN4V) {
@@ -1361,11 +1378,11 @@ device_register(struct device *dev, void *aux)
 	}
 
 	if (strcmp(devname, "scsibus") == 0) {
-		struct scsibus_attach_args *saa = aux;
-		struct scsi_link *sl = saa->saa_sc_link;
-
-		if (strcmp(bp->name, "fp") == 0 &&
-		    bp->val[0] == sl->scsibus) {
+		/*
+		 * Booting from anything but the first (physical) port
+		 * isn't supported by OBP.
+		 */
+		if (strcmp(bp->name, "fp") == 0 && bp->val[0] == 0) {
 			DPRINTF(ACDB_BOOTDEV, ("\t-- matched component %s to %s\n",
 			    bp->name, dev->dv_xname));
 			bootpath_store(1, bp + 1);

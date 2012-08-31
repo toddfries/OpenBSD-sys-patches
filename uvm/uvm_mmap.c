@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_mmap.c,v 1.88 2012/03/09 13:01:29 ariane Exp $	*/
+/*	$OpenBSD: uvm_mmap.c,v 1.91 2012/07/21 06:46:58 matthew Exp $	*/
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -154,7 +154,7 @@ sys_mquery(struct proc *p, void *v, register_t *retval)
 		*retval = (register_t)(vaddr);
 
 	if (fp != NULL)
-		FRELE(fp);
+		FRELE(fp, p);
 	return (error);
 }
 
@@ -362,6 +362,10 @@ sys_mmap(struct proc *p, void *v, register_t *retval)
 		flags = (flags & ~MAP_COPY) | MAP_PRIVATE;
 	if ((flags & (MAP_SHARED|MAP_PRIVATE)) == (MAP_SHARED|MAP_PRIVATE))
 		return (EINVAL);
+	if ((flags & (MAP_FIXED|__MAP_NOREPLACE)) == __MAP_NOREPLACE)
+		return (EINVAL);
+	if (size == 0)
+		return (EINVAL);
 
 	/*
 	 * align file position and save offset.  adjust size.
@@ -419,7 +423,7 @@ sys_mmap(struct proc *p, void *v, register_t *retval)
 		/* special case: catch SunOS style /dev/zero */
 		if (vp->v_type == VCHR && iszerodev(vp->v_rdev)) {
 			flags |= MAP_ANON;
-			FRELE(fp);
+			FRELE(fp, p);
 			fp = NULL;
 			goto is_anon;
 		}
@@ -536,7 +540,7 @@ sys_mmap(struct proc *p, void *v, register_t *retval)
 
 out:
 	if (fp)
-		FRELE(fp);	
+		FRELE(fp, p);	
 	return (error);
 }
 
@@ -992,8 +996,10 @@ uvm_mmap(vm_map_t map, vaddr_t *addr, vsize_t size, vm_prot_t prot,
 	} else {
 		if (*addr & PAGE_MASK)
 			return(EINVAL);
+
 		uvmflag |= UVM_FLAG_FIXED;
-		uvm_unmap(map, *addr, *addr + size);	/* zap! */
+		if ((flags & __MAP_NOREPLACE) == 0)
+			uvm_unmap(map, *addr, *addr + size);	/* zap! */
 	}
 
 	/*

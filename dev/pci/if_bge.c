@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.307 2011/06/22 16:44:27 tedu Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.311 2012/07/04 13:24:41 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -241,13 +241,9 @@ const struct pci_matchid bge_devices[] = {
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5715S },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5717 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5718 },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5720 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5721 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5722 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5723 },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5724 },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5750 },
-	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5750M },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5751 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5751F },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5751M },
@@ -1865,8 +1861,7 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 
 	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_USE_PRODID_REG) {
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5717 ||
-		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5718 ||
-		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5724)
+		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5718)
 			sc->bge_chipid = pci_conf_read(pc, pa->pa_tag,
 			    BGE_PCI_GEN2_PRODID_ASICREV);
 		else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM57761 ||
@@ -1996,6 +1991,8 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	      PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5753F ||
 	      PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM5787F)) ||
 	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM57790 ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM57791 ||
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_BROADCOM_BCM57795 ||
 	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5906)
 		sc->bge_flags |= BGE_10_100_ONLY;
 
@@ -2211,11 +2208,10 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	/* The SysKonnect SK-9D41 is a 1000baseSX card. */
 	if (PCI_PRODUCT(subid) == SK_SUBSYSID_9D41 ||
 	    (hwcfg & BGE_HWCFG_MEDIA) == BGE_MEDIA_FIBER) {
-		if (BGE_IS_5714_FAMILY(sc) ||
-		    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5717)
-		    sc->bge_flags |= BGE_PHY_FIBER_MII;
-		else
+		if (BGE_IS_5700_FAMILY(sc))
 		    sc->bge_flags |= BGE_PHY_FIBER_TBI;
+		else
+		    sc->bge_flags |= BGE_PHY_FIBER_MII;
 	}
 
 	/* Hookup IRQ last. */

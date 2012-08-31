@@ -1,4 +1,4 @@
-/*	$OpenBSD: rt2560.c,v 1.58 2011/02/22 20:05:03 kettenis Exp $  */
+/*	$OpenBSD: rt2560.c,v 1.60 2012/07/13 10:08:15 stsp Exp $  */
 
 /*-
  * Copyright (c) 2005, 2006
@@ -995,9 +995,14 @@ rt2560_tx_intr(struct rt2560_softc *sc)
 		sc->txq.next = (sc->txq.next + 1) % RT2560_TX_RING_COUNT;
 	}
 
-	sc->sc_tx_timer = 0;
-	ifp->if_flags &= ~IFF_OACTIVE;
-	rt2560_start(ifp);
+	if (sc->txq.queued == 0 && sc->prioq.queued == 0)
+		sc->sc_tx_timer = 0;
+	if (sc->txq.queued < RT2560_TX_RING_COUNT - 1) {
+		sc->sc_flags &= ~RT2560_DATA_OACTIVE;
+		if (!(sc->sc_flags & (RT2560_DATA_OACTIVE|RT2560_PRIO_OACTIVE)))
+			ifp->if_flags &= ~IFF_OACTIVE;
+		rt2560_start(ifp);
+	}
 }
 
 void
@@ -1061,9 +1066,14 @@ rt2560_prio_intr(struct rt2560_softc *sc)
 		sc->prioq.next = (sc->prioq.next + 1) % RT2560_PRIO_RING_COUNT;
 	}
 
-	sc->sc_tx_timer = 0;
-	ifp->if_flags &= ~IFF_OACTIVE;
-	rt2560_start(ifp);
+	if (sc->txq.queued == 0 && sc->prioq.queued == 0)
+		sc->sc_tx_timer = 0;
+	if (sc->prioq.queued < RT2560_PRIO_RING_COUNT) {
+		sc->sc_flags &= ~RT2560_PRIO_OACTIVE;
+		if (!(sc->sc_flags & (RT2560_DATA_OACTIVE|RT2560_PRIO_OACTIVE)))
+			ifp->if_flags &= ~IFF_OACTIVE;
+		rt2560_start(ifp);
+	}
 }
 
 /*
@@ -1931,6 +1941,7 @@ rt2560_start(struct ifnet *ifp)
 		if (m0 != NULL) {
 			if (sc->prioq.queued >= RT2560_PRIO_RING_COUNT) {
 				ifp->if_flags |= IFF_OACTIVE;
+				sc->sc_flags |= RT2560_PRIO_OACTIVE;
 				break;
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
@@ -1952,6 +1963,7 @@ rt2560_start(struct ifnet *ifp)
 				break;
 			if (sc->txq.queued >= RT2560_TX_RING_COUNT - 1) {
 				ifp->if_flags |= IFF_OACTIVE;
+				sc->sc_flags |= RT2560_DATA_OACTIVE;
 				break;
 			}
 			IFQ_DEQUEUE(&ifp->if_snd, m0);
@@ -2101,6 +2113,16 @@ rt2560_bbp_read(struct rt2560_softc *sc, uint8_t reg)
 {
 	uint32_t val;
 	int ntries;
+
+	for (ntries = 0; ntries < 100; ntries++) {
+		if (!(RAL_READ(sc, RT2560_BBPCSR) & RT2560_BBP_BUSY))
+			break;
+		DELAY(1);
+	}
+	if (ntries == 100) {
+		printf("%s: could not read from BBP\n", sc->sc_dev.dv_xname);
+		return 0;
+	}
 
 	val = RT2560_BBP_BUSY | reg << 8;
 	RAL_WRITE(sc, RT2560_BBPCSR, val);
@@ -2626,8 +2648,6 @@ rt2560_init(struct ifnet *ifp)
 	/* set basic rate set (will be updated later) */
 	RAL_WRITE(sc, RT2560_ARSP_PLCP_1, 0x153);
 
-	rt2560_set_txantenna(sc, 1);
-	rt2560_set_rxantenna(sc, 1);
 	rt2560_set_slottime(sc);
 	rt2560_update_plcp(sc);
 	rt2560_update_led(sc, 0, 0);
@@ -2639,6 +2659,9 @@ rt2560_init(struct ifnet *ifp)
 		rt2560_stop(ifp, 1);
 		return EIO;
 	}
+
+	rt2560_set_txantenna(sc, 1);
+	rt2560_set_rxantenna(sc, 1);
 
 	/* set default BSS channel */
 	ic->ic_bss->ni_chan = ic->ic_ibss_chan;
@@ -2685,6 +2708,7 @@ rt2560_stop(struct ifnet *ifp, int disable)
 	struct ieee80211com *ic = &sc->sc_ic;
 
 	sc->sc_tx_timer = 0;
+	sc->sc_flags &= ~(RT2560_PRIO_OACTIVE|RT2560_DATA_OACTIVE);
 	ifp->if_timer = 0;
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 

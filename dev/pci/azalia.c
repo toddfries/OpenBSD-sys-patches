@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.199 2011/09/19 07:36:59 kettenis Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.201 2012/08/12 19:32:22 kettenis Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -397,6 +397,7 @@ azalia_configure_pci(azalia_t *az)
 	switch (PCI_PRODUCT(az->pciid)) {
 	case PCI_PRODUCT_ATI_SB450_HDA:
 	case PCI_PRODUCT_ATI_SBX00_HDA:
+	case PCI_PRODUCT_AMD_HUDSON2_HDA:
 		reg = azalia_pci_read(az->pc, az->tag, ATI_PCIE_SNOOP_REG);
 		reg &= ATI_PCIE_SNOOP_MASK;
 		reg |= ATI_PCIE_SNOOP_ENABLE;
@@ -460,6 +461,7 @@ azalia_configure_pci(azalia_t *az)
 	case PCI_PRODUCT_INTEL_3400_HDA:
 	case PCI_PRODUCT_INTEL_QS57_HDA:
 	case PCI_PRODUCT_INTEL_6SERIES_HDA:
+	case PCI_PRODUCT_INTEL_7SERIES_HDA:
 		reg = azalia_pci_read(az->pc, az->tag,
 		    INTEL_PCIE_NOSNOOP_REG);
 		reg &= INTEL_PCIE_NOSNOOP_MASK;

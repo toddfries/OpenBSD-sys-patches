@@ -1,4 +1,4 @@
-/*	$OpenBSD: gbe.c,v 1.13 2010/12/26 15:41:00 miod Exp $ */
+/*	$OpenBSD: gbe.c,v 1.16 2012/05/29 17:37:09 mikeb Exp $ */
 
 /*
  * Copyright (c) 2007, 2008, 2009 Joel Sing <jsing@openbsd.org>
@@ -33,6 +33,7 @@
 #include <mips64/arcbios.h>
 #include <mips64/archtype.h>
 
+#include <sgi/dev/gl.h>
 #include <sgi/localbus/crimebus.h>
 #include <sgi/localbus/macebusvar.h>
 
@@ -225,8 +226,8 @@ gbe_attach(struct device *parent, struct device *self, void *aux)
 		 * We've already been setup via gbe_cnattach().
 		 */
 
-		gsc->ioh = PHYS_TO_UNCACHED(GBE_BASE);
-		gsc->re_ioh = PHYS_TO_UNCACHED(RE_BASE);
+		gsc->ioh = PHYS_TO_XKPHYS(GBE_BASE, CCA_NC);
+		gsc->re_ioh = PHYS_TO_XKPHYS(RE_BASE, CCA_NC);
 
 		gsc->rev = bus_space_read_4(gsc->iot, gsc->ioh, GBE_CTRL_STAT)
 		    & 0xf;
@@ -563,6 +564,11 @@ gbe_enable(struct gbe_softc *gsc)
 	if (i == 10000)
 		printf("timeout unfreezing pixel counter!\n");
 
+	/* Disable sync-on-green. */
+	if (strcmp(osloadoptions, "nosog") == 0)
+		bus_space_write_4(gsc->iot, gsc->ioh, GBE_VT_FLAGS,
+		    GBE_VT_SYNC_LOW);
+
 	/* Provide GBE with address of tilemap and enable DMA. */
 	bus_space_write_4(gsc->iot, gsc->ioh, GBE_FB_CTRL, 
 	    ((screen->tm_phys >> 9) << 
@@ -579,6 +585,9 @@ gbe_disable(struct gbe_softc *gsc)
 	val = bus_space_read_4(gsc->iot, gsc->ioh, GBE_VT_XY);
 	if ((val & GBE_VT_XY_FREEZE) == GBE_VT_XY_FREEZE)
 		return;
+
+	/* Enable sync-on-green. */
+	bus_space_write_4(gsc->iot, gsc->ioh, GBE_VT_FLAGS, 0);
 
 	val = bus_space_read_4(gsc->iot, gsc->ioh, GBE_DOTCLOCK);
 	if ((val & GBE_DOTCLOCK_RUN) == 0) 
@@ -1050,7 +1059,6 @@ gbe_loadcmap(struct gbe_screen *screen, u_int start, u_int end)
 void
 gbe_rop(struct gbe_softc *gsc, int x, int y, int w, int h, int op)
 {
-
 	gbe_wait_re_idle(gsc);
 
 	bus_space_write_4(gsc->iot, gsc->re_ioh, RE_PP_PRIMITIVE,
@@ -1156,7 +1164,7 @@ gbe_do_cursor(struct rasops_info *ri)
 	x = ri->ri_xorigin + ri->ri_ccol * w;
 	y = ri->ri_yorigin + ri->ri_crow * h;
 
-	gbe_rop(sc, x, y, w, h, LOGIC_OP_XOR);
+	gbe_rop(sc, x, y, w, h, OPENGL_LOGIC_OP_COPY_INVERTED);
 
 	return 0;
 }
@@ -1275,7 +1283,7 @@ gbe_cnprobe(bus_space_tag_t iot, bus_addr_t addr)
 	int val, width, height;
 
 	/* Setup bus space mapping. */
-	ioh = PHYS_TO_UNCACHED(addr);
+	ioh = PHYS_TO_XKPHYS(addr, CCA_NC);
 
 	/* Determine resolution configured by firmware. */
 	val = bus_space_read_4(iot, ioh, GBE_VT_HCMAP);
@@ -1309,8 +1317,8 @@ gbe_cnattach(bus_space_tag_t iot, bus_addr_t addr)
 	
 	/* Setup bus space mapping. */
 	gsc->iot = iot;
-	gsc->ioh = PHYS_TO_UNCACHED(addr);
-	gsc->re_ioh = PHYS_TO_UNCACHED(RE_BASE);
+	gsc->ioh = PHYS_TO_XKPHYS(addr, CCA_NC);
+	gsc->re_ioh = PHYS_TO_XKPHYS(RE_BASE, CCA_NC);
 
 	/* Determine GBE revision. */
 	gsc->rev = bus_space_read_4(gsc->iot, gsc->ioh, GBE_CTRL_STAT) & 0xf;
@@ -1337,7 +1345,7 @@ gbe_cnattach(bus_space_tag_t iot, bus_addr_t addr)
 	va = pmap_steal_memory(gbe_consdata.tm_size + 65536, NULL, NULL);
 	pmap_extract(pmap_kernel(), va, &pa);
 	gbe_consdata.tm_phys = ((pa >> 16) + 1) << 16;
-	gbe_consdata.tm = (caddr_t)PHYS_TO_UNCACHED(gbe_consdata.tm_phys);
+	gbe_consdata.tm = (caddr_t)PHYS_TO_XKPHYS(gbe_consdata.tm_phys, CCA_NC);
 	
 	/* 
 	 * Steal memory for framebuffer - 64KB aligned and coherent.
@@ -1345,7 +1353,7 @@ gbe_cnattach(bus_space_tag_t iot, bus_addr_t addr)
 	va = pmap_steal_memory(gbe_consdata.fb_size + 65536, NULL, NULL);
 	pmap_extract(pmap_kernel(), va, &pa);
 	gbe_consdata.fb_phys = ((pa >> 16) + 1) << 16;
-	gbe_consdata.fb = (caddr_t)PHYS_TO_UNCACHED(gbe_consdata.fb_phys);
+	gbe_consdata.fb = (caddr_t)PHYS_TO_XKPHYS(gbe_consdata.fb_phys, CCA_NC);
 
 	/* 
 	 * Steal memory for rasops tile - 64KB aligned and coherent.
@@ -1353,7 +1361,7 @@ gbe_cnattach(bus_space_tag_t iot, bus_addr_t addr)
 	va = pmap_steal_memory(GBE_TILE_SIZE + 65536, NULL, NULL);
 	pmap_extract(pmap_kernel(), va, &pa);
 	gbe_consdata.ro_phys = ((pa >> 16) + 1) << 16;
-	gbe_consdata.ro = (caddr_t)PHYS_TO_UNCACHED(gbe_consdata.ro_phys);
+	gbe_consdata.ro = (caddr_t)PHYS_TO_XKPHYS(gbe_consdata.ro_phys, CCA_NC);
 
 	/*
 	 * Setup GBE hardware.

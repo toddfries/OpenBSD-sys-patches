@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.123 2011/11/24 17:39:55 sperreault Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.125 2012/07/16 18:05:36 markus Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -248,7 +248,7 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 		m_tag_delete(m, mtag);
 	} else
 		tdb = ipsp_spd_lookup(m, AF_INET6, sizeof(struct ip6_hdr),
-		    &error, IPSP_DIRECTION_OUT, NULL, inp);
+		    &error, IPSP_DIRECTION_OUT, NULL, inp, 0);
 
 	if (tdb == NULL) {
 	        splx(s);
@@ -1933,7 +1933,7 @@ do { \
 					*mp = m = m_get(M_WAIT, MT_SOOPTS);
 					m->m_len = sizeof(tdbi);
 					bcopy((caddr_t)&tdbi, mtod(m, caddr_t),
-					    (unsigned)m->m_len);
+					    m->m_len);
 				}
 				splx(s);
 #endif

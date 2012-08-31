@@ -1,4 +1,4 @@
-/*	$OpenBSD: ktrace.h,v 1.12 2011/12/14 07:32:16 guenther Exp $	*/
+/*	$OpenBSD: ktrace.h,v 1.15 2012/07/09 17:51:08 claudio Exp $	*/
 /*	$NetBSD: ktrace.h,v 1.12 1996/02/04 02:12:29 christos Exp $	*/
 
 /*
@@ -48,12 +48,12 @@
  * ktrace record header
  */
 struct ktr_header {
-	size_t	ktr_len;		/* length of buf */
+	uint	ktr_type;		/* trace record type */
 	pid_t	ktr_pid;		/* process id */
+	pid_t	ktr_tid;		/* thread id */
+	struct	timespec ktr_time;	/* timestamp */
 	char	ktr_comm[MAXCOMLEN+1];	/* command name */
-	short	ktr_type;		/* trace record type */
-	struct	timeval ktr_time;	/* timestamp */
-	caddr_t	ktr_buf;
+	size_t	ktr_len;		/* length of buf */
 };
 
 /*
@@ -65,6 +65,11 @@ struct ktr_header {
 /*
  * ktrace record types
  */
+
+ /*
+ * KTR_START - start of trace record, one per ktrace(KTROP_SET) syscall
+ */
+#define KTR_START	0x4b545200	/* "KTR" */
 
 /*
  * KTR_SYSCALL - system call record
@@ -190,6 +195,19 @@ void    ktrstruct(struct proc *, const char *, const void *, size_t);
 	ktrstruct((p), "sockaddr", (s), (l))
 #define ktrstat(p, s) \
 	ktrstruct((p), "stat", (s), sizeof(struct stat))
-
+#define ktrabstimespec(p, s) \
+	ktrstruct((p), "abstimespec", (s), sizeof(struct timespec))
+#define ktrreltimespec(p, s) \
+	ktrstruct((p), "reltimespec", (s), sizeof(struct timespec))
+#define ktrabstimeval(p, s) \
+	ktrstruct((p), "abstimeval", (s), sizeof(struct timeval))
+#define ktrreltimeval(p, s) \
+	ktrstruct((p), "reltimeval", (s), sizeof(struct timeval))
+#define ktrsigaction(p, s) \
+	ktrstruct((p), "sigaction", (s), sizeof(struct sigaction))
+#define ktrrlimit(p, s) \
+	ktrstruct((p), "rlimit", (s), sizeof(struct rlimit))
+#define ktrfdset(p, s, l) \
+	ktrstruct((p), "fdset", (s), l)
 
 #endif	/* !_KERNEL */
