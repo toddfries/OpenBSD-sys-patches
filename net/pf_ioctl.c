@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.248 2011/12/12 21:30:27 mikeb Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.253 2012/07/08 07:58:09 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1045,7 +1045,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			break;
 		}
 		rule->cuid = p->p_cred->p_ruid;
-		rule->cpid = p->p_pid;
+		rule->cpid = p->p_p->ps_pid;
 
 		switch (rule->af) {
 		case 0:
@@ -1088,9 +1088,10 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			error = EINVAL;
 		if (rule->rt && !rule->direction)
 			error = EINVAL;
-		if ((rule->prio[0] != PF_PRIO_NOTSET && rule->prio[0] >
-		    IFQ_MAXPRIO) || (rule->prio[1] != PF_PRIO_NOTSET &&
-                    rule->prio[1] > IFQ_MAXPRIO))
+		if ((rule->set_prio[0] != PF_PRIO_NOTSET &&
+		    rule->set_prio[0] > IFQ_MAXPRIO) ||
+		    (rule->set_prio[1] != PF_PRIO_NOTSET &&
+                    rule->set_prio[1] > IFQ_MAXPRIO))
 			error = EINVAL;
 
 		if (error) {
@@ -1213,7 +1214,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			}
 			pf_rule_copyin(&pcr->rule, newrule, ruleset);
 			newrule->cuid = p->p_cred->p_ruid;
-			newrule->cpid = p->p_pid;
+			newrule->cpid = p->p_p->ps_pid;
 
 			switch (newrule->af) {
 			case 0:
@@ -1346,14 +1347,15 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		for (s = RB_MIN(pf_state_tree_id, &tree_id); s;
 		    s = nexts) {
 			nexts = RB_NEXT(pf_state_tree_id, &tree_id, s);
-			sk = s->key[PF_SK_WIRE];
 
 			if (s->direction == PF_OUT) {
+				sk = s->key[PF_SK_STACK];
 				srcaddr = &sk->addr[1];
 				dstaddr = &sk->addr[0];
 				srcport = sk->port[0];
 				dstport = sk->port[0];
 			} else {
+				sk = s->key[PF_SK_WIRE];
 				srcaddr = &sk->addr[0];
 				dstaddr = &sk->addr[1];
 				srcport = sk->port[0];
@@ -1390,6 +1392,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		break;
 	}
 
+#if NPFSYNC > 0
 	case DIOCADDSTATE: {
 		struct pfioc_state	*ps = (struct pfioc_state *)addr;
 		struct pfsync_state	*sp = &ps->state;
@@ -1401,6 +1404,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		error = pfsync_state_import(sp, PFSYNC_SI_IOCTL);
 		break;
 	}
+#endif
 
 	case DIOCGETSTATE: {
 		struct pfioc_state	*ps = (struct pfioc_state *)addr;
@@ -1417,7 +1421,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			break;
 		}
 
-		pfsync_state_export(&ps->state, s);
+		pf_state_export(&ps->state, s);
 		break;
 	}
 
@@ -1442,7 +1446,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			if (state->timeout != PFTM_UNLINKED) {
 				if ((nr+1) * sizeof(*p) > (unsigned)ps->ps_len)
 					break;
-				pfsync_state_export(pstore, state);
+				pf_state_export(pstore, state);
 				error = copyout(pstore, p, sizeof(*p));
 				if (error) {
 					free(pstore, M_TEMP);
@@ -2593,8 +2597,6 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 #if NPFLOG > 0
 	if (!to->log)
 		to->logif = 0;
-	if (to->logif >= PFLOGIFS_MAX)
-		return (EINVAL);
 #endif
 	to->quick = from->quick;
 	to->ifnot = from->ifnot;
@@ -2620,8 +2622,8 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	to->divert.port = from->divert.port;
 	to->divert_packet.addr = from->divert_packet.addr;
 	to->divert_packet.port = from->divert_packet.port;
-	to->prio[0] = from->prio[0];
-	to->prio[1] = from->prio[1];
+	to->set_prio[0] = from->set_prio[0];
+	to->set_prio[1] = from->set_prio[1];
 
 	return (0);
 }

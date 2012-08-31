@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.802 2012/02/05 22:38:06 mikeb Exp $ */
+/*	$OpenBSD: pf.c,v 1.809 2012/07/26 12:25:31 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -617,7 +617,7 @@ pf_state_rm_src_node(struct pf_state *s, struct pf_src_node *sn)
 		snin = SLIST_NEXT(sni, next);
 		if (sni->sn == sn) {
 			if (snip)
-				SLIST_REMOVE_NEXT(&s->src_nodes, snip, next);
+				SLIST_REMOVE_AFTER(snip, next);
 			else
 				SLIST_REMOVE_HEAD(&s->src_nodes, next);
 			pool_put(&pf_sn_item_pl, sni);
@@ -1075,6 +1075,71 @@ pf_find_state_all(struct pf_state_key_cmp *key, u_int dir, int *more)
 			}
 	}
 	return (ret ? ret->s : NULL);
+}
+
+void
+pf_state_export(struct pfsync_state *sp, struct pf_state *st)
+{
+	bzero(sp, sizeof(struct pfsync_state));
+
+	/* copy from state key */
+	sp->key[PF_SK_WIRE].addr[0] = st->key[PF_SK_WIRE]->addr[0];
+	sp->key[PF_SK_WIRE].addr[1] = st->key[PF_SK_WIRE]->addr[1];
+	sp->key[PF_SK_WIRE].port[0] = st->key[PF_SK_WIRE]->port[0];
+	sp->key[PF_SK_WIRE].port[1] = st->key[PF_SK_WIRE]->port[1];
+	sp->key[PF_SK_WIRE].rdomain = htons(st->key[PF_SK_WIRE]->rdomain);
+	sp->key[PF_SK_WIRE].af = st->key[PF_SK_WIRE]->af;
+	sp->key[PF_SK_STACK].addr[0] = st->key[PF_SK_STACK]->addr[0];
+	sp->key[PF_SK_STACK].addr[1] = st->key[PF_SK_STACK]->addr[1];
+	sp->key[PF_SK_STACK].port[0] = st->key[PF_SK_STACK]->port[0];
+	sp->key[PF_SK_STACK].port[1] = st->key[PF_SK_STACK]->port[1];
+	sp->key[PF_SK_STACK].rdomain = htons(st->key[PF_SK_STACK]->rdomain);
+	sp->key[PF_SK_STACK].af = st->key[PF_SK_STACK]->af;
+	sp->rtableid[PF_SK_WIRE] = htonl(st->rtableid[PF_SK_WIRE]);
+	sp->rtableid[PF_SK_STACK] = htonl(st->rtableid[PF_SK_STACK]);
+	sp->proto = st->key[PF_SK_WIRE]->proto;
+	sp->af = st->key[PF_SK_WIRE]->af;
+
+	/* copy from state */
+	strlcpy(sp->ifname, st->kif->pfik_name, sizeof(sp->ifname));
+	bcopy(&st->rt_addr, &sp->rt_addr, sizeof(sp->rt_addr));
+	sp->creation = htonl(time_uptime - st->creation);
+	sp->expire = pf_state_expires(st);
+	if (sp->expire <= time_second)
+		sp->expire = htonl(0);
+	else
+		sp->expire = htonl(sp->expire - time_second);
+
+	sp->direction = st->direction;
+	sp->log = st->log;
+	sp->timeout = st->timeout;
+	sp->state_flags = htons(st->state_flags);
+	if (!SLIST_EMPTY(&st->src_nodes))
+		sp->sync_flags |= PFSYNC_FLAG_SRCNODE;
+
+	sp->id = st->id;
+	sp->creatorid = st->creatorid;
+	pf_state_peer_hton(&st->src, &sp->src);
+	pf_state_peer_hton(&st->dst, &sp->dst);
+
+	if (st->rule.ptr == NULL)
+		sp->rule = htonl(-1);
+	else
+		sp->rule = htonl(st->rule.ptr->nr);
+	if (st->anchor.ptr == NULL)
+		sp->anchor = htonl(-1);
+	else
+		sp->anchor = htonl(st->anchor.ptr->nr);
+	sp->nat_rule = htonl(-1);	/* left for compat, nat_rule is gone */
+
+	pf_state_counter_hton(st->packets[0], sp->packets[0]);
+	pf_state_counter_hton(st->packets[1], sp->packets[1]);
+	pf_state_counter_hton(st->bytes[0], sp->bytes[0]);
+	pf_state_counter_hton(st->bytes[1], sp->bytes[1]);
+
+	sp->max_mss = htons(st->max_mss);
+	sp->min_ttl = st->min_ttl;
+	sp->set_tos = st->set_tos;
 }
 
 /* END state table stuff */
@@ -2069,8 +2134,6 @@ pf_change_icmp_af(struct mbuf *m, int off, struct pf_pdesc *pd,
 	olen = pd2->off - off;
 	/* new header */
 	hlen = naf == AF_INET ? sizeof(*ip4) : sizeof(*ip6);
-	/* data lenght */
-	mlen = m->m_pkthdr.len - pd2->off;
 
 	/* trim old header */
 	m_adj(n, olen);
@@ -2086,7 +2149,7 @@ pf_change_icmp_af(struct mbuf *m, int off, struct pf_pdesc *pd,
 		bzero(ip4, sizeof(*ip4));
 		ip4->ip_v   = IPVERSION;
 		ip4->ip_hl  = sizeof(*ip4) >> 2;
-		ip4->ip_len = htons(sizeof(*ip4) + mlen);
+		ip4->ip_len = htons(sizeof(*ip4) + pd2->tot_len - olen);
 		ip4->ip_id  = htons(ip_randomid());
 		ip4->ip_off = htons(IP_DF);
 		ip4->ip_ttl = pd2->ttl;
@@ -2102,7 +2165,7 @@ pf_change_icmp_af(struct mbuf *m, int off, struct pf_pdesc *pd,
 		ip6 = mtod(n, struct ip6_hdr *);
 		bzero(ip6, sizeof(*ip6));
 		ip6->ip6_vfc  = IPV6_VERSION;
-		ip6->ip6_plen = htons(mlen);
+		ip6->ip6_plen = htons(pd2->tot_len - olen);
 		if (pd2->proto == IPPROTO_ICMP)
 			ip6->ip6_nxt = IPPROTO_ICMPV6;
 		else
@@ -2461,8 +2524,8 @@ pf_send_tcp(const struct pf_rule *r, sa_family_t af,
 		m->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
 	m->m_pkthdr.pf.tag = rtag;
 	m->m_pkthdr.rdomain = rdom;
-	if (r && r->prio[0] != PF_PRIO_NOTSET)
-		m->m_pkthdr.pf.prio = r->prio[0];
+	if (r && r->set_prio[0] != PF_PRIO_NOTSET)
+		m->m_pkthdr.pf.prio = r->set_prio[0];
 
 #ifdef ALTQ
 	if (r != NULL && r->qid) {
@@ -2585,8 +2648,8 @@ pf_send_icmp(struct mbuf *m, u_int8_t type, u_int8_t code, sa_family_t af,
 
 	m0->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
 	m0->m_pkthdr.rdomain = rdomain;
-	if (r && r->prio[0] != PF_PRIO_NOTSET)
-		m0->m_pkthdr.pf.prio = r->prio[0];
+	if (r && r->set_prio[0] != PF_PRIO_NOTSET)
+		m0->m_pkthdr.pf.prio = r->set_prio[0];
 
 #ifdef ALTQ
 	if (r->qid) {
@@ -3215,10 +3278,10 @@ pf_rule_to_actions(struct pf_rule *r, struct pf_rule_actions *a)
 		a->max_mss = r->max_mss;
 	a->flags |= (r->scrub_flags & (PFSTATE_NODF|PFSTATE_RANDOMID|
 	    PFSTATE_SETTOS|PFSTATE_SCRUB_TCP));
-	if (r->prio[0] != PF_PRIO_NOTSET)
-		a->prio[0] = r->prio[0];
-	if (r->prio[1] != PF_PRIO_NOTSET)
-		a->prio[1] = r->prio[1];
+	if (r->set_prio[0] != PF_PRIO_NOTSET)
+		a->set_prio[0] = r->set_prio[0];
+	if (r->set_prio[1] != PF_PRIO_NOTSET)
+		a->set_prio[1] = r->set_prio[1];
 }
 
 #define PF_TEST_ATTRIB(t, a)			\
@@ -3254,7 +3317,7 @@ pf_test_rule(struct pf_pdesc *pd, struct pf_rule **rm, struct pf_state **sm,
 	u_int8_t		 icmptype = 0, icmpcode = 0;
 
 	bzero(&act, sizeof(act));
-	act.prio[0] = act.prio[1] = PF_PRIO_NOTSET;
+	act.set_prio[0] = act.set_prio[1] = PF_PRIO_NOTSET;
 	bzero(sns, sizeof(sns));
 	act.rtableid = pd->rdomain;
 	SLIST_INIT(&rules);
@@ -3424,15 +3487,19 @@ pf_test_rule(struct pf_pdesc *pd, struct pf_rule **rm, struct pf_state **sm,
 					REASON_SET(&reason, PFRES_MEMORY);
 					goto cleanup;
 				}
-				if (r->log || act.log & PF_LOG_MATCHES)
+				if (r->log || act.log & PF_LOG_MATCHES) {
+					REASON_SET(&reason, PFRES_MATCH);
 					PFLOG_PACKET(pd, reason, r, a, ruleset);
+				}
 			} else {
 				match = 1;
 				*rm = r;
 				*am = a;
 				*rsm = ruleset;
-				if (act.log & PF_LOG_MATCHES)
+				if (act.log & PF_LOG_MATCHES) {
+					REASON_SET(&reason, PFRES_MATCH);
 					PFLOG_PACKET(pd, reason, r, a, ruleset);
+				}
 			}
 
 			if ((*rm)->quick)
@@ -3636,9 +3703,11 @@ pf_create_state(struct pf_pdesc *pd, struct pf_rule *r, struct pf_rule *a,
 	s->set_tos = act->set_tos;
 	s->max_mss = act->max_mss;
 	s->state_flags |= act->flags;
+#if NPFSYNC > 0
 	s->sync_state = PFSYNC_S_NONE;
-	s->prio[0] = act->prio[0];
-	s->prio[1] = act->prio[1];
+#endif
+	s->set_prio[0] = act->set_prio[0];
+	s->set_prio[1] = act->set_prio[1];
 	switch (pd->proto) {
 	case IPPROTO_TCP:
 		s->src.seqlo = ntohl(th->th_seq);
@@ -4847,6 +4916,7 @@ pf_test_state_icmp(struct pf_pdesc *pd, struct pf_state **state,
 			pd2.off = ipoff2 + (h2.ip_hl << 2);
 
 			pd2.proto = h2.ip_p;
+			pd2.tot_len = ntohs(h2.ip_len);
 			pd2.src = (struct pf_addr *)&h2.ip_src;
 			pd2.dst = (struct pf_addr *)&h2.ip_dst;
 			ipsum2 = &h2.ip_sum;
@@ -4867,6 +4937,8 @@ pf_test_state_icmp(struct pf_pdesc *pd, struct pf_state **state,
 			if (pf_walk_header6(&pd2, &h2_6, reason) != PF_PASS)
 				return (PF_DROP);
 
+			pd2.tot_len = ntohs(h2_6.ip6_plen) +
+			    sizeof(struct ip6_hdr);
 			pd2.src = (struct pf_addr *)&h2_6.ip6_src;
 			pd2.dst = (struct pf_addr *)&h2_6.ip6_dst;
 			ipsum2 = NULL;
@@ -6393,7 +6465,7 @@ pf_setup_pdesc(struct pf_pdesc *pd, void *pdhdrs, sa_family_t af, int dir,
 		pd->dst = (struct pf_addr *)&h->ip_dst;
 		pd->virtual_proto = pd->proto = h->ip_p;
 		pd->tot_len = ntohs(h->ip_len);
-		pd->tos = h->ip_tos;
+		pd->tos = h->ip_tos & ~IPTOS_ECN_MASK;
 		pd->rdomain = rtable_l2(pd->m->m_pkthdr.rdomain);
 		pd->ttl = h->ip_ttl;
 		if (h->ip_hl > 5)	/* has options */
@@ -6812,24 +6884,24 @@ done:
 			pf_tag_packet(pd.m, s->tag, s->rtableid[pd.didx]);
 			if (pqid || (pd.tos & IPTOS_LOWDELAY)) {
 				qid = s->pqid;
-				if (s->prio[1] != PF_PRIO_NOTSET)
-					 pd.m->m_pkthdr.pf.prio = s->prio[1];
+				if (s->set_prio[1] != PF_PRIO_NOTSET)
+					pd.m->m_pkthdr.pf.prio = s->set_prio[1];
 			} else {
 				qid = s->qid;
-				if (s->prio[0] != PF_PRIO_NOTSET)
-					 pd.m->m_pkthdr.pf.prio = s->prio[0];
+				if (s->set_prio[0] != PF_PRIO_NOTSET)
+					pd.m->m_pkthdr.pf.prio = s->set_prio[0];
 			}
 		} else {
 			pf_scrub(pd.m, r->scrub_flags, pd.af, r->min_ttl,
 			    r->set_tos);
 			if (pqid || (pd.tos & IPTOS_LOWDELAY)) {
 				qid = r->pqid;
-				if (r->prio[1] != PF_PRIO_NOTSET)
-					 pd.m->m_pkthdr.pf.prio = r->prio[1];
+				if (r->set_prio[1] != PF_PRIO_NOTSET)
+					pd.m->m_pkthdr.pf.prio = r->set_prio[1];
 			} else {
 				qid = r->qid;
-				if (r->prio[0] != PF_PRIO_NOTSET)
-					 pd.m->m_pkthdr.pf.prio = r->prio[0];
+				if (r->set_prio[0] != PF_PRIO_NOTSET)
+					pd.m->m_pkthdr.pf.prio = r->set_prio[0];
 			}
 		}
 	}

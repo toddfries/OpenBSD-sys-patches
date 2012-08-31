@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.32 2010/11/27 19:57:23 miod Exp $ */
+/*	$OpenBSD: db_machdep.c,v 1.35 2012/04/21 12:20:30 miod Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)
@@ -31,9 +31,11 @@
 #include <sys/proc.h>
 #include <dev/cons.h>
 
+#include <mips64/cache.h>
+
 #include <machine/autoconf.h>
-#include <machine/db_machdep.h>
 #include <machine/cpu.h>
+#include <machine/db_machdep.h>
 #include <machine/mips_opcode.h>
 #include <machine/pte.h>
 #include <machine/frame.h>
@@ -64,7 +66,6 @@ int   kdb_trap(int, struct trap_frame *);
 
 void db_trap_trace_cmd(db_expr_t, int, db_expr_t, char *);
 void db_dump_tlb_cmd(db_expr_t, int, db_expr_t, char *);
-
 
 #ifdef MULTIPROCESSOR
 struct mutex ddb_mp_mutex = MUTEX_INITIALIZER(IPL_HIGH);
@@ -334,10 +335,8 @@ db_write_bytes(addr, size, data)
 	if (addr < VM_MAXUSER_ADDRESS) {
 		struct cpu_info *ci = curcpu();
 
-		/* XXX we don't know where this page is mapped... */
-		Mips_HitSyncDCache(ci, addr, PHYS_TO_XKPHYS(addr, CCA_CACHED),
-		    size);
-		Mips_InvalidateICache(ci, PHYS_TO_CKSEG0(addr & 0xffff), size);
+		Mips_HitSyncDCache(ci, addr, size);
+		Mips_InvalidateICache(ci, addr, size);
 	}
 }
 
@@ -506,6 +505,8 @@ if ((tlbp.tlb_hi == tlb.tlb_hi && (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V)) ||
 	}
 	last = tlbno + count;
 
+	if (pid == -1)
+		db_printf("current asid: %d\n", tlb_get_pid());
 	for (; tlbno < ci->ci_hw.tlbsize && tlbno < last; tlbno++) {
 		tlb_read(tlbno, &tlb);
 

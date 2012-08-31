@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.90 2011/07/06 01:57:37 dlg Exp $	*/
+/*	$OpenBSD: in.h,v 1.93 2012/07/16 18:05:36 markus Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -39,6 +39,13 @@
 
 #ifndef _NETINET_IN_H_
 #define	_NETINET_IN_H_
+
+#include <sys/cdefs.h>
+
+#ifndef _KERNEL
+#include <sys/types.h>
+#include <machine/endian.h>
+#endif
 
 /*
  * Protocols
@@ -134,12 +141,15 @@
 #define IPPORT_HIFIRSTAUTO	49152
 #define IPPORT_HILASTAUTO	65535
 
+#ifndef _IN_ADDR_DECLARED
+#define _IN_ADDR_DECLARED
 /*
  * IP Version 4 Internet address (a structure for historical reasons)
  */
 struct in_addr {
 	in_addr_t s_addr;
 };
+#endif
 
 /* last return value of *_input(), meaning "all job for this pkt is done".  */
 #define	IPPROTO_DONE		257
@@ -288,9 +298,12 @@ struct ip_opts {
 #define IP_RECVDSTPORT		33   /* bool; receive IP dst port w/dgram */
 #define IP_PIPEX		34   /* bool; using PIPEX */
 #define IP_RECVRTABLE		35   /* bool; receive rdomain w/dgram */
+#define IP_IPSECFLOWINFO	36   /* bool; IPsec flow info for dgram */
 
 #define IP_RTABLE		0x1021	/* int; routing table, see SO_RTABLE */
 
+
+#if __BSD_VISIBLE
 /*
  * Security levels - IPsec, not IPSO
  */
@@ -307,6 +320,8 @@ struct ip_opts {
 #define IPSEC_ESP_TRANS_LEVEL_DEFAULT IPSEC_LEVEL_DEFAULT
 #define IPSEC_ESP_NETWORK_LEVEL_DEFAULT IPSEC_LEVEL_DEFAULT
 #define IPSEC_IPCOMP_LEVEL_DEFAULT IPSEC_LEVEL_DEFAULT
+
+#endif /* __BSD_VISIBLE */
 
 /*
  * Defaults and limits for options
@@ -340,8 +355,12 @@ struct ip_mreq {
 /*
  * Buffer lengths for strings containing printable IP addresses
  */
+#ifndef INET_ADDRSTRLEN
 #define INET_ADDRSTRLEN		16
+#endif
 
+
+#if __BSD_VISIBLE
 /*
  * Definitions for inet sysctl operations.
  *
@@ -736,6 +755,8 @@ struct ip_mreq {
 	&la_hold_total \
 }
 
+#endif /* __BSD_VISIBLE */
+
 /* INET6 stuff */
 #define __KAME_NETINET_IN_H_INCLUDED_
 #include <netinet6/in6.h>
@@ -743,13 +764,13 @@ struct ip_mreq {
 
 #ifndef _KERNEL
 
-#include <sys/cdefs.h>
-
+#if __BSD_VISIBLE
 __BEGIN_DECLS
 int	   bindresvport(int, struct sockaddr_in *);
 struct sockaddr;
 int	   bindresvport_sa(int, struct sockaddr *);
 __END_DECLS
+#endif
 
 #else
 /*

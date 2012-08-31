@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.70 2011/12/26 23:07:04 haesbaert Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.73 2012/04/17 16:02:33 guenther Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -72,7 +72,6 @@ struct cpu_info {
 	u_int32_t ci_randseed;
 
 	u_int64_t ci_scratch;
-	u_int64_t ci_cur_fsbase;
 
 	struct proc *ci_fpcurproc;
 	struct proc *ci_fpsaveproc;
@@ -134,6 +133,9 @@ struct cpu_info {
 #define CPUF_AP		0x0002		/* CPU is an AP */ 
 #define CPUF_SP		0x0004		/* CPU is only processor */  
 #define CPUF_PRIMARY	0x0008		/* CPU is active primary processor */
+
+#define CPUF_IDENTIFY	0x0010		/* CPU may now identify */
+#define CPUF_IDENTIFIED	0x0020		/* CPU has been identified */
 
 #define CPUF_PRESENT	0x1000		/* CPU is present */
 #define CPUF_RUNNING	0x2000		/* CPU is running */
@@ -264,7 +266,6 @@ extern int cpuspeed;
 /* identcpu.c */
 void	identifycpu(struct cpu_info *);
 int	cpu_amd64speed(int *);
-void cpu_probe_features(struct cpu_info *);
 
 /* machdep.c */
 void	dumpconf(void);

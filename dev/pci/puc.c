@@ -1,4 +1,4 @@
-/*	$OpenBSD: puc.c,v 1.20 2011/11/15 22:27:53 deraadt Exp $	*/
+/*	$OpenBSD: puc.c,v 1.22 2012/06/12 18:43:26 kettenis Exp $	*/
 /*	$NetBSD: puc.c,v 1.3 1999/02/06 06:29:54 cgd Exp $	*/
 
 /*
@@ -56,12 +56,16 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/tty.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pucvar.h>
 
 #include <dev/pci/pcidevs.h>
+
+#include <dev/ic/comreg.h>
+#include <dev/ic/comvar.h>
 
 struct puc_pci_softc {
 	struct puc_softc	sc_psc;
@@ -162,6 +166,26 @@ puc_pci_attach(struct device *parent, struct device *self, void *aux)
 		if (sc->sc_bar_mappings[i].mapped)
 			continue;
 
+		/*
+		 * If a port on this card is used as serial console,
+		 * mapping the associated BAR will fail because the
+		 * bus space is already mapped.  In that case, we try
+		 * to re-use the already existing mapping.
+		 * Unfortunately this means that if a BAR is used to
+		 * support multiple ports, only the first port will
+		 * work.
+		 */
+		if (pci_mapreg_info(pa->pa_pc, pa->pa_tag, bar, type,
+		    &sc->sc_bar_mappings[i].a, NULL, NULL) == 0 &&
+		    pa->pa_iot == comconsiot &&
+		    sc->sc_bar_mappings[i].a == comconsaddr) {
+			sc->sc_bar_mappings[i].t = comconsiot;
+			sc->sc_bar_mappings[i].h = comconsioh;
+			sc->sc_bar_mappings[i].s = COM_NPORTS;
+			sc->sc_bar_mappings[i].mapped = 1;
+			continue;
+		}
+
 		printf("%s: couldn't map BAR at offset 0x%lx\n",
 		    sc->sc_dev.dv_xname, (long)bar);
 	}
@@ -183,19 +207,20 @@ puc_pci_attach(struct device *parent, struct device *self, void *aux)
 void
 puc_common_attach(struct puc_softc *sc, struct puc_attach_args *paa)
 {
+	const struct puc_device_description *desc = sc->sc_desc;
 	int i, bar;
 
 	/* Configure each port. */
 	for (i = 0; i < PUC_MAX_PORTS; i++) {
-		if (sc->sc_desc->ports[i].type == 0)	/* neither com or lpt */
+		if (desc->ports[i].type == 0)	/* neither com or lpt */
 			continue;
 		/* make sure the base address register is mapped */
-		bar = PUC_PORT_BAR_INDEX(sc->sc_desc->ports[i].bar);
+		bar = PUC_PORT_BAR_INDEX(desc->ports[i].bar);
 		if (!sc->sc_bar_mappings[bar].mapped) {
 			printf("%s: %s port uses unmapped BAR (0x%x)\n",
 			    sc->sc_dev.dv_xname,
-			    puc_port_type_name(sc->sc_desc->ports[i].type),
-			    sc->sc_desc->ports[i].bar);
+			    puc_port_type_name(desc->ports[i].type),
+			    desc->ports[i].bar);
 			continue;
 		}
 
@@ -204,11 +229,12 @@ puc_common_attach(struct puc_softc *sc, struct puc_attach_args *paa)
 		paa->a = sc->sc_bar_mappings[bar].a;
 		paa->t = sc->sc_bar_mappings[bar].t;
 
-		paa->type = sc->sc_desc->ports[i].type;
+		paa->type = desc->ports[i].type;
 
-		if (bus_space_subregion(sc->sc_bar_mappings[bar].t,
-		    sc->sc_bar_mappings[bar].h, sc->sc_desc->ports[i].offset,
-		    sc->sc_bar_mappings[bar].s - sc->sc_desc->ports[i].offset,
+		if (desc->ports[i].offset >= sc->sc_bar_mappings[bar].s ||
+		    bus_space_subregion(sc->sc_bar_mappings[bar].t,
+		    sc->sc_bar_mappings[bar].h, desc->ports[i].offset,
+		    sc->sc_bar_mappings[bar].s - desc->ports[i].offset,
 		    &paa->h)) {
 			printf("%s: couldn't get subregion for port %d\n",
 			    sc->sc_dev.dv_xname, i);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.506 2011/11/02 23:53:44 jsg Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.510 2012/05/23 08:23:43 mikeb Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -251,7 +251,7 @@ void (*initclock_func)(void) = i8254_initclocks;
 
 /*
  * Extent maps to manage I/O and ISA memory hole space.  Allocate
- * storage for 8 regions in each, initially.  Later, ioport_malloc_safe
+ * storage for 16 regions in each, initially.  Later, ioport_malloc_safe
  * will indicate that it's safe to use malloc() to dynamically allocate
  * region descriptors.
  *
@@ -1053,7 +1053,7 @@ cyrix3_setperf_setup(struct cpu_info *ci)
 {
 	if (cpu_ecxfeature & CPUIDECX_EST) {
 		if (rdmsr(MSR_MISC_ENABLE) & (1 << 16))
-			est_init(ci->ci_dev.dv_xname, CPUVENDOR_VIA);
+			est_init(ci, CPUVENDOR_VIA);
 		else
 			printf("%s: Enhanced SpeedStep disabled by BIOS\n",
 			    ci->ci_dev.dv_xname);
@@ -1075,8 +1075,6 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 	extern void i686_pagezero(void *, size_t);
 
 	pagezero = i686_pagezero;
-
-	cyrix3_get_bus_clock(ci);
 
 	setperf_setup = cyrix3_setperf_setup;
 #endif
@@ -1443,7 +1441,7 @@ intel686_setperf_setup(struct cpu_info *ci)
 
 	if (cpu_ecxfeature & CPUIDECX_EST) {
 		if (rdmsr(MSR_MISC_ENABLE) & (1 << 16))
-			est_init(ci->ci_dev.dv_xname, CPUVENDOR_INTEL);
+			est_init(ci, CPUVENDOR_INTEL);
 		else
 			printf("%s: Enhanced SpeedStep disabled by BIOS\n",
 			    ci->ci_dev.dv_xname);
@@ -1485,10 +1483,6 @@ intel686_cpu_setup(struct cpu_info *ci)
 	int step = ci->ci_signature & 15;
 	u_quad_t msr119;
 
-#if !defined(SMALL_KERNEL)
-	p3_get_bus_clock(ci);
-#endif
-
 	intel686_common_cpu_setup(ci);
 
 	/*
@@ -1521,10 +1515,6 @@ intel686_cpu_setup(struct cpu_info *ci)
 void
 intel686_p4_cpu_setup(struct cpu_info *ci)
 {
-#if !defined(SMALL_KERNEL)
-	p4_get_bus_clock(ci);
-#endif
-
 	intel686_common_cpu_setup(ci);
 
 #if !defined(SMALL_KERNEL)
@@ -2047,6 +2037,7 @@ p3_get_bus_clock(struct cpu_info *ci)
 	case 0xf: /* Core Xeon */
 	case 0x16: /* 65nm Celeron */
 	case 0x17: /* Core 2 Extreme/45nm Xeon */
+	case 0x1d: /* Xeon MP 7400 */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
@@ -2075,6 +2066,8 @@ p3_get_bus_clock(struct cpu_info *ci)
 		}
 		break;
 	case 0x1c: /* Atom */
+	case 0x26: /* Atom Z6xx */
+	case 0x36: /* Atom [DN]2xxx */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
@@ -2122,19 +2115,20 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
+	/* nehalem */
 	case 0x1a: /* Core i7, Xeon 3500/5500 */
 	case 0x1e: /* Core i5/i7, Xeon 3400 */
 	case 0x1f: /* Core i5/i7 */
+	case 0x2e: /* Xeon 6500/7500 */
+	/* westmere */
 	case 0x25: /* Core i3/i5, Xeon 3400 */
 	case 0x2c: /* Core i7, Xeon 3600/5600 */
-		/* BUS133 */
-		break;
+	case 0x2f: /* Xeon E7 */
+	/* sandy bridge */
 	case 0x2a: /* Core i5/i7 2nd Generation */
 	case 0x2d: /* Xeon E5 */
-		/* BUS100 */
-		break;
-	case 0x1d: /* Xeon MP 7400 */
-	case 0x2e: /* Xeon 6500/7500 */
+	/* ivy bridge */
+	case 0x3a: /* Core i3/i5/i7 3rd Generation */
 		break;
 	default: 
 		printf("%s: unknown i686 model 0x%x, can't get bus clock",
@@ -2152,8 +2146,12 @@ print_msr:
 void
 p4_update_cpuspeed(void)
 {
+	struct cpu_info *ci;
 	u_int64_t msr;
 	int mult;
+
+	ci = curcpu();
+	p4_get_bus_clock(ci);
 
 	if (bus_clock == 0) {
 		printf("p4_update_cpuspeed: unknown bus clock\n");
@@ -2169,10 +2167,14 @@ p4_update_cpuspeed(void)
 void
 p3_update_cpuspeed(void)
 {
+	struct cpu_info *ci;
 	u_int64_t msr;
 	int mult;
 	const u_int8_t mult_code[] = {
 	    50, 30, 40, 0, 55, 35, 45, 0, 0, 70, 80, 60, 0, 75, 0, 65 };
+
+	ci = curcpu();
+	p3_get_bus_clock(ci);
 
 	if (bus_clock == 0) {
 		printf("p3_update_cpuspeed: unknown bus clock\n");
@@ -2454,7 +2456,7 @@ boot(int howto)
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
 		extern struct proc proc0;
 
-		/* protect against curproc->p_stats.foo refs in sync()   XXX */
+		/* make sure there's a process to charge for I/O in sync() */
 		if (curproc == NULL)
 			curproc = &proc0;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_map.c,v 1.148 2012/03/09 13:01:29 ariane Exp $	*/
+/*	$OpenBSD: uvm_map.c,v 1.157 2012/06/14 15:54:36 ariane Exp $	*/
 /*	$NetBSD: uvm_map.c,v 1.86 2000/11/27 08:40:03 chs Exp $	*/
 
 /*
@@ -136,6 +136,7 @@ int			 uvm_map_pageable_wire(struct vm_map*,
 			    struct vm_map_entry*, struct vm_map_entry*,
 			    vaddr_t, vaddr_t, int);
 void			 uvm_map_setup_entries(struct vm_map*);
+void			 uvm_map_setup_md(struct vm_map*);
 void			 uvm_map_teardown(struct vm_map*);
 void			 uvm_map_vmspace_update(struct vm_map*,
 			    struct uvm_map_deadq*, int);
@@ -156,6 +157,8 @@ int			 uvm_map_findspace(struct vm_map*,
 			    struct vm_map_entry**, struct vm_map_entry**,
 			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
+vsize_t			 uvm_map_addr_augment_get(struct vm_map_entry*);
+void			 uvm_map_addr_augment(struct vm_map_entry*);
 
 /*
  * Tree management functions.
@@ -404,11 +407,16 @@ uvm_mapent_free_insert(struct vm_map *map, struct uvm_addr_state *uaddr,
 	UVM_MAP_REQ_WRITE(map);
 
 	/* Actual insert: forward to uaddr pointer. */
-	fun = uaddr->uaddr_functions;
-	KDASSERT(fun != NULL);
-	if (fun->uaddr_free_insert != NULL)
-		(*fun->uaddr_free_insert)(map, uaddr, entry);
-	entry->etype |= UVM_ET_FREEMAPPED;
+	if (uaddr != NULL) {
+		fun = uaddr->uaddr_functions;
+		KDASSERT(fun != NULL);
+		if (fun->uaddr_free_insert != NULL)
+			(*fun->uaddr_free_insert)(map, uaddr, entry);
+		entry->etype |= UVM_ET_FREEMAPPED;
+	}
+
+	/* Update fspace augmentation. */
+	uvm_map_addr_augment(entry);
 }
 
 /*
@@ -420,14 +428,16 @@ uvm_mapent_free_remove(struct vm_map *map, struct uvm_addr_state *uaddr,
 {
 	const struct uvm_addr_functions *fun;
 
-	KASSERT((entry->etype & UVM_ET_FREEMAPPED) != 0);
+	KASSERT((entry->etype & UVM_ET_FREEMAPPED) != 0 || uaddr == NULL);
 	KASSERT(uvm_map_uaddr_e(map, entry) == uaddr);
 	UVM_MAP_REQ_WRITE(map);
 
-	fun = uaddr->uaddr_functions;
-	if (fun->uaddr_free_remove != NULL)
-		(*fun->uaddr_free_remove)(map, uaddr, entry);
-	entry->etype &= ~UVM_ET_FREEMAPPED;
+	if (uaddr != NULL) {
+		fun = uaddr->uaddr_functions;
+		if (fun->uaddr_free_remove != NULL)
+			(*fun->uaddr_free_remove)(map, uaddr, entry);
+		entry->etype &= ~UVM_ET_FREEMAPPED;
+	}
 }
 
 /*
@@ -888,6 +898,46 @@ uvm_map_findspace(struct vm_map *map, struct vm_map_entry**first,
 	return ENOMEM;
 }
 
+/* Calculate entry augmentation value. */
+vsize_t
+uvm_map_addr_augment_get(struct vm_map_entry *entry)
+{
+	vsize_t			 augment;
+	struct vm_map_entry	*left, *right;
+
+	augment = entry->fspace;
+	if ((left = RB_LEFT(entry, daddrs.addr_entry)) != NULL)
+		augment = MAX(augment, left->fspace_augment);
+	if ((right = RB_RIGHT(entry, daddrs.addr_entry)) != NULL)
+		augment = MAX(augment, right->fspace_augment);
+	return augment;
+}
+
+/*
+ * Update augmentation data in entry.
+ */
+void
+uvm_map_addr_augment(struct vm_map_entry *entry)
+{
+	vsize_t			 augment;
+
+	while (entry != NULL) {
+		/* Calculate value for augmentation. */
+		augment = uvm_map_addr_augment_get(entry);
+
+		/*
+		 * Descend update.
+		 * Once we find an entry that already has the correct value,
+		 * stop, since it means all its parents will use the correct
+		 * value too.
+		 */
+		if (entry->fspace_augment == augment)
+			return;
+		entry->fspace_augment = augment;
+		entry = RB_PARENT(entry, daddrs.addr_entry);
+	}
+}
+
 /*
  * uvm_map: establish a valid mapping in map
  *
@@ -905,7 +955,7 @@ uvm_map_findspace(struct vm_map *map, struct vm_map_entry**first,
  *   always relative to vm_map_min(kernel_map).
  *
  * => align: align vaddr, must be a power-of-2.
- *    Align is only a hint and will be ignored if the alignemnt fails.
+ *    Align is only a hint and will be ignored if the alignment fails.
  */
 int
 uvm_map(struct vm_map *map, vaddr_t *addr, vsize_t sz,
@@ -1253,18 +1303,15 @@ uvm_mapent_merge(struct vm_map *map, struct vm_map_entry *e1,
 	 */
 
 	free = uvm_map_uaddr_e(map, e1);
-	if (free)
-		uvm_mapent_free_remove(map, free, e1);
+	uvm_mapent_free_remove(map, free, e1);
 
 	free = uvm_map_uaddr_e(map, e2);
-	if (free)
-		uvm_mapent_free_remove(map, free, e2);
+	uvm_mapent_free_remove(map, free, e2);
 	uvm_mapent_addr_remove(map, e2);
 	e1->end = e2->end;
 	e1->guard = e2->guard;
 	e1->fspace = e2->fspace;
-	if (free)
-		uvm_mapent_free_insert(map, free, e1);
+	uvm_mapent_free_insert(map, free, e1);
 
 	DEAD_ENTRY_PUSH(dead, e2);
 	return e1;
@@ -1401,8 +1448,7 @@ uvm_map_mkentry(struct vm_map *map, struct vm_map_entry *first,
 	 * Reset free space in first.
 	 */
 	free = uvm_map_uaddr_e(map, first);
-	if (free)
-		uvm_mapent_free_remove(map, free, first);
+	uvm_mapent_free_remove(map, free, first);
 	first->guard = 0;
 	first->fspace = 0;
 
@@ -1415,8 +1461,7 @@ uvm_map_mkentry(struct vm_map *map, struct vm_map_entry *first,
 
 		KDASSERT(last->start == last->end);
 		free = uvm_map_uaddr_e(map, last);
-		if (free)
-			uvm_mapent_free_remove(map, free, last);
+		uvm_mapent_free_remove(map, free, last);
 		uvm_mapent_addr_remove(map, last);
 		DEAD_ENTRY_PUSH(dead, last);
 	}
@@ -1638,16 +1683,14 @@ uvm_mapent_mkfree(struct vm_map *map, struct vm_map_entry *entry,
 	addr = entry->start;
 	end = VMMAP_FREE_END(entry);
 	free = uvm_map_uaddr_e(map, entry);
-	if (free)
-		uvm_mapent_free_remove(map, free, entry);
+	uvm_mapent_free_remove(map, free, entry);
 	uvm_mapent_addr_remove(map, entry);
 	DEAD_ENTRY_PUSH(dead, entry);
 
 	if (markfree) {
 		if (prev) {
 			free = uvm_map_uaddr_e(map, prev);
-			if (free)
-				uvm_mapent_free_remove(map, free, prev);
+			uvm_mapent_free_remove(map, free, prev);
 		}
 		*prev_ptr = uvm_map_fix_space(map, prev, addr, end, 0);
 	}
@@ -2011,6 +2054,8 @@ uvm_map_pageable(struct vm_map *map, vaddr_t start, vaddr_t end,
 
 	if (start > end)
 		return EINVAL;
+	if (start == end)
+		return 0;	/* nothing to do */
 	if (start < map->min_offset)
 		return EFAULT; /* why? see first XXX below */
 	if (end > map->max_offset)
@@ -2063,8 +2108,10 @@ uvm_map_pageable(struct vm_map *map, vaddr_t start, vaddr_t end,
 			error = EINVAL;
 			goto out;
 		}
-	} else
+	} else {
+		KASSERT(last != first);
 		last = RB_PREV(uvm_map_addr, &map->addr, last);
+	}
 
 	/*
 	 * Wire/unwire pages here.
@@ -2227,53 +2274,11 @@ uvm_map_setup(struct vm_map *map, vaddr_t min, vaddr_t max, int flags)
 	simple_lock_init(&map->ref_lock);
 
 	/*
-	 * Ensure the selectors will not try to manage page 0;
-	 * it's too special.
-	 */
-	if (min < VMMAP_MIN_ADDR)
-		min = VMMAP_MIN_ADDR;
-
-	/*
 	 * Configure the allocators.
 	 */
-	if (flags & VM_MAP_ISVMSPACE) {
-		/*
-		 * Setup hint areas.
-		 */
-#if 0 /* Don't use the cool stuff yet. */
-#ifdef __LP64__
-		/* Hinted allocations above 4GB */
-		map->uaddr_any[0] =
-		    uaddr_hint_create(0x100000000ULL, max, 1024 * 1024 * 1024);
-		/* Hinted allocations below 4GB */
-		map->uaddr_any[1] =
-		    uaddr_hint_create(MAX(min, VMMAP_MIN_ADDR), 0x100000000ULL,
-		    1024 * 1024 * 1024);
-#else
-		map->uaddr_any[1] =
-		    uaddr_hint_create(MAX(min, VMMAP_MIN_ADDR), max,
-		    1024 * 1024 * 1024);
-#endif
-
-#ifdef __i386__
-		map->uaddr_exe = uaddr_rnd_create(min, I386_MAX_EXE_ADDR);
-		map->uaddr_any[3] = uaddr_pivot_create(2 * I386_MAX_EXE_ADDR,
-		    max);
-#elif defined(__LP64__)
-		map->uaddr_any[3] =
-		    uaddr_pivot_create(MAX(min, 0x100000000ULL), max);
-#else
-		map->uaddr_any[3] = uaddr_pivot_create(min, max);
-#endif
-#else /* Don't use the cool stuff yet. */
-		/*
-		 * Use the really crappy stuff at first commit.
-		 * Browsers like crappy stuff.
-		 */
-		map->uaddr_any[0] = uaddr_rnd_create(min, max);
-#endif
-		map->uaddr_brk_stack = uaddr_stack_brk_create(min, max);
-	} else
+	if (flags & VM_MAP_ISVMSPACE)
+		uvm_map_setup_md(map);
+	else
 		map->uaddr_any[3] = &uaddr_kbootstrap;
 
 	/*
@@ -2413,8 +2418,7 @@ uvm_map_splitentry(struct vm_map *map, struct vm_map_entry *orig,
 	 * Free space will change, unlink from free space tree.
 	 */
 	free = uvm_map_uaddr_e(map, orig);
-	if (free)
-		uvm_mapent_free_remove(map, free, orig);
+	uvm_mapent_free_remove(map, free, orig);
 
 	adj = split - orig->start;
 
@@ -2462,11 +2466,9 @@ uvm_map_splitentry(struct vm_map *map, struct vm_map_entry *orig,
 		free_before = free;
 	else
 		free_before = uvm_map_uaddr_e(map, orig);
-	if (free_before)
-		uvm_mapent_free_insert(map, free_before, orig);
+	uvm_mapent_free_insert(map, free_before, orig);
 	uvm_mapent_addr_insert(map, next);
-	if (free)
-		uvm_mapent_free_insert(map, free, next);
+	uvm_mapent_free_insert(map, free, next);
 
 	uvm_tree_sanity(map, __FILE__, __LINE__);
 }
@@ -2750,6 +2752,7 @@ uvm_map_printit(struct vm_map *map, boolean_t full,
 		    in_free ? 'T' : 'F',
 		    entry->guard,
 		    VMMAP_FREE_START(entry), VMMAP_FREE_END(entry));
+		(*pr)("\tfspace_augment=%lu\n", entry->fspace_augment);
 		(*pr)("\tfreemapped=%c, uaddr=%p\n",
 		    (entry->etype & UVM_ET_FREEMAPPED) ? 'T' : 'F', free);
 		if (free) {
@@ -3969,7 +3972,8 @@ uvm_map_extract(struct vm_map *srcmap, vaddr_t start, vsize_t len,
 	vm_map_lock(kernel_map);
 
 	if (uvm_map_findspace(kernel_map, &tmp1, &tmp2, &dstaddr, len,
-	    PAGE_SIZE, 0, VM_PROT_NONE, 0) != 0) {
+	    MAX(PAGE_SIZE, PMAP_PREFER_ALIGN()), PMAP_PREFER_OFFSET(start),
+	    VM_PROT_NONE, 0) != 0) {
 		error = ENOMEM;
 		goto fail2;
 	}
@@ -4273,8 +4277,7 @@ uvm_map_clip_start(struct vm_map *map, struct vm_map_entry *entry, vaddr_t addr)
 
 	/* Unlink original. */
 	free = uvm_map_uaddr_e(map, entry);
-	if (free)
-		uvm_mapent_free_remove(map, free, entry);
+	uvm_mapent_free_remove(map, free, entry);
 	uvm_mapent_addr_remove(map, entry);
 
 	/* Copy entry. */
@@ -4284,8 +4287,7 @@ uvm_map_clip_start(struct vm_map *map, struct vm_map_entry *entry, vaddr_t addr)
 
 	/* Put new entry in place of original entry. */
 	uvm_mapent_addr_insert(map, tmp);
-	if (free)
-		uvm_mapent_free_insert(map, free, tmp);
+	uvm_mapent_free_insert(map, free, tmp);
 
 	/* Invoke splitentry. */
 	uvm_map_splitentry(map, tmp, entry, addr);
@@ -4522,8 +4524,6 @@ uvm_map_kmem_grow(struct vm_map *map, struct uvm_map_deadq *dead,
 	uvm_maxkaddr = end;
 #endif
 
-	printf("uvm_km_kmem_grow: grown to 0x%lx\n", uvm_maxkaddr);
-
 	/* Rebuild free list. */
 	uvm_map_freelist_update_refill(map, flags);
 }
@@ -4543,8 +4543,7 @@ uvm_map_freelist_update_clear(struct vm_map *map, struct uvm_map_deadq *dead)
 		next = RB_NEXT(uvm_map_addr, &map->addr, entry);
 
 		free = uvm_map_uaddr_e(map, entry);
-		if (free)
-			uvm_mapent_free_remove(map, free, entry);
+		uvm_mapent_free_remove(map, free, entry);
 
 		if (prev != NULL && entry->start == entry->end) {
 			prev->fspace += VMMAP_FREE_END(entry) - entry->end;
@@ -4705,7 +4704,7 @@ uvm_map_fix_space(struct vm_map *map, struct vm_map_entry *entry,
 			 * We'll start a new entry and add to that entry
 			 * instead.
 			 */
-			if (entry != NULL && entfree != NULL)
+			if (entry != NULL)
 				uvm_mapent_free_insert(map, entfree, entry);
 
 			/* New entry for new uaddr. */
@@ -4731,7 +4730,7 @@ uvm_map_fix_space(struct vm_map *map, struct vm_map_entry *entry,
 		min = lmax;
 	}
 	/* Finally put entry on the uaddr state. */
-	if (entry != NULL && entfree != NULL)
+	if (entry != NULL)
 		uvm_mapent_free_insert(map, entfree, entry);
 
 	return entry;
@@ -5024,5 +5023,114 @@ vm_map_unbusy_ln(struct vm_map *map, char *file, int line)
 }
 
 
+#undef RB_AUGMENT
+#define RB_AUGMENT(x)	uvm_map_addr_augment((x))
 RB_GENERATE(uvm_map_addr, vm_map_entry, daddrs.addr_entry,
     uvm_mapentry_addrcmp);
+#undef RB_AUGMENT
+
+
+/*
+ * MD code: vmspace allocator setup.
+ */
+
+
+#ifdef __i386__
+void
+uvm_map_setup_md(struct vm_map *map)
+{
+	vaddr_t		min, max;
+
+	min = map->min_offset;
+	max = map->max_offset;
+
+	/*
+	 * Ensure the selectors will not try to manage page 0;
+	 * it's too special.
+	 */
+	if (min < VMMAP_MIN_ADDR)
+		min = VMMAP_MIN_ADDR;
+
+#if 0	/* Cool stuff, not yet */
+	/* Hinted allocations. */
+	map->uaddr_any[1] = uaddr_hint_create(MAX(min, VMMAP_MIN_ADDR), max,
+	    1024 * 1024 * 1024);
+
+	/* Executable code is special. */
+	map->uaddr_exe = uaddr_rnd_create(min, I386_MAX_EXE_ADDR);
+	/* Place normal allocations beyond executable mappings. */
+	map->uaddr_any[3] = uaddr_pivot_create(2 * I386_MAX_EXE_ADDR, max);
+#else	/* Crappy stuff, for now */
+	map->uaddr_any[0] = uaddr_rnd_create(min, max);
+#endif
+
+#ifndef SMALL_KERNEL
+	map->uaddr_brk_stack = uaddr_stack_brk_create(min, max);
+#endif /* !SMALL_KERNEL */
+}
+#elif __LP64__
+void
+uvm_map_setup_md(struct vm_map *map)
+{
+	vaddr_t		min, max;
+
+	min = map->min_offset;
+	max = map->max_offset;
+
+	/*
+	 * Ensure the selectors will not try to manage page 0;
+	 * it's too special.
+	 */
+	if (min < VMMAP_MIN_ADDR)
+		min = VMMAP_MIN_ADDR;
+
+#if 0	/* Cool stuff, not yet */
+	/* Hinted allocations above 4GB */
+	map->uaddr_any[0] =
+	    uaddr_hint_create(0x100000000ULL, max, 1024 * 1024 * 1024);
+	/* Hinted allocations below 4GB */
+	map->uaddr_any[1] =
+	    uaddr_hint_create(MAX(min, VMMAP_MIN_ADDR), 0x100000000ULL,
+	    1024 * 1024 * 1024);
+	/* Normal allocations, always above 4GB */
+	map->uaddr_any[3] =
+	    uaddr_pivot_create(MAX(min, 0x100000000ULL), max);
+#else	/* Crappy stuff, for now */
+	map->uaddr_any[0] = uaddr_rnd_create(min, max);
+#endif
+
+#ifndef SMALL_KERNEL
+	map->uaddr_brk_stack = uaddr_stack_brk_create(min, max);
+#endif /* !SMALL_KERNEL */
+}
+#else	/* non-i386, 32 bit */
+void
+uvm_map_setup_md(struct vm_map *map)
+{
+	vaddr_t		min, max;
+
+	min = map->min_offset;
+	max = map->max_offset;
+
+	/*
+	 * Ensure the selectors will not try to manage page 0;
+	 * it's too special.
+	 */
+	if (min < VMMAP_MIN_ADDR)
+		min = VMMAP_MIN_ADDR;
+
+#if 0	/* Cool stuff, not yet */
+	/* Hinted allocations. */
+	map->uaddr_any[1] = uaddr_hint_create(MAX(min, VMMAP_MIN_ADDR), max,
+	    1024 * 1024 * 1024);
+	/* Normal allocations. */
+	map->uaddr_any[3] = uaddr_pivot_create(min, max);
+#else	/* Crappy stuff, for now */
+	map->uaddr_any[0] = uaddr_rnd_create(min, max);
+#endif
+
+#ifndef SMALL_KERNEL
+	map->uaddr_brk_stack = uaddr_stack_brk_create(min, max);
+#endif /* !SMALL_KERNEL */
+}
+#endif

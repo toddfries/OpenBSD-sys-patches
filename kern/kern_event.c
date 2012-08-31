@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_event.c,v 1.43 2012/03/10 05:54:28 guenther Exp $	*/
+/*	$OpenBSD: kern_event.c,v 1.48 2012/07/08 17:21:08 guenther Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -41,6 +41,7 @@
 #include <sys/queue.h>
 #include <sys/event.h>
 #include <sys/eventvar.h>
+#include <sys/ktrace.h>
 #include <sys/pool.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
@@ -52,7 +53,7 @@
 #include <sys/syscallargs.h>
 #include <sys/timeout.h>
 
-int	kqueue_scan(struct file *fp, int maxevents,
+int	kqueue_scan(struct kqueue *kq, int maxevents,
 		    struct kevent *ulistp, const struct timespec *timeout,
 		    struct proc *p, int *retval);
 
@@ -138,6 +139,23 @@ struct filterops *sysfilt_ops[] = {
 	&timer_filtops,			/* EVFILT_TIMER */
 };
 
+void KQREF(struct kqueue *);
+void KQRELE(struct kqueue *);
+
+void
+KQREF(struct kqueue *kq)
+{
+	++kq->kq_refs;
+}
+
+void
+KQRELE(struct kqueue *kq)
+{
+	if (--kq->kq_refs == 0) {
+		pool_put(&kqueue_pool, kq);
+	}
+}
+
 void kqueue_init(void);
 
 void
@@ -192,26 +210,26 @@ filt_kqueue(struct knote *kn, long hint)
 int
 filt_procattach(struct knote *kn)
 {
-	struct proc *p;
+	struct process *pr;
 
-	p = pfind(kn->kn_id);
-	if (p == NULL)
+	pr = prfind(kn->kn_id);
+	if (pr == NULL)
 		return (ESRCH);
 
-	/* threads and exiting processes can't be specified */
-	if (p->p_flag & P_THREAD || p->p_p->ps_flags & PS_EXITING)
+	/* exiting processes can't be specified */
+	if (pr->ps_flags & PS_EXITING)
 		return (ESRCH);
 
 	/*
 	 * Fail if it's not owned by you, or the last exec gave us
 	 * setuid/setgid privs (unless you're root).
 	 */
-	if (p->p_p != curproc->p_p &&
-	    (p->p_cred->p_ruid != curproc->p_cred->p_ruid ||
-	    (p->p_p->ps_flags & PS_SUGID)) && suser(curproc, 0) != 0)
+	if (pr != curproc->p_p &&
+	    (pr->ps_cred->p_ruid != curproc->p_cred->p_ruid ||
+	    (pr->ps_flags & PS_SUGID)) && suser(curproc, 0) != 0)
 		return (EACCES);
 
-	kn->kn_ptr.p_proc = p;
+	kn->kn_ptr.p_process = pr;
 	kn->kn_flags |= EV_CLEAR;		/* automatically set */
 
 	/*
@@ -224,7 +242,7 @@ filt_procattach(struct knote *kn)
 	}
 
 	/* XXX lock the proc here while adding to the list? */
-	SLIST_INSERT_HEAD(&p->p_p->ps_klist, kn, kn_selnext);
+	SLIST_INSERT_HEAD(&pr->ps_klist, kn, kn_selnext);
 
 	return (0);
 }
@@ -240,13 +258,13 @@ filt_procattach(struct knote *kn)
 void
 filt_procdetach(struct knote *kn)
 {
-	struct proc *p = kn->kn_ptr.p_proc;
+	struct process *pr = kn->kn_ptr.p_process;
 
 	if (kn->kn_status & KN_DETACHED)
 		return;
 
 	/* XXX locking?  this might modify another process. */
-	SLIST_REMOVE(&p->p_p->ps_klist, kn, knote, kn_selnext);
+	SLIST_REMOVE(&pr->ps_klist, kn, knote, kn_selnext);
 }
 
 int
@@ -270,7 +288,7 @@ filt_proc(struct knote *kn, long hint)
 	 * from the process's klist
 	 */
 	if (event == NOTE_EXIT) {
-		struct process *pr = kn->kn_ptr.p_proc->p_p;
+		struct process *pr = kn->kn_ptr.p_process;
 
 		kn->kn_status |= KN_DETACHED;
 		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
@@ -434,11 +452,12 @@ sys_kqueue(struct proc *p, void *v, register_t *retval)
 	kq = pool_get(&kqueue_pool, PR_WAITOK|PR_ZERO);
 	TAILQ_INIT(&kq->kq_head);
 	fp->f_data = (caddr_t)kq;
+	KQREF(kq);
 	*retval = fd;
 	if (fdp->fd_knlistsize < 0)
 		fdp->fd_knlistsize = 0;		/* this process has a kq */
 	kq->kq_fdp = fdp;
-	FILE_SET_MATURE(fp);
+	FILE_SET_MATURE(fp, p);
 	return (0);
 }
 
@@ -470,6 +489,10 @@ sys_kevent(struct proc *p, void *v, register_t *retval)
 		error = copyin(SCARG(uap, timeout), &ts, sizeof(ts));
 		if (error)
 			goto done;
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktrreltimespec(p, &ts);
+#endif
 		SCARG(uap, timeout) = &ts;
 	}
 
@@ -511,11 +534,16 @@ sys_kevent(struct proc *p, void *v, register_t *retval)
 		goto done;
 	}
 
-	error = kqueue_scan(fp, SCARG(uap, nevents), SCARG(uap, eventlist),
+	KQREF(kq);
+	FRELE(fp, p);
+	error = kqueue_scan(kq, SCARG(uap, nevents), SCARG(uap, eventlist),
 			    SCARG(uap, timeout), p, &n);
+	KQRELE(kq);
 	*retval = n;
+	return (error);
+
  done:
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -548,7 +576,6 @@ kqueue_register(struct kqueue *kq, struct kevent *kev, struct proc *p)
 		if ((fp = fd_getfile(fdp, kev->ident)) == NULL)
 			return (EBADF);
 		FREF(fp);
-		fp->f_count++;
 
 		if (kev->ident < fdp->fd_knlistsize) {
 			SLIST_FOREACH(kn, &fdp->fd_knlist[kev->ident], kn_link)
@@ -594,8 +621,6 @@ kqueue_register(struct kqueue *kq, struct kevent *kev, struct proc *p)
 			 * apply reference count to knote structure, and
 			 * do not release it at the end of this routine.
 			 */
-			if (fp != NULL)
-				FRELE(fp);
 			fp = NULL;
 
 			kn->kn_sfflags = kev->fflags;
@@ -649,15 +674,14 @@ kqueue_register(struct kqueue *kq, struct kevent *kev, struct proc *p)
 
 done:
 	if (fp != NULL)
-		closef(fp, p);
+		FRELE(fp, p);
 	return (error);
 }
 
 int
-kqueue_scan(struct file *fp, int maxevents, struct kevent *ulistp,
+kqueue_scan(struct kqueue *kq, int maxevents, struct kevent *ulistp,
 	const struct timespec *tsp, struct proc *p, int *retval)
 {
-	struct kqueue *kq = (struct kqueue *)fp->f_data;
 	struct kevent *kevp;
 	struct timeval atv, rtv, ttv;
 	struct knote *kn, marker;
@@ -703,6 +727,11 @@ retry:
 	}
 
 start:
+	if (kq->kq_state & KQ_DYING) {
+		error = EBADF;
+		goto done;
+	}
+
 	kevp = kq->kq_kev;
 	s = splhigh();
 	if (kq->kq_count == 0) {
@@ -859,9 +888,8 @@ kqueue_close(struct file *fp, struct proc *p)
 		while (kn != NULL) {
 			kn0 = SLIST_NEXT(kn, kn_link);
 			if (kq == kn->kn_kq) {
-				FREF(kn->kn_fp);
 				kn->kn_fop->f_detach(kn);
-				closef(kn->kn_fp, p);
+				FRELE(kn->kn_fp, p);
 				knote_free(kn);
 				*knp = kn0;
 			} else {
@@ -888,8 +916,11 @@ kqueue_close(struct file *fp, struct proc *p)
 			}
 		}
 	}
-	pool_put(&kqueue_pool, kq);
 	fp->f_data = NULL;
+
+	kq->kq_state |= KQ_DYING;
+	kqueue_wakeup(kq);
+	KQRELE(kq);
 
 	return (0);
 }
@@ -998,7 +1029,7 @@ done:
 
 /*
  * should be called at spl == 0, since we don't want to hold spl
- * while calling closef and free.
+ * while calling FRELE and knote_free.
  */
 void
 knote_drop(struct knote *kn, struct proc *p, struct filedesc *fdp)
@@ -1014,8 +1045,7 @@ knote_drop(struct knote *kn, struct proc *p, struct filedesc *fdp)
 	if (kn->kn_status & KN_QUEUED)
 		knote_dequeue(kn);
 	if (kn->kn_fop->f_isfd) {
-		FREF(kn->kn_fp);
-		closef(kn->kn_fp, p);
+		FRELE(kn->kn_fp, p);
 	}
 	knote_free(kn);
 }

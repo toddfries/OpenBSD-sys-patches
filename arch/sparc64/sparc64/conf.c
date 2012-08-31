@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.61 2011/10/06 20:49:28 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.63 2012/04/06 15:10:40 jsing Exp $	*/
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -65,7 +65,6 @@
 #include "cd.h"
 #include "uk.h"
 #include "wd.h"
-#include "raid.h"
 
 #ifdef notyet
 #include "fb.h"
@@ -82,6 +81,7 @@
 #include "magma.h"		/* has NMTTY and NMBPP */
 #include "spif.h"		/* has NSTTY and NSBPP */
 #include "uperf.h"
+#include "hvctl.h"
 
 #include "fdc.h"		/* has NFDC and NFD; see files.sparc */
 
@@ -149,7 +149,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 22 */
 	bdev_lkm_dummy(),		/* 23 */
 	bdev_lkm_dummy(),		/* 24 */
-	bdev_disk_init(NRAID,raid),	/* 25: RAIDframe disk driver */
+	bdev_notdef(),			/* 25 was: RAIDframe disk driver */
 };
 int	nblkdev = nitems(bdevsw);
 
@@ -285,7 +285,7 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 118 */
 	cdev_random_init(1,random),	/* 119: random data source */
 	cdev_bio_init(NBIO,bio),	/* 120: ioctl tunnel */
-	cdev_disk_init(NRAID,raid),	/* 121: RAIDframe disk driver */
+	cdev_notdef(),			/* 121 was: RAIDframe disk driver */
 	cdev_tty_init(NPCONS,pcons),	/* 122: PROM console */
 	cdev_ptm_init(NPTY,ptm),	/* 123: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 124: devices hot plugging */
@@ -296,6 +296,7 @@ struct cdevsw	cdevsw[] =
 	cdev_bthub_init(NBTHUB,bthub),	/* 129: bluetooth hub */
 	cdev_disk_init(1,diskmap),	/* 130: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 131: pppx */
+	cdev_gen_init(NHVCTL,hvctl)	/* 132: hvctl */
 };
 int	nchrdev = nitems(cdevsw);
 
