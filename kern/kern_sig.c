@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.136 2012/03/10 06:27:21 guenther Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.143 2012/07/11 08:45:21 guenther Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -223,6 +223,9 @@ sys_sigaction(struct proc *p, void *v, register_t *retval)
 		syscallarg(struct sigaction *) osa;
 	} */ *uap = v;
 	struct sigaction vec;
+#ifdef KTRACE
+	struct sigaction ovec;
+#endif
 	struct sigaction *sa;
 	const struct sigaction *nsa;
 	struct sigaction *osa;
@@ -263,13 +266,25 @@ sys_sigaction(struct proc *p, void *v, register_t *retval)
 		error = copyout(sa, osa, sizeof (vec));
 		if (error)
 			return (error);
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ovec = vec;
+#endif
 	}
 	if (nsa) {
 		error = copyin(nsa, sa, sizeof (vec));
 		if (error)
 			return (error);
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktrsigaction(p, sa);
+#endif
 		setsigvec(p, signum, sa);
 	}
+#ifdef KTRACE
+	if (osa && KTRPOINT(p, KTR_STRUCT))
+		ktrsigaction(p, &ovec);
+#endif
 	return (0);
 }
 
@@ -706,7 +721,7 @@ trapsignal(struct proc *p, int signum, u_long trapno, int code,
 			    p->p_sigmask, code, &si);
 		}
 #endif
-		p->p_stats->p_ru.ru_nsignals++;
+		p->p_ru.ru_nsignals++;
 		(*p->p_emul->e_sendsig)(ps->ps_sigact[signum], signum,
 		    p->p_sigmask, trapno, code, sigval);
 		p->p_sigmask |= ps->ps_catchmask[signum];
@@ -1057,11 +1072,19 @@ issignal(struct proc *p)
 			 */
 			p->p_xstat = signum;
 
+			KERNEL_LOCK();
+			single_thread_set(p, SINGLE_SUSPEND, 0);
+			KERNEL_UNLOCK();
+
 			if (dolock)
 				SCHED_LOCK(s);
 			proc_stop(p, 1);
 			if (dolock)
 				SCHED_UNLOCK(s);
+
+			KERNEL_LOCK();
+			single_thread_clear(p, 0);
+			KERNEL_UNLOCK();
 
 			/*
 			 * If we are no longer being traced, or the parent
@@ -1177,7 +1200,7 @@ proc_stop(struct proc *p, int sw)
 #endif
 
 	p->p_stat = SSTOP;
-	atomic_clearbits_int(&p->p_flag, P_WAITED);
+	atomic_clearbits_int(&p->p_p->ps_flags, PS_WAITED);
 	atomic_setbits_int(&p->p_flag, P_STOPPED|P_SUSPSIG);
 	if (!timeout_pending(&proc_stop_to)) {
 		timeout_add(&proc_stop_to, 0);
@@ -1301,7 +1324,7 @@ postsig(int signum)
 			ps->ps_sigact[signum] = SIG_DFL;
 		}
 		splx(s);
-		p->p_stats->p_ru.ru_nsignals++;
+		p->p_ru.ru_nsignals++;
 		if (p->p_sisig == signum) {
 			p->p_sisig = 0;
 			p->p_sitrapno = 0;
@@ -1330,7 +1353,7 @@ sigexit(struct proc *p, int signum)
 	/* Mark process as going away */
 	atomic_setbits_int(&p->p_flag, P_WEXIT);
 
-	p->p_acflag |= AXSIG;
+	p->p_p->ps_acflag |= AXSIG;
 	if (sigprop[signum] & SA_CORE) {
 		p->p_sisig = signum;
 
@@ -1429,7 +1452,7 @@ coredump(struct proc *p)
 	VATTR_NULL(&vattr);
 	vattr.va_size = 0;
 	VOP_SETATTR(vp, &vattr, cred, p);
-	p->p_acflag |= ACORE;
+	p->p_p->ps_acflag |= ACORE;
 
 	io.io_proc = p;
 	io.io_vp = vp;
@@ -1557,6 +1580,10 @@ sys___thrsigdivert(struct proc *p, void *v, register_t *retval)
 		struct timespec ts;
 		if ((error = copyin(SCARG(uap, timeout), &ts, sizeof(ts))) != 0)
 			return (error);
+#ifdef KTRACE
+		if (KTRPOINT(p, KTR_STRUCT))
+			ktrreltimespec(p, &ts);
+#endif
 		to_ticks = (long long)hz * ts.tv_sec +
 		    ts.tv_nsec / (tick * 1000);
 		if (to_ticks > INT_MAX)
@@ -1620,13 +1647,13 @@ initsiginfo(siginfo_t *si, int sig, u_long trapno, int code, union sigval val)
 int
 filt_sigattach(struct knote *kn)
 {
-	struct proc *p = curproc;
+	struct process *pr = curproc->p_p;
 
-	kn->kn_ptr.p_proc = p;
+	kn->kn_ptr.p_process = pr;
 	kn->kn_flags |= EV_CLEAR;		/* automatically set */
 
 	/* XXX lock the proc here while adding to the list? */
-	SLIST_INSERT_HEAD(&p->p_p->ps_klist, kn, kn_selnext);
+	SLIST_INSERT_HEAD(&pr->ps_klist, kn, kn_selnext);
 
 	return (0);
 }
@@ -1634,9 +1661,9 @@ filt_sigattach(struct knote *kn)
 void
 filt_sigdetach(struct knote *kn)
 {
-	struct proc *p = kn->kn_ptr.p_proc;
+	struct process *pr = kn->kn_ptr.p_process;
 
-	SLIST_REMOVE(&p->p_p->ps_klist, kn, knote, kn_selnext);
+	SLIST_REMOVE(&pr->ps_klist, kn, knote, kn_selnext);
 }
 
 /*
@@ -1695,7 +1722,7 @@ single_thread_check(struct proc *p, int deep)
 			if (--pr->ps_singlecount == 0)
 				wakeup(&pr->ps_singlecount);
 			if (pr->ps_flags & PS_SINGLEEXIT)
-				exit1(p, 0, EXIT_THREAD);
+				exit1(p, 0, EXIT_THREAD_NOCHECK);
 
 			/* not exiting and don't need to unwind, so suspend */
 			SCHED_LOCK(s);
@@ -1747,7 +1774,7 @@ single_thread_set(struct proc *p, enum single_thread_mode mode, int deep)
 	TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
 		int s;
 
-		if (q == p)
+		if (q == p || ISSET(q->p_flag, P_WEXIT))
 			continue;
 		SCHED_LOCK(s);
 		atomic_setbits_int(&q->p_flag, P_SUSPSINGLE);
@@ -1793,7 +1820,7 @@ single_thread_set(struct proc *p, enum single_thread_mode mode, int deep)
 }
 
 void
-single_thread_clear(struct proc *p)
+single_thread_clear(struct proc *p, int flag)
 {
 	struct process *pr = p->p_p;
 	struct proc *q;
@@ -1815,7 +1842,7 @@ single_thread_clear(struct proc *p)
 		 * it back into some sleep queue
 		 */
 		SCHED_LOCK(s);
-		if (q->p_stat == SSTOP && (q->p_flag & P_SUSPSIG) == 0) {
+		if (q->p_stat == SSTOP && (q->p_flag & flag) == 0) {
 			if (q->p_wchan == 0)
 				setrunnable(q);
 			else

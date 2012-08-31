@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.362 2012/02/03 01:57:51 bluhm Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.367 2012/07/26 12:25:31 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -531,7 +531,7 @@ struct pf_rule_actions {
 	u_int8_t	log;
 	u_int8_t	set_tos;
 	u_int8_t	min_ttl;
-	u_int8_t	prio[2];
+	u_int8_t	set_prio[2];
 	u_int8_t	pad[3];
 };
 
@@ -649,7 +649,7 @@ struct pf_rule {
 #define PF_FLUSH_GLOBAL		0x02
 	u_int8_t		 flush;
 #define PF_PRIO_NOTSET		0xff
-	u_int8_t		 prio[2];
+	u_int8_t		 set_prio[2];
 	sa_family_t		 naf;
 
 	struct {
@@ -840,18 +840,16 @@ struct pf_state {
 #define	PFSTATE_SETTOS		0x0040
 #define	PFSTATE_RANDOMID	0x0080
 #define	PFSTATE_SCRUB_TCP	0x0100
+#define	PFSTATE_SCRUBMASK (PFSTATE_NODF|PFSTATE_RANDOMID|PFSTATE_SCRUB_TCP)
 	u_int8_t		 log;
 	u_int8_t		 timeout;
 	u_int8_t		 sync_state; /* PFSYNC_S_x */
-
-	/* XXX */
 	u_int8_t		 sync_updates;
-
 	int			 rtableid[2];	/* rtables stack and wire */
 	u_int8_t		 min_ttl;
 	u_int8_t		 set_tos;
+	u_int8_t		 set_prio[2];
 	u_int16_t		 max_mss;
-	u_int8_t		 prio[2];
 	u_int8_t		 pad2[2];
 };
 
@@ -908,13 +906,13 @@ struct pfsync_state {
 	u_int8_t	 proto;
 	u_int8_t	 direction;
 	u_int8_t	 log;
-	u_int8_t	 state_flags; /* XXX remove after 5.0 */
+	u_int8_t	 pad0;
 	u_int8_t	 timeout;
 	u_int8_t	 sync_flags;
 	u_int8_t	 updates;
 	u_int8_t	 min_ttl;
 	u_int8_t	 set_tos;
-	u_int16_t	 all_state_flags;
+	u_int16_t	 state_flags;
 	u_int8_t	 pad[2];
 } __packed;
 
@@ -1765,6 +1763,8 @@ void				 pf_state_rm_src_node(struct pf_state *,
 extern struct pf_state		*pf_find_state_byid(struct pf_state_cmp *);
 extern struct pf_state		*pf_find_state_all(struct pf_state_key_cmp *,
 				    u_int, int *);
+extern void			 pf_state_export(struct pfsync_state *,
+				    struct pf_state *);
 extern void			 pf_print_state(struct pf_state *);
 extern void			 pf_print_flags(u_int8_t);
 extern u_int16_t		 pf_cksum_fixup(u_int16_t, u_int16_t, u_int16_t,

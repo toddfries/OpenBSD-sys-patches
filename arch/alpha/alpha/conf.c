@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.67 2011/10/06 20:49:27 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.69 2012/08/23 06:12:49 deraadt Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -51,7 +51,6 @@ bdev_decl(fd);
 #include "sd.h"
 #include "uk.h"
 #include "vnd.h"
-#include "raid.h"
 #include "rd.h"
 #include "bktr.h"
 #include "radio.h"
@@ -74,7 +73,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 13 */
 	bdev_lkm_dummy(),		/* 14 */
 	bdev_lkm_dummy(),		/* 15 */
-	bdev_disk_init(NRAID,raid),	/* 16 */
+	bdev_notdef(),			/* 16 was: RAIDframe disk driver */
 };
 int	nblkdev = nitems(bdevsw);
 
@@ -112,10 +111,6 @@ cdev_decl(wd);
 cdev_decl(fd);
 #include "cy.h"
 cdev_decl(cy);
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 #include "ksyms.h"
 
 /* USB Devices */
@@ -183,7 +178,7 @@ struct cdevsw	cdevsw[] =
 	cdev_spkr_init(NSPKR,spkr),	/* 40: PC speaker */
 	cdev_midi_init(NMIDI,midi),     /* 41: MIDI I/O */
         cdev_midi_init(NSEQUENCER,sequencer),   /* 42: sequencer I/O */
-	cdev_disk_init(NRAID,raid),	/* 43: RAIDframe disk driver */
+	cdev_notdef(),			/* 43 was: RAIDframe disk driver */
 	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_usb_init(NUSB,usb),	/* 45: USB controller */
 	cdev_usbdev_init(NUHID,uhid),	/* 46: USB generic HID */
@@ -191,11 +186,7 @@ struct cdevsw	cdevsw[] =
 	cdev_usbdev_init(NUGEN,ugen),	/* 48: USB generic driver */
 	cdev_tty_init(NUCOM, ucom),	/* 49: USB tty */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 #ifdef USER_PCICONF
 	cdev_pci_init(NPCI,pci),	/* 52: PCI user */
 #else

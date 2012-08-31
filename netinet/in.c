@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.c,v 1.70 2012/01/03 23:41:51 bluhm Exp $	*/
+/*	$OpenBSD: in.c,v 1.72 2012/07/10 08:31:51 claudio Exp $	*/
 /*	$NetBSD: in.c,v 1.26 1996/02/13 23:41:39 christos Exp $	*/
 
 /*
@@ -192,7 +192,7 @@ int
 in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 {
 	struct ifreq *ifr = (struct ifreq *)data;
-	struct in_ifaddr *ia = 0;
+	struct in_ifaddr *ia = NULL;
 	struct in_aliasreq *ifra = (struct in_aliasreq *)data;
 	struct sockaddr_in oldaddr;
 	int error, hostIsNew, maskIsNew;
@@ -231,7 +231,7 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 					ifra->ifra_addr.sin_addr.s_addr)
 				    break;
 			}
-		if (cmd == SIOCDIFADDR && ia == 0)
+		if (cmd == SIOCDIFADDR && ia == NULL)
 			return (EADDRNOTAVAIL);
 		/* FALLTHROUGH */
 	case SIOCSIFADDR:
@@ -242,7 +242,7 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 
 		if (ifp == 0)
 			panic("in_control");
-		if (ia == (struct in_ifaddr *)0) {
+		if (ia == NULL) {
 			ia = malloc(sizeof *ia, M_IFADDR, M_WAITOK | M_ZERO);
 			s = splsoftnet();
 			TAILQ_INSERT_TAIL(&in_ifaddr, ia, ia_list);
@@ -287,7 +287,7 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 			if (ia2 && ia2->ia_ifp == ifp)
 				ia = ia2;
 		}
-		if (ia == (struct in_ifaddr *)0)
+		if (ia == NULL)
 			return (EADDRNOTAVAIL);
 		break;
 	}
@@ -585,7 +585,7 @@ in_lifaddr_ioctl(struct socket *so, u_long cmd, caddr_t data,
 		}
 		if (!ifa)
 			return EADDRNOTAVAIL;
-		ia = (struct in_ifaddr *)ifa;
+		ia = ifatoia(ifa);
 
 		if (cmd == SIOCGLIFADDR) {
 			/* fill in the if_laddrreq structure */
@@ -807,33 +807,36 @@ int
 in_scrubprefix(struct in_ifaddr *target)
 {
 	struct in_ifaddr *ia;
-	struct in_addr prefix, mask, p;
+	struct in_addr prefix, mask, p, m;
 	int error;
 
 	if ((target->ia_flags & IFA_ROUTE) == 0)
 		return 0;
 
-	if (rtinitflags(target))
+	if (rtinitflags(target)) {
 		prefix = target->ia_dstaddr.sin_addr;
-	else {
+		mask.s_addr = INADDR_BROADCAST;
+	} else {
 		prefix = target->ia_addr.sin_addr;
 		mask = target->ia_sockmask.sin_addr;
 		prefix.s_addr &= mask.s_addr;
 	}
 
 	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-		if (rtinitflags(ia))
+		if (rtinitflags(ia)) {
 			p = ia->ia_dstaddr.sin_addr;
-		else {
+			m.s_addr = INADDR_BROADCAST;
+		} else {
 			p = ia->ia_addr.sin_addr;
-			p.s_addr &= ia->ia_sockmask.sin_addr.s_addr;
+			m = ia->ia_sockmask.sin_addr;
+			p.s_addr &= m.s_addr;
 		}
 
 		if (ia->ia_ifp->if_rdomain != target->ia_ifp->if_rdomain)
 			continue;
-		if (prefix.s_addr != p.s_addr)
+		if (prefix.s_addr != p.s_addr ||
+		    mask.s_addr != m.s_addr)
 			continue;
-
 		/*
 		 * if we got a matching prefix route, move IFA_ROUTE to him
 		 */

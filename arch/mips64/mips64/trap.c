@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.77 2011/11/16 20:50:19 deraadt Exp $	*/
+/*	$OpenBSD: trap.c,v 1.83 2012/08/07 19:55:57 miod Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -50,12 +50,10 @@
 #include <sys/kernel.h>
 #include <sys/signalvar.h>
 #include <sys/syscall.h>
+#include <sys/syscall_mi.h>
 #include <sys/user.h>
 #include <sys/buf.h>
 #include <sys/device.h>
-#ifdef KTRACE
-#include <sys/ktrace.h>
-#endif
 #ifdef PTRACE
 #include <sys/ptrace.h>
 #endif
@@ -79,9 +77,6 @@
 #endif
 
 #include <sys/syslog.h>
-
-#include "systrace.h"
-#include <dev/systrace.h>
 
 #define	USERMODE(ps)	(((ps) & SR_KSU_MASK) == SR_KSU_USER)
 
@@ -150,7 +145,7 @@ ast()
 	struct cpu_info *ci = curcpu();
 	struct proc *p = ci->ci_curproc;
 
-	uvmexp.softs++;
+	atomic_add_int(&uvmexp.softs, 1);
 
 	p->p_md.md_astpending = 0;
 	if (p->p_flag & P_OWEUPC) {
@@ -185,6 +180,8 @@ trap(struct trap_frame *trapframe)
 	trapdebug_enter(ci, trapframe, -1);
 
 	type = (trapframe->cause & CR_EXC_CODE) >> CR_EXC_CODE_SHIFT;
+	if (type != T_SYSCALL)
+		atomic_add_int(&uvmexp.traps, 1);
 	if (USERMODE(trapframe->sr)) {
 		type |= T_USER;
 	}
@@ -400,13 +397,13 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		struct sysent *callp;
 		unsigned int code;
 		unsigned long tpc;
-		int numsys;
+		int numsys, error;
 		struct args {
 			register_t i[8];
 		} args;
 		register_t rval[2];
 
-		uvmexp.syscalls++;
+		atomic_add_int(&uvmexp.syscalls, 1);
 
 		/* compute next PC after syscall instruction */
 		tpc = trapframe->pc; /* Remember if restart */
@@ -420,6 +417,7 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		code = locr0->v0;
 		switch (code) {
 		case SYS_syscall:
+		case SYS___syscall:
 			/*
 			 * Code is first argument, followed by actual args.
 			 */
@@ -437,36 +435,11 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 				args.i[4] = locr0->a5;
 				args.i[5] = locr0->a6;
 				args.i[6] = locr0->a7;
-				i = copyin((void *)locr0->sp,
-				    &args.i[7], sizeof(register_t));
+				if ((error = copyin((void *)locr0->sp,
+				    &args.i[7], sizeof(register_t))))
+					goto bad;
 			}
 			break;
-
-		case SYS___syscall:
-			/*
-			 * Like syscall, but code is a quad, so as to maintain
-			 * quad alignment for the rest of the arguments.
-			 */
-			code = locr0->a0;
-			args.i[0] = locr0->a1;
-			args.i[1] = locr0->a2;
-			args.i[2] = locr0->a3;
-
-			if (code >= numsys)
-				callp += p->p_emul->e_nosys; /* (illegal) */
-			else
-				callp += code;
-			i = callp->sy_argsize / sizeof(int);
-			if (i > 3) {
-				args.i[3] = locr0->a4;
-				args.i[4] = locr0->a5;
-				args.i[5] = locr0->a6;
-				args.i[6] = locr0->a7;
-				i = copyin((void *)locr0->sp, &args.i[7],
-				    sizeof(register_t));
-			}
-			break;
-
 		default:
 			if (code >= numsys)
 				callp += p->p_emul->e_nosys; /* (illegal) */
@@ -485,41 +458,18 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 				args.i[7] = locr0->a7;
 			}
 		}
-#ifdef SYSCALL_DEBUG
-		KERNEL_LOCK();
-		scdebug_call(p, code, args.i);
-		KERNEL_UNLOCK();
-#endif
-#ifdef KTRACE
-		if (KTRPOINT(p, KTR_SYSCALL)) {
-			KERNEL_LOCK();
-			ktrsyscall(p, code, callp->sy_argsize, args.i);
-			KERNEL_UNLOCK();
-		}
-#endif
+
 		rval[0] = 0;
 		rval[1] = locr0->v1;
+
 #if defined(DDB) || defined(DEBUG)
 		trapdebug[TRAPSIZE * ci->ci_cpuid + (trppos[ci->ci_cpuid] == 0 ?
 		    TRAPSIZE : trppos[ci->ci_cpuid]) - 1].code = code;
 #endif
 
-#if NSYSTRACE > 0
-		if (ISSET(p->p_flag, P_SYSTRACE)) {
-			KERNEL_LOCK();
-			i = systrace_redirect(code, p, args.i, rval);
-			KERNEL_UNLOCK();
-		} else
-#endif
-		{
-			int nolock = (callp->sy_flags & SY_NOLOCK);
-			if (!nolock)
-				KERNEL_LOCK();
-			i = (*callp->sy_call)(p, &args, rval);
-			if (!nolock)
-				KERNEL_UNLOCK();
-		}
-		switch (i) {
+		error = mi_syscall(p, code, callp, args.i, rval);
+
+		switch (error) {
 		case 0:
 			locr0->v0 = rval[0];
 			locr0->v1 = rval[1];
@@ -534,22 +484,14 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 			break;	/* nothing to do */
 
 		default:
-			locr0->v0 = i;
+		bad:
+			locr0->v0 = error;
 			locr0->a3 = 1;
 		}
-#ifdef SYSCALL_DEBUG
-		KERNEL_LOCK();
-		scdebug_ret(p, code, i, rval);
-		KERNEL_UNLOCK();
-#endif
-#ifdef KTRACE
-		if (KTRPOINT(p, KTR_SYSRET)) {
-			KERNEL_LOCK();
-			ktrsysret(p, code, i, rval[0]);
-			KERNEL_UNLOCK();
-		}
-#endif
-		goto out;
+
+		mi_syscall_return(p, code, error, rval);
+
+		return;
 	    }
 
 	case T_BREAK:
@@ -763,6 +705,34 @@ printf("SIG-BUSB @%p pc %p, ra %p\n", trapframe->badvaddr, trapframe->pc, trapfr
 		}
 		goto err;
 
+#ifdef CPU_R4000
+	case T_VCEI:
+	case T_VCEI+T_USER:
+	    {
+		vaddr_t va = trapframe->badvaddr;
+#ifdef DEBUG
+		printf("VCEI trap, badvaddr %p\n", trapframe->badvaddr);
+#endif
+		/* HitWBInvalidate_S */
+		__asm__ __volatile__ ("cache 0x17, 0(%0)" :: "r"(va));
+		/* HitInvalidate_I */
+		__asm__ __volatile__ ("cache 0x10, 0(%0)" :: "r"(va));
+	    }
+		return;
+	case T_VCED:
+	case T_VCED+T_USER:
+	    {
+		vaddr_t va = trapframe->badvaddr & ~3;
+#ifdef DEBUG
+		printf("VCED trap, badvaddr %p\n", trapframe->badvaddr);
+#endif
+		/* HitWBInvalidate_S */
+		__asm__ __volatile__ ("cache 0x17, 0(%0)" :: "r"(va));
+		/* HitInvalidate_D */
+		__asm__ __volatile__ ("cache 0x11, 0(%0)" :: "r"(va));
+	    }
+		return;
+#endif	/* CPU_R4000 */
 	default:
 	err:
 		disableintr();
@@ -816,18 +786,7 @@ child_return(arg)
 
 	KERNEL_UNLOCK();
 
-	userret(p);
-
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_LOCK();
-		ktrsysret(p,
-		    (p->p_flag & P_THREAD) ? SYS_rfork :
-		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
-		    0, 0);
-		KERNEL_UNLOCK();
-	}
-#endif
+	mi_child_return(p);
 }
 
 #if defined(DDB) || defined(DEBUG)

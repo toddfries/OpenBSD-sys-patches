@@ -1,4 +1,4 @@
-/*	$OpenBSD: arcbios.h,v 1.18 2011/06/05 20:58:46 miod Exp $	*/
+/*	$OpenBSD: arcbios.h,v 1.22 2012/04/16 21:08:43 miod Exp $	*/
 /*-
  * Copyright (c) 1996 M. Warner Losh.  All rights reserved.
  *
@@ -40,10 +40,15 @@ typedef enum arc_config_class
 	arc_SystemClass,
 	arc_ProcessorClass,
 	arc_CacheClass,
+#ifdef __sgi__
+	arc_MemoryClass,
+#endif
 	arc_AdapterClass,
 	arc_ControllerClass,
 	arc_PeripheralClass,
+#ifdef __arc__
 	arc_MemoryClass
+#endif
 } arc_config_class_t;
 
 typedef enum arc_config_type
@@ -199,7 +204,15 @@ typedef struct arc_mem64 {
 	u_int64_t	PageCount;	/* Number of pages */
 } arc_mem64_t;
 
-typedef caddr_t arc_time_t; /* XXX */
+typedef struct arc_time {
+	u_int16_t	Year;
+	u_int16_t	Month;
+	u_int16_t	Day;
+	u_int16_t	Hour;
+	u_int16_t	Minutes;
+	u_int16_t	Seconds;
+	u_int16_t	Milliseconds;
+} arc_time_t;
 
 typedef struct arc_dsp_stat {
 	u_int16_t	CursorXPosition;
@@ -378,7 +391,7 @@ typedef struct arc_param_blk_32
 	u_int32_t	general_exp_vect; /* ?? */
 	u_int32_t	tlb_miss_exp_vect; /* ?? */
 	u_int32_t	firmware_length; /* Size of Firmware jumptable in bytes */
-	u_int32_t	*firmware_vect;	/* Firmware jumptable */
+	u_int32_t	firmware_vect;	/* Firmware jumptable */
 	u_int32_t	vendor_length;	/* Size of Vendor specific jumptable */
 	u_int32_t	vendor_vect;	/* Vendor specific jumptable */
 	u_int32_t	adapter_count;	/* ?? */
@@ -398,7 +411,7 @@ typedef struct arc_param_blk_64
 	u_int64_t	general_exp_vect; /* ?? */
 	u_int64_t	tlb_miss_exp_vect; /* ?? */
 	u_int64_t	firmware_length; /* Size of Firmware jumptable in bytes */
-	u_int64_t	*firmware_vect;	/* Firmware jumptable */
+	u_int64_t	firmware_vect;	/* Firmware jumptable */
 	u_int64_t	vendor_length;	/* Size of Vendor specific jumptable */
 	u_int64_t	vendor_vect;	/* Vendor specific jumptable */
 	u_int64_t	adapter_count;	/* ?? */
@@ -408,17 +421,17 @@ typedef struct arc_param_blk_64
 } arc_param_blk_64_t;
 
 #ifdef __LP64__
-#define ArcBiosBase32	((arc_param_blk_32_t *) 0xffffffff80001000)
-#define ArcBiosBase64	((arc_param_blk_64_t *) 0xffffffff80001000)
+#define ArcBiosBase32	((arc_param_blk_32_t *)0xffffffff80001000)
+#define ArcBiosBase64	((arc_param_blk_64_t *)0xffffffff80001000)
 #else
-#define ArcBiosBase32	((arc_param_blk_32_t *) 0x80001000)
-#define ArcBiosBase64	((arc_param_blk_64_t *) 0x80001000)
+#define ArcBiosBase32	((arc_param_blk_32_t *)0x80001000)
+#define ArcBiosBase64	((arc_param_blk_64_t *)0x80001000)
 #endif
-#define ArcBios (ArcBiosBase->firmware_vect)
 
 #define	ARCBIOS_PAGE_SIZE	4096
 
 extern int bios_is_32bit;
+extern int bios_consrate;
 extern char bios_enaddr[20];
 extern char bios_console[30];
 extern char bios_graphics[6];
@@ -452,7 +465,7 @@ long Bios_GetComponent(char *);
 long Bios_SaveConfiguration(void);
 arc_sid_t *Bios_GetSystemId(void);
 arc_mem_t *Bios_GetMemoryDescriptor(void *);
-long Bios_GetTime(void);
+arc_time_t *Bios_GetTime(void);
 long Bios_GetRelativeTime(void);
 long Bios_GetDirectoryEntry(u_long, void *, u_long, u_long *);
 long Bios_Open(char *, int, long *);
@@ -469,4 +482,3 @@ long Bios_SetFileInformation(u_long, u_long, u_long);
 void Bios_FlushAllCaches(void);
 long Bios_TestUnicodeCharacter(u_long, u_int16_t);
 arc_dsp_stat_t *Bios_GetDisplayStatus(u_long);
-

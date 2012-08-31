@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_addr.c,v 1.1 2012/03/09 13:01:29 ariane Exp $	*/
+/*	$OpenBSD: uvm_addr.c,v 1.5 2012/07/18 20:28:18 matthew Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -111,8 +111,10 @@ struct uvm_addr_state uaddr_kbootstrap;
  * Support functions.
  */
 
+#ifndef SMALL_KERNEL
 struct vm_map_entry	*uvm_addr_entrybyspace(struct uaddr_free_rbtree*,
 			    vsize_t);
+#endif /* !SMALL_KERNEL */
 void			 uaddr_kinsert(struct vm_map*, struct uvm_addr_state*,
 			    struct vm_map_entry*);
 void			 uaddr_kremove(struct vm_map*, struct uvm_addr_state*,
@@ -146,6 +148,7 @@ int			 uaddr_bestfit_select(struct vm_map*,
 			    struct uvm_addr_state*, struct vm_map_entry**,
 			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
+#ifndef SMALL_KERNEL
 int			 uaddr_pivot_select(struct vm_map*,
 			    struct uvm_addr_state*, struct vm_map_entry**,
 			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
@@ -154,6 +157,7 @@ int			 uaddr_stack_brk_select(struct vm_map*,
 			    struct uvm_addr_state*, struct vm_map_entry**,
 			    vaddr_t*, vsize_t, vaddr_t, vaddr_t, vm_prot_t,
 			    vaddr_t);
+#endif /* !SMALL_KERNEL */
 
 void			 uaddr_rnd_insert(struct vm_map*,
 			    struct uvm_addr_state*, struct vm_map_entry*);
@@ -168,11 +172,13 @@ void			 uaddr_pivot_insert(struct vm_map*,
 void			 uaddr_pivot_remove(struct vm_map*,
 			    struct uvm_addr_state*, struct vm_map_entry*);
 
+#ifndef SMALL_KERNEL
 vsize_t			 uaddr_pivot_random(void);
 int			 uaddr_pivot_newpivot(struct vm_map*,
 			    struct uaddr_pivot_state*, struct uaddr_pivot*,
 			    struct vm_map_entry**, vaddr_t*,
 			    vsize_t, vaddr_t, vaddr_t, vsize_t, vsize_t);
+#endif /* !SMALL_KERNEL */
 
 #if defined(DEBUG) || defined(DDB)
 void			 uaddr_pivot_print(struct uvm_addr_state*, boolean_t,
@@ -182,6 +188,7 @@ void			 uaddr_rnd_print(struct uvm_addr_state*, boolean_t,
 #endif /* DEBUG || DDB */
 
 
+#ifndef SMALL_KERNEL
 /*
  * Find smallest entry in tree that will fit sz bytes.
  */
@@ -201,6 +208,7 @@ uvm_addr_entrybyspace(struct uaddr_free_rbtree *free, vsize_t sz)
 	}
 	return res;
 }
+#endif /* !SMALL_KERNEL */
 
 static __inline vaddr_t
 uvm_addr_align_forward(vaddr_t addr, vaddr_t align, vaddr_t offset)
@@ -335,7 +343,7 @@ uvm_addr_align_back(vaddr_t addr, vaddr_t align, vaddr_t offset)
 /*
  * Directional first fit.
  *
- * Do a lineair search for free space, starting at addr in entry.
+ * Do a linear search for free space, starting at addr in entry.
  * direction ==  1: search forward
  * direction == -1: search backward
  *
@@ -563,7 +571,7 @@ uaddr_rnd_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 	struct vmspace		*vm;
 	vaddr_t			 guard_sz;
 	vaddr_t			 low_addr, high_addr;
-	struct vm_map_entry	*entry;
+	struct vm_map_entry	*entry, *next;
 	vsize_t			 before_gap, after_gap;
 	vaddr_t			 tmp;
 
@@ -593,28 +601,30 @@ uaddr_rnd_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 
 	before_gap = 0;
 	after_gap = guard_sz;
+	hint -= MIN(hint, before_gap);
 
 	/*
-	 * Find the first entry at or after hint with free space.
+	 * Use the augmented address tree to look up the first entry
+	 * at or after hint with sufficient space.
 	 *
-	 * Since we need an entry that is on the free-list, search until
-	 * we hit an entry that is owned by our uaddr.
+	 * This code is the original optimized code, but will fail if the
+	 * subtree it looks at does have sufficient space, but fails to meet
+	 * the align constraint.
+	 *
+	 * Guard: subtree is not exhausted and max(fspace) >= required.
 	 */
-	for (entry = uvm_map_entrybyaddr(&map->addr, hint);
-	    entry != NULL &&
-	    uvm_map_uaddr_e(map, entry) != uaddr;
-	    entry = RB_NEXT(uvm_map_addr, &map->addr, entry)) {
-		/* Fail if we search past uaddr_maxaddr. */
-		if (VMMAP_FREE_START(entry) >= uaddr->uaddr_maxaddr) {
-			entry = NULL;
-			break;
-		}
-	}
+	entry = uvm_map_entrybyaddr(&map->addr, hint);
 
-	for ( /* initial entry filled in above */ ;
-	    entry != NULL && VMMAP_FREE_START(entry) < uaddr->uaddr_maxaddr;
-	    entry = TAILQ_NEXT(entry, dfree.tailq)) {
-		if (uvm_addr_fitspace(&low_addr, &high_addr,
+	/* Walk up the tree, until there is at least sufficient space. */
+	while (entry != NULL &&
+	    entry->fspace_augment < before_gap + after_gap + sz)
+		entry = RB_PARENT(entry, daddrs.addr_entry);
+
+	while (entry != NULL) {
+		/* Test if this fits. */
+		if (VMMAP_FREE_END(entry) > hint &&
+		    uvm_map_uaddr_e(map, entry) == uaddr &&
+		    uvm_addr_fitspace(&low_addr, &high_addr,
 		    MAX(uaddr->uaddr_minaddr, VMMAP_FREE_START(entry)),
 		    MIN(uaddr->uaddr_maxaddr, VMMAP_FREE_END(entry)),
 		    sz, align, offset, before_gap, after_gap) == 0) {
@@ -625,8 +635,30 @@ uaddr_rnd_select(struct vm_map *map, struct uvm_addr_state *uaddr,
 				*addr_out = low_addr;
 			return 0;
 		}
+
+		/* RB_NEXT, but skip subtrees that cannot possible fit. */
+		next = RB_RIGHT(entry, daddrs.addr_entry);
+		if (next != NULL &&
+		    next->fspace_augment >= before_gap + after_gap + sz) {
+			entry = next;
+			while ((next = RB_LEFT(entry, daddrs.addr_entry)) !=
+			    NULL)
+				entry = next;
+		} else {
+do_parent:
+			next = RB_PARENT(entry, daddrs.addr_entry);
+			if (next == NULL)
+				entry = NULL;
+			else if (RB_LEFT(next, daddrs.addr_entry) == entry)
+				entry = next;
+			else {
+				entry = next;
+				goto do_parent;
+			}
+		}
 	}
 
+	/* Lookup failed. */
 	return ENOMEM;
 }
 
@@ -646,34 +678,7 @@ void
 uaddr_rnd_insert(struct vm_map *map, struct uvm_addr_state *uaddr_p,
     struct vm_map_entry *entry)
 {
-	struct uaddr_rnd_state	*uaddr;
-	struct vm_map_entry	*prev;
-
-	uaddr = (struct uaddr_rnd_state*)uaddr_p;
-	KASSERT(entry == RB_FIND(uvm_map_addr, &map->addr, entry));
-
-	/*
-	 * Make prev the first vm_map_entry before entry.
-	 */
-	for (prev = RB_PREV(uvm_map_addr, &map->addr, entry);
-	    prev != NULL;
-	    prev = RB_PREV(uvm_map_addr, &map->addr, prev)) {
-		/* Stop and fail when reaching uaddr minaddr. */
-		if (VMMAP_FREE_START(prev) < uaddr_p->uaddr_minaddr) {
-			prev = NULL;
-			break;
-		}
-
-		KASSERT(prev->etype & UVM_ET_FREEMAPPED);
-		if (uvm_map_uaddr_e(map, prev) == uaddr_p)
-			break;
-	}
-
-	/* Perform insertion. */
-	if (prev == NULL)
-		TAILQ_INSERT_HEAD(&uaddr->ur_free, entry, dfree.tailq);
-	else
-		TAILQ_INSERT_AFTER(&uaddr->ur_free, prev, entry, dfree.tailq);
+	return;
 }
 
 /*
@@ -683,10 +688,7 @@ void
 uaddr_rnd_remove(struct vm_map *map, struct uvm_addr_state *uaddr_p,
     struct vm_map_entry *entry)
 {
-	struct uaddr_rnd_state	*uaddr;
-
-	uaddr = (struct uaddr_rnd_state*)uaddr_p;
-	TAILQ_REMOVE(&uaddr->ur_free, entry, dfree.tailq);
+	return;
 }
 
 #if defined(DEBUG) || defined(DDB)
@@ -888,6 +890,7 @@ uaddr_kbootstrap_destroy(struct uvm_addr_state *uaddr)
 	KASSERT(uaddr == (struct uvm_addr_state*)&uaddr_kbootstrap);
 }
 
+#ifndef SMALL_KERNEL
 /*
  * Best fit algorithm.
  */
@@ -988,8 +991,10 @@ uaddr_bestfit_select(struct vm_map *map, struct uvm_addr_state *uaddr_p,
 	    min : max);
 	return 0;
 }
+#endif /* !SMALL_KERNEL */
 
 
+#ifndef SMALL_KERNEL
 /*
  * A userspace allocator based on pivots.
  */
@@ -1445,7 +1450,9 @@ uaddr_pivot_print(struct uvm_addr_state *uaddr_p, boolean_t full,
 	}
 }
 #endif /* DEBUG || DDB */
+#endif /* !SMALL_KERNEL */
 
+#ifndef SMALL_KERNEL
 /*
  * Strategy for uaddr_stack_brk_select.
  */
@@ -1550,7 +1557,10 @@ uaddr_stack_brk_create(vaddr_t minaddr, vaddr_t maxaddr)
 	uaddr->uaddr_functions = &uaddr_stack_brk_functions;
 	return uaddr;
 }
+#endif /* !SMALL_KERNEL */
 
 
+#ifndef SMALL_KERNEL
 RB_GENERATE(uaddr_free_rbtree, vm_map_entry, dfree.rbtree,
     uvm_mapent_fspace_cmp);
+#endif /* !SMALL_KERNEL */

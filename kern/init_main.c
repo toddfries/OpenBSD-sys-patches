@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.181 2012/01/01 12:17:33 fgsch Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.184 2012/08/28 16:39:09 matthew Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -119,6 +119,7 @@ struct	plimit limit0;
 struct	vmspace vmspace0;
 struct	sigacts sigacts0;
 struct	proc *initproc;
+struct	proc *reaperproc;
 
 int	cmask = CMASK;
 extern	struct user *proc0paddr;
@@ -131,6 +132,9 @@ int	ncpusfound = 1;			/* number of cpus we find */
 __volatile int start_init_exec;		/* semaphore for start_init() */
 
 #if !defined(NO_PROPOLICE)
+#ifdef __ELF__
+long	__guard_local __dso_hidden;
+#endif
 long	__guard[8];
 #endif
 
@@ -288,7 +292,7 @@ main(void *framep)
 
 	/* Init timeouts. */
 	timeout_set(&p->p_sleep_to, endtsleep, p);
-	timeout_set(&p->p_realit_to, realitexpire, p);
+	timeout_set(&pr->ps_realit_to, realitexpire, pr);
 
 	/* Create credentials. */
 	p->p_cred = &cred0;
@@ -324,12 +328,6 @@ main(void *framep)
 	p->p_vmspace = &vmspace0;
 
 	p->p_addr = proc0paddr;				/* XXX */
-
-	/*
-	 * We continue to place resource usage info in the
-	 * user struct so they're pageable.
-	 */
-	p->p_stats = &p->p_addr->u_stats;
 
 	/*
 	 * Charge root for one process.
@@ -413,6 +411,9 @@ main(void *framep)
 
 		arc4random_buf((long *)newguard, sizeof(newguard));
 
+#ifdef __ELF__
+		__guard_local = newguard[0];
+#endif
 		for (i = nitems(__guard) - 1; i; i--)
 			__guard[i] = newguard[i];
 	}
@@ -500,7 +501,7 @@ main(void *framep)
 	boottime = mono_time = time;	
 #endif
 	LIST_FOREACH(p, &allproc, p_list) {
-		p->p_stats->p_start = boottime;
+		p->p_p->ps_start = boottime;
 		microuptime(&p->p_cpu->ci_schedstate.spc_runtime);
 		p->p_rtime.tv_sec = p->p_rtime.tv_usec = 0;
 	}
@@ -512,7 +513,7 @@ main(void *framep)
 		panic("fork pagedaemon");
 
 	/* Create the reaper daemon kernel thread. */
-	if (kthread_create(start_reaper, NULL, NULL, "reaper"))
+	if (kthread_create(start_reaper, NULL, &reaperproc, "reaper"))
 		panic("fork reaper");
 
 	/* Create the cleaner daemon kernel thread. */

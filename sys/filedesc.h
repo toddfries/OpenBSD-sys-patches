@@ -1,4 +1,4 @@
-/*	$OpenBSD: filedesc.h,v 1.21 2012/02/15 04:26:27 guenther Exp $	*/
+/*	$OpenBSD: filedesc.h,v 1.25 2012/07/11 23:07:19 guenther Exp $	*/
 /*	$NetBSD: filedesc.h,v 1.14 1996/04/09 20:55:28 cgd Exp $	*/
 
 /*
@@ -62,6 +62,7 @@ struct filedesc {
 	struct	vnode *fd_cdir;		/* current directory */
 	struct	vnode *fd_rdir;		/* root directory */
 	int	fd_nfiles;		/* number of open files allocated */
+	int	fd_openfd;		/* number of files currently open */
 	u_int	*fd_himap;		/* each bit points to 32 fds */
 	u_int	*fd_lomap;		/* bitmap of free fds */
 	int	fd_lastfile;		/* high-water mark of fd_ofiles */
@@ -120,8 +121,7 @@ struct filedesc0 {
  * Kernel global variables and routines.
  */
 void	filedesc_init(void);
-int	dupfdopen(struct filedesc *fdp, int indx, int dfd, int mode,
-	    int error);
+int	dupfdopen(struct filedesc *, int, int, int);
 int	fdalloc(struct proc *p, int want, int *result);
 void	fdexpand(struct proc *);
 int	falloc(struct proc *p, struct file **resultfp, int *resultfd);

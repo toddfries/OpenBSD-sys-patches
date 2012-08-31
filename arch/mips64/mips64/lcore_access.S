@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_access.S,v 1.19 2010/01/31 19:39:04 miod Exp $ */
+/*	$OpenBSD: lcore_access.S,v 1.21 2012/04/16 22:23:04 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -286,19 +286,87 @@ _kcopyerr:
 
 /*
  * Guarded ``memory'' access routines
+ * int guarded_read_1(paddr_t address, uint8_t *dest);
+ * int guarded_read_2(paddr_t address, uint16_t *dest);
  * int guarded_read_4(paddr_t address, uint32_t *dest);
  * int guarded_write_4(paddr_t address, uint32_t src);
  */
 
-LEAF(guarded_read_4, 0)
+LEAF(guarded_read_1, 0)
 	GET_CPU_INFO(t1, t0)
 	PTR_L	t3, CI_CURPROCPADDR(t1)
+
+	li	a3, SR_BOOT_EXC_VEC
+	mfc0	a2, COP_0_STATUS_REG
+	or	a4, a2, a3
+	xor	a4, a4, a3
+
 	li	v0, KT_GUARDERR
 	lw	v1, PCB_ONFAULT(t3)
 	sw	v0, PCB_ONFAULT(t3)
 
+	mtc0	a4, COP_0_STATUS_REG
+	NOP
+
+	lb	v0, 0(a0)
+	sb	v0, 0(a1)
+
+	mtc0	a2, COP_0_STATUS_REG
+	NOP
+	
+	sw	v1, PCB_ONFAULT(t3)
+	j	ra
+	move	v0, zero
+END(guarded_read_1)
+
+LEAF(guarded_read_2, 0)
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
+
+	li	a3, SR_BOOT_EXC_VEC
+	mfc0	a2, COP_0_STATUS_REG
+	or	a4, a2, a3
+	xor	a4, a4, a3
+
+	li	v0, KT_GUARDERR
+	lw	v1, PCB_ONFAULT(t3)
+	sw	v0, PCB_ONFAULT(t3)
+
+	mtc0	a4, COP_0_STATUS_REG
+	NOP
+
+	lh	v0, 0(a0)
+	sh	v0, 0(a1)
+	
+	mtc0	a2, COP_0_STATUS_REG
+	NOP
+	
+	sw	v1, PCB_ONFAULT(t3)
+	j	ra
+	move	v0, zero
+END(guarded_read_2)
+
+LEAF(guarded_read_4, 0)
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
+
+	li	a3, SR_BOOT_EXC_VEC
+	mfc0	a2, COP_0_STATUS_REG
+	or	a4, a2, a3
+	xor	a4, a4, a3
+
+	li	v0, KT_GUARDERR
+	lw	v1, PCB_ONFAULT(t3)
+	sw	v0, PCB_ONFAULT(t3)
+
+	mtc0	a4, COP_0_STATUS_REG
+	NOP
+
 	lw	v0, 0(a0)
 	sw	v0, 0(a1)
+	
+	mtc0	a2, COP_0_STATUS_REG
+	NOP
 	
 	sw	v1, PCB_ONFAULT(t3)
 	j	ra
@@ -308,11 +376,23 @@ END(guarded_read_4)
 LEAF(guarded_write_4, 0)
 	GET_CPU_INFO(t1, t0)
 	PTR_L	t3, CI_CURPROCPADDR(t1)
+
+	li	a3, SR_BOOT_EXC_VEC
+	mfc0	a2, COP_0_STATUS_REG
+	or	a4, a2, a3
+	xor	a4, a4, a3
+
 	li	v0, KT_GUARDERR
 	lw	v1, PCB_ONFAULT(t3)
 	sw	v0, PCB_ONFAULT(t3)
 
+	mtc0	a4, COP_0_STATUS_REG
+	NOP
+
 	sw	a1, 0(a0)
+	
+	mtc0	a2, COP_0_STATUS_REG
+	NOP
 	
 	sw	v1, PCB_ONFAULT(t3)
 	j	ra
@@ -320,6 +400,9 @@ LEAF(guarded_write_4, 0)
 END(guarded_write_4)
 
 _guarderr:
+	mtc0	a2, COP_0_STATUS_REG
+	NOP
+	
 	sw	v1, PCB_ONFAULT(t3)
 	j	ra
 	li	v0, EFAULT		# return error

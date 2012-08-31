@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.137 2011/07/05 04:48:02 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.140 2012/08/22 13:33:32 okan Exp $	*/
 /*	$NetBSD: machdep.c,v 1.85 1997/09/12 08:55:02 pk Exp $ */
 
 /*
@@ -287,7 +287,7 @@ setregs(p, pack, stack, retval)
 
 #ifdef DEBUG
 int sigdebug = 0;
-int sigpid = 0;
+pid_t sigpid = 0;
 #define SDB_FOLLOW	0x01
 #define SDB_KSTACK	0x02
 #define SDB_FPSTATE	0x04
@@ -551,7 +551,7 @@ boot(howto)
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
 		extern struct proc proc0;
 
-		/* XXX protect against curproc->p_stats.foo refs in sync() */
+		/* make sure there's a process to charge for I/O in sync() */
 		if (curproc == NULL)
 			curproc = &proc0;
 		waittime = 0;
@@ -790,10 +790,9 @@ stackdump()
 	printf("Frame pointer is at %p\n", fp);
 	printf("Call traceback:\n");
 	while (fp && ((u_long)fp >> PGSHIFT) == ((u_long)sfp >> PGSHIFT)) {
-		printf("  pc = 0x%x  args = (0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) fp = %p\n",
+		printf("  pc = 0x%x  args = (0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) fp = %p\n",
 		    fp->fr_pc, fp->fr_arg[0], fp->fr_arg[1], fp->fr_arg[2],
-		    fp->fr_arg[3], fp->fr_arg[4], fp->fr_arg[5], fp->fr_arg[6],
-		    fp->fr_fp);
+		    fp->fr_arg[3], fp->fr_arg[4], fp->fr_arg[5], fp->fr_fp);
 		fp = fp->fr_fp;
 	}
 }
@@ -874,9 +873,9 @@ oldmon_w_trace(va)
 	printf("stop at 0x%lx\n", stop);
 	fp = (struct frame *) va;
 	while (round_page((u_long) fp) == stop) {
-		printf("  0x%x(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) fp %p\n", fp->fr_pc,
+		printf("  0x%x(0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x) fp %p\n", fp->fr_pc,
 		    fp->fr_arg[0], fp->fr_arg[1], fp->fr_arg[2], fp->fr_arg[3],
-		    fp->fr_arg[4], fp->fr_arg[5], fp->fr_arg[6], fp->fr_fp);
+		    fp->fr_arg[4], fp->fr_arg[5], fp->fr_fp);
 		fp = fp->fr_fp;
 		if (fp == NULL)
 			break;

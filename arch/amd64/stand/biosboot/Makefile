@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.3 2004/10/09 21:15:21 mickey Exp $
+#	$OpenBSD: Makefile,v 1.5 2012/08/29 17:45:00 pascal Exp $
 
 MAN=	biosboot.8
 
@@ -6,7 +6,7 @@ MAN=	biosboot.8
 PROG=	biosboot
 SRCS=	biosboot.S
 LD=ld
-LDFLAGS=-melf_i386 -nostdlib -Ttext 0 -N -x -Bstatic
+LDFLAGS=-melf_i386 -nostdlib -Ttext 0 -N -x -Bstatic -nopie
 LDFLAGS+=-L/usr/libdata 
 INSTALL_STRIP=
 SADIR=	${.CURDIR}/..
@@ -18,7 +18,9 @@ ${PROG}: $(OBJS) $(DPADD)
 
 CPPFLAGS+=-DLOADADDR=$(LOADADDR) -DLINKADDR=$(LINKADDR) -DBOOTMAGIC=$(BOOTMAGIC)
 CPPFLAGS+=${DEBUGFLAGS}
+CFLAGS+=-fno-pie
 AFLAGS+=-m32 # -Wa,-a
+AFLAGS+=-fno-pie
 .else
 NOPROG=
 .endif

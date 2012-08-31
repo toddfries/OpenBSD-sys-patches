@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdefs.h,v 1.32 2012/01/03 16:56:58 kettenis Exp $	*/
+/*	$OpenBSD: cdefs.h,v 1.34 2012/08/14 20:11:37 matthew Exp $	*/
 /*	$NetBSD: cdefs.h,v 1.16 1996/04/03 20:46:39 christos Exp $	*/
 
 /*
@@ -40,14 +40,6 @@
 
 #include <machine/cdefs.h>
 
-#if defined(__cplusplus)
-#define	__BEGIN_DECLS	extern "C" {
-#define	__END_DECLS	}
-#else
-#define	__BEGIN_DECLS
-#define	__END_DECLS
-#endif
-
 /*
  * Macro to test if we're using a specific version of gcc or later.
  */
@@ -62,8 +54,9 @@
  * The __CONCAT macro is used to concatenate parts of symbol names, e.g.
  * with "#define OLD(foo) __CONCAT(old,foo)", OLD(foo) produces oldfoo.
  * The __CONCAT macro is a bit tricky -- make sure you don't put spaces
- * in between its arguments.  __CONCAT can also concatenate double-quoted
- * strings produced by the __STRING macro, but this only works with ANSI C.
+ * in between its arguments.  Do not use __CONCAT on double-quoted strings,
+ * such as those from the __STRING macro: to concatenate strings just put
+ * them next to each other.
  */
 #if defined(__STDC__) || defined(__cplusplus)
 #define	__P(protos)	protos		/* full-blown ANSI C */
@@ -235,6 +228,35 @@
 #else
 #define	__malloc
 #endif
+
+#if defined(__cplusplus)
+#define	__BEGIN_EXTERN_C	extern "C" {
+#define	__END_EXTERN_C		}
+#else
+#define	__BEGIN_EXTERN_C
+#define	__END_EXTERN_C
+#endif
+
+#if __GNUC_PREREQ__(4, 0)
+#define	__dso_public	__attribute__((__visibility__("default")))
+#define	__dso_hidden	__attribute__((__visibility__("hidden")))
+#define	__BEGIN_PUBLIC_DECLS \
+	_Pragma("GCC visibility push(default)") __BEGIN_EXTERN_C
+#define	__END_PUBLIC_DECLS	__END_EXTERN_C _Pragma("GCC visibility pop")
+#define	__BEGIN_HIDDEN_DECLS \
+	_Pragma("GCC visibility push(hidden)") __BEGIN_EXTERN_C
+#define	__END_HIDDEN_DECLS	__END_EXTERN_C _Pragma("GCC visibility pop")
+#else
+#define	__dso_public
+#define	__dso_hidden
+#define	__BEGIN_PUBLIC_DECLS	__BEGIN_EXTERN_C
+#define	__END_PUBLIC_DECLS	__END_EXTERN_C
+#define	__BEGIN_HIDDEN_DECLS	__BEGIN_EXTERN_C
+#define	__END_HIDDEN_DECLS	__END_EXTERN_C
+#endif
+
+#define	__BEGIN_DECLS	__BEGIN_PUBLIC_DECLS
+#define	__END_DECLS	__END_PUBLIC_DECLS
 
 /*
  * "The nice thing about standards is that there are so many to choose from."

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip30_machdep.c,v 1.47 2011/05/30 22:25:22 oga Exp $	*/
+/*	$OpenBSD: ip30_machdep.c,v 1.55 2012/07/16 16:06:40 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -28,13 +28,14 @@
 #include <sys/tty.h>
 
 #include <mips64/arcbios.h>
+#include <mips64/cache.h>
 
 #include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <machine/cpu.h>
 #include <machine/memconf.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <sgi/sgi/ip30.h>
 #include <sgi/xbow/widget.h>
@@ -97,12 +98,6 @@ ip30_setup()
 #endif
 
 	/*
-	 * Although being r10k/r12k based, the uncached spaces are
-	 * apparently not used in this design.
-	 */
-	uncached_base = PHYS_TO_XKPHYS(0, CCA_NC);
-
-	/*
 	 * Scan for memory. ARCBios reports up to 1GB of memory as available,
 	 * and anything after is reported as reserved.
 	 */
@@ -136,11 +131,27 @@ ip30_setup()
 		/*
 		 * Add memory not obtained through ARCBios.
 		 */
-		if (start >= IP30_MEMORY_BASE + IP30_MEMORY_ARCBIOS_LIMIT) {
+		if (start < IP30_MEMORY_BASE + IP30_MEMORY_ARCBIOS_LIMIT)
+			start = IP30_MEMORY_BASE + IP30_MEMORY_ARCBIOS_LIMIT;
+#if 1
+		/*
+		 * XXX Temporarily restrict memory to 1.5GB, until the bug
+		 * XXX causing low memory corruption is found.
+		 */
+		if (end > 0x80000000UL)
+			end = 0x80000000UL;
+#endif
+		if (start < end)
 			memrange_register(atop(start), atop(end), 0);
-		}
 	}
 
+	/*
+	 * Register DMA-reachable memory constraints.
+	 * The xbridge(4) is limited to a 31-bit region (its IOMMU features
+	 * are too restricted to be of use).
+	 */
+	dma_constraint.ucr_low = 0;
+	dma_constraint.ucr_high = (1UL << 31) - 1;
 
 	xbow_widget_base = ip30_widget_short;
 	xbow_widget_map = ip30_widget_map;
@@ -166,16 +177,15 @@ ip30_setup()
 	 * may consider this an evil abuse of bus_space knowledge, though.
 	 */
 
-	xbow_build_bus_space(&sys_config.console_io, 0, 15);
-	sys_config.console_io.bus_base = ip30_widget_long(0, 15) +
+	xbow_build_bus_space(&sys_config.console_io, 0, IP30_BRIDGE_WIDGET);
+	sys_config.console_io.bus_base =
+	    ip30_widget_long(0, IP30_BRIDGE_WIDGET) +
 	    BRIDGE_PCI0_MEM_SPACE_BASE + 0x500000;
 
 	comconsaddr = IOC3_UARTA_BASE;
 	comconsfreq = 22000000 / 3;
 	comconsiot = &sys_config.console_io;
-	comconsrate = bios_getenvint("dbaud");
-	if (comconsrate < 50 || comconsrate > 115200)
-		comconsrate = 9600;
+	comconsrate = bios_consrate;
 
 #ifdef DDB
 	/*
@@ -233,7 +243,7 @@ ip30_autoconf(struct device *parent)
 			 */
 			bcopy(&bootcpu_hwinfo, &hw, sizeof(struct cpu_hwinfo));
 			hw.c0prid = 
-		           *(volatile uint32_t *)(mpconf + MPCONF_PRID(cpuid));
+			    *(volatile uint32_t *)(mpconf + MPCONF_PRID(cpuid));
 			hw.type = (hw.c0prid >> 8) & 0xff;
 			hw.l2size = 1 << *(volatile uint32_t *)
 			    (mpconf + MPCONF_SCACHESZ(cpuid));
@@ -258,13 +268,13 @@ ip30_autoconf(struct device *parent)
 paddr_t
 ip30_widget_short(int16_t nasid, u_int widget)
 {
-	return ((uint64_t)(widget) << 24) | (1ULL << 28) | uncached_base;
+	return PHYS_TO_XKPHYS(((uint64_t)widget << 24) | (1ULL << 28), CCA_NC);
 }
 
 paddr_t
 ip30_widget_long(int16_t nasid, u_int widget)
 {
-	return ((uint64_t)(widget) << 36) | uncached_base;
+	return PHYS_TO_XKPHYS((uint64_t)(widget) << 36, CCA_NC);
 }
 
 paddr_t
@@ -291,8 +301,7 @@ ip30_widget_id(int16_t nasid, u_int widget, uint32_t *wid)
 {
 	paddr_t linkpa, wpa;
 
-	if (widget != 0)
-	{
+	if (widget != 0) {
 		if (widget < WIDGET_MIN || widget > WIDGET_MAX)
 			return EINVAL;
 
@@ -568,7 +577,7 @@ hw_cpu_hatch(struct cpu_info *ci)
 	Mips10k_ConfigCache(ci);
 	Mips_SyncCache(ci);
 
-	cpu_startclock(ci);
+	(*md_startclock)(ci);
 
 	ncpus++;
 	cpuset_add(&cpus_running, ci);
@@ -605,18 +614,19 @@ hw_ipi_intr_clear(u_long cpuid)
 void
 hw_cpu_init_secondary(struct cpu_info *ci)
 {
-       /*
-        * When attaching secondary processors, cache information is not
-        * available yet.  But since the MP-capable systems we run on
-        * currently all have R10k-style caches, we can quickly compute
-        * the needed values.
-        */
+	/*
+	 * When attaching secondary processors, cache information is not
+	 * available yet.  But since the MP-capable systems we run on
+	 * currently all have R10k-style caches, we can quickly compute
+	 * the needed values.
+	 */
 	ci->ci_cacheways = 2;
 	ci->ci_l1instcachesize = 32 * 1024;
 	ci->ci_l1instcacheline = 64;
 	ci->ci_l1datacachesize = 32 * 1024;
-	ci->ci_l1datacacheline = 64;
+	ci->ci_l1datacacheline = 32;
 	ci->ci_l2size = ci->ci_hw.l2size;
+	ci->ci_l2line = 64;			/* safe default */
 	ci->ci_l3size = 0;
 }
 #endif

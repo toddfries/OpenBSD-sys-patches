@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.120 2012/01/07 05:38:12 guenther Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.125 2012/04/17 23:17:53 pirofti Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -130,8 +130,8 @@ struct ctlname {
 #define	KERN_DOMAINNAME		22	/* string: (YP) domainname */
 #define	KERN_MAXPARTITIONS	23	/* int: number of partitions/disk */
 #define	KERN_RAWPARTITION	24	/* int: raw partition number */
-/*define gap			25	*/
-/*define gap			26	*/
+#define	KERN_MAXTHREAD	 	25	/* int: max threads */
+#define	KERN_NTHREADS		26	/* int: number of threads */
 #define	KERN_OSVERSION		27	/* string: kernel build version */
 #define	KERN_SOMAXCONN		28	/* int: listen queue maximum */
 #define	KERN_SOMINCONN		29	/* int: half-open controllable param */
@@ -212,8 +212,8 @@ struct ctlname {
 	{ "domainname", CTLTYPE_STRING }, \
 	{ "maxpartitions", CTLTYPE_INT }, \
 	{ "rawpartition", CTLTYPE_INT }, \
-	{ "gap", 0 }, \
-	{ "gap", 0 }, \
+	{ "maxthread", CTLTYPE_INT }, \
+	{ "nthreads", CTLTYPE_INT }, \
 	{ "osversion", CTLTYPE_STRING }, \
 	{ "somaxconn", CTLTYPE_INT }, \
 	{ "sominconn", CTLTYPE_INT }, \
@@ -288,6 +288,7 @@ struct ctlname {
 #define	KERN_PROC_UID		5	/* by effective uid */
 #define	KERN_PROC_RUID		6	/* by real uid */
 #define	KERN_PROC_KTHREAD	7	/* also return kernel threads */
+#define	KERN_PROC_SHOW_THREADS	0x40000000/* also return normal threads */
 
 /*
  * KERN_SYSVIPC_INFO subtypes
@@ -325,7 +326,7 @@ struct kinfo_proc {
 
 	u_int64_t p_addr;		/* PTR: Kernel virtual addr of u-area */
 	u_int64_t p_fd;			/* PTR: Ptr to open files structure. */
-	u_int64_t p_stats;		/* PTR: Accounting/statistics */
+	u_int64_t p_stats;		/* unused, always zero. */
 	u_int64_t p_limit;		/* PTR: Process limits. */
 	u_int64_t p_vmspace;		/* PTR: Address space. */
 	u_int64_t p_sigacts;		/* PTR: Signal actions, state */
@@ -458,7 +459,6 @@ struct kinfo_proc {
  *	sess - source struct session
  *	vm - source struct vmspace
  *	lim - source struct plimits
- *	ps - source struct pstats
  *	sa - source struct sigacts
  * There are some members that are not handled by these macros
  * because they're too painful to generalize: p_pid, p_ppid, p_sid, p_tdev,
@@ -467,18 +467,18 @@ struct kinfo_proc {
 
 #define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
-#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, ps, sa) \
+#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, sa, isthread) \
 do {									\
 	memset((kp), 0, sizeof(*(kp)));					\
 									\
 	(kp)->p_paddr = PTRTOINT64(paddr);				\
 	(kp)->p_fd = PTRTOINT64((p)->p_fd);				\
-	(kp)->p_stats = PTRTOINT64((p)->p_stats);			\
+	(kp)->p_stats = 0;						\
 	(kp)->p_limit = PTRTOINT64((pr)->ps_limit);			\
 	(kp)->p_vmspace = PTRTOINT64((p)->p_vmspace);			\
 	(kp)->p_sigacts = PTRTOINT64((p)->p_sigacts);			\
 	(kp)->p_sess = PTRTOINT64((pg)->pg_session);			\
-	(kp)->p_ru = PTRTOINT64((p)->p_ru);				\
+	(kp)->p_ru = PTRTOINT64((pr)->ps_ru);				\
 									\
 	(kp)->p_exitsig = (p)->p_exitsig;				\
 	(kp)->p_flag = (p)->p_flag | (pr)->ps_flags | P_INMEM;		\
@@ -499,14 +499,23 @@ do {									\
 	(kp)->p_jobc = (pg)->pg_jobc;					\
 									\
 	(kp)->p_estcpu = (p)->p_estcpu;					\
-	(kp)->p_rtime_sec = (p)->p_rtime.tv_sec;			\
-	(kp)->p_rtime_usec = (p)->p_rtime.tv_usec;			\
+	if (isthread) {							\
+		(kp)->p_rtime_sec = (p)->p_tu.tu_runtime.tv_sec;	\
+		(kp)->p_rtime_usec = (p)->p_tu.tu_runtime.tv_usec;	\
+		(kp)->p_tid = (p)->p_pid + THREAD_PID_OFFSET;		\
+		(kp)->p_uticks = (p)->p_tu.tu_uticks;			\
+		(kp)->p_sticks = (p)->p_tu.tu_sticks;			\
+		(kp)->p_iticks = (p)->p_tu.tu_iticks;			\
+	} else {							\
+		(kp)->p_rtime_sec = (pr)->ps_tu.tu_runtime.tv_sec;	\
+		(kp)->p_rtime_usec = (pr)->ps_tu.tu_runtime.tv_usec;	\
+		(kp)->p_tid = -1;					\
+		(kp)->p_uticks = (pr)->ps_tu.tu_uticks;			\
+		(kp)->p_sticks = (pr)->ps_tu.tu_sticks;			\
+		(kp)->p_iticks = (pr)->ps_tu.tu_iticks;			\
+	}								\
 	(kp)->p_cpticks = (p)->p_cpticks;				\
 	(kp)->p_pctcpu = (p)->p_pctcpu;					\
-									\
-	(kp)->p_uticks = (p)->p_uticks;					\
-	(kp)->p_sticks = (p)->p_sticks;					\
-	(kp)->p_iticks = (p)->p_iticks;					\
 									\
 	(kp)->p_tracep = PTRTOINT64((pr)->ps_tracevp);			\
 	(kp)->p_traceflag = (pr)->ps_traceflag;				\
@@ -520,7 +529,7 @@ do {									\
 	(kp)->p_nice = (pr)->ps_nice;					\
 									\
 	(kp)->p_xstat = (p)->p_xstat;					\
-	(kp)->p_acflag = (p)->p_acflag;					\
+	(kp)->p_acflag = (pr)->ps_acflag;					\
 									\
 	/* XXX depends on e_name being an array and not a pointer */	\
 	copy_str((kp)->p_emul, (char *)(p)->p_emul +			\
@@ -558,37 +567,36 @@ do {									\
 		(kp)->p_rlim_rss_cur =					\
 		    (lim)->pl_rlimit[RLIMIT_RSS].rlim_cur;		\
 									\
-	if (!P_ZOMBIE(p) && (ps) != NULL) {				\
+	if (!P_ZOMBIE(p)) {						\
 		struct timeval tv;					\
 									\
 		(kp)->p_uvalid = 1;					\
 									\
-		(kp)->p_ustart_sec = (ps)->p_start.tv_sec;		\
-		(kp)->p_ustart_usec = (ps)->p_start.tv_usec;		\
+		(kp)->p_ustart_sec = (pr)->ps_start.tv_sec;		\
+		(kp)->p_ustart_usec = (pr)->ps_start.tv_usec;		\
 									\
-		(kp)->p_uru_maxrss = (ps)->p_ru.ru_maxrss;		\
-		(kp)->p_uru_ixrss = (ps)->p_ru.ru_ixrss;		\
-		(kp)->p_uru_idrss = (ps)->p_ru.ru_idrss;		\
-		(kp)->p_uru_isrss = (ps)->p_ru.ru_isrss;		\
-		(kp)->p_uru_minflt = (ps)->p_ru.ru_minflt;		\
-		(kp)->p_uru_majflt = (ps)->p_ru.ru_majflt;		\
-		(kp)->p_uru_nswap = (ps)->p_ru.ru_nswap;		\
-		(kp)->p_uru_inblock = (ps)->p_ru.ru_inblock;		\
-		(kp)->p_uru_oublock = (ps)->p_ru.ru_oublock;		\
-		(kp)->p_uru_msgsnd = (ps)->p_ru.ru_msgsnd;		\
-		(kp)->p_uru_msgrcv = (ps)->p_ru.ru_msgrcv;		\
-		(kp)->p_uru_nsignals = (ps)->p_ru.ru_nsignals;		\
-		(kp)->p_uru_nvcsw = (ps)->p_ru.ru_nvcsw;		\
-		(kp)->p_uru_nivcsw = (ps)->p_ru.ru_nivcsw;		\
+		(kp)->p_uru_maxrss = (p)->p_ru.ru_maxrss;		\
+		(kp)->p_uru_ixrss = (p)->p_ru.ru_ixrss;			\
+		(kp)->p_uru_idrss = (p)->p_ru.ru_idrss;			\
+		(kp)->p_uru_isrss = (p)->p_ru.ru_isrss;			\
+		(kp)->p_uru_minflt = (p)->p_ru.ru_minflt;		\
+		(kp)->p_uru_majflt = (p)->p_ru.ru_majflt;		\
+		(kp)->p_uru_nswap = (p)->p_ru.ru_nswap;			\
+		(kp)->p_uru_inblock = (p)->p_ru.ru_inblock;		\
+		(kp)->p_uru_oublock = (p)->p_ru.ru_oublock;		\
+		(kp)->p_uru_msgsnd = (p)->p_ru.ru_msgsnd;		\
+		(kp)->p_uru_msgrcv = (p)->p_ru.ru_msgrcv;		\
+		(kp)->p_uru_nsignals = (p)->p_ru.ru_nsignals;		\
+		(kp)->p_uru_nvcsw = (p)->p_ru.ru_nvcsw;			\
+		(kp)->p_uru_nivcsw = (p)->p_ru.ru_nivcsw;		\
 									\
-		timeradd(&(ps)->p_cru.ru_utime,				\
-			 &(ps)->p_cru.ru_stime, &tv);			\
+		timeradd(&(pr)->ps_cru.ru_utime,			\
+			 &(pr)->ps_cru.ru_stime, &tv);			\
 		(kp)->p_uctime_sec = tv.tv_sec;				\
 		(kp)->p_uctime_usec = tv.tv_usec;			\
 	}								\
 									\
 	(kp)->p_cpuid = KI_NOCPU;					\
-	(kp)->p_tid = (p)->p_pid + THREAD_PID_OFFSET;			\
 	(kp)->p_rtableid = (pr)->ps_rtableid;				\
 } while (0)
 
@@ -934,7 +942,7 @@ int sysctl_dopool(int *, u_int, char *, size_t *);
 void fill_file2(struct kinfo_file2 *, struct file *, struct filedesc *,
     int, struct vnode *, struct proc *, struct proc *);
 
-void fill_kproc(struct proc *, struct kinfo_proc *);
+void fill_kproc(struct proc *, struct kinfo_proc *, int);
 
 int kern_sysctl(int *, u_int, void *, size_t *, void *, size_t,
 		     struct proc *);

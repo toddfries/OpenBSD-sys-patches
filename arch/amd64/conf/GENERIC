@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.326 2011/09/20 20:25:45 matthieu Exp $
+#	$OpenBSD: GENERIC,v 1.331 2012/08/14 00:54:12 dlg Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -34,6 +34,7 @@ ioapic*	at mainbus?
 isa0	at mainbus0
 isa0	at pcib?
 isa0	at amdpcib?
+isa0	at tcpcib?
 pci*	at mainbus0
 
 acpi0		at bios0
@@ -73,6 +74,7 @@ pci*	at ppb?
 pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
 amdpcib* at pci?		# AMD 8111 LPC bridge
+tcpcib*	at pci?			# Intel Atom E600 LPC bridge
 kate*	at pci?			# AMD K8 temperature sensor
 km*	at pci?			# AMD K10 temperature sensor
 amas*	at pci? disable		# AMD memory configuration
@@ -255,7 +257,7 @@ udl*	at uhub?		# DisplayLink USB displays
 wsdisplay* at udl?
 
 puc*	at pci?			# PCI "universal" communication device
-#puc*	at cardbus?
+com*	at cardbus?
 
 sdhc*	at pci?			# SD Host Controller
 sdmmc*	at sdhc?		# SD/MMC bus
@@ -338,6 +340,7 @@ twe*	at pci?				# 3ware Escalade RAID controllers
 #aac*	at pci?				# Adaptec FSA RAID controllers
 ami*	at pci?				# AMI MegaRAID controllers
 mfi*	at pci?				# LSI MegaRAID SAS controllers
+mfii*	at pci?				# LSI MegaRAID SAS Fusion controllers
 #cac*	at pci?				# Compaq Smart ARRAY [234]* RAID controllers
 ciss*	at pci?				# Compaq Smart ARRAY [56]* RAID controllers
 iha*	at pci?				# Initio Ultra/UltraWide SCSI controllers
@@ -417,6 +420,7 @@ em*	at pci?				# Intel Pro/1000 ethernet
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
 ix*	at pci?				# Intel 82598EB 10Gb ethernet
 myx*	at pci?				# Myricom Myri-10G 10Gb ethernet
+oce*	at pci?				# Emulex OneConnect 10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 #nge*	at pci?				# NS DP83820/DP83821 GigE
 bge*	at pci?				# Broadcom BCM57xx (aka Tigon3)
@@ -589,7 +593,6 @@ owctr*	at onewire?		# Counter device
 pseudo-device	pctr		1
 pseudo-device	nvram		1
 pseudo-device	sequencer	1
-#pseudo-device	raid		4	# RAIDframe disk driver
 pseudo-device	hotplug		1	# devices hot plugging
 pseudo-device	mtrr		1	# Memory range attributes control
 

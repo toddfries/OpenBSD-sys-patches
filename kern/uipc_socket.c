@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket.c,v 1.95 2011/08/23 13:44:58 bluhm Exp $	*/
+/*	$OpenBSD: uipc_socket.c,v 1.104 2012/07/22 18:11:54 guenther Exp $	*/
 /*	$NetBSD: uipc_socket.c,v 1.21 1996/02/04 02:17:52 christos Exp $	*/
 
 /*
@@ -50,6 +50,8 @@
 #include <sys/resourcevar.h>
 #include <net/route.h>
 #include <sys/pool.h>
+
+void	sbsync(struct sockbuf *, struct mbuf *);
 
 int	sosplice(struct socket *, int, off_t, struct timeval *);
 void	sounsplice(struct socket *, struct socket *, int);
@@ -404,9 +406,18 @@ sosend(struct socket *so, struct mbuf *addr, struct uio *uio, struct mbuf *top,
 	    (flags & MSG_DONTROUTE) && (so->so_options & SO_DONTROUTE) == 0 &&
 	    (so->so_proto->pr_flags & PR_ATOMIC);
 	if (uio && uio->uio_procp)
-		uio->uio_procp->p_stats->p_ru.ru_msgsnd++;
-	if (control)
+		uio->uio_procp->p_ru.ru_msgsnd++;
+	if (control) {
 		clen = control->m_len;
+		/* reserve extra space for AF_LOCAL's internalize */
+		if (so->so_proto->pr_domain->dom_family == AF_LOCAL &&
+		    clen >= CMSG_ALIGN(sizeof(struct cmsghdr)) &&
+		    mtod(control, struct cmsghdr *)->cmsg_type == SCM_RIGHTS)
+			clen = CMSG_SPACE(
+			    (clen - CMSG_ALIGN(sizeof(struct cmsghdr))) *
+			    (sizeof(struct file *) / sizeof(int)));
+	}
+
 #define	snderr(errno)	{ error = errno; splx(s); goto release; }
 
 restart:
@@ -435,7 +446,8 @@ restart:
 		if (flags & MSG_OOB)
 			space += 1024;
 		if ((atomic && resid > so->so_snd.sb_hiwat) ||
-		    clen > so->so_snd.sb_hiwat)
+		    (so->so_proto->pr_domain->dom_family != AF_LOCAL &&
+		    clen > so->so_snd.sb_hiwat))
 			snderr(EMSGSIZE);
 		if (space < resid + clen &&
 		    (atomic || space < so->so_snd.sb_lowat || space < clen)) {
@@ -539,6 +551,41 @@ out:
 }
 
 /*
+ * Following replacement or removal of the first mbuf on the first
+ * mbuf chain of a socket buffer, push necessary state changes back
+ * into the socket buffer so that other consumers see the values
+ * consistently.  'nextrecord' is the callers locally stored value of
+ * the original value of sb->sb_mb->m_nextpkt which must be restored
+ * when the lead mbuf changes.  NOTE: 'nextrecord' may be NULL.
+ */
+void
+sbsync(struct sockbuf *sb, struct mbuf *nextrecord)
+{
+
+	/*
+	 * First, update for the new value of nextrecord.  If necessary,
+	 * make it the first record.
+	 */
+	if (sb->sb_mb != NULL)
+		sb->sb_mb->m_nextpkt = nextrecord;
+	else
+		sb->sb_mb = nextrecord;
+
+        /*
+         * Now update any dependent socket buffer fields to reflect
+         * the new state.  This is an inline of SB_EMPTY_FIXUP, with
+         * the addition of a second clause that takes care of the
+         * case where sb_mb has been updated, but remains the last
+         * record.
+         */
+        if (sb->sb_mb == NULL) {
+                sb->sb_mbtail = NULL;
+                sb->sb_lastrecord = NULL;
+        } else if (sb->sb_mb->m_nextpkt == NULL)
+                sb->sb_lastrecord = sb->sb_mb;
+}
+
+/*
  * Implement receive operations on a socket.
  * We depend on the way that records are added to the sockbuf
  * by sbappend*.  In particular, each record (mbufs linked through m_next)
@@ -560,6 +607,7 @@ soreceive(struct socket *so, struct mbuf **paddr, struct uio *uio,
     socklen_t controllen)
 {
 	struct mbuf *m, **mp;
+	struct mbuf *cm;
 	int flags, len, error, s, offset;
 	struct protosw *pr = so->so_proto;
 	struct mbuf *nextrecord;
@@ -675,11 +723,19 @@ restart:
 dontblock:
 	/*
 	 * On entry here, m points to the first record of the socket buffer.
-	 * While we process the initial mbufs containing address and control
-	 * info, we save a copy of m->m_nextpkt into nextrecord.
+	 * From this point onward, we maintain 'nextrecord' as a cache of the
+	 * pointer to the next record in the socket buffer.  We must keep the
+	 * various socket buffer pointers and local stack versions of the
+	 * pointers in sync, pushing out modifications before operations that
+	 * may sleep, and re-reading them afterwards.
+	 *
+	 * Otherwise, we will race with the network stack appending new data
+	 * or records onto the socket buffer by using inconsistent/stale
+	 * versions of the field, possibly resulting in socket buffer
+	 * corruption.
 	 */
 	if (uio->uio_procp)
-		uio->uio_procp->p_stats->p_ru.ru_msgrcv++;
+		uio->uio_procp->p_ru.ru_msgrcv++;
 	KASSERT(m == so->so_rcv.sb_mb);
 	SBLASTRECORDCHK(&so->so_rcv, "soreceive 1");
 	SBLASTMBUFCHK(&so->so_rcv, "soreceive 1");
@@ -705,6 +761,7 @@ dontblock:
 				MFREE(m, so->so_rcv.sb_mb);
 				m = so->so_rcv.sb_mb;
 			}
+			sbsync(&so->so_rcv, nextrecord);
 		}
 	}
 	while (m && m->m_type == MT_CONTROL && error == 0) {
@@ -714,53 +771,41 @@ dontblock:
 			m = m->m_next;
 		} else {
 			sbfree(&so->so_rcv, m);
+			so->so_rcv.sb_mb = m->m_next;
+			m->m_nextpkt = m->m_next = NULL;
+			cm = m;
+			m = so->so_rcv.sb_mb;
+			sbsync(&so->so_rcv, nextrecord);
 			if (controlp) {
 				if (pr->pr_domain->dom_externalize &&
-				    mtod(m, struct cmsghdr *)->cmsg_type ==
+				    mtod(cm, struct cmsghdr *)->cmsg_type ==
 				    SCM_RIGHTS)
-				   error = (*pr->pr_domain->dom_externalize)(m,
+				   error = (*pr->pr_domain->dom_externalize)(cm,
 				       controllen);
-				*controlp = m;
-				so->so_rcv.sb_mb = m->m_next;
-				m->m_next = 0;
-				m = so->so_rcv.sb_mb;
+				*controlp = cm;
 			} else {
 				/*
 				 * Dispose of any SCM_RIGHTS message that went
 				 * through the read path rather than recv.
 				 */
 				if (pr->pr_domain->dom_dispose &&
-				    mtod(m, struct cmsghdr *)->cmsg_type == SCM_RIGHTS)
-					pr->pr_domain->dom_dispose(m);
-				MFREE(m, so->so_rcv.sb_mb);
-				m = so->so_rcv.sb_mb;
+				    mtod(cm, struct cmsghdr *)->cmsg_type == SCM_RIGHTS)
+					pr->pr_domain->dom_dispose(cm);
+				m_free(cm);
 			}
 		}
+		if (m != NULL)
+			nextrecord = so->so_rcv.sb_mb->m_nextpkt;
+		else
+			nextrecord = so->so_rcv.sb_mb;
 		if (controlp) {
 			orig_resid = 0;
 			controlp = &(*controlp)->m_next;
 		}
 	}
 
-	/*
-	 * If m is non-NULL, we have some data to read.  From now on,
-	 * make sure to keep sb_lastrecord consistent when working on
-	 * the last packet on the chain (nextrecord == NULL) and we
-	 * change m->m_nextpkt.
-	 */
+	/* If m is non-NULL, we have some data to read. */
 	if (m) {
-		if ((flags & MSG_PEEK) == 0) {
-			m->m_nextpkt = nextrecord;
-			/*
-			 * If nextrecord == NULL (this is a single chain),
-			 * then sb_lastrecord may not be valid here if m
-			 * was changed earlier.
-			 */
-			if (nextrecord == NULL) {
-				KASSERT(so->so_rcv.sb_mb == m);
-				so->so_rcv.sb_lastrecord = m;
-			}
-		}
 		type = m->m_type;
 		if (type == MT_OOBDATA)
 			flags |= MSG_OOB;
@@ -768,12 +813,6 @@ dontblock:
 			flags |= MSG_BCAST;
 		if (m->m_flags & M_MCAST)
 			flags |= MSG_MCAST;
-	} else {
-		if ((flags & MSG_PEEK) == 0) {
-			KASSERT(so->so_rcv.sb_mb == m);
-			so->so_rcv.sb_mb = nextrecord;
-			SB_EMPTY_FIXUP(&so->so_rcv);
-		}
 	}
 	SBLASTRECORDCHK(&so->so_rcv, "soreceive 2");
 	SBLASTMBUFCHK(&so->so_rcv, "soreceive 2");
@@ -1008,10 +1047,15 @@ sosplice(struct socket *so, int fd, off_t max, struct timeval *tv)
 
 	/* If no fd is given, unsplice by removing existing link. */
 	if (fd < 0) {
+		/* Lock receive buffer. */
+		if ((error = sblock(&so->so_rcv,
+		    (so->so_state & SS_NBIO) ? M_NOWAIT : M_WAITOK)) != 0)
+			return (error);
 		s = splsoftnet();
 		if (so->so_splice)
 			sounsplice(so, so->so_splice, 1);
 		splx(s);
+		sbunlock(&so->so_rcv);
 		return (0);
 	}
 
@@ -1029,12 +1073,12 @@ sosplice(struct socket *so, int fd, off_t max, struct timeval *tv)
 	/* Lock both receive and send buffer. */
 	if ((error = sblock(&so->so_rcv,
 	    (so->so_state & SS_NBIO) ? M_NOWAIT : M_WAITOK)) != 0) {
-		FRELE(fp);
+		FRELE(fp, curproc);
 		return (error);
 	}
 	if ((error = sblock(&sosp->so_snd, M_WAITOK)) != 0) {
 		sbunlock(&so->so_rcv);
-		FRELE(fp);
+		FRELE(fp, curproc);
 		return (error);
 	}
 	s = splsoftnet();
@@ -1080,7 +1124,7 @@ sosplice(struct socket *so, int fd, off_t max, struct timeval *tv)
 	splx(s);
 	sbunlock(&sosp->so_snd);
 	sbunlock(&so->so_rcv);
-	FRELE(fp);
+	FRELE(fp, curproc);
 	return (error);
 }
 
@@ -1107,7 +1151,7 @@ int
 somove(struct socket *so, int wait)
 {
 	struct socket	*sosp = so->so_splice;
-	struct mbuf	*m = NULL, **mp;
+	struct mbuf	*m = NULL, **mp, *nextrecord;
 	u_long		 len, off, oobmark;
 	long		 space;
 	int		 error = 0, maxreached = 0;
@@ -1159,6 +1203,7 @@ somove(struct socket *so, int wait)
 
 	/* Take at most len mbufs out of receive buffer. */
 	m = so->so_rcv.sb_mb;
+	nextrecord = m->m_nextpkt;
 	for (off = 0, mp = &m; off < len;
 	    off += (*mp)->m_len, mp = &(*mp)->m_next) {
 		u_long size = len - off;
@@ -1177,11 +1222,10 @@ somove(struct socket *so, int wait)
 			*mp = so->so_rcv.sb_mb;
 			sbfree(&so->so_rcv, *mp);
 			so->so_rcv.sb_mb = (*mp)->m_next;
+			sbsync(&so->so_rcv, nextrecord);
 		}
 	}
 	*mp = NULL;
-	SB_EMPTY_FIXUP(&so->so_rcv);
-	so->so_rcv.sb_lastrecord = so->so_rcv.sb_mb;
 
 	SBLASTRECORDCHK(&so->so_rcv, "somove");
 	SBLASTMBUFCHK(&so->so_rcv, "somove");
@@ -1224,16 +1268,14 @@ somove(struct socket *so, int wait)
 			if (o) {
 				error = (*sosp->so_proto->pr_usrreq)(sosp,
 				    PRU_SEND, m, NULL, NULL, NULL);
-				m = NULL;
+				m = o;
 				if (error) {
-					m_freem(o);
 					if (sosp->so_state & SS_CANTSENDMORE)
 						error = EPIPE;
 					goto release;
 				}
 				len -= oobmark;
 				so->so_splicelen += oobmark;
-				m = o;
 				o = m_get(wait, MT_DATA);
 			}
 			oobmark = 0;
@@ -1289,25 +1331,33 @@ somove(struct socket *so, int wait)
 		timeout_add_tv(&so->so_idleto, &so->so_idletv);
 	return (1);
 }
+#endif /* SOCKET_SPLICE */
 
 void
 sorwakeup(struct socket *so)
 {
+#ifdef SOCKET_SPLICE
 	if (so->so_rcv.sb_flags & SB_SPLICE) {
 		(void) somove(so, M_DONTWAIT);
 		return;
 	}
-	_sorwakeup(so);
+#endif
+	sowakeup(so, &so->so_rcv);
+	if (so->so_upcall)
+		(*(so->so_upcall))(so, so->so_upcallarg, M_DONTWAIT);
 }
 
 void
 sowwakeup(struct socket *so)
 {
+#ifdef SOCKET_SPLICE
 	if (so->so_snd.sb_flags & SB_SPLICE)
 		(void) somove(so->so_spliceback, M_DONTWAIT);
-	_sowwakeup(so);
+#endif
+	sowakeup(so, &so->so_snd);
 }
 
+#ifdef SOCKET_SPLICE
 void
 soidle(void *arg)
 {
@@ -1361,7 +1411,6 @@ sosetopt(struct socket *so, int level, int optname, struct mbuf *m0)
 		case SO_REUSEADDR:
 		case SO_REUSEPORT:
 		case SO_OOBINLINE:
-		case SO_JUMBO:
 		case SO_TIMESTAMP:
 			if (m == NULL || m->m_len < sizeof (int)) {
 				error = EINVAL;
@@ -1433,20 +1482,18 @@ sosetopt(struct socket *so, int level, int optname, struct mbuf *m0)
 		case SO_RCVTIMEO:
 		    {
 			struct timeval *tv;
-			u_short val;
+			int val;
 
 			if (m == NULL || m->m_len < sizeof (*tv)) {
 				error = EINVAL;
 				goto bad;
 			}
 			tv = mtod(m, struct timeval *);
-			if (tv->tv_sec > (USHRT_MAX - tv->tv_usec / tick) / hz) {
+			val = tvtohz(tv);
+			if (val > USHRT_MAX) {
 				error = EDOM;
 				goto bad;
 			}
-			val = tv->tv_sec * hz + tv->tv_usec / tick;
-			if (val == 0 && tv->tv_usec != 0)
-				val = 1;
 
 			switch (optname) {
 
@@ -1540,7 +1587,6 @@ sogetopt(struct socket *so, int level, int optname, struct mbuf **mp)
 		case SO_REUSEPORT:
 		case SO_BROADCAST:
 		case SO_OOBINLINE:
-		case SO_JUMBO:
 		case SO_TIMESTAMP:
 			*mtod(m, int *) = so->so_options & optname;
 			break;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.225 2011/12/29 12:10:52 haesbaert Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.230 2012/07/16 18:05:36 markus Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -120,6 +120,7 @@ ip_output(struct mbuf *m0, ...)
 
 	struct inpcb *inp;
 	struct tdb *tdb;
+	u_int32_t ipsecflowinfo;
 	int s;
 #if NPF > 0
 	struct ifnet *encif;
@@ -135,6 +136,7 @@ ip_output(struct mbuf *m0, ...)
 	inp = va_arg(ap, struct inpcb *);
 	if (inp && (inp->inp_flags & INP_IPV6) != 0)
 		panic("ip_output: IPv6 pcb is passed");
+	ipsecflowinfo = (flags & IP_IPSECFLOW) ? va_arg(ap, u_int32_t) : 0;
 #endif /* IPSEC */
 	va_end(ap);
 
@@ -289,7 +291,7 @@ reroute:
 	}
 	else
 		tdb = ipsp_spd_lookup(m, AF_INET, hlen, &error,
-		    IPSP_DIRECTION_OUT, NULL, inp);
+		    IPSP_DIRECTION_OUT, NULL, inp, ipsecflowinfo);
 
 	if (tdb == NULL) {
 		splx(s);
@@ -660,8 +662,7 @@ sendit:
 				rt->rt_rmx.rmx_mtu = icmp_mtu;
 				if (ro && ro->ro_rt != NULL) {
 					RTFREE(ro->ro_rt);
-					ro->ro_rt = NULL;
-					rtalloc1(&ro->ro_dst, RT_REPORT,
+					ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT,
 					    m->m_pkthdr.rdomain);
 				}
 				if (rt_mtucloned)
@@ -732,14 +733,6 @@ sendit:
 		goto done;
 	}
 #endif
-
-	/* XXX
-	 * Try to use jumbograms based on socket option, or the route
-	 * or... for other reasons later on. 
-	 */
-	if ((flags & IP_JUMBO) && ro->ro_rt && (ro->ro_rt->rt_flags & RTF_JUMBO) &&
-	    ro->ro_rt->rt_ifp)
-		mtu = ro->ro_rt->rt_ifp->if_hardmtu;
 
 	/*
 	 * If small enough for interface, can just send directly.
@@ -945,7 +938,7 @@ ip_insertoptions(m, opt, phlen)
 	struct ipoption *p = mtod(opt, struct ipoption *);
 	struct mbuf *n;
 	struct ip *ip = mtod(m, struct ip *);
-	unsigned optlen;
+	unsigned int optlen;
 
 	optlen = opt->m_len - sizeof(p->ipopt_dst);
 	if (optlen + ntohs(ip->ip_len) > IP_MAXPACKET)
@@ -972,7 +965,7 @@ ip_insertoptions(m, opt, phlen)
 		ovbcopy((caddr_t)ip, mtod(m, caddr_t), sizeof(struct ip));
 	}
 	ip = mtod(m, struct ip *);
-	bcopy((caddr_t)p->ipopt_list, (caddr_t)(ip + 1), (unsigned)optlen);
+	bcopy((caddr_t)p->ipopt_list, (caddr_t)(ip + 1), optlen);
 	*phlen = sizeof(struct ip) + optlen;
 	ip->ip_len = htons(ntohs(ip->ip_len) + optlen);
 	return (m);
@@ -1015,7 +1008,7 @@ ip_optcopy(ip, jp)
 		if (optlen > cnt)
 			optlen = cnt;
 		if (IPOPT_COPIED(opt)) {
-			bcopy((caddr_t)cp, (caddr_t)dp, (unsigned)optlen);
+			bcopy((caddr_t)cp, (caddr_t)dp, optlen);
 			dp += optlen;
 		}
 	}
@@ -1070,6 +1063,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVTTL:
 		case IP_RECVDSTPORT:
 		case IP_RECVRTABLE:
+		case IP_IPSECFLOWINFO:
 			if (m == NULL || m->m_len != sizeof(int))
 				error = EINVAL;
 			else {
@@ -1121,6 +1115,9 @@ ip_ctloutput(op, so, level, optname, mp)
 					break;
 				case IP_RECVRTABLE:
 					OPTSET(INP_RECVRTABLE);
+					break;
+				case IP_IPSECFLOWINFO:
+					OPTSET(INP_IPSECFLOWINFO);
 					break;
 				}
 			}
@@ -1397,21 +1394,22 @@ ip_ctloutput(op, so, level, optname, mp)
 			}
 #endif
 			break;
-		case IP_RTABLE:
+		case SO_RTABLE:
 			if (m == NULL || m->m_len < sizeof(u_int)) {
 				error = EINVAL;
 				break;
 			}
 			rtid = *mtod(m, u_int *);
+			if (inp->inp_rtableid == rtid)
+				break;
+			/* needs priviledges to switch when already set */
+			if (p->p_p->ps_rtableid != rtid &&
+			    p->p_p->ps_rtableid != 0 &&
+			    (error = suser(p, 0)) != 0)
+				break;
 			/* table must exist */
 			if (!rtable_exists(rtid)) {
 				error = EINVAL;
-				break;
-			}
-			/* needs priviledges to switch when already set */
-			if (p->p_p->ps_rtableid != rtid &&
-			    p->p_p->ps_rtableid != 0 && suser(p, 0) != 0) {
-				error = EACCES;
 				break;
 			}
 			inp->inp_rtableid = rtid;
@@ -1439,7 +1437,7 @@ ip_ctloutput(op, so, level, optname, mp)
 			if (inp->inp_options) {
 				m->m_len = inp->inp_options->m_len;
 				bcopy(mtod(inp->inp_options, caddr_t),
-				    mtod(m, caddr_t), (unsigned)m->m_len);
+				    mtod(m, caddr_t), m->m_len);
 			} else
 				m->m_len = 0;
 			break;
@@ -1454,6 +1452,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVTTL:
 		case IP_RECVDSTPORT:
 		case IP_RECVRTABLE:
+		case IP_IPSECFLOWINFO:
 			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 			m->m_len = sizeof(int);
 			switch (optname) {
@@ -1494,6 +1493,9 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 			case IP_RECVRTABLE:
 				optval = OPTBIT(INP_RECVRTABLE);
+				break;
+			case IP_IPSECFLOWINFO:
+				optval = OPTBIT(INP_IPSECFLOWINFO);
 				break;
 			}
 			*mtod(m, int *) = optval;

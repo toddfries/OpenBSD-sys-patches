@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.136 2011/07/05 04:48:02 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.140 2012/08/24 10:00:55 jsg Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -348,10 +348,12 @@ setregs(p, pack, stack, retval)
 }
 
 #ifdef DEBUG
-/* See sigdebug.h */
-#include <sparc64/sparc64/sigdebug.h>
-int sigdebug = 0x0;
-int sigpid = 0;
+int sigdebug = 0;
+pid_t sigpid = 0;
+#define SDB_FOLLOW	0x01
+#define SDB_KSTACK	0x02
+#define SDB_FPSTATE	0x04
+#define SDB_DDB		0x08
 #endif
 
 struct sigframe {
@@ -639,7 +641,7 @@ boot(howto)
 		extern struct proc proc0;
 		extern int sparc_clock_time_is_ok;
 
-		/* XXX protect against curproc->p_stats.foo refs in sync() */
+		/* make sure there's a process to charge for I/O in sync() */
 		if (curproc == NULL)
 			curproc = &proc0;
 		waittime = 0;
@@ -939,11 +941,10 @@ stackdump()
 			fp = (struct frame32 *)(u_long)fp64->fr_fp;
 		} else {
 			/* 32-bit frame */
-			printf("  pc = %x  args = (%x, %x, %x, %x, %x, %x, %x) "
+			printf("  pc = %x  args = (%x, %x, %x, %x, %x, %x) "
 			    "fp = %x\n", fp->fr_pc, fp->fr_arg[0],
 			    fp->fr_arg[1], fp->fr_arg[2], fp->fr_arg[3],
-			    fp->fr_arg[4], fp->fr_arg[5], fp->fr_arg[6],
-			    fp->fr_fp);
+			    fp->fr_arg[4], fp->fr_arg[5], fp->fr_fp);
 			fp = (struct frame32*)(u_long)(u_short)fp->fr_fp;
 		}
 	}

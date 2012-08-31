@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.506 2011/11/02 23:53:44 jsg Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.511 2012/08/24 02:49:23 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -251,7 +251,7 @@ void (*initclock_func)(void) = i8254_initclocks;
 
 /*
  * Extent maps to manage I/O and ISA memory hole space.  Allocate
- * storage for 8 regions in each, initially.  Later, ioport_malloc_safe
+ * storage for 16 regions in each, initially.  Later, ioport_malloc_safe
  * will indicate that it's safe to use malloc() to dynamically allocate
  * region descriptors.
  *
@@ -972,7 +972,7 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 	{ CPUID_CMOV,	"CMOV" },
 	{ CPUID_PAT,	"PAT" },
 	{ CPUID_PSE36,	"PSE36" },
-	{ CPUID_SER,	"SER" },
+	{ CPUID_PSN,	"PSN" },
 	{ CPUID_CFLUSH,	"CFLUSH" },
 	{ CPUID_DS,	"DS" },
 	{ CPUID_ACPI,	"ACPI" },
@@ -983,7 +983,7 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 	{ CPUID_SS,	"SS" },
 	{ CPUID_HTT,	"HTT" },
 	{ CPUID_TM,	"TM" },
-	{ CPUID_SBF,	"SBF" }
+	{ CPUID_PBE,	"PBE" }
 };
 
 const struct cpu_cpuid_feature i386_ecpuid_features[] = {
@@ -999,6 +999,7 @@ const struct cpu_cpuid_feature i386_ecpuid_features[] = {
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
 	{ CPUIDECX_PCLMUL,	"PCLMUL" },
+	{ CPUIDECX_DTES64,	"DTES64" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_DSCPL,	"DS-CPL" },
 	{ CPUIDECX_VMX,		"VMX" },
@@ -1011,26 +1012,49 @@ const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_CX16,	"CX16" },
 	{ CPUIDECX_XTPR,	"xTPR" },
 	{ CPUIDECX_PDCM,	"PDCM" },
+	{ CPUIDECX_PCID,	"PCID" },
 	{ CPUIDECX_DCA,		"DCA" },
 	{ CPUIDECX_SSE41,	"SSE4.1" },
 	{ CPUIDECX_SSE42,	"SSE4.2" },
 	{ CPUIDECX_X2APIC,	"x2APIC" },
 	{ CPUIDECX_MOVBE,	"MOVBE" },
 	{ CPUIDECX_POPCNT,	"POPCNT" },
+	{ CPUIDECX_DEADLINE,	"DEADLINE" },
 	{ CPUIDECX_AES,		"AES" },
 	{ CPUIDECX_XSAVE,	"XSAVE" },
 	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
 	{ CPUIDECX_AVX,		"AVX" },
+	{ CPUIDECX_F16C,	"F16C" },
+	{ CPUIDECX_RDRAND,	"RDRAND" },
 };
 
 const struct cpu_cpuid_feature i386_ecpuid_ecxfeatures[] = {
 	{ CPUIDECX_LAHF,	"LAHF" },
+	{ CPUIDECX_CMPLEG,	"CMPLEG" },
 	{ CPUIDECX_SVM,		"SVM" },
+	{ CPUIDECX_EAPICSP,	"EAPICSP" },
+	{ CPUIDECX_AMCR8,	"AMCR8" },
 	{ CPUIDECX_ABM,		"ABM" },
 	{ CPUIDECX_SSE4A,	"SSE4A" },
+	{ CPUIDECX_MASSE,	"MASSE" },
+	{ CPUIDECX_3DNOWP,	"3DNOWP" },
+	{ CPUIDECX_OSVW,	"OSVW" },
+	{ CPUIDECX_IBS,		"IBS" },
 	{ CPUIDECX_XOP,		"XOP" },
+	{ CPUIDECX_SKINIT,	"SKINIT" },
 	{ CPUIDECX_WDT,		"WDT" },
-	{ CPUIDECX_FMA4,	"FMA4" }
+	{ CPUIDECX_LWP,		"LWP" },
+	{ CPUIDECX_FMA4,	"FMA4" },
+	{ CPUIDECX_NODEID,	"NODEID" },
+	{ CPUIDECX_TBM,		"TBM" },
+	{ CPUIDECX_TOPEXT,	"TOPEXT" },
+};
+
+const struct cpu_cpuid_feature cpu_seff0_ebxfeatures[] = {
+	{ SEFF0EBX_FSGSBASE,	"FSGSBASE" },
+	{ SEFF0EBX_SMEP,	"SMEP" },
+	{ SEFF0EBX_EREP,	"EREP" },
+	{ SEFF0EBX_INVPCID,	"INVPCID" },
 };
 
 void
@@ -1053,7 +1077,7 @@ cyrix3_setperf_setup(struct cpu_info *ci)
 {
 	if (cpu_ecxfeature & CPUIDECX_EST) {
 		if (rdmsr(MSR_MISC_ENABLE) & (1 << 16))
-			est_init(ci->ci_dev.dv_xname, CPUVENDOR_VIA);
+			est_init(ci, CPUVENDOR_VIA);
 		else
 			printf("%s: Enhanced SpeedStep disabled by BIOS\n",
 			    ci->ci_dev.dv_xname);
@@ -1075,8 +1099,6 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 	extern void i686_pagezero(void *, size_t);
 
 	pagezero = i686_pagezero;
-
-	cyrix3_get_bus_clock(ci);
 
 	setperf_setup = cyrix3_setperf_setup;
 #endif
@@ -1443,7 +1465,7 @@ intel686_setperf_setup(struct cpu_info *ci)
 
 	if (cpu_ecxfeature & CPUIDECX_EST) {
 		if (rdmsr(MSR_MISC_ENABLE) & (1 << 16))
-			est_init(ci->ci_dev.dv_xname, CPUVENDOR_INTEL);
+			est_init(ci, CPUVENDOR_INTEL);
 		else
 			printf("%s: Enhanced SpeedStep disabled by BIOS\n",
 			    ci->ci_dev.dv_xname);
@@ -1485,10 +1507,6 @@ intel686_cpu_setup(struct cpu_info *ci)
 	int step = ci->ci_signature & 15;
 	u_quad_t msr119;
 
-#if !defined(SMALL_KERNEL)
-	p3_get_bus_clock(ci);
-#endif
-
 	intel686_common_cpu_setup(ci);
 
 	/*
@@ -1501,14 +1519,14 @@ intel686_cpu_setup(struct cpu_info *ci)
 	/*
 	 * Disable the Pentium3 serial number.
 	 */
-	if ((model == 7) && (ci->ci_feature_flags & CPUID_SER)) {
+	if ((model == 7) && (ci->ci_feature_flags & CPUID_PSN)) {
 		msr119 = rdmsr(MSR_BBL_CR_CTL);
 		msr119 |= 0x0000000000200000LL;
 		wrmsr(MSR_BBL_CR_CTL, msr119);
 
 		printf("%s: disabling processor serial number\n",
 			 ci->ci_dev.dv_xname);
-		ci->ci_feature_flags &= ~CPUID_SER;
+		ci->ci_feature_flags &= ~CPUID_PSN;
 		ci->ci_level = 2;
 	}
 
@@ -1521,10 +1539,6 @@ intel686_cpu_setup(struct cpu_info *ci)
 void
 intel686_p4_cpu_setup(struct cpu_info *ci)
 {
-#if !defined(SMALL_KERNEL)
-	p4_get_bus_clock(ci);
-#endif
-
 	intel686_common_cpu_setup(ci);
 
 #if !defined(SMALL_KERNEL)
@@ -1874,6 +1888,20 @@ identifycpu(struct cpu_info *ci)
 					numbits++;
 				}
 			}
+
+			if (cpuid_level >= 0x07) {
+				u_int val, dummy;
+
+				/* "Structured Extended Feature Flags" */
+				CPUID_LEAF(0x7, 0, dummy, val, dummy, dummy);
+				max = sizeof(cpu_seff0_ebxfeatures) /
+				    sizeof(cpu_seff0_ebxfeatures[0]);
+				for (i = 0; i < max; i++)
+					if (val & cpu_seff0_ebxfeatures[i].feature_bit)
+						printf("%s%s",
+						    (numbits == 0 ? "" : ","),
+						    cpu_seff0_ebxfeatures[i].feature_name);
+			}
 			printf("\n");
 		}
 	}
@@ -2047,6 +2075,7 @@ p3_get_bus_clock(struct cpu_info *ci)
 	case 0xf: /* Core Xeon */
 	case 0x16: /* 65nm Celeron */
 	case 0x17: /* Core 2 Extreme/45nm Xeon */
+	case 0x1d: /* Xeon MP 7400 */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
@@ -2075,6 +2104,8 @@ p3_get_bus_clock(struct cpu_info *ci)
 		}
 		break;
 	case 0x1c: /* Atom */
+	case 0x26: /* Atom Z6xx */
+	case 0x36: /* Atom [DN]2xxx */
 		msr = rdmsr(MSR_FSB_FREQ);
 		bus = (msr >> 0) & 0x7;
 		switch (bus) {
@@ -2122,19 +2153,20 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
+	/* nehalem */
 	case 0x1a: /* Core i7, Xeon 3500/5500 */
 	case 0x1e: /* Core i5/i7, Xeon 3400 */
 	case 0x1f: /* Core i5/i7 */
+	case 0x2e: /* Xeon 6500/7500 */
+	/* westmere */
 	case 0x25: /* Core i3/i5, Xeon 3400 */
 	case 0x2c: /* Core i7, Xeon 3600/5600 */
-		/* BUS133 */
-		break;
+	case 0x2f: /* Xeon E7 */
+	/* sandy bridge */
 	case 0x2a: /* Core i5/i7 2nd Generation */
 	case 0x2d: /* Xeon E5 */
-		/* BUS100 */
-		break;
-	case 0x1d: /* Xeon MP 7400 */
-	case 0x2e: /* Xeon 6500/7500 */
+	/* ivy bridge */
+	case 0x3a: /* Core i3/i5/i7 3rd Generation */
 		break;
 	default: 
 		printf("%s: unknown i686 model 0x%x, can't get bus clock",
@@ -2152,8 +2184,12 @@ print_msr:
 void
 p4_update_cpuspeed(void)
 {
+	struct cpu_info *ci;
 	u_int64_t msr;
 	int mult;
+
+	ci = curcpu();
+	p4_get_bus_clock(ci);
 
 	if (bus_clock == 0) {
 		printf("p4_update_cpuspeed: unknown bus clock\n");
@@ -2169,10 +2205,14 @@ p4_update_cpuspeed(void)
 void
 p3_update_cpuspeed(void)
 {
+	struct cpu_info *ci;
 	u_int64_t msr;
 	int mult;
 	const u_int8_t mult_code[] = {
 	    50, 30, 40, 0, 55, 35, 45, 0, 0, 70, 80, 60, 0, 75, 0, 65 };
+
+	ci = curcpu();
+	p3_get_bus_clock(ci);
 
 	if (bus_clock == 0) {
 		printf("p3_update_cpuspeed: unknown bus clock\n");
@@ -2454,7 +2494,7 @@ boot(int howto)
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
 		extern struct proc proc0;
 
-		/* protect against curproc->p_stats.foo refs in sync()   XXX */
+		/* make sure there's a process to charge for I/O in sync() */
 		if (curproc == NULL)
 			curproc = &proc0;
 
