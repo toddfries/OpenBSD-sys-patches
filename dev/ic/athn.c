@@ -282,7 +282,7 @@ athn_attach(struct athn_softc *sc)
 	    IEEE80211_C_WEP |		/* WEP. */
 	    IEEE80211_C_RSN |		/* WPA/RSN. */
 #ifndef IEEE80211_STA_ONLY
-	    IEEE80211_C_HOSTAP |	/* Host AP mode supported. */
+	    IEEE80211_C_HOSTAP |	/* Host Ap mode supported. */
 	    IEEE80211_C_APPMGT |	/* Host AP power saving supported. */
 #endif
 	    IEEE80211_C_MONITOR |	/* Monitor mode supported. */

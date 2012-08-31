@@ -253,6 +253,7 @@ apm_suspend(int state)
 	s = splhigh();
 	disable_intr();
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	/* Send machine to sleep */
 	apm_set_powstate(APM_DEV_ALLDEVS, state);

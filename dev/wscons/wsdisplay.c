@@ -2205,6 +2205,8 @@ wsdisplay_suspend(void)
 {
 	int	i;
 
+//XXX this should return a error for suspend/resume!
+
 	for (i = 0; i < wsdisplay_cd.cd_ndevs; i++)
 		if (wsdisplay_cd.cd_devs[i] != NULL)
 			wsdisplay_suspend_device(wsdisplay_cd.cd_devs[i]);
