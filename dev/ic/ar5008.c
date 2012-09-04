@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5008.c,v 1.20 2011/06/19 00:27:34 matthew Exp $	*/
+/*	$OpenBSD: ar5008.c,v 1.21 2012/08/25 12:14:31 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>

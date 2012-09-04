@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.72 2012/06/10 21:23:36 kettenis Exp $	*/
+/*	$OpenBSD: athn.c,v 1.73 2012/08/25 12:14:31 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -283,7 +283,7 @@ athn_attach(struct athn_softc *sc)
 	    IEEE80211_C_RSN |		/* WPA/RSN. */
 #ifndef IEEE80211_STA_ONLY
 	    IEEE80211_C_HOSTAP |	/* Host Ap mode supported. */
-	    IEEE80211_C_APPMGT |
+	    IEEE80211_C_APPMGT |	/* Host AP power saving supported. */
 #endif
 	    IEEE80211_C_MONITOR |	/* Monitor mode supported. */
 	    IEEE80211_C_SHSLOT |	/* Short slot time supported. */

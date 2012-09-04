@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar9003.c,v 1.22 2011/01/01 13:44:42 damien Exp $	*/
+/*	$OpenBSD: ar9003.c,v 1.23 2012/08/25 12:14:31 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
