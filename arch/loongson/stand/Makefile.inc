@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.2 2011/03/18 06:21:40 matthew Exp $
+#	$OpenBSD: Makefile.inc,v 1.4 2012/08/31 16:13:59 pascal Exp $
 
 BINDIR=		/usr/mdec
 
