@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.c,v 1.30 2012/07/17 03:18:57 yasuoka Exp $	*/
+/*	$OpenBSD: pipex.c,v 1.32 2012/09/10 07:20:58 yasuoka Exp $	*/
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -1073,7 +1073,12 @@ pipex_ppp_input(struct mbuf *m0, struct pipex_session *session, int decrypted)
 	case PPP_IPV6:
 		if (session->ip6_forward == 0)
 			goto drop;
-		/* XXX: support MPPE */
+		if (!decrypted && pipex_session_is_mppe_required(session))
+			/*
+			 * if ip packet received when mppe
+			 * is required, discard it.
+			 */
+			goto drop;
 		m_adj(m0, hlen);
 		pipex_ip6_input(m0, session);
 		return;
@@ -1238,6 +1243,8 @@ pipex_ip6_input(struct mbuf *m0, struct pipex_session *session)
 	if (IF_QFULL(&ip6intrq)) {
 		IF_DROP(&ip6intrq);
 		ifp->if_collisions++;
+		if (!ip6intrq.ifq_congestion)
+			if_congestion(&ip6intrq);
 		splx(s);
 		goto drop;
 	}
