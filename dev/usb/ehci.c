@@ -1040,6 +1040,9 @@ ehci_detach(struct ehci_softc *sc, int flags)
 
 	timeout_del(&sc->sc_tmo_intrlist);
 
+	if (sc->sc_shutdownhook != NULL)
+		shutdownhook_disestablish(sc->sc_shutdownhook);
+
 	usb_delay_ms(&sc->sc_bus, 300); /* XXX let stray task complete */
 
 	/* XXX free other data structures XXX */
@@ -1106,23 +1109,6 @@ ehci_activate(struct device *self, int act)
 
 		/* restore things in case the bios sucks */
 		EOWRITE4(sc, EHCI_CTRLDSSEGMENT, 0);
-
-#if 0
-		EOWRITE4(sc, EHCI_USBCMD, 0);	/* Halt controller */
-		usb_delay_ms(&sc->sc_bus, 1);
-		EOWRITE4(sc, EHCI_USBCMD, EHCI_CMD_HCRESET);
-		for (i = 0; i < 100; i++) {
-			usb_delay_ms(&sc->sc_bus, 1);
-			hcr = EOREAD4(sc, EHCI_USBCMD) & EHCI_CMD_HCRESET;
-			if (!hcr)
-				break;
-		}
-		if (hcr) {
-			printf("%s: reset timeout\n",
-			    sc->sc_bus.bdev.dv_xname);
-		}
-#endif
-
 		EOWRITE4(sc, EHCI_PERIODICLISTBASE, DMAADDR(&sc->sc_fldma, 0));
 		EOWRITE4(sc, EHCI_ASYNCLISTADDR,
 		    sc->sc_async_head->physaddr | EHCI_LINK_QH);
@@ -1186,19 +1172,10 @@ void
 ehci_shutdown(void *v)
 {
 	ehci_softc_t *sc = v;
-	u_int32_t hcr;
-	int i;
 
 	DPRINTF(("ehci_shutdown: stopping the HC\n"));
 	EOWRITE4(sc, EHCI_USBCMD, 0);	/* Halt controller */
-	usb_delay_ms(&sc->sc_bus, 1);
 	EOWRITE4(sc, EHCI_USBCMD, EHCI_CMD_HCRESET);
-	for (i = 0; i < 100; i++) {
-		usb_delay_ms(&sc->sc_bus, 1);
-		hcr = EOREAD4(sc, EHCI_USBCMD) & EHCI_CMD_HCRESET;
-		if (!hcr)
-			break;
-	}
 }
 
 usbd_status

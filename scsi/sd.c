@@ -285,8 +285,6 @@ sdactivate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_SUSPEND:
-		break;
-	case DVACT_POWERDOWN:
 		/*
 		 * Stop the disk.  Stopping the disk should flush the
 		 * cache, but we are paranoid so we flush the cache

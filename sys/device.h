@@ -66,7 +66,6 @@ enum devclass {
 #define	DVACT_SUSPEND		2	/* suspend the device */
 #define	DVACT_RESUME		3	/* resume the device */
 #define	DVACT_QUIESCE		4	/* warn the device about suspend */
-#define	DVACT_POWERDOWN		5	/* power device down */
 
 struct device {
 	enum	devclass dv_class;	/* this device's classification */

@@ -2841,9 +2841,6 @@ pccbbactivate(struct device *self, int act)
 		sc->sc_iobase[1] = pci_conf_read(pc, tag, PCI_CB_IOBASE1);
 		sc->sc_iolimit[1] = pci_conf_read(pc, tag, PCI_CB_IOLIMIT1);
 		break;
-	case DVACT_POWERDOWN:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_RESUME:
 		/* Restore the registers saved above. */
 		pci_conf_write(pc, tag, PCI_BHLC_REG, sc->sc_bhlcr);

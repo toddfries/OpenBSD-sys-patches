@@ -140,7 +140,6 @@ pcmcia_activate(struct device *self, int act)
 	switch (act) {
 	case DVACT_QUIESCE:
 	case DVACT_SUSPEND:
-	case DVACT_POWERDOWN:
 	case DVACT_RESUME:
 		for (pf = SIMPLEQ_FIRST(&sc->card.pf_head); pf != NULL;
 		     pf = SIMPLEQ_NEXT(pf, pf_list)) {
