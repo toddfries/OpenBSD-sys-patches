@@ -1493,9 +1493,6 @@ pciide_activate(struct device *self, int act)
 			    sc->sc_tag, NFORCE_UDMATIM);
 		}
 		break;
-	case DVACT_POWERDOWN:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_RESUME:
 		for (i = 0; i < nitems(sc->sc_save); i++)
 			pci_conf_write(sc->sc_pc, sc->sc_tag,

@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.238 2012/07/13 11:51:41 pirofti Exp $ */
+/* $OpenBSD: acpi.c,v 1.239 2012/09/07 19:19:59 kettenis Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -72,6 +72,8 @@ int	acpi_hasprocfvs;
 #define ACPIEN_RETRIES 15
 
 void 	acpi_pci_match(struct device *, struct pci_attach_args *);
+pcireg_t acpi_pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
+
 int	acpi_match(struct device *, void *, void *);
 void	acpi_attach(struct device *, struct device *, void *);
 int	acpi_submatch(struct device *, void *, void *);
@@ -100,6 +102,7 @@ void	acpi_pbtn_task(void *, int);
 int	acpi_thinkpad_enabled;
 int	acpi_toshiba_enabled;
 int	acpi_asus_enabled;
+int	acpi_saved_spl;
 int	acpi_saved_boothowto;
 int	acpi_enabled;
 
@@ -109,8 +112,9 @@ int	acpi_matchhids(struct acpi_attach_args *aa, const char *hids[],
 void	acpi_thread(void *);
 void	acpi_create_thread(void *);
 void	acpi_init_pm(struct acpi_softc *);
+
+void	acpi_handle_suspend_failure(struct acpi_softc *);
 void	acpi_init_gpes(struct acpi_softc *);
-void	acpi_indicator(struct acpi_softc *, int);
 
 int	acpi_founddock(struct aml_node *, void *);
 int	acpi_foundpss(struct aml_node *, void *);
@@ -136,6 +140,7 @@ struct idechnl {
 	int64_t		sta;
 };
 
+void	acpi_resume(struct acpi_softc *, int);
 int	acpi_add_device(struct aml_node *node, void *arg);
 
 struct gpe_block *acpi_find_gpe(struct acpi_softc *, int);
@@ -499,6 +504,24 @@ acpi_getpci(struct aml_node *node, void *arg)
 		pci->bus, pci->dev, pci->fun,
 		aml_nodename(node));
 
+	/* Collect device power state information. */
+	if (aml_evalinteger(sc, node, "_S3D", 0, NULL, &val) == 0)
+		pci->_s3d = val;
+	else
+		pci->_s3d = -1;
+	if (aml_evalinteger(sc, node, "_S3W", 0, NULL, &val) == 0)
+		pci->_s3w = val;
+	else
+		pci->_s3w = -1;
+	if (aml_evalinteger(sc, node, "_S4D", 0, NULL, &val) == 0)
+		pci->_s4d = val;
+	else
+		pci->_s4d = -1;
+	if (aml_evalinteger(sc, node, "_S4W", 0, NULL, &val) == 0)
+		pci->_s4w = val;
+	else
+		pci->_s4w = -1;
+
 	/* Check if PCI device exists */
 	if (pci->dev > 0x1F || pci->fun > 7) {
 		free(pci, M_DEVBUF);
@@ -548,6 +571,37 @@ acpi_pci_match(struct device *dev, struct pci_attach_args *pa)
 	}
 }
 
+pcireg_t
+acpi_pci_min_powerstate(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	struct acpi_pci *pdev;
+	int bus, dev, fun;
+	int state;
+
+	pci_decompose_tag(pc, tag, &bus, &dev, &fun);
+	TAILQ_FOREACH(pdev, &acpi_pcidevs, next) {
+		if (pdev->bus == bus && pdev->dev == dev && pdev->fun == fun) {
+			switch (acpi_softc->sc_nextstate) {
+			case ACPI_STATE_S3:
+				state = MAX(pdev->_s3d, pdev->_s3w);
+				break;
+			case ACPI_STATE_S4:
+				state = MAX(pdev->_s4d, pdev->_s4w);
+				break;
+			default:
+				state = -1;
+				break;
+			}
+
+			if (state >= PCI_PMCSR_STATE_D0 &&
+			    state <= PCI_PMCSR_STATE_D3)
+				return state;
+		}
+	}
+
+	return PCI_PMCSR_STATE_D3;
+}
+
 void
 acpi_attach(struct device *parent, struct device *self, void *aux)
 {
@@ -563,7 +617,6 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	struct device *dev;
 	struct acpi_ac *ac;
 	struct acpi_bat *bat;
-	int s;
 #endif /* SMALL_KERNEL */
 	paddr_t facspa;
 
@@ -688,9 +741,7 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 
 #ifndef SMALL_KERNEL
 	/* Initialize GPE handlers */
-	s = spltty();
 	acpi_init_gpes(sc);
-	splx(s);
 
 	/* some devices require periodic polling */
 	timeout_set(&sc->sc_dev_timeout, acpi_poll, sc);
@@ -1385,9 +1436,6 @@ acpi_reset(void)
 	struct acpi_softc	*sc = acpi_softc;
 	struct acpi_fadt	*fadt = sc->sc_fadt;
 
-	if (acpi_enabled == 0)
-		return;
-
 	/*
 	 * RESET_REG_SUP is not properly set in some implementations,
 	 * but not testing against it breaks more machines than it fixes
@@ -1627,36 +1675,43 @@ void
 acpi_enable_onegpe(struct acpi_softc *sc, int gpe)
 {
 	uint8_t mask, en;
+	int s;
 
 	/* Read enabled register */
+	s = spltty();
 	mask = (1L << (gpe & 7));
 	en = acpi_read_pmreg(sc, ACPIREG_GPE_EN, gpe>>3);
 	dnprintf(50, "enabling GPE %.2x (current: %sabled) %.2x\n",
 	    gpe, (en & mask) ? "en" : "dis", en);
 	acpi_write_pmreg(sc, ACPIREG_GPE_EN, gpe>>3, en | mask);
+	splx(s);
 }
 
 /* Clear all GPEs */
 void
 acpi_disable_allgpes(struct acpi_softc *sc)
 {
-	int idx;
+	int idx, s;
 
+	s = spltty();
 	for (idx = 0; idx < sc->sc_lastgpe; idx += 8) {
 		acpi_write_pmreg(sc, ACPIREG_GPE_EN, idx >> 3, 0);
 		acpi_write_pmreg(sc, ACPIREG_GPE_STS, idx >> 3, -1);
 	}
+	splx(s);
 }
 
 /* Enable runtime GPEs */
 void
 acpi_enable_rungpes(struct acpi_softc *sc)
 {
-	int idx;
+	int s, idx;
 
+	s = spltty();
 	for (idx = 0; idx < sc->sc_lastgpe; idx++)
 		if (sc->gpe_table[idx].handler)
 			acpi_enable_onegpe(sc, idx);
+	splx(s);
 }
 
 /* Enable wakeup GPEs */
@@ -1664,7 +1719,9 @@ void
 acpi_enable_wakegpes(struct acpi_softc *sc, int state)
 {
 	struct acpi_wakeq *wentry;
+	int s;
 
+	s = spltty();
 	SIMPLEQ_FOREACH(wentry, &sc->sc_wakedevs, q_next) {
 		dnprintf(10, "%.4s(S%d) gpe %.2x\n", wentry->q_node->name,
 		    wentry->q_state,
@@ -1672,6 +1729,7 @@ acpi_enable_wakegpes(struct acpi_softc *sc, int state)
 		if (state <= wentry->q_state)
 			acpi_enable_onegpe(sc, wentry->q_gpe);
 	}
+	splx(s);
 }
 
 int
@@ -1700,15 +1758,19 @@ acpi_gpe(struct acpi_softc *sc, int gpe, void *arg)
 {
 	struct aml_node *node = arg;
 	uint8_t mask, en;
+	int s;
 
 	dnprintf(10, "handling GPE %.2x\n", gpe);
 	aml_evalnode(sc, node, 0, NULL, NULL);
 
+	s = spltty();
 	mask = (1L << (gpe & 7));
 	if (!sc->gpe_table[gpe].edge)
 		acpi_write_pmreg(sc, ACPIREG_GPE_STS, gpe>>3, mask);
 	en = acpi_read_pmreg(sc, ACPIREG_GPE_EN,  gpe>>3);
 	acpi_write_pmreg(sc, ACPIREG_GPE_EN,  gpe>>3, en | mask);
+	splx(s);
+
 	return (0);
 }
 
@@ -1812,21 +1874,45 @@ acpi_init_pm(struct acpi_softc *sc)
 	sc->sc_sst = aml_searchname(&aml_root, "_SI_._SST");
 }
 
-void
-acpi_sleep_pm(struct acpi_softc *sc, int state)
+int
+acpi_sleep_state(struct acpi_softc *sc, int state)
 {
-	uint16_t rega, regb, regra, regrb;
-	int retry = 0;
+	int ret;
 
-	disable_intr();
+	switch (state) {
+	case ACPI_STATE_S0:
+	case ACPI_STATE_S1:
+	case ACPI_STATE_S2:
+	case ACPI_STATE_S5:
+		return (0);
+	}
+
+	if (sc->sc_sleeptype[state].slp_typa == -1 ||
+	    sc->sc_sleeptype[state].slp_typb == -1)
+		return (EOPNOTSUPP);
+
+	if ((ret = acpi_prepare_sleep_state(sc, state)) != 0)
+		return (ret);
+
+	ret = acpi_sleep_machdep(sc, state);
+
+#ifndef SMALL_KERNEL
+	acpi_resume(sc, state);
+#endif /* !SMALL_KERNEL */
+	return (ret);
+}
+
+int
+acpi_enter_sleep_state(struct acpi_softc *sc, int state)
+{
+	uint16_t rega, regb;
+	int retries;
 
 	/* Clear WAK_STS bit */
 	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0, ACPI_PM1_WAK_STS);
 
-	/* Disable BM arbitration at deep sleep and beyond */
-	if (state >= ACPI_STATE_S3 &&
-	    sc->sc_fadt->pm2_cnt_blk && sc->sc_fadt->pm2_cnt_len)
-		acpi_write_pmreg(sc, ACPIREG_PM2_CNT, 0, ACPI_PM2_ARB_DIS);
+	/* Disable BM arbitration */
+	acpi_write_pmreg(sc, ACPIREG_PM2_CNT, 0, ACPI_PM2_ARB_DIS);
 
 	/* Write SLP_TYPx values */
 	rega = acpi_read_pmreg(sc, ACPIREG_PM1A_CNT, 0);
@@ -1838,194 +1924,259 @@ acpi_sleep_pm(struct acpi_softc *sc, int state)
 	acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, 0, rega);
 	acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, 0, regb);
 
-	/* Loop on WAK_STS, setting the SLP_EN bits once in a while */
+	/* Set SLP_EN bit */
 	rega |= ACPI_PM1_SLP_EN;
 	regb |= ACPI_PM1_SLP_EN;
-	while (1) {
-		if (retry == 0) {
-			acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, 0, rega);
-			acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, 0, regb);
-		}
-		retry = (retry + 1) % 100000;
 
-		regra = acpi_read_pmreg(sc, ACPIREG_PM1A_STS, 0);
-		regrb = acpi_read_pmreg(sc, ACPIREG_PM1B_STS, 0);
-		if ((regra & ACPI_PM1_WAK_STS) ||
-		    (regrb & ACPI_PM1_WAK_STS))
+	/*
+	 * Let the machdep code flush caches and do any other necessary
+	 * tasks before going away.
+	 */
+	acpi_cpu_flush(sc, state);
+
+	/*
+	 * XXX The following sequence is probably not right. 
+	 */
+	acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, 0, rega);
+	acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, 0, regb);
+
+	/* Loop on WAK_STS */
+	for (retries = 1000; retries > 0; retries--) {
+		rega = acpi_read_pmreg(sc, ACPIREG_PM1A_STS, 0);
+		regb = acpi_read_pmreg(sc, ACPIREG_PM1B_STS, 0);
+		if ((rega & ACPI_PM1_WAK_STS) ||
+		    (regb & ACPI_PM1_WAK_STS))
 			break;
+		DELAY(1000);
 	}
+
+	return (-1);
 }
 
 void
-acpi_resume_pm(struct acpi_softc *sc, int fromstate)
+acpi_resume(struct acpi_softc *sc, int state)
 {
-	uint16_t rega, regb, en;
+	struct aml_value env;
 
-	/* Write SLP_TYPx values */
-	rega = acpi_read_pmreg(sc, ACPIREG_PM1A_CNT, 0);
-	regb = acpi_read_pmreg(sc, ACPIREG_PM1B_CNT, 0);
-	rega &= ~(ACPI_PM1_SLP_TYPX_MASK | ACPI_PM1_SLP_EN);
-	regb &= ~(ACPI_PM1_SLP_TYPX_MASK | ACPI_PM1_SLP_EN);
-	rega |= ACPI_PM1_SLP_TYPX(sc->sc_sleeptype[ACPI_STATE_S0].slp_typa);
-	regb |= ACPI_PM1_SLP_TYPX(sc->sc_sleeptype[ACPI_STATE_S0].slp_typb);
-	acpi_write_pmreg(sc, ACPIREG_PM1A_CNT, 0, rega);
-	acpi_write_pmreg(sc, ACPIREG_PM1B_CNT, 0, regb);
+	memset(&env, 0, sizeof(env));
+	env.type = AML_OBJTYPE_INTEGER;
+	env.v_integer = sc->sc_state;
 
 	/* Force SCI_EN on resume to fix horribly broken machines */
 	acpi_write_pmreg(sc, ACPIREG_PM1_CNT, 0, ACPI_PM1_SCI_EN);
 
 	/* Clear fixed event status */
-	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0, ACPI_PM1_ALL_STS);
+	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0,
+	    ACPI_PM1_ALL_STS);
 
-	/* acpica-reference.pdf page 148 says do not call _BFS */
-	/* 1st resume AML step: _BFS(fromstate) */
-	aml_node_setval(sc, sc->sc_bfs, fromstate);
+	if (sc->sc_bfs)
+		if (aml_evalnode(sc, sc->sc_bfs, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _BFS failed.\n",
+			    DEVNAME(sc));
+		}
+
+	if (sc->sc_wak)
+		if (aml_evalnode(sc, sc->sc_wak, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _WAK failed.\n",
+			    DEVNAME(sc));
+		}
+
+	/* Reset the indicator lights to "waking" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_WAKING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
 
 	/* Enable runtime GPEs */
 	acpi_disable_allgpes(sc);
 	acpi_enable_rungpes(sc);
 
-	acpi_indicator(sc, ACPI_SST_WAKING);
+	if (state == ACPI_STATE_S4)
+		boothowto = acpi_saved_boothowto;
 
-	/* 2nd resume AML step: _WAK(fromstate) */
-	aml_node_setval(sc, sc->sc_wak, fromstate);
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
 
-	/* Clear WAK_STS bit */
-	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0, ACPI_PM1_WAK_STS);
+	cold = 0;
+	enable_intr();
+	splx(acpi_saved_spl);
 
-	en = acpi_read_pmreg(sc, ACPIREG_PM1_EN, 0);
-	if (!(sc->sc_fadt->flags & FADT_PWR_BUTTON))
-		en |= ACPI_PM1_PWRBTN_EN;
-	if (!(sc->sc_fadt->flags & FADT_SLP_BUTTON))
-		en |= ACPI_PM1_SLPBTN_EN;
-	acpi_write_pmreg(sc, ACPIREG_PM1_EN, 0, en);
+	acpi_resume_machdep();
 
-	/*
-	 * If PM2 exists, re-enable BM arbitration (reportedly some
-	 * BIOS forget to)
-	 */
-	if (sc->sc_fadt->pm2_cnt_blk && sc->sc_fadt->pm2_cnt_len) {
-		rega = acpi_read_pmreg(sc, ACPIREG_PM2_CNT, 0);
-		rega &= ~ACPI_PM2_ARB_DIS;
-		acpi_write_pmreg(sc, ACPIREG_PM2_CNT, 0, rega);
+	sc->sc_state = ACPI_STATE_S0;
+	if (sc->sc_tts) {
+		env.v_integer = sc->sc_state;
+		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _TTS failed.\n",
+			    DEVNAME(sc));
+		}
 	}
+
+	/* disable _LID for wakeup */
+	acpibtn_disable_psw();
+
+	/* Reset the indicator lights to "working" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_WORKING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
+
+#ifdef MULTIPROCESSOR
+	sched_start_secondary_cpus();
+#endif
+
+	acpi_record_event(sc, APM_NORMAL_RESUME);
+
+	bufq_restart();
+
+#if NWSDISPLAY > 0
+	wsdisplay_resume();
+#endif /* NWSDISPLAY > 0 */
 }
 
-/* Set the indicator light to some state */
 void
-acpi_indicator(struct acpi_softc *sc, int led_state)
+acpi_handle_suspend_failure(struct acpi_softc *sc)
 {
-	static int save_led_state = -1;
+	struct aml_value env;
 
-	if (save_led_state != led_state) {
-		aml_node_setval(sc, sc->sc_sst, led_state);
-		save_led_state = led_state;
+	/* Undo a partial suspend. Devices will have already been resumed */
+	cold = 0;
+	enable_intr();
+	splx(acpi_saved_spl);
+
+	/* Tell ACPI to go back to S0 */
+	memset(&env, 0, sizeof(env));
+	env.type = AML_OBJTYPE_INTEGER;
+	sc->sc_state = ACPI_STATE_S0;
+	if (sc->sc_tts) {
+		env.v_integer = sc->sc_state;
+		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _TTS failed.\n",
+			    DEVNAME(sc));
+		}
 	}
+
+	/* disable _LID for wakeup */
+	acpibtn_disable_psw();
+
+	/* Reset the indicator lights to "working" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_WORKING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
+
+#ifdef MULTIPROCESSOR
+	sched_start_secondary_cpus();
+#endif
 }
 
 int
-acpi_sleep_state(struct acpi_softc *sc, int state)
+acpi_prepare_sleep_state(struct acpi_softc *sc, int state)
 {
-	int error = ENXIO;
-	int s;
+	struct aml_value env;
+	int error = 0;
 
-	switch (state) {
-	case ACPI_STATE_S0:
-		return (0);
-	case ACPI_STATE_S1:
-		return (EOPNOTSUPP);
-	case ACPI_STATE_S5:	/* only sleep states handled here */
-		return (EOPNOTSUPP);
-	}
+	if (sc == NULL || state == ACPI_STATE_S0)
+		return(0);
 
 	if (sc->sc_sleeptype[state].slp_typa == -1 ||
 	    sc->sc_sleeptype[state].slp_typb == -1) {
 		printf("%s: state S%d unavailable\n",
 		    sc->sc_dev.dv_xname, state);
-		return (EOPNOTSUPP);
+		return (ENXIO);
 	}
 
-	/* 1st suspend AML step: _TTS(tostate) */
-	if (aml_node_setval(sc, sc->sc_tts, state) != 0)
-		goto fail_tts;
-	acpi_indicator(sc, ACPI_SST_WAKING);	/* blink */
-
-#if NWSDISPLAY > 0
-	wsdisplay_suspend();
-#endif /* NWSDISPLAY > 0 */
-	bufq_quiesce();
-
-	if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE))
-		goto fail_quiesce;
-
 #ifdef MULTIPROCESSOR
-	acpi_sleep_mp();
+	sched_stop_secondary_cpus();
+	KASSERT(CPU_IS_PRIMARY(curcpu()));
 #endif
 
-	resettodr();
+	sc->sc_nextstate = state;
 
-	s = splhigh();
-	disable_intr();	/* PSL_I for resume; PIC/APIC broken until repair */
-	cold = 1;	/* Force other code to delay() instead of tsleep() */
+	memset(&env, 0, sizeof(env));
+	env.type = AML_OBJTYPE_INTEGER;
+	env.v_integer = state;
+	/* _TTS(state) */
+	if (sc->sc_tts)
+		if (aml_evalnode(sc, sc->sc_tts, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _TTS failed.\n",
+			    DEVNAME(sc));
+			return (ENXIO);
+		}
 
-	if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND) != 0)
-		goto fail_suspend;
-	acpi_sleep_clocks(sc, state);
+	if (state == ACPI_STATE_S4)
+		printf("%s: hibernating to disk ...\n", DEVNAME(sc));
 
-	/* 2nd suspend AML step: _PTS(tostate) */
-	if (aml_node_setval(sc, sc->sc_pts, state) != 0)
-		goto fail_pts;
+#if NWSDISPLAY > 0
+	if (state == ACPI_STATE_S3 || state == ACPI_STATE_S4)
+		wsdisplay_suspend();
+#endif /* NWSDISPLAY > 0 */
 
-	acpibtn_enable_psw();	/* enable _LID for wakeup */
-	acpi_indicator(sc, ACPI_SST_SLEEPING);
+	if (state == ACPI_STATE_S3)
+		resettodr();
 
-	/* 3rd suspend AML step: _GTS(tostate) */
-	aml_node_setval(sc, sc->sc_gts, state);
+	bufq_quiesce();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE);
+
+	acpi_saved_spl = splhigh();
+	disable_intr();
+	cold = 1;
+	if (state == ACPI_STATE_S4) {
+		acpi_saved_boothowto = boothowto;
+		boothowto = RB_RDONLY;
+	}
+	if (state == ACPI_STATE_S3 || state == ACPI_STATE_S4)
+		if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND) != 0) {
+			acpi_handle_suspend_failure(sc);
+			error = ENXIO;
+			goto fail;
+		}
+
+	/* _PTS(state) */
+	if (sc->sc_pts)
+		if (aml_evalnode(sc, sc->sc_pts, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _PTS failed.\n",
+			    DEVNAME(sc));
+			error = ENXIO;
+			goto fail;
+		}
+
+	/* enable _LID for wakeup */
+	acpibtn_enable_psw();
+
+	/* Reset the indicator lights to "sleeping" */
+	if (sc->sc_sst) {
+		env.v_integer = ACPI_SST_SLEEPING;
+		aml_evalnode(sc, sc->sc_sst, 1, &env, NULL);
+	}
+	env.v_integer = state;
+
+	sc->sc_state = state;
+	/* _GTS(state) */
+	if (sc->sc_gts)
+		if (aml_evalnode(sc, sc->sc_gts, 1, &env, NULL) != 0) {
+			dnprintf(10, "%s evaluating method _GTS failed.\n",
+			    DEVNAME(sc));
+			error = ENXIO;
+			goto fail;
+		}
 
 	/* Clear fixed event status */
-	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0, ACPI_PM1_ALL_STS);
+	acpi_write_pmreg(sc, ACPIREG_PM1_STS, 0,
+	    ACPI_PM1_ALL_STS);
 
 	/* Enable wake GPEs */
 	acpi_disable_allgpes(sc);
 	acpi_enable_wakegpes(sc, state);
 
-	/* Sleep */
-	sc->sc_state = state;
-	error = acpi_sleep_cpu(sc, state);
-	sc->sc_state = ACPI_STATE_S0;
-	/* Resume */
+fail:
+	if (error) {
+		bufq_restart();
 
-	acpi_resume_clocks(sc);		/* AML may need clocks */
-	acpi_resume_pm(sc, state);
-	acpi_resume_cpu(sc);
-	acpibtn_disable_psw();		/* disable _LID for wakeup */
-
-fail_pts:
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_RESUME);
-
-fail_suspend:
-	cold = 0;
-	enable_intr();
-	splx(s);
-
-	inittodr(time_second);
-
-	/* 3rd resume AML step: _TTS(runstate) */
-	aml_node_setval(sc, sc->sc_tts, sc->sc_state);
-
-#ifdef MULTIPROCESSOR
-	acpi_resume_mp();
-#endif
-
-fail_quiesce:
-	bufq_restart();
 #if NWSDISPLAY > 0
-	wsdisplay_resume();
+		wsdisplay_resume();
 #endif /* NWSDISPLAY > 0 */
+	}
 
-	acpi_record_event(sc, APM_NORMAL_RESUME);
-	acpi_indicator(sc, ACPI_SST_WORKING);
-fail_tts:
 	return (error);
 }
 
@@ -2038,30 +2189,17 @@ acpi_wakeup(void *arg)
 	wakeup(sc);
 }
 
-/* XXX
- * We are going to do AML execution but are not in the acpi thread.
- * We do not know if the acpi thread is sleeping on acpiec in some
- * intermediate context.  Wish us luck.
- */
 void
 acpi_powerdown(void)
 {
-	int state = ACPI_STATE_S5, s;
-	struct acpi_softc *sc = acpi_softc;
-
-	if (acpi_enabled == 0)
-		return;
-
-	s = splhigh();
-	disable_intr();
-	cold = 1;
-
-	acpi_disable_allgpes(sc);
-
-	acpi_sleep_pm(sc, state);
-	panic("acpi S5 transition did not happen");
-	while (1)
-		;
+	/*
+	 * In case acpi_prepare_sleep fails, we shouldn't try to enter
+	 * the sleep state. It might cost us the battery.
+	 */
+	acpi_disable_allgpes(acpi_softc);
+	acpi_enable_wakegpes(acpi_softc, ACPI_STATE_S5);
+	if (acpi_prepare_sleep_state(acpi_softc, ACPI_STATE_S5) == 0)
+		acpi_enter_sleep_state(acpi_softc, ACPI_STATE_S5);
 }
 
 void
@@ -2096,10 +2234,10 @@ acpi_thread(void *arg)
 		if (!(sc->sc_fadt->flags & FADT_SLP_BUTTON))
 			en |= ACPI_PM1_SLPBTN_EN;
 		acpi_write_pmreg(sc, ACPIREG_PM1_EN, 0, en);
+		splx(s);
 
 		/* Enable handled GPEs here */
 		acpi_enable_rungpes(sc);
-		splx(s);
 	}
 
 	while (thread->running) {

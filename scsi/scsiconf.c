@@ -251,7 +251,6 @@ scsi_activate_lun(struct scsibus_softc *sc, int target, int lun, int act)
 	case DVACT_QUIESCE:
 	case DVACT_SUSPEND:
 	case DVACT_RESUME:
-	case DVACT_POWERDOWN:
 		config_suspend(dev, act);
 		break;
 	case DVACT_DEACTIVATE:

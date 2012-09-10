@@ -802,7 +802,6 @@ config_activate_children(struct device *parent, int act)
 		case DVACT_SUSPEND:
 		case DVACT_RESUME:
 		case DVACT_QUIESCE:
-		case DVACT_POWERDOWN:
 			rv = config_suspend(d, act);
 			break;
 		case DVACT_DEACTIVATE:
@@ -823,8 +822,6 @@ config_activate_children(struct device *parent, int act)
 #endif
 		if (act == DVACT_RESUME)
 			printf("failing resume cannot be handled\n");
-		if (act == DVACT_POWERDOWN)
-			return (rv);
 		if (act != DVACT_SUSPEND)
 			return (rv);
 

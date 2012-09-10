@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.94 2011/10/10 19:42:37 miod Exp $	*/
+/*	$OpenBSD: pci.c,v 1.95 2012/09/07 19:26:48 kettenis Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -51,7 +51,6 @@ void pciattach(struct device *, struct device *, void *);
 int pcidetach(struct device *, int);
 int pciactivate(struct device *, int);
 void pci_suspend(struct pci_softc *);
-void pci_powerdown(struct pci_softc *);
 void pci_resume(struct pci_softc *);
 
 #define NMAPREG			((PCI_MAPREG_END - PCI_MAPREG_START) / \
@@ -209,10 +208,6 @@ pciactivate(struct device *self, int act)
 		rv = config_activate_children(self, act);
 		pci_suspend((struct pci_softc *)self);
 		break;
-	case DVACT_POWERDOWN:
-		rv = config_activate_children(self, act);
-		pci_powerdown((struct pci_softc *)self);
-		break;
 	case DVACT_RESUME:
 		pci_resume((struct pci_softc *)self);
 		rv = config_activate_children(self, act);
@@ -264,31 +259,16 @@ pci_suspend(struct pci_softc *sc)
 			}
 			pd->pd_msi_mc = reg;
 		}
-	}
-}
-
-void
-pci_powerdown(struct pci_softc *sc)
-{
-	struct pci_dev *pd;
-	pcireg_t bhlc;
-
-	LIST_FOREACH(pd, &sc->sc_devs, pd_next) {
-		/*
-		 * Only handle header type 0 here; PCI-PCI bridges and
-		 * CardBus bridges need special handling, which will
-		 * be done in their specific drivers.
-		 */
-		bhlc = pci_conf_read(sc->sc_pc, pd->pd_tag, PCI_BHLC_REG);
-		if (PCI_HDRTYPE_TYPE(bhlc) != 0)
-			continue;
 
 		if (pci_dopm) {
-			/* Place the device into D3. */
+			/*
+			 * Place the device into the lowest possible
+			 * power state.
+			 */
 			pd->pd_pmcsr_state = pci_get_powerstate(sc->sc_pc,
 			    pd->pd_tag);
 			pci_set_powerstate(sc->sc_pc, pd->pd_tag,
-			    PCI_PMCSR_STATE_D3);
+			    pci_min_powerstate(sc->sc_pc, pd->pd_tag));
 		}
 	}
 }

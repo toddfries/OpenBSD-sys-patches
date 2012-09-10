@@ -369,10 +369,6 @@ apm_suspend()
 	cold = 1;
 
 	rv = config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
-
-	/* return value from this should be checked */
-	(void) config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
-
 	if (rv == 0) {
 		rv = sys_platform->suspend();
 		if (rv == 0)

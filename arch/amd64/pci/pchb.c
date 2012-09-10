@@ -285,9 +285,6 @@ pchbactivate(struct device *self, int act)
 	case DVACT_SUSPEND:
 		rv = config_activate_children(self, act);
 		break;
-	case DVACT_POWERDOWN:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_RESUME:
 		/* re-enable RNG, if we have it */
 		if (sc->sc_rng_active)

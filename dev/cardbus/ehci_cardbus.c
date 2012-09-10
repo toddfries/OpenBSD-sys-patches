@@ -161,6 +161,8 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	sc->sc.sc_shutdownhook = shutdownhook_establish(ehci_shutdown, &sc->sc);
+
 	/* Attach usb device. */
 	sc->sc.sc_child = config_found((void *)sc, &sc->sc.sc_bus,
 				       usbctlprint);
