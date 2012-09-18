@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.h,v 1.57 2012/07/10 11:49:42 guenther Exp $	*/
+/*	$OpenBSD: in6.h,v 1.59 2012/09/17 20:01:26 yasuoka Exp $	*/
 /*	$KAME: in6.h,v 1.83 2001/03/29 02:55:07 jinmei Exp $	*/
 
 /*
@@ -451,6 +451,8 @@ struct route_in6 {
 #define IPV6_DONTFRAG		62   /* bool; disable IPv6 fragmentation */
 #define IPV6_PIPEX		63   /* bool; using PIPEX */
 
+#define IPV6_RECVDSTPORT	64   /* bool; receive IP dst port w/dgram */
+
 #define IPV6_RTABLE		0x1021	/* int; routing table, see SO_RTABLE */
 
 /* to define items, should talk with KAME guys first, for *BSD compatibility */
@@ -769,6 +771,12 @@ int	in6_mask2len(struct in6_addr *, u_char *);
 #endif /* _KERNEL */
 
 #if __BSD_VISIBLE
+
+#ifndef	_SOCKLEN_T_DEFINED_
+#define	_SOCKLEN_T_DEFINED_
+typedef	__socklen_t	socklen_t;	/* length type for network syscalls */
+#endif
+
 __BEGIN_DECLS
 struct cmsghdr;
 
