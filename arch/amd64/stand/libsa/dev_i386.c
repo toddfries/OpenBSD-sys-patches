@@ -112,8 +112,8 @@ devboot(dev_t bootdev, char *p)
 	 * softraid volume.
 	 */
 	SLIST_FOREACH(bv, &sr_volumes, sbv_link) {
-		/* For now we only support booting from RAID 1 volumes. */
-		if (bv->sbv_level != 1)
+		/* We only support booting from RAID1/CONCAT volumes. */
+		if (bv->sbv_level != 1 && bv->sbv_level != 'c')
 			continue;
 		if (bv->sbv_flags & BIOC_SCBOOTABLE)
 			SLIST_FOREACH(bc, &bv->sbv_chunks, sbc_link)

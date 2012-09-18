@@ -749,7 +749,7 @@ sr_strategy(struct sr_boot_volume *bv, int rw, daddr32_t blk, size_t size,
     void *buf, size_t *rsize)
 {
 	struct diskinfo *sr_dip, *dip;
-	struct sr_boot_chunk *bc;
+	struct sr_boot_chunk *bc = NULL;
 
 	/* We only support read-only softraid. */
 	if (rw != F_READ)
@@ -761,14 +761,20 @@ sr_strategy(struct sr_boot_volume *bv, int rw, daddr32_t blk, size_t size,
 
 	if (bv->sbv_level == 0) {
 		return ENOTSUP;
-	} else if (bv->sbv_level == 1) {
+	} else if (bv->sbv_level == 1 || bv->sbv_level == 'c') {
 
 		/* Select first online chunk. */
-		SLIST_FOREACH(bc, &bv->sbv_chunks, sbc_link)
-			if (bc->sbc_state == BIOC_SDONLINE)
-				break;
-		if (bc == NULL)
-			return EIO;
+		if (bv->sbv_level == 1) {
+			SLIST_FOREACH(bc, &bv->sbv_chunks, sbc_link)
+				if (bc->sbc_state == BIOC_SDONLINE)
+					break;
+			if (bc == NULL)
+				return EIO;
+		} else if (bv->sbv_level == 'c') {
+			bc = SLIST_FIRST(&bv->sbv_chunks);
+			if (bc == NULL || bc->sbc_state != BIOC_SDONLINE)
+				return EIO;
+		}
 
 		dip = (struct diskinfo *)bc->sbc_diskinfo;
 		dip->bsddev = bc->sbc_mm;
