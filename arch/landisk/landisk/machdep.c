@@ -222,6 +222,7 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
 		_reg_write_1(LANDISK_PWRMNG, PWRMNG_POWEROFF);

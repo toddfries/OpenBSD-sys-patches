@@ -212,6 +212,9 @@ sili_pci_activate(struct device *self, int act)
 	case DVACT_SUSPEND:
 		rv = config_activate_children(self, act);
 		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
+		break;
 	case DVACT_RESUME:
 		sili_resume(sc);
 		rv = config_activate_children(self, act);

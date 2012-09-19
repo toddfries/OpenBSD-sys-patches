@@ -62,6 +62,7 @@ extern int ehcidebug;
 int	ehci_cardbus_match(struct device *, void *, void *);
 void	ehci_cardbus_attach(struct device *, struct device *, void *);
 int	ehci_cardbus_detach(struct device *, int);
+int	ehci_cardbus_activate(struct device *, int);
 
 struct ehci_cardbus_softc {
 	ehci_softc_t		sc;
@@ -73,7 +74,7 @@ struct ehci_cardbus_softc {
 
 struct cfattach ehci_cardbus_ca = {
 	sizeof(struct ehci_cardbus_softc), ehci_cardbus_match,
-	    ehci_cardbus_attach, ehci_cardbus_detach, ehci_activate
+	    ehci_cardbus_attach, ehci_cardbus_detach, ehci_cardbus_activate
 };
 
 #define CARDBUS_CBMEM PCI_CBMEM
@@ -161,8 +162,6 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	sc->sc.sc_shutdownhook = shutdownhook_establish(ehci_shutdown, &sc->sc);
-
 	/* Attach usb device. */
 	sc->sc.sc_child = config_found((void *)sc, &sc->sc.sc_bus,
 				       usbctlprint);
@@ -190,3 +189,8 @@ ehci_cardbus_detach(struct device *self, int flags)
 	return (0);
 }
 
+int
+ehci_cardbus_activate(struct device *self, int act)
+{
+	return ehci_activate(self, act);
+}

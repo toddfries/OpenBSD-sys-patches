@@ -389,7 +389,10 @@ ppbactivate(struct device *self, int act)
 			}
 			sc->sc_msi_mc = reg;
 		}
-
+		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
+		
 		if (pci_dopm) {	
 			/*
 			 * Place the bridge into the lowest possible

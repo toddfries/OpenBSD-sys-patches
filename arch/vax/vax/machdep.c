@@ -546,10 +546,11 @@ boot(howto)
 	if (howto & RB_DUMP)
 		dumpsys();
 
-	/* Run any shutdown hooks. */
-	doshutdownhooks();
 
 haltsys:
+	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+
 	if (howto & RB_HALT) {
 		if (dep_call->cpu_halt)
 			(*dep_call->cpu_halt) ();

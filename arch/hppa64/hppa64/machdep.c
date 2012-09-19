@@ -570,6 +570,7 @@ boot(int howto)
 			dumpsys();
 
 		doshutdownhooks();
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 	}
 
 	/* in case we came on powerfail interrupt */

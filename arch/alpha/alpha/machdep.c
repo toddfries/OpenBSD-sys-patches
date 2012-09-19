@@ -1027,9 +1027,8 @@ boot(howto)
 		dumpsys();
 
 haltsys:
-
-	/* run any shutdown hooks */
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #if defined(MULTIPROCESSOR)
 #if 0 /* XXX doesn't work when called from here?! */
