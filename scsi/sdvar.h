@@ -69,7 +69,6 @@ struct sd_softc {
 		u_int32_t	unmap_sectors;	/* maximum sectors/unmap */
 		u_int32_t	unmap_descs;	/* maximum descriptors/unmap */
 	} params;
-	void *sc_sdhook;		/* our shutdown hook */
 	struct timeout sc_timeout;
 
 	struct scsi_xshandler sc_xsh;

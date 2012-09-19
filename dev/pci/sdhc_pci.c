@@ -172,11 +172,6 @@ sdhc_pci_attach(struct device *parent, struct device *self, void *aux)
 			printf("%s at 0x%x: can't initialize host\n",
 			    sc->sc.sc_dev.dv_xname, reg);
 	}
-
-	/*
-	 * Establish shutdown hooks.
-	 */
-	(void)shutdownhook_establish(sdhc_shutdown, &sc->sc);
 }
 
 void

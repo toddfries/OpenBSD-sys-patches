@@ -615,8 +615,8 @@ boot(howto)
 		dumpsys();
 
 haltsys:
-	/* Run any shutdown hooks. */
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	/* Finally, halt/reboot the system. */
 	if (howto & RB_HALT) {

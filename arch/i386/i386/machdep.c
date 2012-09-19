@@ -2523,6 +2523,7 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	i386_broadcast_ipi(I386_IPI_HALT);

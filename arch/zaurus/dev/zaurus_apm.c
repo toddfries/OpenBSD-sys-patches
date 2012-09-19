@@ -653,6 +653,7 @@ zapm_poweroff(void)
 
 	s = splhigh();
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	/* XXX enable charging during suspend */
 

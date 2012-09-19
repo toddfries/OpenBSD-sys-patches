@@ -920,6 +920,7 @@ boot(int howto)
 			dumpsys();
 
 		doshutdownhooks();
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 		hppa_ipi_broadcast(HPPA_IPI_HALT);

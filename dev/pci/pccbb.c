@@ -457,8 +457,6 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-	shutdownhook_establish(pccbb_shutdown, sc);
-
 	/* Disable legacy register mapping. */
 	pccbb_legacy_disable(sc);
 
@@ -2840,6 +2838,10 @@ pccbbactivate(struct device *self, int act)
 		sc->sc_iolimit[0] = pci_conf_read(pc, tag, PCI_CB_IOLIMIT0);
 		sc->sc_iobase[1] = pci_conf_read(pc, tag, PCI_CB_IOBASE1);
 		sc->sc_iolimit[1] = pci_conf_read(pc, tag, PCI_CB_IOLIMIT1);
+		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
+		pccbb_shutdown(self);
 		break;
 	case DVACT_RESUME:
 		/* Restore the registers saved above. */

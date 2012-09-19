@@ -320,6 +320,7 @@ apm_suspend(struct pxa2x0_apm_softc *sc)
 
 	s = splhigh();
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 	splx(s);
 
 	pxa2x0_apm_sleep(sc);

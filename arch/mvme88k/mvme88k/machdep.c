@@ -435,8 +435,8 @@ boot(howto)
 		dumpsys();
 
 haltsys:
-	/* Run any shutdown hooks. */
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		printf("System halted. Press any key to reboot...\n\n");

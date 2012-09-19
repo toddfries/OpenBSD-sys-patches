@@ -436,6 +436,9 @@ wdc_pcmcia_activate(self, act)
 		break;
 	case DVACT_SUSPEND:
 		rv = config_activate_children(self, act);
+		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
 		if (sc->sc_ih)
 			pcmcia_intr_disestablish(sc->sc_pf, sc->sc_ih);
 		sc->sc_ih = NULL;
