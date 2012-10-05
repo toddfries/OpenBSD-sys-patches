@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vlan.c,v 1.91 2011/11/27 00:46:07 haesbaert Exp $	*/
+/*	$OpenBSD: if_vlan.c,v 1.93 2012/09/30 12:11:50 claudio Exp $	*/
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -196,7 +196,6 @@ vlan_start(struct ifnet *ifp)
 	ifv = ifp->if_softc;
 	p = ifv->ifv_p;
 
-	ifp->if_flags |= IFF_OACTIVE;
 	for (;;) {
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 		if (m == NULL)
@@ -263,7 +262,6 @@ vlan_start(struct ifnet *ifp)
 		ifp->if_opackets++;
 		if_start(p);
 	}
-	ifp->if_flags &= ~IFF_OACTIVE;
 
 	return;
 }
@@ -424,9 +422,7 @@ vlan_config(struct ifvlan *ifv, struct ifnet *p, u_int16_t tag)
 	 */
 	if (p->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		ifv->ifv_if.if_capabilities = p->if_capabilities &
-		    (IFCAP_CSUM_IPv4|IFCAP_CSUM_TCPv4|
-		    IFCAP_CSUM_UDPv4);
-		/* (IFCAP_CSUM_TCPv6|IFCAP_CSUM_UDPv6); */
+		    IFCAP_CSUM_MASK;
 
 	/*
 	 * Hardware VLAN tagging only works with the default VLAN

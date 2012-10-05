@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.55 2012/04/03 21:17:35 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.57 2012/10/03 11:18:23 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -35,6 +35,7 @@
 #include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/memconf.h>
 #include <machine/mnode.h>
 #include <machine/atomic.h>
@@ -806,7 +807,8 @@ ip27_hub_splx(int newipl)
 	/* Update masks to new ipl. Order highly important! */
 	__asm__ (".set noreorder\n");
 	ci->ci_ipl = newipl;
-	__asm__ ("sync\n\t.set reorder\n");
+	mips_sync();
+	__asm__ (".set reorder\n");
 	if (CPU_IS_PRIMARY(ci))
 		ip27_hub_setintrmask(newipl);
 	/* If we still have softints pending trigger processing. */
