@@ -75,6 +75,10 @@
 
 #include <dev/pci/virtioreg.h>
 
+#ifndef VIRTIO_DEBUG
+#define VIRTIO_DEBUG		0
+#endif
+
 struct vq_entry {
 	SIMPLEQ_ENTRY(vq_entry)	qe_list; /* free list */
 	uint16_t		qe_index; /* index in vq_desc array */
@@ -150,27 +154,27 @@ struct virtio_ops {
 #define VIRTIO_CHILD_ERROR	((void*)1)
 
 struct virtio_softc {
-	struct device		sc_dev;
-	bus_dma_tag_t		sc_dmat; /* set by transport */
-	struct virtio_ops	*sc_ops; /* set by transport */
+	struct device		 sc_dev;
+	bus_dma_tag_t		 sc_dmat;	/* set by transport */
+	struct virtio_ops	*sc_ops;	/* set by transport */
 
-	int			sc_ipl; /* set by child */
-	void			*sc_ih; /* set by transport */
+	int			 sc_ipl;		/* set by child */
+	void			*sc_ih;		/* set by transport */
 
-	uint32_t		sc_features;
-	int			sc_indirect;
+	uint32_t		 sc_features;
+	int			 sc_indirect;
 
-	int			sc_nvqs; /* set by child */
-	struct virtqueue	*sc_vqs; /* set by child */
+	int			 sc_nvqs;	/* set by child */
+	struct virtqueue	*sc_vqs;	/* set by child */
 
-	int			sc_childdevid; /* set by transport */
-	struct device		*sc_child; /* set by child,
-					    * VIRTIO_CHILD_ERROR on error
-					    */
+	int			 sc_childdevid;	/* set by transport */
+	struct device		*sc_child;	/* set by child,
+						 * VIRTIO_CHILD_ERROR on error
+						 */
 	int			(*sc_config_change)(struct virtio_softc*);
-					 /* set by child */
+						/* set by child */
 	int			(*sc_intrhand)(struct virtio_softc*);
-					 /* set by child */
+						/* set by child */
 };
 
 /* public interface */
@@ -214,7 +218,9 @@ int virtio_start_vq_intr(struct virtio_softc *, struct virtqueue *);
 const char *virtio_device_string(int);
 void virtio_log_features(uint32_t, uint32_t, const struct virtio_feature_name *);
 
+#if VIRTIO_DEBUG
 void virtio_vq_dump(struct virtqueue *vq);
+#endif
 int virtio_nused(struct virtqueue *vq);
 int virtio_postpone_intr(struct virtqueue *vq, uint16_t nslots);
 int virtio_postpone_intr_smart(struct virtqueue *vq);

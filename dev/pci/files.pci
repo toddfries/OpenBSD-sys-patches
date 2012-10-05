@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.287 2012/08/30 21:54:12 mpi Exp $
+#	$OpenBSD: files.pci,v 1.288 2012/09/19 19:24:33 sf Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -811,6 +811,18 @@ file	dev/pci/gcu.c			gcu
 
 # AMD Geode CS5536 Audio
 device	auglx: audio, ac97
+attach	auglx at pci
+file	dev/pci/auglx.c			auglx
+
+# Intel 3400 Thermal 
+device	itherm
+attach	itherm at pci
+file	dev/pci/itherm.c		itherm
+
+# AMD Geode CS5536 PCI-ISA bridge
+device	glxpcib: isabus, gpiobus, i2cbus
+attach	glxpcib at pci
+file	dev/pci/glxpcib.c		glxpcib
 
 # VirtIO
 device	virtio {}
@@ -826,15 +838,3 @@ file	dev/pci/if_vio.c		vio
 device	vioblk: scsi
 attach	vioblk at virtio
 file	dev/pci/vioblk.c		vioblk
-attach	auglx at pci
-file	dev/pci/auglx.c			auglx
-
-# Intel 3400 Thermal 
-device	itherm
-attach	itherm at pci
-file	dev/pci/itherm.c		itherm
-
-# AMD Geode CS5536 PCI-ISA bridge
-device	glxpcib: isabus, gpiobus, i2cbus
-attach	glxpcib at pci
-file	dev/pci/glxpcib.c		glxpcib

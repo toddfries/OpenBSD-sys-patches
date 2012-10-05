@@ -47,14 +47,6 @@
  * XXX: PCI-endian while the device specific registers are native endian.
  */
 
-#define MINSEG_INDIRECT		2 /* use indirect if nsegs >= this value */
-#define VIRTIO_DEBUG		0
-
-#define PCI_IS_VIRTIO(pa) (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_QUMRANET &&	\
-			   PCI_PRODUCT(pa->pa_id) >= 0x1000 &&			\
-			   PCI_PRODUCT(pa->pa_id) <= 0x103f &&			\
-			   PCI_REVISION(pa->pa_class) == 0)
-
 #define virtio_set_status(sc, s) virtio_pci_set_status(sc, s)
 #define virtio_device_reset(sc) virtio_set_status((sc), 0)
 
@@ -152,7 +144,10 @@ virtio_pci_match(struct device *parent, void *match, void *aux)
 	struct pci_attach_args *pa;
 
 	pa = (struct pci_attach_args *)aux;
-	if (PCI_IS_VIRTIO(pa))
+	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_QUMRANET &&
+	    PCI_PRODUCT(pa->pa_id) >= 0x1000 &&
+	    PCI_PRODUCT(pa->pa_id) <= 0x103f &&
+	    PCI_REVISION(pa->pa_class) == 0)
 		return 1;
 	return 0;
 }
@@ -178,10 +173,12 @@ virtio_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	/* subsystem ID shows what I am */
 	id = PCI_PRODUCT(pci_conf_read(pc, tag, PCI_SUBSYS_ID_REG));
-	printf(" Virtio %s Device", virtio_device_string(id));
+	printf(": Virtio %s Device", virtio_device_string(id));
 
+#ifdef notyet
 	if (pci_get_capability(pc, tag, PCI_CAP_MSIX, NULL, NULL))
-		printf(" msix-cap");
+		printf(", msix capable");
+#endif
 	printf("\n");
 
 	vsc->sc_ops = &virtio_pci_ops;
@@ -191,7 +188,7 @@ virtio_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	if (pci_mapreg_map(pa, PCI_MAPREG_START, PCI_MAPREG_TYPE_IO, 0,
 			   &sc->sc_iot, &sc->sc_ioh, NULL, &sc->sc_iosize, 0)) {
-		printf("can't map i/o space\n");
+		printf("%s: can't map i/o space\n", vsc->sc_dev.dv_xname);
 		return;
 	}
 
@@ -204,28 +201,28 @@ virtio_pci_attach(struct device *parent, struct device *self, void *aux)
 	vsc->sc_child = NULL;
 	config_found(self, sc, NULL);
 	if (vsc->sc_child == NULL) {
-		printf("no matching child driver; not configured\n");
+		printf("%s: no matching child driver; not configured\n", vsc->sc_dev.dv_xname);
 		goto fail_1;
 	}
 	if (vsc->sc_child == VIRTIO_CHILD_ERROR) {
-		printf("virtio configuration failed\n");
+		printf("%s: virtio configuration failed\n", vsc->sc_dev.dv_xname);
 		goto fail_1;
 	}
 
 	if (pci_intr_map(pa, &ih)) {
-		printf("couldn't map interrupt\n");
+		printf("%s: couldn't map interrupt\n", vsc->sc_dev.dv_xname);
 		goto fail_2;
 	}
 	intrstr = pci_intr_string(pc, ih);
 	vsc->sc_ih = pci_intr_establish(pc, ih, vsc->sc_ipl, virtio_pci_intr, sc, vsc->sc_dev.dv_xname);
 	if (vsc->sc_ih == NULL) {
-		printf("couldn't establish interrupt");
+		printf("%s: couldn't establish interrupt", vsc->sc_dev.dv_xname);
 		if (intrstr != NULL)
 			printf(" at %s", intrstr);
 		printf("\n");
 		goto fail_2;
 	}
-	printf("%s: interrupting at %s\n", vsc->sc_dev.dv_xname, intrstr);
+	printf("%s: %s\n", vsc->sc_dev.dv_xname, intrstr);
 
 	virtio_set_status(vsc, VIRTIO_CONFIG_DEVICE_STATUS_DRIVER_OK);
 	return;
@@ -262,7 +259,8 @@ virtio_pci_detach(struct device *self, int flags)
 
 /*
  * Feature negotiation.
- * Prints available / negotiated features if guest_feature_names != NULL
+ * Prints available / negotiated features if guest_feature_names != NULL and
+ * VIRTIO_DEBUG is 1
  */
 uint32_t
 virtio_pci_negotiate_features(struct virtio_softc *vsc, uint32_t guest_features,
@@ -284,8 +282,10 @@ virtio_pci_negotiate_features(struct virtio_softc *vsc, uint32_t guest_features,
 	host = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 				VIRTIO_CONFIG_DEVICE_FEATURES);
 	neg = host & guest_features;
+#if VIRTIO_DEBUG
 	if (guest_feature_names)
 		virtio_log_features(host, neg, guest_feature_names);
+#endif
 	bus_space_write_4(sc->sc_iot, sc->sc_ioh,
 			  VIRTIO_CONFIG_GUEST_FEATURES, neg);
 	vsc->sc_features = neg;

@@ -29,24 +29,24 @@
  */
 
 /* Configuration registers */
-#define VIRTIO_BLK_CONFIG_CAPACITY      0 /* 64bit */
-#define VIRTIO_BLK_CONFIG_SIZE_MAX      8 /* 32bit */
-#define VIRTIO_BLK_CONFIG_SEG_MAX       12 /* 32bit */
-#define VIRTIO_BLK_CONFIG_GEOMETRY_C    16 /* 16bit */
-#define VIRTIO_BLK_CONFIG_GEOMETRY_H    18 /* 8bit */
-#define VIRTIO_BLK_CONFIG_GEOMETRY_S    19 /* 8bit */
-#define VIRTIO_BLK_CONFIG_BLK_SIZE      20 /* 32bit */
+#define VIRTIO_BLK_CONFIG_CAPACITY	0 /* 64bit */
+#define VIRTIO_BLK_CONFIG_SIZE_MAX	8 /* 32bit */
+#define VIRTIO_BLK_CONFIG_SEG_MAX	12 /* 32bit */
+#define VIRTIO_BLK_CONFIG_GEOMETRY_C	16 /* 16bit */
+#define VIRTIO_BLK_CONFIG_GEOMETRY_H	18 /* 8bit */
+#define VIRTIO_BLK_CONFIG_GEOMETRY_S	19 /* 8bit */
+#define VIRTIO_BLK_CONFIG_BLK_SIZE	20 /* 32bit */
 
 /* Feature bits */
-#define VIRTIO_BLK_F_BARRIER    (1<<0)
-#define VIRTIO_BLK_F_SIZE_MAX   (1<<1)
-#define VIRTIO_BLK_F_SEG_MAX    (1<<2)
-#define VIRTIO_BLK_F_GEOMETRY   (1<<4)
-#define VIRTIO_BLK_F_RO         (1<<5)
-#define VIRTIO_BLK_F_BLK_SIZE   (1<<6)
-#define VIRTIO_BLK_F_SCSI       (1<<7)
-#define VIRTIO_BLK_F_FLUSH      (1<<9)
-#define VIRTIO_BLK_F_TOPOLOGY   (1<<10)
+#define VIRTIO_BLK_F_BARRIER	(1<<0)
+#define VIRTIO_BLK_F_SIZE_MAX	(1<<1)
+#define VIRTIO_BLK_F_SEG_MAX	(1<<2)
+#define VIRTIO_BLK_F_GEOMETRY	(1<<4)
+#define VIRTIO_BLK_F_RO		(1<<5)
+#define VIRTIO_BLK_F_BLK_SIZE	(1<<6)
+#define VIRTIO_BLK_F_SCSI	(1<<7)
+#define VIRTIO_BLK_F_FLUSH	(1<<9)
+#define VIRTIO_BLK_F_TOPOLOGY	(1<<10)
 
 /* Command */
 #define VIRTIO_BLK_T_IN			0
@@ -55,17 +55,20 @@
 #define VIRTIO_BLK_T_SCSI_CMD_OUT	3
 #define VIRTIO_BLK_T_FLUSH		4
 #define VIRTIO_BLK_T_FLUSH_OUT		5
+#define VIRTIO_BLK_T_GET_ID		8 /* from qemu, not in spec, yet */
 #define VIRTIO_BLK_T_BARRIER		0x80000000
 
 /* Status */
-#define VIRTIO_BLK_S_OK         0
-#define VIRTIO_BLK_S_IOERR      1
+#define VIRTIO_BLK_S_OK		0
+#define VIRTIO_BLK_S_IOERR	1
+
+#define VIRTIO_BLK_ID_BYTES	20 /* length of serial number */
 
 /* Request header structure */
 struct virtio_blk_req_hdr {
-        uint32_t        type;   /* VIRTIO_BLK_T_* */
-        uint32_t        ioprio;
-        uint64_t        sector;
+	uint32_t	type;	/* VIRTIO_BLK_T_* */
+	uint32_t	ioprio;
+	uint64_t	sector;
 } __packed;
 /* 512*virtio_blk_req_hdr.sector byte payload and 1 byte status follows */
 

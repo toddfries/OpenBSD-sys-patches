@@ -32,7 +32,6 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/mbuf.h>
-#include <sys/mutex.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/timeout.h>
@@ -55,7 +54,7 @@
 
 #include <net/bpf.h>
 
-#if 0
+#if VIRTIO_DEBUG
 #define DBGPRINT(fmt, args...) printf("%s: " fmt "\n", __func__, ## args)
 #else
 #define DBGPRINT(fmt, args...)
@@ -175,7 +174,7 @@ struct virtio_net_ctrl_vlan {
  * if_viovar.h:
  */
 enum vio_ctrl_state {
-	FREE, INUSE, DONE
+	FREE, INUSE, DONE, RESET
 };
 
 struct vio_softc {
@@ -215,9 +214,8 @@ struct vio_softc {
 	struct mbuf		**sc_tx_mbufs;
 
 	enum vio_ctrl_state	sc_ctrl_inuse;
-	struct mutex		sc_ctrl_lock;
 
-	struct timeout		sc_timeout;
+	struct timeout		sc_tick;
 };
 
 #define VIO_DMAMEM_OFFSET(sc, p) ((caddr_t)(p) - (sc)->sc_dma_kva)
@@ -228,26 +226,25 @@ struct vio_softc {
 	virtio_enqueue_p((vq), (slot), (sc)->sc_dma_map,	\
 	    VIO_DMAMEM_OFFSET((sc), (p)), (size), (write))
 
-#define VIRTIO_NET_TX_MAXNSEGS		(16) /* XXX */
-#define VIRTIO_NET_CTRL_MAC_MAXENTRIES	(64) /* XXX */
+#define VIRTIO_NET_TX_MAXNSEGS		16 /* for larger chains, defrag */
+#define VIRTIO_NET_CTRL_MAC_MAXENTRIES	64 /* for more entries, use ALLMULTI */
 
 /* for now, sc_ctrl_mac_tbl_uc has always 0 entries */
-#define VIO_CTRL_MAC_INFO_SIZE 				\
+#define VIO_CTRL_MAC_INFO_SIZE 					\
 	(2*sizeof(struct virtio_net_ctrl_mac_tbl) + 		\
 	 0 + VIRTIO_NET_CTRL_MAC_MAXENTRIES * ETHER_ADDR_LEN)
 
 /* cfattach interface functions */
 int	vio_match(struct device *, void *, void *);
 void	vio_attach(struct device *, struct device *, void *);
-void	vio_deferred_init(void *);
 
 /* ifnet interface functions */
 int	vio_init(struct ifnet *);
 void	vio_stop(struct ifnet *, int);
 void	vio_start(struct ifnet *);
 int	vio_ioctl(struct ifnet *, u_long, caddr_t);
-void	viof_get_lladr(struct arpcom *ac, struct virtio_softc *vsc);
-void	viof_put_lladr(struct arpcom *ac, struct virtio_softc *vsc);
+void	vio_get_lladr(struct arpcom *ac, struct virtio_softc *vsc);
+void	vio_put_lladr(struct arpcom *ac, struct virtio_softc *vsc);
 
 /* rx */
 int	vio_add_rx_mbuf(struct vio_softc *, int);
@@ -261,11 +258,12 @@ void	vio_rx_drain(struct vio_softc *);
 int	vio_tx_intr(struct virtqueue *);
 int	vio_txeof(struct virtqueue *);
 void	vio_tx_drain(struct vio_softc *);
-int	vio_tx_load(struct vio_softc *, int, struct mbuf *, struct mbuf **);
-void	vio_timeout(void *);
+int	vio_encap(struct vio_softc *, int, struct mbuf *, struct mbuf **);
+void	vio_txtick(void *);
 
 /* other control */
 int	vio_link_state(struct ifnet *);
+int	vio_config_change(struct virtio_softc *);
 int	vio_ctrl_rx(struct vio_softc *, int, int);
 int	vio_set_rx_filter(struct vio_softc *);
 int	vio_iff(struct vio_softc *);
@@ -354,7 +352,7 @@ vio_free_dmamem(struct vio_softc *sc)
  *   sc_ctrl_mac_tbl_mc: multicast MAC address filter for a VIRTIO_NET_CTRL_MAC
  *			 class command (WRITE)
  * sc_ctrl_* structures are allocated only one each; they are protected by
- * sc_ctrl_lock mutex
+ * sc_ctrl_inuse, which must only be accessed at splnet
  */
 /*
  * dynamically allocated memory is used for:
@@ -431,7 +429,7 @@ vio_alloc_mem(struct vio_softc *sc)
 
 	for (i = 0; i < txqsize; i++) {
 		r = bus_dmamap_create(vsc->sc_dmat, ETHER_MAX_LEN,
-		    256 /* XXX */, ETHER_MAX_LEN, 0,
+		    VIRTIO_NET_TX_MAXNSEGS, ETHER_MAX_LEN, 0,
 		    BUS_DMA_NOWAIT|BUS_DMA_ALLOCNOW,
 		    &sc->sc_tx_dmamaps[i]);
 		if (r != 0)
@@ -460,7 +458,7 @@ err_hdr:
 }
 
 void
-viof_get_lladr(struct arpcom *ac, struct virtio_softc *vsc)
+vio_get_lladr(struct arpcom *ac, struct virtio_softc *vsc)
 {
 	int i;
 	for (i = 0; i < ETHER_ADDR_LEN; i++) {
@@ -470,7 +468,7 @@ viof_get_lladr(struct arpcom *ac, struct virtio_softc *vsc)
 }
 
 void
-viof_put_lladr(struct arpcom *ac, struct virtio_softc *vsc)
+vio_put_lladr(struct arpcom *ac, struct virtio_softc *vsc)
 {
 	int i;
 	for (i = 0; i < ETHER_ADDR_LEN; i++) {
@@ -516,12 +514,12 @@ vio_attach(struct device *parent, struct device *self, void *aux)
 	features = virtio_negotiate_features(vsc, features,
 	    virtio_net_feature_names);
 	if (features & VIRTIO_NET_F_MAC) {
-		viof_get_lladr(&sc->sc_ac, vsc);
+		vio_get_lladr(&sc->sc_ac, vsc);
 	} else {
 		ether_fakeaddr(ifp);
-		viof_put_lladr(&sc->sc_ac, vsc);
+		vio_put_lladr(&sc->sc_ac, vsc);
 	}
-	printf(" %s\n", ether_sprintf(sc->sc_ac.ac_enaddr));
+	printf(": address %s\n", ether_sprintf(sc->sc_ac.ac_enaddr));
 
 	if (virtio_alloc_vq(vsc, &sc->sc_vq[VQRX], 0,
 	    MCLBYTES + sizeof(struct virtio_net_hdr), 2, "rx") != 0) {
@@ -545,7 +543,6 @@ vio_attach(struct device *parent, struct device *self, void *aux)
 	    && (features & VIRTIO_NET_F_CTRL_RX)) {
 		if (virtio_alloc_vq(vsc, &sc->sc_vq[VQCTL], 2, NBPG, 1,
 		    "control") == 0) {
-			mtx_init(&sc->sc_ctrl_lock, IPL_NET);
 			sc->sc_vq[VQCTL].vq_done = vio_ctrleof;
 			virtio_start_vq_intr(vsc, &sc->sc_vq[VQCTL]);
 			vsc->sc_nvqs = 3;
@@ -554,8 +551,6 @@ vio_attach(struct device *parent, struct device *self, void *aux)
 
 	if (vio_alloc_mem(sc) < 0)
 		goto err;
-	if (vsc->sc_nvqs == 3)
-		startuphook_establish(vio_deferred_init, self);
 
 	strlcpy(ifp->if_xname, self->dv_xname, IFNAMSIZ);
 	ifp->if_softc = sc;
@@ -563,14 +558,14 @@ vio_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_start = vio_start;
 	ifp->if_ioctl = vio_ioctl;
 	ifp->if_capabilities = 0;
-	/* XXX: is this incompatible to postponing the tx irq? */
 	IFQ_SET_MAXLEN(&ifp->if_snd, vsc->sc_vqs[1].vq_num - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	ifmedia_init(&sc->sc_media, 0, vio_media_change, vio_media_status);
 	ifmedia_add(&sc->sc_media, IFM_ETHER | IFM_AUTO, 0, NULL);
 	ifmedia_set(&sc->sc_media, IFM_ETHER | IFM_AUTO);
+	vsc->sc_config_change = vio_config_change;
 	m_clsetwms(ifp, MCLBYTES, 4, sc->sc_vq[VQRX].vq_num);
-	timeout_set(&sc->sc_timeout, vio_timeout, &sc->sc_vq[VQTX]);
+	timeout_set(&sc->sc_tick, vio_txtick, &sc->sc_vq[VQTX]);
 
 	if_attach(ifp);
 	ether_ifattach(ifp);
@@ -616,6 +611,14 @@ vio_link_state(struct ifnet *ifp)
 }
 
 int
+vio_config_change(struct virtio_softc *vsc)
+{
+	struct vio_softc *sc = (struct vio_softc *)vsc->sc_child;
+	vio_link_state(&sc->sc_ac.ac_if);
+	return 1;
+}
+
+int
 vio_media_change(struct ifnet *ifp)
 {
 	/* Ignore */
@@ -631,19 +634,6 @@ vio_media_status(struct ifnet *ifp, struct ifmediareq *imr)
 	vio_link_state(ifp);
 	if (LINK_STATE_IS_UP(ifp->if_link_state) && ifp->if_flags & IFF_UP)
 		imr->ifm_status |= IFM_ACTIVE|IFM_FDX;
-}
-
-/* we need interrupts to make promiscuous mode off */
-void
-vio_deferred_init(void *self)
-{
-	struct vio_softc *sc = (struct vio_softc *)self;
-	struct ifnet *ifp = &sc->sc_ac.ac_if;
-	int r = vio_ctrl_rx(sc, VIRTIO_NET_CTRL_RX_PROMISC, 0);
-	if (r != 0)
-		printf("resetting promisc mode failed, errror %d\n", r);
-	else
-		ifp->if_flags &= ~IFF_PROMISC;
 }
 
 /*
@@ -669,7 +659,7 @@ vio_stop(struct ifnet *ifp, int disable)
 	struct vio_softc *sc = ifp->if_softc;
 	struct virtio_softc *vsc = sc->sc_virtio;
 
-	timeout_del(&sc->sc_timeout);
+	timeout_del(&sc->sc_tick);
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 	/* only way to stop I/O and DMA is resetting... */
 	virtio_reset(vsc);
@@ -688,10 +678,9 @@ vio_stop(struct ifnet *ifp, int disable)
 		virtio_start_vq_intr(vsc, &sc->sc_vq[VQCTL]);
 	virtio_reinit_end(vsc);
 	if (vsc->sc_nvqs >= 3) {
-		mtx_enter(&sc->sc_ctrl_lock);
 		if (sc->sc_ctrl_inuse != FREE)
-			vio_ctrl_wakeup(sc, FREE);
-		mtx_leave(&sc->sc_ctrl_lock);
+			sc->sc_ctrl_inuse = RESET;
+		wakeup(&sc->sc_ctrl_inuse);
 	}
 }
 
@@ -725,7 +714,7 @@ again:
 		}
 		if (r != 0)
 			panic("enqueue_prep for a tx buffer: %d", r);
-		r = vio_tx_load(sc, slot, m, &sc->sc_tx_mbufs[slot]);
+		r = vio_encap(sc, slot, m, &sc->sc_tx_mbufs[slot]);
 		if (r != 0) {
 			virtio_enqueue_abort(vq, slot);
 			ifp->if_flags |= IFF_OACTIVE;
@@ -771,7 +760,7 @@ again:
 
 	if (queued > 0) {
 		virtio_notify(vsc, vq);
-		timeout_add_sec(&sc->sc_timeout, 1);
+		timeout_add_sec(&sc->sc_tick, 1);
 	}
 }
 
@@ -980,7 +969,7 @@ vio_rx_drain(struct vio_softc *sc)
 /* tx interrupt; dequeue and free mbufs */
 /*
  * tx interrupt is actually disabled unless the tx queue is full, i.e.
- * IFF_OACTIVE is set. vio_timeout is used to make sure that mbufs
+ * IFF_OACTIVE is set. vio_txtick is used to make sure that mbufs
  * are dequeued and freed even if no further transfer happens.
  */
 int
@@ -998,10 +987,12 @@ vio_tx_intr(struct virtqueue *vq)
 }
 
 void
-vio_timeout(void *arg)
+vio_txtick(void *arg)
 {
 	struct virtqueue *vq = arg;
-	vio_txeof(vq);
+	int s = splnet();
+	vio_tx_intr(vq);
+	splx(s);
 }
 
 int
@@ -1035,14 +1026,14 @@ vio_txeof(struct virtqueue *vq)
 		virtio_stop_vq_intr(vsc, &sc->sc_vq[VQTX]);
 	}
 	if (vq->vq_used_idx == vq->vq_avail_idx)
-		timeout_del(&sc->sc_timeout);
+		timeout_del(&sc->sc_tick);
 	else if (r)
-		timeout_add_sec(&sc->sc_timeout, 1);
+		timeout_add_sec(&sc->sc_tick, 1);
 	return r;
 }
 
 int
-vio_tx_load(struct vio_softc *sc, int slot, struct mbuf *m,
+vio_encap(struct vio_softc *sc, int slot, struct mbuf *m,
 	      struct mbuf **mnew)
 {
 	struct virtio_softc	*vsc = sc->sc_virtio;
@@ -1115,6 +1106,7 @@ vio_ctrl_rx(struct vio_softc *sc, int cmd, int onoff)
 	if (vsc->sc_nvqs < 3)
 		return ENOTSUP;
 
+	splassert(IPL_NET);
 	vio_wait_ctrl(sc);
 
 	sc->sc_ctrl_cmd->class = VIRTIO_NET_CTRL_RX;
@@ -1142,8 +1134,10 @@ vio_ctrl_rx(struct vio_softc *sc, int cmd, int onoff)
 	    sizeof(*sc->sc_ctrl_status), 0);
 	virtio_enqueue_commit(vsc, vq, slot, 1);
 
-	if (vio_wait_ctrl_done(sc))
-		return EIO;
+	if (vio_wait_ctrl_done(sc)) {
+		r = EIO;
+		goto out;
+	}
 
 	VIO_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_cmd,
 	    sizeof(*sc->sc_ctrl_cmd), BUS_DMASYNC_POSTWRITE);
@@ -1155,51 +1149,42 @@ vio_ctrl_rx(struct vio_softc *sc, int cmd, int onoff)
 	if (sc->sc_ctrl_status->ack == VIRTIO_NET_OK) {
 		r = 0;
 	} else {
-		printf("%s: failed setting rx mode\n", sc->sc_dev.dv_xname);
+		printf("%s: ctrl cmd %d failed\n", sc->sc_dev.dv_xname, cmd);
 		r = EIO;
 	}
 
-	vio_ctrl_wakeup(sc, FREE);
 	DBGPRINT("cmd %d %d: %d", cmd, (int)onoff, r);
+out:
+	vio_ctrl_wakeup(sc, FREE);
 	return r;
 }
 
 void
 vio_wait_ctrl(struct vio_softc *sc)
 {
-	mtx_enter(&sc->sc_ctrl_lock);
-	while (sc->sc_ctrl_inuse != FREE) {
-		msleep(&sc->sc_ctrl_inuse, &sc->sc_ctrl_lock, IPL_NET,
-		    "vio_wait", 0);
-	}
+	while (sc->sc_ctrl_inuse != FREE)
+		tsleep(&sc->sc_ctrl_inuse, IPL_NET, "vio_wait", 0);
 	sc->sc_ctrl_inuse = INUSE;
-	mtx_leave(&sc->sc_ctrl_lock);
 }
 
 int
 vio_wait_ctrl_done(struct vio_softc *sc)
 {
 	int r = 0;
-	mtx_enter(&sc->sc_ctrl_lock);
-	while (sc->sc_ctrl_inuse != DONE && sc->sc_ctrl_inuse != FREE) {
-		if (sc->sc_ctrl_inuse == FREE) {
-			/* device has been reset */
+	while (sc->sc_ctrl_inuse != DONE && sc->sc_ctrl_inuse != RESET) {
+		if (sc->sc_ctrl_inuse == RESET) {
 			r = 1;
 			break;
 		}
-		msleep(&sc->sc_ctrl_inuse, &sc->sc_ctrl_lock, IPL_NET,
-		    "vio_wait", 0);
+		tsleep(&sc->sc_ctrl_inuse, IPL_NET, "vio_wait", 0);
 	}
-	mtx_leave(&sc->sc_ctrl_lock);
 	return r;
 }
 
 void
 vio_ctrl_wakeup(struct vio_softc *sc, enum vio_ctrl_state new)
 {
-	mtx_enter(&sc->sc_ctrl_lock);
 	sc->sc_ctrl_inuse = new;
-	mtx_leave(&sc->sc_ctrl_lock);
 	wakeup(&sc->sc_ctrl_inuse);
 }
 
@@ -1231,6 +1216,8 @@ vio_set_rx_filter(struct vio_softc *sc)
 	struct virtio_softc *vsc = sc->sc_virtio;
 	struct virtqueue *vq = &sc->sc_vq[VQCTL];
 	int r, slot;
+
+	splassert(IPL_NET);
 
 	if (vsc->sc_nvqs < 3)
 		return ENOTSUP;
@@ -1265,8 +1252,10 @@ vio_set_rx_filter(struct vio_softc *sc)
 	    sizeof(*sc->sc_ctrl_status), 0);
 	virtio_enqueue_commit(vsc, vq, slot, 1);
 
-	if (vio_wait_ctrl_done(sc))
-		return EIO;
+	if (vio_wait_ctrl_done(sc)) {
+		r = EIO;
+		goto out;
+	}
 
 	VIO_DMAMEM_SYNC(vsc, sc, sc->sc_ctrl_cmd,
 	    sizeof(*sc->sc_ctrl_cmd), BUS_DMASYNC_POSTWRITE);
@@ -1282,6 +1271,7 @@ vio_set_rx_filter(struct vio_softc *sc)
 		r = EIO;
 	}
 
+out:
 	vio_ctrl_wakeup(sc, FREE);
 	return r;
 }
@@ -1305,6 +1295,8 @@ vio_iff(struct vio_softc *sc)
 	int nentries = 0;
 	int promisc = 0, allmulti = 0, rxfilter = 0;
 	int r;
+
+	splassert(IPL_NET);
 
 	if (vsc->sc_nvqs < 3) {
 		/* no ctrl vq; always promisc */
