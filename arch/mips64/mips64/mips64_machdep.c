@@ -1,7 +1,7 @@
-/*	$OpenBSD: mips64_machdep.c,v 1.4 2012/07/14 19:50:12 miod Exp $ */
+/*	$OpenBSD: mips64_machdep.c,v 1.8 2012/10/03 11:18:23 miod Exp $ */
 
 /*
- * Copyright (c) 2009, 2010 Miodrag Vallat.
+ * Copyright (c) 2009, 2010, 2012 Miodrag Vallat.
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -50,6 +50,7 @@
 
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 
 #include <uvm/uvm.h>
 
@@ -123,6 +124,17 @@ build_trampoline(vaddr_t addr, vaddr_t dest)
 }
 
 /*
+ * Prototype status registers value for userland processes.
+ */
+register_t protosr = SR_FR_32 | SR_XX | SR_UX | SR_KSU_USER | SR_EXL |
+#ifdef CPU_R8000
+    SR_SERIALIZE_FPU |
+#else
+    SR_KX |
+#endif
+    SR_INT_ENAB;
+
+/*
  * Set registers on exec for native exec format. For o64/64.
  */
 void
@@ -138,13 +150,7 @@ setregs(p, pack, stack, retval)
 	p->p_md.md_regs->sp = stack;
 	p->p_md.md_regs->pc = pack->ep_entry & ~3;
 	p->p_md.md_regs->t9 = pack->ep_entry & ~3; /* abicall req */
-	p->p_md.md_regs->sr = SR_FR_32 | SR_XX | SR_KSU_USER | SR_KX | SR_UX |
-	    SR_EXL | SR_INT_ENAB;
-#if defined(CPU_R10000) && !defined(TGT_COHERENT)
-	if (ci->ci_hw.type == MIPS_R12000)
-		p->p_md.md_regs->sr |= SR_DSD;
-#endif
-	p->p_md.md_regs->sr |= idle_mask & SR_INT_MASK;
+	p->p_md.md_regs->sr = protosr | (idle_mask & SR_INT_MASK);
 	p->p_md.md_regs->ic = (idle_mask << 8) & IC_INT_MASK;
 #ifndef FPUEMUL
 	p->p_md.md_flags &= ~MDP_FPUSED;
@@ -187,6 +193,45 @@ exec_md_map(struct proc *p, struct exec_package *pack)
 #endif
 
 	return 0;
+}
+
+/*
+ * Initial TLB setup for the current processor.
+ */
+void
+tlb_init(unsigned int tlbsize)
+{
+#ifdef CPU_R8000
+	register_t sr;
+
+	sr = getsr();
+	sr &= ~(((uint64_t)SR_PGSZ_MASK << SR_KPGSZ_SHIFT) |
+	        ((uint64_t)SR_PGSZ_MASK << SR_UPGSZ_SHIFT));
+	sr |= ((uint64_t)SR_PGSZ_16K << SR_KPGSZ_SHIFT) |
+	    ((uint64_t)SR_PGSZ_16K << SR_UPGSZ_SHIFT);
+	protosr |= ((uint64_t)SR_PGSZ_16K << SR_KPGSZ_SHIFT) |
+	    ((uint64_t)SR_PGSZ_16K << SR_UPGSZ_SHIFT);
+	setsr(sr);
+#else
+	tlb_set_page_mask(TLB_PAGE_MASK);
+#endif
+	tlb_set_wired(0);
+	tlb_flush(tlbsize);
+#if UPAGES > 1
+	tlb_set_wired(UPAGES / 2);
+#endif
+}
+
+/*
+ * Handle an ASID wrap.
+ */
+void
+tlb_asid_wrap(struct cpu_info *ci)
+{
+	tlb_flush(ci->ci_hw.tlbsize);
+#ifdef CPU_R8000
+	Mips_InvalidateICache(ci, 0, ci->ci_l1instcachesize);
+#endif
 }
 
 /*
