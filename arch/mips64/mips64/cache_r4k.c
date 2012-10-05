@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache_r4k.c,v 1.7 2012/06/24 20:25:58 miod Exp $	*/
+/*	$OpenBSD: cache_r4k.c,v 1.11 2012/10/03 11:18:23 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -21,6 +21,7 @@
 
 #include <mips64/cache.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -36,18 +37,41 @@
 
 #define	cache(op,addr) \
     __asm__ __volatile__ ("cache %0, 0(%1)" :: "i"(op), "r"(addr) : "memory")
-#define	sync() \
-    __asm__ __volatile__ ("sync" ::: "memory")
 
 static __inline__ void	mips4k_hitinv_primary(vaddr_t, vsize_t, vsize_t);
 static __inline__ void	mips4k_hitinv_secondary(vaddr_t, vsize_t, vsize_t);
 static __inline__ void	mips4k_hitwbinv_primary(vaddr_t, vsize_t, vsize_t);
 static __inline__ void	mips4k_hitwbinv_secondary(vaddr_t, vsize_t, vsize_t);
 
+/*
+ * Invoke a simple routine from uncached space (either CKSEG1 or uncached
+ * XKPHYS).
+ */
+
+static void
+run_uncached(void (*fn)(register_t), register_t arg)
+{
+	vaddr_t va;
+	paddr_t pa;
+
+	va = (vaddr_t)fn;
+	if (IS_XKPHYS(va)) {
+		pa = XKPHYS_TO_PHYS(va);
+		va = PHYS_TO_XKPHYS(pa, CCA_NC);
+	} else {
+		pa = CKSEG0_TO_PHYS(va);
+		va = PHYS_TO_CKSEG1(pa);
+	}
+	fn = (void (*)(register_t))va;
+
+	(*fn)(arg);
+}
+
+
 void
 Mips4k_ConfigCache(struct cpu_info *ci)
 {
-	uint32_t cfg, ncfg;
+	register_t cfg, ncfg;
 
 	cfg = cp0_get_config();
 
@@ -100,25 +124,10 @@ Mips4k_ConfigCache(struct cpu_info *ci)
 	ci->ci_HitInvalidateDCache = Mips4k_HitInvalidateDCache;
 	ci->ci_IOSyncDCache = Mips4k_IOSyncDCache;
 
-	ncfg = (cfg & ~7) | CCA_CACHED;
-	ncfg &= ~(1 << 4);
-	if (cfg != ncfg) {
-		void (*fn)(uint32_t);
-		vaddr_t va;
-		paddr_t pa;
-
-		va = (vaddr_t)&cp0_set_config;
-		if (IS_XKPHYS(va)) {
-			pa = XKPHYS_TO_PHYS(va);
-			va = PHYS_TO_XKPHYS(pa, CCA_NC);
-		} else {
-			pa = CKSEG0_TO_PHYS(va);
-			va = PHYS_TO_CKSEG1(pa);
-		}
-		fn = (void (*)(uint32_t))va;
-
-		(*fn)(ncfg);
-	}
+	ncfg = (cfg & ~CFGR_CCA_MASK) | CCA_CACHED;
+	ncfg &= ~CFGR_CU;
+	if (cfg != ncfg)
+		run_uncached(cp0_set_config, ncfg);
 }
 
 /*
@@ -156,7 +165,7 @@ Mips4k_SyncCache(struct cpu_info *ci)
 		}
 	}
 
-	sync();
+	mips_sync();
 }
 
 /*
@@ -188,7 +197,7 @@ Mips4k_InvalidateICache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 		sva += line;
 	}
 
-	sync();
+	mips_sync();
 }
 
 /*
@@ -220,7 +229,7 @@ Mips4k_SyncDCachePage(struct cpu_info *ci, vaddr_t va, paddr_t pa)
 		}
 	}
 
-	sync();
+	mips_sync();
 }
 
 /*
@@ -279,7 +288,7 @@ Mips4k_HitSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 		mips4k_hitwbinv_secondary(va, sz, line);
 	}
 
-	sync();
+	mips_sync();
 }
 
 /*
@@ -338,7 +347,7 @@ Mips4k_HitInvalidateDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 		mips4k_hitinv_secondary(va, sz, line);
 	}
 
-	sync();
+	mips_sync();
 }
 
 /*
