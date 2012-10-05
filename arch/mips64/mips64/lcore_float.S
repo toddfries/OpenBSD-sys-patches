@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_float.S,v 1.20 2010/09/21 20:29:17 miod Exp $ */
+/*	$OpenBSD: lcore_float.S,v 1.22 2012/10/03 11:18:23 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -31,14 +31,14 @@
 #include <machine/param.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
 
 #include "assym.h"
 
-	.set	noreorder		# Noreorder is default style!
-
 	.set	mips3
+	.set	noreorder		# Noreorder is default style!
 
 /*----------------------------------------------------------------------------
  *
@@ -59,13 +59,14 @@
  *----------------------------------------------------------------------------
  */
 LEAF(MipsSwitchFPState, 0)
-	mfc0	t1, COP_0_STATUS_REG	# Save old SR
+	MFC0	t1, COP_0_STATUS_REG	# Save old SR
+	MFC0_HAZARD
 	or	t0, t1, SR_COP_1_BIT|SR_FR_32	# enable the coprocessor
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_CU_HAZARD
 
 	beq	a0, zero, 1f		# skip save if NULL pointer
-	nop
+	 NOP
 /*
  * First read out the status register to make sure that all FP operations
  * have completed.
@@ -73,11 +74,11 @@ LEAF(MipsSwitchFPState, 0)
 	PTR_L	a0, P_ADDR(a0)		# get pointer to pcb for proc
 	cfc1	t0, FPC_CSR		# stall til FP done
 	cfc1	t0, FPC_CSR		# now get status
-	li	t3, ~SR_COP_1_BIT
-	REG_L	t2, PCB_REGS+(PS * REGSZ)(a0)	# get CPU status register
+	LI	t3, ~SR_COP_1_BIT
+	REG_L	t2, PCB_REGS+(SR * REGSZ)(a0)	# get CPU status register
 	REG_S	t0, PCB_FPREGS+(32 * REGSZ)(a0)	# save FP status
 	and	t2, t2, t3			# clear COP_1 enable bit
-	REG_S	t2, PCB_REGS+(PS * REGSZ)(a0)	# save new status register
+	REG_S	t2, PCB_REGS+(SR * REGSZ)(a0)	# save new status register
 /*
  * Save the floating point registers.
  */
@@ -153,22 +154,23 @@ LEAF(MipsSwitchFPState, 0)
 	ldc1	$f31, PCB_FPREGS+(31 * REGSZ)(a1)
 
 	ctc1	t0, FPC_CSR
-	nop
+	NOP
 
-	mtc0	t1, COP_0_STATUS_REG	# Restore the status register.
-	ITLBNOPFIX
+	MTC0	t1, COP_0_STATUS_REG	# Restore the status register.
+	MTC0_SR_CU_HAZARD
 	j	ra
-	nop
+	 NOP
 END(MipsSwitchFPState)
 
 LEAF(MipsSwitchFPState16, 0)
-	mfc0	t1, COP_0_STATUS_REG	# Save old SR
+	MFC0	t1, COP_0_STATUS_REG	# Save old SR
+	MFC0_HAZARD
 	or	t0, t1, SR_COP_1_BIT	# enable the coprocessor
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_CU_HAZARD
 
 	beq	a0, zero, 1f		# skip save if NULL pointer
-	nop
+	 NOP
 /*
  * First read out the status register to make sure that all FP operations
  * have completed.
@@ -176,11 +178,11 @@ LEAF(MipsSwitchFPState16, 0)
 	PTR_L	a0, P_ADDR(a0)		# get pointer to pcb for proc
 	cfc1	t0, FPC_CSR		# stall til FP done
 	cfc1	t0, FPC_CSR		# now get status
-	li	t3, ~SR_COP_1_BIT
-	REG_L	t2, PCB_REGS+(PS * REGSZ)(a0)	# get CPU status register
+	LI	t3, ~SR_COP_1_BIT
+	REG_L	t2, PCB_REGS+(SR * REGSZ)(a0)	# get CPU status register
 	REG_S	t0, PCB_FPREGS+(32 * REGSZ)(a0)	# save FP status
 	and	t2, t2, t3			# clear COP_1 enable bit
-	REG_S	t2, PCB_REGS+(PS * REGSZ)(a0)	# save new status register
+	REG_S	t2, PCB_REGS+(SR * REGSZ)(a0)	# save new status register
 /*
  * Save the floating point registers.
  */
@@ -256,12 +258,12 @@ LEAF(MipsSwitchFPState16, 0)
 	lwc1	$f31, PCB_FPREGS+(31 * REGSZ)(a1)
 
 	ctc1	t0, FPC_CSR
-	nop
+	NOP
 
-	mtc0	t1, COP_0_STATUS_REG	# Restore the status register.
-	ITLBNOPFIX
+	MTC0	t1, COP_0_STATUS_REG	# Restore the status register.
+	MTC0_SR_CU_HAZARD
 	j	ra
-	nop
+	 NOP
 END(MipsSwitchFPState16)
 
 /*----------------------------------------------------------------------------
@@ -283,22 +285,23 @@ END(MipsSwitchFPState16)
  */
 LEAF(MipsSaveCurFPState, 0)
 	PTR_L	a0, P_ADDR(a0)			# get pointer to pcb for proc
-	mfc0	t1, COP_0_STATUS_REG	# Disable interrupts and
+	MFC0	t1, COP_0_STATUS_REG	# Disable interrupts and
+	MFC0_HAZARD
 	or	t0, t1, SR_COP_1_BIT|SR_FR_32	# enable the coprocessor
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 	GET_CPU_INFO(t2, t3)
 	PTR_S	zero, CI_FPUPROC(t2)		# indicate state has been saved
 /*
  * First read out the status register to make sure that all FP operations
  * have completed.
  */
-	REG_L	t2, PCB_REGS+(PS * REGSZ)(a0)	# get CPU status register
-	li	t3, ~SR_COP_1_BIT
+	REG_L	t2, PCB_REGS+(SR * REGSZ)(a0)	# get CPU status register
+	LI	t3, ~SR_COP_1_BIT
 	and	t2, t2, t3			# clear COP_1 enable bit
 	cfc1	t0, FPC_CSR		# stall til FP done
 	cfc1	t0, FPC_CSR		# now get status
-	REG_S	t2, PCB_REGS+(PS * REGSZ)(a0)	# save new status register
+	REG_S	t2, PCB_REGS+(SR * REGSZ)(a0)	# save new status register
 	REG_S	t0, PCB_FPREGS+(32 * REGSZ)(a0)	# save FP status
 /*
  * Save the floating point registers.
@@ -336,30 +339,31 @@ LEAF(MipsSaveCurFPState, 0)
 	sdc1	$f30, PCB_FPREGS+(30 * REGSZ)(a0)
 	sdc1	$f31, PCB_FPREGS+(31 * REGSZ)(a0)
 
-	mtc0	t1, COP_0_STATUS_REG	# Restore the status register.
-	ITLBNOPFIX
+	MTC0	t1, COP_0_STATUS_REG	# Restore the status register.
+	MTC0_SR_IE_HAZARD
 	j	ra
-	nop
+	 NOP
 END(MipsSaveCurFPState)
 
 LEAF(MipsSaveCurFPState16, 0)
 	PTR_L	a0, P_ADDR(a0)			# get pointer to pcb for proc
-	mfc0	t1, COP_0_STATUS_REG	# Disable interrupts and
+	MFC0	t1, COP_0_STATUS_REG	# Disable interrupts and
+	MFC0_HAZARD
 	or	t0, t1, SR_COP_1_BIT	# enable the coprocessor
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 	GET_CPU_INFO(t2, t3)
 	PTR_S	zero, CI_FPUPROC(t2)		# indicate state has been saved
 /*
  * First read out the status register to make sure that all FP operations
  * have completed.
  */
-	REG_L	t2, PCB_REGS+(PS * REGSZ)(a0)	# get CPU status register
-	li	t3, ~SR_COP_1_BIT
+	REG_L	t2, PCB_REGS+(SR * REGSZ)(a0)	# get CPU status register
+	LI	t3, ~SR_COP_1_BIT
 	and	t2, t2, t3			# clear COP_1 enable bit
 	cfc1	t0, FPC_CSR		# stall til FP done
 	cfc1	t0, FPC_CSR		# now get status
-	REG_S	t2, PCB_REGS+(PS * REGSZ)(a0)	# save new status register
+	REG_S	t2, PCB_REGS+(SR * REGSZ)(a0)	# save new status register
 	REG_S	t0, PCB_FPREGS+(32 * REGSZ)(a0)	# save FP status
 /*
  * Save the floating point registers.
@@ -397,10 +401,10 @@ LEAF(MipsSaveCurFPState16, 0)
 	swc1	$f30, PCB_FPREGS+(30 * REGSZ)(a0)
 	swc1	$f31, PCB_FPREGS+(31 * REGSZ)(a0)
 
-	mtc0	t1, COP_0_STATUS_REG	# Restore the status register.
-	ITLBNOPFIX
+	MTC0	t1, COP_0_STATUS_REG	# Restore the status register.
+	MTC0_SR_IE_HAZARD
 	j	ra
-	nop
+	 NOP
 END(MipsSaveCurFPState16)
 
 /*----------------------------------------------------------------------------
@@ -420,15 +424,16 @@ END(MipsSaveCurFPState16)
  *----------------------------------------------------------------------------
  */
 LEAF(cp1_get_prid, 0)
-	mfc0	v1, COP_0_STATUS_REG
+	MFC0	v1, COP_0_STATUS_REG
+	MFC0_HAZARD
 	li	a0, SR_COP_1_BIT
 	or	v1, a0
-	mtc0	v1, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	v1, COP_0_STATUS_REG
+	MTC0_SR_CU_HAZARD
 	cfc1	v0, FPC_ID
 	xor	v1, a0
-	mtc0	v1, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	v1, COP_0_STATUS_REG
+	MTC0_SR_CU_HAZARD
 	jr	ra
-	nop
+	 NOP
 END(cp1_get_prid)

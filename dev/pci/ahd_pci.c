@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahd_pci.c,v 1.18 2009/05/31 04:47:59 deraadt Exp $	*/
+/*	$OpenBSD: ahd_pci.c,v 1.20 2012/09/30 21:46:09 brad Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -103,6 +103,7 @@ ahd_compose_id(u_int device, u_int vendor, u_int subdevice, u_int subvendor)
 #define ID_AIC7901			0x800F9005FFFF9005ull
 #define ID_AHA_29320A			0x8000900500609005ull
 #define ID_AHA_29320ALP			0x8017900500449005ull
+#define ID_AHA_29320LPE			0x8017900500459005ull
 
 #define ID_AIC7901A			0x801E9005FFFF9005ull
 #define ID_AHA_29320LP			0x8014900500449005ull
@@ -161,6 +162,11 @@ struct ahd_pci_identity ahd_pci_ident_table [] =
 	},
 	{
 		ID_AHA_29320ALP,
+		ID_ALL_MASK,
+		ahd_aic7901_setup
+	},
+	{
+		ID_AHA_29320LPE,
 		ID_ALL_MASK,
 		ahd_aic7901_setup
 	},
