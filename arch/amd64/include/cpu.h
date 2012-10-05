@@ -101,6 +101,11 @@ struct cpu_info {
 	u_int32_t	ci_cflushsz;
 	u_int64_t	ci_tsc_freq;
 
+#define ARCH_HAVE_CPU_TOPOLOGY
+	u_int32_t	ci_smt_id;
+	u_int32_t	ci_core_id;
+	u_int32_t	ci_pkg_id;
+
 	struct cpu_functions *ci_func;
 	void (*cpu_setup)(struct cpu_info *);
 	void (*ci_info)(struct cpu_info *);
