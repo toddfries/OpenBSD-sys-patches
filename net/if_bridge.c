@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.194 2012/07/16 18:05:36 markus Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.196 2012/09/20 14:10:18 mpf Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -1418,8 +1418,9 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 		    == 0) {
 			if (eh->ether_dhost[ETHER_ADDR_LEN - 1] == 0) {
 				/* STP traffic */
-				bstp_input(sc->sc_stp, ifl->bif_stp, eh, m);
-				return (NULL);
+				if ((m = bstp_input(sc->sc_stp, ifl->bif_stp,
+				    eh, m)) == NULL);
+					return (NULL);
 			} else if (eh->ether_dhost[ETHER_ADDR_LEN - 1] <= 0xf) {
 				m_freem(m);
 				return (NULL);
@@ -2395,7 +2396,7 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 		if (proto == 0)
 			goto skiplookup;
 
-		s = spltdb();
+		s = splsoftnet();
 
 		tdb = gettdb(ifp->if_rdomain, spi, &dst, proto);
 		if (tdb != NULL && (tdb->tdb_flags & TDBF_INVALID) == 0 &&

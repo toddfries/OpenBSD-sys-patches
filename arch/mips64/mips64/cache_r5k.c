@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache_r5k.c,v 1.3 2012/06/24 20:24:46 miod Exp $	*/
+/*	$OpenBSD: cache_r5k.c,v 1.8 2012/10/03 11:18:23 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -60,6 +60,7 @@
 
 #include <mips64/cache.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -115,26 +116,24 @@
 #define	cache(op,offs,addr)	__asm__ __volatile__ \
 	("cache %0, %1(%2)" :: "i"(op), "i"(offs), "r"(addr) : "memory")
 
-#define	sync()			__asm__ __volatile__ ("sync" ::: "memory")
-
 #define	reset_taglo()		__asm__ __volatile__ \
 	("mtc0 $zero, $28")	/* COP_0_TAG_LO */
 #define	reset_taghi()		__asm__ __volatile__ \
 	("mtc0 $zero, $29")	/* COP_0_TAG_HI */
 
-static __inline__ uint32_t
+static __inline__ register_t
 get_config(void)
 {
-	uint32_t cfg;
+	register_t cfg;
 	__asm__ __volatile__ ("mfc0 %0, $16" : "=r"(cfg)); /* COP_0_CONFIG */
 	return cfg;
 }
 
 static __inline__ void
-set_config(uint32_t cfg)
+set_config(register_t cfg)
 {
 	__asm__ __volatile__ ("mtc0 %0, $16" :: "r"(cfg)); /* COP_0_CONFIG */
-	/* ITLBNOPFIX */
+	/* MTC0_HAZARD */
 #ifdef CPU_RM7000
 	nop10();
 #else
@@ -147,10 +146,10 @@ static __inline__ void	mips5k_hitinv_secondary(vaddr_t, vsize_t);
 static __inline__ void	mips5k_hitwbinv_primary(vaddr_t, vsize_t);
 static __inline__ void	mips5k_hitwbinv_secondary(vaddr_t, vsize_t);
 
-void mips5k_l2_init(uint32_t);
-void mips7k_l2_init(uint32_t);
-void mips7k_l3_init(uint32_t);
-static void run_uncached(void (*)(uint32_t), uint32_t);
+void mips5k_l2_init(register_t);
+void mips7k_l2_init(register_t);
+void mips7k_l3_init(register_t);
+static void run_uncached(void (*)(register_t), register_t);
 
 /*
  * Invoke a simple routine from uncached space (either CKSEG1 or uncached
@@ -158,7 +157,7 @@ static void run_uncached(void (*)(uint32_t), uint32_t);
  */
 
 static void
-run_uncached(void (*fn)(uint32_t), uint32_t arg)
+run_uncached(void (*fn)(register_t), register_t arg)
 {
 	vaddr_t va;
 	paddr_t pa;
@@ -171,7 +170,7 @@ run_uncached(void (*fn)(uint32_t), uint32_t arg)
 		pa = CKSEG0_TO_PHYS(va);
 		va = PHYS_TO_CKSEG1(pa);
 	}
-	fn = (void (*)(uint32_t))va;
+	fn = (void (*)(register_t))va;
 
 	(*fn)(arg);
 }
@@ -183,10 +182,10 @@ run_uncached(void (*fn)(uint32_t), uint32_t arg)
  * ON THE STACK IN THE ASSEMBLY OUTPUT EVERYTIME YOU CHANGE IT.
  */
 void
-mips5k_l2_init(uint32_t l2size)
+mips5k_l2_init(register_t l2size)
 {
 	register vaddr_t va, eva;
-	register uint32_t cfg;
+	register register_t cfg;
 
 	cfg = get_config();
 	cfg |= CF_5_SE;
@@ -209,10 +208,10 @@ mips5k_l2_init(uint32_t l2size)
  * ON THE STACK IN THE ASSEMBLY OUTPUT EVERYTIME YOU CHANGE IT.
  */
 void
-mips7k_l2_init(uint32_t l2size)
+mips7k_l2_init(register_t l2size)
 {
 	register vaddr_t va, eva;
-	register uint32_t cfg;
+	register register_t cfg;
 
 	cfg = get_config();
 	cfg |= CF_7_SE;
@@ -227,7 +226,7 @@ mips7k_l2_init(uint32_t l2size)
 		va += R5K_LINE;
 		cache(IndexStoreTag_S, -4, va);
 	}
-	sync();
+	mips_sync();
 
 	va = PHYS_TO_XKPHYS(0, CCA_CACHED);
 	eva = va + l2size;
@@ -236,7 +235,7 @@ mips7k_l2_init(uint32_t l2size)
 		__asm__ __volatile__
 		    ("lw $zero, %0(%1)" :: "i"(-4), "r"(va));
 	}
-	sync();
+	mips_sync();
 
 	va = PHYS_TO_XKPHYS(0, CCA_CACHED);
 	eva = va + l2size;
@@ -244,7 +243,7 @@ mips7k_l2_init(uint32_t l2size)
 		va += R5K_LINE;
 		cache(IndexStoreTag_S, -4, va);
 	}
-	sync();
+	mips_sync();
 }
 
 /*
@@ -253,10 +252,10 @@ mips7k_l2_init(uint32_t l2size)
  * ON THE STACK IN THE ASSEMBLY OUTPUT EVERYTIME YOU CHANGE IT.
  */
 void
-mips7k_l3_init(uint32_t l3size)
+mips7k_l3_init(register_t l3size)
 {
 	register vaddr_t va, eva;
-	register uint32_t cfg;
+	register register_t cfg;
 
 	cfg = get_config();
 	cfg |= CF_7_TE;
@@ -280,7 +279,7 @@ mips7k_l3_init(uint32_t l3size)
 void
 Mips5k_ConfigCache(struct cpu_info *ci)
 {
-	uint32_t cfg, ncfg;
+	register_t cfg, ncfg;
 	uint setshift;
 
 	cfg = cp0_get_config();
@@ -388,7 +387,7 @@ Mips5k_ConfigCache(struct cpu_info *ci)
 	ci->ci_HitInvalidateDCache = Mips5k_HitInvalidateDCache;
 	ci->ci_IOSyncDCache = Mips5k_IOSyncDCache;
 
-	ncfg = (cfg & ~7) | CCA_CACHED;
+	ncfg = (cfg & ~CFGR_CCA_MASK) | CCA_CACHED;
 	if (cfg != ncfg)
 		run_uncached(cp0_set_config, ncfg);
 }
@@ -405,7 +404,7 @@ Mips5k_SyncCache(struct cpu_info *ci)
 	 * Revision 1 R4600 need to perform `Index' cache operations with
 	 * interrupt disabled, to make sure both ways are correctly updated.
 	 */
-	uint32_t sr = disableintr();
+	register_t sr = disableintr();
 #endif
 
 	sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
@@ -462,7 +461,7 @@ Mips5k_SyncCache(struct cpu_info *ci)
 	}
 #endif
 
-	sync();
+	mips_sync();
 }
 
 /*
@@ -478,7 +477,7 @@ Mips5k_InvalidateICache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	 * Revision 1 R4600 need to perform `Index' cache operations with
 	 * interrupt disabled, to make sure both ways are correctly updated.
 	 */
-	uint32_t sr = disableintr();
+	register_t sr = disableintr();
 #endif
 
 	/* extend the range to integral cache lines */
@@ -524,7 +523,7 @@ Mips5k_InvalidateICache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 #ifdef CPU_R4600
 	setsr(sr);
 #endif
-	sync();
+	mips_sync();
 }
 
 static __inline__ void
@@ -563,7 +562,7 @@ Mips5k_SyncDCachePage(struct cpu_info *ci, vaddr_t va, paddr_t pa)
 	 * Revision 1 R4600 need to perform `Index' cache operations with
 	 * interrupt disabled, to make sure both ways are correctly updated.
 	 */
-	uint32_t sr = disableintr();
+	register_t sr = disableintr();
 #endif
 
 	switch (ci->ci_cacheways) {
@@ -618,7 +617,7 @@ Mips5k_SyncDCachePage(struct cpu_info *ci, vaddr_t va, paddr_t pa)
 	}
 #endif
 
-	sync();
+	mips_sync();
 }
 
 /*
@@ -656,7 +655,7 @@ Mips5k_HitSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 		mips5k_hitwbinv_primary(va, sz);
 	}
 
-	sync();
+	mips_sync();
 }
 
 /*
@@ -719,7 +718,7 @@ Mips5k_HitInvalidateDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 		mips5k_hitinv_primary(va, sz);
 	}
 
-	sync();
+	mips_sync();
 }
 
 /*
@@ -841,5 +840,5 @@ Mips5k_IOSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz, int how)
 		break;
 	}
 
-	sync();
+	mips_sync();
 }
