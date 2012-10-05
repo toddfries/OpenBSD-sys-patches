@@ -207,7 +207,7 @@ sleep_setup(struct sleep_state *sls, const volatile void *ident, int prio,
 	p->p_wmesg = wmesg;
 	p->p_slptime = 0;
 	p->p_priority = prio & PRIMASK;
-	TAILQ_INSERT_TAIL(&slpque[LOOKUP(ident)], p, p_runq);
+	TAILQ_INSERT_TAIL(&slpque[LOOKUP(ident)], p, p_slpq);
 }
 
 void
@@ -344,7 +344,7 @@ void
 unsleep(struct proc *p)
 {
 	if (p->p_wchan) {
-		TAILQ_REMOVE(&slpque[LOOKUP(p->p_wchan)], p, p_runq);
+		TAILQ_REMOVE(&slpque[LOOKUP(p->p_wchan)], p, p_slpq);
 		p->p_wchan = NULL;
 	}
 }
@@ -363,7 +363,7 @@ wakeup_n(const volatile void *ident, int n)
 	SCHED_LOCK(s);
 	qp = &slpque[LOOKUP(ident)];
 	for (p = TAILQ_FIRST(qp); p != NULL && n != 0; p = pnext) {
-		pnext = TAILQ_NEXT(p, p_runq);
+		pnext = TAILQ_NEXT(p, p_slpq);
 #ifdef DIAGNOSTIC
 		if (p->p_stat != SSLEEP && p->p_stat != SSTOP)
 			panic("wakeup: p_stat is %d", (int)p->p_stat);
@@ -371,7 +371,7 @@ wakeup_n(const volatile void *ident, int n)
 		if (p->p_wchan == ident) {
 			--n;
 			p->p_wchan = 0;
-			TAILQ_REMOVE(qp, p, p_runq);
+			TAILQ_REMOVE(qp, p, p_slpq);
 			if (p->p_stat == SSLEEP)
 				setrunnable(p);
 		}

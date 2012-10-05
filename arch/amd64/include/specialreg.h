@@ -209,10 +209,14 @@
 #define	CPUID2MODEL(cpuid)	(((cpuid) >> 4) & 15)
 #define	CPUID2STEPPING(cpuid)	((cpuid) & 15)
 
-#define	CPUID(code, eax, ebx, ecx, edx)                         \
+#define CPUID2(eax_code, ecx_code, eax, ebx, ecx, edx)         \
 	__asm("cpuid"                                           \
-	    : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx)    \
-	    : "a" (code));
+	: "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx)    \
+	: "a" (eax_code), "c" (ecx_code));
+
+#define CPUID(code, eax, ebx, ecx, edx)                                \
+	CPUID2(code, 0, eax, ebx, ecx, edx)
+
 #define	CPUID_LEAF(code, leaf, eax, ebx, ecx, edx)		\
 	__asm("cpuid"                                           \
 	    : "=a" (eax), "=b" (ebx), "=c" (ecx), "=d" (edx)    \

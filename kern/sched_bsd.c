@@ -77,19 +77,17 @@ scheduler_start(void)
 
 	timeout_set(&schedcpu_to, schedcpu, &schedcpu_to);
 
-	rrticks_init = hz / 10;
+	rrticks_init = hz / 20;
 	schedcpu(&schedcpu_to);
 }
 
 /*
- * Force switch among equal priority processes every 100ms.
+ * Force switch among equal priority processes every 50ms.
  */
 void
 roundrobin(struct cpu_info *ci)
 {
 	struct schedstate_percpu *spc = &ci->ci_schedstate;
-
-	spc->spc_rrticks = rrticks_init;
 
 	if (ci->ci_curproc != NULL) {
 		if (spc->spc_schedflags & SPCF_SEENRR) {
@@ -252,8 +250,7 @@ schedcpu(void *arg)
 		resetpriority(p);
 		if (p->p_priority >= PUSER) {
 			if (p->p_stat == SRUN &&
-			    (p->p_priority / SCHED_PPQ) !=
-			    (p->p_usrpri / SCHED_PPQ)) {
+			    p->p_priority == p->p_usrpri) {
 				remrunqueue(p);
 				p->p_priority = p->p_usrpri;
 				setrunqueue(p);
@@ -304,6 +301,7 @@ yield(void)
 	SCHED_LOCK(s);
 	p->p_priority = p->p_usrpri;
 	p->p_stat = SRUN;
+	generate_deadline(p, 1);
 	setrunqueue(p);
 	p->p_ru.ru_nvcsw++;
 	mi_switch();
@@ -332,6 +330,7 @@ preempt(struct proc *newp)
 	p->p_priority = p->p_usrpri;
 	p->p_stat = SRUN;
 	p->p_cpu = sched_choosecpu(p);
+	generate_deadline(p, 0);
 	setrunqueue(p);
 	p->p_ru.ru_nivcsw++;
 	mi_switch();
@@ -531,8 +530,7 @@ resetpriority(struct proc *p)
 
 	SCHED_ASSERT_LOCKED();
 
-	newpriority = PUSER + p->p_estcpu +
-	    NICE_WEIGHT * (p->p_p->ps_nice - NZERO);
+	newpriority = PUSER + p->p_estcpu + (p->p_p->ps_nice - NZERO);
 	newpriority = min(newpriority, MAXPRI);
 	p->p_usrpri = newpriority;
 	resched_proc(p, p->p_usrpri);
@@ -564,4 +562,33 @@ schedclock(struct proc *p)
 	if (p->p_priority >= PUSER)
 		p->p_priority = p->p_usrpri;
 	SCHED_UNLOCK(s);
+}
+
+void
+generate_deadline(struct proc *p, char voluntary) {
+	/*
+	* For nice values between 0 and 39 inclusively, the offset lies between
+	* 32 and 1280 milliseconds for a machine with hz=100. That means that
+	* processes with nice value=0 (i.e. -20 in userland) will be executed
+	* 32 milliseconds in the future at the latest. Processes with very
+	* little priority will be executed 1.28 seconds in the future at the very
+	* latest. The shift is done to ensure that the lowest possible offset is
+	* larger than the timeslice, in order to make sure that the scheduler does
+	* not degenerate to round robin behaviour when more than just a few processes
+	* with high priority are started.
+	*
+	* If the process voluntarily yielded its CPU, we reward it by halving its
+	* deadline offset.
+	*/
+	unsigned int offset_msec = ((p->p_p->ps_nice + 1) * rrticks_init) << (voluntary ? 2 : 3);
+	struct timeval offset = {
+		.tv_sec  = offset_msec / 1000,
+		.tv_usec = offset_msec % 1000
+	};
+	struct timeval now;
+	microuptime(&now);
+
+	timeradd(&now, &offset, &(p->p_deadline));
+	if (!voluntary)
+		p->p_rrticks = rrticks_init;
 }

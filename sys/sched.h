@@ -70,6 +70,7 @@
 #define	_SYS_SCHED_H_
 
 #include <sys/queue.h>
+#include <sys/tree.h>
 
 /*
  * Posix defines a <sched.h> which may want to include <sys/sched.h>
@@ -99,7 +100,6 @@ struct schedstate_percpu {
 	u_int spc_schedticks;		/* ticks for schedclock() */
 	u_int64_t spc_cp_time[CPUSTATES]; /* CPU state statistics */
 	u_char spc_curpriority;		/* usrpri of curproc */
-	int spc_rrticks;		/* ticks until roundrobin() */
 	int spc_pscnt;			/* prof/stat counter */
 	int spc_psdiv;			/* prof/stat divisor */	
 	struct proc *spc_idleproc;	/* idle proc for this cpu */
@@ -107,8 +107,7 @@ struct schedstate_percpu {
 	u_int spc_nrun;			/* procs on the run queues */
 	fixpt_t spc_ldavg;		/* shortest load avg. for this cpu */
 
-	TAILQ_HEAD(prochead, proc) spc_qs[SCHED_NQS];
-	volatile uint32_t spc_whichqs;
+	RB_HEAD(prochead, proc) spc_runq;
 
 #ifdef notyet
 	struct proc *spc_reaper;	/* dead proc reaper */
@@ -125,9 +124,7 @@ struct schedstate_percpu {
 #define SPCF_SHOULDHALT		0x0004	/* CPU should be vacated */
 #define SPCF_HALTED		0x0008	/* CPU has been halted */
 
-#define	SCHED_PPQ	(128 / SCHED_NQS)	/* priorities per queue */
-#define NICE_WEIGHT 2			/* priorities per nice level */
-#define	ESTCPULIM(e) min((e), NICE_WEIGHT * PRIO_MAX - SCHED_PPQ)
+#define	ESTCPULIM(e) min((e), PRIO_MAX)
 
 extern int schedhz;			/* ideally: 16 */
 extern int rrticks_init;		/* ticks per roundrobin() */
@@ -152,13 +149,14 @@ void cpu_idle_enter(void);
 void cpu_idle_cycle(void);
 void cpu_idle_leave(void);
 void sched_peg_curproc(struct cpu_info *ci);
+void generate_deadline(struct proc *, char);
 
 #ifdef MULTIPROCESSOR
 void sched_start_secondary_cpus(void);
 void sched_stop_secondary_cpus(void);
 #endif
 
-#define curcpu_is_idle()	(curcpu()->ci_schedstate.spc_whichqs == 0)
+#define curcpu_is_idle()	(RB_EMPTY(&curcpu()->ci_schedstate.spc_runq))
 
 void sched_init_runqueues(void);
 void setrunqueue(struct proc *);

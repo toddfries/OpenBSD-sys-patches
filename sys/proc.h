@@ -247,8 +247,9 @@ struct process {
 #define	PS_EXITING	_P_EXITING
 
 struct proc {
-	TAILQ_ENTRY(proc) p_runq;
+	TAILQ_ENTRY(proc) p_slpq;
 	LIST_ENTRY(proc) p_list;	/* List of all processes. */
+	RB_ENTRY(proc) p_runq;
 
 	struct	process *p_p;		/* The process of this thread. */
 	TAILQ_ENTRY(proc) p_thr_link;/* Threads in a process linkage. */
@@ -280,6 +281,8 @@ struct proc {
 	int	p_sigwait;	/* signal handled by sigwait() */
 
 	/* scheduling */
+	int p_rrticks;
+	struct timeval p_deadline;
 	u_int	p_estcpu;	 /* Time averaged value of p_cpticks. */
 	int	p_cpticks;	 /* Ticks of cpu time. */
 	fixpt_t	p_pctcpu;	 /* %cpu for this process during p_swtime */
