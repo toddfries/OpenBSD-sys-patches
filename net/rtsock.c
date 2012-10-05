@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.120 2012/09/17 19:00:36 blambert Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.123 2012/09/20 20:53:13 blambert Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -617,12 +617,12 @@ route_output(struct mbuf *m, ...)
 			error = EAFNOSUPPORT;
 			goto flush;
 		}
-		rn = rt_lookup(dst, netmask, tableid);
+		rt = rt_lookup(dst, netmask, tableid);
+		rn = (struct radix_node *)rt;
 		if (rn == NULL || (rn->rn_flags & RNF_ROOT) != 0) {
 			error = ESRCH;
 			goto flush;
 		}
-		rt = (struct rtentry *)rn;
 #ifndef SMALL_KERNEL
 		/*
 		 * for RTM_CHANGE/LOCK, if we got multipath routes,
@@ -644,7 +644,7 @@ route_output(struct mbuf *m, ...)
 			}
 
 			/* if multipath routes */
-			if (rn_mpath_next(rn, 0)) {
+			if (rt_mpath_next(rt, 0)) {
 				if (gate)
 					rt = rt_mpath_matchgate(rt, gate, prio);
 				else if (rtm->rtm_type != RTM_GET)
@@ -922,7 +922,7 @@ rt_setmetrics(u_long which, struct rt_metrics *in, struct rt_kmetrics *out)
 		out->rmx_mtu = in->rmx_mtu;
 	if (which & RTV_EXPIRE)
 		out->rmx_expire = in->rmx_expire;
-	/* RTV_PRIORITY handled befor */
+	/* RTV_PRIORITY handled before */
 }
 
 void
