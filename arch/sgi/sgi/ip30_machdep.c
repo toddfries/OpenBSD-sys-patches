@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip30_machdep.c,v 1.55 2012/07/16 16:06:40 miod Exp $	*/
+/*	$OpenBSD: ip30_machdep.c,v 1.57 2012/10/03 11:18:23 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -33,6 +33,7 @@
 #include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/memconf.h>
 
 #include <uvm/uvm.h>
@@ -559,11 +560,7 @@ hw_cpu_hatch(struct cpu_info *ci)
 	 */
 	setsr(getsr() | SR_KX | SR_UX);
 
-	tlb_set_page_mask(TLB_PAGE_MASK);
-	tlb_set_wired(0);
-	tlb_flush(64);
-	tlb_set_wired(UPAGES / 2);
-
+	tlb_init(64);
 	tlb_set_pid(0);
 
 	/*
