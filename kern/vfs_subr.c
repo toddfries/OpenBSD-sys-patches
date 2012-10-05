@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.197 2012/07/16 15:31:17 deraadt Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.199 2012/10/01 00:08:43 guenther Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -95,8 +95,6 @@ struct freelst vnode_free_list;	/* vnode free list */
 struct mntlist mountlist;	/* mounted filesystem list */
 
 void	vclean(struct vnode *, int, struct proc *);
-void	vhold(struct vnode *);
-void	vdrop(struct vnode *);
 
 void insmntque(struct vnode *, struct mount *);
 int getdevvp(dev_t, struct vnode **, enum vtype);
@@ -1580,7 +1578,7 @@ vaccess(enum vtype type, mode_t file_mode, uid_t uid, gid_t gid,
 	}
 
 	/* Otherwise, check the groups. */
-	if (cred->cr_gid == gid || groupmember(gid, cred)) {
+	if (groupmember(gid, cred)) {
 		if (acc_mode & VEXEC)
 			mask |= S_IXGRP;
 		if (acc_mode & VREAD)
