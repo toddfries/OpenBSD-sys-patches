@@ -1,4 +1,4 @@
-/*	$OpenBSD: xheart.c,v 1.23 2011/07/10 17:48:25 miod Exp $	*/
+/*	$OpenBSD: xheart.c,v 1.25 2012/10/03 11:18:23 miod Exp $	*/
 
 /*
  * Copyright (c) 2008 Miodrag Vallat.
@@ -31,6 +31,7 @@
 #include <machine/atomic.h>
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/intr.h>
 
 #include <sgi/xbow/xbow.h>
@@ -398,7 +399,8 @@ xheart_splx(int newipl)
 	/* Update masks to new ipl. Order highly important! */
 	__asm__ (".set noreorder\n");
 	ci->ci_ipl = newipl;
-	__asm__ ("sync\n\t.set reorder\n");
+	mips_sync();
+	__asm__ (".set reorder\n");
 
 	if (CPU_IS_PRIMARY(ci))
 		xheart_setintrmask(newipl);

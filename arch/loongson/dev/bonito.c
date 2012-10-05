@@ -1,4 +1,4 @@
-/*	$OpenBSD: bonito.c,v 1.19 2011/03/31 20:37:44 miod Exp $	*/
+/*	$OpenBSD: bonito.c,v 1.22 2012/10/03 11:18:20 miod Exp $	*/
 /*	$NetBSD: bonito_mainbus.c,v 1.11 2008/04/28 20:23:10 martin Exp $	*/
 /*	$NetBSD: bonito_pci.c,v 1.5 2008/04/28 20:23:28 martin Exp $	*/
 
@@ -59,6 +59,8 @@
 
 #include <machine/autoconf.h>
 #include <machine/bus.h>
+#include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/intr.h>
 
 #include <dev/pci/pcidevs.h>
@@ -88,7 +90,7 @@ struct cfdriver bonito_cd = {
 	NULL, "bonito", DV_DULL
 };
 
-#define	wbflush()	__asm__ __volatile__ ("sync" ::: "memory")
+#define	wbflush()	mips_sync()
 
 bus_addr_t	bonito_pa_to_device(paddr_t);
 paddr_t		bonito_device_to_pa(bus_addr_t);
@@ -477,7 +479,8 @@ bonito_splx(int newipl)
 	/* Update masks to new ipl. Order highly important! */
 	__asm__ (".set noreorder\n");
 	ci->ci_ipl = newipl;
-	__asm__ ("sync\n\t.set reorder\n");
+	mips_sync();
+	__asm__ (".set reorder\n");
 	bonito_setintrmask(newipl);
 	/* If we still have softints pending trigger processing. */
 	if (ci->ci_softpending != 0 && newipl < IPL_SOFTINT)
@@ -489,7 +492,7 @@ bonito_setintrmask(int level)
 {
 	uint64_t active;
 	uint32_t clear, set;
-	uint32_t sr;
+	register_t sr;
 
 	active = bonito_intem & ~bonito_imask[level];
 	/* be sure to mask high bits, there may be other interrupt sources */
@@ -697,7 +700,8 @@ bonito_intr_dispatch(uint64_t isr, int startbit, struct trap_frame *frame)
 				}
 				__asm__ (".set noreorder\n");
 				curcpu()->ci_ipl = frame->ipl;
-				__asm__ ("sync\n\t.set reorder\n");
+				mips_sync();
+				__asm__ (".set reorder\n");
 			}
 			if (rc == 0) {
 				printf("spurious interrupt %d\n", bitno);
@@ -845,7 +849,7 @@ bonito_conf_read_internal(const struct bonito_config *bc, pcitag_t tag,
 {
 	pcireg_t data;
 	u_int32_t cfgoff, pcimap_cfg;
-	uint32_t sr;
+	register_t sr;
 	uint64_t imr;
 
 	if (bonito_conf_addr(bc, tag, offset, &cfgoff, &pcimap_cfg))
@@ -889,7 +893,7 @@ bonito_conf_write(void *v, pcitag_t tag, int offset, pcireg_t data)
 	struct bonito_softc *sc = v;
 	u_int32_t cfgoff, pcimap_cfg;
 	struct bonito_cfg_hook *hook;
-	uint32_t sr;
+	register_t sr;
 	uint64_t imr;
 
 	SLIST_FOREACH(hook, &sc->sc_hook, next) {
