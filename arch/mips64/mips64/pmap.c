@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.63 2012/05/10 21:12:26 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.66 2012/10/03 22:46:07 miod Exp $	*/
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -36,7 +36,6 @@
 #include <sys/shm.h>
 #endif
 
-#include <mips64/archtype.h>
 #include <mips64/cache.h>
 #include <machine/autoconf.h>
 #include <machine/cpu.h>
@@ -207,7 +206,7 @@ pmap_invalidate_user_page(pmap_t pmap, vaddr_t va)
 	if (cpumask == 1 << cpuid) {
 		u_long asid;
 
-		asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+		asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 		tlb_flush_addr(va | asid);
 	} else if (cpumask) {
 		struct pmap_invalidate_page_arg arg;
@@ -227,7 +226,7 @@ pmap_invalidate_user_page_action(void *arg)
 	unsigned int cpuid = cpu_number();
 	u_long asid;
 
-	asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+	asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 	tlb_flush_addr(va | asid);
 }
 
@@ -289,7 +288,7 @@ pmap_update_user_page(pmap_t pmap, vaddr_t va, pt_entry_t entry)
 	if (cpumask == 1 << cpuid) {
 		u_long asid;
 
-		asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+		asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 		tlb_update(va | asid, entry);
 	} else if (cpumask) {
 		struct pmap_update_page_arg arg;
@@ -310,7 +309,7 @@ pmap_update_user_page_action(void *arg)
 	unsigned int cpuid = cpu_number();
 	u_long asid;
 
-	asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+	asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 	tlb_update(va | asid, entry);
 }
 #else
@@ -318,7 +317,7 @@ void
 pmap_invalidate_user_page(pmap_t pmap, vaddr_t va)
 {
 	u_long cpuid = cpu_number();
-	u_long asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+	u_long asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 
 	if (pmap->pm_asid[cpuid].pma_asidgen ==
 	    pmap_asid_info[cpuid].pma_asidgen)
@@ -329,7 +328,7 @@ void
 pmap_update_user_page(pmap_t pmap, vaddr_t va, pt_entry_t entry)
 {
 	u_long cpuid = cpu_number();
-	u_long asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+	u_long asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 
 	if (pmap->pm_asid[cpuid].pma_asidgen ==
 	    pmap_asid_info[cpuid].pma_asidgen)
@@ -344,7 +343,9 @@ void
 pmap_bootstrap(void)
 {
 	u_int i;
+#ifndef CPU_R8000
 	pt_entry_t *spte;
+#endif
 
 	/*
 	 * Create a mapping table for kernel virtual memory. This
@@ -357,8 +358,10 @@ pmap_bootstrap(void)
 
 	Sysmapsize = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
 	    PAGE_SIZE;
+#ifndef CPU_R8000
 	if (Sysmapsize & 1)
 		Sysmapsize++;	/* force even number of pages */
+#endif
 
 	Sysmap = (pt_entry_t *)
 	    uvm_pageboot_alloc(sizeof(pt_entry_t) * Sysmapsize);
@@ -371,6 +374,7 @@ pmap_bootstrap(void)
 	simple_lock_init(&pmap_kernel()->pm_lock);
 	pmap_kernel()->pm_count = 1;
 
+#ifndef CPU_R8000
 	/*
 	 * The 64 bit Mips architecture stores the AND result
 	 * of the Global bits in the pte pair in the on chip
@@ -381,10 +385,14 @@ pmap_bootstrap(void)
 	 */
 	for (i = Sysmapsize, spte = Sysmap; i != 0; i--, spte++)
 		*spte = PG_G;
+#else
+	bzero(Sysmap, sizeof(pt_entry_t) * Sysmapsize);
+#endif
+	tlb_set_gbase((vaddr_t)Sysmap, Sysmapsize);
 
 	for (i = 0; i < MAXCPUS; i++) {
 		pmap_asid_info[i].pma_asidgen = 1;
-		pmap_asid_info[i].pma_asid = 2;
+		pmap_asid_info[i].pma_asid = MIN_USER_ASID + 1;
 	}
 }
 
@@ -436,12 +444,14 @@ pmap_steal_memory(vsize_t size, vaddr_t *vstartp, vaddr_t *vendp)
 			*vendp = virtual_end;
 
 #ifdef __sgi__
+#ifndef CPU_R8000
 		/*
 		 * Return a CKSEG0 address whenever possible.
 		 */
 		if (pa + size < CKSEG_SIZE)
 			va = PHYS_TO_CKSEG0(pa);
 		else
+#endif
 			va = PHYS_TO_XKPHYS(pa, CCA_CACHED);
 #else
 		va = PHYS_TO_XKPHYS(pa, CCA_CACHED);
@@ -504,10 +514,10 @@ extern struct user *proc0paddr;
 	if (pmap == vmspace0.vm_map.pmap) {
 		/*
 		 * The initial process has already been allocated a TLBPID
-		 * in mach_init().
+		 * in mips_init().
 		 */
 		for (i = 0; i < ncpusfound; i++) {
-			pmap->pm_asid[i].pma_asid = 1;
+			pmap->pm_asid[i].pma_asid = MIN_USER_ASID;
 			pmap->pm_asid[i].pma_asidgen =
 				pmap_asid_info[i].pma_asidgen;
 		}
@@ -555,7 +565,7 @@ pmap_destroy(pmap_t pmap)
 #ifdef PARANOIA
 			for (j = 0; j < NPTEPG; j++) {
 				if (pte[j] != PG_NV)
-					panic("pmap_destroy: segmap not empty");
+					panic("pmap_destroy: segmap %p not empty at index %d", pte, j);
 			}
 #endif
 			pool_put(&pmap_pg_pool, pte);
@@ -648,7 +658,7 @@ pmap_remove(pmap_t pmap, vaddr_t sva, vaddr_t eva)
 			panic("pmap_remove(%p, %p): not in range", sva, eva);
 #endif
 		pte = kvtopte(sva);
-		for(; sva < eva; sva += NBPG, pte++) {
+		for(; sva < eva; sva += PAGE_SIZE, pte++) {
 			entry = *pte;
 			if (!(entry & PG_V))
 				continue;
@@ -689,7 +699,7 @@ pmap_remove(pmap_t pmap, vaddr_t sva, vaddr_t eva)
 		 * Invalidate every valid mapping within this segment.
 		 */
 		pte += uvtopte(sva);
-		for (; sva < nssva; sva += NBPG, pte++) {
+		for (; sva < nssva; sva += PAGE_SIZE, pte++) {
 			entry = *pte;
 			if (!(entry & PG_V))
 				continue;
@@ -772,8 +782,7 @@ void
 pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 {
 	vaddr_t nssva;
-	pt_entry_t *pte, entry;
-	u_int p;
+	pt_entry_t *pte, entry, p;
 	struct cpu_info *ci = curcpu();
 
 	DPRINTF(PDB_FOLLOW|PDB_PROTECT,
@@ -801,7 +810,7 @@ pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 			panic("pmap_protect(%p, %p): not in range", sva, eva);
 #endif
 		pte = kvtopte(sva);
-		for (; sva < eva; sva += NBPG, pte++) {
+		for (; sva < eva; sva += PAGE_SIZE, pte++) {
 			entry = *pte;
 			if (!(entry & PG_V))
 				continue;
@@ -838,7 +847,7 @@ pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 		 * Change protection on every valid mapping within this segment.
 		 */
 		pte += uvtopte(sva);
-		for (; sva < nssva; sva += NBPG, pte++) {
+		for (; sva < nssva; sva += PAGE_SIZE, pte++) {
 			entry = *pte;
 			if (!(entry & PG_V))
 				continue;
@@ -940,7 +949,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 
 		pte = kvtopte(va);
 		if ((*pte & PG_V) && pa != pfn_to_pad(*pte)) {
-			pmap_remove(pmap, va, va + NBPG);
+			pmap_remove(pmap, va, va + PAGE_SIZE);
 			stat_count(enter_stats.mchange);
 		}
 		if ((*pte & PG_V) == 0) {
@@ -998,7 +1007,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	 * MIPS pages in a OpenBSD page.
 	 */
 	if ((*pte & PG_V) && pa != pfn_to_pad(*pte)) {
-		pmap_remove(pmap, va, va + NBPG);
+		pmap_remove(pmap, va, va + PAGE_SIZE);
 		stat_count(enter_stats.mchange);
 	}
 	if ((*pte & PG_V) == 0) {
@@ -1138,12 +1147,14 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 	if (pmap == pmap_kernel()) {
 		if (IS_XKPHYS(va))
 			pa = XKPHYS_TO_PHYS(va);
+#ifndef CPU_R8000
 		else if (va >= (vaddr_t)CKSEG0_BASE &&
 		    va < (vaddr_t)CKSEG0_BASE + CKSEG_SIZE)
 			pa = CKSEG0_TO_PHYS(va);
 		else if (va >= (vaddr_t)CKSEG1_BASE &&
 		    va < (vaddr_t)CKSEG1_BASE + CKSEG_SIZE)
 			pa = CKSEG1_TO_PHYS(va);
+#endif
 		else {
 #ifdef DIAGNOSTIC
 			if (va < VM_MIN_KERNEL_ADDRESS ||
@@ -1475,12 +1486,12 @@ pmap_alloc_tlbpid(struct proc *p)
 	if (pmap->pm_asid[cpuid].pma_asidgen != 
 	    pmap_asid_info[cpuid].pma_asidgen) {
 		id = pmap_asid_info[cpuid].pma_asid;
-		if (id >= VMNUM_PIDS) {
-			tlb_flush(ci->ci_hw.tlbsize);
+		if (id >= PG_ASID_COUNT) {
+			tlb_asid_wrap(ci);
 			/* reserve tlbpid_gen == 0 to alway mean invalid */
 			if (++pmap_asid_info[cpuid].pma_asidgen == 0)
 				pmap_asid_info[cpuid].pma_asidgen = 1;
-			id = 1;
+			id = MIN_USER_ASID;
 		}
 		pmap_asid_info[cpuid].pma_asid = id + 1;
 		pmap->pm_asid[cpuid].pma_asid = id;
@@ -1755,12 +1766,14 @@ pmap_map_direct(vm_page_t pg)
 	vaddr_t va;
 
 #ifdef __sgi__
+#ifndef CPU_R8000
 	/*
 	 * Return a CKSEG0 address whenever possible.
 	 */
 	if (pa < CKSEG_SIZE)
 		va = PHYS_TO_CKSEG0(pa);
 	else
+#endif
 		va = PHYS_TO_XKPHYS(pa, CCA_CACHED);
 #else
 	va = PHYS_TO_XKPHYS(pa, CCA_CACHED);
@@ -1776,9 +1789,11 @@ pmap_unmap_direct(vaddr_t va)
 	vm_page_t pg;
 
 #ifdef __sgi__
+#ifndef CPU_R8000
 	if (va >= CKSEG0_BASE)
 		pa = CKSEG0_TO_PHYS(va);
 	else
+#endif
 		pa = XKPHYS_TO_PHYS(va);
 #else
 	pa = XKPHYS_TO_PHYS(va);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: int.c,v 1.6 2012/07/18 19:56:02 miod Exp $	*/
+/*	$OpenBSD: int.c,v 1.9 2012/10/03 11:18:23 miod Exp $	*/
 /*	$NetBSD: int.c,v 1.24 2011/07/01 18:53:46 dyoung Exp $	*/
 
 /*
@@ -45,6 +45,7 @@
 #include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/intr.h>
 
 #include <dev/ic/i8253reg.h>
@@ -241,12 +242,12 @@ void
 int2_splx(int newipl)
 {
 	struct cpu_info *ci = curcpu();
-	uint32_t sr;
+	register_t sr;
 
 	__asm__ (".set noreorder");
 	ci->ci_ipl = newipl;
-	__asm__ ("sync" ::: "memory");
-	__asm__ (".set reorder");
+	mips_sync();
+	__asm__ (".set reorder\n");
 
 	sr = disableintr();	/* XXX overkill? */
 	int2_write(INT2_LOCAL1_MASK, (int2_intem >> 8) & ~int2_l1imask[newipl]);
@@ -350,7 +351,7 @@ int2_attach(struct device *parent, struct device *self, void *aux)
 	    TIMER_SEL1 | TIMER_16BIT | TIMER_SWSTROBE);
 	int2_write(INT2_TIMER_CONTROL,
 	    TIMER_SEL2 | TIMER_16BIT | TIMER_SWSTROBE);
-	__asm__ __volatile__ ("sync" ::: "memory");
+	mips_sync();
 	delay(4);
 	int2_write(INT2_TIMER_CLEAR, 0x03);
 
@@ -493,7 +494,7 @@ int_8254_cal(void)
 	int2_write(INT2_TIMER_CONTROL,
 	    TIMER_SEL0 | TIMER_RATEGEN | TIMER_16BIT);
 	int2_write(INT2_TIMER_0, freq & 0xff);
-	__asm__ ("sync" ::: "memory");
+	mips_sync();
 	delay(4);
 	int2_write(INT2_TIMER_0, freq >> 8);
 
@@ -501,7 +502,7 @@ int_8254_cal(void)
 	int2_write(INT2_TIMER_CONTROL,
 	    TIMER_SEL2 | TIMER_RATEGEN | TIMER_16BIT);
 	int2_write(INT2_TIMER_2, 2);
-	__asm__ ("sync" ::: "memory");
+	mips_sync();
 	delay(4);
 	int2_write(INT2_TIMER_2, 0);
 
