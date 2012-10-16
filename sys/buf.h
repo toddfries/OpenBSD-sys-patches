@@ -109,13 +109,9 @@ void		 bufq_quiesce(void);
 void		 bufq_restart(void);
 
 /* disksort */
-struct not_really_bufq_disksort {
+struct bufq_disksort {
 	struct buf	 *bqd_actf;
 	struct buf	**bqd_actb;
-};
-
-struct bufq_disksort {
-	SIMPLEQ_ENTRY(buf)	bqf_entries;
 };
 
 /* fifo */
@@ -139,7 +135,6 @@ struct bufq_swapreg {
 
 /* bufq link in struct buf */
 union bufq_data {
-	struct not_really_bufq_disksort	not_really_bufq_data_disksort;
 	struct bufq_disksort	bufq_data_disksort;
 	struct bufq_fifo	bufq_data_fifo;
 	struct bufq_nscan	bufq_data_nscan;
@@ -161,8 +156,8 @@ extern struct bio_ops {
 } bioops;
 
 /* XXX: disksort(); */
-#define b_actf	b_bufq.not_really_bufq_data_disksort.bqd_actf
-#define b_actb	b_bufq.not_really_bufq_data_disksort.bqd_actb
+#define b_actf	b_bufq.bufq_data_disksort.bqd_actf
+#define b_actb	b_bufq.bufq_data_disksort.bqd_actb
 
 /* The buffer header describes an I/O operation in the kernel. */
 struct buf {
