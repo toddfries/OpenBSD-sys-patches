@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ether.c,v 1.59 2012/09/26 14:53:23 markus Exp $  */
+/*	$OpenBSD: ip_ether.c,v 1.61 2012/10/05 17:17:04 camield Exp $  */
 /*
  * The author of this code is Angelos D. Keromytis (kermit@adk.gr)
  *
@@ -59,6 +59,9 @@
 #endif
 #ifdef MPLS
 #include <netmpls/mpls.h>
+#endif
+#if NPF > 0
+#include <net/pfvar.h>
 #endif
 
 #include "bpfilter.h"
@@ -230,7 +233,7 @@ etherip_decap(struct mbuf *m, int iphlen)
 	sc = etherip_getgif(m);
 	if (sc == NULL)
 		return;
-	if (sc->gif_if.if_bridge == NULL) {
+	if (sc->gif_if.if_bridgeport == NULL) {
 		DPRINTF(("etherip_input(): interface not part of bridge\n"));
 		etheripstat.etherip_noifdrops++;
 		m_freem(m);

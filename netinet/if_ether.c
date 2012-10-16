@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.93 2011/09/18 11:17:58 miod Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.95 2012/10/05 17:17:04 camield Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -62,6 +62,9 @@
 #include <netinet/if_ether.h>
 #if NCARP > 0
 #include <netinet/ip_carp.h>
+#endif
+#if NBRIDGE > 0
+#include <net/if_bridge.h>
 #endif
 
 #define SIN(s) ((struct sockaddr_in *)s)
@@ -671,7 +674,9 @@ in_arpinput(struct mbuf *m)
 				   ac->ac_if.if_xname);
 				goto out;
 			} else if (rt->rt_ifp != &ac->ac_if) {
+#if NCARP > 0
 				if (ac->ac_if.if_type != IFT_CARP)
+#endif
 					log(LOG_WARNING,
 					   "arp: attempt to overwrite entry for"
 					   " %s on %s by %s on %s\n",
@@ -689,19 +694,25 @@ in_arpinput(struct mbuf *m)
 				rt->rt_expire = 1; /* no longer static */
 			}
 		    }
-		} else if (rt->rt_ifp != &ac->ac_if && !(ac->ac_if.if_bridge &&
-		    (rt->rt_ifp->if_bridge == ac->ac_if.if_bridge)) &&
+		} else if (rt->rt_ifp != &ac->ac_if &&
+#if NBRIDGE > 0
+		    !SAME_BRIDGE(ac->ac_if.if_bridgeport,
+		    rt->rt_ifp->if_bridgeport) &&
+#endif
+#if NCARP > 0
 		    !(rt->rt_ifp->if_type == IFT_CARP &&
 		    rt->rt_ifp->if_carpdev == &ac->ac_if) &&
 		    !(ac->ac_if.if_type == IFT_CARP &&
-		    ac->ac_if.if_carpdev == rt->rt_ifp)) {
-		    log(LOG_WARNING,
-			"arp: attempt to add entry for %s "
-			"on %s by %s on %s\n",
-			inet_ntoa(isaddr), rt->rt_ifp->if_xname,
-			ether_sprintf(ea->arp_sha),
-			ac->ac_if.if_xname);
-		    goto out;
+		    ac->ac_if.if_carpdev == rt->rt_ifp) &&
+#endif
+		    1) {
+			log(LOG_WARNING,
+			    "arp: attempt to add entry for %s "
+			    "on %s by %s on %s\n",
+			    inet_ntoa(isaddr), rt->rt_ifp->if_xname,
+			    ether_sprintf(ea->arp_sha),
+			    ac->ac_if.if_xname);
+			goto out;
 		}
 		bcopy(ea->arp_sha, LLADDR(sdl),
 		    sdl->sdl_alen = sizeof(ea->arp_sha));
