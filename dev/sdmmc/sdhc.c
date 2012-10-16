@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdhc.c,v 1.34 2011/07/31 16:55:01 kettenis Exp $	*/
+/*	$OpenBSD: sdhc.c,v 1.35 2012/10/08 21:47:50 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>

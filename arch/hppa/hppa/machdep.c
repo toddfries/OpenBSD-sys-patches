@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.206 2012/06/21 00:56:59 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.208 2012/10/08 21:47:47 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -1170,7 +1170,7 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	tf->tf_arg1 = tf->tf_arg2 = 0; /* XXX dynload stuff */
 
 	/* setup terminal stack frame */
-	setstack(tf, (stack + 0x1f) & ~0x1f, 0);
+	setstack(tf, (stack + 0x3f) & ~0x3f, 0);
 
 	/* reset any of the pending FPU exceptions */
 	fpu_proc_flush(p);

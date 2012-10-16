@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.108 2011/07/06 04:49:36 matthew Exp $ */
+/*	$OpenBSD: wd.c,v 1.109 2012/10/08 21:47:50 deraadt Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*

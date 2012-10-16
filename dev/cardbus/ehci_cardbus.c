@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci_cardbus.c,v 1.15 2010/03/27 21:40:13 jsg Exp $ */
+/*	$OpenBSD: ehci_cardbus.c,v 1.16 2012/10/08 21:47:50 deraadt Exp $ */
 /*	$NetBSD: ehci_cardbus.c,v 1.6.6.3 2004/09/21 13:27:25 skrll Exp $	*/
 
 /*
@@ -62,7 +62,6 @@ extern int ehcidebug;
 int	ehci_cardbus_match(struct device *, void *, void *);
 void	ehci_cardbus_attach(struct device *, struct device *, void *);
 int	ehci_cardbus_detach(struct device *, int);
-int	ehci_cardbus_activate(struct device *, int);
 
 struct ehci_cardbus_softc {
 	ehci_softc_t		sc;
@@ -74,7 +73,7 @@ struct ehci_cardbus_softc {
 
 struct cfattach ehci_cardbus_ca = {
 	sizeof(struct ehci_cardbus_softc), ehci_cardbus_match,
-	    ehci_cardbus_attach, ehci_cardbus_detach, ehci_cardbus_activate
+	ehci_cardbus_attach, ehci_cardbus_detach, ehci_activate
 };
 
 #define CARDBUS_CBMEM PCI_CBMEM
@@ -187,10 +186,4 @@ ehci_cardbus_detach(struct device *self, int flags)
 		sc->sc.sc_size = 0;
 	}
 	return (0);
-}
-
-int
-ehci_cardbus_activate(struct device *self, int act)
-{
-	return ehci_activate(self, act);
 }

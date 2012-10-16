@@ -1,4 +1,4 @@
-/* $OpenBSD: vga_pci.c,v 1.68 2012/08/22 20:58:30 mpi Exp $ */
+/* $OpenBSD: vga_pci.c,v 1.69 2012/10/08 21:47:50 deraadt Exp $ */
 /* $NetBSD: vga_pci.c,v 1.3 1998/06/08 06:55:58 thorpej Exp $ */
 
 /*

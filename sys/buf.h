@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.78 2011/07/04 04:30:41 tedu Exp $	*/
+/*	$OpenBSD: buf.h,v 1.80 2012/10/09 15:36:50 beck Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -63,10 +63,20 @@ LIST_HEAD(workhead, worklist);
 /*
  * Buffer queues
  */
+#define BUFQ_NSCAN_N	128
 #define BUFQ_DISKSORT	0
-#define	BUFQ_FIFO	1
-#define BUFQ_DEFAULT	BUFQ_DISKSORT
-#define BUFQ_HOWMANY	2
+#define BUFQ_FIFO	1
+#define BUFQ_NSCAN	2
+#define BUFQ_DEFAULT	BUFQ_NSCAN
+#define BUFQ_HOWMANY	3
+
+/*
+ * Write limits for bufq - defines high and low water marks for how
+ * many kva slots are allowed to be consumed to parallelize writes from
+ * the buffer cache from any individual bufq.
+ */
+#define BUFQ_HI		128
+#define BUFQ_LOW	64
 
 struct bufq_impl;
 
@@ -75,6 +85,9 @@ struct bufq {
 	struct mutex	 	 bufq_mtx;
 	void			*bufq_data;
 	u_int			 bufq_outstanding;
+	u_int			 bufq_hi;
+	u_int			 bufq_low;
+	int			 bufq_waiting;
 	int			 bufq_stop;
 	int			 bufq_type;
 	const struct bufq_impl	*bufq_impl;
@@ -90,6 +103,7 @@ void		 bufq_requeue(struct bufq *, struct buf *);
 int		 bufq_peek(struct bufq *);
 void		 bufq_drain(struct bufq *);
 
+void		 bufq_wait(struct bufq *, struct buf *);
 void		 bufq_done(struct bufq *, struct buf *);
 void		 bufq_quiesce(void);
 void		 bufq_restart(void);
@@ -110,6 +124,12 @@ struct bufq_fifo {
 	SIMPLEQ_ENTRY(buf)	bqf_entries;
 };
 
+/* nscan */
+SIMPLEQ_HEAD(bufq_nscan_head, buf);
+struct bufq_nscan {
+	SIMPLEQ_ENTRY(buf)	bqf_entries;
+};
+
 /* Abuse bufq_fifo, for swapping to regular files. */
 struct bufq_swapreg {
 	SIMPLEQ_ENTRY(buf)	bqf_entries;
@@ -122,6 +142,7 @@ union bufq_data {
 	struct not_really_bufq_disksort	not_really_bufq_data_disksort;
 	struct bufq_disksort	bufq_data_disksort;
 	struct bufq_fifo	bufq_data_fifo;
+	struct bufq_nscan	bufq_data_nscan;
 	struct bufq_swapreg	bufq_swapreg;
 };
 

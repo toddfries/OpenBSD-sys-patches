@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.38 2012/10/03 21:44:51 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.39 2012/10/08 21:47:48 deraadt Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.

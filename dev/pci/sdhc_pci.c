@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdhc_pci.c,v 1.12 2011/12/23 21:58:47 kettenis Exp $	*/
+/*	$OpenBSD: sdhc_pci.c,v 1.13 2012/10/08 21:47:50 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
