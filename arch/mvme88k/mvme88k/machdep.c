@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.245 2011/10/09 17:01:34 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.246 2012/10/08 21:47:49 deraadt Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur

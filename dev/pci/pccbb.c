@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbb.c,v 1.87 2010/12/08 20:22:49 miod Exp $	*/
+/*	$OpenBSD: pccbb.c,v 1.88 2012/10/08 21:47:50 deraadt Exp $	*/
 /*	$NetBSD: pccbb.c,v 1.96 2004/03/28 09:49:31 nakayama Exp $	*/
 
 /*

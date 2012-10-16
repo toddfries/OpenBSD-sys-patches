@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.193 2012/08/11 13:52:27 jmatthew Exp $ */
+/*	$OpenBSD: ahci.c,v 1.194 2012/10/08 21:47:50 deraadt Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>

@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.43 2012/06/20 17:31:55 mlarkin Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.44 2012/10/08 21:47:48 deraadt Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -23,6 +23,7 @@
 #include <sys/memrange.h>
 #include <sys/proc.h>
 #include <sys/user.h>
+#include <sys/reboot.h>
 #include <sys/hibernate.h>
 
 #include <uvm/uvm_extern.h>
@@ -295,7 +296,13 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 		}
 #endif
 
+<<<<<<< HEAD
 		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+=======
+		boothowto |= RB_POWERDOWN;
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+		boothowto &= ~RB_POWERDOWN;
+>>>>>>> master
 
 		acpi_sleep_pm(sc, state);
 		printf("%s: acpi_sleep_pm failed", DEVNAME(sc));
