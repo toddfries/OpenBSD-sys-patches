@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.274 2012/01/30 13:13:03 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.278 2012/10/09 11:57:33 jsing Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -73,7 +73,9 @@ uint32_t	sr_debug = 0
 		;
 #endif
 
-struct sr_softc *softraid0;
+struct sr_softc	*softraid0;
+struct sr_uuid	sr_bootuuid;
+u_int8_t	sr_bootkey[SR_CRYPTO_MAXKEYBYTES];
 
 int		sr_match(struct device *, void *, void *);
 void		sr_attach(struct device *, struct device *, void *);
@@ -103,7 +105,7 @@ int			sr_ioctl_disk(struct sr_softc *, struct bioc_disk *);
 int			sr_ioctl_setstate(struct sr_softc *,
 			    struct bioc_setstate *);
 int			sr_ioctl_createraid(struct sr_softc *,
-			    struct bioc_createraid *, int);
+			    struct bioc_createraid *, int, void *);
 int			sr_ioctl_deleteraid(struct sr_softc *,
 			    struct bioc_deleteraid *);
 int			sr_ioctl_discipline(struct sr_softc *,
@@ -1105,22 +1107,15 @@ sr_meta_native_bootprobe(struct sr_softc *sc, dev_t devno,
 
 		sr_meta_getdevname(sc, rawdev, devname, sizeof(devname));
 		if (sr_meta_validate(fake_sd, rawdev, md, NULL) == 0) {
-			if (md->ssdi.ssd_vol_flags & BIOC_SCNOAUTOASSEMBLE) {
-				DNPRINTF(SR_D_META, "%s: don't save %s\n",
-				    DEVNAME(sc), devname);
-			} else {
-				/* XXX fix M_WAITOK, this is boot time */
-				bc = malloc(sizeof(struct sr_boot_chunk),
-				    M_DEVBUF, M_WAITOK | M_ZERO);
-				bc->sbc_metadata =
-				    malloc(sizeof(struct sr_metadata),
-				    M_DEVBUF, M_WAITOK | M_ZERO);
-				bcopy(md, bc->sbc_metadata,
-				    sizeof(struct sr_metadata));
-				bc->sbc_mm = rawdev;
-				SLIST_INSERT_HEAD(bch, bc, sbc_link);
-				rv = SR_META_CLAIMED;
-			}
+			/* XXX fix M_WAITOK, this is boot time */
+			bc = malloc(sizeof(struct sr_boot_chunk),
+			    M_DEVBUF, M_WAITOK | M_ZERO);
+			bc->sbc_metadata = malloc(sizeof(struct sr_metadata),
+			    M_DEVBUF, M_WAITOK | M_ZERO);
+			bcopy(md, bc->sbc_metadata, sizeof(struct sr_metadata));
+			bc->sbc_mm = rawdev;
+			SLIST_INSERT_HEAD(bch, bc, sbc_link);
+			rv = SR_META_CLAIMED;
 		}
 
 		/* we are done, close partition */
@@ -1153,6 +1148,7 @@ sr_boot_assembly(struct sr_softc *sc)
 	struct sr_chunk		*hotspare, *chunk, *last;
 	u_int64_t		*ondisk = NULL;
 	dev_t			*devs = NULL;
+	void			*data;
 	char			devname[32];
 	int			rv = 0, i;
 
@@ -1233,6 +1229,7 @@ sr_boot_assembly(struct sr_softc *sc)
 			bv->sbv_level = bc->sbc_metadata->ssdi.ssd_level;
 			bv->sbv_volid = bc->sbc_metadata->ssdi.ssd_volid;
 			bv->sbv_chunk_no = bc->sbc_metadata->ssdi.ssd_chunk_no;
+			bv->sbv_flags = bc->sbc_metadata->ssdi.ssd_vol_flags;
 			bcopy(&bc->sbc_metadata->ssdi.ssd_uuid, &bv->sbv_uuid,
 			    sizeof(bc->sbc_metadata->ssdi.ssd_uuid));
 			SLIST_INIT(&bv->sbv_chunks);
@@ -1362,12 +1359,21 @@ sr_boot_assembly(struct sr_softc *sc)
 	 */
 	SLIST_FOREACH(bv, &bvh, sbv_link) {
 
-		bzero(&bc, sizeof(bc));
+		bzero(&bcr, sizeof(bcr));
+		data = NULL;
 
 		/* Check if this is a hotspare "volume". */
 		if (bv->sbv_level == SR_HOTSPARE_LEVEL &&
 		    bv->sbv_chunk_no == 1)
 			continue;
+
+		/*
+		 * Skip volumes that are marked as no auto assemble, unless
+		 * this was the volume which we actually booted from.
+		 */
+		if (bcmp(&sr_bootuuid, &bv->sbv_uuid, sizeof(sr_bootuuid)) != 0)
+			if (bv->sbv_flags & BIOC_SCNOAUTOASSEMBLE)
+				continue;
 
 #ifdef SR_DEBUG
 		DNPRINTF(SR_D_META, "%s: assembling volume ", DEVNAME(sc));
@@ -1429,11 +1435,16 @@ sr_boot_assembly(struct sr_softc *sc)
 		bcr.bc_level = bv->sbv_level;
 		bcr.bc_dev_list_len = bv->sbv_chunk_no * sizeof(dev_t);
 		bcr.bc_dev_list = devs;
-		bcr.bc_flags = BIOC_SCDEVT;
+		bcr.bc_flags = BIOC_SCDEVT |
+		    (bv->sbv_flags & BIOC_SCNOAUTOASSEMBLE);
+
+		if (bv->sbv_level == 'C' &&
+		    bcmp(&sr_bootuuid, &bv->sbv_uuid, sizeof(sr_bootuuid)) == 0)
+			data = sr_bootkey;
 
 		rw_enter_write(&sc->sc_lock);
 		bio_status_init(&sc->sc_status, &sc->sc_dev);
-		sr_ioctl_createraid(sc, &bcr, 0);
+		sr_ioctl_createraid(sc, &bcr, 0, data);
 		rw_exit_write(&sc->sc_lock);
 
 		rv++;
@@ -1808,6 +1819,8 @@ sr_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_shutdownhook = shutdownhook_establish(sr_shutdownhook, sc);
 
 	sr_boot_assembly(sc);
+
+	explicit_bzero(sr_bootkey, sizeof(sr_bootkey));
 }
 
 int
@@ -2305,7 +2318,8 @@ sr_bio_ioctl(struct device *dev, u_long cmd, caddr_t addr)
 
 	case BIOCCREATERAID:
 		DNPRINTF(SR_D_IOCTL, "createraid\n");
-		rv = sr_ioctl_createraid(sc, (struct bioc_createraid *)addr, 1);
+		rv = sr_ioctl_createraid(sc, (struct bioc_createraid *)addr,
+		    1, NULL);
 		break;
 
 	case BIOCDELETERAID:
@@ -3054,7 +3068,8 @@ sr_roam_chunks(struct sr_discipline *sd)
 }
 
 int
-sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
+sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc,
+    int user, void *data)
 {
 	struct sr_meta_opt_item *omi;
 	struct sr_chunk_head	*cl;
@@ -3207,7 +3222,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc, int user)
 				sr_meta_opt_handler(sd, omi->omi_som);
 
 		if (sd->sd_assemble) {
-			if ((i = sd->sd_assemble(sd, bc, no_chunk))) {
+			if ((i = sd->sd_assemble(sd, bc, no_chunk, data))) {
 				rv = i;
 				goto unwind;
 			}
