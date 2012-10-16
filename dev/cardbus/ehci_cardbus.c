@@ -62,7 +62,6 @@ extern int ehcidebug;
 int	ehci_cardbus_match(struct device *, void *, void *);
 void	ehci_cardbus_attach(struct device *, struct device *, void *);
 int	ehci_cardbus_detach(struct device *, int);
-int	ehci_cardbus_activate(struct device *, int);
 
 struct ehci_cardbus_softc {
 	ehci_softc_t		sc;
@@ -74,11 +73,7 @@ struct ehci_cardbus_softc {
 
 struct cfattach ehci_cardbus_ca = {
 	sizeof(struct ehci_cardbus_softc), ehci_cardbus_match,
-<<<<<<< HEAD
-	    ehci_cardbus_attach, ehci_cardbus_detach, ehci_cardbus_activate
-=======
 	ehci_cardbus_attach, ehci_cardbus_detach, ehci_activate
->>>>>>> master
 };
 
 #define CARDBUS_CBMEM PCI_CBMEM
@@ -192,12 +187,3 @@ ehci_cardbus_detach(struct device *self, int flags)
 	}
 	return (0);
 }
-<<<<<<< HEAD
-
-int
-ehci_cardbus_activate(struct device *self, int act)
-{
-	return ehci_activate(self, act);
-}
-=======
->>>>>>> master

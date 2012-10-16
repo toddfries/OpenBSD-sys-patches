@@ -254,7 +254,6 @@ apm_suspend(int state)
 	s = splhigh();
 	disable_intr();
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	boothowto |= RB_POWERDOWN;
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);

@@ -296,13 +296,9 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 		}
 #endif
 
-<<<<<<< HEAD
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
-=======
 		boothowto |= RB_POWERDOWN;
 		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 		boothowto &= ~RB_POWERDOWN;
->>>>>>> master
 
 		acpi_sleep_pm(sc, state);
 		printf("%s: acpi_sleep_pm failed", DEVNAME(sc));

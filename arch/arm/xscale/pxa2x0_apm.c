@@ -321,15 +321,11 @@ apm_suspend(struct pxa2x0_apm_softc *sc)
 
 	s = splhigh();
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
-<<<<<<< HEAD
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
-=======
 
 	boothowto |= RB_POWERDOWN;
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 	boothowto &= ~RB_POWERDOWN;
 
->>>>>>> master
 	splx(s);
 
 	pxa2x0_apm_sleep(sc);

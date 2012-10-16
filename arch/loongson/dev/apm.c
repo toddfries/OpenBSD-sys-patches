@@ -371,14 +371,9 @@ apm_suspend()
 
 	rv = config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
 
-<<<<<<< HEAD
-	/* return value from this should be checked */
-	(void) config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
-=======
 	boothowto |= RB_POWERDOWN;
 	(void) config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 	boothowto &= ~RB_POWERDOWN;
->>>>>>> master
 
 	if (rv == 0) {
 		rv = sys_platform->suspend();

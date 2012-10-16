@@ -271,8 +271,6 @@ sdactivate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_SUSPEND:
-		break;
-	case DVACT_POWERDOWN:
 		/*
 		 * We flush the cache, since we our next step before
 		 * DVACT_POWERDOWN might be a hibernate operation.
