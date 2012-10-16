@@ -325,117 +325,58 @@ bufq_restart(void)
 
 /*
  * disksort implementation.
- * There are two queues, one going forward and one going backwards.  We
- * switch between them after each is empty.  0 is forward, 1 is backwards.
  */
-
-#define BUF_INORDER(ba, bb, dir) \
-    (!(dir) == (((ba)->b_cylinder < (bb)->b_cylinder) || \
-    ((ba)->b_cylinder == (bb)->b_cylinder && (ba)->b_blkno < (bb)->b_blkno)))
-
-SIMPLEQ_HEAD(bufq_disksort_head, buf);
-
-#define dsentries b_bufq.bufq_data_disksort.bqf_entries
-
-struct bufq_disksort_data {
-	struct bufq_disksort_head queues[2];
-	int dir;
-};
-
-void simple_disksort(struct bufq_disksort_head *, struct buf *, int);
-void
-simple_disksort(struct bufq_disksort_head *head, struct buf *bp, int dir)
-{
-	struct buf *cur, *prev;
-
-	prev = NULL;
-	/*
-	 * we look for the first slot where we would fit, then insert
-	 * after the element we just passed.
-	 */
-	SIMPLEQ_FOREACH(cur, head, dsentries) {
-		if (BUF_INORDER(bp, cur, dir))
-			break;
-		prev = cur;
-	}
-	if (prev)
-		SIMPLEQ_INSERT_AFTER(head, prev, bp, dsentries);
-	else
-		SIMPLEQ_INSERT_HEAD(head, bp, dsentries);
-
-}
 
 void *
 bufq_disksort_create(void)
 {
-	struct bufq_disksort_data *data;
-	
-	data = malloc(sizeof(*data), M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (!data)
-		return NULL;
-	SIMPLEQ_INIT(&data->queues[0]);
-	SIMPLEQ_INIT(&data->queues[1]);
-
-	return data;
+	return (malloc(sizeof(struct buf), M_DEVBUF, M_NOWAIT | M_ZERO));
 }
 
 void
-bufq_disksort_destroy(void *vdata)
+bufq_disksort_destroy(void *data)
 {
-	free(vdata, M_DEVBUF);
+	free(data, M_DEVBUF);
 }
 
 void
-bufq_disksort_queue(void *vdata, struct buf *bp)
+bufq_disksort_queue(void *data, struct buf *bp)
 {
-	struct bufq_disksort_data *data = vdata;
-	struct buf *bph;
-	int dir;
-
-	dir = data->dir;
-	bph = SIMPLEQ_FIRST(&data->queues[dir]);
-	/* if we're in order, we've been passed. queue in the other dir */
-	if (bph && BUF_INORDER(bp, bph, dir))
-		simple_disksort(&data->queues[!dir], bp, !dir);
-	else
-		simple_disksort(&data->queues[dir], bp, dir);
+	disksort((struct buf *)data, bp);
 }
 
 struct buf *
-bufq_disksort_dequeue(void *vdata)
+bufq_disksort_dequeue(void *data)
 {
-	struct bufq_disksort_data *data = vdata;
-	struct bufq_disksort_head *head;
+	struct buf	*bufq = data;
 	struct buf	*bp;
 
-	head = &data->queues[data->dir];
-	bp = SIMPLEQ_FIRST(head);
-	if (bp == NULL) {
-		data->dir = !data->dir;
-		head = &data->queues[data->dir];
-		bp = SIMPLEQ_FIRST(head);
-	}
+	bp = bufq->b_actf;
 	if (bp != NULL)
-		SIMPLEQ_REMOVE_HEAD(head, dsentries);
+		bufq->b_actf = bp->b_actf;
+	if (bufq->b_actf == NULL)
+		bufq->b_actb = &bufq->b_actf;
 
 	return (bp);
 }
 
 void
-bufq_disksort_requeue(void *vdata, struct buf *bp)
+bufq_disksort_requeue(void *data, struct buf *bp)
 {
-	struct bufq_disksort_data *data = vdata;
+	struct buf	*bufq = data;
 
-	SIMPLEQ_INSERT_HEAD(&data->queues[data->dir], bp, dsentries);
+	bp->b_actf = bufq->b_actf;
+	bufq->b_actf = bp;
+	if (bp->b_actf == NULL)
+		bufq->b_actb = &bp->b_actf;
 }
 
 int
-bufq_disksort_peek(void *vdata)
+bufq_disksort_peek(void *data)
 {
-	struct bufq_disksort_data *data = vdata;
+	struct buf	*bufq = data;
 
-	return (SIMPLEQ_FIRST(&data->queues[0]) != NULL) ||
-	    (SIMPLEQ_FIRST(&data->queues[1]) != NULL);
+	return (bufq->b_actf != NULL);
 }
 
 /*
