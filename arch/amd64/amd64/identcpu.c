@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.39 2012/09/19 20:19:31 jsg Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.41 2012/10/09 09:16:09 jsg Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -146,9 +146,17 @@ const struct {
 	{ CPUIDECX_TOPEXT,	"TOPEXT" },
 }, cpu_seff0_ebxfeatures[] = {
 	{ SEFF0EBX_FSGSBASE,	"FSGSBASE" },
+	{ SEFF0EBX_BMI1,	"BMI1" },
+	{ SEFF0EBX_HLE,		"HLE" },
+	{ SEFF0EBX_AVX2,	"AVX2" },
 	{ SEFF0EBX_SMEP,	"SMEP" },
-	{ SEFF0EBX_EREP,	"EREP" },
+	{ SEFF0EBX_BMI2,	"BMI2" },
+	{ SEFF0EBX_ERMS,	"ERMS" },
 	{ SEFF0EBX_INVPCID,	"INVPCID" },
+	{ SEFF0EBX_RTM,		"RTM" },
+	{ SEFF0EBX_RDSEED,	"RDSEED" },
+	{ SEFF0EBX_ADX,		"ADX" },
+	{ SEFF0EBX_SMAP,	"SMAP" },
 };
 
 int
@@ -405,11 +413,12 @@ identifycpu(struct cpu_info *ci)
 
 	if (cpuid_level >= 0x07) {
 		/* "Structured Extended Feature Flags" */
-		CPUID_LEAF(0x7, 0, dummy, val, dummy, dummy);
+		CPUID_LEAF(0x7, 0, dummy, ci->ci_feature_sefflags, dummy, dummy);
 		max = sizeof(cpu_seff0_ebxfeatures) /
 		    sizeof(cpu_seff0_ebxfeatures[0]);
 		for (i = 0; i < max; i++)
-			if (val & cpu_seff0_ebxfeatures[i].bit)
+			if (ci->ci_feature_sefflags &
+			    cpu_seff0_ebxfeatures[i].bit)
 				printf(",%s", cpu_seff0_ebxfeatures[i].str);
 	}
 
