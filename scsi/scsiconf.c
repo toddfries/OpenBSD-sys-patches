@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.c,v 1.182 2011/09/22 21:36:00 jsing Exp $	*/
+/*	$OpenBSD: scsiconf.c,v 1.184 2012/10/16 10:30:52 jsg Exp $	*/
 /*	$NetBSD: scsiconf.c,v 1.57 1996/05/02 01:09:01 neil Exp $	*/
 
 /*
@@ -251,6 +251,7 @@ scsi_activate_lun(struct scsibus_softc *sc, int target, int lun, int act)
 	case DVACT_QUIESCE:
 	case DVACT_SUSPEND:
 	case DVACT_RESUME:
+	case DVACT_POWERDOWN:
 		config_suspend(dev, act);
 		break;
 	case DVACT_DEACTIVATE:
@@ -1105,7 +1106,7 @@ scsi_inqmatch(struct scsi_inquiry_data *inqbuf, const void *_base,
 			continue;
 		priority += len;
 
-#if SCSIDEBUG
+#ifdef SCSIDEBUG
 		printf("scsi_inqmatch: %d/%d/%d <%s, %s, %s>\n",
 		    priority, match->type, match->removable,
 		    match->vendor, match->product, match->revision);
