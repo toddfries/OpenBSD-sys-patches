@@ -233,7 +233,7 @@ hardclock(struct clockframe *frame)
 	if (stathz == 0)
 		statclock(frame);
 
-	if (p && (--(p->p_rrticks) <= 0))
+	if (--ci->ci_schedstate.spc_rrticks <= 0)
 		roundrobin(ci);
 
 	/*
