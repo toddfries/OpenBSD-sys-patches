@@ -1,15 +1,15 @@
-#	$OpenBSD: Makefile,v 1.39 2012/09/25 09:01:03 pascal Exp $
+#	$OpenBSD: Makefile,v 1.44 2012/10/13 14:10:35 jsing Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
-MAN=	boot.8
-MLINKS=	boot.8 boot.conf.5
+MAN?=	boot.8
+MLINKS?=boot.8 boot.conf.5
 
 .if ${MACHINE} == "i386"
 S	=${.CURDIR}/../../../..
 SADIR=	${.CURDIR}/..
 
-PROG=	boot
+PROG?=	boot
 LD?=	ld
 SIZE?=	size
 LDFLAGS+=-nostdlib -Bstatic -nopie
@@ -18,7 +18,7 @@ LDFLAGS+=-nostdlib -Bstatic -nopie
 CLEANFILES+=	srt0.o
 SRCS=	crt0.c
 .else
-LDFLAGS+=-Ttext $(LINKADDR) -Z -x -noinhibit-exec
+LDFLAGS+=-Ttext $(LINKADDR) -N -x
 CLEANFILES+=	crt0.o
 SRCS=	srt0.S
 .endif
@@ -53,8 +53,12 @@ SRCS+=	adler32.c crc32.c inflate.c inftrees.c
 boot.bin: boot
 	objcopy -v -O binary ${PROG} boot.bin
 
+CLEANFILES+= ${PROG}.new
+
 ${PROG}: $(OBJS)
-	$(LD) $(LDFLAGS) -o ${PROG} $(OBJS)
+	$(LD) $(LDFLAGS) -o ${PROG}.new $(OBJS)
+	@perl ${SADIR}/boot/check-boot.pl ${PROG}.new
+	@mv ${PROG}.new ${PROG}
 	@$(SIZE) ${PROG}
 
 .else
