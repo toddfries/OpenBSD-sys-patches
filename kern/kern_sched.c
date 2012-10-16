@@ -24,22 +24,11 @@
 #include <sys/resourcevar.h>
 #include <sys/signalvar.h>
 #include <sys/mutex.h>
-#include <sys/tree.h>
 
 #include <uvm/uvm_extern.h>
 
 #include <sys/malloc.h>
 
-static int
-sched_cmp_proc(struct proc *a, struct proc *b) {
-	if (a == b)
-		return 0;
-	if (timercmp(&(a->p_deadline), &(b->p_deadline), <))
-		return -1;
-	return 1;
-}
-
-RB_GENERATE_STATIC(prochead, proc, p_runq, sched_cmp_proc);
 
 void sched_kthreads_create(void *);
 
@@ -90,8 +79,10 @@ void
 sched_init_cpu(struct cpu_info *ci)
 {
 	struct schedstate_percpu *spc = &ci->ci_schedstate;
+	int i;
 
-	RB_INIT(&spc->spc_runq);
+	for (i = 0; i < SCHED_NQS; i++)
+		TAILQ_INIT(&spc->spc_qs[i]);
 
 	spc->spc_idleproc = NULL;
 
@@ -167,17 +158,18 @@ sched_idle(void *v)
 
 		cpuset_add(&sched_idle_cpus, ci);
 		cpu_idle_enter();
-
-		if (spc->spc_schedflags & SPCF_SHOULDHALT &&
-			 (spc->spc_schedflags & SPCF_HALTED) == 0) {
-			cpuset_del(&sched_idle_cpus, ci);
-			SCHED_LOCK(s);
-			atomic_setbits_int(&spc->spc_schedflags, SPCF_HALTED);
-			SCHED_UNLOCK(s);
-			wakeup(spc);
+		while (spc->spc_whichqs == 0) {
+			if (spc->spc_schedflags & SPCF_SHOULDHALT &&
+			    (spc->spc_schedflags & SPCF_HALTED) == 0) {
+				cpuset_del(&sched_idle_cpus, ci);
+				SCHED_LOCK(s);
+				atomic_setbits_int(&spc->spc_schedflags,
+				    spc->spc_whichqs ? 0 : SPCF_HALTED);
+				SCHED_UNLOCK(s);
+				wakeup(spc);
+			}
+			cpu_idle_cycle();
 		}
-		cpu_idle_cycle();
-
 		cpu_idle_leave();
 		cpuset_del(&sched_idle_cpus, ci);
 	}
@@ -230,13 +222,14 @@ void
 setrunqueue(struct proc *p)
 {
 	struct schedstate_percpu *spc;
+	int queue = p->p_priority >> 2;
 
 	SCHED_ASSERT_LOCKED();
 	spc = &p->p_cpu->ci_schedstate;
 	spc->spc_nrun++;
 
-	KASSERT(!RB_FIND(prochead, &spc->spc_runq, p));
-	RB_INSERT(prochead, &spc->spc_runq, p);
+	TAILQ_INSERT_TAIL(&spc->spc_qs[queue], p, p_runq);
+	spc->spc_whichqs |= (1 << queue);
 	cpuset_add(&sched_queued_cpus, p->p_cpu);
 
 	if (cpuset_isset(&sched_idle_cpus, p->p_cpu))
@@ -247,29 +240,38 @@ void
 remrunqueue(struct proc *p)
 {
 	struct schedstate_percpu *spc;
+	int queue = p->p_priority >> 2;
 
 	SCHED_ASSERT_LOCKED();
 	spc = &p->p_cpu->ci_schedstate;
 	spc->spc_nrun--;
 
-	KASSERT(RB_REMOVE(prochead, &spc->spc_runq, p));
-	if (RB_EMPTY(&spc->spc_runq))
-		cpuset_del(&sched_queued_cpus, p->p_cpu);
+	TAILQ_REMOVE(&spc->spc_qs[queue], p, p_runq);
+	if (TAILQ_EMPTY(&spc->spc_qs[queue])) {
+		spc->spc_whichqs &= ~(1 << queue);
+		if (spc->spc_whichqs == 0)
+			cpuset_del(&sched_queued_cpus, p->p_cpu);
+	}
 }
 
 struct proc *
 sched_chooseproc(void)
 {
 	struct schedstate_percpu *spc = &curcpu()->ci_schedstate;
-	struct proc *p, *p_tmp = NULL;
+	struct proc *p;
+	int queue;
 
 	SCHED_ASSERT_LOCKED();
 
 	if (spc->spc_schedflags & SPCF_SHOULDHALT) {
-		RB_FOREACH_SAFE(p, prochead, &spc->spc_runq, p_tmp) {
-			remrunqueue(p);
-			p->p_cpu = sched_choosecpu(p);
-			setrunqueue(p);
+		if (spc->spc_whichqs) {
+			for (queue = 0; queue < SCHED_NQS; queue++) {
+				TAILQ_FOREACH(p, &spc->spc_qs[queue], p_runq) {
+					remrunqueue(p);
+					p->p_cpu = sched_choosecpu(p);
+					setrunqueue(p);
+				}
+			}
 		}
 		p = spc->spc_idleproc;
 		KASSERT(p);
@@ -278,14 +280,17 @@ sched_chooseproc(void)
 		return (p);
 	}
 
-	if (!RB_EMPTY(&spc->spc_runq)) {
-		p = RB_MIN(prochead, &spc->spc_runq);
+again:
+	if (spc->spc_whichqs) {
+		queue = ffs(spc->spc_whichqs) - 1;
+		p = TAILQ_FIRST(&spc->spc_qs[queue]);
 		remrunqueue(p);
 		sched_noidle++;
 		KASSERT(p->p_stat == SRUN);
 	} else if ((p = sched_steal_proc(curcpu())) == NULL) {
-		while ((p = spc->spc_idleproc) == NULL) {
-			int s;
+		p = spc->spc_idleproc;
+		if (p == NULL) {
+                        int s;
 			/*
 			 * We get here if someone decides to switch during
 			 * boot before forking kthreads, bleh.
@@ -297,7 +302,8 @@ sched_chooseproc(void)
 			spl0();
 			delay(10);
 			SCHED_LOCK(s);
-		}
+			goto again;
+                }
 		KASSERT(p);
 		p->p_stat = SRUN;
 	} 
@@ -435,13 +441,15 @@ sched_steal_proc(struct cpu_info *self)
 
 	while ((ci = cpuset_first(&set)) != NULL) {
 		struct proc *p;
+		int queue;
 		int cost;
 
 		cpuset_del(&set, ci);
 
 		spc = &ci->ci_schedstate;
 
-		RB_FOREACH(p, prochead, &spc->spc_runq) {
+		queue = ffs(spc->spc_whichqs) - 1;
+		TAILQ_FOREACH(p, &spc->spc_qs[queue], p_runq) {
 			if (p->p_flag & P_CPUPEG)
 				continue;
 
@@ -494,10 +502,6 @@ int sched_cost_load = 1;
 int sched_cost_priority = 1;
 int sched_cost_runnable = 3;
 int sched_cost_resident = 1;
-#ifdef ARCH_HAVE_CPU_TOPOLOGY
-int sched_cost_diffcore = 2; /* cost for moving to a different core */
-int sched_cost_diffpkg = 3; /* cost for moving to a different package */
-#endif
 
 int
 sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
@@ -537,13 +541,6 @@ sched_proc_to_cpu_cost(struct cpu_info *ci, struct proc *p)
 		    log2(pmap_resident_count(p->p_vmspace->vm_map.pmap));
 		cost -= l2resident * sched_cost_resident;
 	}
-
-#ifdef ARCH_HAVE_CPU_TOPOLOGY
-	if (p->p_cpu->ci_pkg_id != ci->ci_pkg_id)
-		cost *= sched_cost_diffpkg;
-	else if (p->p_cpu->ci_core_id != ci->ci_core_id)
-		cost *= sched_cost_diffcore;
-#endif
 
 	return (cost);
 }
