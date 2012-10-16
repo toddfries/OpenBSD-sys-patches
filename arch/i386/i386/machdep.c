@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.512 2012/09/19 20:19:31 jsg Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.515 2012/10/09 09:16:09 jsg Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -1054,9 +1054,17 @@ const struct cpu_cpuid_feature i386_ecpuid_ecxfeatures[] = {
 
 const struct cpu_cpuid_feature cpu_seff0_ebxfeatures[] = {
 	{ SEFF0EBX_FSGSBASE,	"FSGSBASE" },
+	{ SEFF0EBX_BMI1,	"BMI1" },
+	{ SEFF0EBX_HLE,		"HLE" },
+	{ SEFF0EBX_AVX2,	"AVX2" },
 	{ SEFF0EBX_SMEP,	"SMEP" },
-	{ SEFF0EBX_EREP,	"EREP" },
+	{ SEFF0EBX_BMI2,	"BMI2" },
+	{ SEFF0EBX_ERMS,	"ERMS" },
 	{ SEFF0EBX_INVPCID,	"INVPCID" },
+	{ SEFF0EBX_RTM,		"RTM" },
+	{ SEFF0EBX_RDSEED,	"RDSEED" },
+	{ SEFF0EBX_ADX,		"ADX" },
+	{ SEFF0EBX_SMAP,	"SMAP" },
 };
 
 void
@@ -1892,14 +1900,16 @@ identifycpu(struct cpu_info *ci)
 			}
 
 			if (cpuid_level >= 0x07) {
-				u_int val, dummy;
+				u_int dummy;
 
 				/* "Structured Extended Feature Flags" */
-				CPUID_LEAF(0x7, 0, dummy, val, dummy, dummy);
+				CPUID_LEAF(0x7, 0, dummy,
+				    ci->ci_feature_sefflags, dummy, dummy);
 				max = sizeof(cpu_seff0_ebxfeatures) /
 				    sizeof(cpu_seff0_ebxfeatures[0]);
 				for (i = 0; i < max; i++)
-					if (val & cpu_seff0_ebxfeatures[i].feature_bit)
+					if (ci->ci_feature_sefflags &
+					    cpu_seff0_ebxfeatures[i].feature_bit)
 						printf("%s%s",
 						    (numbits == 0 ? "" : ","),
 						    cpu_seff0_ebxfeatures[i].feature_name);
@@ -2530,6 +2540,7 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	i386_broadcast_ipi(I386_IPI_HALT);
