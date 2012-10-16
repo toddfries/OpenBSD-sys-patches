@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehcivar.h,v 1.22 2012/05/12 17:39:51 mpi Exp $ */
+/*	$OpenBSD: ehcivar.h,v 1.24 2012/10/09 13:41:04 deraadt Exp $ */
 /*	$NetBSD: ehcivar.h,v 1.19 2005/04/29 15:04:29 augustss Exp $	*/
 
 /*
@@ -126,12 +126,10 @@ typedef struct ehci_softc {
 	int sc_id_vendor;		/* vendor ID for root hub */
 
 	u_int32_t sc_cmd;		/* shadow of cmd reg during suspend */
-	void *sc_shutdownhook;		/* cookie from shutdown hook */
 
 	usb_dma_t sc_fldma;
 	ehci_link_t *sc_flist;
 	u_int sc_flsize;
-	u_int sc_rand;			/* XXX need proper intr scheduling */
 
 	struct ehci_soft_islot sc_islots[EHCI_INTRQHS];
 
