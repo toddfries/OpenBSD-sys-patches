@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_bufq.c,v 1.19 2010/09/03 10:51:53 dlg Exp $	*/
+/*	$OpenBSD: kern_bufq.c,v 1.22 2012/10/09 16:44:15 beck Exp $	*/
 /*
  * Copyright (c) 2010 Thordur I. Bjornsson <thib@openbsd.org>
  * Copyright (c) 2010 David Gwynne <dlg@openbsd.org>
@@ -20,6 +20,7 @@
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
+#include <sys/mount.h>
 #include <sys/mutex.h>
 #include <sys/buf.h>
 #include <sys/errno.h>
@@ -55,6 +56,13 @@ struct buf	*bufq_fifo_dequeue(void *);
 void		 bufq_fifo_requeue(void *, struct buf *);
 int		 bufq_fifo_peek(void *);
 
+void		*bufq_nscan_create(void);
+void		 bufq_nscan_destroy(void *);
+void		 bufq_nscan_queue(void *, struct buf *);
+struct buf	*bufq_nscan_dequeue(void *);
+void		 bufq_nscan_requeue(void *, struct buf *);
+int		 bufq_nscan_peek(void *);
+
 const struct bufq_impl bufq_impls[BUFQ_HOWMANY] = {
 	{
 		bufq_disksort_create,
@@ -71,16 +79,40 @@ const struct bufq_impl bufq_impls[BUFQ_HOWMANY] = {
 		bufq_fifo_dequeue,
 		bufq_fifo_requeue,
 		bufq_fifo_peek
+	},
+	{
+		bufq_nscan_create,
+		bufq_nscan_destroy,
+		bufq_nscan_queue,
+		bufq_nscan_dequeue,
+		bufq_nscan_requeue,
+		bufq_nscan_peek
 	}
 };
 
 int
 bufq_init(struct bufq *bq, int type)
 {
+	u_int hi = BUFQ_HI, low = BUFQ_LOW;
+
 	if (type > BUFQ_HOWMANY)
 		panic("bufq_init: type %i unknown", type);
 
+	/*
+	 * Ensure that writes can't consume the entire amount of kva
+	 * available the buffer cache if we only have a limited amount
+	 * of kva available to us.
+	 */
+	if (hi >= (bcstats.kvaslots / 16)) {
+		hi = bcstats.kvaslots / 16;
+		if (hi < 2)
+			hi = 2;
+		low = hi / 2;
+	}
+
 	mtx_init(&bq->bufq_mtx, IPL_BIO);
+	bq->bufq_hi = hi;
+	bq->bufq_low = low;
 	bq->bufq_type = type;
 	bq->bufq_impl = &bufq_impls[type];
 	bq->bufq_data = bq->bufq_impl->impl_create();
@@ -222,6 +254,22 @@ bufq_drain(struct bufq *bq)
 }
 
 void
+bufq_wait(struct bufq *bq, struct buf *bp)
+{
+	if (bq->bufq_hi) {
+		assertwaitok();
+		mtx_enter(&bq->bufq_mtx);
+		while (bq->bufq_outstanding >= bq->bufq_hi) {
+			bq->bufq_waiting++;
+			msleep(&bq->bufq_waiting, &bq->bufq_mtx,
+			    PRIBIO, "bqwait", 0);
+			bq->bufq_waiting--;
+		}
+		mtx_leave(&bq->bufq_mtx);
+	}
+}
+
+void
 bufq_done(struct bufq *bq, struct buf *bp)
 {
 	mtx_enter(&bq->bufq_mtx);
@@ -229,6 +277,8 @@ bufq_done(struct bufq *bq, struct buf *bp)
 	KASSERT(bq->bufq_outstanding >= 0);
 	if (bq->bufq_stop && bq->bufq_outstanding == 0)
 		wakeup(&bq->bufq_outstanding);
+	if (bq->bufq_waiting && bq->bufq_outstanding < bq->bufq_low)
+		wakeup_one(&bq->bufq_waiting);
 	mtx_leave(&bq->bufq_mtx);
 	bp->b_bq = NULL;
 }
@@ -388,4 +438,143 @@ bufq_fifo_peek(void *data)
 	struct bufq_fifo_head	*head = data;
 
 	return (SIMPLEQ_FIRST(head) != NULL);
+}
+
+/*
+ * nscan implementation
+ */
+
+#define BUF_INORDER(ba, bb)			 \
+    (((ba)->b_cylinder < (bb)->b_cylinder) || \
+    ((ba)->b_cylinder == (bb)->b_cylinder && (ba)->b_blkno < (bb)->b_blkno))
+
+#define dsentries b_bufq.bufq_data_nscan.bqf_entries
+
+struct bufq_nscan_data {
+	struct bufq_nscan_head sorted;
+	struct bufq_nscan_head fifo;
+	int dir;
+	int leftoverroom; /* Remaining number of buffer inserts allowed  */
+};
+
+void bufq_nscan_resort(struct bufq_nscan_data *data);
+void bufq_simple_nscan(struct bufq_nscan_head *, struct buf *);
+
+void
+bufq_simple_nscan(struct bufq_nscan_head *head, struct buf *bp)
+{
+	struct buf *cur, *prev;
+
+	prev = NULL;
+	/*
+	 * We look for the first slot where we would fit, then insert
+	 * after the element we just passed.
+	 */
+	SIMPLEQ_FOREACH(cur, head, dsentries) {
+		if (BUF_INORDER(bp, cur))
+			break;
+		prev = cur;
+	}
+	if (prev)
+		SIMPLEQ_INSERT_AFTER(head, prev, bp, dsentries);
+	else
+		SIMPLEQ_INSERT_HEAD(head, bp, dsentries);
+
+}
+
+/*
+ * Take N elements from the fifo queue and sort them
+ */
+void
+bufq_nscan_resort(struct bufq_nscan_data *data)
+{
+	struct bufq_nscan_head *fifo = &data->fifo;
+	struct bufq_nscan_head *sorted = &data->sorted;
+	int count, segmentsize = BUFQ_NSCAN_N;
+	struct buf *bp;
+
+	for (count = 0; count < segmentsize; count++) {
+		bp = SIMPLEQ_FIRST(fifo);
+		if (!bp)
+			break;
+		SIMPLEQ_REMOVE_HEAD(fifo, dsentries);
+		bufq_simple_nscan(sorted, bp);
+	}
+	data->leftoverroom = segmentsize - count;
+}
+
+void *
+bufq_nscan_create(void)
+{
+	struct bufq_nscan_data *data;
+
+	data = malloc(sizeof(*data), M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (!data)
+		return NULL;
+	SIMPLEQ_INIT(&data->sorted);
+	SIMPLEQ_INIT(&data->fifo);
+
+	return data;
+}
+
+void
+bufq_nscan_destroy(void *vdata)
+{
+	free(vdata, M_DEVBUF);
+}
+
+void
+bufq_nscan_queue(void *vdata, struct buf *bp)
+{
+	struct bufq_nscan_data *data = vdata;
+
+	/*
+	 * If the previous sorted segment was small, we will continue
+	 * packing in bufs as long as they're in order.
+	 */
+	if (data->leftoverroom) {
+		struct buf *next = SIMPLEQ_FIRST(&data->sorted);
+		if (next && BUF_INORDER(next, bp)) {
+			bufq_simple_nscan(&data->sorted, bp);
+			data->leftoverroom--;
+			return;
+		}
+	}
+
+	SIMPLEQ_INSERT_TAIL(&data->fifo, bp, dsentries);
+
+}
+
+struct buf *
+bufq_nscan_dequeue(void *vdata)
+{
+	struct bufq_nscan_data *data = vdata;
+	struct bufq_nscan_head *sorted = &data->sorted;
+	struct buf	*bp;
+
+	if (SIMPLEQ_FIRST(sorted) == NULL)
+		bufq_nscan_resort(data);
+
+	bp = SIMPLEQ_FIRST(sorted);
+	if (bp != NULL)
+		SIMPLEQ_REMOVE_HEAD(sorted, dsentries);
+
+	return (bp);
+}
+
+void
+bufq_nscan_requeue(void *vdata, struct buf *bp)
+{
+	struct bufq_nscan_data *data = vdata;
+
+	SIMPLEQ_INSERT_HEAD(&data->fifo, bp, dsentries);
+}
+
+int
+bufq_nscan_peek(void *vdata)
+{
+	struct bufq_nscan_data *data = vdata;
+
+	return (SIMPLEQ_FIRST(&data->sorted) != NULL) ||
+	    (SIMPLEQ_FIRST(&data->fifo) != NULL);
 }

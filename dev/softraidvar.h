@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.116 2012/01/28 14:40:04 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.119 2012/10/09 13:55:36 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -254,7 +254,7 @@ struct sr_aoe_config {
 
 struct sr_boot_chunk {
 	struct sr_metadata *sbc_metadata;
-	dev_t		sbc_mm;			
+	dev_t		sbc_mm;			/* Device major/minor. */
 
 	u_int32_t	sbc_chunk_id;		/* Chunk ID. */
 	u_int32_t	sbc_state;		/* Chunk state. */
@@ -285,7 +285,11 @@ struct sr_boot_volume {
 	char		sbv_part;		/* Partition opened. */
 	void		*sbv_diskinfo;		/* MD disk information. */
 
+	u_int8_t	*sbv_keys;		/* Disk keys for volume. */
+	u_int8_t	*sbv_maskkey;		/* Mask key for disk keys. */
+
 	struct sr_boot_chunk_head sbv_chunks;	/* List of chunks. */
+	struct sr_meta_opt_head sbv_meta_opt;	/* List of optional metadata. */
 
 	SLIST_ENTRY(sr_boot_volume)	sbv_link;
 };
@@ -331,6 +335,9 @@ extern u_int32_t		sr_debug;
 #define	SR_MAX_STATES		7
 #define SR_VM_IGNORE_DIRTY	1
 #define SR_REBUILD_IO_SIZE	128 /* blocks */
+
+extern struct sr_uuid	sr_bootuuid;
+extern u_int8_t		sr_bootkey[SR_CRYPTO_MAXKEYBYTES];
 
 /* forward define to prevent dependency goo */
 struct sr_softc;
@@ -573,7 +580,7 @@ struct sr_discipline {
 	int			(*sd_create)(struct sr_discipline *,
 				    struct bioc_createraid *, int, int64_t);
 	int			(*sd_assemble)(struct sr_discipline *,
-				    struct bioc_createraid *, int);
+				    struct bioc_createraid *, int, void *);
 	int			(*sd_alloc_resources)(struct sr_discipline *);
 	int			(*sd_free_resources)(struct sr_discipline *);
 	int			(*sd_ioctl_handler)(struct sr_discipline *,
