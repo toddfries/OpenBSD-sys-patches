@@ -1,19 +1,19 @@
-#	$OpenBSD: Makefile,v 1.11 2012/09/25 09:01:03 pascal Exp $
+#	$OpenBSD: Makefile,v 1.16 2012/10/13 14:10:35 jsing Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
-MAN=	boot.8
-MLINKS=	boot.8 boot.conf.5
+MAN?=	boot.8
+MLINKS?=boot.8 boot.conf.5
 
 .if ${MACHINE} == "amd64"
 S	=${.CURDIR}/../../../..
 SADIR=	${.CURDIR}/..
 
-PROG=	boot
+PROG?=	boot
 SRCS=	srt0.S conf.c
 LD?=	ld
 SIZE?=	size
-LDFLAGS+=-nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -noinhibit-exec -nopie
+LDFLAGS+=-nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -nopie
 LDFLAGS+=-melf_i386 -L/usr/libdata 
 
 .PATH:	${SADIR}/libsa
@@ -33,6 +33,9 @@ SRCS+=	close.c closeall.c dev.c disklabel.c dkcksum.c fstat.c ioctl.c lseek.c \
 	open.c read.c stat.c write.c cread.c readdir.c cons.c loadfile.c \
 	elf32.c elf64.c
 SRCS+=	ufs.c
+.if defined(BOOT_CRYPTO)
+SRCS+=  aes_xts.c explicit_bzero.c hmac_sha1.c pbkdf2.c rijndael.c sha1.c
+.endif
 
 .PATH:	${S}/lib/libkern/arch/amd64 ${S}/lib/libkern
 SRCS+=	divdi3.c moddi3.c qdivrem.c
@@ -43,8 +46,12 @@ SRCS+=	adler32.c crc32.c inflate.c inftrees.c
 boot.bin: boot
 	objcopy -v -O binary ${PROG} boot.bin
 
+CLEANFILES+= ${PROG}.new
+
 ${PROG}: $(OBJS)
-	$(LD) $(LDFLAGS) -o ${PROG} $(OBJS)
+	$(LD) $(LDFLAGS) -o ${PROG}.new $(OBJS)
+	@perl ${SADIR}/boot/check-boot.pl ${PROG}.new
+	@mv ${PROG}.new ${PROG}
 	@$(SIZE) ${PROG}
 
 .else
@@ -53,6 +60,9 @@ NOPROG=
 
 .include <bsd.prog.mk>
 
+.if defined(BOOT_CRYPTO)
+CPPFLAGS+=-DBOOT_CRYPTO
+.endif
 CPPFLAGS+=-DBOOTMAGIC=$(BOOTMAGIC) ${DEBUGFLAGS} -DLINKADDR=${LINKADDR}
 CPPFLAGS+=-DSLOW -DSMALL -DNOBYFOUR -DNO_GZIP -DDYNAMIC_CRC_TABLE
 CPPFLAGS+=-DHEAP_LIMIT=${HEAP_LIMIT} -I${S}/stand/boot #-DCOMPAT_UFS

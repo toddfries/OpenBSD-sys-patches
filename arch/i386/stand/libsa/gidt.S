@@ -1,4 +1,4 @@
-/*	$OpenBSD: gidt.S,v 1.32 2006/12/26 19:30:44 tom Exp $	*/
+/*	$OpenBSD: gidt.S,v 1.35 2012/10/09 12:39:12 jsing Exp $	*/
 
 /*
  * Copyright (c) 1997 Michael Shalayeff
@@ -148,7 +148,7 @@ ENTRY(_rtt)
 #endif
 
 	/* Try to cause a triple fault... */
-	lidt    Idtr_reset
+	lidt	Idtr_reset
 	xorl	%eax, %eax
 	divl	%eax, %eax
 
@@ -159,26 +159,33 @@ ENTRY(_rtt)
 	movl	$0, %esp	/* segment violation */
 	ret
 
-	.align	8, 0x90
-pmm_init:
-	/* load idtr for interrupts */
-	lidt	Idtr
-	ret
-
-
-#ifdef __STDC__
 #define IPROC(n)	X##n
 #define IEMU(n)		IPROC(emu##n)
-#else
-#define IPROC(n)	X/**/n
-#define IEMU(n)		IPROC(emu/**/n)
-#endif
-	.align 8, 0x90
-idt:
+
+create_idt_entry:
+	movw	%ax, (%ebx)
+	movw	$S32TEXT, 2(%ebx)
+	movw	$((0x80|SDT_SYS386TGT) << 8), 4(%ebx)
+	shr	$16, %eax
+	movw	%ax, 6(%ebx)
+	addl	$8, %ebx
+	ret
+
+	.align	8, 0x90
+pmm_init:
+
 #define idte(e)	\
-	.short	IPROC(e); .short (S32TEXT); \
-	.short	((0x80|SDT_SYS386TGT) << 8); .short (LINKADDR >> 16)
-/* internal (0-31) */
+	movl $IPROC(e), %eax; call create_idt_entry
+#define idtb(b)	idte(emu##b)
+
+	/* Build interrupt descriptor table. */
+	/* Maskable interrupts (32-255) */
+	movl	$idt, %ebx
+	movl	$Idtr, %eax
+	movw	$(640 - 1), (%eax)
+	movl	%ebx, 2(%eax)
+
+	/* Internal (0-31) */
 	idte(de); idte(db); idte(nmi); idte(bp); idte(of); idte(br)
 	idte(ud); idte(nm); idte(df);  idte(fo); idte(ts); idte(np)
 	idte(ss); idte(gp); idte(pf);  idte(xx); idte(mf); idte(ac)
@@ -186,14 +193,7 @@ idt:
 	idte(xx); idte(xx); idte(xx);  idte(xx); idte(xx); idte(xx)
 	idte(xx); idte(xx); idte(xx);  idte(xx); idte(xx); idte(xx)
 	idte(xx) 
-		/* Maskable interrupts (32-255) */
-		/* BIOS entry points (32-63) */
-		/* DOS entry points (64-80) */
-#ifdef __STDC__
-#define idtb(b)	idte(emu##b)
-#else
-#define idtb(b)	idte(emu/**/b)
-#endif
+	/* BIOS entry points (32-63) */
 	idtb(0);  idtb(1);  idtb(2);  idtb(3);  idtb(4);  idtb(5)
 	idtb(6);  idtb(7);  idtb(8);  idtb(9);  idtb(10); idtb(11)
 	idtb(12); idtb(13); idtb(14); idtb(15); idtb(16); idtb(17)
@@ -202,20 +202,37 @@ idt:
 	idtb(30); idtb(31); idtb(32); idtb(33); idtb(34); idtb(35)
 	idtb(36); idtb(37); idtb(38); idtb(39); idtb(40); idtb(41)
 	idtb(42); idtb(43); idtb(44); idtb(45); idtb(46); idtb(47)
+	/* DOS entry points (64-80) */
+
+#undef idtb
 #undef idte
+
+	/* load idtr for interrupts */
+	lidt	Idtr
+	ret
+
+	.bss
+	.align 8, 0x90
+idt:
+	/* IDT has 80 entries at 8 bytes each. */
+	.space  640
+
 	.globl	Idtr
-Idtr:	.word	. - idt - 1
-	.long	idt
+Idtr:	.word	0  // 640 - 1
+	.long	0  // idt
+	.word	0
+
+	.text
+	.align	8
+	.globl	Idtr_real
+Idtr_real:
+	.word	1023
+	.long	0
 	.word	0
 
 	.align	8
-	.globl	Idtr_real
-Idtr_real:	.word	1023
-		.long	0
-		.word	0
-
-	.align	8
-Idtr_reset:	.long	0, 0
+Idtr_reset:
+	.long	0, 0
 
 	.align	8
 gdt:
@@ -314,6 +331,10 @@ IEMUENT(44); IEMUENT(45); IEMUENT(46); IEMUENT(47)
  * entry point for BIOS real-mode interface
  * all the magic for real-prot mode switching is here
  *
+ * Note: Once in real mode access to .data or .bss should be avoided since it
+ * may not be reachable within the current segment. The following code also
+ * assumes that .text is writeable.
+ *
  * Call:	%eax, %ecx, %edx, %ebx, %ebp, %esi, %edi, %es, %ds
  * Return:	%eax, %edx, %ecx, %eflags (as returned from BIOS)
  *
@@ -322,7 +343,7 @@ IEMUENT(44); IEMUENT(45); IEMUENT(46); IEMUENT(47)
 	.align	8, 0x90
 EMUh:
 	/* save %eax */
-	mov	%eax, 3f
+	mov	%eax, 5f
 	pop	%eax
 
 	pusha
@@ -334,18 +355,29 @@ EMUh:
 	/* save BIOS int vector */
 	mov	%al, intno
 
+	/* Load BIOS registers prior to switching to real mode. */
+	movl	_C_LABEL(BIOS_regs)+BIOSR_ES, %eax
+	mov	%eax, 7f
+	movl	_C_LABEL(BIOS_regs)+BIOSR_DS, %eax
+	mov	%eax, 6f
+
 	prot2real
 
 	push	%ds
 
-	addr32  movw (_C_LABEL(BIOS_regs)+(BIOSR_ES) - LINKADDR), %ax
-	movw	%ax, %es
-	addr32  movw (_C_LABEL(BIOS_regs)+(BIOSR_DS) - LINKADDR), %ax
-	movw	%ax, %ds
+	# data32 movl $Leax, %eax
+	.byte	0x66, 0xb8
+7:	.long	0x90909090
+	mov	%ax, %es
 
 	# data32 movl $Leax, %eax
 	.byte	0x66, 0xb8
-3:	.long	0x90909090
+6:	.long	0x90909090
+	mov	%ax, %ds
+
+	# data32 movl $Leax, %eax
+	.byte	0x66, 0xb8
+5:	.long	0x90909090
 
 	;sti
 	int	$0
@@ -354,20 +386,36 @@ intno	= . - 1
 
 	pop	%ds
 
-	addr32 movl %ebx, (_C_LABEL(BIOS_regs)+(BIOSR_BX) - LINKADDR)
-	movw	%es, %bx
-	addr32 movw %bx, (_C_LABEL(BIOS_regs)+(BIOSR_ES) - LINKADDR)
+	/* Preserve BX and ES for protected mode. */
+	addr32 movl %eax, (2f - LINKADDR)
+	movl	%ebx, %eax
+	addr32 movl %eax, (4f - LINKADDR)
+	movl	%es, %eax
+	addr32 movl %eax, (3f - LINKADDR)
+	addr32 movl (2f - LINKADDR), %eax
+
 	movb	%ah, %bh
 	lahf
 	xchgb	%ah, %bh
 
+	/* Preserve AX for protected mode. */
 	addr32 movl %eax, (2f - LINKADDR)
 
 	real2prot
 
 	# movl $Leax, %eax
-	.byte 0xb8
-2:	.long 0x90909090
+	.byte	0xb8
+4:	.long	0x90909090
+	movl	%eax, _C_LABEL(BIOS_regs)+BIOSR_BX
+
+	# movl $Leax, %eax
+	.byte	0xb8
+3:	.long	0x90909090
+	movl	%eax, _C_LABEL(BIOS_regs)+BIOSR_ES
+
+	# movl $Leax, %eax
+	.byte	0xb8
+2:	.long	0x90909090
 
 	/* pass BIOS return values back to caller */
 	movl	%eax, 0xb*4(%esp)
@@ -413,6 +461,6 @@ ENTRY(bootbuf)
 	sti
 
 	/* Jump to buffer */
-	ljmp $0x0, $0x7c00
+	ljmp	$0x0, $0x7c00
 
 	.end
