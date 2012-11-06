@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.71 2012/08/13 13:14:50 mikeb Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.73 2012/11/06 17:29:39 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -788,16 +788,7 @@ ixgbe_init(void *arg)
 	}
 #endif
 
-#ifdef IXGBE_FDIR
-	/* Init Flow director */
-	if (sc->hw.mac.type != ixgbe_mac_82598EB)
-		ixgbe_init_fdir_signature_82599(&sc->hw, fdir_pballoc);
-#endif
-
-	/*
-	 * Check on any SFP devices that
-	 * need to be kick-started
-	 */
+	/* Check on any SFP devices that need to be kick-started */
 	if (sc->hw.phy.type == ixgbe_phy_none) {
 		err = sc->hw.phy.ops.identify(&sc->hw);
 		if (err == IXGBE_ERR_SFP_NOT_SUPPORTED) {
@@ -3207,10 +3198,11 @@ ixgbe_setup_vlan_hw_support(struct ix_softc *sc)
 	 * A soft reset zero's out the VFTA, so
 	 * we need to repopulate it now.
 	 */
-	for (i = 0; i < IXGBE_VFTA_SIZE; i++)
+	for (i = 0; i < IXGBE_VFTA_SIZE; i++) {
 		if (sc->shadow_vfta[i] != 0)
 			IXGBE_WRITE_REG(&sc->hw, IXGBE_VFTA(i),
 			    sc->shadow_vfta[i]);
+	}
 
 	ctrl = IXGBE_READ_REG(&sc->hw, IXGBE_VLNCTRL);
 #if 0
@@ -3225,13 +3217,13 @@ ixgbe_setup_vlan_hw_support(struct ix_softc *sc)
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_VLNCTRL, ctrl);
 
 	/* On 82599 the VLAN enable is per/queue in RXDCTL */
-	if (sc->hw.mac.type != ixgbe_mac_82598EB)
+	if (sc->hw.mac.type != ixgbe_mac_82598EB) {
 		for (i = 0; i < sc->num_queues; i++) {
 			ctrl = IXGBE_READ_REG(&sc->hw, IXGBE_RXDCTL(i));
 			ctrl |= IXGBE_RXDCTL_VME;
 			IXGBE_WRITE_REG(&sc->hw, IXGBE_RXDCTL(i), ctrl);
 		}
-
+	}
 }
 
 void

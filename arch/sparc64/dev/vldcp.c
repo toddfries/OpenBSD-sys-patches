@@ -1,4 +1,4 @@
-/*	$OpenBSD: vldcp.c,v 1.3 2012/10/21 17:30:38 kettenis Exp $	*/
+/*	$OpenBSD: vldcp.c,v 1.6 2012/10/27 21:47:52 kettenis Exp $	*/
 /*
  * Copyright (c) 2009, 2012 Mark Kettenis
  *
@@ -63,6 +63,9 @@ struct vldcp_softc {
 	uint64_t	sc_rx_sysino;
 
 	struct ldc_conn	sc_lc;
+
+	struct selinfo	sc_rsel;
+	struct selinfo	sc_wsel;
 };
 
 int	vldcp_match(struct device *, void *, void *);
@@ -79,12 +82,25 @@ struct cfdriver vldcp_cd = {
 int	vldcp_tx_intr(void *);
 int	vldcp_rx_intr(void *);
 
+/*
+ * We attach to certain well-known channels.  These are assigned fixed
+ * device minor device numbers through their index in the table below.
+ * So "hvctl" gets minor 0, "spds" gets minor 1, etc. etc.
+ *
+ * We also attach to the domain services channels.  These are named
+ * "ldom-<guestname>" and get assigned a device minor starting at
+ * VLDC_LDOM_OFFSET.
+ */
+#define VLDC_NUM_SERVICES	64
+#define VLDC_LDOM_OFFSET	32
+int vldc_num_ldoms;
+
 struct vldc_svc {
 	const char *vs_name;
 	struct vldcp_softc *vs_sc;
 };
 
-struct vldc_svc vldc_svc[] = {
+struct vldc_svc vldc_svc[VLDC_NUM_SERVICES] = {
 	{ "hvctl" },
 	{ "spds" },
 	{ NULL }
@@ -99,6 +115,10 @@ vldcp_match(struct device *parent, void *match, void *aux)
 	for (svc = vldc_svc; svc->vs_name != NULL; svc++)
 		if (strcmp(ca->ca_name, svc->vs_name) == 0)
 			return (1);
+
+	if (strncmp(ca->ca_name, "ldom-", 5) == 0 &&
+	    strcmp(ca->ca_name, "ldom-primary") != 0)
+		return (1);
 
 	return (0);
 }
@@ -137,9 +157,6 @@ vldcp_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_DISABLED);
-	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_DISABLED);
-
 	lc = &sc->sc_lc;
 	lc->lc_id = ca->ca_id;
 	lc->lc_sc = sc;
@@ -156,9 +173,19 @@ vldcp_attach(struct device *parent, struct device *self, void *aux)
 		goto free_txqueue;
 	}
 
-	for (svc = vldc_svc; svc->vs_name != NULL; svc++)
-		if (strcmp(ca->ca_name, svc->vs_name) == 0)
+	for (svc = vldc_svc; svc->vs_name != NULL; svc++) {
+		if (strcmp(ca->ca_name, svc->vs_name) == 0) {
 			svc->vs_sc = sc;
+			break;
+		}
+	}
+
+	if (strncmp(ca->ca_name, "ldom-", 5) == 0 &&
+	    strcmp(ca->ca_name, "ldom-primary") != 0) {
+		int minor = VLDC_LDOM_OFFSET + vldc_num_ldoms++;
+		if (minor < nitems(vldc_svc))
+			vldc_svc[minor].vs_sc = sc;
+	}
 
 	printf(" channel \"%s\"\n", ca->ca_name);
 	return;
@@ -200,6 +227,8 @@ vldcp_tx_intr(void *arg)
 		lc->lc_tx_state = tx_state;
 	}
 
+	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_DISABLED);
+	selwakeup(&sc->sc_wsel);
 	wakeup(lc->lc_txq);
 	return (1);
 }
@@ -231,6 +260,9 @@ vldcp_rx_intr(void *arg)
 			break;
 		}
 		lc->lc_rx_state = rx_state;
+		cbus_intr_setenabled(sc->sc_rx_sysino, INTR_DISABLED);
+		selwakeup(&sc->sc_rsel);
+		wakeup(lc->lc_rxq);
 		return (1);
 	}
 
@@ -238,6 +270,7 @@ vldcp_rx_intr(void *arg)
 		return (0);
 
 	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_DISABLED);
+	selwakeup(&sc->sc_rsel);
 	wakeup(lc->lc_rxq);
 	return (1);
 }
@@ -413,6 +446,7 @@ retry:
 	next_tx_tail &= ((lc->lc_txq->lq_nentries * 64) - 1);
 
 	if (tx_head == next_tx_tail) {
+		cbus_intr_setenabled(sc->sc_tx_sysino, INTR_ENABLED);
 		ret = tsleep(lc->lc_txq, PWAIT | PCATCH, "hvwr", 0);
 		if (ret) {
 			splx(s);
@@ -529,13 +563,14 @@ vldcppoll(dev_t dev, int events, struct proc *p)
 	struct ldc_conn *lc;
 	uint64_t head, tail, state;
 	int revents = 0;
-	int err;
+	int s, err;
 
 	sc = vldcp_lookup(dev);
 	if (sc == NULL)
 		return (ENXIO);
 	lc = &sc->sc_lc;
 
+	s = spltty();
 	if (events & (POLLIN | POLLRDNORM)) {
 		err = hv_ldc_rx_get_state(lc->lc_id, &head, &tail, &state);
 
@@ -548,6 +583,16 @@ vldcppoll(dev_t dev, int events, struct proc *p)
 		if (err == 0 && state == LDC_CHANNEL_UP && head != tail)
 			revents |= events & (POLLOUT | POLLWRNORM);
 	}
-
+	if (revents == 0) {
+		if (events & (POLLIN | POLLRDNORM)) {
+			cbus_intr_setenabled(sc->sc_rx_sysino, INTR_ENABLED);
+			selrecord(p, &sc->sc_rsel);
+		}
+		if (events & (POLLOUT | POLLWRNORM)) {
+			cbus_intr_setenabled(sc->sc_tx_sysino, INTR_ENABLED);
+			selrecord(p, &sc->sc_wsel);
+		}
+	}
+	splx(s);
 	return revents;
 }
