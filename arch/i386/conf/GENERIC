@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.737 2012/08/03 16:37:19 mikeb Exp $
+#	$OpenBSD: GENERIC,v 1.738 2012/08/14 00:54:12 dlg Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -442,6 +442,7 @@ twe*	at pci?			# 3ware Escalade RAID controllers
 #aac*	at pci?			# Adaptec FSA RAID controllers
 ami*	at pci?			# AMI MegaRAID controllers
 mfi*	at pci?			# LSI MegaRAID SAS controllers
+mfii*	at pci?			# LSI MegaRAID SAS Fusion controllers
 cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 cac*	at eisa?
 ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
@@ -786,11 +787,19 @@ pseudo-device	nvram		1
 pseudo-device	sequencer	1
 pseudo-device	hotplug		1	# devices hot plugging
 
+<<<<<<< HEAD
 # mouse & keyboard multiplexor pseudo-devices
+=======
+>>>>>>> origin/stefan_fritsch.virtio
 
 # Virtio devices
 virtio*		at pci? 	# Virtio PCI device
 vioblk*		at virtio?	# Virtio block device
+<<<<<<< HEAD
 vioif*		at virtio?	# Virtio network device
+=======
+vio*		at virtio?	# Virtio network device
+# mouse & keyboard multiplexor pseudo-devices
+>>>>>>> origin/stefan_fritsch.virtio
 pseudo-device	wsmux		2
 pseudo-device	crypto		1

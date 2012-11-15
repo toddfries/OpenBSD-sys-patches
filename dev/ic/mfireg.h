@@ -1,4 +1,4 @@
-/* $OpenBSD: mfireg.h,v 1.30 2012/01/12 06:12:30 dlg Exp $ */
+/* $OpenBSD: mfireg.h,v 1.33 2012/08/17 11:31:34 dlg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -251,7 +251,7 @@ typedef enum {
 #define MFI_MAX_LD				64
 #define MFI_MAX_SPAN				8
 #define MFI_MAX_ARRAY_DEDICATED			16
-#define MFI_MAX_PHYSDISK			256
+#define MFI_MAX_PD				256
 
 /* sense buffer */
 struct mfi_sense {
@@ -299,10 +299,8 @@ union mfi_sgl_frame {
 
 struct mfi_init_frame {
 	struct mfi_frame_header	mif_header;
-	uint32_t		mif_qinfo_new_addr_lo;
-	uint32_t		mif_qinfo_new_addr_hi;
-	uint32_t		mif_qinfo_old_addr_lo;
-	uint32_t		mif_qinfo_old_addr_hi;
+	uint64_t		mif_qinfo_new_addr;
+	uint64_t		mif_qinfo_old_addr;
 	uint32_t		mif_reserved[6];
 } __packed;
 
@@ -310,29 +308,23 @@ struct mfi_init_frame {
 struct mfi_init_qinfo {
 	uint32_t		miq_flags;
 	uint32_t		miq_rq_entries;
-	uint32_t		miq_rq_addr_lo;
-	uint32_t		miq_rq_addr_hi;
-	uint32_t		miq_pi_addr_lo;
-	uint32_t		miq_pi_addr_hi;
-	uint32_t		miq_ci_addr_lo;
-	uint32_t		miq_ci_addr_hi;
+	uint64_t		miq_rq_addr;
+	uint64_t		miq_pi_addr;
+	uint64_t		miq_ci_addr;
 } __packed;
 
 #define MFI_IO_FRAME_SIZE	40
 struct mfi_io_frame {
 	struct mfi_frame_header	mif_header;
-	uint32_t		mif_sense_addr_lo;
-	uint32_t		mif_sense_addr_hi;
-	uint32_t		mif_lba_lo;
-	uint32_t		mif_lba_hi;
+	uint64_t		mif_sense_addr;
+	uint64_t		mif_lba;
 	union mfi_sgl		mif_sgl;
 } __packed;
 
 #define MFI_PASS_FRAME_SIZE	48
 struct mfi_pass_frame {
 	struct mfi_frame_header mpf_header;
-	uint32_t		mpf_sense_addr_lo;
-	uint32_t		mpf_sense_addr_hi;
+	uint64_t		mpf_sense_addr;
 	uint8_t			mpf_cdb[16];
 	union mfi_sgl		mpf_sgl;
 } __packed;
@@ -349,8 +341,7 @@ struct mfi_abort_frame {
 	struct mfi_frame_header maf_header;
 	uint32_t		maf_abort_context;
 	uint32_t		maf_pad;
-	uint32_t		maf_abort_mfi_addr_lo;
-	uint32_t		maf_abort_mfi_addr_hi;
+	uint64_t		maf_abort_mfi_addr;
 	uint32_t		maf_reserved[6];
 } __packed;
 
@@ -821,9 +812,8 @@ struct mfi_pd_address {
 struct mfi_pd_list {
 	uint32_t		mpl_size;
 	uint32_t		mpl_no_pd;
-	struct mfi_pd_address	mpl_address[1];
+	struct mfi_pd_address	mpl_address[MFI_MAX_PD];
 } __packed;
-#define MFI_PD_LIST_SIZE (MFI_MAX_PHYSDISK * sizeof(struct mfi_pd_address) + 8)
 
 struct mfi_pd {
 	uint16_t		mfp_id;
@@ -922,7 +912,7 @@ struct mfi_pd_details {
 struct mfi_pd_allowedops_list {
 	uint32_t		mpo_no_entries;
 	uint32_t		mpo_res;
-	uint32_t		mpo_allowedops_list[MFI_MAX_PHYSDISK];
+	uint32_t		mpo_allowedops_list[MFI_MAX_PD];
 } __packed;
 
 /* array configuration from MD_DCMD_CONF_GET */
@@ -942,6 +932,8 @@ struct mfi_array {
 #define MFI_PD_FAILED		0x11
 #define MFI_PD_REBUILD		0x14
 #define MFI_PD_ONLINE		0x18
+#define MFI_PD_COPYBACK		0x20
+#define MFI_PD_SYSTEM		0x40
 		uint8_t		mar_enc_pd;
 		uint8_t		mar_enc_slot;
 	} pd[MFI_MAX_PD_ARRAY];

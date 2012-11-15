@@ -115,6 +115,7 @@ struct virtqueue {
 
 	/* enqueue/dequeue status */
 	uint16_t		vq_avail_idx;
+	uint16_t		vq_avail_signalled;
 	uint16_t		vq_used_idx;
 	int			vq_queued;
 	struct mutex		*vq_aring_lock;

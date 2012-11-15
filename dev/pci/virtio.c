@@ -225,7 +225,8 @@ virtio_vq_intr(struct virtio_softc *sc)
 	struct virtqueue *vq;
 	int i, r = 0;
 
-	for (i = 0; i < sc->sc_nvqs; i++) {
+	/* going backwards is better for if_vio */
+	for (i = sc->sc_nvqs - 1; i >= 0; i--) {
 		vq = &sc->sc_vqs[i];
 		if (vq->vq_queued) {
 			vq->vq_queued = 0;
@@ -274,6 +275,7 @@ virtio_init_vq(struct virtio_softc *sc, struct virtqueue *vq, int reinit)
 
 	/* enqueue/dequeue status */
 	vq->vq_avail_idx = 0;
+	vq->vq_avail_signalled = 0xffff;
 	vq->vq_used_idx = 0;
 	vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
 	vq_sync_uring(sc, vq, BUS_DMASYNC_PREREAD);
@@ -289,7 +291,7 @@ virtio_alloc_vq(struct virtio_softc *sc,
 		const char *name)
 {
 	int vq_size, allocsize1, allocsize2, allocsize3, allocsize = 0;
-	int rsegs, r;
+	int rsegs, r, hdrlen;
 #define VIRTQUEUE_ALIGN(n)	(((n)+(VIRTIO_PAGE_SIZE-1))&	\
 				 ~(VIRTIO_PAGE_SIZE-1))
 
@@ -303,11 +305,13 @@ virtio_alloc_vq(struct virtio_softc *sc,
 	if (((vq_size - 1) & vq_size) != 0)
 		panic("vq_size not power of two: %d", vq_size);
 
+	hdrlen = (sc->sc_features & VIRTIO_F_RING_EVENT_IDX) ? 3 : 2;
+
 	/* allocsize1: descriptor table + avail ring + pad */
-	allocsize1 = VIRTQUEUE_ALIGN(sizeof(struct vring_desc)*vq_size
-				     + sizeof(uint16_t)*(3+vq_size));
+	allocsize1 = VIRTQUEUE_ALIGN(sizeof(struct vring_desc) * vq_size
+				     + sizeof(uint16_t) * (hdrlen + vq_size));
 	/* allocsize2: used ring + pad */
-	allocsize2 = VIRTQUEUE_ALIGN(sizeof(uint16_t)*3
+	allocsize2 = VIRTQUEUE_ALIGN(sizeof(uint16_t) * hdrlen
 				     + sizeof(struct vring_used_elem)*vq_size);
 	/* allocsize3: indirect table */
 	/* XXX: This is rather inefficient. In practice only a fraction of this
@@ -519,6 +523,7 @@ virtio_enqueue_prep(struct virtqueue *vq, int *slotp)
 
 /*
  * enqueue_reserve: allocate remaining slots and build the descriptor chain.
+ * Calls virtio_enqueue_abort() on failure.
  */
 int
 virtio_enqueue_reserve(struct virtqueue *vq, int slot, int nsegs)
@@ -665,13 +670,14 @@ virtio_enqueue_commit(struct virtio_softc *sc, struct virtqueue *vq,
 notify:
 	if (notifynow) {
 		if (vq->vq_owner->sc_features & VIRTIO_F_RING_EVENT_IDX) {
-			uint16_t o = vq->vq_avail->idx;
+			uint16_t o = vq->vq_avail_signalled;
 			uint16_t n = vq->vq_avail_idx;
 			uint16_t t = VQ_AVAIL_EVENT(vq) + 1;
 			publish_avail_idx(sc, vq);
 			if ((o < n && o < t && t <= n)
 			    || (o > n && (o < t || t <= n))) {
 				sc->sc_ops->kick(sc, vq->vq_index);
+				vq->vq_avail_signalled = n;
 			}
 		} else {
 			publish_avail_idx(sc, vq);
@@ -763,20 +769,16 @@ virtio_dequeue_commit(struct virtqueue *vq, int slot)
 }
 
 /*
- * Increase the event index in order to delay interrupt.
- * Then check whether we have new buffers in the used ring
- * since last evaluation of vq_used_idx. If the number of
- * available buffers in the used ring more then nslots we
- * must tell it to our caller. Else the caller set the event
- * index behind used->idx without to know about it.
+ * Increase the event index in order to delay interrupts.
+ * Returns 0 on success; returns 1 if the used ring has already advanced
+ * too far, and the caller must process the queue again (otherewise, no
+ * more interrupts will happen).
  */
 int
 virtio_postpone_intr(struct virtqueue *vq, uint16_t nslots)
 {
 	uint16_t	idx;
 
-	if (nslots >= vq->vq_num)
-		nslots = vq->vq_num - 1;
 	idx = vq->vq_used_idx + nslots;
 
 	/* set the new event index: avail_ring->used_event = idx */
@@ -792,27 +794,29 @@ virtio_postpone_intr(struct virtqueue *vq, uint16_t nslots)
 }
 
 /*
- * Wait until 3/4 of the available descriptors have been consumed.
+ * Postpone interrupt until 3/4 of the available descriptors have been
+ * consumed.
  */
 int
 virtio_postpone_intr_smart(struct virtqueue *vq)
 {
 	uint16_t	nslots;
 
-	nslots = (uint16_t)(vq->vq_avail->idx - vq->vq_used_idx) / 4 * 3;
+	nslots = (uint16_t)(vq->vq_avail->idx - vq->vq_used_idx) * 3 / 4;
 
 	return virtio_postpone_intr(vq, nslots);
 }
 
 /*
- * Postpone interrupt as far as possible
+ * Postpone interrupt until all of the available descriptors have been
+ * consumed.
  */
 int
 virtio_postpone_intr_far(struct virtqueue *vq)
 {
 	uint16_t	nslots;
 
-	nslots = vq->vq_num - 1;
+	nslots = (uint16_t)(vq->vq_avail->idx - vq->vq_used_idx);
 
 	return virtio_postpone_intr(vq, nslots);
 }
@@ -824,15 +828,25 @@ virtio_postpone_intr_far(struct virtqueue *vq)
 void
 virtio_stop_vq_intr(struct virtio_softc *sc, struct virtqueue *vq)
 {
-	/*
-	* If event index feature is negotiated the device should
-	* ignore flags field in the available ring structure
-	*/
-	if (!(sc->sc_features & VIRTIO_F_RING_EVENT_IDX)) {
+	if ((sc->sc_features & VIRTIO_F_RING_EVENT_IDX)) {
+		/*
+		 * No way to disable the interrupt completely with
+		 * RingEventIdx. Instead advance used_event by half
+		 * the possible value. This won't happen soon and
+		 * is far enough in the past to not trigger a spurios
+		 * interrupt.
+		 */
+		VQ_USED_EVENT(vq) = vq->vq_used_idx + 0x8000;
+	} else {
 		vq->vq_avail->flags |= VRING_AVAIL_F_NO_INTERRUPT;
+<<<<<<< HEAD
 		vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
 		vq->vq_queued++;
+=======
+>>>>>>> origin/stefan_fritsch.virtio
 	}
+	vq_sync_aring(sc, vq, BUS_DMASYNC_PREWRITE);
+	vq->vq_queued++;
 }
 
 int
