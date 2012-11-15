@@ -277,18 +277,6 @@ mfence(void)
 	__asm __volatile("mfence" : : : "memory");
 }
 
-static __inline void
-sfence(void)
-{
-	__asm __volatile("sfence" : : : "memory");
-}
-
-static __inline void
-lfence(void)
-{
-	__asm __volatile("lfence" : : : "memory");
-}
-
 static __inline u_int64_t
 rdtsc(void)
 {
