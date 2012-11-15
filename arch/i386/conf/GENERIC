@@ -787,19 +787,6 @@ pseudo-device	nvram		1
 pseudo-device	sequencer	1
 pseudo-device	hotplug		1	# devices hot plugging
 
-<<<<<<< HEAD
 # mouse & keyboard multiplexor pseudo-devices
-=======
->>>>>>> origin/stefan_fritsch.virtio
-
-# Virtio devices
-virtio*		at pci? 	# Virtio PCI device
-vioblk*		at virtio?	# Virtio block device
-<<<<<<< HEAD
-vioif*		at virtio?	# Virtio network device
-=======
-vio*		at virtio?	# Virtio network device
-# mouse & keyboard multiplexor pseudo-devices
->>>>>>> origin/stefan_fritsch.virtio
 pseudo-device	wsmux		2
 pseudo-device	crypto		1

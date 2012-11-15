@@ -810,39 +810,12 @@ file	dev/pci/gcu.c			gcu
 
 # AMD Geode CS5536 Audio
 device	auglx: audio, ac97
-<<<<<<< HEAD
 attach	auglx at pci
 file	dev/pci/auglx.c			auglx
 
 # Intel 3400 Thermal 
 device	itherm
 attach	itherm at pci
-=======
->>>>>>> origin/stefan_fritsch.virtio
-
-# VirtIO
-device	virtio {}
-file	dev/pci/virtio.c		virtio
-
-attach	virtio at pci with virtio_pci
-file	dev/pci/virtio_pci.c		virtio_pci
-
-device	vio
-attach	vio at virtio
-file	dev/pci/if_vio.c		vio
-
-device	vioblk: scsi
-attach	vioblk at virtio
-file	dev/pci/vioblk.c		vioblk
-<<<<<<< HEAD
-=======
-attach	auglx at pci
-file	dev/pci/auglx.c			auglx
-
-# Intel 3400 Thermal 
-device	itherm
-attach	itherm at pci
->>>>>>> origin/stefan_fritsch.virtio
 file	dev/pci/itherm.c		itherm
 
 # AMD Geode CS5536 PCI-ISA bridge
