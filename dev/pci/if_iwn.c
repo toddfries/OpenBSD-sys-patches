@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.116 2012/11/14 12:30:19 kettenis Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.118 2012/11/17 14:02:51 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -639,15 +639,13 @@ iwn5000_attach(struct iwn_softc *sc, pci_product_id_t pid)
 		break;
 	case IWN_HW_REV_TYPE_6005:
 		sc->limits = &iwn6000_sensitivity_limits;
-		if (pid == PCI_PRODUCT_INTEL_WL_6030_1 ||
+		if (pid == PCI_PRODUCT_INTEL_WL_1030_1 ||
+		    pid == PCI_PRODUCT_INTEL_WL_1030_2 ||
+		    pid == PCI_PRODUCT_INTEL_WL_6030_1 ||
 		    pid == PCI_PRODUCT_INTEL_WL_6030_2 ||
 		    pid == PCI_PRODUCT_INTEL_WL_6235_1) {
 			sc->fwname = "iwn-6030";
-
-			/* XXX: The 6235 generates a fatal firmware error when
-			 * Bluetooth coexistence is attempted, so don't try
-			 * it */
-			sc->sc_flags |= IWN_FLAG_NO_BT_COEX;
+			sc->sc_flags |= IWN_FLAG_ADV_BT_COEX;
 		} else
 			sc->fwname = "iwn-6005";
 		break;
@@ -4202,8 +4200,10 @@ iwn_config(struct iwn_softc *sc)
 		}
 	}
 
-	if (!(sc->sc_flags & IWN_FLAG_NO_BT_COEX)) {
-		/* Configure bluetooth coexistence. */
+	/* Configure bluetooth coexistence. */
+	if (sc->sc_flags & IWN_FLAG_ADV_BT_COEX) {
+		/* XXX Advanced bluetooth coexistence isn't implemented yet. */
+	} else {
 		error = iwn_send_btcoex(sc);
 		if (error != 0) {
 			printf("%s: could not configure bluetooth coexistence\n",

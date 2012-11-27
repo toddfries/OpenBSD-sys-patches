@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_oce.c,v 1.61 2012/11/14 17:25:46 mikeb Exp $	*/
+/*	$OpenBSD: if_oce.c,v 1.67 2012/11/27 18:08:21 gsoares Exp $	*/
 
 /*
  * Copyright (c) 2012 Mike Belopuhov
@@ -376,7 +376,7 @@ struct oce_softc {
 
 #define IF_LRO_ENABLED(ifp)	ISSET((ifp)->if_capabilities, IFCAP_LRO)
 
-int 	oce_probe(struct device *, void *, void *);
+int 	oce_match(struct device *, void *, void *);
 void	oce_attach(struct device *, struct device *, void *);
 int 	oce_pci_alloc(struct oce_softc *, struct pci_attach_args *);
 void	oce_attachhook(void *);
@@ -452,7 +452,7 @@ struct oce_ring *
 	oce_create_ring(struct oce_softc *, int nitems, int isize, int maxseg);
 void	oce_destroy_ring(struct oce_softc *, struct oce_ring *);
 int	oce_load_ring(struct oce_softc *, struct oce_ring *,
-	    struct phys_addr *, int max_segs);
+	    struct oce_pa *, int max_segs);
 static inline void *
 	oce_ring_get(struct oce_ring *);
 static inline void *
@@ -517,7 +517,7 @@ struct cfdriver oce_cd = {
 };
 
 struct cfattach oce_ca = {
-	sizeof(struct oce_softc), oce_probe, oce_attach, NULL, NULL
+	sizeof(struct oce_softc), oce_match, oce_attach, NULL, NULL
 };
 
 const struct pci_matchid oce_devices[] = {
@@ -529,7 +529,7 @@ const struct pci_matchid oce_devices[] = {
 };
 
 int
-oce_probe(struct device *parent, void *match, void *aux)
+oce_match(struct device *parent, void *match, void *aux)
 {
 	return (pci_matchbyid(aux, oce_devices, nitems(oce_devices)));
 }
@@ -661,7 +661,6 @@ fail_2:
 fail_1:
 	oce_dma_free(sc, &sc->sc_mbx);
 }
-
 
 int
 oce_pci_alloc(struct oce_softc *sc, struct pci_attach_args *pa)
@@ -951,7 +950,6 @@ oce_iff(struct oce_softc *sc)
 	oce_set_promisc(sc, promisc);
 }
 
-
 void
 oce_link_status(struct oce_softc *sc)
 {
@@ -962,6 +960,7 @@ oce_link_status(struct oce_softc *sc)
 		link_state = LINK_STATE_FULL_DUPLEX;
 	if (ifp->if_link_state == link_state)
 		return;
+	ifp->if_baudrate = 0;
 	if (link_state != LINK_STATE_DOWN) {
 		switch (sc->sc_link_speed) {
 		case 1:
@@ -977,8 +976,7 @@ oce_link_status(struct oce_softc *sc)
 			ifp->if_baudrate = IF_Gbps(10);
 			break;
 		}
-	} else
-		ifp->if_baudrate = 0;
+	}
 	ifp->if_link_state = link_state;
 	if_link_state_change(ifp);
 }
@@ -1133,6 +1131,7 @@ oce_stop(struct oce_softc *sc)
 	int i;
 
 	timeout_del(&sc->sc_tick);
+	timeout_del(&sc->sc_rxrefill);
 
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
@@ -1399,7 +1398,7 @@ oce_intr(void *arg)
 	struct oce_eq *eq = sc->sc_eq[0];
 	struct oce_eqe *eqe;
 	struct oce_cq *cq = NULL;
-	int i, claimed = 0, neqe = 0;
+	int i, neqe = 0;
 
 	oce_dma_sync(&eq->ring->dma, BUS_DMASYNC_POSTREAD);
 
@@ -1408,12 +1407,13 @@ oce_intr(void *arg)
 		neqe++;
 	}
 
-	if (!neqe)
-		goto eq_arm; /* Spurious */
+	/* Spurious? */
+	if (!neqe) {
+		oce_arm_eq(eq, 0, TRUE, FALSE);
+		return (0);
+	}
 
 	oce_dma_sync(&eq->ring->dma, BUS_DMASYNC_PREWRITE);
-
-	claimed = 1;
 
  	/* Clear EQ entries, but dont arm */
 	oce_arm_eq(eq, neqe, FALSE, TRUE);
@@ -1422,17 +1422,11 @@ oce_intr(void *arg)
 	for (i = 0; i < eq->cq_valid; i++) {
 		cq = eq->cq[i];
 		(*cq->cq_intr)(cq->cb_arg);
-	}
-
-	/* Arm all CQs connected to this EQ */
-	for (i = 0; i < eq->cq_valid; i++) {
-		cq = eq->cq[i];
 		oce_arm_cq(cq, 0, TRUE);
 	}
 
-eq_arm:
 	oce_arm_eq(eq, 0, TRUE, FALSE);
-	return (claimed);
+	return (1);
 }
 
 /* Handle the Completion Queue for transmit */
@@ -1746,7 +1740,8 @@ oce_init_lro(struct oce_softc *sc)
 		lro = &sc->sc_rq[i]->lro;
 		rc = tcp_lro_init(lro);
 		if (rc != 0) {
-			printf("%s: LRO init failed\n");
+			printf("%s: LRO init failed\n",
+			    sc->sc_dev.dv_xname);
 			return rc;
 		}
 		lro->ifp = &sc->sc_ac.ac_if;
@@ -1844,9 +1839,8 @@ oce_refill_rx(void *arg)
 
 	s = splnet();
 	OCE_RQ_FOREACH(sc, rq, i) {
-		oce_alloc_rx_bufs(rq);
-		if (!rq->pending)
-			timeout_add(&sc->sc_rxrefill, 1);
+		if (!oce_alloc_rx_bufs(rq))
+			timeout_add(&sc->sc_rxrefill, 5);
 	}
 	splx(s);
 }
@@ -2589,7 +2583,7 @@ oce_destroy_ring(struct oce_softc *sc, struct oce_ring *ring)
 
 int
 oce_load_ring(struct oce_softc *sc, struct oce_ring *ring,
-    struct phys_addr *pa_list, int maxsegs)
+    struct oce_pa *pa, int maxsegs)
 {
 	struct oce_dma_mem *dma = &ring->dma;
 	int i;
@@ -2601,17 +2595,15 @@ oce_load_ring(struct oce_softc *sc, struct oce_ring *ring,
 	}
 
 	if (dma->map->dm_nsegs > maxsegs) {
-		printf("%s: too many segments", sc->sc_dev.dv_xname);
+		printf("%s: too many segments\n", sc->sc_dev.dv_xname);
 		return (0);
 	}
 
 	bus_dmamap_sync(dma->tag, dma->map, 0, dma->map->dm_mapsize,
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
-	for (i = 0; i < dma->map->dm_nsegs; i++) {
-		pa_list[i].lo = ADDR_LO(dma->map->dm_segs[i].ds_addr);
-		pa_list[i].hi = ADDR_HI(dma->map->dm_segs[i].ds_addr);
-	}
+	for (i = 0; i < dma->map->dm_nsegs; i++)
+		pa[i].addr = dma->map->dm_segs[i].ds_addr;
 
 	return (dma->map->dm_nsegs);
 }
@@ -2834,26 +2826,26 @@ oce_cmd(struct oce_softc *sc, int subsys, int opcode, int version,
 	mbx->payload_length = length;
 
 	if (epayload) {
-		mbx->u0.s.sge_count = 1;
+		mbx->flags = OCE_MBX_F_SGE;
 		oce_dma_sync(&sc->sc_pld, BUS_DMASYNC_PREREAD);
 		bcopy(payload, epayload, length);
-		mbx->payload.u0.u1.sgl[0].paddr = OCE_MEM_DVA(&sc->sc_pld);
-		mbx->payload.u0.u1.sgl[0].length = length;
+		mbx->pld.sgl[0].addr = OCE_MEM_DVA(&sc->sc_pld);
+		mbx->pld.sgl[0].length = length;
 		hdr = (struct mbx_hdr *)epayload;
 	} else {
-		mbx->u0.s.embedded = 1;
-		bcopy(payload, &mbx->payload, length);
-		hdr = (struct mbx_hdr *)&mbx->payload;
+		mbx->flags = OCE_MBX_F_EMBED;
+		bcopy(payload, mbx->pld.data, length);
+		hdr = (struct mbx_hdr *)&mbx->pld.data;
 	}
 
-	hdr->u0.req.opcode = opcode;
-	hdr->u0.req.subsystem = subsys;
-	hdr->u0.req.request_length = length - sizeof(*hdr);
-	hdr->u0.req.version = version;
+	hdr->subsys = subsys;
+	hdr->opcode = opcode;
+	hdr->version = version;
+	hdr->length = length - sizeof(*hdr);
 	if (opcode == OPCODE_COMMON_FUNCTION_RESET)
-		hdr->u0.req.timeout = 2 * OCE_MBX_TIMEOUT;
+		hdr->timeout = 2 * OCE_MBX_TIMEOUT;
 	else
-		hdr->u0.req.timeout = OCE_MBX_TIMEOUT;
+		hdr->timeout = OCE_MBX_TIMEOUT;
 
 	if (epayload)
 		oce_dma_sync(&sc->sc_pld, BUS_DMASYNC_PREWRITE);
@@ -2864,7 +2856,7 @@ oce_cmd(struct oce_softc *sc, int subsys, int opcode, int version,
 			oce_dma_sync(&sc->sc_pld, BUS_DMASYNC_POSTWRITE);
 			bcopy(epayload, payload, length);
 		} else
-			bcopy(&mbx->payload, payload, length);
+			bcopy(&mbx->pld.data, payload, length);
 	} else
 		printf("%s: mailbox timeout, subsys %d op %d ver %d "
 		    "%spayload lenght %d\n", sc->sc_dev.dv_xname, subsys,
@@ -2891,16 +2883,16 @@ oce_first_mcc(struct oce_softc *sc)
 	mbx = oce_ring_get(mq->ring);
 	bzero(mbx, sizeof(struct oce_mbx));
 
-	cmd = (struct mbx_get_common_fw_version *)&mbx->payload;
+	cmd = (struct mbx_get_common_fw_version *)&mbx->pld.data;
 
 	hdr = &cmd->hdr;
-	hdr->u0.req.subsystem = SUBSYS_COMMON;
-	hdr->u0.req.opcode = OPCODE_COMMON_GET_FW_VERSION;
-	hdr->u0.req.version = OCE_MBX_VER_V0;
-	hdr->u0.req.timeout = OCE_MBX_TIMEOUT;
-	hdr->u0.req.request_length = sizeof(*cmd) - sizeof(*hdr);
+	hdr->subsys = SUBSYS_COMMON;
+	hdr->opcode = OPCODE_COMMON_GET_FW_VERSION;
+	hdr->version = OCE_MBX_VER_V0;
+	hdr->timeout = OCE_MBX_TIMEOUT;
+	hdr->length = sizeof(*cmd) - sizeof(*hdr);
 
-	mbx->u0.s.embedded = 1;
+	mbx->flags = OCE_MBX_F_EMBED;
 	mbx->payload_length = sizeof(*cmd);
 	oce_dma_sync(&mq->ring->dma, BUS_DMASYNC_PREREAD |
 	    BUS_DMASYNC_PREWRITE);
@@ -2962,22 +2954,22 @@ oce_create_iface(struct oce_softc *sc, uint8_t *macaddr)
 	int err = 0;
 
 	/* interface capabilities to give device when creating interface */
-	caps = MBX_RX_IFACE_FLAGS_BROADCAST | MBX_RX_IFACE_FLAGS_UNTAGGED |
-	    MBX_RX_IFACE_FLAGS_PROMISC | MBX_RX_IFACE_FLAGS_MCAST_PROMISC |
-	    MBX_RX_IFACE_FLAGS_RSS;
+	caps = MBX_RX_IFACE_BROADCAST | MBX_RX_IFACE_UNTAGGED |
+	    MBX_RX_IFACE_PROMISC | MBX_RX_IFACE_MCAST_PROMISC |
+	    MBX_RX_IFACE_RSS;
 
 	/* capabilities to enable by default (others set dynamically) */
-	caps_en = MBX_RX_IFACE_FLAGS_BROADCAST | MBX_RX_IFACE_FLAGS_UNTAGGED;
+	caps_en = MBX_RX_IFACE_BROADCAST | MBX_RX_IFACE_UNTAGGED;
 
 	if (!IS_XE201(sc)) {
 		/* LANCER A0 workaround */
-		caps |= MBX_RX_IFACE_FLAGS_PASS_L3L4_ERR;
-		caps_en |= MBX_RX_IFACE_FLAGS_PASS_L3L4_ERR;
+		caps |= MBX_RX_IFACE_PASS_L3L4_ERR;
+		caps_en |= MBX_RX_IFACE_PASS_L3L4_ERR;
 	}
 
 	/* enable capabilities controlled via driver startup parameters */
 	if (sc->sc_rss_enable)
-		caps_en |= MBX_RX_IFACE_FLAGS_RSS;
+		caps_en |= MBX_RX_IFACE_RSS;
 
 	bzero(&cmd, sizeof(cmd));
 
@@ -3161,8 +3153,7 @@ oce_set_promisc(struct oce_softc *sc, int enable)
 
 	if (enable)
 		req->iface_flags = req->iface_flags_mask =
-		    MBX_RX_IFACE_FLAGS_PROMISC |
-		    MBX_RX_IFACE_FLAGS_VLAN_PROMISC;
+		    MBX_RX_IFACE_PROMISC | MBX_RX_IFACE_VLAN_PROMISC;
 
 	return (oce_cmd(sc, SUBSYS_COMMON, OPCODE_COMMON_SET_IFACE_RX_FILTER,
 	    OCE_MBX_VER_V0, &cmd, sizeof(cmd)));
