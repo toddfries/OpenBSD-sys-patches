@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.137 2012/10/08 21:47:45 deraadt Exp $ */
+/* $OpenBSD: machdep.c,v 1.139 2012/11/01 21:09:17 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -124,6 +124,10 @@
 #include <dev/tc/ioasicvar.h>
 #endif
 
+#ifdef BROKEN_PROM_CONSOLE
+extern void sio_intr_shutdown(void);
+#endif
+
 int	cpu_dump(void);
 int	cpu_dumpsize(void);
 u_long	cpu_dump_mempagecnt(void);
@@ -210,8 +214,8 @@ phys_ram_seg_t mem_clusters[VM_PHYSSEG_MAX];	/* low size bits overloaded */
 int	mem_cluster_cnt;
 
 void
-alpha_init(pfn, ptb, bim, bip, biv)
-	u_long pfn;		/* first free PFN number */
+alpha_init(unused, ptb, bim, bip, biv)
+	u_long unused;
 	u_long ptb;		/* PFN of current level 1 page table */
 	u_long bim;		/* bootinfo magic */
 	u_long bip;		/* bootinfo pointer */
@@ -784,11 +788,11 @@ nobootinfo:
 	 */
 	hz = hwrpb->rpb_intr_freq >> 12;
 	if (!(60 <= hz && hz <= 10240)) {
-		hz = 1024;
 #ifdef DIAGNOSTIC
 		printf("WARNING: unbelievable rpb_intr_freq: %ld (%d hz)\n",
 			hwrpb->rpb_intr_freq, hz);
 #endif
+		hz = 1024;
 	}
 }
 
@@ -1029,6 +1033,10 @@ boot(howto)
 haltsys:
 	doshutdownhooks();
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+
+#ifdef BROKEN_PROM_CONSOLE
+	sio_intr_shutdown(NULL);
+#endif
 
 #if defined(MULTIPROCESSOR)
 #if 0 /* XXX doesn't work when called from here?! */
