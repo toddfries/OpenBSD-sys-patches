@@ -1,4 +1,4 @@
-/*	$OpenBSD: ocereg.h,v 1.4 2012/10/11 16:38:10 mikeb Exp $	*/
+/*	$OpenBSD: if_ocereg.h,v 1.7 2012/11/26 19:03:59 mikeb Exp $	*/
 
 /*-
  * Copyright (C) 2012 Emulex
@@ -43,18 +43,16 @@
 #define OCE_BAR_CSR			0x18
 #define OCE_BAR_DB			0x20
 
-#define	IMAGE_TRANSFER_SIZE		(32 * 1024)	/* 32K at a time */
-
-/* CSR register offsets */
-#define	MPU_EP_CONTROL			0
-#define	MPU_EP_SEMAPHORE_BE3		0xac
-#define	MPU_EP_SEMAPHORE_XE201		0x400
+/* MPU semaphore */
+#define	MPU_EP_SEM_BE			0x0ac
+#define	MPU_EP_SEM_XE201		0x400
 #define MPU_EP_SEMAPHORE(sc) \
-	((IS_BE(sc)) ? MPU_EP_SEMAPHORE_BE3 : MPU_EP_SEMAPHORE_XE201)
-#define	PCICFG_INTR_CTRL		0xfc
-#define	HOSTINTR_MASK			(1 << 29)
-#define	HOSTINTR_PFUNC_SHIFT		26
-#define	HOSTINTR_PFUNC_MASK		7
+	((IS_BE(sc)) ? MPU_EP_SEM_BE : MPU_EP_SEM_XE201)
+#define	 MPU_EP_SEM_STAGE_MASK		0xffff
+#define	 MPU_EP_SEM_ERROR		(1<<31)
+
+#define	PCI_INTR_CTRL			0xfc
+#define	 HOSTINTR_MASK			(1<<29)
 
 /* POST status reg struct */
 #define	POST_STAGE_POWER_ON_RESET	0x00
@@ -65,43 +63,13 @@
 #define	POST_STAGE_ARMFW_UE		0xf000
 
 /* DOORBELL registers */
-#define	PD_RXULP_DB			0x0100
 #define	PD_TXULP_DB			0x0060
-#define	DB_RQ_ID_MASK			0x3FF
-
+#define	PD_RXULP_DB			0x0100
 #define	PD_CQ_DB			0x0120
-#define	PD_EQ_DB			PD_CQ_DB
-#define	PD_MPU_MBOX_DB			0x0160
+#define	PD_EQ_DB			0x0120	/* same as CQ */
+#define	 PD_EQ_DB_EVENT			 (1<<10)
 #define	PD_MQ_DB			0x0140
-
-/* EQE completion types */
-#define	EQ_MINOR_CODE_COMPLETION 	0x00
-#define	EQ_MINOR_CODE_OTHER		0x01
-#define	EQ_MAJOR_CODE_COMPLETION 	0x00
-
-/* Link Status field values */
-#define	PHY_LINK_FAULT_NONE		0x0
-#define	PHY_LINK_FAULT_LOCAL		0x01
-#define	PHY_LINK_FAULT_REMOTE		0x02
-
-#define	PHY_LINK_SPEED_ZERO		0x0	/* No link */
-#define	PHY_LINK_SPEED_10MBPS		0x1	/* (10 Mbps) */
-#define	PHY_LINK_SPEED_100MBPS		0x2	/* (100 Mbps) */
-#define	PHY_LINK_SPEED_1GBPS		0x3	/* (1 Gbps) */
-#define	PHY_LINK_SPEED_10GBPS		0x4	/* (10 Gbps) */
-
-#define	PHY_LINK_DUPLEX_NONE		0x0
-#define	PHY_LINK_DUPLEX_HALF		0x1
-#define	PHY_LINK_DUPLEX_FULL		0x2
-
-#define	NTWK_PORT_A			0x0	/* (Port A) */
-#define	NTWK_PORT_B			0x1	/* (Port B) */
-
-#define	PHY_LINK_SPEED_ZERO			0x0	/* (No link.) */
-#define	PHY_LINK_SPEED_10MBPS		0x1	/* (10 Mbps) */
-#define	PHY_LINK_SPEED_100MBPS		0x2	/* (100 Mbps) */
-#define	PHY_LINK_SPEED_1GBPS		0x3	/* (1 Gbps) */
-#define	PHY_LINK_SPEED_10GBPS		0x4	/* (10 Gbps) */
+#define	PD_MPU_MBOX_DB			0x0160
 
 /* Hardware Address types */
 #define	MAC_ADDRESS_TYPE_STORAGE	0x0	/* (Storage MAC Address) */
@@ -111,32 +79,25 @@
 #define	MAC_ADDRESS_TYPE_FCOE		0x4	/* (FCoE MAC Address) */
 
 /* CREATE_IFACE capability and cap_en flags */
-#define MBX_RX_IFACE_FLAGS_RSS		0x4
-#define MBX_RX_IFACE_FLAGS_PROMISCUOUS	0x8
-#define MBX_RX_IFACE_FLAGS_BROADCAST	0x10
-#define MBX_RX_IFACE_FLAGS_UNTAGGED	0x20
-#define MBX_RX_IFACE_FLAGS_VLAN_PROMISCUOUS	0x80
-#define MBX_RX_IFACE_FLAGS_VLAN		0x100
-#define MBX_RX_IFACE_FLAGS_MCAST_PROMISCUOUS	0x200
-#define MBX_RX_IFACE_FLAGS_PASS_L2_ERR	0x400
-#define MBX_RX_IFACE_FLAGS_PASS_L3L4_ERR	0x800
-#define MBX_RX_IFACE_FLAGS_MULTICAST	0x1000
-#define MBX_RX_IFACE_RX_FILTER_IF_MULTICAST_HASH 0x2000
-#define MBX_RX_IFACE_FLAGS_HDS		0x4000
-#define MBX_RX_IFACE_FLAGS_DIRECTED	0x8000
-#define MBX_RX_IFACE_FLAGS_VMQ		0x10000
-#define MBX_RX_IFACE_FLAGS_NETQ		0x20000
-#define MBX_RX_IFACE_FLAGS_QGROUPS	0x40000
-#define MBX_RX_IFACE_FLAGS_LSO		0x80000
-#define MBX_RX_IFACE_FLAGS_LRO		0x100000
+#define MBX_RX_IFACE_RSS		0x000004
+#define MBX_RX_IFACE_PROMISC		0x000008
+#define MBX_RX_IFACE_BROADCAST		0x000010
+#define MBX_RX_IFACE_UNTAGGED		0x000020
+#define MBX_RX_IFACE_VLAN_PROMISC	0x000080
+#define MBX_RX_IFACE_VLAN		0x000100
+#define MBX_RX_IFACE_MCAST_PROMISC	0x000200
+#define MBX_RX_IFACE_PASS_L2_ERR	0x000400
+#define MBX_RX_IFACE_PASS_L3L4_ERR	0x000800
+#define MBX_RX_IFACE_MCAST		0x001000
+#define MBX_RX_IFACE_MCAST_HASH		0x002000
+#define MBX_RX_IFACE_HDS		0x004000
+#define MBX_RX_IFACE_DIRECTED		0x008000
+#define MBX_RX_IFACE_VMQ		0x010000
+#define MBX_RX_IFACE_NETQ		0x020000
+#define MBX_RX_IFACE_QGROUPS		0x040000
+#define MBX_RX_IFACE_LSO		0x080000
+#define MBX_RX_IFACE_LRO		0x100000
 
-#define	MQ_RING_CONTEXT_SIZE_16		0x5	/* (16 entries) */
-#define	MQ_RING_CONTEXT_SIZE_32		0x6	/* (32 entries) */
-#define	MQ_RING_CONTEXT_SIZE_64		0x7	/* (64 entries) */
-#define	MQ_RING_CONTEXT_SIZE_128	0x8	/* (128 entries) */
-
-#define	MBX_DB_READY_BIT		0x1
-#define	MBX_DB_HI_BIT			0x2
 #define	ASYNC_EVENT_CODE_LINK_STATE	0x1
 #define	ASYNC_EVENT_LINK_UP		0x1
 #define	ASYNC_EVENT_LINK_DOWN		0x0
@@ -151,16 +112,10 @@
 #define	NTWK_LOGICAL_LINK_DOWN		0
 #define	NTWK_LOGICAL_LINK_UP		1
 
-/* Rx filter bits */
-#define	NTWK_RX_FILTER_IP_CKSUM 	0x1
-#define	NTWK_RX_FILTER_TCP_CKSUM	0x2
-#define	NTWK_RX_FILTER_UDP_CKSUM	0x4
-#define	NTWK_RX_FILTER_STRIP_CRC	0x8
-
 /* max SGE per mbx */
 #define	MAX_MBX_SGE			19
 
-/* Max multicast filter size*/
+/* Max multicast filter size */
 #define OCE_MAX_MC_FILTER_SIZE		32
 
 /* PCI SLI (Service Level Interface) capabilities register */
@@ -183,383 +138,63 @@
 #define OCE_INTF_FAMILY_A0_CHIP		0xA	/* Lancer A0 chip (supported) */
 #define OCE_INTF_FAMILY_B0_CHIP		0xB	/* Lancer B0 chip (future) */
 
-#define	NIC_WQE_SIZE	16
-#define	NIC_UNICAST	0x00
-#define	NIC_MULTICAST	0x01
-#define	NIC_BROADCAST	0x02
-
-#define	NIC_HDS_NO_SPLIT	0x00
-#define	NIC_HDS_SPLIT_L3PL	0x01
-#define	NIC_HDS_SPLIT_L4PL	0x02
+#define	NIC_WQE_SIZE			16
 
 #define	NIC_WQ_TYPE_FORWARDING		0x01
 #define	NIC_WQ_TYPE_STANDARD		0x02
 #define	NIC_WQ_TYPE_LOW_LATENCY		0x04
 
-#define OCE_RESET_STATS		1
-#define OCE_RETAIN_STATS	0
-#define OCE_TXP_SW_SZ		48
+#define OCE_TXP_SW_SZ			48
 
-typedef union pci_sli_intf_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t sli_valid:3;
-		uint32_t sli_hint2:5;
-		uint32_t sli_hint1:8;
-		uint32_t sli_if_type:4;
-		uint32_t sli_family:4;
-		uint32_t sli_rev:4;
-		uint32_t rsv0:3;
-		uint32_t sli_func_type:1;
-#else
-		uint32_t sli_func_type:1;
-		uint32_t rsv0:3;
-		uint32_t sli_rev:4;
-		uint32_t sli_family:4;
-		uint32_t sli_if_type:4;
-		uint32_t sli_hint1:8;
-		uint32_t sli_hint2:5;
-		uint32_t sli_valid:3;
-#endif
-	} bits;
-} __packed pci_sli_intf_t;
+#define OCE_SLI_FUNCTION(reg)		((reg) & 0x1)
+#define OCE_SLI_REVISION(reg)		(((reg) >> 4) & 0xf)
+#define OCE_SLI_FAMILY(reg)		(((reg) >> 8) & 0xf)
+#define OCE_SLI_IFTYPE(reg)		(((reg) >> 12) & 0xf)
+#define OCE_SLI_HINT1(reg)		(((reg) >> 16) & 0xff)
+#define OCE_SLI_HINT2(reg)		(((reg) >> 24) & 0x1f)
+#define OCE_SLI_SIGNATURE(reg)		(((reg) >> 29) & 0x7)
 
-/* physical address structure to be used in MBX */
-struct phys_addr {
-	/* dw0 */
-	uint32_t lo;
-	/* dw1 */
-	uint32_t hi;
+#define PD_MPU_MBOX_DB_READY		(1<<0)
+#define PD_MPU_MBOX_DB_HI		(1<<1)
+#define PD_MPU_MBOX_DB_ADDR_SHIFT	2
+
+struct oce_pa {
+	uint64_t		addr;
 } __packed;
 
-typedef union pcicfg_intr_ctl_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t winselect:2;
-		uint32_t hostintr:1;
-		uint32_t pfnum:3;
-		uint32_t vf_cev_int_line_en:1;
-		uint32_t winaddr:23;
-		uint32_t membarwinen:1;
-#else
-		uint32_t membarwinen:1;
-		uint32_t winaddr:23;
-		uint32_t vf_cev_int_line_en:1;
-		uint32_t pfnum:3;
-		uint32_t hostintr:1;
-		uint32_t winselect:2;
-#endif
-	} bits;
-} __packed pcicfg_intr_ctl_t;
-
-typedef union pcicfg_semaphore_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t rsvd:31;
-		uint32_t lock:1;
-#else
-		uint32_t lock:1;
-		uint32_t rsvd:31;
-#endif
-	} bits;
-} __packed pcicfg_semaphore_t;
-
-typedef union pcicfg_soft_reset_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t nec_ll_rcvdetect:8;
-		uint32_t dbg_all_reqs_62_49:14;
-		uint32_t scratchpad0:1;
-		uint32_t exception_oe:1;
-		uint32_t soft_reset:1;
-		uint32_t rsvd0:7;
-#else
-		uint32_t rsvd0:7;
-		uint32_t soft_reset:1;
-		uint32_t exception_oe:1;
-		uint32_t scratchpad0:1;
-		uint32_t dbg_all_reqs_62_49:14;
-		uint32_t nec_ll_rcvdetect:8;
-#endif
-	} bits;
-} __packed pcicfg_soft_reset_t;
-
-typedef union pcicfg_online1_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t host8_online:1;
-		uint32_t host7_online:1;
-		uint32_t host6_online:1;
-		uint32_t host5_online:1;
-		uint32_t host4_online:1;
-		uint32_t host3_online:1;
-		uint32_t host2_online:1;
-		uint32_t ipc_online:1;
-		uint32_t arm_online:1;
-		uint32_t txp_online:1;
-		uint32_t xaui_online:1;
-		uint32_t rxpp_online:1;
-		uint32_t txpb_online:1;
-		uint32_t rr_online:1;
-		uint32_t pmem_online:1;
-		uint32_t pctl1_online:1;
-		uint32_t pctl0_online:1;
-		uint32_t pcs1online_online:1;
-		uint32_t mpu_iram_online:1;
-		uint32_t pcs0online_online:1;
-		uint32_t mgmt_mac_online:1;
-		uint32_t lpcmemhost_online:1;
-#else
-		uint32_t lpcmemhost_online:1;
-		uint32_t mgmt_mac_online:1;
-		uint32_t pcs0online_online:1;
-		uint32_t mpu_iram_online:1;
-		uint32_t pcs1online_online:1;
-		uint32_t pctl0_online:1;
-		uint32_t pctl1_online:1;
-		uint32_t pmem_online:1;
-		uint32_t rr_online:1;
-		uint32_t txpb_online:1;
-		uint32_t rxpp_online:1;
-		uint32_t xaui_online:1;
-		uint32_t txp_online:1;
-		uint32_t arm_online:1;
-		uint32_t ipc_online:1;
-		uint32_t host2_online:1;
-		uint32_t host3_online:1;
-		uint32_t host4_online:1;
-		uint32_t host5_online:1;
-		uint32_t host6_online:1;
-		uint32_t host7_online:1;
-		uint32_t host8_online:1;
-#endif
-	} bits;
-} __packed pcicfg_online1_t;
-
-typedef union mpu_ep_semaphore_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t error:1;
-		uint32_t backup_fw:1;
-		uint32_t iscsi_no_ip:1;
-		uint32_t iscsi_ip_conflict:1;
-		uint32_t option_rom_installed:1;
-		uint32_t iscsi_drv_loaded:1;
-		uint32_t rsvd0:10;
-		uint32_t stage:16;
-#else
-		uint32_t stage:16;
-		uint32_t rsvd0:10;
-		uint32_t iscsi_drv_loaded:1;
-		uint32_t option_rom_installed:1;
-		uint32_t iscsi_ip_conflict:1;
-		uint32_t iscsi_no_ip:1;
-		uint32_t backup_fw:1;
-		uint32_t error:1;
-#endif
-	} bits;
-} __packed mpu_ep_semaphore_t;
-
-typedef union mpu_ep_control_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t cpu_reset:1;
-		uint32_t rsvd1:15;
-		uint32_t ep_ram_init_status:1;
-		uint32_t rsvd0:12;
-		uint32_t m2_rxpbuf:1;
-		uint32_t m1_rxpbuf:1;
-		uint32_t m0_rxpbuf:1;
-#else
-		uint32_t m0_rxpbuf:1;
-		uint32_t m1_rxpbuf:1;
-		uint32_t m2_rxpbuf:1;
-		uint32_t rsvd0:12;
-		uint32_t ep_ram_init_status:1;
-		uint32_t rsvd1:15;
-		uint32_t cpu_reset:1;
-#endif
-	} bits;
-} __packed mpu_ep_control_t;
-
-/* RX doorbell */
-typedef union pd_rxulp_db_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t num_posted:8;
-		uint32_t invalidate:1;
-		uint32_t rsvd1:13;
-		uint32_t qid:10;
-#else
-		uint32_t qid:10;
-		uint32_t rsvd1:13;
-		uint32_t invalidate:1;
-		uint32_t num_posted:8;
-#endif
-	} bits;
-} __packed pd_rxulp_db_t;
-
-/* TX doorbell */
-typedef union pd_txulp_db_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t rsvd1:2;
-		uint32_t num_posted:14;
-		uint32_t rsvd0:6;
-		uint32_t qid:10;
-#else
-		uint32_t qid:10;
-		uint32_t rsvd0:6;
-		uint32_t num_posted:14;
-		uint32_t rsvd1:2;
-#endif
-	} bits;
-} __packed pd_txulp_db_t;
-
-/* CQ doorbell */
-typedef union cq_db_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t rsvd1:2;
-		uint32_t rearm:1;
-		uint32_t num_popped:13;
-		uint32_t rsvd0:5;
-		uint32_t event:1;
-		uint32_t qid:10;
-#else
-		uint32_t qid:10;
-		uint32_t event:1;
-		uint32_t rsvd0:5;
-		uint32_t num_popped:13;
-		uint32_t rearm:1;
-		uint32_t rsvd1:2;
-#endif
-	} bits;
-} __packed cq_db_t;
-
-/* EQ doorbell */
-typedef union eq_db_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t rsvd1:2;
-		uint32_t rearm:1;
-		uint32_t num_popped:13;
-		uint32_t rsvd0:5;
-		uint32_t event:1;
-		uint32_t clrint:1;
-		uint32_t qid:9;
-#else
-		uint32_t qid:9;
-		uint32_t clrint:1;
-		uint32_t event:1;
-		uint32_t rsvd0:5;
-		uint32_t num_popped:13;
-		uint32_t rearm:1;
-		uint32_t rsvd1:2;
-#endif
-	} bits;
-} __packed eq_db_t;
-
-/* bootstrap mbox doorbell */
-typedef union pd_mpu_mbox_db_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t address:30;
-		uint32_t hi:1;
-		uint32_t ready:1;
-#else
-		uint32_t ready:1;
-		uint32_t hi:1;
-		uint32_t address:30;
-#endif
-	} bits;
-} __packed pd_mpu_mbox_db_t;
-
-/* MQ ring doorbell */
-typedef union pd_mq_db_u {
-	uint32_t dw0;
-	struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-		uint32_t rsvd1:2;
-		uint32_t num_posted:14;
-		uint32_t rsvd0:5;
-		uint32_t mq_id:11;
-#else
-		uint32_t mq_id:11;
-		uint32_t rsvd0:5;
-		uint32_t num_posted:14;
-		uint32_t rsvd1:2;
-#endif
-	} bits;
-} __packed pd_mq_db_t;
-
-/*
- * Event Queue Entry
- */
-struct oce_eqe {
-	uint32_t evnt;
+struct oce_sge {
+	uint64_t		addr;
+	uint32_t		length;
 } __packed;
 
-/* MQ scatter gather entry. Array of these make an SGL */
-struct oce_mq_sge {
-	uint32_t pa_lo;
-	uint32_t pa_hi;
-	uint32_t length;
+struct mbx_hdr {
+	uint8_t			opcode;
+	uint8_t			subsys;
+	uint8_t			port;
+	uint8_t			domain;
+	uint32_t		timeout;
+	uint32_t		length;
+	uint8_t			version;
+#define  OCE_MBX_VER_V2		 0x0002
+#define  OCE_MBX_VER_V1		 0x0001
+#define  OCE_MBX_VER_V0		 0x0000
+	uint8_t			_rsvd[3];
 } __packed;
 
-/*
- * payload can contain an SGL or an embedded array of upto 59 dwords
- */
-#define OCE_MBX_PAYLOAD		236
-struct oce_mbx_payload {
-	union {
-		union {
-			struct oce_mq_sge sgl[MAX_MBX_SGE];
-			uint8_t embedded[OCE_MBX_PAYLOAD];
-		} u1;
-		uint32_t dw[OCE_MBX_PAYLOAD / 4];
-	} u0;
-} __packed;
+/* payload can contain an SGL or an embedded array of upto 59 dwords */
+#define OCE_MBX_PAYLOAD			(59 * 4)
 
-/*
- * MQ MBX structure
- */
 struct oce_mbx {
+	uint32_t		flags;
+#define  OCE_MBX_F_EMBED	 (1<<0)
+#define  OCE_MBX_F_SGE		 (1<<3)
+	uint32_t		payload_length;
+	uint32_t		tag[2];
+	uint32_t		_rsvd;
 	union {
-		struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-			uint32_t special:8;
-			uint32_t rsvd1:16;
-			uint32_t sge_count:5;
-			uint32_t rsvd0:2;
-			uint32_t embedded:1;
-#else
-			uint32_t embedded:1;
-			uint32_t rsvd0:2;
-			uint32_t sge_count:5;
-			uint32_t rsvd1:16;
-			uint32_t special:8;
-#endif
-		} s;
-		uint32_t dw0;
-	} u0;
-
-	uint32_t payload_length;
-	uint32_t tag[2];
-	uint32_t rsvd2[1];
-	struct oce_mbx_payload payload;
+		struct oce_sge	sgl[MAX_MBX_SGE];
+		uint8_t		data[OCE_MBX_PAYLOAD];
+	} pld;
 } __packed;
 
 /* completion queue entry for MQ */
@@ -603,6 +238,9 @@ struct oce_mq_cqe {
 		uint32_t dw[4];
 	} u0;
 } __packed;
+
+#define	MQ_CQE_VALID(_cqe)		((_cqe)->u0.dw[3])
+#define	MQ_CQE_INVALIDATE(_cqe)		((_cqe)->u0.dw[3] = 0)
 
 /* Mailbox Completion Status Codes */
 enum MBX_COMPLETION_STATUS {
@@ -722,32 +360,31 @@ struct oce_bmbx {
 	struct oce_mq_cqe cqe;
 } __packed;
 
-/* ---[ MBXs start here ]---------------------------------------------- */
 /* MBXs sub system codes */
-enum MBX_SUBSYSTEM_CODES {
-	MBX_SUBSYSTEM_RSVD = 0,
-	MBX_SUBSYSTEM_COMMON = 1,
-	MBX_SUBSYSTEM_COMMON_ISCSI = 2,
-	MBX_SUBSYSTEM_NIC = 3,
-	MBX_SUBSYSTEM_TOE = 4,
-	MBX_SUBSYSTEM_PXE_UNDI = 5,
-	MBX_SUBSYSTEM_ISCSI_INI = 6,
-	MBX_SUBSYSTEM_ISCSI_TGT = 7,
-	MBX_SUBSYSTEM_MILI_PTL = 8,
-	MBX_SUBSYSTEM_MILI_TMD = 9,
-	MBX_SUBSYSTEM_RDMA = 10,
-	MBX_SUBSYSTEM_LOWLEVEL = 11,
-	MBX_SUBSYSTEM_LRO = 13,
-	IOCBMBX_SUBSYSTEM_DCBX = 15,
-	IOCBMBX_SUBSYSTEM_DIAG = 16,
-	IOCBMBX_SUBSYSTEM_VENDOR = 17
+enum SUBSYS_CODES {
+	SUBSYS_RSVD = 0,
+	SUBSYS_COMMON = 1,
+	SUBSYS_COMMON_ISCSI = 2,
+	SUBSYS_NIC = 3,
+	SUBSYS_TOE = 4,
+	SUBSYS_PXE_UNDI = 5,
+	SUBSYS_ISCSI_INI = 6,
+	SUBSYS_ISCSI_TGT = 7,
+	SUBSYS_MILI_PTL = 8,
+	SUBSYS_MILI_TMD = 9,
+	SUBSYS_RDMA = 10,
+	SUBSYS_LOWLEVEL = 11,
+	SUBSYS_LRO = 13,
+	SUBSYS_DCBX = 15,
+	SUBSYS_DIAG = 16,
+	SUBSYS_VENDOR = 17
 };
 
 /* common ioctl opcodes */
-enum COMMON_SUBSYSTEM_OPCODES {
+enum COMMON_SUBSYS_OPCODES {
 /* These opcodes are common to both networking and storage PCI functions
  * They are used to reserve resources and configure CNA. These opcodes
- * all use the MBX_SUBSYSTEM_COMMON subsystem code.
+ * all use the SUBSYS_COMMON subsystem code.
  */
 	OPCODE_COMMON_QUERY_IFACE_MAC = 1,
 	OPCODE_COMMON_SET_IFACE_MAC = 2,
@@ -841,75 +478,6 @@ enum COMMON_SUBSYSTEM_OPCODES {
 	OPCODE_COMMON_READ_OBJECT = 171,
 	OPCODE_COMMON_WRITE_OBJECT = 172
 };
-
-/* common ioctl header */
-#define OCE_MBX_VER_V2	0x0002		/* Version V2 mailbox command */
-#define OCE_MBX_VER_V1	0x0001		/* Version V1 mailbox command */
-#define OCE_MBX_VER_V0	0x0000		/* Version V0 mailbox command */
-struct mbx_hdr {
-	union {
-		uint32_t dw[4];
-		struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-			/* dw 0 */
-			uint32_t domain:8;
-			uint32_t port_number:8;
-			uint32_t subsystem:8;
-			uint32_t opcode:8;
-			/* dw 1 */
-			uint32_t timeout;
-			/* dw 2 */
-			uint32_t request_length;
-			/* dw 3 */
-			uint32_t rsvd0:24;
-			uint32_t version:8;
-#else
-			/* dw 0 */
-			uint32_t opcode:8;
-			uint32_t subsystem:8;
-			uint32_t port_number:8;
-			uint32_t domain:8;
-			/* dw 1 */
-			uint32_t timeout;
-			/* dw 2 */
-			uint32_t request_length;
-			/* dw 3 */
-			uint32_t version:8;
-			uint32_t rsvd0:24;
-#endif
-		} req;
-		struct {
-#if _BYTE_ORDER == BIG_ENDIAN
-			/* dw 0 */
-			uint32_t domain:8;
-			uint32_t rsvd0:8;
-			uint32_t subsystem:8;
-			uint32_t opcode:8;
-			/* dw 1 */
-			uint32_t rsvd1:16;
-			uint32_t additional_status:8;
-			uint32_t status:8;
-#else
-			/* dw 0 */
-			uint32_t opcode:8;
-			uint32_t subsystem:8;
-			uint32_t rsvd0:8;
-			uint32_t domain:8;
-			/* dw 1 */
-			uint32_t status:8;
-			uint32_t additional_status:8;
-			uint32_t rsvd1:16;
-#endif
-			uint32_t rsp_length;
-			uint32_t actual_rsp_length;
-		} rsp;
-	} u0;
-} __packed;
-
-#define	OCE_BMBX_RHDR_SZ 20
-#define	OCE_MBX_RRHDR_SZ sizeof (struct mbx_hdr)
-#define	OCE_MBX_ADDL_STATUS(_MHDR) ((_MHDR)->u0.rsp.additional_status)
-#define	OCE_MBX_STATUS(_MHDR) ((_MHDR)->u0.rsp.status)
 
 /* [05] OPCODE_COMMON_QUERY_LINK_CONFIG */
 struct mbx_query_common_link_config {
@@ -1099,6 +667,13 @@ struct mbx_destroy_common_iface {
 	} params;
 } __packed;
 
+/*
+ * Event Queue Entry
+ */
+struct oce_eqe {
+	uint32_t evnt;
+} __packed;
+
 /* event queue context structure */
 struct oce_eq_ctx {
 #if _BYTE_ORDER == BIG_ENDIAN
@@ -1148,7 +723,7 @@ struct mbx_create_common_eq {
 	union {
 		struct {
 			struct oce_eq_ctx ctx;
-			struct phys_addr pages[8];
+			struct oce_pa pages[8];
 		} req;
 
 		struct {
@@ -1281,7 +856,7 @@ struct mbx_create_common_cq {
 	union {
 		struct {
 			union oce_cq_ctx cq_ctx;
-			struct phys_addr pages[4];
+			struct oce_pa pages[4];
 		} req;
 
 		struct {
@@ -1311,7 +886,7 @@ struct mbx_destroy_common_cq {
 	} params;
 } __packed;
 
-typedef union oce_mq_ctx_u {
+union oce_mq_ctx {
 	uint32_t dw[5];
 	struct {
 #if _BYTE_ORDER == BIG_ENDIAN
@@ -1350,7 +925,7 @@ typedef union oce_mq_ctx_u {
 		/* dw8 */
 		uint32_t dw8rsvd1;
 	} v0;
-} __packed oce_mq_ctx_t;
+} __packed;
 
 /**
  * @brief [21] OPCODE_COMMON_CREATE_MQ
@@ -1361,8 +936,8 @@ struct mbx_create_common_mq {
 	struct mbx_hdr hdr;
 	union {
 		struct {
-			oce_mq_ctx_t context;
-			struct phys_addr pages[8];
+			union oce_mq_ctx context;
+			struct oce_pa pages[8];
 		} req;
 
 		struct {
@@ -1377,7 +952,7 @@ struct mbx_create_common_mq_ex {
 	union {
 		struct {
 			union oce_mq_ext_ctx context;
-			struct phys_addr pages[8];
+			struct oce_pa pages[8];
 		} req;
 
 		struct {
@@ -1447,22 +1022,6 @@ struct mbx_common_get_set_flow_control {
 	uint16_t rx_flow_control;
 	uint16_t tx_flow_control;
 #endif
-} __packed;
-
-enum e_flash_opcode {
-	MGMT_FLASHROM_OPCODE_FLASH = 1,
-	MGMT_FLASHROM_OPCODE_SAVE = 2
-};
-
-/* [06]	OPCODE_READ_COMMON_FLASHROM */
-/* [07]	OPCODE_WRITE_COMMON_FLASHROM */
-struct mbx_common_read_write_flashrom {
-	struct mbx_hdr hdr;
-	uint32_t flash_op_code;
-	uint32_t flash_op_type;
-	uint32_t data_buffer_size;
-	uint32_t data_offset;
-	uint8_t  data_buffer[4];	/* + IMAGE_TRANSFER_SIZE */
 } __packed;
 
 struct oce_phy_info {
@@ -1813,70 +1372,24 @@ struct mbx_lowlevel_set_loopback_mode {
 	} params;
 } __packed;
 
-struct flash_file_hdr {
-	uint8_t  sign[52];
-	uint8_t  ufi_version[4];
-	uint32_t file_len;
-	uint32_t cksum;
-	uint32_t antidote;
-	uint32_t num_imgs;
-	uint8_t  build[24];
-	uint8_t  rsvd[32];
-} __packed;
-
-struct image_hdr {
-	uint32_t imageid;
-	uint32_t imageoffset;
-	uint32_t imagelength;
-	uint32_t image_checksum;
-	uint8_t  image_version[32];
-} __packed;
-
-struct flash_section_hdr {
-	uint32_t format_rev;
-	uint32_t cksum;
-	uint32_t antidote;
-	uint32_t num_images;
-	uint8_t  id_string[128];
-	uint32_t rsvd[4];
-} __packed;
-
-struct flash_section_entry {
-	uint32_t type;
-	uint32_t offset;
-	uint32_t pad_size;
-	uint32_t image_size;
-	uint32_t cksum;
-	uint32_t entry_point;
-	uint32_t rsvd0;
-	uint32_t rsvd1;
-	uint8_t  ver_data[32];
-} __packed;
-
-struct flash_sec_info {
-	uint8_t cookie[32];
-	struct  flash_section_hdr fsec_hdr;
-	struct  flash_section_entry fsec_entry[32];
-} __packed;
-
-enum LOWLEVEL_SUBSYSTEM_OPCODES {
+enum LOWLEVEL_SUBSYS_OPCODES {
 /* Opcodes used for lowlevel functions common to many subystems.
  * Some of these opcodes are used for diagnostic functions only.
- * These opcodes use the MBX_SUBSYSTEM_LOWLEVEL subsystem code.
+ * These opcodes use the SUBSYS_LOWLEVEL subsystem code.
  */
 	OPCODE_LOWLEVEL_TEST_LOOPBACK = 18,
 	OPCODE_LOWLEVEL_SET_LOOPBACK_MODE = 19,
 	OPCODE_LOWLEVEL_GET_LOOPBACK_MODE = 20
 };
 
-enum LLDP_SUBSYSTEM_OPCODES {
+enum LLDP_SUBSYS_OPCODES {
 /* Opcodes used for LLDP susbsytem for configuring the LLDP state machines. */
 	OPCODE_LLDP_GET_CFG = 1,
 	OPCODE_LLDP_SET_CFG = 2,
 	OPCODE_LLDP_GET_STATS = 3
 };
 
-enum DCBX_SUBSYSTEM_OPCODES {
+enum DCBX_SUBSYS_OPCODES {
 /* Opcodes used for DCBX. */
 	OPCODE_DCBX_GET_CFG = 1,
 	OPCODE_DCBX_SET_CFG = 2,
@@ -1885,12 +1398,12 @@ enum DCBX_SUBSYSTEM_OPCODES {
 	OPCODE_DCBX_SET_MODE = 5
 };
 
-enum DMTF_SUBSYSTEM_OPCODES {
+enum DMTF_SUBSYS_OPCODES {
 /* Opcodes used for DCBX subsystem. */
 	OPCODE_DMTF_EXEC_CLP_CMD = 1
 };
 
-enum DIAG_SUBSYSTEM_OPCODES {
+enum DIAG_SUBSYS_OPCODES {
 /* Opcodes used for diag functions common to many subsystems. */
 	OPCODE_DIAG_RUN_DMA_TEST = 1,
 	OPCODE_DIAG_RUN_MDIO_TEST = 2,
@@ -1899,7 +1412,7 @@ enum DIAG_SUBSYSTEM_OPCODES {
 	OPCODE_DIAG_GET_MAC = 5
 };
 
-enum VENDOR_SUBSYSTEM_OPCODES {
+enum VENDOR_SUBSYS_OPCODES {
 /* Opcodes used for Vendor subsystem. */
 	OPCODE_VENDOR_SLI = 1
 };
@@ -2040,11 +1553,11 @@ enum MGMT_ADDI_STATUS {
 	MGMT_ADDI_INVALID_REQUEST = 75
 };
 
-enum NIC_SUBSYSTEM_OPCODES {
+enum NIC_SUBSYS_OPCODES {
 /**
  * @brief NIC Subsystem Opcodes (see Network SLI-4 manual >= Rev4, v21-2)
  * These opcodes are used for configuring the Ethernet interfaces.
- * These opcodes all use the MBX_SUBSYSTEM_NIC subsystem code.
+ * These opcodes all use the SUBSYS_NIC subsystem code.
  */
 	OPCODE_NIC_CONFIG_RSS = 1,
 	OPCODE_NIC_CONFIG_ACPI = 2,
@@ -2062,17 +1575,6 @@ enum NIC_SUBSYSTEM_OPCODES {
 	OPCODE_NIC_GET_VPORT_STATS = 19,
 	OPCODE_NIC_GET_QUEUE_STATS = 20
 };
-
-/* Hash option flags for RSS enable */
-enum RSS_ENABLE_FLAGS {
-	RSS_ENABLE_NONE 	= 0x0,	/* (No RSS) */
-	RSS_ENABLE_IPV4 	= 0x1,	/* (IPV4 HASH enabled ) */
-	RSS_ENABLE_TCP_IPV4 	= 0x2,	/* (TCP IPV4 Hash enabled) */
-	RSS_ENABLE_IPV6 	= 0x4,	/* (IPV6 HASH enabled) */
-	RSS_ENABLE_TCP_IPV6 	= 0x8	/* (TCP IPV6 HASH */
-};
-#define RSS_ENABLE (RSS_ENABLE_IPV4 | RSS_ENABLE_TCP_IPV4)
-#define RSS_DISABLE RSS_ENABLE_NONE
 
 /* NIC header WQE */
 struct oce_nic_hdr_wqe {
@@ -2203,8 +1705,8 @@ struct oce_nic_tx_cqe {
 		uint32_t dw[4];
 	} u0;
 } __packed;
-#define	WQ_CQE_VALID(_cqe)  (_cqe->u0.dw[3])
-#define	WQ_CQE_INVALIDATE(_cqe)  (_cqe->u0.dw[3] = 0)
+#define	WQ_CQE_VALID(_cqe)		((_cqe)->u0.dw[3])
+#define	WQ_CQE_INVALIDATE(_cqe)		((_cqe)->u0.dw[3] = 0)
 
 /* Receive Queue Entry (RQE) */
 struct oce_nic_rqe {
@@ -2375,9 +1877,8 @@ struct oce_nic_rx_cqe_v1 {
 	} u0;
 } __packed;
 
-#define	RQ_CQE_VALID_MASK  0x80
-#define	RQ_CQE_VALID(_cqe) (_cqe->u0.dw[2])
-#define	RQ_CQE_INVALIDATE(_cqe) (_cqe->u0.dw[2] = 0)
+#define	RQ_CQE_VALID(_cqe)		((_cqe)->u0.dw[2])
+#define	RQ_CQE_INVALIDATE(_cqe)		((_cqe)->u0.dw[2] = 0)
 
 struct mbx_config_nic_promiscuous {
 	struct mbx_hdr hdr;
@@ -2400,7 +1901,7 @@ struct mbx_config_nic_promiscuous {
 	} params;
 } __packed;
 
-typedef	union oce_wq_ctx_u {
+union oce_wq_ctx {
 		uint32_t dw[17];
 		struct {
 #if _BYTE_ORDER == BIG_ENDIAN
@@ -2481,7 +1982,7 @@ typedef	union oce_wq_ctx_u {
 			/* dw8 - dw20 */
 			uint32_t dw8_20rsvd1[13];
 		} v1;
-} __packed oce_wq_ctx_t;
+} __packed;
 
 /**
  * @brief [07] NIC_CREATE_WQ
@@ -2506,8 +2007,7 @@ struct mbx_create_nic_wq {
 			uint16_t cq_id;
 			uint16_t rsvd3;
 			uint32_t rsvd4[13];
-			struct phys_addr pages[8];
-
+			struct oce_pa pages[8];
 		} req;
 
 		struct {
@@ -2549,7 +2049,7 @@ struct mbx_create_nic_rq {
 			uint16_t cq_id;
 			uint8_t frag_size;
 			uint8_t num_pages;
-			struct phys_addr pages[2];
+			struct oce_pa pages[2];
 			uint32_t if_id;
 			uint16_t max_frame_size;
 			uint16_t page_size;
@@ -2974,51 +2474,19 @@ struct mbx_get_vport_stats {
 	} params;
 } __packed;
 
-/**
- * @brief	[20(0x14)] NIC_GET_QUEUE_STATS
- * The significant difference between vPort and Queue statistics is
- * the packet byte counters.
- */
-struct oce_queue_stats {
-	uint64_t packets;
-	uint64_t bytes;
-	uint64_t errors;
-	uint64_t drops;
-	uint64_t buffer_errors;		/* rsvd when tx */
-} __packed;
-
-#define QUEUE_TYPE_WQ		0
-#define QUEUE_TYPE_RQ		1
-#define QUEUE_TYPE_HDS_RQ	1	/* same as RQ */
-
-struct mbx_get_queue_stats {
-	/* dw0 - dw3 */
-	struct mbx_hdr hdr;
-	union {
-		struct {
-			/* dw4 */
-#if _BYTE_ORDER == BIG_ENDIAN
-			uint32_t reset_stats:8;
-			uint32_t queue_type:8;
-			uint32_t queue_id:16;
-#else
-			uint32_t queue_id:16;
-			uint32_t queue_type:8;
-			uint32_t reset_stats:8;
-#endif
-		} req;
-
-		union {
-			struct oce_queue_stats qs;
-			uint32_t queue_stats[13 - 4 + 1];
-		} rsp;
-	} params;
-} __packed;
+/* Hash option flags for RSS enable */
+enum RSS_ENABLE_FLAGS {
+	RSS_ENABLE_NONE 	= 0x0,	/* (No RSS) */
+	RSS_ENABLE_IPV4 	= 0x1,	/* (IPV4 HASH enabled ) */
+	RSS_ENABLE_TCP_IPV4 	= 0x2,	/* (TCP IPV4 Hash enabled) */
+	RSS_ENABLE_IPV6 	= 0x4,	/* (IPV6 HASH enabled) */
+	RSS_ENABLE_TCP_IPV6 	= 0x8	/* (TCP IPV6 HASH */
+};
 
 /* [01] NIC_CONFIG_RSS */
-#define OCE_HASH_TBL_SZ	10
-#define OCE_CPU_TBL_SZ	128
-#define OCE_FLUSH	1	/* RSS flush completion per CQ port */
+#define OCE_HASH_TBL_SZ		10
+#define OCE_CPU_TBL_SZ		128
+#define OCE_FLUSH		1	/* RSS flush completion per CQ port */
 struct mbx_config_nic_rss {
 	struct mbx_hdr hdr;
 	union {
@@ -3047,348 +2515,3 @@ struct mbx_config_nic_rss {
 		} rsp;
 	} params;
 } __packed;
-
-typedef uint32_t oce_stat_t;		/* statistic counter */
-
-enum OCE_RXF_PORT_STATS {
-	RXF_RX_BYTES_LSD,
-	RXF_RX_BYTES_MSD,
-	RXF_RX_TOTAL_FRAMES,
-	RXF_RX_UNICAST_FRAMES,
-	RXF_RX_MULTICAST_FRAMES,
-	RXF_RX_BROADCAST_FRAMES,
-	RXF_RX_CRC_ERRORS,
-	RXF_RX_ALIGNMENT_SYMBOL_ERRORS,
-	RXF_RX_PAUSE_FRAMES,
-	RXF_RX_CONTROL_FRAMES,
-	RXF_RX_IN_RANGE_ERRORS,
-	RXF_RX_OUT_RANGE_ERRORS,
-	RXF_RX_FRAME_TOO_LONG,
-	RXF_RX_ADDRESS_MATCH_ERRORS,
-	RXF_RX_VLAN_MISMATCH,
-	RXF_RX_DROPPED_TOO_SMALL,
-	RXF_RX_DROPPED_TOO_SHORT,
-	RXF_RX_DROPPED_HEADER_TOO_SMALL,
-	RXF_RX_DROPPED_TCP_LENGTH,
-	RXF_RX_DROPPED_RUNT,
-	RXF_RX_64_BYTE_PACKETS,
-	RXF_RX_65_127_BYTE_PACKETS,
-	RXF_RX_128_256_BYTE_PACKETS,
-	RXF_RX_256_511_BYTE_PACKETS,
-	RXF_RX_512_1023_BYTE_PACKETS,
-	RXF_RX_1024_1518_BYTE_PACKETS,
-	RXF_RX_1519_2047_BYTE_PACKETS,
-	RXF_RX_2048_4095_BYTE_PACKETS,
-	RXF_RX_4096_8191_BYTE_PACKETS,
-	RXF_RX_8192_9216_BYTE_PACKETS,
-	RXF_RX_IP_CHECKSUM_ERRS,
-	RXF_RX_TCP_CHECKSUM_ERRS,
-	RXF_RX_UDP_CHECKSUM_ERRS,
-	RXF_RX_NON_RSS_PACKETS,
-	RXF_RX_IPV4_PACKETS,
-	RXF_RX_IPV6_PACKETS,
-	RXF_RX_IPV4_BYTES_LSD,
-	RXF_RX_IPV4_BYTES_MSD,
-	RXF_RX_IPV6_BYTES_LSD,
-	RXF_RX_IPV6_BYTES_MSD,
-	RXF_RX_CHUTE1_PACKETS,
-	RXF_RX_CHUTE2_PACKETS,
-	RXF_RX_CHUTE3_PACKETS,
-	RXF_RX_MANAGEMENT_PACKETS,
-	RXF_RX_SWITCHED_UNICAST_PACKETS,
-	RXF_RX_SWITCHED_MULTICAST_PACKETS,
-	RXF_RX_SWITCHED_BROADCAST_PACKETS,
-	RXF_TX_BYTES_LSD,
-	RXF_TX_BYTES_MSD,
-	RXF_TX_UNICAST_FRAMES,
-	RXF_TX_MULTICAST_FRAMES,
-	RXF_TX_BROADCAST_FRAMES,
-	RXF_TX_PAUSE_FRAMES,
-	RXF_TX_CONTROL_FRAMES,
-	RXF_TX_64_BYTE_PACKETS,
-	RXF_TX_65_127_BYTE_PACKETS,
-	RXF_TX_128_256_BYTE_PACKETS,
-	RXF_TX_256_511_BYTE_PACKETS,
-	RXF_TX_512_1023_BYTE_PACKETS,
-	RXF_TX_1024_1518_BYTE_PACKETS,
-	RXF_TX_1519_2047_BYTE_PACKETS,
-	RXF_TX_2048_4095_BYTE_PACKETS,
-	RXF_TX_4096_8191_BYTE_PACKETS,
-	RXF_TX_8192_9216_BYTE_PACKETS,
-	RXF_RX_FIFO_OVERFLOW,
-	RXF_RX_INPUT_FIFO_OVERFLOW,
-	RXF_PORT_STATS_N_WORDS
-};
-
-enum OCE_RXF_ADDL_STATS {
-	RXF_RX_DROPS_NO_PBUF,
-	RXF_RX_DROPS_NO_TXPB,
-	RXF_RX_DROPS_NO_ERX_DESCR,
-	RXF_RX_DROPS_NO_TPRE_DESCR,
-	RXF_MANAGEMENT_RX_PORT_PACKETS,
-	RXF_MANAGEMENT_RX_PORT_BYTES,
-	RXF_MANAGEMENT_RX_PORT_PAUSE_FRAMES,
-	RXF_MANAGEMENT_RX_PORT_ERRORS,
-	RXF_MANAGEMENT_TX_PORT_PACKETS,
-	RXF_MANAGEMENT_TX_PORT_BYTES,
-	RXF_MANAGEMENT_TX_PORT_PAUSE,
-	RXF_MANAGEMENT_RX_PORT_RXFIFO_OVERFLOW,
-	RXF_RX_DROPS_TOO_MANY_FRAGS,
-	RXF_RX_DROPS_INVALID_RING,
-	RXF_FORWARDED_PACKETS,
-	RXF_RX_DROPS_MTU,
-	RXF_ADDL_STATS_N_WORDS
-};
-
-enum OCE_TX_CHUTE_PORT_STATS {
-	CTPT_XMT_IPV4_PKTS,
-	CTPT_XMT_IPV4_LSD,
-	CTPT_XMT_IPV4_MSD,
-	CTPT_XMT_IPV6_PKTS,
-	CTPT_XMT_IPV6_LSD,
-	CTPT_XMT_IPV6_MSD,
-	CTPT_REXMT_IPV4_PKTs,
-	CTPT_REXMT_IPV4_LSD,
-	CTPT_REXMT_IPV4_MSD,
-	CTPT_REXMT_IPV6_PKTs,
-	CTPT_REXMT_IPV6_LSD,
-	CTPT_REXMT_IPV6_MSD,
-	CTPT_N_WORDS,
-};
-
-enum OCE_RX_ERR_STATS {
-	RX_DROPS_NO_FRAGMENTS_0,
-	RX_DROPS_NO_FRAGMENTS_1,
-	RX_DROPS_NO_FRAGMENTS_2,
-	RX_DROPS_NO_FRAGMENTS_3,
-	RX_DROPS_NO_FRAGMENTS_4,
-	RX_DROPS_NO_FRAGMENTS_5,
-	RX_DROPS_NO_FRAGMENTS_6,
-	RX_DROPS_NO_FRAGMENTS_7,
-	RX_DROPS_NO_FRAGMENTS_8,
-	RX_DROPS_NO_FRAGMENTS_9,
-	RX_DROPS_NO_FRAGMENTS_10,
-	RX_DROPS_NO_FRAGMENTS_11,
-	RX_DROPS_NO_FRAGMENTS_12,
-	RX_DROPS_NO_FRAGMENTS_13,
-	RX_DROPS_NO_FRAGMENTS_14,
-	RX_DROPS_NO_FRAGMENTS_15,
-	RX_DROPS_NO_FRAGMENTS_16,
-	RX_DROPS_NO_FRAGMENTS_17,
-	RX_DROPS_NO_FRAGMENTS_18,
-	RX_DROPS_NO_FRAGMENTS_19,
-	RX_DROPS_NO_FRAGMENTS_20,
-	RX_DROPS_NO_FRAGMENTS_21,
-	RX_DROPS_NO_FRAGMENTS_22,
-	RX_DROPS_NO_FRAGMENTS_23,
-	RX_DROPS_NO_FRAGMENTS_24,
-	RX_DROPS_NO_FRAGMENTS_25,
-	RX_DROPS_NO_FRAGMENTS_26,
-	RX_DROPS_NO_FRAGMENTS_27,
-	RX_DROPS_NO_FRAGMENTS_28,
-	RX_DROPS_NO_FRAGMENTS_29,
-	RX_DROPS_NO_FRAGMENTS_30,
-	RX_DROPS_NO_FRAGMENTS_31,
-	RX_DROPS_NO_FRAGMENTS_32,
-	RX_DROPS_NO_FRAGMENTS_33,
-	RX_DROPS_NO_FRAGMENTS_34,
-	RX_DROPS_NO_FRAGMENTS_35,
-	RX_DROPS_NO_FRAGMENTS_36,
-	RX_DROPS_NO_FRAGMENTS_37,
-	RX_DROPS_NO_FRAGMENTS_38,
-	RX_DROPS_NO_FRAGMENTS_39,
-	RX_DROPS_NO_FRAGMENTS_40,
-	RX_DROPS_NO_FRAGMENTS_41,
-	RX_DROPS_NO_FRAGMENTS_42,
-	RX_DROPS_NO_FRAGMENTS_43,
-	RX_DEBUG_WDMA_SENT_HOLD,
-	RX_DEBUG_WDMA_PBFREE_SENT_HOLD,
-	RX_DEBUG_WDMA_0B_PBFREE_SENT_HOLD,
-	RX_DEBUG_PMEM_PBUF_DEALLOC,
-	RX_ERRORS_N_WORDS
-};
-
-enum OCE_PMEM_ERR_STATS {
-	PMEM_ETH_RED_DROPS,
-	PMEM_LRO_RED_DROPS,
-	PMEM_ULP0_RED_DROPS,
-	PMEM_ULP1_RED_DROPS,
-	PMEM_GLOBAL_RED_DROPS,
-	PMEM_ERRORS_N_WORDS
-};
-
-/**
- * @brief Statistics for a given Physical Port
- * These satisfy all the required BE2 statistics and also the
- * following MIB objects:
- *
- * RFC 2863 - The Interfaces Group MIB
- * RFC 2819 - Remote Network Monitoring Management Information Base (RMON)
- * RFC 3635 - Managed Objects for the Ethernet-like Interface Types
- * RFC 4502 - Remote Network Monitoring Mgmt Information Base Ver-2 (RMON2)
- *
- */
-enum OCE_PPORT_STATS {
-	PPORT_TX_PKTS = 0,
-	PPORT_TX_UNICAST_PKTS = 2,
-	PPORT_TX_MULTICAST_PKTS = 4,
-	PPORT_TX_BROADCAST_PKTS = 6,
-	PPORT_TX_BYTES = 8,
-	PPORT_TX_UNICAST_BYTES = 10,
-	PPORT_TX_MULTICAST_BYTES = 12,
-	PPORT_TX_BROADCAST_BYTES = 14,
-	PPORT_TX_DISCARDS = 16,
-	PPORT_TX_ERRORS = 18,
-	PPORT_TX_PAUSE_FRAMES = 20,
-	PPORT_TX_PAUSE_ON_FRAMES = 22,
-	PPORT_TX_PAUSE_OFF_FRAMES = 24,
-	PPORT_TX_INTERNAL_MAC_ERRORS = 26,
-	PPORT_TX_CONTROL_FRAMES = 28,
-	PPORT_TX_PKTS_64_BYTES = 30,
-	PPORT_TX_PKTS_65_TO_127_BYTES = 32,
-	PPORT_TX_PKTS_128_TO_255_BYTES = 34,
-	PPORT_TX_PKTS_256_TO_511_BYTES = 36,
-	PPORT_TX_PKTS_512_TO_1023_BYTES = 38,
-	PPORT_TX_PKTS_1024_TO_1518_BYTES = 40,
-	PPORT_TX_PKTS_1519_TO_2047_BYTES = 42,
-	PPORT_TX_PKTS_2048_TO_4095_BYTES = 44,
-	PPORT_TX_PKTS_4096_TO_8191_BYTES = 46,
-	PPORT_TX_PKTS_8192_TO_9216_BYTES = 48,
-	PPORT_TX_LSO_PKTS = 50,
-	PPORT_RX_PKTS = 52,
-	PPORT_RX_UNICAST_PKTS = 54,
-	PPORT_RX_MULTICAST_PKTS = 56,
-	PPORT_RX_BROADCAST_PKTS = 58,
-	PPORT_RX_BYTES = 60,
-	PPORT_RX_UNICAST_BYTES = 62,
-	PPORT_RX_MULTICAST_BYTES = 64,
-	PPORT_RX_BROADCAST_BYTES = 66,
-	PPORT_RX_UNKNOWN_PROTOS = 68,
-	PPORT_RESERVED_WORD69 = 69,
-	PPORT_RX_DISCARDS = 70,
-	PPORT_RX_ERRORS = 72,
-	PPORT_RX_CRC_ERRORS = 74,
-	PPORT_RX_ALIGNMENT_ERRORS = 76,
-	PPORT_RX_SYMBOL_ERRORS = 78,
-	PPORT_RX_PAUSE_FRAMES = 80,
-	PPORT_RX_PAUSE_ON_FRAMES = 82,
-	PPORT_RX_PAUSE_OFF_FRAMES = 84,
-	PPORT_RX_FRAMES_TOO_LONG = 86,
-	PPORT_RX_INTERNAL_MAC_ERRORS = 88,
-	PPORT_RX_UNDERSIZE_PKTS = 90,
-	PPORT_RX_OVERSIZE_PKTS = 91,
-	PPORT_RX_FRAGMENT_PKTS = 92,
-	PPORT_RX_JABBERS = 93,
-	PPORT_RX_CONTROL_FRAMES = 94,
-	PPORT_RX_CONTROL_FRAMES_UNK_OPCODE = 96,
-	PPORT_RX_IN_RANGE_ERRORS = 98,
-	PPORT_RX_OUT_OF_RANGE_ERRORS = 99,
-	PPORT_RX_ADDRESS_MATCH_ERRORS = 100,
-	PPORT_RX_VLAN_MISMATCH_ERRORS = 101,
-	PPORT_RX_DROPPED_TOO_SMALL = 102,
-	PPORT_RX_DROPPED_TOO_SHORT = 103,
-	PPORT_RX_DROPPED_HEADER_TOO_SMALL = 104,
-	PPORT_RX_DROPPED_INVALID_TCP_LENGTH = 105,
-	PPORT_RX_DROPPED_RUNT = 106,
-	PPORT_RX_IP_CHECKSUM_ERRORS = 107,
-	PPORT_RX_TCP_CHECKSUM_ERRORS = 108,
-	PPORT_RX_UDP_CHECKSUM_ERRORS = 109,
-	PPORT_RX_NON_RSS_PKTS = 110,
-	PPORT_RESERVED_WORD111 = 111,
-	PPORT_RX_IPV4_PKTS = 112,
-	PPORT_RX_IPV6_PKTS = 114,
-	PPORT_RX_IPV4_BYTES = 116,
-	PPORT_RX_IPV6_BYTES = 118,
-	PPORT_RX_NIC_PKTS = 120,
-	PPORT_RX_TCP_PKTS = 122,
-	PPORT_RX_ISCSI_PKTS = 124,
-	PPORT_RX_MANAGEMENT_PKTS = 126,
-	PPORT_RX_SWITCHED_UNICAST_PKTS = 128,
-	PPORT_RX_SWITCHED_MULTICAST_PKTS = 130,
-	PPORT_RX_SWITCHED_BROADCAST_PKTS = 132,
-	PPORT_NUM_FORWARDS = 134,
-	PPORT_RX_FIFO_OVERFLOW = 136,
-	PPORT_RX_INPUT_FIFO_OVERFLOW = 137,
-	PPORT_RX_DROPS_TOO_MANY_FRAGS = 138,
-	PPORT_RX_DROPS_INVALID_QUEUE = 140,
-	PPORT_RESERVED_WORD141 = 141,
-	PPORT_RX_DROPS_MTU = 142,
-	PPORT_RX_PKTS_64_BYTES = 144,
-	PPORT_RX_PKTS_65_TO_127_BYTES = 146,
-	PPORT_RX_PKTS_128_TO_255_BYTES = 148,
-	PPORT_RX_PKTS_256_TO_511_BYTES = 150,
-	PPORT_RX_PKTS_512_TO_1023_BYTES = 152,
-	PPORT_RX_PKTS_1024_TO_1518_BYTES = 154,
-	PPORT_RX_PKTS_1519_TO_2047_BYTES = 156,
-	PPORT_RX_PKTS_2048_TO_4095_BYTES = 158,
-	PPORT_RX_PKTS_4096_TO_8191_BYTES = 160,
-	PPORT_RX_PKTS_8192_TO_9216_BYTES = 162,
-	PPORT_N_WORDS = 164
-};
-
-/**
- * @brief Statistics for a given Virtual Port (vPort)
- * The following describes the vPort statistics satisfying
- * requirements of Linux/VMWare netdev statistics and
- * Microsoft Windows Statistics along with other Operating Systems.
- */
-enum OCE_VPORT_STATS {
-	VPORT_TX_PKTS = 0,
-	VPORT_TX_UNICAST_PKTS = 2,
-	VPORT_TX_MULTICAST_PKTS = 4,
-	VPORT_TX_BROADCAST_PKTS = 6,
-	VPORT_TX_BYTES = 8,
-	VPORT_TX_UNICAST_BYTES = 10,
-	VPORT_TX_MULTICAST_BYTES = 12,
-	VPORT_TX_BROADCAST_BYTES = 14,
-	VPORT_TX_DISCARDS = 16,
-	VPORT_TX_ERRORS = 18,
-	VPORT_TX_PKTS_64_BYTES = 20,
-	VPORT_TX_PKTS_65_TO_127_BYTES = 22,
-	VPORT_TX_PKTS_128_TO_255_BYTES = 24,
-	VPORT_TX_PKTS_256_TO_511_BYTES = 26,
-	VPORT_TX_PKTS_512_TO_1023_BYTEs = 28,
-	VPORT_TX_PKTS_1024_TO_1518_BYTEs = 30,
-	VPORT_TX_PKTS_1519_TO_9699_BYTEs = 32,
-	VPORT_TX_PKTS_OVER_9699_BYTES = 34,
-	VPORT_RX_PKTS = 36,
-	VPORT_RX_UNICAST_PKTS = 38,
-	VPORT_RX_MULTICAST_PKTS = 40,
-	VPORT_RX_BROADCAST_PKTS = 42,
-	VPORT_RX_BYTES = 44,
-	VPORT_RX_UNICAST_BYTES = 46,
-	VPORT_RX_MULTICAST_BYTES = 48,
-	VPORT_RX_BROADCAST_BYTES = 50,
-	VPORT_RX_DISCARDS = 52,
-	VPORT_RX_ERRORS = 54,
-	VPORT_RX_PKTS_64_BYTES = 56,
-	VPORT_RX_PKTS_65_TO_127_BYTES = 58,
-	VPORT_RX_PKTS_128_TO_255_BYTES = 60,
-	VPORT_RX_PKTS_256_TO_511_BYTES = 62,
-	VPORT_RX_PKTS_512_TO_1023_BYTEs = 64,
-	VPORT_RX_PKTS_1024_TO_1518_BYTEs = 66,
-	VPORT_RX_PKTS_1519_TO_9699_BYTEs = 68,
-	VPORT_RX_PKTS_OVER_9699_BYTES = 70,
-	VPORT_N_WORDS = 72
-};
-
-/**
- * @brief Statistics for a given queue (NIC WQ, RQ, or HDS RQ)
- * This set satisfies requirements of VMQare NetQueue and Microsoft VMQ
- */
-enum OCE_QUEUE_TX_STATS {
-	QUEUE_TX_PKTS = 0,
-	QUEUE_TX_BYTES = 2,
-	QUEUE_TX_ERRORS = 4,
-	QUEUE_TX_DROPS = 6,
-	QUEUE_TX_N_WORDS = 8
-};
-
-enum OCE_QUEUE_RX_STATS {
-	QUEUE_RX_PKTS = 0,
-	QUEUE_RX_BYTES = 2,
-	QUEUE_RX_ERRORS = 4,
-	QUEUE_RX_DROPS = 6,
-	QUEUE_RX_BUFFER_ERRORS = 8,
-	QUEUE_RX_N_WORDS = 10
-};
