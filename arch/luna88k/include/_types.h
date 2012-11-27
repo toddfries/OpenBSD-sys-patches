@@ -1,4 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.3 2007/05/15 01:56:46 deraadt Exp $	*/
+/*	$OpenBSD: _types.h,v 1.5 2012/11/05 19:39:34 miod Exp $	*/
 
 /* public domain */
 #include <m88k/_types.h>
