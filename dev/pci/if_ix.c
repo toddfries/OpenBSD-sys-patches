@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.71 2012/08/13 13:14:50 mikeb Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.75 2012/11/23 04:34:11 brad Exp $	*/
 
 /******************************************************************************
 
@@ -597,7 +597,6 @@ ixgbe_watchdog(struct ifnet * ifp)
 	sc->watchdog_events++;
 
 	ixgbe_init(sc);
-	return;
 }
 
 /*********************************************************************
@@ -788,16 +787,7 @@ ixgbe_init(void *arg)
 	}
 #endif
 
-#ifdef IXGBE_FDIR
-	/* Init Flow director */
-	if (sc->hw.mac.type != ixgbe_mac_82598EB)
-		ixgbe_init_fdir_signature_82599(&sc->hw, fdir_pballoc);
-#endif
-
-	/*
-	 * Check on any SFP devices that
-	 * need to be kick-started
-	 */
+	/* Check on any SFP devices that need to be kick-started */
 	if (sc->hw.phy.type == ixgbe_phy_none) {
 		err = sc->hw.phy.ops.identify(&sc->hw);
 		if (err == IXGBE_ERR_SFP_NOT_SUPPORTED) {
@@ -1312,9 +1302,6 @@ ixgbe_update_link_status(struct ix_softc *sc)
 		for (i = 0; i < sc->num_queues; i++)
 			txr[i].watchdog_timer = FALSE;
 	}
-
-
-	return;
 }
 
 
@@ -1492,7 +1479,6 @@ ixgbe_setup_optics(struct ix_softc *sc)
 			sc->optics = IFM_ETHER | IFM_AUTO;
 			break;
 	}
-	return;
 }
 
 /*********************************************************************
@@ -1584,7 +1570,6 @@ ixgbe_free_pci_resources(struct ix_softc * sc)
 	struct ix_queue *que = sc->queues;
 	int i;
 
-
 	/* Release all msix queue resources: */
 	for (i = 0; i < sc->num_queues; i++, que++) {
 		if (que->tag)
@@ -1598,8 +1583,6 @@ ixgbe_free_pci_resources(struct ix_softc * sc)
 	if (os->os_membase != 0)
 		bus_space_unmap(os->os_memt, os->os_memh, os->os_memsize);
 	os->os_membase = 0;
-
-	return;
 }
 
 /*********************************************************************
@@ -1663,9 +1646,6 @@ ixgbe_setup_interface(struct ix_softc *sc)
 
 	if_attach(ifp);
 	ether_ifattach(ifp);
-
-
-	return;
 }
 
 void
@@ -1710,7 +1690,6 @@ ixgbe_config_link(struct ix_softc *sc)
 			err = sc->hw.mac.ops.setup_link(&sc->hw, autoneg,
 			    negotiate, sc->link_up);
 	}
-	return;
 }
 
 
@@ -2097,8 +2076,6 @@ ixgbe_initialize_transmit_units(struct ix_softc *sc)
 		rttdcs &= ~IXGBE_RTTDCS_ARBDIS;
 		IXGBE_WRITE_REG(hw, IXGBE_RTTDCS, rttdcs);
 	}
-
-	return;
 }
 
 /*********************************************************************
@@ -2112,9 +2089,8 @@ ixgbe_free_transmit_structures(struct ix_softc *sc)
 	struct tx_ring *txr = sc->tx_rings;
 	int		i;
 
-	for (i = 0; i < sc->num_queues; i++, txr++) {
+	for (i = 0; i < sc->num_queues; i++, txr++)
 		ixgbe_free_transmit_buffers(txr);
-	}
 }
 
 /*********************************************************************
@@ -2746,9 +2722,10 @@ ixgbe_setup_receive_structures(struct ix_softc *sc)
 	struct rx_ring *rxr = sc->rx_rings;
 	int i;
 
-	for (i = 0; i < sc->num_queues; i++, rxr++)
+	for (i = 0; i < sc->num_queues; i++, rxr++) {
 		if (ixgbe_setup_receive_ring(rxr))
 			goto fail;
+	}
 
 	return (0);
 
@@ -2835,6 +2812,7 @@ ixgbe_initialize_receive_units(struct ix_softc *sc)
 	}
 
 	rxcsum = IXGBE_READ_REG(&sc->hw, IXGBE_RXCSUM);
+	rxcsum &= ~IXGBE_RXCSUM_PCSD;
 
 	/* Setup RSS */
 	if (sc->num_queues > 1) {
@@ -2873,15 +2851,10 @@ ixgbe_initialize_receive_units(struct ix_softc *sc)
 		rxcsum |= IXGBE_RXCSUM_PCSD;
 	}
 
-	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
-		rxcsum |= IXGBE_RXCSUM_PCSD;
-
 	if (!(rxcsum & IXGBE_RXCSUM_PCSD))
 		rxcsum |= IXGBE_RXCSUM_IPPCSE;
 
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_RXCSUM, rxcsum);
-
-	return;
 }
 
 /*********************************************************************
@@ -2895,9 +2868,8 @@ ixgbe_free_receive_structures(struct ix_softc *sc)
 	struct rx_ring *rxr = sc->rx_rings;
 	int		i;
 
-	for (i = 0; i < sc->num_queues; i++, rxr++) {
+	for (i = 0; i < sc->num_queues; i++, rxr++)
 		ixgbe_free_receive_buffers(rxr);
-	}
 }
 
 /*********************************************************************
@@ -3207,10 +3179,11 @@ ixgbe_setup_vlan_hw_support(struct ix_softc *sc)
 	 * A soft reset zero's out the VFTA, so
 	 * we need to repopulate it now.
 	 */
-	for (i = 0; i < IXGBE_VFTA_SIZE; i++)
+	for (i = 0; i < IXGBE_VFTA_SIZE; i++) {
 		if (sc->shadow_vfta[i] != 0)
 			IXGBE_WRITE_REG(&sc->hw, IXGBE_VFTA(i),
 			    sc->shadow_vfta[i]);
+	}
 
 	ctrl = IXGBE_READ_REG(&sc->hw, IXGBE_VLNCTRL);
 #if 0
@@ -3225,13 +3198,13 @@ ixgbe_setup_vlan_hw_support(struct ix_softc *sc)
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_VLNCTRL, ctrl);
 
 	/* On 82599 the VLAN enable is per/queue in RXDCTL */
-	if (sc->hw.mac.type != ixgbe_mac_82598EB)
+	if (sc->hw.mac.type != ixgbe_mac_82598EB) {
 		for (i = 0; i < sc->num_queues; i++) {
 			ctrl = IXGBE_READ_REG(&sc->hw, IXGBE_RXDCTL(i));
 			ctrl |= IXGBE_RXDCTL_VME;
 			IXGBE_WRITE_REG(&sc->hw, IXGBE_RXDCTL(i), ctrl);
 		}
-
+	}
 }
 
 void
@@ -3272,8 +3245,6 @@ ixgbe_enable_intr(struct ix_softc *sc)
 		ixgbe_enable_queue(sc, que->msix);
 
 	IXGBE_WRITE_FLUSH(hw);
-
-	return;
 }
 
 void
@@ -3289,7 +3260,6 @@ ixgbe_disable_intr(struct ix_softc *sc)
 		IXGBE_WRITE_REG(&sc->hw, IXGBE_EIMC_EX(1), ~0);
 	}
 	IXGBE_WRITE_FLUSH(&sc->hw);
-	return;
 }
 
 uint16_t
