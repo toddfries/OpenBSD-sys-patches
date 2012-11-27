@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_athn_usb.c,v 1.8 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: if_athn_usb.c,v 1.10 2012/11/12 22:38:26 mikeb Exp $	*/
 
 /*-
  * Copyright (c) 2011 Damien Bergamini <damien.bergamini@free.fr>
@@ -289,7 +289,8 @@ athn_usb_detach(struct device *self, int flags)
 	struct athn_usb_softc *usc = (struct athn_usb_softc *)self;
 	struct athn_softc *sc = &usc->sc_sc;
 
-	athn_detach(sc);
+	if (usc->sc_athn_attached)
+		athn_detach(sc);
 
 	/* Wait for all async commands to complete. */
 	athn_usb_wait_async(usc);
@@ -347,6 +348,7 @@ athn_usb_attachhook(void *xsc)
 		splx(s);
 		return;
 	}
+	usc->sc_athn_attached = 1;
 	/* Override some operations for USB. */
 	ifp->if_ioctl = athn_usb_ioctl;
 	ifp->if_start = athn_usb_start;
@@ -1663,6 +1665,7 @@ athn_usb_rx_frame(struct athn_usb_softc *usc, struct mbuf *m)
 	struct ar_htc_frame_hdr *htc;
 	struct ar_rx_status *rs;
 	uint16_t datalen;
+	int s;
 
 	if (__predict_false(m->m_len < sizeof(*htc)))
 		goto skip;
@@ -1693,6 +1696,8 @@ athn_usb_rx_frame(struct athn_usb_softc *usc, struct mbuf *m)
 	m_adj(m, sizeof(*rs));	/* Strip Rx status. */
 	m->m_pkthdr.rcvif = ifp;
 
+	s = splnet();
+
 	/* Grab a reference to the source node. */
 	wh = mtod(m, struct ieee80211_frame *);
 	ni = ieee80211_find_rxnode(ic, wh);
@@ -1720,6 +1725,7 @@ athn_usb_rx_frame(struct athn_usb_softc *usc, struct mbuf *m)
 
 	/* Node is no longer needed. */
 	ieee80211_release_node(ic, ni);
+	splx(s);
 	return;
  skip:
 	m_freem(m);
