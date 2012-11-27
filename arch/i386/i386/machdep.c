@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.515 2012/10/09 09:16:09 jsg Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.517 2012/11/10 09:45:05 mglocker Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -164,6 +164,8 @@ extern struct proc *npxproc;
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
 #endif /* NCOM > 0 */
+
+void	replacesmap(void);
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
@@ -1067,6 +1069,14 @@ const struct cpu_cpuid_feature cpu_seff0_ebxfeatures[] = {
 	{ SEFF0EBX_SMAP,	"SMAP" },
 };
 
+const struct cpu_cpuid_feature i386_cpuid_eaxperf[] = {
+	{ CPUIDEAX_VERID,	"PERF" },
+};
+
+const struct cpu_cpuid_feature i386_cpuid_edxapmi[] = {
+	{ CPUIDEDX_ITSC,	"ITSC" },
+};
+
 void
 winchip_cpu_setup(struct cpu_info *ci)
 {
@@ -1836,7 +1846,20 @@ identifycpu(struct cpu_info *ci)
 	}
 
 	if (ci->ci_feature_flags && (ci->ci_feature_flags & CPUID_TSC)) {
-		/* Has TSC */
+		/* Has TSC, check if it's constant */
+		switch (vendor) {
+		case CPUVENDOR_INTEL:
+			if ((ci->ci_family == 0x0f && ci->ci_model >= 0x03) ||
+			    (ci->ci_family == 0x06 && ci->ci_model >= 0x0e)) {
+				ci->ci_flags |= CPUF_CONST_TSC;
+			}
+			break;
+		case CPUVENDOR_VIA:
+			if (ci->ci_model >= 0x0f) {
+				ci->ci_flags |= CPUF_CONST_TSC;
+			}
+			break;
+		}
 		calibrate_cyclecounter();
 		if (cpuspeed > 994) {
 			int ghz, fr;
@@ -1898,6 +1921,22 @@ identifycpu(struct cpu_info *ci)
 					numbits++;
 				}
 			}
+			for (i = 0; i < nitems(i386_cpuid_eaxperf); i++) {
+				if (cpu_perf_eax &
+				    i386_cpuid_eaxperf[i].feature_bit) {
+					printf("%s%s", (numbits == 0 ? "" : ","),
+					    i386_cpuid_eaxperf[i].feature_name);
+					numbits++;
+				}
+			}
+			for (i = 0; i < nitems(i386_cpuid_edxapmi); i++) {
+				if (cpu_apmi_edx &
+				    i386_cpuid_edxapmi[i].feature_bit) {
+					printf("%s%s", (numbits == 0 ? "" : ","),
+					    i386_cpuid_edxapmi[i].feature_name);
+					numbits++;
+				}
+			}
 
 			if (cpuid_level >= 0x07) {
 				u_int dummy;
@@ -1921,6 +1960,10 @@ identifycpu(struct cpu_info *ci)
 	if (ci->ci_flags & CPUF_PRIMARY) {
 		if (cpu_ecxfeature & CPUIDECX_RDRAND)
 			has_rdrand = 1;
+#ifndef SMALL_KERNEL
+		if (ci->ci_feature_sefflags & SEFF0EBX_SMAP)
+			replacesmap();
+#endif
 	}
 
 #ifndef SMALL_KERNEL
