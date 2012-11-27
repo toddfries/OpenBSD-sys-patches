@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.245 2012/10/05 17:17:04 camield Exp $	*/
+/*	$OpenBSD: if.c,v 1.248 2012/11/23 20:12:03 sthen Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -67,6 +67,7 @@
 #include "carp.h"
 #include "pf.h"
 #include "trunk.h"
+#include "ether.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -553,8 +554,9 @@ if_detach(struct ifnet *ifp)
 	rt_if_remove(ifp);
 #ifdef INET
 	rti_delete(ifp);
-#if NETHER > 0
-	myip_ifp = NULL;
+#if NETHER > 0 && defined(NFSCLIENT) 
+	if (ifp == revarp_ifp)
+		revarp_ifp = NULL;
 #endif
 #ifdef MROUTING
 	vif_delete(ifp);
@@ -1266,6 +1268,10 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		ifr->ifr_mtu = ifp->if_mtu;
 		break;
 
+	case SIOCGIFHARDMTU:
+		ifr->ifr_hardmtu = ifp->if_hardmtu;
+		break;
+
 	case SIOCGIFDATA:
 		error = copyout((caddr_t)&ifp->if_data, ifr->ifr_data,
 		    sizeof(ifp->if_data));
@@ -1496,9 +1502,6 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			rt_if_remove(ifp);
 #ifdef INET
 			rti_delete(ifp);
-#if NETHER > 0
-			myip_ifp = NULL;
-#endif
 #ifdef MROUTING
 			vif_delete(ifp);
 #endif
