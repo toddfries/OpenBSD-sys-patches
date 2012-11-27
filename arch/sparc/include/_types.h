@@ -1,4 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.17 2012/04/28 17:24:50 miod Exp $	*/
+/*	$OpenBSD: _types.h,v 1.19 2012/11/05 19:39:34 miod Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
