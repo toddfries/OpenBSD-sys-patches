@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_i386.c,v 1.35 2011/06/26 23:19:11 tedu Exp $	*/
+/*	$OpenBSD: dev_i386.c,v 1.38 2012/11/01 00:55:38 jsing Exp $	*/
 
 /*
  * Copyright (c) 1996-1999 Michael Shalayeff
@@ -26,10 +26,20 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/param.h>
+#include <sys/queue.h>
+#include <sys/disklabel.h>
+#include <dev/cons.h>
+
 #include "libsa.h"
 #include "biosdev.h"
-#include <sys/param.h>
-#include <dev/cons.h>
+#include "disk.h"
+
+#ifdef SOFTRAID
+#include <dev/biovar.h>
+#include <dev/softraidvar.h>
+#include "softraid.h"
+#endif
 
 extern int debug;
 
@@ -89,6 +99,14 @@ devopen(struct open_file *f, const char *fname, char **file)
 void
 devboot(dev_t bootdev, char *p)
 {
+#ifdef SOFTRAID
+	struct sr_boot_volume *bv;
+	struct sr_boot_chunk *bc;
+	struct diskinfo *dip = NULL;
+#endif
+	int sr_boot_vol = -1;
+	int part_type = FS_UNUSED;
+
 #ifdef _TEST
 	*p++ = '/';
 	*p++ = 'd';
@@ -97,7 +115,36 @@ devboot(dev_t bootdev, char *p)
 	*p++ = '/';
 	*p++ = 'r';
 #endif
-	if (bootdev & 0x100) {
+
+#ifdef SOFTRAID
+	/*
+	 * Determine the partition type for the 'a' partition of the
+	 * boot device.
+	 */
+	TAILQ_FOREACH(dip, &disklist, list)
+		if (dip->bios_info.bios_number == bootdev &&
+		    (dip->bios_info.flags & BDI_BADLABEL) == 0)
+			part_type = dip->disklabel.d_partitions[0].p_fstype;
+
+	/*
+	 * See if we booted from a disk that is a member of a bootable
+	 * softraid volume.
+	 */
+	SLIST_FOREACH(bv, &sr_volumes, sbv_link) {
+		if (bv->sbv_flags & BIOC_SCBOOTABLE)
+			SLIST_FOREACH(bc, &bv->sbv_chunks, sbc_link)
+				if (bc->sbc_disk == bootdev)
+					sr_boot_vol = bv->sbv_unit;
+		if (sr_boot_vol != -1)
+			break;
+	}
+#endif
+
+	if (sr_boot_vol != -1 && part_type != FS_BSDFFS) {
+		*p++ = 's';
+		*p++ = 'r';
+		*p++ = '0' + sr_boot_vol;
+	} else if (bootdev & 0x100) {
 		*p++ = 'c';
 		*p++ = 'd';
 		*p++ = '0';
@@ -128,9 +175,9 @@ putchar(int c)
 			pch_pos--;
 		break;
 	case '\t':
-		do
+		do {
 			cnputc(' ');
-		while (++pch_pos % 8);
+		} while (++pch_pos % 8);
 		break;
 	case '\n':
 	case '\r':
@@ -183,7 +230,7 @@ ttydev(char *name)
 		return NODEV;
 	for (i = 0; i < ncdevs; i++)
 		if (strncmp(name, cdevs[i], no - name + 1) == 0)
-			return (makedev(i, unit));
+			return makedev(i, unit);
 	return NODEV;
 }
 
@@ -191,7 +238,7 @@ int
 cnspeed(dev_t dev, int sp)
 {
 	if (major(dev) == 8)	/* comN */
-		return (comspeed(dev, sp));
+		return comspeed(dev, sp);
 
 	/* pc0 and anything else */
 	return 9600;

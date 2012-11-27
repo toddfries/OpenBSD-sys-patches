@@ -1,4 +1,4 @@
-/*	$OpenBSD: diskprobe.c,v 1.32 2010/04/23 15:25:20 jsing Exp $	*/
+/*	$OpenBSD: diskprobe.c,v 1.34 2012/11/01 00:55:38 jsing Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -34,12 +34,18 @@
 #include <sys/queue.h>
 #include <sys/reboot.h>
 #include <sys/disklabel.h>
-#include <stand/boot/bootarg.h>
-#include <machine/biosvar.h>
+
 #include <lib/libz/zlib.h>
+#include <machine/biosvar.h>
+#include <stand/boot/bootarg.h>
+
 #include "disk.h"
 #include "biosdev.h"
 #include "libsa.h"
+
+#ifdef SOFTRAID
+#include "softraid.h"
+#endif
 
 #define MAX_CKSUMLEN MAXBSIZE / DEV_BSIZE	/* Max # of blks to cksum */
 
@@ -182,6 +188,10 @@ diskprobe(void)
 		printf(";");
 #endif
 	hardprobe();
+
+#ifdef SOFTRAID
+	srprobe();
+#endif
 
 	/* Checksumming of hard disks */
 	for (i = 0; disksum(i++) && i < MAX_CKSUMLEN; )
