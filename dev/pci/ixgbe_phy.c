@@ -1,4 +1,4 @@
-/*	$OpenBSD: ixgbe_phy.c,v 1.8 2012/08/06 21:07:52 mikeb Exp $	*/
+/*	$OpenBSD: ixgbe_phy.c,v 1.10 2012/12/17 18:44:27 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -1279,7 +1279,7 @@ int32_t ixgbe_write_i2c_eeprom_generic(struct ixgbe_hw *hw, uint8_t byte_offset,
  *  @data: value read
  *
  *  Performs byte read operation to SFP module's EEPROM over I2C interface at
- *  a specified deivce address.
+ *  a specified device address.
  **/
 int32_t ixgbe_read_i2c_byte_generic(struct ixgbe_hw *hw, uint8_t byte_offset,
 				uint8_t dev_addr, uint8_t *data)
@@ -1535,6 +1535,7 @@ int32_t ixgbe_clock_out_i2c_byte(struct ixgbe_hw *hw, uint8_t data)
 	i2cctl = IXGBE_READ_REG(hw, IXGBE_I2CCTL);
 	i2cctl |= IXGBE_I2C_DATA_OUT;
 	IXGBE_WRITE_REG(hw, IXGBE_I2CCTL, i2cctl);
+	IXGBE_WRITE_FLUSH(hw);
 
 	return status;
 }
@@ -1655,16 +1656,20 @@ int32_t ixgbe_clock_out_i2c_bit(struct ixgbe_hw *hw, int data)
  **/
 int32_t ixgbe_raise_i2c_clk(struct ixgbe_hw *hw, uint32_t *i2cctl)
 {
-	int32_t status = IXGBE_SUCCESS;
+	int i;
 
 	*i2cctl |= IXGBE_I2C_CLK_OUT;
 
-	IXGBE_WRITE_REG(hw, IXGBE_I2CCTL, *i2cctl);
+	for (i = 0; i < IXGBE_I2C_CLOCK_STRETCHING_TIMEOUT; i++) {
+		IXGBE_WRITE_REG(hw, IXGBE_I2CCTL, *i2cctl);
+		IXGBE_WRITE_FLUSH(hw);
+		/* SCL rise time (1000ns) */
+		usec_delay(IXGBE_I2C_T_RISE);
 
-	/* SCL rise time (1000ns) */
-	usec_delay(IXGBE_I2C_T_RISE);
-
-	return status;
+		if (IXGBE_READ_REG(hw, IXGBE_I2CCTL) & IXGBE_I2C_CLK_IN)
+			return (IXGBE_SUCCESS);
+	}
+	return (IXGBE_ERR_I2C);
 }
 
 /**
@@ -1680,6 +1685,7 @@ void ixgbe_lower_i2c_clk(struct ixgbe_hw *hw, uint32_t *i2cctl)
 	*i2cctl &= ~IXGBE_I2C_CLK_OUT;
 
 	IXGBE_WRITE_REG(hw, IXGBE_I2CCTL, *i2cctl);
+	IXGBE_WRITE_FLUSH(hw);
 
 	/* SCL fall time (300ns) */
 	usec_delay(IXGBE_I2C_T_FALL);
@@ -1703,6 +1709,7 @@ int32_t ixgbe_set_i2c_data(struct ixgbe_hw *hw, uint32_t *i2cctl, int data)
 		*i2cctl &= ~IXGBE_I2C_DATA_OUT;
 
 	IXGBE_WRITE_REG(hw, IXGBE_I2CCTL, *i2cctl);
+	IXGBE_WRITE_FLUSH(hw);
 
 	/* Data rise/fall (1000ns/300ns) and set-up time (250ns) */
 	usec_delay(IXGBE_I2C_T_RISE + IXGBE_I2C_T_FALL + IXGBE_I2C_T_SU_DATA);
