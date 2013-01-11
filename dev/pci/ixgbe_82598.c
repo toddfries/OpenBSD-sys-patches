@@ -1,4 +1,4 @@
-/*	$OpenBSD: ixgbe_82598.c,v 1.7 2012/07/29 13:49:03 mikeb Exp $	*/
+/*	$OpenBSD: ixgbe_82598.c,v 1.10 2012/12/17 12:03:16 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -233,10 +233,6 @@ int32_t ixgbe_init_phy_ops_82598(struct ixgbe_hw *hw)
 		phy->ops.get_firmware_version =
 			     &ixgbe_get_phy_firmware_version_tnx;
 		break;
-	case ixgbe_phy_aq:
-		phy->ops.get_firmware_version =
-			     &ixgbe_get_phy_firmware_version_generic;
-		break;
 	case ixgbe_phy_nl:
 		phy->ops.reset = &ixgbe_reset_phy_nl;
 
@@ -377,7 +373,6 @@ enum ixgbe_media_type ixgbe_get_media_type_82598(struct ixgbe_hw *hw)
 	switch (hw->phy.type) {
 	case ixgbe_phy_cu_unknown:
 	case ixgbe_phy_tn:
-	case ixgbe_phy_aq:
 		media_type = ixgbe_media_type_copper;
 		goto out;
 	default:
@@ -711,11 +706,6 @@ int32_t ixgbe_check_mac_link_82598(struct ixgbe_hw *hw, ixgbe_link_speed *speed,
 	    (ixgbe_validate_link_ready(hw) != IXGBE_SUCCESS))
 		*link_up = FALSE;
 
-	/* if link is down, zero out the current_mode */
-	if (*link_up == FALSE) {
-		hw->fc.current_mode = ixgbe_fc_none;
-		hw->fc.fc_was_autonegged = FALSE;
-	}
 out:
 	return IXGBE_SUCCESS;
 }
@@ -893,20 +883,17 @@ mac_reset_top:
 		DEBUGOUT("Reset polling failed to complete.\n");
 	}
 
+	msec_delay(50);
+
 	/*
 	 * Double resets are required for recovery from certain error
 	 * conditions.  Between resets, it is necessary to stall to allow time
-	 * for any pending HW events to complete.  We use 1usec since that is
-	 * what is needed for ixgbe_disable_pcie_master().  The second reset
-	 * then clears out any effects of those events.
+	 * for any pending HW events to complete.
 	 */
 	if (hw->mac.flags & IXGBE_FLAGS_DOUBLE_RESET_REQUIRED) {
 		hw->mac.flags &= ~IXGBE_FLAGS_DOUBLE_RESET_REQUIRED;
-		usec_delay(1);
 		goto mac_reset_top;
 	}
-
-	msec_delay(50);
 
 	gheccr = IXGBE_READ_REG(hw, IXGBE_GHECCR);
 	gheccr &= ~((1 << 21) | (1 << 18) | (1 << 9) | (1 << 6));
@@ -1187,7 +1174,6 @@ uint32_t ixgbe_get_supported_physical_layer_82598(struct ixgbe_hw *hw)
 	 * physical layer because 10GBase-T PHYs use LMS = KX4/KX */
 	switch (hw->phy.type) {
 	case ixgbe_phy_tn:
-	case ixgbe_phy_aq:
 	case ixgbe_phy_cu_unknown:
 		hw->phy.ops.read_reg(hw, IXGBE_MDIO_PHY_EXT_ABILITY,
 		IXGBE_MDIO_PMA_PMD_DEV_TYPE, &ext_ability);
@@ -1215,8 +1201,14 @@ uint32_t ixgbe_get_supported_physical_layer_82598(struct ixgbe_hw *hw)
 			physical_layer = IXGBE_PHYSICAL_LAYER_10GBASE_CX4;
 		else if (pma_pmd_10g == IXGBE_AUTOC_10G_KX4)
 			physical_layer = IXGBE_PHYSICAL_LAYER_10GBASE_KX4;
-		else /* XAUI */
-			physical_layer = IXGBE_PHYSICAL_LAYER_UNKNOWN;
+		else { /* XAUI */
+			if (autoc & IXGBE_AUTOC_KX_SUPP)
+				physical_layer |=
+				    IXGBE_PHYSICAL_LAYER_1000BASE_KX;
+			if (autoc & IXGBE_AUTOC_KX4_SUPP)
+				physical_layer |=
+				    IXGBE_PHYSICAL_LAYER_10GBASE_KX4;
+		}
 		break;
 	case IXGBE_AUTOC_LMS_KX4_AN:
 	case IXGBE_AUTOC_LMS_KX4_AN_1G_AN:
