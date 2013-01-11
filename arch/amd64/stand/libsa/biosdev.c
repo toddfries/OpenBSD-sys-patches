@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosdev.c,v 1.18 2012/10/09 13:55:36 jsing Exp $	*/
+/*	$OpenBSD: biosdev.c,v 1.19 2012/10/27 15:43:42 jsing Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -31,8 +31,6 @@
 #include <sys/param.h>
 #include <sys/reboot.h>
 #include <sys/disklabel.h>
-#include <dev/biovar.h>
-#include <dev/softraidvar.h>
 #include <isofs/cd9660/iso.h>
 #include <lib/libsa/saerrno.h>
 #include <machine/tss.h>
@@ -42,11 +40,9 @@
 #include "disk.h"
 #include "libsa.h"
 
-#ifdef BOOT_CRYPTO
-#include <lib/libsa/aes_xts.h>
-#include <lib/libsa/hmac_sha1.h>
-#include <lib/libsa/pbkdf2.h>
-#include <lib/libsa/rijndael.h>
+#ifdef SOFTRAID
+#include <dev/softraidvar.h>
+#include "softraid.h"
 #endif
 
 static const char *biosdisk_err(u_int);
@@ -56,14 +52,6 @@ int CHS_rw (int, int, int, int, int, int, void *);
 static int EDD_rw (int, int, u_int32_t, u_int32_t, void *);
 
 static u_int findopenbsd(bios_diskinfo_t *, const char **);
-
-static const char *sr_getdisklabel(struct sr_boot_volume *, struct disklabel *);
-static int sr_strategy(struct sr_boot_volume *, int, daddr32_t, size_t,
-    void *, size_t *);
-
-#ifdef BOOT_CRYPTO
-static int sr_crypto_decrypt_keys(struct sr_boot_volume *);
-#endif
 
 extern int debug;
 int bios_bootdev;
@@ -467,7 +455,9 @@ bios_getdisklabel(bios_diskinfo_t *bd, struct disklabel *label)
 int
 biosopen(struct open_file *f, ...)
 {
+#ifdef SOFTRAID
 	struct sr_boot_volume *bv;
+#endif
 	register char *cp, **file;
 	dev_t maj, unit, part;
 	struct diskinfo *dip;
@@ -520,6 +510,7 @@ biosopen(struct open_file *f, ...)
 	else
 		f->f_flags |= F_RAW;
 
+#ifdef SOFTRAID
 	/* Intercept softraid disks. */
 	if (strncmp("sr", dev, 2) == 0) {
 
@@ -532,10 +523,8 @@ biosopen(struct open_file *f, ...)
 			return EADAPT;
 		}
 
-#ifdef BOOT_CRYPTO
 		if (bv->sbv_level == 'C' && bv->sbv_keys == NULL)
 			sr_crypto_decrypt_keys(bv);
-#endif
 
 		if (bv->sbv_diskinfo == NULL) {
 			dip = alloc(sizeof(struct diskinfo));
@@ -562,6 +551,7 @@ biosopen(struct open_file *f, ...)
 
 		return 0;
 	}
+#endif
  
 	for (maj = 0; maj < nbdevs &&
 	    strncmp(dev, bdevs[maj], devlen); maj++);
@@ -721,9 +711,11 @@ biosstrategy(void *devdata, int rw, daddr32_t blk, size_t size, void *buf,
 	u_int8_t error = 0;
 	size_t nsect;
 
+#ifdef SOFTRAID
 	/* Intercept strategy for softraid volumes. */
 	if (dip->sr_vol)
 		return sr_strategy(dip->sr_vol, rw, blk, size, buf, rsize);
+#endif
 
 	nsect = (size + DEV_BSIZE - 1) / DEV_BSIZE;
 	blk += dip->disklabel.d_partitions[B_PARTITION(dip->bsddev)].p_offset;
