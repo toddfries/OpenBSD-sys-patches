@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.113 2012/11/21 05:26:18 kirby Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.115 2012/12/05 23:20:21 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -47,8 +47,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
 
 /*
  * ASIX Electronics AX88172 USB 2.0 ethernet driver. Used in the
@@ -794,12 +792,7 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = axe_ioctl;
 	ifp->if_start = axe_start;
-
 	ifp->if_watchdog = axe_watchdog;
-
-/*	ifp->if_baudrate = 10000000; */
-/*	ifp->if_snd.ifq_maxlen = IFQ_MAXLEN;*/
-
 	IFQ_SET_READY(&ifp->if_snd);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;

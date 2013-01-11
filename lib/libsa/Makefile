@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.22 2005/05/24 22:25:46 millert Exp $
+#	$OpenBSD: Makefile,v 1.24 2013/01/01 18:49:33 miod Exp $
 #	$NetBSD: Makefile,v 1.13 1996/10/02 16:19:51 ws Exp $
 
 LIB=	sa
@@ -12,9 +12,8 @@ DIR=${SAREL}${SADIR}
 AFLAGS+=${XAFLAGS}
 CFLAGS+=${XCFLAGS} -D_STANDALONE -DCOMPAT_UFS $(DEBUGFLAGS) -I${DIR} -I${DIR}/../..
 #
-# Needed for PowerPC
+# Needed for alpha and macppc
 CFLAGS+=$(EXTRACFLAGS)
-CPPFLAGS+=${XCPPFLAGS}
 
 .if defined(USE_LOADFILE)
 SRCS+= loadfile.c
@@ -25,7 +24,7 @@ CPPFLAGS+= -D__INTERNAL_LIBSA_CREAD
 .endif
 
 # stand routines
-SRCS+=	alloc.c memcpy.c exit.c exec.c getfile.c gets.c globals.c \
+SRCS+=	alloc.c memcpy.c exit.c getfile.c gets.c globals.c \
 	printf.c snprintf.c strerror.c strcmp.c memset.c memcmp.c \
 	strncpy.c strncmp.c strchr.c
 
