@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.125 2012/04/17 23:17:53 pirofti Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.127 2012/12/18 21:28:45 millert Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -37,11 +37,6 @@
 
 #ifndef _SYS_SYSCTL_H_
 #define	_SYS_SYSCTL_H_
-
-#ifndef _KERNEL
-#include <sys/proc.h>		/* for SRUN, SIDL, etc */
-#include <sys/resource.h>	/* for struct loadavg */
-#endif
 
 #include <uvm/uvm_extern.h>
 
@@ -975,7 +970,6 @@ int pflow_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 int pipex_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 
 #else	/* !_KERNEL */
-#include <sys/cdefs.h>
 
 __BEGIN_DECLS
 int	sysctl(int *, u_int, void *, size_t *, void *, size_t);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cn30xxgmx.c,v 1.3 2011/07/03 20:31:39 yasuoka Exp $	*/
+/*	$OpenBSD: cn30xxgmx.c,v 1.5 2012/12/05 23:20:14 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -31,14 +31,11 @@
  *  take no thought for other GMX interface
  */
 
-#include <sys/cdefs.h>
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/types.h>
 #include <sys/device.h>
 #include <sys/lock.h>
-#include <sys/cdefs.h>
 #include <sys/malloc.h>
 #include <sys/syslog.h>
 
@@ -672,7 +669,7 @@ cn30xxgmx_rgmii_speed(struct cn30xxgmx_port_softc *sc)
 		baudrate = IF_Mbps(100);
 		break;
 	case RXN_RX_INBND_SPEED_125:
-		baudrate = IF_Mbps(1000);
+		baudrate = IF_Gbps(1);
 		break;
 	default:
 		baudrate = 0/* XXX */;
