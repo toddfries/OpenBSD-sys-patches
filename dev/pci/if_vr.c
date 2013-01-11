@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.119 2012/11/23 18:40:30 gsoares Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.121 2012/12/01 09:55:03 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -623,15 +623,15 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = vr_ioctl;
 	ifp->if_start = vr_start;
 	ifp->if_watchdog = vr_watchdog;
-	ifp->if_baudrate = IF_Mbps(10);
-	ifp->if_capabilities = 0;
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
-	ifp->if_capabilities |= IFCAP_VLAN_MTU;
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
 	if (sc->vr_quirks & VR_Q_CSUM)
-		ifp->if_capabilities |= IFCAP_CSUM_IPv4|IFCAP_CSUM_TCPv4|
+		ifp->if_capabilities |= IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 |
 					IFCAP_CSUM_UDPv4;
+
 #ifndef SMALL_KERNEL
 	if (sc->vr_revid >= REV_ID_VT3065_A) {
 		ifp->if_capabilities |= IFCAP_WOL;
