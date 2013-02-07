@@ -1,4 +1,4 @@
-$OpenBSD: pcidevs,v 1.1664 2013/01/02 05:45:41 jsg Exp $
+$OpenBSD: pcidevs,v 1.1667 2013/01/17 12:50:34 reyk Exp $
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
 /*
@@ -2058,13 +2058,14 @@ product DELTA 8139		0x1360	8139
 product DIAMOND VIPER		0x9001	Viper/PCI
 
 /* D-Link products */
-product DLINK 550TX		0x1002	550TX
-product DLINK 530TXPLUS		0x1300	530TX+
+product DLINK DFE550TX		0x1002	DFE-550TX
+product DLINK DFE530TXPLUS	0x1300	DFE-530TX+
 product DLINK DFE690TXD		0x1340	DFE-690TXD
 product DLINK DRP32TXD		0x1561	DRP32TXD
 product DLINK DWL610		0x3300	DWL-610
 product DLINK DGE550T		0x4000	DGE-550T
 product DLINK DGE550SX		0x4001	DGE-550SX
+product DLINK DFE520TX_C1	0x4200	DFE-520TX C1
 product DLINK DGE528T		0x4300	DGE-528T
 product DLINK DGE530T_C1	0x4302	DGE-530T C1
 product DLINK DGE560T		0x4b00	DGE-560T
@@ -6040,8 +6041,11 @@ product VMWARE VIRTUAL		0x0710	Virtual SVGA
 product VMWARE NET		0x0720	Virtual NIC
 product VMWARE MACHINE_2	0x0740	Virtual Machine Communication Interface
 product VMWARE EHCI		0x0770	Virtual EHCI
+product VMWARE UHCI		0x0774	Virtual UHCI
 product VMWARE PCI		0x0790	Virtual PCI-PCI
 product VMWARE PCIE		0x07a0	Virtual PCIE-PCIE
+product VMWARE NET_3		0x07b0	Virtual VMXNET3
+product VMWARE PVSCSI		0x07c0	Virtual PVSCSI
 product VMWARE MACHINE		0x0801	Virtual Machine Interface
 
 /* Weitek products */
