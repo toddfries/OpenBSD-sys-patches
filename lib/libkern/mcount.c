@@ -1,4 +1,4 @@
-/*	$OpenBSD: mcount.c,v 1.10 2013/01/16 23:38:14 dlg Exp $	*/
+/*	$OpenBSD: mcount.c,v 1.12 2013/02/12 08:06:22 mpi Exp $	*/
 /*	$NetBSD: mcount.c,v 1.3.6.1 1996/06/12 04:23:01 cgd Exp $	*/
 
 /*-
