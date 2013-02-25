@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.142 2012/12/28 14:05:39 jsing Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.145 2013/02/09 20:56:35 miod Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -234,7 +234,6 @@ bufinit(void)
 
 	pool_init(&bufpool, sizeof(struct buf), 0, 0, 0, "bufpl", NULL);
 	pool_setipl(&bufpool, IPL_BIO);
-	pool_sethiwat(&bufpool, buflowpages / 4);
 
 	for (dp = bufqueues; dp < &bufqueues[BQUEUES]; dp++)
 		TAILQ_INIT(dp);
@@ -1036,7 +1035,7 @@ buf_get(struct vnode *vp, daddr64_t blkno, size_t size)
 	LIST_INIT(&bp->b_dep);
 	bp->b_bcount = size;
 
-	buf_acquire_unmapped(bp);
+	buf_acquire_nomap(bp);
 
 	if (vp != NULL) {
 		/*
@@ -1240,12 +1239,13 @@ biodone(struct buf *bp)
 }
 
 #ifdef DDB
-void	bcstats_print(int (*)(const char *, ...));
+void	bcstats_print(int (*)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))));
 /*
  * bcstats_print: ddb hook to print interesting buffer cache counters
  */
 void
-bcstats_print(int (*pr)(const char *, ...))
+bcstats_print(
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	(*pr)("Current Buffer Cache status:\n");
 	(*pr)("numbufs %lld busymapped %lld, delwri %lld\n",
