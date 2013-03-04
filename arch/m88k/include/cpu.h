@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.56 2013/01/05 11:20:56 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.58 2013/02/12 08:06:22 mpi Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
