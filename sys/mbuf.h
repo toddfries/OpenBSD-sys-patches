@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.159 2012/10/05 12:27:02 camield Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.161 2013/02/07 11:06:42 mikeb Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -50,9 +50,9 @@
 #define	MLEN		(MSIZE - sizeof(struct m_hdr))	/* normal data len */
 #define	MHLEN		(MLEN - sizeof(struct pkthdr))	/* data len w/pkthdr */
 
-/* smallest amount to put in cluster */
-#define	MINCLSIZE	(MHLEN + MLEN + 1)
-#define	M_MAXCOMPRESS	(MHLEN / 2)	/* max amount to copy for compression */
+#define	MAXMCLBYTES	(64 * 1024)		/* largest cluster from the stack */
+#define	MINCLSIZE	(MHLEN + MLEN + 1)	/* smallest amount to put in cluster */
+#define	M_MAXCOMPRESS	(MHLEN / 2)		/* max amount to copy for compression */
 
 /* Packet tags structure */
 struct m_tag {
@@ -450,6 +450,14 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 #define PACKET_TAG_PF_DIVERT		0x0200 /* pf(4) diverted packet */
 #define PACKET_TAG_PIPEX		0x0400 /* pipex session cache */
 #define PACKET_TAG_PF_REASSEMBLED	0x0800 /* pf reassembled ipv6 packet */
+
+/*
+ * Maximum tag payload length (that is excluding the m_tag structure).
+ * Please make sure to update this value when increasing the payload
+ * length for an existing packet tag type or when adding a new one that
+ * has payload larger than the value below.
+ */
+#define PACKET_TAG_MAXSIZE		40
 
 #endif /* _KERNEL */
 #endif /* _SYS_MBUF_H_ */

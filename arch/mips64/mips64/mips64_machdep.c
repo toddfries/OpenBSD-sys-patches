@@ -1,4 +1,4 @@
-/*	$OpenBSD: mips64_machdep.c,v 1.8 2012/10/03 11:18:23 miod Exp $ */
+/*	$OpenBSD: mips64_machdep.c,v 1.11 2013/01/16 20:23:54 miod Exp $ */
 
 /*
  * Copyright (c) 2009, 2010, 2012 Miodrag Vallat.
@@ -46,6 +46,7 @@
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/exec.h>
+#include <sys/sysctl.h>
 #include <sys/timetc.h>
 
 #include <machine/autoconf.h>
@@ -318,17 +319,14 @@ cp0_calibrate(struct cpu_info *ci)
 }
 
 /*
- * Start the real-time and statistics clocks. Leave stathz 0 since there
- * are no other timers available.
+ * Start the real-time and statistics clocks.
  */
 void
 cpu_initclocks()
 {
 	struct cpu_info *ci = curcpu();
 
-	hz = 100;
-	profhz = 100;
-	stathz = 0;	/* XXX no stat clock yet */
+	profhz = hz;
 
 	tick = 1000000 / hz;	/* number of micro-seconds between interrupts */
 	tickadj = 240000 / (60 * hz);		/* can adjust 240ms in 60s */
@@ -336,9 +334,11 @@ cpu_initclocks()
 	cp0_calibrate(ci);
 
 #ifndef MULTIPROCESSOR
-	cp0_timecounter.tc_frequency =
-	    (uint64_t)ci->ci_hw.clock / CP0_CYCLE_DIVIDER;
-	tc_init(&cp0_timecounter);
+	if (cpu_setperf == NULL) {
+		cp0_timecounter.tc_frequency =
+		    (uint64_t)ci->ci_hw.clock / CP0_CYCLE_DIVIDER;
+		tc_init(&cp0_timecounter);
+	}
 #endif
 
 #ifdef DIAGNOSTIC

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.91 2012/12/02 07:03:31 guenther Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.93 2013/02/12 08:06:22 mpi Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
