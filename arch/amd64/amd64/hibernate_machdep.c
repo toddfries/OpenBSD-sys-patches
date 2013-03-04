@@ -33,6 +33,7 @@
 #include <machine/hibernate.h>
 #include <machine/hibernate_var.h>
 #include <machine/kcore.h>
+#include <machine/pte.h>
 #include <machine/pmap.h>
 
 #ifdef MULTIPROCESSOR
@@ -51,8 +52,7 @@
 
 /* Hibernate support */
 void    hibernate_enter_resume_4k_pte(vaddr_t, paddr_t);
-void    hibernate_enter_resume_4k_pde(vaddr_t);
-void    hibernate_enter_resume_4m_pde(vaddr_t, paddr_t);
+void    hibernate_enter_resume_2m_pde(vaddr_t, paddr_t);
 
 extern	void hibernate_resume_machdep(void);
 extern	void hibernate_flush(void);
@@ -62,7 +62,7 @@ extern  phys_ram_seg_t mem_clusters[];
 extern	struct hibernate_state *hibernate_state;
 
 /*
- * i386 MD Hibernate functions
+ * amd64 MD Hibernate functions
  */
 
 /*
@@ -71,13 +71,18 @@ extern	struct hibernate_state *hibernate_state;
 hibio_fn
 get_hibernate_io_function(void)
 {
+	char *blkname = findblkname(major(swdevt[0].sw_dev));
+
+	if (blkname == NULL)
+		return NULL;
+
 #if NWD > 0
 	/* XXX - Only support wd hibernate presently */
-	if (strcmp(findblkname(major(swdevt[0].sw_dev)), "wd") == 0)
+	if (strcmp(blkname, "wd") == 0)
 		return wd_hibernate_io;
 #endif
 #if NAHCI > 0 && NSD > 0
-	if (strcmp(findblkname(major(swdevt[0].sw_dev)), "sd") == 0) {
+	if (strcmp(blkname, "sd") == 0) {
 		extern struct cfdriver sd_cd;
 		extern int ahci_hibernate_io(dev_t dev, daddr_t blkno,
 		    vaddr_t addr, size_t size, int op, void *page);
@@ -135,28 +140,66 @@ get_hibernate_info_md(union hibernate_info *hiber_info)
  * the specified size.
  *
  * size : 0 if a 4KB mapping is desired
- *        1 if a 4MB mapping is desired
+ *        1 if a 2MB mapping is desired
  */
 void
 hibernate_enter_resume_mapping(vaddr_t va, paddr_t pa, int size)
 {
 	if (size)
-		return hibernate_enter_resume_4m_pde(va, pa);
+		return hibernate_enter_resume_2m_pde(va, pa);
 	else
 		return hibernate_enter_resume_4k_pte(va, pa);
 }
 
 /*
- * Enter a 4MB PDE mapping for the supplied VA/PA into the resume-time pmap
+ * Enter a 2MB PDE mapping for the supplied VA/PA into the resume-time pmap
  */
 void
-hibernate_enter_resume_4m_pde(vaddr_t va, paddr_t pa)
+hibernate_enter_resume_2m_pde(vaddr_t va, paddr_t pa)
 {
 	pt_entry_t *pde, npde;
 
-	pde = s4pde_4m(va);
-	npde = (pa & PMAP_PA_MASK_4M) | PG_RW | PG_V | PG_u | PG_M | PG_PS;
-	*pde = npde;
+	if (va < NBPD_L4) {
+		if (va < NBPD_L3) {
+			/* First 512GB and 1GB are already mapped */
+			pde = (pt_entry_t *)(HIBERNATE_PD_LOW +
+				(pl2_pi(va) * sizeof(pt_entry_t)));
+			npde = (pa & L2_MASK) | 
+				PG_RW | PG_V | PG_u | PG_M | PG_PS;
+			*pde = npde;
+		} else {
+			/* Map the 1GB containing region */
+			pde = (pt_entry_t *)(HIBERNATE_PDPT_LOW +
+				(pl3_pi(va) * sizeof(pt_entry_t)));
+			npde = (HIBERNATE_PD_LOW2) | PG_RW | PG_V | PG_u;
+			*pde = npde;
+
+			/* Map 2MB region */
+			pde = (pt_entry_t *)(HIBERNATE_PD_LOW2 +
+				(pl2_pi(va) * sizeof(pt_entry_t)));
+			npde = (pa & L2_MASK) |
+				PG_RW | PG_V | PG_u | PG_M | PG_PS;
+			*pde = npde; 
+		}
+	} else {
+		/* First map the 512GB containing region */
+		pde = (pt_entry_t *)(HIBERNATE_PML4T +
+			(pl4_pi(va) * sizeof(pt_entry_t)));
+		npde = (HIBERNATE_PDPT_HI) | PG_RW | PG_V | PG_u;
+		*pde = npde;
+
+		/* Map the 1GB containing region */
+		pde = (pt_entry_t *)(HIBERNATE_PDPT_HI +
+			(pl3_pi(va) * sizeof(pt_entry_t)));
+		npde = (HIBERNATE_PD_HI) | PG_RW | PG_V | PG_u;
+		*pde = npde;
+
+		/* Map the requested 2MB region */
+		pde = (pt_entry_t *)(HIBERNATE_PD_HI +
+			(pl2_pi(va) * sizeof(pt_entry_t)));
+		npde = (pa & L2_MASK) | PG_RW | PG_V | PG_u | PG_PS;
+		*pde = npde;
+	}
 }
 
 /*
@@ -165,23 +208,12 @@ hibernate_enter_resume_4m_pde(vaddr_t va, paddr_t pa)
 void
 hibernate_enter_resume_4k_pte(vaddr_t va, paddr_t pa)
 {
-	pt_entry_t *pte, npte;
-
-	pte = s4pte_4k(va);
-	npte = (pa & PMAP_PA_MASK) | PG_RW | PG_V | PG_u | PG_M;
-	*pte = npte;
-}
-
-/*
- * Enter a 4KB PDE mapping for the supplied VA into the resume-time pmap.
- */
-void
-hibernate_enter_resume_4k_pde(vaddr_t va)
-{
 	pt_entry_t *pde, npde;
 
-	pde = s4pde_4k(va);
-	npde = (HIBERNATE_PT_PAGE & PMAP_PA_MASK) | PG_RW | PG_V | PG_u | PG_M;
+	/* Map the page */
+	pde = (pt_entry_t *)(HIBERNATE_PT_LOW +
+		(pl1_pi(va) * sizeof(pt_entry_t)));
+	npde = (pa & PMAP_PA_MASK) | PG_RW | PG_V | PG_u;
 	*pde = npde;
 }
 
@@ -197,20 +229,58 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 {
 	int phys_page_number, i;
 	paddr_t pa, piglet_start, piglet_end;
-	vaddr_t kern_start_4m_va, kern_end_4m_va, page;
+	vaddr_t kern_start_2m_va, kern_end_2m_va, page;
+	pt_entry_t *pde, npde;
 
-	/* Identity map PD, PT, and stack pages */
-	pmap_kenter_pa(HIBERNATE_PT_PAGE, HIBERNATE_PT_PAGE, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_PD_PAGE, HIBERNATE_PD_PAGE, VM_PROT_ALL);
+	/* Identity map MMU pages */
+	pmap_kenter_pa(HIBERNATE_PML4T, HIBERNATE_PML4T, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_PDPT_LOW, HIBERNATE_PDPT_LOW, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_PDPT_HI, HIBERNATE_PDPT_HI, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_PD_LOW, HIBERNATE_PD_LOW, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_PD_LOW2, HIBERNATE_PD_LOW2, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_PD_HI, HIBERNATE_PD_HI, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_PT_LOW, HIBERNATE_PT_LOW, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_PT_LOW2, HIBERNATE_PT_LOW2, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_PT_HI, HIBERNATE_PT_HI, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_SELTABLE, HIBERNATE_SELTABLE, VM_PROT_ALL);
+
+	/* Identity map 3 pages for stack */
 	pmap_kenter_pa(HIBERNATE_STACK_PAGE, HIBERNATE_STACK_PAGE, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_STACK_PAGE + PAGE_SIZE,
+		HIBERNATE_STACK_PAGE + PAGE_SIZE, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_STACK_PAGE + 2*PAGE_SIZE,
+		HIBERNATE_STACK_PAGE + 2*PAGE_SIZE, VM_PROT_ALL);
 	pmap_activate(curproc);
 
-	bzero((caddr_t)HIBERNATE_PT_PAGE, PAGE_SIZE);
-	bzero((caddr_t)HIBERNATE_PD_PAGE, PAGE_SIZE);
-	bzero((caddr_t)HIBERNATE_STACK_PAGE, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_PML4T, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_PDPT_LOW, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_PDPT_HI, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_PD_LOW, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_PD_LOW2, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_PD_HI, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_PT_LOW, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_PT_LOW2, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_PT_HI, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_SELTABLE, PAGE_SIZE);
+	bzero((caddr_t)HIBERNATE_STACK_PAGE, PAGE_SIZE*3);
 
-	/* PDE for low pages */
-	hibernate_enter_resume_4k_pde(0);
+	/* First 512GB PML4E */
+	pde = (pt_entry_t *)(HIBERNATE_PML4T +
+		(pl4_pi(0) * sizeof(pt_entry_t)));
+	npde = (HIBERNATE_PDPT_LOW) | PG_RW | PG_V | PG_u;
+	*pde = npde;
+
+	/* First 1GB PDPTE */
+	pde = (pt_entry_t *)(HIBERNATE_PDPT_LOW +
+		(pl3_pi(0) * sizeof(pt_entry_t)));
+	npde = (HIBERNATE_PD_LOW) | PG_RW | PG_V | PG_u;
+	*pde = npde;
+	
+	/* PD for first 2MB */
+	pde = (pt_entry_t *)(HIBERNATE_PD_LOW +
+		(pl2_pi(0) * sizeof(pt_entry_t)));
+	npde = (HIBERNATE_PT_LOW) | PG_RW | PG_V | PG_u;
+	*pde = npde;
 
 	/*
 	 * Identity map first 640KB physical for tramps and special utility
@@ -221,41 +291,30 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	}
 
 	/*
-	 * Map current kernel VA range using 4M pages
+	 * Map current kernel VA range using 2MB pages
 	 */
-	kern_start_4m_va = (paddr_t)&start & ~(PAGE_MASK_4M);
-	kern_end_4m_va = (paddr_t)&end & ~(PAGE_MASK_4M);
+	kern_start_2m_va = (paddr_t)&start & ~(PAGE_MASK_2M);
+	kern_end_2m_va = (paddr_t)&end & ~(PAGE_MASK_2M);
 	phys_page_number = 0;
 
-	for (page = kern_start_4m_va; page <= kern_end_4m_va;
-	    page += NBPD, phys_page_number++) {
-		pa = (paddr_t)(phys_page_number * NBPD);
-		hibernate_enter_resume_mapping(page, pa, 1);
-	}
-
-	/*
-	 * Identity map the image (pig) area
-	 */
-	phys_page_number = image_start / NBPD;
-	image_start &= ~(PAGE_MASK_4M);
-	image_end &= ~(PAGE_MASK_4M);
-	for (page = image_start; page <= image_end ;
-	    page += NBPD, phys_page_number++) {
-		pa = (paddr_t)(phys_page_number * NBPD);
+	for (page = kern_start_2m_va; page <= kern_end_2m_va;
+	    page += NBPD_L2, phys_page_number++) {
+		pa = (paddr_t)(phys_page_number * NBPD_L2);
 		hibernate_enter_resume_mapping(page, pa, 1);
 	}
 
 	/*
 	 * Map the piglet
 	 */
-	phys_page_number = hib_info->piglet_pa / NBPD;
+	phys_page_number = hib_info->piglet_pa / NBPD_L2;
 	piglet_start = hib_info->piglet_va;
 	piglet_end = piglet_start + HIBERNATE_CHUNK_SIZE * 3;
-	piglet_start &= ~(PAGE_MASK_4M);
-	piglet_end &= ~(PAGE_MASK_4M);
+	piglet_start &= ~(PAGE_MASK_2M);
+	piglet_end &= ~(PAGE_MASK_2M);
+
 	for (page = piglet_start; page <= piglet_end ;
-	    page += NBPD, phys_page_number++) {
-		pa = (paddr_t)(phys_page_number * NBPD);
+	    page += NBPD_L2, phys_page_number++) {
+		pa = (paddr_t)(phys_page_number * NBPD_L2);
 		hibernate_enter_resume_mapping(page, pa, 1);
 	}
 }
@@ -327,3 +386,4 @@ hibernate_inflate_skip(union hibernate_info *hib_info, paddr_t dest)
 
 	return (0);
 }
+

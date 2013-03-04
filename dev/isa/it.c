@@ -1,4 +1,4 @@
-/*	$OpenBSD: it.c,v 1.40 2011/01/20 16:59:55 form Exp $	*/
+/*	$OpenBSD: it.c,v 1.42 2012/12/14 13:17:29 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2007-2008 Oleg Safiullin <form@pdp-11.org.ru>
@@ -168,6 +168,7 @@ it_match(struct device *parent, void *match, void *aux)
 	case IT_ID_8720:
 	case IT_ID_8721:
 	case IT_ID_8726:
+	case IT_ID_8772:
 		/* get environment controller base address */
 		it_writereg(ia->ia_iot, ioh, IT_LDN, IT_EC_LDN);
 		ec_iobase = it_readreg(ia->ia_iot, ioh, IT_EC_MSB) << 8;
@@ -229,7 +230,7 @@ it_attach(struct device *parent, struct device *self, void *aux)
 		it_writereg(sc->sc_iot, sc->sc_ioh, IT_LDN, IT_WDT_LDN);
 		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_CSR, 0x00);
 		it_writereg(sc->sc_iot, sc->sc_ioh, IT_WDT_TCR, 0x00);
-		wdog_register(sc, it_wdog_cb);
+		wdog_register(it_wdog_cb, sc);
 	}
 
 	/* exit MB PnP mode and unmap */

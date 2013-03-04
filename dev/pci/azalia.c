@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.201 2012/08/12 19:32:22 kettenis Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.203 2013/02/09 21:02:17 miod Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -497,6 +497,8 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 	pa = aux;
 
 	sc->dmat = pa->pa_dmat;
+
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	v = pci_conf_read(pa->pa_pc, pa->pa_tag, ICH_PCI_HDBARL);
 	v &= PCI_MAPREG_TYPE_MASK | PCI_MAPREG_MEM_TYPE_MASK;
@@ -4323,36 +4325,45 @@ azalia_params2fmt(const audio_params_t *param, uint16_t *fmt)
 		break;
 	}
 
-	if (param->sample_rate == 384000) {
-		printf("%s: invalid sample_rate: %u\n", __func__,
+	switch (param->sample_rate) {
+	default:
+	case 384000:
+		printf("%s: invalid sample_rate: %lu\n", __func__,
 		    param->sample_rate);
 		return EINVAL;
-	} else if (param->sample_rate == 192000) {
+	case 192000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X4 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 176400) {
+		break;
+	case 176400:
 		ret |= HDA_SD_FMT_BASE_44 | HDA_SD_FMT_MULT_X4 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 96000) {
+		break;
+	case 96000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X2 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 88200) {
+		break;
+	case 88200:
 		ret |= HDA_SD_FMT_BASE_44 | HDA_SD_FMT_MULT_X2 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 48000) {
+		break;
+	case 48000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 44100) {
+		break;
+	case 44100:
 		ret |= HDA_SD_FMT_BASE_44 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 32000) {
+		break;
+	case 32000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X2 | HDA_SD_FMT_DIV_BY3;
-	} else if (param->sample_rate == 22050) {
+		break;
+	case 22050:
 		ret |= HDA_SD_FMT_BASE_44 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY2;
-	} else if (param->sample_rate == 16000) {
+		break;
+	case 16000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY3;
-	} else if (param->sample_rate == 11025) {
+		break;
+	case 11025:
 		ret |= HDA_SD_FMT_BASE_44 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY4;
-	} else if (param->sample_rate == 8000) {
+		break;
+	case 8000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY6;
-	} else {
-		printf("%s: invalid sample_rate: %u\n", __func__,
-		    param->sample_rate);
-		return EINVAL;
+		break;
 	}
 	*fmt = ret;
 	return 0;

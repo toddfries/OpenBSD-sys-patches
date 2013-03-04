@@ -1,4 +1,4 @@
-/*	$OpenBSD: disk.h,v 1.2 2012/01/11 14:47:02 jsing Exp $	*/
+/*	$OpenBSD: disk.h,v 1.4 2012/10/27 15:43:42 jsing Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -27,8 +27,8 @@
  *
  */
 
-#ifndef _DISKPROBE_H
-#define _DISKPROBE_H
+#ifndef _DISK_H
+#define _DISK_H
 
 #include <sys/queue.h>
 
@@ -44,12 +44,12 @@ struct diskinfo {
 };
 TAILQ_HEAD(disklist_lh, diskinfo);
 
-/* Head of this list. */
+/* Disk info for boot device. */
 extern struct diskinfo *bootdev_dip;
 
-/* List of softraid volumes. */
-extern struct sr_boot_volume_head sr_volumes;
+/* List of probed disks. */
+extern struct disklist_lh disklist;
 
 void dump_diskinfo(void);
 
-#endif /* _DISKPROBE_H */
+#endif /* _DISK_H */

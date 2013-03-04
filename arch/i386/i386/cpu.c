@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.44 2012/07/09 15:25:37 deraadt Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.48 2012/11/02 15:10:28 jsg Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -102,6 +102,7 @@
 #include <dev/ic/mc146818reg.h>
 #include <i386/isa/nvram.h>
 #include <dev/isa/isareg.h>
+#include <dev/rndvar.h>
 
 int     cpu_match(struct device *, void *, void *);
 void    cpu_attach(struct device *, struct device *, void *);
@@ -156,6 +157,78 @@ struct cfattach cpu_ca = {
 struct cfdriver cpu_cd = {
 	NULL, "cpu", DV_DULL /* XXX DV_CPU */
 };
+
+#ifndef SMALL_KERNEL
+void	replacesmap(void);
+
+extern int _copyout_stac;
+extern int _copyout_clac;
+extern int _copyin_stac;
+extern int _copyin_clac;
+extern int _copy_fault_clac;
+extern int _copyoutstr_stac;
+extern int _copyinstr_stac;
+extern int _copystr_fault_clac;
+extern int _ucas_32_stac;
+extern int _ucas_32_clac;
+extern int _stac;
+extern int _clac;
+
+static const struct {
+	void *daddr;
+	void *saddr;
+} ireplace[] = {
+	{ &_copyout_stac, &_stac },
+	{ &_copyout_clac, &_clac },
+	{ &_copyin_stac, &_stac },
+	{ &_copyin_clac, &_clac },
+	{ &_copy_fault_clac, &_clac },
+	{ &_copyoutstr_stac, &_stac },
+	{ &_copyinstr_stac, &_stac },
+	{ &_copystr_fault_clac, &_clac },
+	{ &_ucas_32_stac, &_stac },
+	{ &_ucas_32_clac, &_clac },
+};
+
+void
+replacesmap(void)
+{
+	static int replacedone = 0;
+	int i, s;
+	vaddr_t nva;
+
+	if (replacedone)
+		return;
+	replacedone = 1;
+
+	s = splhigh();
+	/*
+	 * Create writeable aliases of memory we need
+	 * to write to as kernel is mapped read-only
+	 */
+	nva = (vaddr_t)km_alloc(2 * PAGE_SIZE, &kv_any, &kp_none, &kd_waitok);
+
+	for (i = 0; i < nitems(ireplace); i++) {
+		paddr_t kva = trunc_page((paddr_t)ireplace[i].daddr);
+		paddr_t po = (paddr_t)ireplace[i].daddr & PAGE_MASK;
+		paddr_t pa1, pa2;
+
+		pmap_extract(pmap_kernel(), kva, &pa1);
+		pmap_extract(pmap_kernel(), kva + PAGE_SIZE, &pa2);
+		pmap_kenter_pa(nva, pa1, VM_PROT_READ | VM_PROT_WRITE);
+		pmap_kenter_pa(nva + PAGE_SIZE, pa2, VM_PROT_READ | 
+		    VM_PROT_WRITE);
+		pmap_update(pmap_kernel());
+
+		/* replace 3 byte nops with stac/clac instructions */
+		bcopy(ireplace[i].saddr, (void *)(nva + po), 3);
+	}
+
+	km_free((void *)nva, 2 * PAGE_SIZE, &kv_any, &kp_none);
+
+	splx(s);
+}
+#endif /* !SMALL_KERNEL */
 
 int
 cpu_match(struct device *parent, void *match, void *aux)
@@ -332,6 +405,13 @@ cpu_init(struct cpu_info *ci)
 	if (cpu_feature & CPUID_PGE)
 		lcr4(rcr4() | CR4_PGE);	/* enable global TLB caching */
 
+	if (ci->ci_feature_sefflags & SEFF0EBX_SMEP)
+		lcr4(rcr4() | CR4_SMEP);
+#ifndef SMALL_KERNEL
+	if (ci->ci_feature_sefflags & SEFF0EBX_SMAP)
+		lcr4(rcr4() | CR4_SMAP);
+#endif
+
 #ifdef MULTIPROCESSOR
 	ci->ci_flags |= CPUF_RUNNING;
 	tlbflushg();
@@ -384,6 +464,28 @@ patinit(struct cpu_info *ci)
 	pmap_pg_wc = PG_WC;
 }
 
+struct timeout rdrand_tmo;
+void rdrand(void *);
+
+void
+rdrand(void *v)
+{
+	struct timeout *tmo = v;
+	uint32_t r, valid;
+	int i;
+
+	for (i = 0; i < 4; i++) {
+		__asm __volatile(
+		    "xor        %1, %1\n\t"
+		    "rdrand     %0\n\t"
+		    "rcl        $1, %1\n"
+		    : "=r" (r), "=r" (valid) );
+		if (valid)
+			add_true_randomness(r);
+	}
+
+	timeout_add_msec(tmo, 10);
+}
 
 #ifdef MULTIPROCESSOR
 void

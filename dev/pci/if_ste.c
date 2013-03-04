@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ste.c,v 1.47 2011/06/22 16:44:27 tedu Exp $ */
+/*	$OpenBSD: if_ste.c,v 1.51 2013/01/16 06:15:58 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -821,9 +821,9 @@ ste_stats_update(void *xsc)
 }
 
 const struct pci_matchid ste_devices[] = {
+	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DFE550TX },
 	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201_1 },
-	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201_2 },
-	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_550TX }
+	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201_2 }
 };	
 
 /*
@@ -845,7 +845,6 @@ void
 ste_attach(struct device *parent, struct device *self, void *aux)
 {
 	const char		*intrstr = NULL;
-	pcireg_t		command;
 	struct ste_softc	*sc = (struct ste_softc *)self;
 	struct pci_attach_args	*pa = aux;
 	pci_chipset_tag_t	pc = pa->pa_pc;
@@ -853,41 +852,15 @@ ste_attach(struct device *parent, struct device *self, void *aux)
 	struct ifnet		*ifp;
 	bus_size_t		size;
 
-	/*
-	 * Handle power management nonsense.
-	 */
-	command = pci_conf_read(pc, pa->pa_tag, STE_PCI_CAPID) & 0x000000FF;
-	if (command == 0x01) {
-
-		command = pci_conf_read(pc, pa->pa_tag, STE_PCI_PWRMGMTCTRL);
-		if (command & STE_PSTATE_MASK) {
-			u_int32_t		iobase, membase, irq;
-
-			/* Save important PCI config data. */
-			iobase = pci_conf_read(pc, pa->pa_tag, STE_PCI_LOIO);
-			membase = pci_conf_read(pc, pa->pa_tag, STE_PCI_LOMEM);
-			irq = pci_conf_read(pc, pa->pa_tag, STE_PCI_INTLINE);
-
-			/* Reset the power state. */
-			printf("%s: chip is in D%d power mode -- setting to D0\n",
-				sc->sc_dev.dv_xname, command & STE_PSTATE_MASK);
-			command &= 0xFFFFFFFC;
-			pci_conf_write(pc, pa->pa_tag, STE_PCI_PWRMGMTCTRL, command);
-
-			/* Restore PCI config data. */
-			pci_conf_write(pc, pa->pa_tag, STE_PCI_LOIO, iobase);
-			pci_conf_write(pc, pa->pa_tag, STE_PCI_LOMEM, membase);
-			pci_conf_write(pc, pa->pa_tag, STE_PCI_INTLINE, irq);
-		}
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/*
 	 * Only use one PHY since this chip reports multiple
-	 * Note on the DFE-550 the PHY is at 1 on the DFE-580
+	 * Note on the DFE-550TX the PHY is at 1 on the DFE-580TX
 	 * it is at 0 & 1.  It is rev 0x12.
 	 */
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_DLINK &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_DLINK_550TX &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_DLINK_DFE550TX &&
 	    PCI_REVISION(pa->pa_class) == 0x12)
 		sc->ste_one_phy = 1;
 
@@ -958,7 +931,6 @@ ste_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = ste_ioctl;
 	ifp->if_start = ste_start;
 	ifp->if_watchdog = ste_watchdog;
-	ifp->if_baudrate = 10000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, STE_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);

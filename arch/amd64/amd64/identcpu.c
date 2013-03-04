@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.37 2012/08/24 02:49:23 guenther Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.43 2012/11/10 09:45:05 mglocker Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -44,6 +44,8 @@
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
 
+void	replacesmap(void);
+
 /* sysctl wants this. */
 char cpu_model[48];
 int cpuspeed;
@@ -52,10 +54,11 @@ int amd64_has_xcrypt;
 #ifdef CRYPTO
 int amd64_has_aesni;
 #endif
+int has_rdrand;
 
 const struct {
 	u_int32_t	bit;
-	char		str[8];
+	char		str[12];
 } cpu_cpuid_features[] = {
 	{ CPUID_FPU,	"FPU" },
 	{ CPUID_VME,	"VME" },
@@ -145,9 +148,21 @@ const struct {
 	{ CPUIDECX_TOPEXT,	"TOPEXT" },
 }, cpu_seff0_ebxfeatures[] = {
 	{ SEFF0EBX_FSGSBASE,	"FSGSBASE" },
+	{ SEFF0EBX_BMI1,	"BMI1" },
+	{ SEFF0EBX_HLE,		"HLE" },
+	{ SEFF0EBX_AVX2,	"AVX2" },
 	{ SEFF0EBX_SMEP,	"SMEP" },
-	{ SEFF0EBX_EREP,	"EREP" },
+	{ SEFF0EBX_BMI2,	"BMI2" },
+	{ SEFF0EBX_ERMS,	"ERMS" },
 	{ SEFF0EBX_INVPCID,	"INVPCID" },
+	{ SEFF0EBX_RTM,		"RTM" },
+	{ SEFF0EBX_RDSEED,	"RDSEED" },
+	{ SEFF0EBX_ADX,		"ADX" },
+	{ SEFF0EBX_SMAP,	"SMAP" },
+}, cpu_cpuid_perf_eax[] = {
+	{ CPUIDEAX_VERID,	"PERF" },
+}, cpu_cpuid_apmi_edx[] = {
+	{ CPUIDEDX_ITSC,	"ITSC" },
 };
 
 int
@@ -309,7 +324,7 @@ via_update_sensor(void *args)
 void
 identifycpu(struct cpu_info *ci)
 {
-	u_int64_t last_tsc;
+	u_int64_t last_count, count, msr;
 	u_int32_t dummy, val, pnfeatset;
 	u_int32_t brand[12];
 	char mycpu_model[48];
@@ -364,9 +379,52 @@ identifycpu(struct cpu_info *ci)
 		ci->ci_model += ((ci->ci_signature >> 16) & 0x0f) << 4;
 	}
 
-	last_tsc = rdtsc();
-	delay(100000);
-	ci->ci_tsc_freq = (rdtsc() - last_tsc) * 10;
+	if (ci->ci_feature_flags && ci->ci_feature_flags & CPUID_TSC) {
+		/* Has TSC, check if it's constant */
+		if (!strcmp(cpu_vendor, "GenuineIntel")) {
+			if ((ci->ci_family == 0x0f && ci->ci_model >= 0x03) ||
+			    (ci->ci_family == 0x06 && ci->ci_model >= 0x0e)) {
+				ci->ci_flags |= CPUF_CONST_TSC;
+			}
+		} else if (!strcmp(cpu_vendor, "CentaurHauls")) {
+			/* VIA */
+			if (ci->ci_model >= 0x0f) {
+				ci->ci_flags |= CPUF_CONST_TSC;
+			}
+		} else if (!strcmp(cpu_vendor, "AuthenticAMD")) {
+			if (cpu_apmi_edx & CPUIDEDX_ITSC) {
+				/* Invariant TSC indicates constant TSC on
+				 * AMD.
+				 */
+				ci->ci_flags |= CPUF_CONST_TSC;
+			}
+		}
+	}
+
+	if ((ci->ci_flags & CPUF_CONST_TSC) &&
+	    (cpu_perf_eax & CPUIDEAX_VERID) > 1 &&
+	    CPUIDEDX_NUM_FC(cpu_perf_edx) > 1) {
+		msr = rdmsr(MSR_PERF_FIXED_CTR_CTRL) | MSR_PERF_FIXED_CTR1_EN;
+		wrmsr(MSR_PERF_FIXED_CTR_CTRL, msr);
+		msr = rdmsr(MSR_PERF_GLOBAL_CTRL) | MSR_PERF_GLOBAL_CTR1_EN;
+		wrmsr(MSR_PERF_GLOBAL_CTRL, msr);
+
+		last_count = rdmsr(MSR_PERF_FIXED_CTR1);
+		delay(100000);
+		count = rdmsr(MSR_PERF_FIXED_CTR1);
+
+		msr = rdmsr(MSR_PERF_FIXED_CTR_CTRL);
+		msr &= ~MSR_PERF_FIXED_CTR1_EN;
+		wrmsr(MSR_PERF_FIXED_CTR_CTRL, msr);
+		msr = rdmsr(MSR_PERF_GLOBAL_CTRL);
+		msr &= ~MSR_PERF_GLOBAL_CTR1_EN;
+		wrmsr(MSR_PERF_GLOBAL_CTRL, msr);
+	} else {
+		last_count = rdtsc();
+		delay(100000);
+		count = rdtsc();
+	}
+	ci->ci_tsc_freq = (count - last_count) * 10;
 
 	amd_cpu_cacheinfo(ci);
 
@@ -399,14 +457,23 @@ identifycpu(struct cpu_info *ci)
 	for (i = 0; i < max; i++)
 		if (ecpu_ecxfeature & cpu_ecpuid_ecxfeatures[i].bit)
 			printf(",%s", cpu_ecpuid_ecxfeatures[i].str);
+	max = sizeof(cpu_cpuid_perf_eax) / sizeof(cpu_cpuid_perf_eax[0]);
+	for (i = 0; i < max; i++)
+		if (cpu_perf_eax & cpu_cpuid_perf_eax[i].bit)
+			printf(",%s", cpu_cpuid_perf_eax[i].str);
+	max = sizeof(cpu_cpuid_apmi_edx) / sizeof(cpu_cpuid_apmi_edx[0]);
+	for (i = 0; i < max; i++)
+		if (cpu_apmi_edx & cpu_cpuid_apmi_edx[i].bit)
+			printf(",%s", cpu_cpuid_apmi_edx[i].str);
 
 	if (cpuid_level >= 0x07) {
 		/* "Structured Extended Feature Flags" */
-		CPUID_LEAF(0x7, 0, dummy, val, dummy, dummy);
+		CPUID_LEAF(0x7, 0, dummy, ci->ci_feature_sefflags, dummy, dummy);
 		max = sizeof(cpu_seff0_ebxfeatures) /
 		    sizeof(cpu_seff0_ebxfeatures[0]);
 		for (i = 0; i < max; i++)
-			if (val & cpu_seff0_ebxfeatures[i].bit)
+			if (ci->ci_feature_sefflags &
+			    cpu_seff0_ebxfeatures[i].bit)
 				printf(",%s", cpu_seff0_ebxfeatures[i].str);
 	}
 
@@ -432,6 +499,12 @@ identifycpu(struct cpu_info *ci)
 
 		if (cpu_ecxfeature & CPUIDECX_AES)
 			amd64_has_aesni = 1;
+
+		if (cpu_ecxfeature & CPUIDECX_RDRAND)
+			has_rdrand = 1;
+
+		if (ci->ci_feature_sefflags & SEFF0EBX_SMAP)
+			replacesmap();
 	}
 	if (!strncmp(mycpu_model, "Intel", 5)) {
 		u_int32_t cflushsz;

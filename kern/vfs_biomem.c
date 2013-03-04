@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_biomem.c,v 1.18 2011/09/19 14:48:04 beck Exp $ */
+/*	$OpenBSD: vfs_biomem.c,v 1.23 2013/01/18 10:07:37 beck Exp $ */
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
  *
@@ -30,8 +30,6 @@ vaddr_t buf_kva_start, buf_kva_end;
 int buf_needva;
 TAILQ_HEAD(,buf) buf_valist;
 
-int buf_nkvmsleep;
-
 extern struct bcachestats bcstats;
 
 /*
@@ -42,8 +40,6 @@ extern struct bcachestats bcstats;
  * wraparound. Even if you reuse 4GB worth of buffers every second
  * you'll still run out of time_t faster than buffers.
  *
- * XXX - the spl locking in here is extreme paranoia right now until I figure
- *       it all out.
  */
 voff_t buf_page_offset;
 struct uvm_object *buf_object, buf_object_store;
@@ -76,33 +72,28 @@ buf_mem_init(vsize_t size)
 void
 buf_acquire(struct buf *bp)
 {
-	int s;
-
 	KASSERT((bp->b_flags & B_BUSY) == 0);
-
-	s = splbio();
+	splassert(IPL_BIO);
 	/*
 	 * Busy before waiting for kvm.
 	 */
 	SET(bp->b_flags, B_BUSY);
 	buf_map(bp);
-
-	splx(s);
 }
 
 /*
- * Busy a buffer, but don't map it.
- * If it has a mapping, we keep it, but we also keep the mapping on
- * the list since we assume that it won't be used anymore.
+ * Acquire a buf but do not map it. Preserve any mapping it did have.
  */
 void
-buf_acquire_unmapped(struct buf *bp)
+buf_acquire_nomap(struct buf *bp)
 {
-	int s;
-
-	s = splbio();
-	SET(bp->b_flags, B_BUSY|B_NOTMAPPED);
-	splx(s);
+	splassert(IPL_BIO);
+	SET(bp->b_flags, B_BUSY);
+	if (bp->b_data != NULL) {
+		TAILQ_REMOVE(&buf_valist, bp, b_valist);
+		bcstats.kvaslots_avail--;
+		bcstats.busymapped++;
+	}
 }
 
 void
@@ -128,10 +119,14 @@ buf_map(struct buf *bp)
 			/*
 			 * Find some buffer we can steal the space from.
 			 */
-			while ((vbp = TAILQ_FIRST(&buf_valist)) == NULL) {
+			vbp = TAILQ_FIRST(&buf_valist);
+			while ((curproc != syncerproc &&
+			   curproc != cleanerproc &&
+			   bcstats.kvaslots_avail <= RESERVE_SLOTS) ||
+			   vbp == NULL) {
 				buf_needva++;
-				buf_nkvmsleep++;
 				tsleep(&buf_needva, PRIBIO, "buf_needva", 0);
+				vbp = TAILQ_FIRST(&buf_valist);
 			}
 			va = buf_unmap(vbp);
 		}
@@ -153,30 +148,25 @@ buf_map(struct buf *bp)
 	}
 
 	bcstats.busymapped++;
-
-	CLR(bp->b_flags, B_NOTMAPPED);
 }
 
 void
 buf_release(struct buf *bp)
 {
-	int s;
 
 	KASSERT(bp->b_flags & B_BUSY);
-	KASSERT((bp->b_data != NULL) || (bp->b_flags & B_NOTMAPPED));
+	splassert(IPL_BIO);
 
-	s = splbio();
 	if (bp->b_data) {
 		bcstats.busymapped--;
 		TAILQ_INSERT_TAIL(&buf_valist, bp, b_valist);
 		bcstats.kvaslots_avail++;
 		if (buf_needva) {
-			buf_needva--;
-			wakeup_one(&buf_needva);
+			buf_needva=0;
+			wakeup(&buf_needva);
 		}
 	}
-	CLR(bp->b_flags, B_BUSY|B_NOTMAPPED);
-	splx(s);
+	CLR(bp->b_flags, B_BUSY);
 }
 
 /*
@@ -194,9 +184,8 @@ int
 buf_dealloc_mem(struct buf *bp)
 {
 	caddr_t data;
-	int s;
 
-	s = splbio();
+	splassert(IPL_BIO);
 
 	data = bp->b_data;
 	bp->b_data = NULL;
@@ -211,21 +200,23 @@ buf_dealloc_mem(struct buf *bp)
 	if (bp->b_pobj)
 		buf_free_pages(bp);
 
-	if (data == NULL) {
-		splx(s);
+	if (data == NULL)
 		return (0);
-	}
 
 	bp->b_data = data;
 	if (!(bp->b_flags & B_BUSY)) {		/* XXX - need better test */
 		TAILQ_REMOVE(&buf_valist, bp, b_valist);
 		bcstats.kvaslots_avail--;
-	} else
+	} else {
 		CLR(bp->b_flags, B_BUSY);
+		if (buf_needva) {
+			buf_needva = 0;
+			wakeup(&buf_needva);
+		}
+	}
 	SET(bp->b_flags, B_RELEASED);
 	TAILQ_INSERT_HEAD(&buf_valist, bp, b_valist);
 	bcstats.kvaslots_avail++;
-	splx(s);
 
 	return (1);
 }
@@ -253,12 +244,11 @@ vaddr_t
 buf_unmap(struct buf *bp)
 {
 	vaddr_t va;
-	int s;
 
 	KASSERT((bp->b_flags & B_BUSY) == 0);
 	KASSERT(bp->b_data != NULL);
+	splassert(IPL_BIO);
 
-	s = splbio();
 	TAILQ_REMOVE(&buf_valist, bp, b_valist);
 	bcstats.kvaslots_avail--;
 	va = (vaddr_t)bp->b_data;
@@ -269,8 +259,6 @@ buf_unmap(struct buf *bp)
 	if (bp->b_flags & B_RELEASED)
 		pool_put(&bufpool, bp);
 
-	splx(s);
-
 	return (va);
 }
 
@@ -279,13 +267,11 @@ void
 buf_alloc_pages(struct buf *bp, vsize_t size)
 {
 	voff_t offs;
-	int s;
 
 	KASSERT(size == round_page(size));
 	KASSERT(bp->b_pobj == NULL);
 	KASSERT(bp->b_data == NULL);
-
-	s = splbio();
+	splassert(IPL_BIO);
 
 	offs = buf_page_offset;
 	buf_page_offset += size;
@@ -297,7 +283,6 @@ buf_alloc_pages(struct buf *bp, vsize_t size)
 	bp->b_pobj = buf_object;
 	bp->b_poffs = offs;
 	bp->b_bufsize = size;
-	splx(s);
 }
 
 void
@@ -306,12 +291,10 @@ buf_free_pages(struct buf *bp)
 	struct uvm_object *uobj = bp->b_pobj;
 	struct vm_page *pg;
 	voff_t off, i;
-	int s;
 
 	KASSERT(bp->b_data == NULL);
 	KASSERT(uobj != NULL);
-
-	s = splbio();
+	splassert(IPL_BIO);
 
 	off = bp->b_poffs;
 	bp->b_pobj = NULL;
@@ -325,7 +308,6 @@ buf_free_pages(struct buf *bp)
 		uvm_pagefree(pg);
 		bcstats.numbufpages--;
 	}
-	splx(s);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sio_pic.c,v 1.32 2011/04/15 20:40:05 deraadt Exp $	*/
+/*	$OpenBSD: sio_pic.c,v 1.34 2013/03/02 22:54:29 miod Exp $	*/
 /* $NetBSD: sio_pic.c,v 1.28 2000/06/06 03:10:13 thorpej Exp $ */
 
 /*-
@@ -353,7 +353,6 @@ sio_intr_setup(pc, iot)
 	initial_ocw1[1] = bus_space_read_1(sio_iot, sio_ioh_icu2, 1);
 	initial_elcr[0] = (*sio_read_elcr)(0);			/* XXX */
 	initial_elcr[1] = (*sio_read_elcr)(1);			/* XXX */
-	shutdownhook_establish(sio_intr_shutdown, 0);
 #endif
 
 	sio_intr = alpha_shared_intr_alloc(ICU_LEN);
@@ -408,6 +407,9 @@ void
 sio_intr_shutdown(arg)
 	void *arg;
 {
+	if (sio_write_elcr == NULL)
+		return;
+
 	/*
 	 * Restore the initial values, to make the PROM happy.
 	 */
@@ -565,13 +567,14 @@ sio_intr_alloc(v, mask, type, irq)
 	count = -1;
 
 	/* some interrupts should never be dynamically allocated */
-	mask &= 0xdef8;
+	mask &= 0xffff;
+	mask &= ~((1 << 13) | (1 << 8) | (1 << 2) | (1 << 1) | (1 << 0));
 
 	/*
 	 * XXX some interrupts will be used later (6 for fdc, 12 for pms).
 	 * the right answer is to do "breadth-first" searching of devices.
 	 */
-	mask &= 0xefbf;
+	mask &= ~((1 << 12) | (1 << 6));
 
 	for (i = 0; i < ICU_LEN; i++) {
 		if (LEGAL_IRQ(i) == 0 || (mask & (1<<i)) == 0)

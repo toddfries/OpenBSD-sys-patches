@@ -1,4 +1,4 @@
-/* $OpenBSD: wskbd.c,v 1.70 2011/11/09 14:27:52 shadchin Exp $ */
+/* $OpenBSD: wskbd.c,v 1.72 2013/01/06 18:07:07 ratchov Exp $ */
 /* $NetBSD: wskbd.c,v 1.80 2005/05/04 01:52:16 augustss Exp $ */
 
 /*
@@ -440,7 +440,7 @@ wskbd_attach(struct device *parent, struct device *self, void *aux)
 	}
 #endif
 
-#if WSDISPLAY > 0 && NWSMUX == 0
+#if NWSDISPLAY > 0 && NWSMUX == 0
 	if (ap->console == 0) {
 		/*
 		 * In the non-wsmux world, always connect wskbd0 and wsdisplay0
@@ -1648,11 +1648,11 @@ wskbd_translate(struct wskbd_internal *id, u_int type, int value)
 		case KS_AudioMute:
 			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
 			    (void *)(long)0, (void *)(int)1);
-			break;
+			return (0);
 		case KS_AudioLower:
 			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
 			    (void *)(long)-1, (void*)(int)1);
-			break;
+			return (0);
 		case KS_AudioRaise:
 			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
 			    (void *)(long)1, (void*)(int)1);

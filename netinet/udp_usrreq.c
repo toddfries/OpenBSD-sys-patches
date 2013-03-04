@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.149 2012/07/17 03:18:57 yasuoka Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.153 2013/02/16 14:34:52 bluhm Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -620,6 +620,11 @@ udp_input(struct mbuf *m, ...)
 		}
 	}
 
+#if NPF > 0
+	/* The statekey has finished finding the inp, it is no longer needed. */
+	m->m_pkthdr.pf.statekey = NULL;
+#endif
+
 #ifdef IPSEC
 	mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL);
 	s = splnet();
@@ -688,6 +693,16 @@ udp_input(struct mbuf *m, ...)
 	if (ip && (inp->inp_flags & INP_CONTROLOPTS ||
 	    inp->inp_socket->so_options & SO_TIMESTAMP))
 		ip_savecontrol(inp, &opts, ip, m);
+#ifdef INET6
+	if (ip6 && (inp->inp_flags & IN6P_RECVDSTPORT)) {
+		struct mbuf **mp = &opts;
+
+		while (*mp)
+			mp = &(*mp)->m_next;
+		*mp = sbcreatecontrol((caddr_t)&uh->uh_dport, sizeof(u_int16_t),
+		    IPV6_RECVDSTPORT, IPPROTO_IPV6);
+	}
+#endif /* INET6 */
 	if (ip && (inp->inp_flags & INP_RECVDSTPORT)) {
 		struct mbuf **mp = &opts;
 
@@ -712,8 +727,11 @@ udp_input(struct mbuf *m, ...)
 		int off = iphlen + sizeof(struct udphdr);
 		if ((session = pipex_l2tp_lookup_session(m, off)) != NULL) {
 			if ((m = pipex_l2tp_input(m, off, session,
-			    ipsecflowinfo)) == NULL)
+			    ipsecflowinfo)) == NULL) {
+				if (opts)
+					m_freem(opts);
 				return; /* the packet is handled by PIPEX */
+			}
 		}
 	}
 #endif

@@ -1,6 +1,6 @@
-/*	$OpenBSD: mpii.c,v 1.65 2012/08/28 17:02:33 mikeb Exp $	*/
+/*	$OpenBSD: mpii.c,v 1.69 2013/01/25 04:25:21 dlg Exp $	*/
 /*
- * Copyright (c) 2010 Mike Belopuhov <mkb@crypt.org.ru>
+ * Copyright (c) 2010, 2012 Mike Belopuhov
  * Copyright (c) 2009 James Giannoules
  * Copyright (c) 2005 - 2010 David Gwynne <dlg@openbsd.org>
  * Copyright (c) 2005 - 2010 Marco Peereboom <marco@openbsd.org>
@@ -1152,7 +1152,16 @@ mpii_iocfacts(struct mpii_softc *sc)
 
 	sc->sc_max_cmds = MIN(letoh16(ifp.request_credit),
 	    MPII_REQUEST_CREDIT);
+
+	/*
+	 * The host driver must ensure that there is at least one
+	 * unused entry in the Reply Free Queue. One way to ensure
+	 * that this requirement is met is to never allocate a number
+	 * of reply frames that is a multiple of 16.
+	 */
 	sc->sc_num_reply_frames = sc->sc_max_cmds + 32;
+	if (!(sc->sc_num_reply_frames % 16))
+		sc->sc_num_reply_frames--;
 
 	/* must be multiple of 16 */
 	sc->sc_reply_post_qdepth = sc->sc_max_cmds +
@@ -1744,9 +1753,9 @@ mpii_event_process(struct mpii_softc *sc, struct mpii_rcb *rcb)
 	enp = (struct mpii_msg_event_reply *)rcb->rcb_reply;
 
 	DNPRINTF(MPII_D_EVT, "%s: mpii_event_process: %#x\n", DEVNAME(sc),
-	    letoh32(enp->event));
+	    letoh16(enp->event));
 
-	switch (letoh32(enp->event)) {
+	switch (letoh16(enp->event)) {
 	case MPII_EVENT_EVENT_CHANGE:
 		/* should be properly ignored */
 		break;
@@ -1819,7 +1828,7 @@ mpii_event_process(struct mpii_softc *sc, struct mpii_rcb *rcb)
 		}
 	default:
 		DNPRINTF(MPII_D_EVT, "%s:  unhandled event 0x%02x\n",
-		    DEVNAME(sc), letoh32(enp->event));
+		    DEVNAME(sc), letoh16(enp->event));
 	}
 
 	if (enp->ack_required) {
@@ -3483,7 +3492,7 @@ mpii_create_sensors(struct mpii_softc *sc)
 	int			i;
 
 	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_vd_count,
-	    M_DEVBUF, M_WAITOK | M_CANFAIL | M_ZERO);
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sc_sensors == NULL)
 		return (1);
 	sc->sc_nsensors = sc->sc_vd_count;

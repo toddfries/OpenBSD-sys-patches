@@ -1,4 +1,4 @@
-/*	$OpenBSD: pchb.c,v 1.11 2008/06/26 05:42:12 ray Exp $	*/
+/*	$OpenBSD: pchb.c,v 1.13 2012/12/22 19:07:50 mpi Exp $	*/
 /*	$NetBSD: pchb.c,v 1.4 2000/01/25 07:19:11 tsubai Exp $	*/
 
 /*-
@@ -41,6 +41,10 @@
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcidevs.h>
 
+#include <dev/pci/agpvar.h>
+
+#include "agp.h"
+
 int	pchbmatch(struct device *, void *, void *);
 void	pchbattach(struct device *, struct device *, void *);
 
@@ -78,10 +82,12 @@ pchbmatch(struct device *parent, void *cf, void *aux)
 		case PCI_PRODUCT_APPLE_UNINORTH6:
 		case PCI_PRODUCT_APPLE_SHASTA_HT:
 		case PCI_PRODUCT_APPLE_K2:
-		case PCI_PRODUCT_APPLE_K2_AGP:
 		case PCI_PRODUCT_APPLE_INTREPID2_AGP:
 		case PCI_PRODUCT_APPLE_INTREPID2_PCI1:
 		case PCI_PRODUCT_APPLE_INTREPID2_PCI2:
+		case PCI_PRODUCT_APPLE_U3_AGP:
+		case PCI_PRODUCT_APPLE_U3L_AGP:
+		case PCI_PRODUCT_APPLE_K2_AGP:
 			return (1);
 		}
 		break;
@@ -101,17 +107,20 @@ pchbmatch(struct device *parent, void *cf, void *aux)
 void
 pchbattach(struct device *parent, struct device  *self, void *aux)
 {
+#if NAGP > 0
+	struct pci_attach_args *pa = aux;
+#endif /* NAGP > 0 */
+
 	printf("\n");
 
-	/*
-	 * All we do is print out a description.  Eventually, we
-	 * might want to add code that does something that's
-	 * possibly chipset-specific.
-	 */
+#if NAGP > 0
+	if (pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_AGP,
+	    NULL, NULL) != 0) {
+		struct agp_attach_args	aa;
+		aa.aa_busname = "agp";
+		aa.aa_pa = pa;
 
-	/*
-	pci_devinfo(pa->pa_id, pa->pa_class, 0, devinfo, sizeof devinfo);
-	printf("%s: %s (rev. 0x%02x)\n", self->dv_xname, devinfo,
-	    PCI_REVISION(pa->pa_class));
-	*/
+		config_found(self, &aa, agpdev_print);
+	}
+#endif /* NAGP > 0 */
 }

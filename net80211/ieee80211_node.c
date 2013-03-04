@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.c,v 1.73 2012/08/25 11:34:27 kettenis Exp $	*/
+/*	$OpenBSD: ieee80211_node.c,v 1.77 2012/11/07 19:39:08 stsp Exp $	*/
 /*	$NetBSD: ieee80211_node.c,v 1.14 2004/05/09 09:18:47 dyoung Exp $	*/
 
 /*-
@@ -98,8 +98,6 @@ void ieee80211_set_tim(struct ieee80211com *, int, int);
 void ieee80211_inact_timeout(void *);
 void ieee80211_node_cache_timeout(void *);
 #endif
-
-#define M_80211_NODE	M_DEVBUF
 
 #ifndef IEEE80211_STA_ONLY
 void
@@ -761,7 +759,7 @@ ieee80211_get_rate(struct ieee80211com *ic)
 struct ieee80211_node *
 ieee80211_node_alloc(struct ieee80211com *ic)
 {
-	return malloc(sizeof(struct ieee80211_node), M_80211_NODE,
+	return malloc(sizeof(struct ieee80211_node), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 }
 
@@ -778,7 +776,7 @@ void
 ieee80211_node_free(struct ieee80211com *ic, struct ieee80211_node *ni)
 {
 	ieee80211_node_cleanup(ic, ni);
-	free(ni, M_80211_NODE);
+	free(ni, M_DEVBUF);
 }
 
 void
@@ -1110,7 +1108,7 @@ ieee80211_release_node(struct ieee80211com *ic, struct ieee80211_node *ni)
 {
 	int s;
 
-	DPRINTF(("%s refcnt %d\n", ether_sprintf(ni->ni_macaddr),
+	DPRINTF(("%s refcnt %u\n", ether_sprintf(ni->ni_macaddr),
 	    ni->ni_refcnt));
 	s = splnet();
 	if (ieee80211_node_decref(ni) == 0 &&
@@ -1476,10 +1474,10 @@ ieee80211_node_join(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 #if NBRIDGE > 0
 	/*
-	 * If the parent interface belongs to a bridge, learn
+	 * If the parent interface is a bridgeport, learn
 	 * the node's address dynamically on this interface.
 	 */
-	if (ic->ic_if.if_bridge != NULL)
+	if (ic->ic_if.if_bridgeport != NULL)
 		bridge_update(&ic->ic_if,
 		    (struct ether_addr *)ni->ni_macaddr, 0);
 #endif
@@ -1606,8 +1604,16 @@ ieee80211_node_leave(struct ieee80211com *ic, struct ieee80211_node *ni)
 		return;
 	}
 
-	if (ni->ni_pwrsave == IEEE80211_PS_DOZE)
+	if (ni->ni_pwrsave == IEEE80211_PS_DOZE) {
 		ic->ic_pssta--;
+		ni->ni_pwrsave = IEEE80211_PS_AWAKE;
+	}
+
+	if (!IF_IS_EMPTY(&ni->ni_savedq)) {
+		IF_PURGE(&ni->ni_savedq);
+		if (ic->ic_set_tim != NULL)
+			(*ic->ic_set_tim)(ic, ni->ni_associd, 0);
+	}
 
 	if (ic->ic_flags & IEEE80211_F_RSNON)
 		ieee80211_node_leave_rsn(ic, ni);
@@ -1629,10 +1635,10 @@ ieee80211_node_leave(struct ieee80211com *ic, struct ieee80211_node *ni)
 
 #if NBRIDGE > 0
 	/*
-	 * If the parent interface belongs to a bridge, delete
+	 * If the parent interface is a bridgeport, delete
 	 * any dynamically learned address for this node.
 	 */
-	if (ic->ic_if.if_bridge != NULL)
+	if (ic->ic_if.if_bridgeport != NULL)
 		bridge_update(&ic->ic_if,
 		    (struct ether_addr *)ni->ni_macaddr, 1);
 #endif

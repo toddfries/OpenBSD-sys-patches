@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.83 2012/07/14 19:50:11 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.93 2013/02/12 08:06:22 mpi Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -78,10 +78,10 @@
 /* r8k, r1xk only */
 #define	CCA_COHERENT_EXCL	4UL	/* cached, coherent, exclusive */
 #define	CCA_COHERENT_EXCLWRITE	5UL	/* cached, coherent, exclusive write */
-/* r1xk only */
-#define	CCA_NC_ACCELERATED	7UL	/* uncached accelerated */
 /* r4k only */
 #define	CCA_COHERENT_UPDWRITE	6UL	/* cached, coherent, update on write */
+/* r1xk only */
+#define	CCA_NC_ACCELERATED	7UL	/* uncached accelerated */
 
 #ifdef TGT_COHERENT
 #define	CCA_CACHED		CCA_COHERENT_EXCLWRITE
@@ -113,225 +113,6 @@
 #define	XKPHYS_TO_SP(x)		(((x) >> 57) & 0x03)
 
 #endif	/* _LOCORE */
-
-#if defined(_KERNEL) || defined(_STANDALONE)
-
-/*
- * Status register.
- */
-#define	SR_XX			0x80000000
-#define	SR_COP_USABILITY	0x30000000	/* CP0 and CP1 only */
-#define	SR_COP_0_BIT		0x10000000
-#define	SR_COP_1_BIT		0x20000000
-#define	SR_RP			0x08000000
-#define	SR_FR_32		0x04000000
-#define	SR_RE			0x02000000
-#define	SR_DSD			0x01000000	/* Only on R12000 */
-#define	SR_BOOT_EXC_VEC		0x00400000
-#define	SR_TLB_SHUTDOWN		0x00200000
-#define	SR_SOFT_RESET		0x00100000
-#define	SR_DIAG_CH		0x00040000
-#define	SR_DIAG_CE		0x00020000
-#define	SR_DIAG_DE		0x00010000
-#define	SR_KX			0x00000080
-#define	SR_SX			0x00000040
-#define	SR_UX			0x00000020
-#define	SR_KSU_MASK		0x00000018
-#define	SR_KSU_USER		0x00000010
-#define	SR_KSU_SUPER		0x00000008
-#define	SR_KSU_KERNEL		0x00000000
-#define	SR_ERL			0x00000004
-#define	SR_EXL			0x00000002
-#define	SR_INT_ENAB		0x00000001
-
-#define	SR_INT_MASK		0x0000ff00
-#define	SOFT_INT_MASK_0		0x00000100
-#define	SOFT_INT_MASK_1		0x00000200
-#define	SR_INT_MASK_0		0x00000400
-#define	SR_INT_MASK_1		0x00000800
-#define	SR_INT_MASK_2		0x00001000
-#define	SR_INT_MASK_3		0x00002000
-#define	SR_INT_MASK_4		0x00004000
-#define	SR_INT_MASK_5		0x00008000
-/*
- * Interrupt control register in RM7000. Expansion of interrupts.
- */
-#define	IC_INT_MASK		0x00003f00	/* Two msb reserved */
-#define	IC_INT_MASK_6		0x00000100
-#define	IC_INT_MASK_7		0x00000200
-#define	IC_INT_MASK_8		0x00000400
-#define	IC_INT_MASK_9		0x00000800
-#define	IC_INT_TIMR		0x00001000	/* 12 Timer */
-#define	IC_INT_PERF		0x00002000	/* 13 Performance counter */
-#define	IC_INT_TE		0x00000080	/* Timer on INT11 */
-
-#define	ALL_INT_MASK		((IC_INT_MASK << 8) | SR_INT_MASK)
-#define	SOFT_INT_MASK		(SOFT_INT_MASK_0 | SOFT_INT_MASK_1)
-#define	HW_INT_MASK		(ALL_INT_MASK & ~SOFT_INT_MASK)
-
-
-/*
- * The bits in the cause register.
- *
- *	CR_BR_DELAY	Exception happened in branch delay slot.
- *	CR_COP_ERR	Coprocessor error.
- *	CR_IP		Interrupt pending bits defined below.
- *	CR_EXC_CODE	The exception type (see exception codes below).
- */
-#define	CR_BR_DELAY		0x80000000
-#define	CR_COP_ERR		0x30000000
-#define	CR_EXC_CODE		0x0000007c
-#define	CR_EXC_CODE_SHIFT	2
-#define	CR_IPEND		0x003fff00
-#define	CR_INT_SOFT0		0x00000100
-#define	CR_INT_SOFT1		0x00000200
-#define	CR_INT_0		0x00000400
-#define	CR_INT_1		0x00000800
-#define	CR_INT_2		0x00001000
-#define	CR_INT_3		0x00002000
-#define	CR_INT_4		0x00004000
-#define	CR_INT_5		0x00008000
-/* Following on RM7000 */
-#define	CR_INT_6		0x00010000
-#define	CR_INT_7		0x00020000
-#define	CR_INT_8		0x00040000
-#define	CR_INT_9		0x00080000
-#define	CR_INT_HARD		0x000ffc00
-#define	CR_INT_TIMR		0x00100000	/* 12 Timer */
-#define	CR_INT_PERF		0x00200000	/* 13 Performance counter */
-
-/*
- * The bits in the context register.
- */
-#define	CNTXT_PTE_BASE		0xff800000
-#define	CNTXT_BAD_VPN2		0x007ffff0
-
-/*
- * Location of exception vectors.
- */
-#define	RESET_EXC_VEC		(CKSEG1_BASE + 0x1fc00000)
-#define	TLB_MISS_EXC_VEC	(CKSEG1_BASE + 0x00000000)
-#define	XTLB_MISS_EXC_VEC	(CKSEG1_BASE + 0x00000080)
-#define	CACHE_ERR_EXC_VEC	(CKSEG1_BASE + 0x00000100)
-#define	GEN_EXC_VEC		(CKSEG1_BASE + 0x00000180)
-
-/*
- * Coprocessor 0 registers:
- */
-#define	COP_0_TLB_INDEX		$0
-#define	COP_0_TLB_RANDOM	$1
-#define	COP_0_TLB_LO0		$2
-#define	COP_0_TLB_LO1		$3
-#define	COP_0_TLB_CONTEXT	$4
-#define	COP_0_TLB_PG_MASK	$5
-#define	COP_0_TLB_WIRED		$6
-#define	COP_0_BAD_VADDR		$8
-#define	COP_0_COUNT		$9
-#define	COP_0_TLB_HI		$10
-#define	COP_0_COMPARE		$11
-#define	COP_0_STATUS_REG	$12
-#define	COP_0_CAUSE_REG		$13
-#define	COP_0_EXC_PC		$14
-#define	COP_0_PRID		$15
-#define	COP_0_CONFIG		$16
-#define	COP_0_LLADDR		$17
-#define	COP_0_WATCH_LO		$18
-#define	COP_0_WATCH_HI		$19
-#define	COP_0_TLB_XCONTEXT	$20
-#define	COP_0_TLB_FR_MASK	$21	/* R10000 onwards */
-#define	COP_0_DIAG		$22	/* Loongson 2F */
-#define	COP_0_ECC		$26
-#define	COP_0_CACHE_ERR		$27
-#define	COP_0_TAG_LO		$28
-#define	COP_0_TAG_HI		$29
-#define	COP_0_ERROR_PC		$30
-
-/*
- * RM7000 specific
- */
-#define	COP_0_WATCH_1		$18
-#define	COP_0_WATCH_2		$19
-#define	COP_0_WATCH_M		$24
-#define	COP_0_PC_COUNT		$25
-#define	COP_0_PC_CTRL		$22
-
-#define	COP_0_ICR		$20	/* Use cfc0/ctc0 to access */
-
-/*
- * Octeon specific
- */
-#define COP_0_TLB_PG_GRAIN	$5, 1
-#define COP_0_CVMCTL		$9, 7
-#define COP_0_CVMMEMCTL		$11, 7
-#define COP_0_EBASE		$15, 1
-
-/*
- * COP_0_COUNT speed divider.
- */
-#if defined(CPU_OCTEON)
-#define CP0_CYCLE_DIVIDER       1
-#else
-#define CP0_CYCLE_DIVIDER       2
-#endif
-
-/*
- * Values for the code field in a break instruction.
- */
-#define	BREAK_INSTR		0x0000000d
-#define	BREAK_VAL_MASK		0x03ff0000
-#define	BREAK_VAL_SHIFT		16
-#define	BREAK_KDB_VAL		512
-#define	BREAK_SSTEP_VAL		513
-#define	BREAK_BRKPT_VAL		514
-#define	BREAK_SOVER_VAL		515
-#define	BREAK_DDB_VAL		516
-#define	BREAK_FPUEMUL_VAL	517
-#define	BREAK_KDB	(BREAK_INSTR | (BREAK_KDB_VAL << BREAK_VAL_SHIFT))
-#define	BREAK_SSTEP	(BREAK_INSTR | (BREAK_SSTEP_VAL << BREAK_VAL_SHIFT))
-#define	BREAK_BRKPT	(BREAK_INSTR | (BREAK_BRKPT_VAL << BREAK_VAL_SHIFT))
-#define	BREAK_SOVER	(BREAK_INSTR | (BREAK_SOVER_VAL << BREAK_VAL_SHIFT))
-#define	BREAK_DDB	(BREAK_INSTR | (BREAK_DDB_VAL << BREAK_VAL_SHIFT))
-#define	BREAK_FPUEMUL	(BREAK_INSTR | (BREAK_FPUEMUL_VAL << BREAK_VAL_SHIFT))
-
-/*
- * The floating point version and status registers.
- */
-#define	FPC_ID			$0
-#define	FPC_CSR			$31
-
-/*
- * The low part of the TLB entry.
- */
-#define	VMTLB_PF_NUM		0x3fffffc0
-#define	VMTLB_ATTR_MASK		0x00000038
-#define	VMTLB_MOD_BIT		0x00000004
-#define	VMTLB_VALID_BIT		0x00000002
-#define	VMTLB_GLOBAL_BIT	0x00000001
-
-#define	VMTLB_PHYS_PAGE_SHIFT	6
-
-/*
- * The high part of the TLB entry.
- */
-#define	VMTLB_VIRT_PAGE_NUM	0xffffe000
-#define	VMTLB_PID		0x000000ff
-#define	VMTLB_PID_SHIFT		0
-#define	VMTLB_VIRT_PAGE_SHIFT	12
-
-/*
- * The number of process id entries.
- */
-#define	VMNUM_PIDS		256
-
-/*
- * TLB probe return codes.
- */
-#define	VMTLB_NOT_FOUND		0
-#define	VMTLB_FOUND		1
-#define	VMTLB_FOUND_WITH_PATCH	2
-#define	VMTLB_PROBE_ERROR	3
-
-#endif	/* _KERNEL || _STANDALONE */
 
 /*
  * Exported definitions unique to mips cpu support.
@@ -478,6 +259,7 @@ void	cp0_calibrate(struct cpu_info *);
  */
 #define	clockframe trap_frame	/* Use normal trap frame */
 
+#define	SR_KSU_USER		0x00000010
 #define	CLKF_USERMODE(framep)	((framep)->sr & SR_KSU_USER)
 #define	CLKF_PC(framep)		((framep)->pc)
 #define	CLKF_INTR(framep)	(curcpu()->ci_intrdepth > 1)	/* XXX */
@@ -486,6 +268,7 @@ void	cp0_calibrate(struct cpu_info *);
  * This is used during profiling to integrate system time.
  */
 #define	PROC_PC(p)	((p)->p_md.md_regs->pc)
+#define	PROC_STACK(p)	((p)->p_md.md_regs->sp)
 
 /*
  * Preempt the current process if in interrupt from user mode,
@@ -518,7 +301,36 @@ void	cp0_calibrate(struct cpu_info *);
 
 #define	aston(p)		p->p_md.md_astpending = 1
 
+#ifdef CPU_R8000
+#define	mips_sync()		__asm__ __volatile__ ("lw $0, 0(%0)" :: \
+				    "r" (PHYS_TO_XKPHYS(0, CCA_NC)) : "memory")
+#else
+#define	mips_sync()		__asm__ __volatile__ ("sync" ::: "memory")
+#endif
+
 #endif /* _KERNEL && !_LOCORE */
+
+#ifdef _KERNEL
+/*
+ * Values for the code field in a break instruction.
+ */
+#define	BREAK_INSTR		0x0000000d
+#define	BREAK_VAL_MASK		0x03ff0000
+#define	BREAK_VAL_SHIFT		16
+#define	BREAK_KDB_VAL		512
+#define	BREAK_SSTEP_VAL		513
+#define	BREAK_BRKPT_VAL		514
+#define	BREAK_SOVER_VAL		515
+#define	BREAK_DDB_VAL		516
+#define	BREAK_FPUEMUL_VAL	517
+#define	BREAK_KDB	(BREAK_INSTR | (BREAK_KDB_VAL << BREAK_VAL_SHIFT))
+#define	BREAK_SSTEP	(BREAK_INSTR | (BREAK_SSTEP_VAL << BREAK_VAL_SHIFT))
+#define	BREAK_BRKPT	(BREAK_INSTR | (BREAK_BRKPT_VAL << BREAK_VAL_SHIFT))
+#define	BREAK_SOVER	(BREAK_INSTR | (BREAK_SOVER_VAL << BREAK_VAL_SHIFT))
+#define	BREAK_DDB	(BREAK_INSTR | (BREAK_DDB_VAL << BREAK_VAL_SHIFT))
+#define	BREAK_FPUEMUL	(BREAK_INSTR | (BREAK_FPUEMUL_VAL << BREAK_VAL_SHIFT))
+
+#endif /* _KERNEL */
 
 /*
  * CTL_MACHDEP definitions.
@@ -570,29 +382,20 @@ void	cp0_calibrate(struct cpu_info *);
 
 #if defined(_KERNEL) && !defined(_LOCORE)
 
+extern register_t protosr;
+
 struct exec_package;
-struct tlb_entry;
 struct user;
 
-u_int	cp0_get_count(void);
-uint32_t cp0_get_config(void);
-uint32_t cp0_get_config_1(void);
-uint32_t cp0_get_config_2(void);
-uint32_t cp0_get_config_3(void);
-uint32_t cp0_get_prid(void);
-void	cp0_set_compare(u_int);
-void	cp0_set_config(uint32_t);
-u_int	cp1_get_prid(void);
-u_int	tlb_get_pid(void);
-void	tlb_set_page_mask(uint32_t);
-void	tlb_set_pid(u_int);
-void	tlb_set_wired(int);
-
+void	tlb_asid_wrap(struct cpu_info *);
 void	tlb_flush(int);
 void	tlb_flush_addr(vaddr_t);
-void	tlb_write_indexed(int, struct tlb_entry *);
-int	tlb_update(vaddr_t, unsigned);
-void	tlb_read(int, struct tlb_entry *);
+void	tlb_init(unsigned int);
+void	tlb_set_gbase(vaddr_t, vsize_t);
+void	tlb_set_page_mask(uint32_t);
+void	tlb_set_pid(u_int);
+void	tlb_set_wired(uint32_t);
+int	tlb_update(vaddr_t, register_t);
 
 void	build_trampoline(vaddr_t, vaddr_t);
 void	cpu_switchto_asm(struct proc *, struct proc *);
@@ -624,10 +427,22 @@ void	setsoftintr0(void);
 void	clearsoftintr0(void);
 void	setsoftintr1(void);
 void	clearsoftintr1(void);
-uint32_t enableintr(void);
-uint32_t disableintr(void);
-uint32_t getsr(void);
-uint32_t setsr(uint32_t);
+register_t enableintr(void);
+register_t disableintr(void);
+register_t getsr(void);
+register_t setsr(register_t);
+
+u_int	cp0_get_count(void);
+register_t cp0_get_config(void);
+uint32_t cp0_get_config_1(void);
+uint32_t cp0_get_config_2(void);
+uint32_t cp0_get_config_3(void);
+register_t cp0_get_prid(void);
+void	cp0_reset_cause(register_t);
+void	cp0_set_compare(u_int);
+void	cp0_set_config(register_t);
+void	cp0_set_trapbase(register_t);
+u_int	cp1_get_prid(void);
 
 /*
  * Cache routines (may be overriden)

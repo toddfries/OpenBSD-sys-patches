@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.105 2011/06/22 16:44:27 tedu Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.108 2013/02/09 19:15:18 sthen Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -873,7 +873,6 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 {
 	int			i;
 	const char		*intrstr = NULL;
-	pcireg_t		command;
 	struct sis_softc	*sc = (struct sis_softc *)self;
 	struct pci_attach_args	*pa = aux;
 	pci_chipset_tag_t	pc = pa->pa_pc;
@@ -883,33 +882,7 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sis_stopped = 1;
 
-	/*
-	 * Handle power management nonsense.
-	 */
-	command = pci_conf_read(pc, pa->pa_tag, SIS_PCI_CAPID) & 0x000000FF;
-	if (command == 0x01) {
-
-		command = pci_conf_read(pc, pa->pa_tag, SIS_PCI_PWRMGMTCTRL);
-		if (command & SIS_PSTATE_MASK) {
-			u_int32_t		iobase, membase, irq;
-
-			/* Save important PCI config data. */
-			iobase = pci_conf_read(pc, pa->pa_tag, SIS_PCI_LOIO);
-			membase = pci_conf_read(pc, pa->pa_tag, SIS_PCI_LOMEM);
-			irq = pci_conf_read(pc, pa->pa_tag, SIS_PCI_INTLINE);
-
-			/* Reset the power state. */
-			printf("%s: chip is in D%d power mode -- setting to D0\n",
-			    sc->sc_dev.dv_xname, command & SIS_PSTATE_MASK);
-			command &= 0xFFFFFFFC;
-			pci_conf_write(pc, pa->pa_tag, SIS_PCI_PWRMGMTCTRL, command);
-
-			/* Restore PCI config data. */
-			pci_conf_write(pc, pa->pa_tag, SIS_PCI_LOIO, iobase);
-			pci_conf_write(pc, pa->pa_tag, SIS_PCI_LOMEM, membase);
-			pci_conf_write(pc, pa->pa_tag, SIS_PCI_INTLINE, irq);
-		}
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/*
 	 * Map control/status registers.
@@ -1117,10 +1090,10 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = sis_ioctl;
 	ifp->if_start = sis_start;
 	ifp->if_watchdog = sis_watchdog;
-	ifp->if_baudrate = 10000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, SIS_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
+	ifp->if_hardmtu = 1518; /* determined experimentally on DP83815 */
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 

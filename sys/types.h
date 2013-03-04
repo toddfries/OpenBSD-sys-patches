@@ -1,4 +1,4 @@
-/*	$OpenBSD: types.h,v 1.32 2011/03/19 18:26:06 deraadt Exp $	*/
+/*	$OpenBSD: types.h,v 1.35 2013/01/09 12:17:38 jsg Exp $	*/
 /*	$NetBSD: types.h,v 1.29 1996/11/15 22:48:25 jtc Exp $	*/
 
 /*-
@@ -40,7 +40,6 @@
 #ifndef _SYS_TYPES_H_
 #define	_SYS_TYPES_H_
 
-#include <sys/cdefs.h>
 #include <sys/_types.h>
 #include <machine/endian.h>
 
@@ -159,8 +158,6 @@ typedef	__fsfilcnt_t	fsfilcnt_t;	/* file system file count */
  */
 typedef __in_addr_t	in_addr_t;	/* base type for internet address */
 typedef __in_port_t	in_port_t;	/* IP port type */
-typedef __sa_family_t	sa_family_t;	/* sockaddr address family type */
-typedef __socklen_t	socklen_t;	/* length type for network syscalls */
 
 /*
  * The following types may be defined in multiple header files.
@@ -239,5 +236,32 @@ struct	buf;
 struct	tty;
 struct	uio;
 #endif
+
+#ifdef _KERNEL
+#if (defined(__GNUC__) && __GNUC__ >= 3) || defined(__PCC__) || defined(lint)
+/* Support for _C99: type _Bool is already built-in. */
+#define false	0
+#define true	1
+
+#else
+/* `_Bool' type must promote to `int' or `unsigned int'. */
+typedef enum {
+	false = 0,
+	true = 1
+} _Bool;
+
+/* And those constants must also be available as macros. */
+#define	false	false
+#define	true	true
+
+#endif
+
+/* User visible type `bool' is provided as a macro which may be redefined */
+#define bool _Bool
+
+/* Inform that everything is fine */
+#define __bool_true_false_are_defined 1
+
+#endif /* _KERNEL */
 
 #endif /* !_SYS_TYPES_H_ */

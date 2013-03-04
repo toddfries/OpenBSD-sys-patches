@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_motorola.c,v 1.67 2012/04/10 15:50:52 guenther Exp $ */
+/*	$OpenBSD: pmap_motorola.c,v 1.69 2013/01/01 01:01:08 miod Exp $ */
 
 /*
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -269,7 +269,6 @@ struct vm_map	st_map_store, pt_map_store;
 
 paddr_t    	avail_start;	/* PA of first available physical page */
 paddr_t		avail_end;	/* PA of last available physical page */
-vsize_t		mem_size;	/* memory size in bytes */
 vaddr_t		virtual_avail;  /* VA of first avail page (after kernel bss)*/
 vaddr_t		virtual_end;	/* VA of last avail page (end of kernel AS) */
 
@@ -751,11 +750,10 @@ pmap_remove_flags(pmap, sva, eva, flags)
 				break;
 			}
 			if (pmap_pte_v(pte)) {
-				if ((flags & PRM_SKIPWIRED) &&
-				    pmap_pte_w(pte))
-					goto skip;
-				pmap_remove_mapping(pmap, sva, pte, flags);
-skip:
+				if ((flags & PRM_SKIPWIRED) == 0 ||
+				    !pmap_pte_w(pte))
+					pmap_remove_mapping(pmap, sva, pte,
+					    flags);
 			}
 			pte++;
 			sva += PAGE_SIZE;

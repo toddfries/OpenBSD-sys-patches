@@ -1,4 +1,4 @@
-/*	$OpenBSD: ichiic.c,v 1.28 2012/06/29 15:17:32 jasper Exp $	*/
+/*	$OpenBSD: ichiic.c,v 1.30 2013/03/02 06:56:16 jsg Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -103,7 +103,8 @@ const struct pci_matchid ichiic_ids[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801I_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JD_SMB },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82801JI_SMB },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_C600_SMB }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_C600_SMB },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_EP80579_SMBUS }
 };
 
 int
@@ -264,6 +265,8 @@ ichiic_i2c_exec(void *cookie, i2c_op_t op, i2c_addr_t addr,
 		ctl = ICH_SMB_HC_CMD_BDATA;
 	else if (len == 2)
 		ctl = ICH_SMB_HC_CMD_WDATA;
+	else
+		panic("%s: unexpected len %zd", __func__, len);
 
 	if ((flags & I2C_F_POLL) == 0)
 		ctl |= ICH_SMB_HC_INTREN;

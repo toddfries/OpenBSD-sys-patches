@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_subr.c,v 1.197 2012/07/16 15:31:17 deraadt Exp $	*/
+/*	$OpenBSD: vfs_subr.c,v 1.202 2013/02/17 17:39:29 miod Exp $	*/
 /*	$NetBSD: vfs_subr.c,v 1.53 1996/04/22 01:39:13 christos Exp $	*/
 
 /*
@@ -95,8 +95,6 @@ struct freelst vnode_free_list;	/* vnode free list */
 struct mntlist mountlist;	/* mounted filesystem list */
 
 void	vclean(struct vnode *, int, struct proc *);
-void	vhold(struct vnode *);
-void	vdrop(struct vnode *);
 
 void insmntque(struct vnode *, struct mount *);
 int getdevvp(dev_t, struct vnode **, enum vtype);
@@ -1580,7 +1578,7 @@ vaccess(enum vtype type, mode_t file_mode, uid_t uid, gid_t gid,
 	}
 
 	/* Otherwise, check the groups. */
-	if (cred->cr_gid == gid || groupmember(gid, cred)) {
+	if (groupmember(gid, cred)) {
 		if (acc_mode & VEXEC)
 			mask |= S_IXGRP;
 		if (acc_mode & VREAD)
@@ -1865,17 +1863,18 @@ loop:
 				break;
 			}
 			bremfree(bp);
-			buf_acquire(bp);
 			/*
 			 * XXX Since there are no node locks for NFS, I believe
 			 * there is a slight chance that a delayed write will
 			 * occur while sleeping just above, so check for it.
 			 */
 			if ((bp->b_flags & B_DELWRI) && (flags & V_SAVE)) {
+				buf_acquire(bp);
 				splx(s);
 				(void) VOP_BWRITE(bp);
 				goto loop;
 			}
+			buf_acquire_nomap(bp);
 			bp->b_flags |= B_INVAL;
 			brelse(bp);
 		}
@@ -2151,7 +2150,8 @@ vn_isdisk(struct vnode *vp, int *errp)
 #include <ddb/db_output.h>
 
 void
-vfs_buf_print(void *b, int full, int (*pr)(const char *, ...))
+vfs_buf_print(void *b, int full,
+    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
 {
 	struct buf *bp = b;
 
@@ -2178,7 +2178,8 @@ const char *vtypes[] = { VTYPE_NAMES };
 const char *vtags[] = { VTAG_NAMES };
 
 void
-vfs_vnode_print(void *v, int full, int (*pr)(const char *, ...))
+vfs_vnode_print(void *v, int full,
+    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
 {
 	struct vnode *vp = v;
 
@@ -2187,7 +2188,7 @@ vfs_vnode_print(void *v, int full, int (*pr)(const char *, ...))
 	      vp->v_type > nitems(vtypes)? "<unk>":vtypes[vp->v_type],
 	      vp->v_type, vp->v_mount, vp->v_mountedhere);
 
-	(*pr)("data %p usecount %d writecount %ld holdcnt %ld numoutput %d\n",
+	(*pr)("data %p usecount %d writecount %d holdcnt %d numoutput %d\n",
 	      vp->v_data, vp->v_usecount, vp->v_writecount,
 	      vp->v_holdcnt, vp->v_numoutput);
 
@@ -2211,7 +2212,8 @@ vfs_vnode_print(void *v, int full, int (*pr)(const char *, ...))
 }
 
 void
-vfs_mount_print(struct mount *mp, int full, int (*pr)(const char *, ...))
+vfs_mount_print(struct mount *mp, int full,
+    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
 {
 	struct vfsconf *vfc = mp->mnt_vfc;
 	struct vnode *vp;

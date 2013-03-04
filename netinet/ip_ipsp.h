@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.h,v 1.148 2012/07/16 18:05:36 markus Exp $	*/
+/*	$OpenBSD: ip_ipsp.h,v 1.153 2013/02/14 16:22:34 mikeb Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -39,6 +39,8 @@
 
 #ifndef _NETINET_IPSP_H_
 #define _NETINET_IPSP_H_
+
+struct m_tag;
 
 /* IPSP global definitions. */
 
@@ -293,15 +295,12 @@ struct tdb {				/* tunnel descriptor block */
 #define	TDBF_ALLOCATIONS	0x00008	/* Check the flows counters */
 #define	TDBF_INVALID		0x00010	/* This SPI is not valid yet/anymore */
 #define	TDBF_FIRSTUSE		0x00020	/* Expire after first use */
-#define	TDBF_HALFIV		0x00040	/* Use half-length IV (ESP old only) */
 #define	TDBF_SOFT_TIMER		0x00080	/* Soft expiration */
 #define	TDBF_SOFT_BYTES		0x00100	/* Soft expiration */
 #define	TDBF_SOFT_ALLOCATIONS	0x00200	/* Soft expiration */
 #define	TDBF_SOFT_FIRSTUSE	0x00400	/* Soft expiration */
 #define	TDBF_PFS		0x00800	/* Ask for PFS from Key Mgmt. */
 #define	TDBF_TUNNELING		0x01000	/* Force IP-IP encapsulation */
-#define	TDBF_NOREPLAY		0x02000	/* No replay counter present */
-#define	TDBF_RANDOMPADDING	0x04000	/* Random data in the ESP padding */
 #define	TDBF_SKIPCRYPTO		0x08000	/* Skip actual crypto processing */
 #define	TDBF_USEDTUNNEL		0x10000	/* Appended a tunnel header in past */
 #define	TDBF_UDPENCAP		0x20000	/* UDP encapsulation */
@@ -356,8 +355,11 @@ struct tdb {				/* tunnel descriptor block */
 	u_int8_t	*tdb_amxkey;	/* Raw authentication key */
 	u_int8_t	*tdb_emxkey;	/* Raw encryption key */
 
+#define TDB_REPLAYWASTE	32
+#define TDB_REPLAYMAX	(2100+TDB_REPLAYWASTE)
+
 	u_int64_t	tdb_rpl;	/* Replay counter */
-	u_int64_t	tdb_bitmap;	/* Used for replay sliding window */
+	u_int32_t	tdb_seen[howmany(TDB_REPLAYMAX, 32)]; /* Anti-replay window */
 
 	u_int8_t	tdb_iv[4];	/* Used for HALF-IV ESP */
 
@@ -442,14 +444,6 @@ struct xformsw {
 	    int, int);        /* output */
 };
 
-/*
- * Protects all tdb lists.
- * Must at least be splsoftnet (note: do not use splsoftclock as it is
- * special on some architectures, assuming it is always an spl lowering
- * operation).
- */
-#define	spltdb	splsoftnet
-
 extern int encdebug;
 extern int ipsec_acl;
 extern int ipsec_keep_invalid;
@@ -497,7 +491,7 @@ extern struct xformsw xformsw[], *xformswNXFORMSW;
 
 #define	SPI_CHAIN_ATTRIB(have, TDB_DIR, TDBP)				\
 do {									\
-	int s = spltdb();						\
+	int s = splsoftnet();						\
 	struct tdb *tmptdb = (TDBP);					\
 									\
 	(have) = 0;							\
@@ -625,8 +619,7 @@ extern int tcp_signature_tdb_output(struct mbuf *, struct tdb *,
     struct mbuf **, int, int);
 
 /* Replay window */
-extern int checkreplaywindow(u_int32_t, u_int64_t *, u_int32_t, u_int64_t *,
-    u_int32_t *, int, int);
+extern int checkreplaywindow(struct tdb *, u_int32_t, u_int32_t *, int);
 
 extern unsigned char ipseczeroes[];
 

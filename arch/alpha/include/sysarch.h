@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysarch.h,v 1.7 2011/04/23 21:34:02 martynas Exp $	*/
+/*	$OpenBSD: sysarch.h,v 1.9 2012/12/05 23:20:09 deraadt Exp $	*/
 /*	$NetBSD: sysarch.h,v 1.8 2001/04/26 03:10:46 ross Exp $	*/
 
 /*-
@@ -55,7 +55,12 @@ struct alpha_fp_c_args {
 };
 
 #ifndef _KERNEL
+
+#include <sys/cdefs.h>
+
+__BEGIN_DECLS
 int	sysarch(int, void *);
+__END_DECLS
 #endif /* !_KERNEL */
 
 #endif /* !_MACHINE_SYSARCH_H_ */

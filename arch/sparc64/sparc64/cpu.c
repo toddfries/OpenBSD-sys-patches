@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.56 2011/01/13 22:55:33 matthieu Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.59 2012/12/04 21:00:21 kettenis Exp $	*/
 /*	$NetBSD: cpu.c,v 1.13 2001/05/26 21:27:15 chs Exp $ */
 
 /*
@@ -223,12 +223,6 @@ cpu_match(parent, vcf, aux)
 
 	if (portid != cpus->ci_upaid)
 		return (0);
-#else
-	/* XXX Only attach the first thread of a core for now. */
-	if (OF_getprop(OF_parent(ma->ma_node), "device_type",
-	    buf, sizeof(buf)) >= 0 && strcmp(buf, "core") == 0 &&
-	    (getpropint(ma->ma_node, "cpuid", -1) % 2) == 1)
-		return (0);
 #endif
 
 	return (1);
@@ -431,10 +425,14 @@ cpu_init(struct cpu_info *ci)
 #ifdef SUN4V
 	paddr_t pa = ci->ci_paddr;
 	int err;
+#endif
 
-	if (CPU_ISSUN4U || CPU_ISSUN4US)
+	if (CPU_ISSUN4U || CPU_ISSUN4US) {
+		tick_enable();
 		return;
+	}
 
+#ifdef SUN4V
 #define MONDO_QUEUE_SIZE	32
 #define QUEUE_ENTRY_SIZE	64
 
@@ -788,10 +786,24 @@ cpu_idle_cycle(void)
 		sparc_wrpr(pstate, sparc_rdpr(pstate) & ~PSTATE_IE, 0);
 	}
 #endif
+
+	/*
+	 * On processors with multiple threads we simply force a
+	 * thread switch.  Using the sleep instruction seems to work
+	 * just as well as using the suspend instruction and makes the
+	 * code a little bit less complicated.
+	 */
+	__asm __volatile(
+		"999:	nop					\n"
+		"	.section .sun4u_mtp_patch, \"ax\"	\n"
+		"	.word	999b				\n"
+		"	.word	0x81b01060	! sleep		\n"
+		"	.previous				\n"
+		: : : "memory");
 }
 
 void
-cpu_idle_leave()
+cpu_idle_leave(void)
 {
 	if (CPU_ISSUN4V) {
 		sparc_wrpr(pstate, sparc_rdpr(pstate) | PSTATE_IE, 0);

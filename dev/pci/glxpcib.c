@@ -1,4 +1,4 @@
-/*      $OpenBSD: glxpcib.c,v 1.5 2012/03/06 12:57:36 mikeb Exp $	*/
+/*      $OpenBSD: glxpcib.c,v 1.9 2013/01/16 07:17:59 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -211,6 +211,8 @@ struct cfdriver glxpcib_cd = {
 int	glxpcib_match(struct device *, void *, void *);
 void	glxpcib_attach(struct device *, struct device *, void *);
 int	glxpcib_activate(struct device *, int);
+int	glxpcib_search(struct device *, void *, void *);
+int	glxpcib_print(void *, const char *);
 
 struct cfattach glxpcib_ca = {
 	sizeof(struct glxpcib_softc), glxpcib_match, glxpcib_attach,
@@ -278,11 +280,7 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 	tc->tc_counter_mask = 0xffffffff;
 	tc->tc_frequency = 3579545;
 	tc->tc_name = "CS5536";
-#ifdef __loongson__
-	tc->tc_quality = 0;
-#else
 	tc->tc_quality = 1000;
-#endif
 	tc->tc_priv = sc;
 	tc_init(tc);
 
@@ -300,8 +298,9 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 		/* count in seconds (as upper level desires) */
 		bus_space_write_2(sc->sc_iot, sc->sc_ioh, AMD5536_MFGPT0_SETUP,
 		    AMD5536_MFGPT_CNT_EN | AMD5536_MFGPT_CMP2EV |
-		    AMD5536_MFGPT_CMP2 | AMD5536_MFGPT_DIV_MASK);
-		wdog_register(sc, glxpcib_wdogctl_cb);
+		    AMD5536_MFGPT_CMP2 | AMD5536_MFGPT_DIV_MASK |
+		    AMD5536_MFGPT_STOP_EN);
+		wdog_register(glxpcib_wdogctl_cb, sc);
 		sc->sc_wdog = 1;
 		printf(", watchdog");
 	}
@@ -396,6 +395,8 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 	if (i2c)
 		config_found(&sc->sc_dev, &iba, iicbus_print);
 #endif
+
+	config_search(glxpcib_search, self, pa);
 }
 
 int
@@ -425,6 +426,9 @@ glxpcib_activate(struct device *self, int act)
 			sc->sc_msrsave[i] = rdmsr(glxpcib_msrlist[i]);
 #endif
 
+		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
 #ifndef SMALL_KERNEL
@@ -678,6 +682,46 @@ glxpcib_smb_read_byte(void *arg, uint8_t *bytep, int flags)
 	    AMD5536_SMB_SDA);
 
 	return (0);
+}
+
+int
+glxpcib_print(void *args, const char *parentname)
+{
+	struct glxpcib_attach_args *gaa = (struct glxpcib_attach_args *)args;
+
+	if (parentname != NULL)
+		printf("%s at %s", gaa->gaa_name, parentname);
+
+	return UNCONF;
+}
+
+int
+glxpcib_search(struct device *parent, void *gcf, void *args)
+{
+	struct glxpcib_softc *sc = (struct glxpcib_softc *)parent;
+	struct cfdata *cf = (struct cfdata *)gcf;
+	struct pci_attach_args *pa = (struct pci_attach_args *)args;
+	struct glxpcib_attach_args gaa;
+
+	gaa.gaa_name = cf->cf_driver->cd_name;
+	gaa.gaa_pa = pa;
+	gaa.gaa_iot = sc->sc_iot;
+	gaa.gaa_ioh = sc->sc_ioh;
+
+	/*
+	 * These devices are attached directly, either from
+	 * glxpcib_attach() or later in time from pcib_callback().
+	 */
+	if (strcmp(cf->cf_driver->cd_name, "gpio") == 0 ||
+	    strcmp(cf->cf_driver->cd_name, "iic") == 0 ||
+	    strcmp(cf->cf_driver->cd_name, "isa") == 0)
+		return 0;
+
+	if (cf->cf_attach->ca_match(parent, cf, &gaa) == 0)
+		return 0;
+
+	config_attach(parent, cf, &gaa, glxpcib_print);
+	return 1;
 }
 
 int

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sdvar.h,v 1.38 2011/07/11 06:26:09 dlg Exp $	*/
+/*	$OpenBSD: sdvar.h,v 1.40 2012/12/19 19:52:11 kettenis Exp $	*/
 /*	$NetBSD: sdvar.h,v 1.7 1998/08/17 00:49:03 mycroft Exp $	*/
 
 /*-

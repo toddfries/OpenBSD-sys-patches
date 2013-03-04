@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sk.c,v 1.161 2012/02/24 06:19:00 guenther Exp $	*/
+/*	$OpenBSD: if_sk.c,v 1.163 2012/11/29 21:10:32 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -1167,7 +1167,6 @@ sk_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = sk_ioctl;
 	ifp->if_start = sk_start;
 	ifp->if_watchdog = sk_watchdog;
-	ifp->if_baudrate = 1000000000;
 	ifp->if_hardmtu = SK_JUMBO_MTU;
 	IFQ_SET_MAXLEN(&ifp->if_snd, SK_TX_RING_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
@@ -1304,7 +1303,7 @@ skc_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args *pa = aux;
 	struct skc_attach_args skca;
 	pci_chipset_tag_t pc = pa->pa_pc;
-	pcireg_t command, memtype;
+	pcireg_t memtype;
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
 	u_int8_t skrs;
@@ -1312,35 +1311,7 @@ skc_attach(struct device *parent, struct device *self, void *aux)
 
 	DPRINTFN(2, ("begin skc_attach\n"));
 
-	/*
-	 * Handle power management nonsense.
-	 */
-	command = pci_conf_read(pc, pa->pa_tag, SK_PCI_CAPID) & 0x000000FF;
-
-	if (command == 0x01) {
-		command = pci_conf_read(pc, pa->pa_tag, SK_PCI_PWRMGMTCTRL);
-		if (command & SK_PSTATE_MASK) {
-			u_int32_t		iobase, membase, irq;
-
-			/* Save important PCI config data. */
-			iobase = pci_conf_read(pc, pa->pa_tag, SK_PCI_LOIO);
-			membase = pci_conf_read(pc, pa->pa_tag, SK_PCI_LOMEM);
-			irq = pci_conf_read(pc, pa->pa_tag, SK_PCI_INTLINE);
-
-			/* Reset the power state. */
-			printf("%s chip is in D%d power mode "
-			    "-- setting to D0\n", sc->sk_dev.dv_xname,
-			    command & SK_PSTATE_MASK);
-			command &= 0xFFFFFFFC;
-			pci_conf_write(pc, pa->pa_tag,
-			    SK_PCI_PWRMGMTCTRL, command);
-
-			/* Restore PCI config data. */
-			pci_conf_write(pc, pa->pa_tag, SK_PCI_LOIO, iobase);
-			pci_conf_write(pc, pa->pa_tag, SK_PCI_LOMEM, membase);
-			pci_conf_write(pc, pa->pa_tag, SK_PCI_INTLINE, irq);
-		}
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/*
 	 * Map control/status registers.

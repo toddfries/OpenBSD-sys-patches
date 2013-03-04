@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.242 2012/07/09 12:58:01 krw Exp $	*/
+/*	$OpenBSD: sd.c,v 1.245 2012/12/19 19:52:11 kettenis Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -286,14 +286,23 @@ sdactivate(struct device *self, int act)
 	switch (act) {
 	case DVACT_SUSPEND:
 		/*
+		 * We flush the cache, since we our next step before
+		 * DVACT_POWERDOWN might be a hibernate operation.
+		 */
+		if ((sc->flags & SDF_DIRTY) != 0)
+			sd_flush(sc, SCSI_AUTOCONF);
+		break;
+	case DVACT_POWERDOWN:
+		/*
 		 * Stop the disk.  Stopping the disk should flush the
 		 * cache, but we are paranoid so we flush the cache
 		 * first.
 		 */
 		if ((sc->flags & SDF_DIRTY) != 0)
 			sd_flush(sc, SCSI_AUTOCONF);
-		scsi_start(sc->sc_link, SSS_STOP,
-		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_AUTOCONF);
+		if (boothowto & RB_POWERDOWN)
+			scsi_start(sc->sc_link, SSS_STOP,
+			    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_AUTOCONF);
 		break;
 	case DVACT_RESUME:
 		scsi_start(sc->sc_link, SSS_START,
@@ -1131,16 +1140,6 @@ sd_shutdown(void *arg)
 	 */
 	if ((sc->flags & SDF_DIRTY) != 0)
 		sd_flush(sc, SCSI_AUTOCONF);
-	if (boothowto & RB_POWERDOWN)
-		scsi_start(sc->sc_link, SSS_STOP,
-		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_AUTOCONF);
-
-	/*
-	 * There should be no outstanding IO at this point, but lets stop
-	 * it just in case.
-	 */
-	timeout_del(&sc->sc_timeout);
-	scsi_xsh_del(&sc->sc_xsh);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: yeeloong_machdep.c,v 1.17 2011/07/21 20:36:12 miod Exp $	*/
+/*	$OpenBSD: yeeloong_machdep.c,v 1.23 2013/01/16 20:28:06 miod Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -26,8 +26,10 @@
 #include <sys/systm.h>
 #include <sys/device.h>
 
-#include <mips64/archtype.h>
 #include <machine/autoconf.h>
+#include <machine/cpu.h>
+#include <mips64/loongson2.h>
+#include <mips64/mips_cpu.h>
 #include <machine/pmon.h>
 
 #include <dev/isa/isareg.h>
@@ -61,6 +63,7 @@ void	 fuloong_powerdown(void);
 void	 fuloong_setup(void);
 
 void	 yeeloong_powerdown(void);
+void	 yeeloong_setup(void);
 
 void	 lemote_pci_attach_hook(pci_chipset_tag_t);
 int	 lemote_intr_map(int, int, int);
@@ -74,6 +77,7 @@ void	 lemote_isa_intr_disestablish(void *, void *);
 uint	 lemote_get_isa_imr(void);
 uint	 lemote_get_isa_isr(void);
 uint32_t lemote_isa_intr(uint32_t, struct trap_frame *);
+extern void	(*cpu_setperf)(int);
 
 const struct bonito_config lemote_bonito = {
 	.bc_adbase = 11,
@@ -193,7 +197,7 @@ const struct platform yeeloong_platform = {
 	.isa_chipset = &lemote_isa_chipset,
 	.legacy_io_ranges = yeeloong_legacy_ranges,
 
-	.setup = NULL,
+	.setup = yeeloong_setup,
 	.device_register = lemote_device_register,
 
 	.powerdown = yeeloong_powerdown,
@@ -388,15 +392,23 @@ lemote_isa_intr(uint32_t hwpend, struct trap_frame *frame)
 				rc = 0;
 				for (ih = bonito_intrhand[BONITO_ISA_IRQ(bitno)];
 				    ih != NULL; ih = ih->ih_next) {
+					void *arg;
+
 					splraise(ih->ih_level);
-					ret = (*ih->ih_fun)(ih->ih_arg);
+					if (ih->ih_arg != NULL)
+						arg = ih->ih_arg;
+					else
+						/* clock interrupt */
+						arg = frame;
+					ret = (*ih->ih_fun)(arg);
 					if (ret) {
 						rc = 1;
 						ih->ih_count.ec_count++;
 					}
 					__asm__ (".set noreorder\n");
 					curcpu()->ci_ipl = frame->ipl;
-					__asm__ ("sync\n\t.set reorder\n");
+					mips_sync();
+					__asm__ (".set reorder\n");
 					if (ret == 1)
 						break;
 				}
@@ -472,6 +484,7 @@ yeeloong_powerdown()
 void
 lemote_reset()
 {
+	cpu_setperf(100);
 	wrmsr(GLCP_SYS_RST, rdmsr(GLCP_SYS_RST) | 1);
 }
 
@@ -491,8 +504,18 @@ fuloong_setup(void)
                 comconsiot = &bonito_pci_io_space_tag;
                 comconsaddr = 0x2f8;
                 comconsrate = 115200; /* default PMON console speed */
+		comconscflag = (TTYDEF_CFLAG & ~(CSIZE | CSTOPB | PARENB)) |
+		    CS8 | CLOCAL; /* 8N1 */
 	}
 #endif
+
+	cpu_setperf = loongson2f_setperf;
+}
+
+void
+yeeloong_setup(void)
+{
+	cpu_setperf = loongson2f_setperf;
 }
 
 void

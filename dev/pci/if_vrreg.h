@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vrreg.h,v 1.30 2012/01/05 19:08:25 deraadt Exp $	*/
+/*	$OpenBSD: if_vrreg.h,v 1.35 2013/02/09 19:17:52 sthen Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -83,6 +83,9 @@
 #define VR_MPA_CNT		0x7C
 #define VR_CRC_CNT		0x7E
 #define VR_STICKHW		0x83
+#define VR_CAMMASK		0x88 /* length 4 bytes */
+#define VR_CAMCTRL		0x92
+#define VR_CAMADDR		0x93
 
 /* Misc Registers */
 #define VR_MISC_CR1		0x81
@@ -342,6 +345,14 @@
 #define VR_BCR1_VLANFILT_ENB	0x80		/* 6105M */
 
 /*
+ * CAM Control registers (VT6105M)
+ */
+#define VR_CAMCTRL_WREN		0x01
+#define VR_CAMCTRL_VCAMSEL	0x02
+#define VR_CAMCTRL_WRITE	0x04
+#define VR_CAMCTRL_READ		0x08
+
+/*
  * Rhine TX/RX list structure.
  */
 
@@ -404,6 +415,7 @@ struct vr_desc {
 #define VR_TXSTAT_ERRSUM	0x00008000
 #define VR_TXSTAT_PQMASK	0x7FFF0000
 #define VR_TXSTAT_OWN		0x80000000
+#define VR_TXSTAT_PQSHIFT	16
 
 #define VR_TXCTL_BUFLEN		0x000007FF
 #define VR_TXCTL_BUFLEN_EXT	0x00007800
@@ -417,13 +429,17 @@ struct vr_desc {
 #define VR_TXCTL_LASTFRAG	0x00400000
 #define VR_TXCTL_FINT		0x00800000
 
-#define VR_MAXFRAGS		16
-#define VR_RX_LIST_CNT		64
+/* TDES3 aka vr_next */
+#define VR_TXNEXT_INTDISABLE	0x00000001
+
+#define VR_MAXFRAGS		8
+#define VR_RX_LIST_CNT		128
 #define VR_TX_LIST_CNT		128
 #define VR_MIN_FRAMELEN		60
 #define VR_RXLEN		1524
-
-#define VR_TXOWN(x)		x->vr_ptr->vr_status
+/* determined experimentally; seems intermittent with higher values */
+#define VR_RXLEN_BABYJUMBO	1758
+#define VR_TX_INTR_THRESH	8
 
 struct vr_list_data {
 	struct vr_desc		vr_rx_list[VR_RX_LIST_CNT];
@@ -456,6 +472,8 @@ struct vr_chain_data {
 
 	struct vr_chain		*vr_tx_cons;
 	struct vr_chain		*vr_tx_prod;
+	int			vr_tx_cnt;
+	unsigned int		vr_tx_pkts;
 };
 
 struct vr_mii_frame {
@@ -479,6 +497,14 @@ struct vr_mii_frame {
 #define VR_FLAG_SCHEDDELAY	2
 #define VR_FLAG_DELAYTIMEO	3	
 
+struct vr_dmamem {
+	bus_dmamap_t		vrm_map;
+	bus_dma_segment_t	vrm_seg;
+	int			vrm_nsegs;
+	size_t			vrm_size;
+	caddr_t			vrm_kva;
+};
+
 struct vr_softc {
 	struct device		sc_dev;		/* generic device structure */
 	pci_chipset_tag_t	sc_pc;		/* PCI registers info */
@@ -496,8 +522,8 @@ struct vr_softc {
 	struct mii_data		sc_mii;
 	struct timeout		sc_to;
 	struct timeout		sc_rxto;
-	bus_dmamap_t		sc_listmap;	/* descriptor list map */
-	bus_dma_segment_t	sc_listseg;
+	struct vr_dmamem	sc_listmap;	/* descriptor list map */
+	struct vr_dmamem	sc_zeromap;	/* zero pad map */
 	int			sc_rxbufs;
 	int			vr_link;
 	int			vr_quirks;
@@ -574,10 +600,5 @@ struct vr_softc {
 #define VR_PCI_PWRMGMTCAP	0xDE /* 16 bits */
 #define VR_PCI_PWRMGMTCTRL	0xE0 /* 16 bits */
 
-#define VR_PSTATE_MASK		0x0003
-#define VR_PSTATE_D0		0x0000
-#define VR_PSTATE_D1		0x0002
-#define VR_PSTATE_D2		0x0002
-#define VR_PSTATE_D3		0x0003
 #define VR_PME_EN		0x0010
 #define VR_PME_STATUS		0x8000

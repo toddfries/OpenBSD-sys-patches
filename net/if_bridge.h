@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.h,v 1.34 2010/11/20 14:23:09 fgsch Exp $	*/
+/*	$OpenBSD: if_bridge.h,v 1.37 2013/01/23 13:28:36 camield Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -383,7 +383,8 @@ struct bstp_state {
  * Bridge interface list
  */
 struct bridge_iflist {
-	LIST_ENTRY(bridge_iflist)	next;		/* next in list */
+	TAILQ_ENTRY(bridge_iflist)	next;		/* next in list */
+	struct bridge_softc		*bridge_sc;
 	struct bstp_port		*bif_stp;	/* STP port state */
 	struct brl_head			bif_brlin;	/* input rules */
 	struct brl_head			bif_brlout;	/* output rules */
@@ -391,6 +392,10 @@ struct bridge_iflist {
 	u_int32_t			bif_flags;	/* member flags */
 };
 #define bif_state			bif_stp->bp_state
+
+#define SAME_BRIDGE(_bp1, _bp2)						\
+	(_bp1 && _bp2 && ((struct bridge_iflist *)_bp1)->bridge_sc ==	\
+	    ((struct bridge_iflist *)_bp2)->bridge_sc)
 
 /*
  * Bridge route node
@@ -421,9 +426,9 @@ struct bridge_softc {
 	u_int32_t			sc_hashkey;	/* hash key */
 	struct timeout			sc_brtimeout;	/* timeout state */
 	struct bstp_state		*sc_stp;	/* stp state */
-	LIST_HEAD(, bridge_iflist)	sc_iflist;	/* interface list */
+	TAILQ_HEAD(, bridge_iflist)	sc_iflist;	/* interface list */
+	TAILQ_HEAD(, bridge_iflist)	sc_spanlist;	/* span ports */
 	LIST_HEAD(, bridge_rtnode)	sc_rts[BRIDGE_RTABLE_SIZE];	/* hash table */
-	LIST_HEAD(, bridge_iflist)	sc_spanlist;	/* span ports */
 };
 
 extern const u_int8_t bstp_etheraddr[];
@@ -444,7 +449,7 @@ void	bstp_stop(struct bstp_state *);
 int	bstp_ioctl(struct ifnet *, u_long, caddr_t);
 struct bstp_port *bstp_add(struct bstp_state *, struct ifnet *);
 void	bstp_delete(struct bstp_port *);
-void	bstp_input(struct bstp_state *, struct bstp_port *,
+struct mbuf *bstp_input(struct bstp_state *, struct bstp_port *,
     struct ether_header *, struct mbuf *);
 void	bstp_ifstate(void *);
 u_int8_t bstp_getstate(struct bstp_state *, struct bstp_port *);

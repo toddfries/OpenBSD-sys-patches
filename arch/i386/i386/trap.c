@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.103 2012/08/07 05:16:53 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.107 2012/12/31 06:44:11 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 /*-
@@ -70,9 +70,6 @@
 #ifdef COMPAT_LINUX
 #include <compat/linux/linux_syscall.h>
 extern struct emul emul_linux_aout, emul_linux_elf;
-#endif
-#ifdef COMPAT_AOUT
-extern struct emul emul_aout;
 #endif
 #ifdef KVM86
 #include <machine/kvm86.h>
@@ -406,6 +403,15 @@ trap(struct trapframe *frame)
 #endif
 		cr2 = rcr2();
 		KERNEL_LOCK();
+		/* This will only trigger if SMEP is enabled */
+		if (cr2 <= VM_MAXUSER_ADDRESS && frame->tf_err & PGEX_I)
+			panic("attempt to execute user address %p "
+			    "in supervisor mode", (void *)cr2);
+		/* This will only trigger if SMAP is enabled */
+		if (pcb->pcb_onfault == NULL && cr2 <= VM_MAXUSER_ADDRESS &&
+		    frame->tf_err & PGEX_P)
+			panic("attempt to access user address %p "
+			    "in supervisor mode", (void *)cr2);
 		goto faultcommon;
 
 	case T_PAGEFLT|T_USER: {	/* page fault */
@@ -536,7 +542,7 @@ syscall(struct trapframe *frame)
 	caddr_t params;
 	struct sysent *callp;
 	struct proc *p;
-	int orig_error, error, opc, nsys;
+	int error, opc, nsys;
 	register_t code, args[8], rval[2];
 #ifdef DIAGNOSTIC
 	int ocpl = lapic_tpr;
@@ -588,11 +594,7 @@ syscall(struct trapframe *frame)
 		 * Like syscall, but code is a quad, so as to maintain
 		 * quad alignment for the rest of the arguments.
 		 */
-		if (callp != sysent
-#ifdef COMPAT_AOUT
-		    && p->p_emul != &emul_aout
-#endif
-		    )
+		if (callp != sysent)
 			break;
 		copyin(params + _QUAD_LOWWORD * sizeof(int), &code, sizeof(int));
 		params += sizeof(quad_t);
@@ -641,7 +643,7 @@ syscall(struct trapframe *frame)
 	rval[0] = 0;
 	rval[1] = frame->tf_edx;
 
-	orig_error = error = mi_syscall(p, code, callp, args, rval);
+	error = mi_syscall(p, code, callp, args, rval);
 
 	switch (error) {
 	case 0:
@@ -662,14 +664,15 @@ syscall(struct trapframe *frame)
 		break;
 	default:
 	bad:
-		if (p->p_emul->e_errno)
-			error = p->p_emul->e_errno[error];
-		frame->tf_eax = error;
+		if (p->p_emul->e_errno && error >= 0 && error <= ELAST)
+			frame->tf_eax = p->p_emul->e_errno[error];
+		else
+			frame->tf_eax = error;
 		frame->tf_eflags |= PSL_C;	/* carry bit */
 		break;
 	}
 
-	mi_syscall_return(p, code, orig_error, rval);
+	mi_syscall_return(p, code, error, rval);
 
 #ifdef DIAGNOSTIC
 	if (lapic_tpr != ocpl) {

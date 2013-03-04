@@ -1,4 +1,4 @@
-/* $OpenBSD: drmP.h,v 1.131 2012/08/22 08:23:41 mpi Exp $ */
+/* $OpenBSD: drmP.h,v 1.133 2012/12/06 15:05:21 mpi Exp $ */
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -72,6 +72,9 @@
 
 #include "drm.h"
 #include "drm_atomic.h"
+#include "agp.h"
+
+#define __OS_HAS_AGP		(NAGP > 0)
 
 #if BYTE_ORDER == BIG_ENDIAN
 #define __BIG_ENDIAN
@@ -86,8 +89,6 @@
 
 				/* Internal types and structures */
 #define DRM_IF_VERSION(maj, min) (maj << 16 | min)
-
-#define __OS_HAS_AGP	1
 
 #define DRM_CURRENTPID		curproc->p_pid
 #define DRM_LOCK()		rw_enter_write(&dev->dev_lock)
@@ -296,7 +297,7 @@ struct drm_agp_mem {
 };
 
 struct drm_agp_head {
-	struct device				*agpdev;
+	struct agp_softc			*agpdev;
 	const char				*chipset;
 	TAILQ_HEAD(agp_memlist, drm_agp_mem)	 memory;
 	struct agp_info				 info;
@@ -584,7 +585,7 @@ void	 drm_free(void *);
 /* XXX until we get PAT support */
 #define drm_core_ioremap_wc drm_core_ioremap
 void	drm_core_ioremap(struct drm_local_map *, struct drm_device *);
-void	drm_core_ioremapfree(struct drm_local_map *);
+void	drm_core_ioremapfree(struct drm_local_map *, struct drm_device *);
 
 int	drm_mtrr_add(unsigned long, size_t, int);
 int	drm_mtrr_del(int, unsigned long, size_t, int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.25 2012/03/19 21:56:49 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.28 2013/01/16 19:04:43 miod Exp $	*/
 /*
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1992, 1993
@@ -54,7 +54,7 @@
 
 
 #include <machine/cpu.h>
-#include <machine/autoconf.h>
+#include <mips64/mips_cpu.h>
 
 extern void proc_trampoline(void);
 /*
@@ -77,12 +77,14 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	p2->p_md.md_uarea = (vaddr_t)p2->p_addr;
 	pmap_extract(pmap_kernel(), p2->p_md.md_uarea, &pa);
 #ifdef __sgi__
+#ifndef CPU_R8000
 	/*
 	 * Return a CKSEG0 address whenever possible.
 	 */
 	if (pa < CKSEG_SIZE)
 		p2->p_addr = (void *)PHYS_TO_CKSEG0(pa);
 	else
+#endif
 		p2->p_addr = (void *)PHYS_TO_XKPHYS(pa, CCA_CACHED);
 #else
 	p2->p_addr = (void *)PHYS_TO_XKPHYS(pa, CCA_CACHED);
@@ -192,7 +194,7 @@ cpu_coredump(p, vp, cred, chdr)
 
 	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&cseg, chdr->c_seghdrsize,
 	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
+	    IO_UNIT, cred, NULL, p);
 	if (error)
 		return error;
 
@@ -200,8 +202,7 @@ cpu_coredump(p, vp, cred, chdr)
 			(caddr_t)(&(p -> p_addr -> u_pcb.pcb_regs)),
 			(off_t)chdr -> c_cpusize,
 			(off_t)(chdr->c_hdrsize + chdr->c_seghdrsize),
-			UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT,
-			cred, NULL, p);
+			UIO_SYSSPACE, IO_UNIT, cred, NULL, p);
 
 	if (!error)
 		chdr->c_nseg++;

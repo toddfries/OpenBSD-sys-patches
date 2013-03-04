@@ -1,4 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.3 2011/03/23 16:54:34 pirofti Exp $	*/
+/*	$OpenBSD: _types.h,v 1.5 2012/11/05 19:39:34 miod Exp $	*/
 
 /* public domain */
 

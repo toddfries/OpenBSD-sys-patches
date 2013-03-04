@@ -1,4 +1,4 @@
-/*	$OpenBSD: com.c,v 1.152 2012/08/25 18:02:17 kettenis Exp $	*/
+/*	$OpenBSD: com.c,v 1.154 2013/02/14 22:22:48 kettenis Exp $	*/
 /*	$NetBSD: com.c,v 1.82.4.1 1996/06/02 09:08:00 mrg Exp $	*/
 
 /*
@@ -233,7 +233,6 @@ com_activate(struct device *self, int act)
 	struct com_softc *sc = (struct com_softc *)self;
 	int s, rv = 0;
 
-	s = spltty();
 	switch (act) {
 	case DVACT_DEACTIVATE:
 #ifdef KGDB
@@ -245,13 +244,14 @@ com_activate(struct device *self, int act)
 			break;
 		}
 
+		s = spltty();
 		if (sc->disable != NULL && sc->enabled != 0) {
 			(*sc->disable)(sc);
 			sc->enabled = 0;
 		}
+		splx(s);
 		break;
 	}
-	splx(s);
 	return (rv);
 }
 
@@ -1424,11 +1424,7 @@ comcnprobe(struct consdev *cp)
 
 	/* Initialize required fields. */
 	cp->cn_dev = makedev(commajor, comconsunit);
-#if defined(COMCONSOLE) || !defined(__amd64__)
 	cp->cn_pri = CN_HIGHPRI;
-#else
-	cp->cn_pri = CN_LOWPRI;
-#endif
 }
 
 void

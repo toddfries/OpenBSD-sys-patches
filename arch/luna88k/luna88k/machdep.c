@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.81 2012/02/28 13:40:53 aoyama Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.86 2013/02/17 18:07:36 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -65,6 +65,7 @@
 #include <sys/buf.h>
 #include <sys/reboot.h>
 #include <sys/conf.h>
+#include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
@@ -218,7 +219,6 @@ extern char *esym;
 
 int machtype = LUNA_88K;	/* may be overwritten in cpu_startup() */
 int cputyp = CPU_88100;
-int boothowto;			/* XXX: should be set in boot loader and locore.S */
 int bootdev;			/* XXX: should be set in boot loader and locore.S */
 int cpuspeed = 33;		/* safe guess */
 int sysconsole = 1;		/* 0 = ttya, 1 = keyboard/mouse, used in dev/sio.c */
@@ -233,9 +233,6 @@ extern void ws_cnattach(void);	/* in dev/lunaws.c */
 
 vaddr_t first_addr;
 vaddr_t last_addr;
-
-vaddr_t avail_start, avail_end;
-vaddr_t virtual_avail, virtual_end;
 
 extern struct user *proc0paddr;
 
@@ -507,8 +504,8 @@ boot(howto)
 		dumpsys();
 
 haltsys:
-	/* Run any shutdown hooks. */
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	/* Luna88k supports automatic powerdown */
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
@@ -989,8 +986,10 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 void
 luna88k_bootstrap()
 {
-	extern struct cmmu_p cmmu8820x;
+	extern const struct cmmu_p cmmu8820x;
 	extern char *end;
+	vaddr_t avail_start;
+	extern vaddr_t avail_end;
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;
 #endif
@@ -1120,32 +1119,6 @@ romttycnputc(dev, c)
 	s = splhigh();
 	ROMPUTC(c);
 	splx(s);
-}
-
-/* taken from NetBSD/luna68k */
-void
-microtime(tvp)
-        register struct timeval *tvp;
-{
-        int s = splclock();
-        static struct timeval lasttime;
-
-        *tvp = time;
-#ifdef notdef
-        tvp->tv_usec += clkread();
-        while (tvp->tv_usec >= 1000000) {
-                tvp->tv_sec++;
-                tvp->tv_usec -= 1000000;
-        }
-#endif
-        if (tvp->tv_sec == lasttime.tv_sec &&
-            tvp->tv_usec <= lasttime.tv_usec &&
-            (tvp->tv_usec = lasttime.tv_usec + 1) >= 1000000) {
-                tvp->tv_sec++;
-                tvp->tv_usec -= 1000000;
-        }
-        lasttime = *tvp;
-        splx(s);
 }
 
 /* powerdown */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.195 2012/04/11 17:42:53 mikeb Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.198 2012/10/08 18:48:25 camield Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -445,7 +445,7 @@ carp_setroute(struct carp_softc *sc, int cmd)
 			bcopy(ifa->ifa_addr, &sa, sizeof(sa));
 			satosin(&sa)->sin_addr.s_addr = satosin(ifa->ifa_netmask
 			    )->sin_addr.s_addr & satosin(&sa)->sin_addr.s_addr;
-			rt = (struct rtentry *)rt_lookup(&sa,
+			rt = rt_lookup(&sa,
 			    ifa->ifa_netmask, sc->sc_if.if_rdomain);
 			nr_ourif = (rt && rt->rt_ifp == &sc->sc_if);
 
@@ -1508,16 +1508,10 @@ carp_iamatch6(struct ifnet *ifp, u_char *src, struct sockaddr_dl **sdl)
 #endif /* INET6 */
 
 struct ifnet *
-carp_ourether(void *v, struct ether_header *eh, int src)
+carp_ourether(void *v, u_int8_t *ena)
 {
 	struct carp_if *cif = (struct carp_if *)v;
 	struct carp_softc *vh;
-	u_int8_t *ena;
-
-	if (src)
-		ena = (u_int8_t *)&eh->ether_shost;
-	else
-		ena = (u_int8_t *)&eh->ether_dhost;
 
 	TAILQ_FOREACH(vh, &cif->vhif_vrs, sc_list) {
 		struct carp_vhost_entry *vhe;
@@ -1579,7 +1573,7 @@ carp_input(struct mbuf *m, u_int8_t *shost, u_int8_t *dhost, u_int16_t etype)
 	bcopy(dhost, &eh.ether_dhost, sizeof(eh.ether_dhost));
 	eh.ether_type = etype;
 
-	if ((ifp = carp_ourether(cif, &eh, 0)))
+	if ((ifp = carp_ourether(cif, dhost)))
 		;
 	else if (m->m_flags & (M_BCAST|M_MCAST)) {
 		struct carp_softc *vh;
@@ -1864,6 +1858,8 @@ carp_set_ifp(struct carp_softc *sc, struct ifnet *ifp)
 		if (ncif != NULL)
 			ifp->if_carp = (caddr_t)ncif;
 		sc->sc_carpdev = ifp;
+		sc->sc_if.if_capabilities = ifp->if_capabilities &
+		    IFCAP_CSUM_MASK;
 		cif = (struct carp_if *)ifp->if_carp;
 		TAILQ_FOREACH(vr, &cif->vhif_vrs, sc_list) {
 			if (vr == sc)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upl.c,v 1.48 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: if_upl.c,v 1.50 2013/02/07 13:35:18 mpi Exp $ */
 /*	$NetBSD: if_upl.c,v 1.19 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -196,7 +196,6 @@ void upl_watchdog(struct ifnet *);
 
 int upl_output(struct ifnet *, struct mbuf *, struct sockaddr *,
 		      struct rtentry *);
-void upl_input(struct ifnet *, struct mbuf *);
 
 /*
  * Probe for a Prolific chip.
@@ -292,7 +291,7 @@ upl_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_addrlen = 0;
 	ifp->if_hdrlen = 0;
 	ifp->if_output = upl_output;
-	ifp->if_baudrate = 12000000;
+	ifp->if_baudrate = IF_Mbps(12);
 	IFQ_SET_READY(&ifp->if_snd);
 
 	/* Attach the interface. */
@@ -990,32 +989,4 @@ upl_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	splx(s);
 
 	return (0);
-}
-
-void
-upl_input(struct ifnet *ifp, struct mbuf *m)
-{
-	struct ifqueue *inq;
-	int s;
-
-	/* XXX Assume all traffic is IP */
-
-	schednetisr(NETISR_IP);
-	inq = &ipintrq;
-
-	s = splnet();
-	if (IF_QFULL(inq)) {
-		IF_DROP(inq);
-		splx(s);
-#if 0
-		if (sc->sc_flags & SC_DEBUG)
-			printf("%s: input queue full\n", ifp->if_xname);
-#endif
-		ifp->if_iqdrops++;
-		return;
-	}
-	IF_ENQUEUE(inq, m);
-	splx(s);
-	ifp->if_ipackets++;
-	ifp->if_ibytes += m->m_len;
 }

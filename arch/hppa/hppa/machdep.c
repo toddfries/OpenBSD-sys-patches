@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.206 2012/06/21 00:56:59 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.210 2012/12/02 07:03:31 guenther Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -920,6 +920,7 @@ boot(int howto)
 			dumpsys();
 
 		doshutdownhooks();
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 		hppa_ipi_broadcast(HPPA_IPI_HALT);
@@ -1161,18 +1162,34 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 	struct trapframe *tf = p->p_md.md_regs;
 	struct pcb *pcb = &p->p_addr->u_pcb;
 
+	bzero(tf, sizeof(*tf));
 	tf->tf_flags = TFF_SYS|TFF_LAST;
-	tf->tf_iioq_tail = 4 +
-	    (tf->tf_iioq_head = pack->ep_entry | HPPA_PC_PRIV_USER);
-	tf->tf_rp = 0;
+	tf->tf_iioq_head = pack->ep_entry | HPPA_PC_PRIV_USER;
+	tf->tf_iioq_tail = tf->tf_iioq_head + 4;
+	tf->tf_iisq_head = tf->tf_iisq_tail = pcb->pcb_space;
 	tf->tf_arg0 = (u_long)PS_STRINGS;
-	tf->tf_arg1 = tf->tf_arg2 = 0; /* XXX dynload stuff */
 
 	/* setup terminal stack frame */
-	setstack(tf, (stack + 0x1f) & ~0x1f, 0);
+	setstack(tf, (stack + 0x3f) & ~0x3f, 0);
 
-	/* reset any of the pending FPU exceptions */
+	tf->tf_cr30 = (paddr_t)pcb->pcb_fpstate;
+
+	tf->tf_sr0 = tf->tf_sr1 = tf->tf_sr2 = tf->tf_sr3 =
+	tf->tf_sr4 = tf->tf_sr5 = tf->tf_sr6 = pcb->pcb_space;
+	tf->tf_pidr1 = tf->tf_pidr2 = pmap_sid2pid(tf->tf_sr0);
+
+	/*
+	 * theoretically these could be inherited,
+	 * but just in case.
+	 */
+	tf->tf_sr7 = HPPA_SID_KERNEL;
+	mfctl(CR_EIEM, tf->tf_eiem);
+	tf->tf_ipsw = PSL_C | PSL_Q | PSL_P | PSL_D | PSL_I /* | PSL_L */ |
+	    (curcpu()->ci_psw & PSL_O);
+
+	/* clear the FPU */
 	fpu_proc_flush(p);
+	bzero(&pcb->pcb_fpstate->hfp_regs, sizeof(pcb->pcb_fpstate->hfp_regs));
 	pcb->pcb_fpstate->hfp_regs.fpr_regs[0] =
 	    ((u_int64_t)HPPA_FPU_INIT) << 32;
 	pcb->pcb_fpstate->hfp_regs.fpr_regs[1] = 0;
@@ -1209,16 +1226,13 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	/* Save the FPU context first. */
 	fpu_proc_save(p);
 
-	ksc.sc_onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
-
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !ksc.sc_onstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(tf->tf_sp) && (psp->ps_sigonstack & sigmask(sig)))
 		scp = (register_t)p->p_sigstk.ss_sp;
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		scp = (tf->tf_sp + 63) & ~63;
 
 	sss = (sizeof(ksc) + 63) & ~63;
@@ -1234,6 +1248,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 		    tf->tf_iioq_head, tf->tf_iioq_tail, tf->tf_ipsw, PSL_BITS);
 #endif
 
+	bzero(&ksc, sizeof(ksc));
 	ksc.sc_mask = mask;
 	ksc.sc_fp = scp + sss;
 	ksc.sc_ps = tf->tf_ipsw;
@@ -1336,10 +1351,6 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	if ((ksc.sc_ps & (PSL_MBS|PSL_MBZ)) != PSL_MBS)
 		return (EINVAL);
 
-	if (ksc.sc_onstack)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = ksc.sc_mask &~ sigcantmask;
 
 	tf->tf_t1 = ksc.sc_regs[0];		/* r22 */

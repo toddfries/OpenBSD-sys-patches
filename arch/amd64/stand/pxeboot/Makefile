@@ -1,19 +1,17 @@
-#	$OpenBSD: Makefile,v 1.10 2012/08/29 17:45:00 pascal Exp $
-
-.include "${.CURDIR}/../Makefile.inc"
+#	$OpenBSD: Makefile,v 1.16 2013/01/18 21:09:04 espie Exp $
 
 MAN=	pxeboot.8
 
 .if ${MACHINE} == "amd64"
-S	=${.CURDIR}/../../../..
+S=	${.CURDIR}/../../../..
 SADIR=	${.CURDIR}/..
 
 PROG=	pxeboot
 SRCS=	srt0.S conf.c devopen.c net.c open.c
 LD?=	ld
 SIZE?=	size
-LDFLAGS+=-melf_i386 -nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -noinhibit-exec
-LDFLAGS+=-nopie -L/usr/libdata 
+LDFLAGS+=-nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -nopie
+LDFLAGS+=-melf_i386 -L/usr/libdata 
 INSTALL_STRIP=
 
 .PATH:	${SADIR}/libsa
@@ -22,6 +20,7 @@ SRCS+=	machdep.c exec_i386.c cmd_i386.c
 SRCS+=	gidt.S alloca.S biosdev.c bioscons.c gateA20.c \
 	memprobe.c diskprobe.c time.c ## biosprobe.c
 SRCS+=	pxe.c pxe_call.S pxe_net.c
+SRCS+=	softraid.c
 
 .PATH:	${S}/stand/boot
 SRCS+=	boot.c cmd.c vars.c bootarg.c
@@ -30,6 +29,7 @@ SRCS+=	boot.c cmd.c vars.c bootarg.c
 SRCS+=	alloc.c exit.c getfile.c gets.c globals.c strcmp.c strlen.c \
 	strncmp.c memcmp.c memcpy.c memset.c printf.c snprintf.c \
 	strerror.c strncpy.c strtol.c strtoll.c ctime.c strlcpy.c strlcat.c
+SRCS+=	aes_xts.c explicit_bzero.c hmac_sha1.c pbkdf2.c rijndael.c sha1.c
 
 SRCS+=	close.c closeall.c dev.c disklabel.c dkcksum.c fstat.c ioctl.c lseek.c \
 	read.c stat.c write.c cread.c readdir.c cons.c loadfile.c \
@@ -43,6 +43,8 @@ SRCS+=	divdi3.c moddi3.c qdivrem.c
 
 .PATH:	${S}/lib/libz
 SRCS+=	adler32.c crc32.c inflate.c inftrees.c
+
+.depend srt0.o gidt.o pxe_call.o: assym.h
 
 ${PROG}: $(OBJS)
 	$(LD) $(LDFLAGS) -o ${PROG} $(OBJS)
@@ -59,10 +61,12 @@ NOPROG=
 
 .include <bsd.prog.mk>
 
+CPPFLAGS+=-DSOFTRAID
 CPPFLAGS+=-DBOOTMAGIC=$(BOOTMAGIC) ${DEBUGFLAGS} -DLINKADDR=${LINKADDR}
 CPPFLAGS+=-DSLOW -DSMALL -DNOBYFOUR -DNO_GZIP -DDYNAMIC_CRC_TABLE
 CPPFLAGS+=-DHEAP_LIMIT=${HEAP_LIMIT} -I${S}/stand/boot #-DCOMPAT_UFS
-CFLAGS+=-m32 $(SACFLAGS) -D__INTERNAL_LIBSA_CREAD -fno-pie
+CFLAGS+=-m32
+CFLAGS+=$(SACFLAGS) -D__INTERNAL_LIBSA_CREAD -fno-pie
+# AFLAGS+=-Wa,-a
 AFLAGS+=-m32 # -Wa,-R
 AFLAGS+=-fno-pie
-# AFLAGS+=-Wa,-a
