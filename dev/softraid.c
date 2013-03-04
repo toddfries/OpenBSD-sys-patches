@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.278 2012/10/09 11:57:33 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.288 2013/01/18 23:19:44 jsing Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -139,6 +139,7 @@ int			sr_chunk_in_use(struct sr_softc *, dev_t);
 void			sr_startwu_callback(void *, void *);
 int			sr_rw(struct sr_softc *, dev_t, char *, size_t,
 			    daddr64_t, long);
+void			sr_wu_done_callback(void *, void *);
 
 /* don't include these on RAMDISK */
 #ifndef SMALL_KERNEL
@@ -2004,6 +2005,89 @@ sr_ccb_put(struct sr_ccb *ccb)
 	splx(s);
 }
 
+struct sr_ccb *
+sr_ccb_rw(struct sr_discipline *sd, int chunk, daddr64_t blkno,
+    daddr64_t len, u_int8_t *data, int xsflags, int ccbflag)
+{
+	struct sr_chunk		*sc = sd->sd_vol.sv_chunks[chunk];
+	struct sr_ccb		*ccb = NULL;
+
+	ccb = sr_ccb_get(sd);
+	if (ccb == NULL)
+		goto out;
+
+	ccb->ccb_flag = ccbflag;
+	ccb->ccb_target = chunk;
+
+	ccb->ccb_buf.b_flags = B_PHYS | B_CALL;
+	if (ISSET(xsflags, SCSI_DATA_IN))
+		ccb->ccb_buf.b_flags |= B_READ;
+	else
+		ccb->ccb_buf.b_flags |= B_WRITE;
+
+	ccb->ccb_buf.b_blkno = blkno;
+	ccb->ccb_buf.b_bcount = len;
+	ccb->ccb_buf.b_bufsize = len;
+	ccb->ccb_buf.b_resid = len;
+	ccb->ccb_buf.b_data = data;
+	ccb->ccb_buf.b_error = 0;
+	ccb->ccb_buf.b_iodone = sd->sd_scsi_intr;
+	ccb->ccb_buf.b_proc = curproc;
+	ccb->ccb_buf.b_dev = sc->src_dev_mm;
+	ccb->ccb_buf.b_vp = sc->src_vn;
+	ccb->ccb_buf.b_bq = NULL;
+
+	if (!ISSET(ccb->ccb_buf.b_flags, B_READ))
+		ccb->ccb_buf.b_vp->v_numoutput++;
+
+	LIST_INIT(&ccb->ccb_buf.b_dep);
+
+	DNPRINTF(SR_D_DIS, "%s: %s %s ccb "
+	    "b_bcount %d b_blkno %lld b_flags 0x%0x b_data %p\n",
+	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, sd->sd_name,
+	    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
+	    ccb->ccb_buf.b_flags, ccb->ccb_buf.b_data);
+
+out:
+	return ccb;
+}
+
+void
+sr_ccb_done(struct sr_ccb *ccb)
+{
+	struct sr_workunit	*wu = ccb->ccb_wu;
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct sr_softc		*sc = sd->sd_sc;
+
+	DNPRINTF(SR_D_INTR, "%s: %s %s ccb done b_bcount %d b_resid %d"
+	    " b_flags 0x%0x block %lld target %d\n",
+	    DEVNAME(sc), sd->sd_meta->ssd_devname, sd->sd_name,
+	    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_resid, ccb->ccb_buf.b_flags,
+	    ccb->ccb_buf.b_blkno, ccb->ccb_target);
+
+	splassert(IPL_BIO);
+
+	if (ccb->ccb_target == -1)
+		panic("%s: invalid target on wu: %p", DEVNAME(sc), wu);
+
+	if (ccb->ccb_buf.b_flags & B_ERROR) {
+		DNPRINTF(SR_D_INTR, "%s: i/o error on block %lld target %d\n",
+		    DEVNAME(sc), ccb->ccb_buf.b_blkno, ccb->ccb_target);
+		if (!ISSET(sd->sd_capabilities, SR_CAP_REDUNDANT))
+			printf("%s: i/o error on block %lld target %d "
+			    "b_error %d\n", DEVNAME(sc), ccb->ccb_buf.b_blkno,
+			    ccb->ccb_target, ccb->ccb_buf.b_error);
+		ccb->ccb_state = SR_CCB_FAILED;
+		sd->sd_set_chunk_state(sd, ccb->ccb_target, BIOC_SDOFFLINE);
+		wu->swu_ios_failed++;
+	} else {
+		ccb->ccb_state = SR_CCB_OK;
+		wu->swu_ios_succeeded++;
+	}
+
+	wu->swu_ios_complete++;
+}
+
 int
 sr_wu_alloc(struct sr_discipline *sd)
 {
@@ -2029,7 +2113,7 @@ sr_wu_alloc(struct sr_discipline *sd)
 	TAILQ_INIT(&sd->sd_wu_defq);
 	for (i = 0; i < no_wu; i++) {
 		wu = &sd->sd_wu[i];
-		wu->swu_dis = sd;
+		TAILQ_INIT(&wu->swu_ccb);
 		sr_wu_put(sd, wu);
 	}
 
@@ -2057,36 +2141,6 @@ sr_wu_free(struct sr_discipline *sd)
 		free(sd->sd_wu, M_DEVBUF);
 }
 
-void
-sr_wu_put(void *xsd, void *xwu)
-{
-	struct sr_discipline	*sd = (struct sr_discipline *)xsd;
-	struct sr_workunit	*wu = (struct sr_workunit *)xwu;
-	struct sr_ccb		*ccb;
-
-	int			s;
-
-	DNPRINTF(SR_D_WU, "%s: sr_wu_put: %p\n", DEVNAME(sd->sd_sc), wu);
-
-	s = splbio();
-	if (wu->swu_cb_active == 1)
-		panic("%s: sr_wu_put got active wu", DEVNAME(sd->sd_sc));
-	while ((ccb = TAILQ_FIRST(&wu->swu_ccb)) != NULL) {
-		TAILQ_REMOVE(&wu->swu_ccb, ccb, ccb_link);
-		sr_ccb_put(ccb);
-	}
-	splx(s);
-
-	bzero(wu, sizeof(*wu));
-	TAILQ_INIT(&wu->swu_ccb);
-	wu->swu_dis = sd;
-
-	mtx_enter(&sd->sd_wu_mtx);
-	TAILQ_INSERT_TAIL(&sd->sd_wu_freeq, wu, swu_link);
-	sd->sd_wu_pending--;
-	mtx_leave(&sd->sd_wu_mtx);
-}
-
 void *
 sr_wu_get(void *xsd)
 {
@@ -2107,9 +2161,142 @@ sr_wu_get(void *xsd)
 }
 
 void
+sr_wu_put(void *xsd, void *xwu)
+{
+	struct sr_discipline	*sd = (struct sr_discipline *)xsd;
+	struct sr_workunit	*wu = (struct sr_workunit *)xwu;
+
+	DNPRINTF(SR_D_WU, "%s: sr_wu_put: %p\n", DEVNAME(sd->sd_sc), wu);
+
+	sr_wu_release_ccbs(wu);
+	sr_wu_init(sd, wu);
+
+	mtx_enter(&sd->sd_wu_mtx);
+	TAILQ_INSERT_TAIL(&sd->sd_wu_freeq, wu, swu_link);
+	sd->sd_wu_pending--;
+	mtx_leave(&sd->sd_wu_mtx);
+}
+
+void
+sr_wu_init(struct sr_discipline *sd, struct sr_workunit *wu)
+{
+	int			s;
+
+	s = splbio();
+	if (wu->swu_cb_active == 1)
+		panic("%s: sr_wu_init got active wu", DEVNAME(sd->sd_sc));
+	splx(s);
+
+	bzero(wu, sizeof(*wu));
+	TAILQ_INIT(&wu->swu_ccb);
+	wu->swu_dis = sd;
+}
+
+void
+sr_wu_enqueue_ccb(struct sr_workunit *wu, struct sr_ccb *ccb)
+{
+	struct sr_discipline	*sd = wu->swu_dis;
+	int			s;
+
+	s = splbio();
+	if (wu->swu_cb_active == 1)
+		panic("%s: sr_wu_enqueue_ccb got active wu",
+		    DEVNAME(sd->sd_sc));
+	ccb->ccb_wu = wu;
+	wu->swu_io_count++;
+	TAILQ_INSERT_TAIL(&wu->swu_ccb, ccb, ccb_link);
+	splx(s);
+}
+
+void
+sr_wu_release_ccbs(struct sr_workunit *wu)
+{
+	struct sr_ccb		*ccb;
+
+	/* Return all ccbs that are associated with this workunit. */
+	while ((ccb = TAILQ_FIRST(&wu->swu_ccb)) != NULL) {
+		TAILQ_REMOVE(&wu->swu_ccb, ccb, ccb_link);
+		sr_ccb_put(ccb);
+	}
+
+	wu->swu_io_count = 0;
+	wu->swu_ios_complete = 0;
+	wu->swu_ios_failed = 0;
+	wu->swu_ios_succeeded = 0;
+}
+
+void
+sr_wu_done(struct sr_workunit *wu)
+{
+	struct sr_discipline	*sd = wu->swu_dis;
+
+	DNPRINTF(SR_D_INTR, "%s: sr_wu_done count %d completed %d failed %d\n",
+	    DEVNAME(sd->sd_sc), wu->swu_io_count, wu->swu_ios_complete,
+	    wu->swu_ios_failed);
+
+	if (wu->swu_ios_complete < wu->swu_io_count)
+		return;
+
+	workq_queue_task(sd->sd_workq, &wu->swu_wqt, 0,
+	    sr_wu_done_callback, sd, wu);
+}
+
+void
+sr_wu_done_callback(void *arg1, void *arg2)
+{
+	struct sr_discipline	*sd = (struct sr_discipline *)arg1;
+	struct sr_workunit	*wu = (struct sr_workunit *)arg2;
+	struct scsi_xfer	*xs = wu->swu_xs;
+	struct sr_workunit	*wup;
+	int			s;
+
+	s = splbio();
+
+	TAILQ_FOREACH(wup, &sd->sd_wu_pendq, swu_link)
+		if (wup == wu)
+			break;
+
+	if (wup == NULL)
+		panic("%s: wu %p not on pending queue",
+		    DEVNAME(sd->sd_sc), wu);
+
+	TAILQ_REMOVE(&sd->sd_wu_pendq, wu, swu_link);
+
+	if (wu->swu_collider) {
+		wu->swu_collider->swu_state = SR_WU_INPROGRESS;
+		TAILQ_REMOVE(&sd->sd_wu_defq, wu->swu_collider, swu_link);
+		sr_raid_startwu(wu->swu_collider);
+	}
+
+	if (wu->swu_ios_failed)
+		xs->error = XS_DRIVER_STUFFUP;
+	else
+		xs->error = XS_NOERROR;
+
+	/*
+	 * If a discipline provides its own sd_scsi_done function, then it
+	 * is responsible for calling sr_scsi_done() once I/O is complete.
+	 */
+	if (sd->sd_scsi_done) {
+		sd->sd_scsi_done(wu);
+	} else {
+		sr_scsi_done(sd, xs);
+
+		/* XXX - move to sr_scsi_done? */
+		if (sd->sd_sync && sd->sd_wu_pending == 0)
+			wakeup(sd);
+	}
+
+	splx(s);
+}
+
+void
 sr_scsi_done(struct sr_discipline *sd, struct scsi_xfer *xs)
 {
 	DNPRINTF(SR_D_DIS, "%s: sr_scsi_done: xs %p\n", DEVNAME(sd->sd_sc), xs);
+
+	if (xs->error == XS_NOERROR)
+		xs->resid = 0;
 
 	scsi_done(xs);
 }
@@ -2117,12 +2304,10 @@ sr_scsi_done(struct sr_discipline *sd, struct scsi_xfer *xs)
 void
 sr_scsi_cmd(struct scsi_xfer *xs)
 {
-	int			s;
 	struct scsi_link	*link = xs->sc_link;
 	struct sr_softc		*sc = link->adapter_softc;
-	struct sr_workunit	*wu = NULL;
+	struct sr_workunit	*wu = xs->io;
 	struct sr_discipline	*sd;
-	struct sr_ccb		*ccb;
 
 	DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd: target %d xs: %p "
 	    "flags: %#x\n", DEVNAME(sc), link->target, xs, xs->flags);
@@ -2139,21 +2324,10 @@ sr_scsi_cmd(struct scsi_xfer *xs)
 		goto stuffup;
 	}
 
-	wu = xs->io;
 	/* scsi layer *can* re-send wu without calling sr_wu_put(). */
-	s = splbio();
-	if (wu->swu_cb_active == 1)
-		panic("%s: sr_scsi_cmd got active wu", DEVNAME(sd->sd_sc));
-	while ((ccb = TAILQ_FIRST(&wu->swu_ccb)) != NULL) {
-		TAILQ_REMOVE(&wu->swu_ccb, ccb, ccb_link);
-		sr_ccb_put(ccb);
-	}
-	splx(s);
-
-	bzero(wu, sizeof(*wu));
-	TAILQ_INIT(&wu->swu_ccb);
+	sr_wu_release_ccbs(wu);
+	sr_wu_init(sd, wu);
 	wu->swu_state = SR_WU_INPROGRESS;
-	wu->swu_dis = sd;
 	wu->swu_xs = xs;
 
 	switch (xs->cmd->opcode) {
@@ -3717,6 +3891,8 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 	sd->sd_scsi_start_stop = sr_raid_start_stop;
 	sd->sd_scsi_sync = sr_raid_sync;
 	sd->sd_scsi_rw = NULL;
+	sd->sd_scsi_intr = NULL;
+	sd->sd_scsi_done = NULL;
 	sd->sd_set_chunk_state = sr_set_chunk_state;
 	sd->sd_set_vol_state = sr_set_vol_state;
 	sd->sd_start_discipline = NULL;

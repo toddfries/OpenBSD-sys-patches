@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.128 2012/09/20 10:25:03 blambert Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.131 2013/02/05 19:09:52 bluhm Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -172,9 +172,8 @@ in_baddynamic(u_int16_t port, u_int16_t proto)
 }
 
 int
-in_pcballoc(struct socket *so, void *v)
+in_pcballoc(struct socket *so, struct inpcbtable *table)
 {
-	struct inpcbtable *table = v;
 	struct inpcb *inp;
 	int s;
 
@@ -218,9 +217,8 @@ in_pcballoc(struct socket *so, void *v)
 }
 
 int
-in_pcbbind(void *v, struct mbuf *nam, struct proc *p)
+in_pcbbind(struct inpcb *inp, struct mbuf *nam, struct proc *p)
 {
-	struct inpcb *inp = v;
 	struct socket *so = inp->inp_socket;
 	struct inpcbtable *table = inp->inp_table;
 	u_int16_t *lastport = &inp->inp_table->inpt_lastport;
@@ -372,9 +370,8 @@ in_pcbbind(void *v, struct mbuf *nam, struct proc *p)
  * then pick one.
  */
 int
-in_pcbconnect(void *v, struct mbuf *nam)
+in_pcbconnect(struct inpcb *inp, struct mbuf *nam)
 {
-	struct inpcb *inp = v;
 	struct sockaddr_in *ifaddr = NULL;
 	struct sockaddr_in *sin = mtod(nam, struct sockaddr_in *);
 
@@ -444,10 +441,8 @@ in_pcbconnect(void *v, struct mbuf *nam)
 }
 
 void
-in_pcbdisconnect(void *v)
+in_pcbdisconnect(struct inpcb *inp)
 {
-	struct inpcb *inp = v;
-
 	switch (sotopf(inp->inp_socket)) {
 #ifdef INET6
 	case PF_INET6:
@@ -466,9 +461,8 @@ in_pcbdisconnect(void *v)
 }
 
 void
-in_pcbdetach(void *v)
+in_pcbdetach(struct inpcb *inp)
 {
-	struct inpcb *inp = v;
 	struct socket *so = inp->inp_socket;
 	int s;
 
@@ -771,8 +765,7 @@ in_pcbrtentry(struct inpcb *inp)
 				break;
 			ro->ro_dst.sa_family = AF_INET6;
 			ro->ro_dst.sa_len = sizeof(struct sockaddr_in6);
-			((struct sockaddr_in6 *) &ro->ro_dst)->sin6_addr =
-			    inp->inp_faddr6;
+			satosin6(&ro->ro_dst)->sin6_addr = inp->inp_faddr6;
 			ro->ro_tableid = inp->inp_rtableid;
 			rtalloc_mpath(ro, &inp->inp_laddr6.s6_addr32[0]);
 			break;
@@ -781,9 +774,9 @@ in_pcbrtentry(struct inpcb *inp)
 			if (inp->inp_faddr.s_addr == INADDR_ANY)
 				break;
 			ro->ro_dst.sa_family = AF_INET;
-			ro->ro_dst.sa_len = sizeof(ro->ro_dst);
-			ro->ro_tableid = inp->inp_rtableid;
+			ro->ro_dst.sa_len = sizeof(struct sockaddr_in);
 			satosin(&ro->ro_dst)->sin_addr = inp->inp_faddr;
+			ro->ro_tableid = inp->inp_rtableid;
 			rtalloc_mpath(ro, &inp->inp_laddr.s_addr);
 			break;
 		}
