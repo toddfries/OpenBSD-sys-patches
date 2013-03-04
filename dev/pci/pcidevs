@@ -1,4 +1,4 @@
-$OpenBSD: pcidevs,v 1.1664 2013/01/02 05:45:41 jsg Exp $
+$OpenBSD: pcidevs,v 1.1669 2013/02/08 07:58:18 jasper Exp $
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
 /*
@@ -46,6 +46,7 @@ $OpenBSD: pcidevs,v 1.1664 2013/01/02 05:45:41 jsg Exp $
  * List of known PCI vendors
  */
 
+vendor	DLINK2		0x00ec	D-Link
 vendor	MARTINMARIETTA	0x003d	Martin-Marietta
 vendor	HAUPPAUGE	0x0070	Hauppauge
 vendor	TTTECH		0x0357	TTTech
@@ -1499,6 +1500,7 @@ product ATI RADEON_HD6310_2	0x9803  Radeon HD 6310
 product ATI RADEON_HD6250_1	0x9804	Radeon HD 6250
 product ATI RADEON_HD6250_2	0x9805  Radeon HD 6250
 product ATI RADEON_HD6320	0x9806  Radeon HD 6320
+product ATI RADEON_HD7290	0x980a	Radeon HD 7290
 product ATI RADEON_HD2600_HDA	0xaa08	Radeon HD 2600 HD Audio
 product ATI RS690M_HDA		0xaa10	RS690M HD Audio
 product ATI RADEON_HD3870_HDA	0xaa18	Radeon HD 3870 HD Audio
@@ -2058,13 +2060,14 @@ product DELTA 8139		0x1360	8139
 product DIAMOND VIPER		0x9001	Viper/PCI
 
 /* D-Link products */
-product DLINK 550TX		0x1002	550TX
-product DLINK 530TXPLUS		0x1300	530TX+
+product DLINK DFE550TX		0x1002	DFE-550TX
+product DLINK DFE530TXPLUS	0x1300	DFE-530TX+
 product DLINK DFE690TXD		0x1340	DFE-690TXD
 product DLINK DRP32TXD		0x1561	DRP32TXD
 product DLINK DWL610		0x3300	DWL-610
 product DLINK DGE550T		0x4000	DGE-550T
 product DLINK DGE550SX		0x4001	DGE-550SX
+product DLINK DFE520TX_C1	0x4200	DFE-520TX C1
 product DLINK DGE528T		0x4300	DGE-528T
 product DLINK DGE530T_C1	0x4302	DGE-530T C1
 product DLINK DGE560T		0x4b00	DGE-560T
@@ -2072,6 +2075,7 @@ product DLINK DGE530T_B1	0x4b01	DGE-530T B1
 product DLINK DGE560SX		0x4b02	DGE-560SX
 product DLINK DGE550T_B1	0x4b03	DGE-550T B1
 product DLINK DGE530T_A1	0x4c00	DGE-530T A1
+product	DLINK2 DFE530TXPLUS2	0x8139	DFE-530TX+
 
 /* Distributed Processing Technology products */
 product DPT MEMCTLR		0x1012	Memory Control
@@ -6040,8 +6044,11 @@ product VMWARE VIRTUAL		0x0710	Virtual SVGA
 product VMWARE NET		0x0720	Virtual NIC
 product VMWARE MACHINE_2	0x0740	Virtual Machine Communication Interface
 product VMWARE EHCI		0x0770	Virtual EHCI
+product VMWARE UHCI		0x0774	Virtual UHCI
 product VMWARE PCI		0x0790	Virtual PCI-PCI
 product VMWARE PCIE		0x07a0	Virtual PCIE-PCIE
+product VMWARE NET_3		0x07b0	Virtual VMXNET3
+product VMWARE PVSCSI		0x07c0	Virtual PVSCSI
 product VMWARE MACHINE		0x0801	Virtual Machine Interface
 
 /* Weitek products */

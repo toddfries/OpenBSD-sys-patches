@@ -1,4 +1,4 @@
-/*	$OpenBSD: gmon.h,v 1.4 2003/06/02 23:28:21 millert Exp $	*/
+/*	$OpenBSD: gmon.h,v 1.6 2013/02/12 08:06:22 mpi Exp $	*/
 /*	$NetBSD: gmon.h,v 1.5 1996/04/09 20:55:30 cgd Exp $	*/
 
 /*-

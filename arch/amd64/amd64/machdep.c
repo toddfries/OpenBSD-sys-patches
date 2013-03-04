@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.159 2012/12/02 07:03:31 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.161 2013/03/02 07:02:07 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -1532,9 +1532,6 @@ init_x86_64(paddr_t first_avail)
 		idt_allocmap[x] = 1;
 	}
 
-	/* 128 was the old interrupt gate for syscalls; remove in 2013 */
-	idt_allocmap[128] = 1;
-
 	setregion(&region, gdtstore, GDT_SIZE - 1);
 	lgdt(&region);
 
@@ -1827,6 +1824,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 					comconsunit = unit;
 					comconsaddr = consaddr;
 					comconsrate = cdp->conspeed;
+					comconsiot = X86_BUS_SPACE_IO;
 
 					/* Probe the serial port this time. */
 					cninit();
