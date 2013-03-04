@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.97 2012/12/05 23:20:24 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.101 2013/01/31 23:30:40 miod Exp $	*/
 /*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
 
 /*-
@@ -41,8 +41,8 @@
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	201211		/* OpenBSD version (year & month). */
-#define OpenBSD5_2 1		/* OpenBSD 5.2 */
+#define OpenBSD	201305		/* OpenBSD version (year & month). */
+#define OpenBSD5_3 1		/* OpenBSD 5.3 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -116,14 +116,7 @@
 
 #define	CMASK	022		/* default file mask: S_IWGRP|S_IWOTH */
 #define	NODEV	(dev_t)(-1)	/* non-existent device */
-#define NETDEV	(dev_t)(-2)	/* network device (for nfs swap) */
 	
-#define	CBLOCK	64		/* Clist block size, must be a power of 2. */
-#define CBQSIZE	(CBLOCK/NBBY)	/* Quote bytes/cblock - can do better. */
-				/* Data chars/clist. */
-#define	CBSIZE	(CBLOCK - sizeof(struct cblock *) - CBQSIZE)
-#define	CROUND	(CBLOCK - 1)	/* Clist rounding. */
-
 /*
  * Constants related to network buffer management.
  * MCLBYTES must be no larger than NBPG (the software page size), and,
@@ -136,8 +129,6 @@
 					/* 2K cluster can hold Ether frame */
 #define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
 #define	MCLOFSET	(MCLBYTES - 1)
-
-#define MAXMCLBYTES	(64 * 1024)	/* largest cluster from the stack */
 
 /*
  * File system parameters and macros.
