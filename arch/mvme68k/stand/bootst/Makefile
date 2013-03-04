@@ -1,15 +1,17 @@
 #	from: @(#)Makefile	8.1 (Berkeley) 6/10/93
-#	$OpenBSD: Makefile,v 1.13 2012/08/21 14:46:19 pascal Exp $
+#	$OpenBSD: Makefile,v 1.15 2013/02/02 13:36:06 miod Exp $
 
 SIZE?=	size
+STRIP?=	strip
 
 S=	${.CURDIR}/../../../..
-DEFS= 
+DEFS=	-DSTANDALONE -DCOMPAT_NOLABEL
 INCPATH=-I${.CURDIR} -I${.CURDIR}/../libsa -I${.CURDIR}/../libbug \
 	-I${.CURDIR}/../../include -I${S} -I${S}/lib/libsa
 CFLAGS+=-O2 ${INCPATH} ${DEFS} ${COPTS}
+LDFLAGS=-N -T ${S}/arch/mvme68k/stand/ld.script -Ttext ${STAGE2_RELOC}
 NOPIE=
-CLEANFILES+=stboot bootst bootst.bug
+CLEANFILES+=stboot bootst bootst.bug bootst.strip
 
 .include "${S}/arch/mvme68k/stand/wrtvid/Makefile.inc"
 .include "${S}/arch/mvme68k/stand/bugcrt/Makefile.inc"
@@ -28,15 +30,16 @@ ALL=	${BOOTS}
 
 all: ${ALL}
 
-bootst.bug:	${OBJS} ${BUGCRT} ${LIBS}
-	${LD} -s -N -T ${STAGE2_RELOC} ${BUGCRT} ${OBJS} ${LIBS} \
-	    `cc -print-libgcc-file-name` -o $@
+bootst.bug: ${BUGCRT} ${OBJS} ${LIBS}
+	${LD} ${LDFLAGS} -o $@ \
+	    ${BUGCRT} ${OBJS} ${LIBS} `${CC} -print-libgcc-file-name`
 	@${SIZE} bootst.bug
 
 bootst stboot: bootst.bug ${WRTVID}
-	${WRTVID} bootst.bug
+	${STRIP} -I a.out-m68k-netbsd -o bootst.strip bootst.bug
+	${WRTVID} bootst.strip
 
-install:
+install: bootst stboot
 	install -c -m 555 -g bin -o bin ${BOOTS} ${DESTDIR}${MDEC_DIR}
 
 .include <bsd.prog.mk>

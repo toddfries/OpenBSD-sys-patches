@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.113 2012/11/21 05:26:18 kirby Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.116 2013/03/04 13:08:06 sthen Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -47,8 +47,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
 
 /*
  * ASIX Electronics AX88172 USB 2.0 ethernet driver. Used in the
@@ -165,6 +163,7 @@ const struct axe_type axe_devs[] = {
 	{ { USB_VENDOR_IODATA, USB_PRODUCT_IODATA_ETGUS2 }, AX178 },
 	{ { USB_VENDOR_JVC, USB_PRODUCT_JVC_MP_PRX1}, 0 },
 	{ { USB_VENDOR_LENOVO, USB_PRODUCT_LENOVO_ETHERNET }, AX772 | AX772B },
+	{ { USB_VENDOR_LINKSYS, USB_PRODUCT_LINKSYS_HG20F9}, AX772 | AX772B },
 	{ { USB_VENDOR_LINKSYS2, USB_PRODUCT_LINKSYS2_USB200M}, 0 },
 	{ { USB_VENDOR_LINKSYS4, USB_PRODUCT_LINKSYS4_USB1000 }, AX178 },
 	{ { USB_VENDOR_LOGITEC, USB_PRODUCT_LOGITEC_LAN_GTJU2}, AX178 },
@@ -794,12 +793,7 @@ axe_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = axe_ioctl;
 	ifp->if_start = axe_start;
-
 	ifp->if_watchdog = axe_watchdog;
-
-/*	ifp->if_baudrate = 10000000; */
-/*	ifp->if_snd.ifq_maxlen = IFQ_MAXLEN;*/
-
 	IFQ_SET_READY(&ifp->if_snd);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;

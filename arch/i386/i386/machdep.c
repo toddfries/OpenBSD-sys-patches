@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.517 2012/11/10 09:45:05 mglocker Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.520 2013/02/13 21:21:34 martynas Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -2315,21 +2315,20 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
 	register_t sp;
-	int oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/*
 	 * Build the argument list for the signal handler.
 	 */
+	bzero(&frame, sizeof(frame));
 	frame.sf_signum = sig;
 
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !oonstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(tf->tf_esp) && (psp->ps_sigonstack & sigmask(sig)))
 		sp = (long)p->p_sigstk.ss_sp + p->p_sigstk.ss_size;
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		sp = tf->tf_esp;
 
 	frame.sf_sc.sc_fpstate = NULL;
@@ -2356,7 +2355,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	 */
 	frame.sf_sc.sc_err = tf->tf_err;
 	frame.sf_sc.sc_trapno = tf->tf_trapno;
-	frame.sf_sc.sc_onstack = oonstack;
 	frame.sf_sc.sc_mask = mask;
 #ifdef VM86
 	if (tf->tf_eflags & PSL_VM) {
@@ -2502,10 +2500,6 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		p->p_md.md_flags |= MDP_USEDFPU;
 	}
 
-	if (context.sc_onstack & 01)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = context.sc_mask & ~sigcantmask;
 
 	return (EJUSTRETURN);
@@ -3257,8 +3251,8 @@ init386(paddr_t first_avail)
 	printf("physload: ");
 #endif
 	kb = atop(KERNTEXTOFF - KERNBASE);
-	if (kb > atop(0x100000)) {
-		paddr_t lim = atop(0x100000);
+	if (kb > atop(IOM_END)) {
+		paddr_t lim = atop(IOM_END);
 #ifdef DEBUG
 		printf(" %x-%x (<16M)", lim, kb);
 #endif
@@ -3848,6 +3842,16 @@ bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 {
 	*nbshp = bsh + offset;
 	return (0);
+}
+
+paddr_t
+bus_space_mmap(bus_space_tag_t t, bus_addr_t addr, off_t off, int prot, int flags)
+{
+	/* Can't mmap I/O space. */
+	if (t == I386_BUS_SPACE_IO)
+		return (-1);
+
+	return (addr + off);
 }
 
 #ifdef DIAGNOSTIC
