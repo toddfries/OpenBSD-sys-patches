@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1664 2013/01/02 05:45:41 jsg Exp 
+ *	OpenBSD: pcidevs,v 1.1669 2013/02/08 07:58:18 jasper Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -4316,6 +4316,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Radeon HD 6320",
 	},
 	{
+	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD7290,
+	    "Radeon HD 7290",
+	},
+	{
 	    PCI_VENDOR_ATI, PCI_PRODUCT_ATI_RADEON_HD2600_HDA,
 	    "Radeon HD 2600 HD Audio",
 	},
@@ -6180,12 +6184,12 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Viper/PCI",
 	},
 	{
-	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_550TX,
-	    "550TX",
+	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DFE550TX,
+	    "DFE-550TX",
 	},
 	{
-	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_530TXPLUS,
-	    "530TX+",
+	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DFE530TXPLUS,
+	    "DFE-530TX+",
 	},
 	{
 	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DFE690TXD,
@@ -6206,6 +6210,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE550SX,
 	    "DGE-550SX",
+	},
+	{
+	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DFE520TX_C1,
+	    "DFE-520TX C1",
 	},
 	{
 	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE528T,
@@ -6234,6 +6242,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE530T_A1,
 	    "DGE-530T A1",
+	},
+	{
+	    PCI_VENDOR_DLINK2, PCI_PRODUCT_DLINK2_DFE530TXPLUS2,
+	    "DFE-530TX+",
 	},
 	{
 	    PCI_VENDOR_DPT, PCI_PRODUCT_DPT_MEMCTLR,
@@ -20548,12 +20560,24 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Virtual EHCI",
 	},
 	{
+	    PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_UHCI,
+	    "Virtual UHCI",
+	},
+	{
 	    PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_PCI,
 	    "Virtual PCI-PCI",
 	},
 	{
 	    PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_PCIE,
 	    "Virtual PCIE-PCIE",
+	},
+	{
+	    PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_NET_3,
+	    "Virtual VMXNET3",
+	},
+	{
+	    PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_PVSCSI,
+	    "Virtual PVSCSI",
 	},
 	{
 	    PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_MACHINE,
@@ -20779,6 +20803,10 @@ static const struct pci_known_product pci_known_products[] = {
 };
 
 static const struct pci_known_vendor pci_known_vendors[] = {
+	{
+	    PCI_VENDOR_DLINK2,
+	    "D-Link",
+	},
 	{
 	    PCI_VENDOR_MARTINMARIETTA,
 	    "Martin-Marietta",

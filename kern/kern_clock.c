@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_clock.c,v 1.76 2012/11/05 19:39:34 miod Exp $	*/
+/*	$OpenBSD: kern_clock.c,v 1.78 2013/02/12 08:06:22 mpi Exp $	*/
 /*	$NetBSD: kern_clock.c,v 1.34 1996/06/09 04:51:03 briggs Exp $	*/
 
 /*-
