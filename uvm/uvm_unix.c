@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_unix.c,v 1.43 2012/03/09 13:01:29 ariane Exp $	*/
+/*	$OpenBSD: uvm_unix.c,v 1.47 2013/01/16 21:47:08 deraadt Exp $	*/
 /*	$NetBSD: uvm_unix.c,v 1.18 2000/09/13 15:00:25 thorpej Exp $	*/
 
 /*
@@ -159,15 +159,15 @@ uvm_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 {
 	struct vmspace *vm = p->p_vmspace;
 	vm_map_t map = &vm->vm_map;
-	vm_map_entry_t entry;
+	vm_map_entry_t entry, safe;
 	vaddr_t start, end, top;
 	struct coreseg cseg;
-	off_t offset;
-	int flag, error = 0;
+	off_t offset, coffset;
+	int csize, chunk, flag, error = 0;
 
 	offset = chdr->c_hdrsize + chdr->c_seghdrsize + chdr->c_cpusize;
 
-	RB_FOREACH(entry, uvm_map_addr, &map->addr) {
+	RB_FOREACH_SAFE(entry, uvm_map_addr, &map->addr, safe) {
 		/* should never happen for a user process */
 		if (UVM_ET_ISSUBMAP(entry)) {
 			panic("uvm_coredump: user process with submap?");
@@ -223,8 +223,7 @@ uvm_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 
 		error = vn_rdwr(UIO_WRITE, vp,
 		    (caddr_t)&cseg, chdr->c_seghdrsize,
-		    offset, UIO_SYSSPACE,
-		    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
+		    offset, UIO_SYSSPACE, IO_UNIT, cred, NULL, p);
 		/*
 		 * We might get an EFAULT on objects mapped beyond
 		 * EOF. Ignore the error.
@@ -233,14 +232,32 @@ uvm_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 			break;
 
 		offset += chdr->c_seghdrsize;
-		error = vn_rdwr(UIO_WRITE, vp,
-		    (caddr_t)(u_long)cseg.c_addr, (int)cseg.c_size,
-		    offset, UIO_USERSPACE,
-		    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
-		if (error)
-			break;
-		
+
+		coffset = 0;
+		csize = (int)cseg.c_size;
+		do {
+			if (p->p_siglist & sigmask(SIGKILL))
+				return (EINTR);
+
+			/* Rest of the loop sleeps with lock held, so... */
+			yield();
+
+			chunk = MIN(csize, MAXPHYS);
+			error = vn_rdwr(UIO_WRITE, vp,
+			    (caddr_t)(u_long)cseg.c_addr + coffset,
+			    chunk, offset + coffset, UIO_USERSPACE,
+			    IO_UNIT, cred, NULL, p);
+			if (error)
+				return (error);
+
+			coffset += chunk;
+			csize -= chunk;
+		} while (csize > 0);
 		offset += cseg.c_size;
+
+		/* Discard the memory */
+		uvm_unmap(map, cseg.c_addr, cseg.c_addr + cseg.c_size);
+
 		chdr->c_nseg++;
 	}
 

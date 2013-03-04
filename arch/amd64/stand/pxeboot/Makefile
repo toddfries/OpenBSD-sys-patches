@@ -1,11 +1,9 @@
-#	$OpenBSD: Makefile,v 1.13 2012/10/29 14:20:10 jsing Exp $
-
-.include "${.CURDIR}/../Makefile.inc"
+#	$OpenBSD: Makefile,v 1.16 2013/01/18 21:09:04 espie Exp $
 
 MAN=	pxeboot.8
 
 .if ${MACHINE} == "amd64"
-S	=${.CURDIR}/../../../..
+S=	${.CURDIR}/../../../..
 SADIR=	${.CURDIR}/..
 
 PROG=	pxeboot
@@ -45,6 +43,8 @@ SRCS+=	divdi3.c moddi3.c qdivrem.c
 
 .PATH:	${S}/lib/libz
 SRCS+=	adler32.c crc32.c inflate.c inftrees.c
+
+.depend srt0.o gidt.o pxe_call.o: assym.h
 
 ${PROG}: $(OBJS)
 	$(LD) $(LDFLAGS) -o ${PROG} $(OBJS)

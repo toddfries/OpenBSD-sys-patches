@@ -1,4 +1,4 @@
-/*	$OpenBSD: m8820x_machdep.c,v 1.50 2011/10/25 18:38:06 miod Exp $	*/
+/*	$OpenBSD: m8820x_machdep.c,v 1.52 2013/02/19 21:02:06 miod Exp $	*/
 /*
  * Copyright (c) 2004, 2007, 2010, 2011, Miodrag Vallat.
  *
@@ -90,6 +90,7 @@ extern	void m8820x_copypage(vaddr_t, vaddr_t);
 cpuid_t	m8820x_init(void);
 void	m8820x_cpu_configuration_print(int);
 void	m8820x_shutdown(void);
+apr_t	m8820x_apr_cmode(void);
 void	m8820x_set_sapr(apr_t);
 void	m8820x_set_uapr(apr_t);
 void	m8820x_tlbis(cpuid_t, vaddr_t, pt_entry_t);
@@ -102,12 +103,13 @@ void	m8820x_dma_cachectl(paddr_t, psize_t, int);
 void	m8820x_dma_cachectl_local(paddr_t, psize_t, int);
 void	m8820x_initialize_cpu(cpuid_t);
 
-struct cmmu_p cmmu8820x = {
+const struct cmmu_p cmmu8820x = {
 	m8820x_init,
 	m8820x_setup_board_config,
 	m8820x_cpu_configuration_print,
 	m8820x_shutdown,
 	m8820x_cpu_number,
+	m8820x_apr_cmode,
 	m8820x_set_sapr,
 	m8820x_set_uapr,
 	m8820x_tlbis,
@@ -524,6 +526,13 @@ m8820x_shutdown()
 	}
 
 	CMMU_UNLOCK;
+}
+
+/* not used */
+apr_t
+m8820x_apr_cmode()
+{
+	return CACHE_DFL;
 }
 
 void

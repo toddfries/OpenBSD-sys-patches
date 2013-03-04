@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1664 2013/01/02 05:45:41 jsg Exp 
+ *	OpenBSD: pcidevs,v 1.1669 2013/02/08 07:58:18 jasper Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -51,6 +51,7 @@
  * List of known PCI vendors
  */
 
+#define	PCI_VENDOR_DLINK2	0x00ec		/* D-Link */
 #define	PCI_VENDOR_MARTINMARIETTA	0x003d		/* Martin-Marietta */
 #define	PCI_VENDOR_HAUPPAUGE	0x0070		/* Hauppauge */
 #define	PCI_VENDOR_TTTECH	0x0357		/* TTTech */
@@ -1504,6 +1505,7 @@
 #define	PCI_PRODUCT_ATI_RADEON_HD6250_1	0x9804		/* Radeon HD 6250 */
 #define	PCI_PRODUCT_ATI_RADEON_HD6250_2	0x9805		/* Radeon HD 6250 */
 #define	PCI_PRODUCT_ATI_RADEON_HD6320	0x9806		/* Radeon HD 6320 */
+#define	PCI_PRODUCT_ATI_RADEON_HD7290	0x980a		/* Radeon HD 7290 */
 #define	PCI_PRODUCT_ATI_RADEON_HD2600_HDA	0xaa08		/* Radeon HD 2600 HD Audio */
 #define	PCI_PRODUCT_ATI_RS690M_HDA	0xaa10		/* RS690M HD Audio */
 #define	PCI_PRODUCT_ATI_RADEON_HD3870_HDA	0xaa18		/* Radeon HD 3870 HD Audio */
@@ -2063,13 +2065,14 @@
 #define	PCI_PRODUCT_DIAMOND_VIPER	0x9001		/* Viper/PCI */
 
 /* D-Link products */
-#define	PCI_PRODUCT_DLINK_550TX	0x1002		/* 550TX */
-#define	PCI_PRODUCT_DLINK_530TXPLUS	0x1300		/* 530TX+ */
+#define	PCI_PRODUCT_DLINK_DFE550TX	0x1002		/* DFE-550TX */
+#define	PCI_PRODUCT_DLINK_DFE530TXPLUS	0x1300		/* DFE-530TX+ */
 #define	PCI_PRODUCT_DLINK_DFE690TXD	0x1340		/* DFE-690TXD */
 #define	PCI_PRODUCT_DLINK_DRP32TXD	0x1561		/* DRP32TXD */
 #define	PCI_PRODUCT_DLINK_DWL610	0x3300		/* DWL-610 */
 #define	PCI_PRODUCT_DLINK_DGE550T	0x4000		/* DGE-550T */
 #define	PCI_PRODUCT_DLINK_DGE550SX	0x4001		/* DGE-550SX */
+#define	PCI_PRODUCT_DLINK_DFE520TX_C1	0x4200		/* DFE-520TX C1 */
 #define	PCI_PRODUCT_DLINK_DGE528T	0x4300		/* DGE-528T */
 #define	PCI_PRODUCT_DLINK_DGE530T_C1	0x4302		/* DGE-530T C1 */
 #define	PCI_PRODUCT_DLINK_DGE560T	0x4b00		/* DGE-560T */
@@ -2077,6 +2080,7 @@
 #define	PCI_PRODUCT_DLINK_DGE560SX	0x4b02		/* DGE-560SX */
 #define	PCI_PRODUCT_DLINK_DGE550T_B1	0x4b03		/* DGE-550T B1 */
 #define	PCI_PRODUCT_DLINK_DGE530T_A1	0x4c00		/* DGE-530T A1 */
+#define	PCI_PRODUCT_DLINK2_DFE530TXPLUS2	0x8139		/* DFE-530TX+ */
 
 /* Distributed Processing Technology products */
 #define	PCI_PRODUCT_DPT_MEMCTLR	0x1012		/* Memory Control */
@@ -6045,8 +6049,11 @@
 #define	PCI_PRODUCT_VMWARE_NET	0x0720		/* Virtual NIC */
 #define	PCI_PRODUCT_VMWARE_MACHINE_2	0x0740		/* Virtual Machine Communication Interface */
 #define	PCI_PRODUCT_VMWARE_EHCI	0x0770		/* Virtual EHCI */
+#define	PCI_PRODUCT_VMWARE_UHCI	0x0774		/* Virtual UHCI */
 #define	PCI_PRODUCT_VMWARE_PCI	0x0790		/* Virtual PCI-PCI */
 #define	PCI_PRODUCT_VMWARE_PCIE	0x07a0		/* Virtual PCIE-PCIE */
+#define	PCI_PRODUCT_VMWARE_NET_3	0x07b0		/* Virtual VMXNET3 */
+#define	PCI_PRODUCT_VMWARE_PVSCSI	0x07c0		/* Virtual PVSCSI */
 #define	PCI_PRODUCT_VMWARE_MACHINE	0x0801		/* Virtual Machine Interface */
 
 /* Weitek products */
