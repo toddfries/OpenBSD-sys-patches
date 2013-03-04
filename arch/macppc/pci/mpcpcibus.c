@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpcpcibus.c,v 1.43 2011/10/28 15:17:02 drahn Exp $ */
+/*	$OpenBSD: mpcpcibus.c,v 1.45 2013/01/21 15:06:29 mpi Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -33,23 +33,16 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
-#include <uvm/uvm_extern.h>
+#include <sys/malloc.h>
+#include <sys/extent.h>
 
 #include <machine/autoconf.h>
 #include <machine/pcb.h>
-#include <machine/bat.h>
-#include <machine/powerpc.h>
 
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
-
-#include <macppc/pci/pcibrvar.h>
-#include <macppc/pci/mpc106reg.h>
 
 #include <dev/ofw/openfirm.h>
 
@@ -75,9 +68,30 @@ int      mpc_ether_hw_addr(struct ppc_pci_chipset *, u_int8_t *);
 u_int32_t mpc_gen_config_reg(void *cpv, pcitag_t tag, int offset);
 int	of_ether_hw_addr(struct ppc_pci_chipset *, u_int8_t *);
 int	find_node_intr (int parent, u_int32_t *addr, u_int32_t *intr);
-u_int32_t pci_iack(void);
 
 void fix_node_irq(int node, struct pcibus_attach_args *pba);
+
+struct pcibr_config {
+	bus_space_tag_t		lc_memt;
+	bus_space_tag_t		lc_iot;
+	bus_space_handle_t	ioh_cf8;
+	bus_space_handle_t	ioh_cfc;
+	struct ppc_pci_chipset	lc_pc;
+	int			config_type;
+	int			bus;
+	int			node;
+};
+
+struct pcibr_softc {
+	struct device		sc_dev;
+	struct ppc_bus_space	sc_membus_space;
+	struct ppc_bus_space	sc_iobus_space;
+	struct pcibr_config	pcibr_config;
+	struct extent 		*sc_ioex;
+	struct extent		*sc_memex;
+	char			sc_ioex_name[32];
+	char			sc_memex_name[32];
+};
 
 struct cfattach mpcpcibr_ca = {
         sizeof(struct pcibr_softc), mpcpcibrmatch, mpcpcibrattach,
@@ -91,8 +105,6 @@ static int      mpcpcibrprint(void *, const char *pnp);
 
 void	mpcpcibus_find_ranges_32(struct pcibr_softc *, u_int32_t *, int);
 void	mpcpcibus_find_ranges_64(struct pcibr_softc *, u_int32_t *, int);
-
-struct pcibr_config mpc_config;
 
 /*
  * config types
@@ -381,7 +393,7 @@ mpcpcibrattach(struct device *parent, struct device *self, void *aux)
 	}
 	/* translate byte(s) into item count*/
 
-	lcp = sc->sc_pcibr = &sc->pcibr_config;
+	lcp = &sc->pcibr_config;
 
 	snprintf(sc->sc_ioex_name, sizeof(sc->sc_ioex_name),
 	    "%s pciio", sc->sc_dev.dv_xname);
@@ -452,8 +464,7 @@ mpcpcibrattach(struct device *parent, struct device *self, void *aux)
 	lcp->lc_pc.pc_intr_establish = mpc_intr_establish;
 	lcp->lc_pc.pc_intr_disestablish = mpc_intr_disestablish;
 
-	printf(": %s, Revision 0x%x\n", compat, 
-	    mpc_cfg_read_1(lcp, MPC106_PCI_REVID));
+	printf(": %s\n", compat);
 
 	bzero(&pba, sizeof(pba));
 	pba.pba_dmat = &pci_bus_dma_tag;
@@ -926,86 +937,4 @@ void
 mpc_intr_disestablish(void *lcv, void *cookie)
 {
 	/* XXX We should probably do something clever here.... later */
-}
-
-u_int32_t
-pci_iack()
-{
-	/* do pci IACK cycle */
-	/* this should be bus allocated. */
-	volatile u_int8_t *iack = (u_int8_t *)0xbffffff0;
-	u_int8_t val;
-
-	val = *iack;
-	return val;
-}
-
-void
-mpc_cfg_write_1(struct pcibr_config *cp, u_int32_t reg, u_int8_t val)
-{
-	int s;
-	s = splhigh();
-	bus_space_write_4(cp->lc_iot, cp->ioh_cf8, 0, MPC106_REGOFFS(reg));
-	bus_space_write_1(cp->lc_iot, cp->ioh_cfc, 0, val);
-	splx(s);
-}
-
-void
-mpc_cfg_write_2(struct pcibr_config *cp, u_int32_t reg, u_int16_t val)
-{
-	int s;
-	s = splhigh();
-	bus_space_write_4(cp->lc_iot, cp->ioh_cf8, 0, MPC106_REGOFFS(reg));
-	bus_space_write_2(cp->lc_iot, cp->ioh_cfc, 0, val);
-	splx(s);
-}
-
-void
-mpc_cfg_write_4(struct pcibr_config *cp, u_int32_t reg, u_int32_t val)
-{
-
-	int s;
-	s = splhigh();
-	bus_space_write_4(cp->lc_iot, cp->ioh_cf8, 0, MPC106_REGOFFS(reg));
-	bus_space_write_4(cp->lc_iot, cp->ioh_cfc, 0, val);
-	splx(s);
-}
-
-u_int8_t
-mpc_cfg_read_1(struct pcibr_config *cp, u_int32_t reg)
-{
-	u_int8_t _v_;
-
-	int s;
-	s = splhigh();
-	bus_space_write_4(cp->lc_iot, cp->ioh_cf8, 0, MPC106_REGOFFS(reg));
-	_v_ = bus_space_read_1(cp->lc_iot, cp->ioh_cfc, 0);
-	splx(s);
-	return(_v_);
-}
-
-u_int16_t
-mpc_cfg_read_2(struct pcibr_config *cp, u_int32_t reg)
-{
-	u_int16_t _v_;
-
-	int s;
-	s = splhigh();
-	bus_space_write_4(cp->lc_iot, cp->ioh_cf8, 0, MPC106_REGOFFS(reg));
-	_v_ = bus_space_read_2(cp->lc_iot, cp->ioh_cfc, 0);
-	splx(s);
-	return(_v_);
-}
-
-u_int32_t
-mpc_cfg_read_4(struct pcibr_config *cp, u_int32_t reg)
-{
-	u_int32_t _v_;
-
-	int s;
-	s = splhigh();
-	bus_space_write_4(cp->lc_iot, cp->ioh_cf8, 0, MPC106_REGOFFS(reg));
-	_v_ = bus_space_read_4(cp->lc_iot, cp->ioh_cfc, 0);
-	splx(s);
-	return(_v_);
 }
