@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.31 2012/12/02 07:03:31 guenther Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.33 2013/02/12 08:06:22 mpi Exp $	*/
 /*	$NetBSD: cpu.h,v 1.34 2003/06/23 11:01:08 martin Exp $	*/
 
 /*
