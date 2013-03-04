@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.40 2011/09/15 00:48:24 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.44 2013/02/12 08:06:22 mpi Exp $	*/
 /*	$NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $	*/
 
 /*
@@ -35,7 +35,6 @@
 #define _MACHINE_CPU_H_
 #ifdef _KERNEL
 
-#include <sys/cdefs.h>
 #include <sys/device.h>
 #include <sys/evcount.h>
 
@@ -123,6 +122,7 @@ extern	int	want_resched;	/* resched() was called */
  * This is used during profiling to integrate system time.
  */
 #define	PROC_PC(p)	(((struct trapframe *)((p)->p_addr->u_pcb.framep))->pc)
+#define	PROC_STACK(p)	(((struct trapframe *)((p)->p_addr->u_pcb.framep))->sp)
 
 /*
  * Give a profiling tick to the current process when the user profiling

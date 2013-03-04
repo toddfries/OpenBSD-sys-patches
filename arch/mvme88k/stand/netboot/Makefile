@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.16 2012/08/21 14:46:19 pascal Exp $
+#	$OpenBSD: Makefile,v 1.19 2013/01/16 20:45:09 miod Exp $
 
 SIZE?=	size
 STRIP?= strip
@@ -21,15 +21,15 @@ SRCS+=	if_ie.c
 #SRCS+=  if_le.c
 OBJS=  ${SRCS:S/.c/.o/g}
 LIBS= ${LIBSA} ${LIBBUG} ${LIBZ}
-LDFLAGS+= -s -N -T ${STAGE2_RELOC}
+LDFLAGS=-N -T ${S}/arch/mvme88k/stand/ld.script -Ttext ${STAGE2_RELOC}
+LDFLAGS+= -warn-common
 NOPIE=
 
 all:	netboot.bin
 
-netboot: ${OBJS} ${NETBOOT_CRT} ${LIBS}
+netboot: ${NETBOOT_CRT} ${OBJS} ${LIBS}
 	${LD} ${LDFLAGS} -o $@ \
-		${NETBOOT_CRT} ${OBJS} ${LIBS} `cc -print-libgcc-file-name`
-#	@${SIZE} $@
+	    ${NETBOOT_CRT} ${OBJS} ${LIBS} `${CC} -print-libgcc-file-name`
 
 netboot.bin: netboot
 	${STRIP} netboot

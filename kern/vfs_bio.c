@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.139 2012/11/07 17:50:48 beck Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.146 2013/02/17 17:39:29 miod Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -100,19 +100,6 @@ long bufhighpages; 	/* bufpages absolute high water mark */
 long bufbackpages; 	/* number of pages we back off when asked to shrink */
 
 vsize_t bufkvm;
-
-/*
- * RESERVE_SLOTS of kva space, and the corresponding amount
- * of buffer pages are reserved for the cleaner and syncer's
- * exclusive use. Since we reserve kva slots to map the buffers
- * along with the buffer space, this ensures the cleaner and
- * syncer can always map and push out buffers if we get low
- * on buffer pages or kva space in which to map them.
- */
-#define RESERVE_SLOTS 4
-#define RESERVE_PAGES (RESERVE_SLOTS * MAXPHYS / PAGE_SIZE)
-#define BCACHE_MIN (RESERVE_PAGES * 2)
-#define UNCLEAN_PAGES (bcstats.numbufpages - bcstats.numcleanpages)
 
 struct proc *cleanerproc;
 int bd_req;			/* Sleep point for cleaner daemon. */
@@ -247,7 +234,6 @@ bufinit(void)
 
 	pool_init(&bufpool, sizeof(struct buf), 0, 0, 0, "bufpl", NULL);
 	pool_setipl(&bufpool, IPL_BIO);
-	pool_sethiwat(&bufpool, buflowpages / 4);
 
 	for (dp = bufqueues; dp < &bufqueues[BQUEUES]; dp++)
 		TAILQ_INIT(dp);
@@ -319,8 +305,8 @@ bufadjust(int newbufpages)
 	 * Wake up the cleaner if we have lots of dirty pages,
 	 * or if we are getting low on buffer cache kva.
 	 */
-	if (UNCLEAN_PAGES >= hidirtypages ||
-	    bcstats.kvaslots_avail <= 2 * RESERVE_SLOTS)
+	if (!growing && (UNCLEAN_PAGES >= hidirtypages ||
+	    bcstats.kvaslots_avail <= 2 * RESERVE_SLOTS))
 		wakeup(&bd_req);
 
 	splx(s);
@@ -1049,7 +1035,7 @@ buf_get(struct vnode *vp, daddr64_t blkno, size_t size)
 	LIST_INIT(&bp->b_dep);
 	bp->b_bcount = size;
 
-	buf_acquire_unmapped(bp);
+	buf_acquire_nomap(bp);
 
 	if (vp != NULL) {
 		/*
@@ -1096,15 +1082,15 @@ void
 buf_daemon(struct proc *p)
 {
 	struct timeval starttime, timediff;
-	struct buf *bp;
-	int s, pushed;
+	struct buf *bp = NULL;
+	int s, pushed = 0;
 
 	cleanerproc = curproc;
 
-	pushed = 16;
 	s = splbio();
 	for (;;) {
-		if (pushed >= 16 && (UNCLEAN_PAGES < hidirtypages &&
+		if (bp == NULL || (pushed >= 16 &&
+		    UNCLEAN_PAGES < hidirtypages &&
 		    bcstats.kvaslots_avail > 2 * RESERVE_SLOTS)){
 			pushed = 0;
 			/*
@@ -1164,8 +1150,6 @@ buf_daemon(struct proc *p)
 				break;
 
 		}
-		if (bp == NULL)
-			pushed = 16; /* No dirty bufs - sleep */
 	}
 }
 
@@ -1255,12 +1239,13 @@ biodone(struct buf *bp)
 }
 
 #ifdef DDB
-void	bcstats_print(int (*)(const char *, ...));
+void	bcstats_print(int (*)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */);
 /*
  * bcstats_print: ddb hook to print interesting buffer cache counters
  */
 void
-bcstats_print(int (*pr)(const char *, ...))
+bcstats_print(
+    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
 {
 	(*pr)("Current Buffer Cache status:\n");
 	(*pr)("numbufs %lld busymapped %lld, delwri %lld\n",

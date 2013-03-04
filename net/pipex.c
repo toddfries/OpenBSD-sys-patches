@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.c,v 1.35 2012/09/28 16:09:05 markus Exp $	*/
+/*	$OpenBSD: pipex.c,v 1.38 2013/02/13 22:10:38 yasuoka Exp $	*/
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -128,6 +128,9 @@ void
 pipex_init(void)
 {
 	extern int max_keylen;		/* for radix.c */
+
+	if (pipex_softintr != NULL)
+		return;
 
 	LIST_INIT(&pipex_session_list);
 	LIST_INIT(&pipex_close_wait_list);
@@ -393,14 +396,24 @@ pipex_add_session(struct pipex_session_req *req,
 	}
 #endif
 #ifdef PIPEX_MPPE
-    	if ((req->pr_ppp_flags & PIPEX_PPP_MPPE_ACCEPTED) != 0)
+    	if ((req->pr_ppp_flags & PIPEX_PPP_MPPE_ACCEPTED) != 0) {
+		if (req->pr_mppe_recv.keylenbits <= 0) {
+			free(session, M_TEMP);
+			return (EINVAL);
+		}
 		pipex_session_init_mppe_recv(session,
 		    req->pr_mppe_recv.stateless, req->pr_mppe_recv.keylenbits,
 		    req->pr_mppe_recv.master_key);
-    	if ((req->pr_ppp_flags & PIPEX_PPP_MPPE_ENABLED) != 0)
+	}
+    	if ((req->pr_ppp_flags & PIPEX_PPP_MPPE_ENABLED) != 0) {
+		if (req->pr_mppe_send.keylenbits <= 0) {
+			free(session, M_TEMP);
+			return (EINVAL);
+		}
 		pipex_session_init_mppe_send(session,
 		    req->pr_mppe_send.stateless, req->pr_mppe_send.keylenbits,
 		    req->pr_mppe_send.master_key);
+	}
 
 	if (pipex_session_is_mppe_required(session)) {
 		if (!pipex_session_is_mppe_enabled(session) ||

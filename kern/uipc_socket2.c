@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket2.c,v 1.53 2012/04/13 09:38:32 deraadt Exp $	*/
+/*	$OpenBSD: uipc_socket2.c,v 1.55 2013/01/15 11:12:57 bluhm Exp $	*/
 /*	$NetBSD: uipc_socket2.c,v 1.11 1996/02/04 02:17:55 christos Exp $	*/
 
 /*
@@ -275,8 +275,9 @@ socantrcvmore(struct socket *so)
 int
 sbwait(struct sockbuf *sb)
 {
+	splsoftassert(IPL_SOFTNET);
 
-	sb->sb_flags |= SB_WAIT;
+	sb->sb_flagsintr |= SB_WAIT;
 	return (tsleep(&sb->sb_cc,
 	    (sb->sb_flags & SB_NOINTR) ? PSOCK : PSOCK | PCATCH, "netio",
 	    sb->sb_timeo));
@@ -311,12 +312,15 @@ sb_lock(struct sockbuf *sb)
 void
 sowakeup(struct socket *so, struct sockbuf *sb)
 {
+	int s = splsoftnet();
+
 	selwakeup(&sb->sb_sel);
-	sb->sb_flags &= ~SB_SEL;
-	if (sb->sb_flags & SB_WAIT) {
-		sb->sb_flags &= ~SB_WAIT;
+	sb->sb_flagsintr &= ~SB_SEL;
+	if (sb->sb_flagsintr & SB_WAIT) {
+		sb->sb_flagsintr &= ~SB_WAIT;
 		wakeup(&sb->sb_cc);
 	}
+	splx(s);
 	if (so->so_state & SS_ASYNC)
 		csignal(so->so_pgid, SIGIO, so->so_siguid, so->so_sigeuid);
 }
@@ -573,16 +577,18 @@ sbappendstream(struct sockbuf *sb, struct mbuf *m)
 void
 sbcheck(struct sockbuf *sb)
 {
-	struct mbuf *m;
+	struct mbuf *m, *n;
 	u_long len = 0, mbcnt = 0;
 
-	for (m = sb->sb_mb; m; m = m->m_next) {
-		len += m->m_len;
-		mbcnt += MSIZE;
-		if (m->m_flags & M_EXT)
-			mbcnt += m->m_ext.ext_size;
-		if (m->m_nextpkt)
-			panic("sbcheck nextpkt");
+	for (m = sb->sb_mb; m; m = m->m_nextpkt) {
+		for (n = m; n; n = n->m_next) {
+			len += n->m_len;
+			mbcnt += MSIZE;
+			if (n->m_flags & M_EXT)
+				mbcnt += n->m_ext.ext_size;
+			if (m != n && n->m_nextpkt)
+				panic("sbcheck nextpkt");
+		}
 	}
 	if (len != sb->sb_cc || mbcnt != sb->sb_mbcnt) {
 		printf("cc %lu != %lu || mbcnt %lu != %lu\n", len, sb->sb_cc,

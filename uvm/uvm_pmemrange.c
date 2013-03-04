@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pmemrange.c,v 1.34 2012/01/05 17:49:45 ariane Exp $	*/
+/*	$OpenBSD: uvm_pmemrange.c,v 1.36 2013/01/29 19:55:48 beck Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Ariane van der Steldt <ariane@stack.nl>
@@ -735,13 +735,14 @@ uvm_pmr_getpages(psize_t count, paddr_t start, paddr_t end, paddr_t align,
 	/*
 	 * Validate arguments.
 	 */
-	KASSERT(count > 0 &&
-	    (start == 0 || end == 0 || start < end) &&
-	    align >= 1 && powerof2(align) &&
-	    maxseg > 0 &&
-	    (boundary == 0 || powerof2(boundary)) &&
-	    (boundary == 0 || maxseg * boundary >= count) &&
-	    TAILQ_EMPTY(result));
+	KASSERT(count > 0);
+	KASSERT(start == 0 || end == 0 || start < end);
+	KASSERT(align >= 1);
+	KASSERT(powerof2(align));
+	KASSERT(maxseg > 0);
+	KASSERT(boundary == 0 || powerof2(boundary));
+	KASSERT(boundary == 0 || maxseg * boundary >= count);
+	KASSERT(TAILQ_EMPTY(result));
 
 	/*
 	 * TRYCONTIG is a noop if you only want a single segment.
@@ -1881,11 +1882,17 @@ uvm_wait_pla(paddr_t low, paddr_t high, paddr_t size, int failok)
 	struct uvm_pmalloc pma;
 	const char *wmsg = "pmrwait";
 
-	/*
-	 * Prevent deadlock.
-	 */
 	if (curproc == uvm.pagedaemon_proc) {
+		/*
+		 * XXX detect pagedaemon deadlock - see comment in
+		 * uvm_wait(), as this is exactly the same issue.
+		 */
+		printf("pagedaemon: wait_pla deadlock detected!\n");
 		msleep(&uvmexp.free, &uvm.fpageqlock, PVM, wmsg, hz >> 3);
+#if defined(DEBUG)
+		/* DEBUG: panic so we can debug it */
+		panic("wait_pla pagedaemon deadlock");
+#endif
 		return 0;
 	}
 
