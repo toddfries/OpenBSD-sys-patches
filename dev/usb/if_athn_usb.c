@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_athn_usb.c,v 1.10 2012/11/12 22:38:26 mikeb Exp $	*/
+/*	$OpenBSD: if_athn_usb.c,v 1.12 2013/01/14 09:50:31 jsing Exp $	*/
 
 /*-
  * Copyright (c) 2011 Damien Bergamini <damien.bergamini@free.fr>
@@ -1052,7 +1052,7 @@ athn_usb_newstate_cb(struct athn_usb_softc *usc, void *arg)
 #ifndef IEEE80211_STA_ONLY
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
 			athn_set_hostap_timers(sc);
-			/* Enable sotfware beacon alert interrupts. */
+			/* Enable software beacon alert interrupts. */
 			imask = htobe32(AR_IMR_SWBA);
 		} else
 #endif
@@ -1112,7 +1112,7 @@ athn_usb_node_leave(struct ieee80211com *ic, struct ieee80211_node *ni)
 
 	/* Do it in a process context. */
 	sta_index = ((struct athn_node *)ni)->sta_index;
-	athn_usb_do_async(usc, athn_usb_newassoc_cb,
+	athn_usb_do_async(usc, athn_usb_node_leave_cb,
 	    &sta_index, sizeof(sta_index));
 }
 
