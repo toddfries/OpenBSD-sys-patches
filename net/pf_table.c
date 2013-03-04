@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_table.c,v 1.95 2012/12/29 14:53:05 markus Exp $	*/
+/*	$OpenBSD: pf_table.c,v 1.97 2013/02/18 14:48:13 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2002 Cedric Berger
@@ -703,7 +703,7 @@ pfr_clr_astats(struct pfr_table *tbl, struct pfr_addr *addr, int size,
 	}
 
 	if (!(flags & PFR_FLAG_DUMMY)) {
-		pfr_clstats_kentries(&workq, 0, 0);
+		pfr_clstats_kentries(&workq, time_second, 0);
 	}
 	if (nzero != NULL)
 		*nzero = xzero;
@@ -982,7 +982,7 @@ pfr_clstats_kentries(struct pfr_kentryworkq *workq, long tzero, int negchange)
 	SLIST_FOREACH(p, workq, pfrke_workq) {
 		s = splsoftnet();
 		if (negchange)
-			p->pfrke_flags ^= p->pfrke_flags & PFRKE_FLAG_NOT;
+			p->pfrke_flags ^= PFRKE_FLAG_NOT;
 		if (p->pfrke_counters) {
 			pool_put(&pfr_kcounters_pl, p->pfrke_counters);
 			p->pfrke_counters = NULL;
