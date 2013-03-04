@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_aoe.c,v 1.26 2012/10/08 14:22:41 jsing Exp $ */
+/* $OpenBSD: softraid_aoe.c,v 1.30 2013/03/02 12:50:01 jsing Exp $ */
 /*
  * Copyright (c) 2008 Ted Unangst <tedu@openbsd.org>
  * Copyright (c) 2008 Marco Peereboom <marco@openbsd.org>
@@ -84,6 +84,7 @@ sr_aoe_discipline_init(struct sr_discipline *sd)
 
 	/* Fill out discipline members. */
 	sd->sd_type = SR_MD_AOE_INIT;
+	strlcpy(sd->sd_name, "AOE INIT", sizeof(sd->sd_name));
 	sd->sd_capabilities = SR_CAP_SYSTEM_DISK;
 	sd->sd_max_wu = SR_RAIDAOE_NOWU;
 
@@ -93,6 +94,7 @@ sr_aoe_discipline_init(struct sr_discipline *sd)
 	sd->sd_create = sr_aoe_create;
 	sd->sd_free_resources = sr_aoe_free_resources;
 	sd->sd_scsi_rw = sr_aoe_rw;
+	sd->sd_scsi_intr = NULL;
 }
 
 void
@@ -101,6 +103,7 @@ sr_aoe_server_discipline_init(struct sr_discipline *sd)
 
 	/* Fill out discipline members. */
 	sd->sd_type = SR_MD_AOE_TARG;
+	strlcpy(sd->sd_name, "AOE TARG", sizeof(sd->sd_name));
 	sd->sd_capabilities = 0;
 	sd->sd_max_wu = SR_RAIDAOE_NOWU;
 
@@ -116,6 +119,7 @@ sr_aoe_server_discipline_init(struct sr_discipline *sd)
 	sd->sd_scsi_start_stop = NULL;
 	sd->sd_scsi_sync = NULL;
 	sd->sd_scsi_rw = NULL;
+	sd->sd_scsi_intr = NULL;
 	sd->sd_set_chunk_state = NULL;
 	sd->sd_set_vol_state = NULL;
 	sd->sd_start_discipline = sr_aoe_server_start;
@@ -129,8 +133,6 @@ sr_aoe_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 
 	if (no_chunk != 1)
 		return EINVAL;
-
-	strlcpy(sd->sd_name, "AOE INIT", sizeof(sd->sd_name));
 
 	sd->sd_max_ccb_per_wu = no_chunk;
 
@@ -241,9 +243,6 @@ out:
 int
 sr_aoe_alloc_resources(struct sr_discipline *sd)
 {
-	if (!sd)
-		return (EINVAL);
-
 	DNPRINTF(SR_D_DIS, "%s: sr_aoe_alloc_resources\n",
 	    DEVNAME(sd->sd_sc));
 
@@ -258,9 +257,6 @@ sr_aoe_free_resources(struct sr_discipline *sd)
 {
 	int			s, rv = EINVAL;
 	struct aoe_handler	*ah;
-
-	if (!sd)
-		return (rv);
 
 	DNPRINTF(SR_D_DIS, "%s: sr_aoe_free_resources\n",
 	    DEVNAME(sd->sd_sc));
@@ -502,8 +498,6 @@ sr_aoe_request_done(struct aoe_req *ar, struct aoe_packet *ap)
 		else
 			xs->error = XS_NOERROR;
 
-		xs->resid = 0;
-
 		sr_scsi_done(sd, xs);
 	}
 	splx(s);
@@ -604,9 +598,6 @@ sr_aoe_server_alloc_resources(struct sr_discipline *sd)
 	struct aoe_handler	*ah;
 	struct ifnet		*ifp;
 
-	if (!sd)
-		return (rv);
-
 	DNPRINTF(SR_D_DIS, "%s: sr_aoe_server_alloc_resources\n",
 	    DEVNAME(sd->sd_sc));
 
@@ -654,9 +645,6 @@ int
 sr_aoe_server_free_resources(struct sr_discipline *sd)
 {
 	int			s;
-
-	if (!sd)
-		return (EINVAL);
 
 	DNPRINTF(SR_D_DIS, "%s: sr_aoe_server_free_resources\n",
 	    DEVNAME(sd->sd_sc));
