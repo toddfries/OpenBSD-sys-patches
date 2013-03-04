@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.229 2012/12/30 00:58:19 guenther Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.231 2013/02/11 11:11:42 mpi Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -1364,7 +1364,7 @@ int
 sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 {
 	struct kinfo_proc *kproc = NULL;
-	struct proc *p;
+	struct proc *p, *pp;
 	struct process *pr;
 	char *dp;
 	int arg, buflen, doingzomb, elem_size, elem_count;
@@ -1461,6 +1461,15 @@ again:
 		if ((p->p_flag & P_THREAD) == 0) {
 			if (buflen >= elem_size && elem_count > 0) {
 				fill_kproc(p, kproc, 0);
+				/* Update %cpu for all threads */
+				if (!dothreads) {
+					TAILQ_FOREACH(pp, &pr->ps_threads,
+					    p_thr_link) {
+						if (pp == p)
+							continue;
+						kproc->p_pctcpu += pp->p_pctcpu;
+					}
+				}
 				error = copyout(kproc, dp, elem_size);
 				if (error)
 					goto err;
@@ -1608,6 +1617,12 @@ sysctl_proc_args(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	/* Execing - danger. */
 	if ((vp->p_p->ps_flags & PS_INEXEC))
 		return (EBUSY);
+	
+	/* Only owner or root can get env */
+	if ((op == KERN_PROC_NENV || op == KERN_PROC_ENV) &&
+	    (vp->p_ucred->cr_uid != cp->p_ucred->cr_uid &&
+	    (error = suser(cp, 0)) != 0))
+		return (error);
 
 	vm = vp->p_vmspace;
 	vm->vm_refcnt++;
