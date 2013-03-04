@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.121 2012/12/01 09:55:03 brad Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.127 2013/02/09 19:17:52 sthen Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -62,6 +62,7 @@
  */
 
 #include "bpfilter.h"
+#include "vlan.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -82,6 +83,11 @@
 #endif	/* INET */
 #include <net/if_dl.h>
 #include <net/if_media.h>
+
+#if NVLAN > 0
+#include <net/if_types.h>
+#include <net/if_vlan_var.h>
+#endif
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -157,6 +163,8 @@ int vr_alloc_mbuf(struct vr_softc *, struct vr_chain_onefrag *);
 #define	VR_Q_CSUM		(1<<1)
 #define	VR_Q_CAM		(1<<2)
 #define	VR_Q_HWTAG		(1<<3)
+#define	VR_Q_INTDISABLE		(1<<4)
+#define	VR_Q_BABYJUMBO		(1<<5) /* others may work too */
 
 struct vr_type {
 	pci_vendor_id_t		vr_vid;
@@ -168,11 +176,12 @@ struct vr_type {
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINEII,
 	    VR_Q_NEEDALIGN },
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_RHINEII_2,
-	    0 },
+	    VR_Q_BABYJUMBO },
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6105,
-	    0 },
+	    VR_Q_BABYJUMBO },
 	{ PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT6105M,
-	    VR_Q_CSUM | VR_Q_CAM | VR_Q_HWTAG },
+	    VR_Q_CSUM | VR_Q_CAM | VR_Q_HWTAG | VR_Q_INTDISABLE |
+	    VR_Q_BABYJUMBO },
 	{ PCI_VENDOR_DELTA, PCI_PRODUCT_DELTA_RHINEII,
 	    VR_Q_NEEDALIGN },
 	{ PCI_VENDOR_ADDTRON, PCI_PRODUCT_ADDTRON_RHINEII,
@@ -623,6 +632,9 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = vr_ioctl;
 	ifp->if_start = vr_start;
 	ifp->if_watchdog = vr_watchdog;
+	if (sc->vr_quirks & VR_Q_BABYJUMBO)
+		ifp->if_hardmtu = VR_RXLEN_BABYJUMBO -
+		    ETHER_HDR_LEN - ETHER_CRC_LEN;
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
@@ -631,6 +643,12 @@ vr_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->vr_quirks & VR_Q_CSUM)
 		ifp->if_capabilities |= IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 |
 					IFCAP_CSUM_UDPv4;
+
+#if NVLAN > 0
+	/* if the hardware can do VLAN tagging, say so. */
+	if (sc->vr_quirks & VR_Q_HWTAG)
+		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
+#endif
 
 #ifndef SMALL_KERNEL
 	if (sc->vr_revid >= REV_ID_VT3065_A) {
@@ -712,7 +730,7 @@ vr_list_tx_init(struct vr_softc *sc)
 	cd = &sc->vr_cdata;
 	ld = sc->vr_ldata;
 
-	cd->vr_tx_cnt = 0;
+	cd->vr_tx_cnt = cd->vr_tx_pkts = 0;
 
 	for (i = 0; i < VR_TX_LIST_CNT; i++) {
 		cd->vr_tx_chain[i].vr_ptr = &ld->vr_tx_list[i];
@@ -899,6 +917,7 @@ vr_rxeof(struct vr_softc *sc)
 #endif
 
 		ifp->if_ipackets++;
+
 		if (sc->vr_quirks & VR_Q_CSUM &&
 		    (rxstat & VR_RXSTAT_FRAG) == 0 &&
 		    (rxctl & VR_RXCTL_IP) != 0) {
@@ -910,6 +929,21 @@ vr_rxeof(struct vr_softc *sc)
 				m->m_pkthdr.csum_flags |= M_TCP_CSUM_IN_OK |
 				    M_UDP_CSUM_IN_OK;
 		}
+
+#if NVLAN > 0
+		/*
+		 * If there's a tagged packet, the 802.1q header will be at the
+		 * 4-byte boundary following the CRC.  There will be 2 bytes
+		 * TPID (0x8100) and 2 bytes TCI (including VLAN ID).
+		 * This isn't in the data sheet.
+		 */
+		if (rxctl & VR_RXCTL_TAG) {
+			int offset = ((total_len + 3) & ~3) + ETHER_CRC_LEN + 2;
+			m->m_pkthdr.ether_vtag = htons(*(u_int16_t *)
+			    ((u_int8_t *)m->m_data + offset));
+			m->m_flags |= M_VLANTAG;
+		}
+#endif
 
 #if NBPFILTER > 0
 		/*
@@ -1170,7 +1204,7 @@ vr_encap(struct vr_softc *sc, struct vr_chain **cp, struct mbuf *m_head)
 	struct vr_chain		*c = *cp;
 	struct vr_desc		*f = NULL;
 	struct mbuf		*m_new = NULL;
-	u_int32_t		vr_ctl = 0, vr_status = 0;
+	u_int32_t		vr_ctl = 0, vr_status = 0, intdisable = 0;
 	bus_dmamap_t		txmap;
 	int			i, runt = 0;
 
@@ -1221,6 +1255,28 @@ vr_encap(struct vr_softc *sc, struct vr_chain **cp, struct mbuf *m_head)
 		return(1);
 	}
 
+#if NVLAN > 0
+	/* Tell chip to insert VLAN tag if needed. */
+	if (m_head->m_flags & M_VLANTAG) {
+		u_int32_t vtag = m_head->m_pkthdr.ether_vtag;
+		vtag = (vtag << VR_TXSTAT_PQSHIFT) & VR_TXSTAT_PQMASK;
+		vr_status |= vtag;
+		vr_ctl |= htole32(VR_TXCTL_INSERTTAG);
+	}
+#endif
+
+	/*
+	 * We only want TX completion interrupts on every Nth packet.
+	 * We need to set VR_TXNEXT_INTDISABLE on every descriptor except
+	 * for the last discriptor of every Nth packet, where we set
+	 * VR_TXCTL_FINT.  The former is in the specs for only some chips.
+	 * present: VT6102 VT6105M VT8235M
+	 * not present: VT86C100 6105LOM
+	 */
+	if (++sc->vr_cdata.vr_tx_pkts % VR_TX_INTR_THRESH != 0 &&
+	    sc->vr_quirks & VR_Q_INTDISABLE)
+		intdisable = VR_TXNEXT_INTDISABLE;
+
 	if (m_new != NULL) {
 		m_freem(m_head);
 
@@ -1238,7 +1294,7 @@ vr_encap(struct vr_softc *sc, struct vr_chain **cp, struct mbuf *m_head)
 			f->vr_ctl |= htole32(VR_TXCTL_FIRSTFRAG);
 		f->vr_status = htole32(vr_status);
 		f->vr_data = htole32(txmap->dm_segs[i].ds_addr);
-		f->vr_next = htole32(c->vr_nextdesc->vr_paddr);
+		f->vr_next = htole32(c->vr_nextdesc->vr_paddr | intdisable);
 		sc->vr_cdata.vr_tx_cnt++;
 	}
 
@@ -1250,12 +1306,15 @@ vr_encap(struct vr_softc *sc, struct vr_chain **cp, struct mbuf *m_head)
 		    VR_TXCTL_TLINK | vr_ctl);
 		f->vr_status = htole32(vr_status);
 		f->vr_data = htole32(sc->sc_zeromap.vrm_map->dm_segs[0].ds_addr);
-		f->vr_next = htole32(c->vr_nextdesc->vr_paddr);
+		f->vr_next = htole32(c->vr_nextdesc->vr_paddr | intdisable);
 		sc->vr_cdata.vr_tx_cnt++;
 	}
 
-	/* Set EOP on the last desciptor */
-	f->vr_ctl |= htole32(VR_TXCTL_LASTFRAG | VR_TXCTL_FINT);
+	/* Set EOP on the last descriptor */
+	f->vr_ctl |= htole32(VR_TXCTL_LASTFRAG);
+
+	if (sc->vr_cdata.vr_tx_pkts % VR_TX_INTR_THRESH == 0)
+		f->vr_ctl |= htole32(VR_TXCTL_FINT);
 
 	return (0);
 }
@@ -1273,6 +1332,7 @@ vr_start(struct ifnet *ifp)
 	struct vr_softc		*sc;
 	struct mbuf		*m_head;
 	struct vr_chain		*cur_tx, *head_tx;
+	unsigned int		 queued = 0;
 
 	sc = ifp->if_softc;
 
@@ -1298,6 +1358,7 @@ vr_start(struct ifnet *ifp)
 				IF_PREPEND(&ifp->if_snd, m_head);
 			break;
 		}
+		queued++;
 
 		/* Only set ownership bit on first descriptor */
 		head_tx->vr_ptr->vr_status |= htole32(VR_TXSTAT_OWN);
@@ -1313,7 +1374,7 @@ vr_start(struct ifnet *ifp)
 #endif
 		cur_tx = cur_tx->vr_nextdesc;
 	}
-	if (sc->vr_cdata.vr_tx_cnt != 0) {
+	if (queued > 0) {
 		sc->vr_cdata.vr_tx_prod = cur_tx;
 
 		bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap.vrm_map, 0,
@@ -1395,6 +1456,9 @@ vr_init(void *xsc)
 
 	VR_CLRBIT(sc, VR_TXCFG, VR_TXCFG_TX_THRESH);
 	VR_SETBIT(sc, VR_TXCFG, VR_TXTHRESH_STORENFWD);
+
+	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
+		VR_SETBIT(sc, VR_TXCFG, VR_TXCFG_TXTAGEN);
 
 	/* Init circular RX list. */
 	if (vr_list_rx_init(sc) == ENOBUFS) {
@@ -1540,6 +1604,15 @@ vr_watchdog(struct ifnet *ifp)
 
 	sc = ifp->if_softc;
 
+	/*
+	 * Since we're only asking for completion interrupts only every
+	 * few packets, occasionally the watchdog will fire when we have
+	 * some TX descriptors to reclaim, so check for that first.
+	 */
+	vr_txeof(sc);
+	if (sc->vr_cdata.vr_tx_cnt == 0);
+		return;
+
 	ifp->if_oerrors++;
 	printf("%s: watchdog timeout\n", sc->sc_dev.dv_xname);
 	vr_init(sc);
@@ -1677,7 +1750,10 @@ vr_alloc_mbuf(struct vr_softc *sc, struct vr_chain_onefrag *r)
 	r->vr_mbuf = m;
 	d = r->vr_ptr;
 	d->vr_data = htole32(r->vr_map->dm_segs[0].ds_addr);
-	d->vr_ctl = htole32(VR_RXCTL | VR_RXLEN);
+	if (sc->vr_quirks & VR_Q_BABYJUMBO)
+		d->vr_ctl = htole32(VR_RXCTL | VR_RXLEN_BABYJUMBO);
+	else
+		d->vr_ctl = htole32(VR_RXCTL | VR_RXLEN);
 
 	bus_dmamap_sync(sc->sc_dmat, sc->sc_listmap.vrm_map, 0,
 	    sc->sc_listmap.vrm_map->dm_mapsize, BUS_DMASYNC_PREWRITE);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: loongson2_machdep.c,v 1.11 2011/03/31 20:37:44 miod Exp $	*/
+/*	$OpenBSD: loongson2_machdep.c,v 1.13 2013/01/16 20:28:06 miod Exp $	*/
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -38,7 +38,6 @@ boolean_t is_memory_range(paddr_t, psize_t, psize_t);
 void	loongson2e_setup(u_long, u_long);
 void	loongson2f_setup(u_long, u_long);
 void	loongson2f_setup_window(uint, uint, uint64_t, uint64_t, uint64_t, uint);
-int	loongson2f_cpuspeed(int *);
 
 /* PCI view of CPU memory */
 paddr_t loongson_dma_base = 0;
@@ -272,6 +271,29 @@ is_memory_range(paddr_t pa, psize_t len, psize_t limit)
 int
 loongson2f_cpuspeed(int *freq)
 {
-	*freq = bootcpu_hwinfo.clock / 1000000;
+	uint32_t step, val;
+
+	val = REGVAL(LOONGSON_CHIP_CONFIG0);
+	step = (val & 0x7) + 1;
+	*freq = ((bootcpu_hwinfo.clock / 8) * step) / 1000000;
+
 	return 0;
+}
+
+void
+loongson2f_setperf(int percent)
+{
+	uint32_t step, val;
+
+	step = percent * 8 / 100;
+	if (step < 2)
+		step = 2;
+
+	/*
+	 * Set clock step.
+	 */
+	val = REGVAL(LOONGSON_CHIP_CONFIG0);
+	val = (val & ~0x7) | (step - 1);
+	REGVAL(LOONGSON_CHIP_CONFIG0) = val;
+	(void)REGVAL(LOONGSON_CHIP_CONFIG0);
 }
