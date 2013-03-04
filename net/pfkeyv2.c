@@ -1,4 +1,4 @@
-/* $OpenBSD: pfkeyv2.c,v 1.127 2012/09/26 14:53:23 markus Exp $ */
+/* $OpenBSD: pfkeyv2.c,v 1.129 2013/02/26 00:28:29 sthen Exp $ */
 
 /*
  *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995
@@ -155,7 +155,7 @@ pfkeyv2_create(struct socket *socket)
 	struct pfkeyv2_socket *pfkeyv2_socket;
 
 	if (!(pfkeyv2_socket = malloc(sizeof(struct pfkeyv2_socket),
-	    M_PFKEY, M_DONTWAIT | M_ZERO)))
+	    M_PFKEY, M_NOWAIT | M_ZERO)))
 		return (ENOMEM);
 
 	pfkeyv2_socket->next = pfkeyv2_sockets;
@@ -228,7 +228,7 @@ pfkeyv2_sendmessage(void **headers, int mode, struct socket *socket,
 
 	/* ...and allocate it */
 	if (!(buffer = malloc(j + sizeof(struct sadb_msg), M_PFKEY,
-	    M_DONTWAIT))) {
+	    M_NOWAIT))) {
 		rval = ENOMEM;
 		goto ret;
 	}
@@ -391,7 +391,7 @@ pfkeyv2_policy(struct ipsec_acquire *ipa, void **headers, void **buffer)
 		return (EINVAL);
 	}
 
-	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
+	if (!(p = malloc(i, M_PFKEY, M_NOWAIT | M_ZERO))) {
 		rval = ENOMEM;
 		goto ret;
 	} else
@@ -532,11 +532,8 @@ pfkeyv2_get(struct tdb *sa, void **headers, void **buffer, int *lenp)
 	if (sa->tdb_last_used)
 		i += sizeof(struct sadb_lifetime);
 
-	if (sa->tdb_src.sa.sa_family)
-		i += sizeof(struct sadb_address) + PADUP(SA_LEN(&sa->tdb_src.sa));
-
-	if (sa->tdb_dst.sa.sa_family)
-		i += sizeof(struct sadb_address) + PADUP(SA_LEN(&sa->tdb_dst.sa));
+	i += sizeof(struct sadb_address) + PADUP(SA_LEN(&sa->tdb_src.sa));
+	i += sizeof(struct sadb_address) + PADUP(SA_LEN(&sa->tdb_dst.sa));
 
 	if (sa->tdb_proxy.sa.sa_family)
 		i += sizeof(struct sadb_address) + PADUP(SA_LEN(&sa->tdb_proxy.sa));
@@ -606,7 +603,7 @@ pfkeyv2_get(struct tdb *sa, void **headers, void **buffer, int *lenp)
 		goto ret;
 	}
 
-	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
+	if (!(p = malloc(i, M_PFKEY, M_NOWAIT | M_ZERO))) {
 		rval = ENOMEM;
 		goto ret;
 	} else
@@ -893,7 +890,7 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 		struct mbuf *packet;
 
 		if (!(freeme = malloc(sizeof(struct sadb_msg) + len, M_PFKEY,
-		    M_DONTWAIT))) {
+		    M_NOWAIT))) {
 			rval = ENOMEM;
 			goto ret;
 		}
@@ -958,7 +955,7 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 
 		/* Send a message back telling what the SA (the SPI really) is */
 		if (!(freeme = malloc(sizeof(struct sadb_sa), M_PFKEY,
-		    M_DONTWAIT | M_ZERO))) {
+		    M_NOWAIT | M_ZERO))) {
 			rval = ENOMEM;
 			goto ret;
 		}
@@ -1341,7 +1338,7 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 
 		i = sizeof(struct sadb_supported) + sizeof(ealgs);
 
-		if (!(freeme = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
+		if (!(freeme = malloc(i, M_PFKEY, M_NOWAIT | M_ZERO))) {
 			rval = ENOMEM;
 			goto ret;
 		}
@@ -1359,7 +1356,7 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 
 		i = sizeof(struct sadb_supported) + sizeof(aalgs);
 
-		if (!(freeme = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
+		if (!(freeme = malloc(i, M_PFKEY, M_NOWAIT | M_ZERO))) {
 			rval = ENOMEM;
 			goto ret;
 		}
@@ -1380,7 +1377,7 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 
 		i = sizeof(struct sadb_supported) + sizeof(calgs);
 
-		if (!(freeme = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
+		if (!(freeme = malloc(i, M_PFKEY, M_NOWAIT | M_ZERO))) {
 			rval = ENOMEM;
 			goto ret;
 		}
@@ -1713,7 +1710,7 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 			    sizeof(struct sadb_ident);
 
 			ipo->ipo_srcid = malloc(clen + sizeof(struct ipsec_ref),
-			    M_CREDENTIALS, M_DONTWAIT);
+			    M_CREDENTIALS, M_NOWAIT);
 			if (ipo->ipo_srcid == NULL) {
 				if (exists)
 					ipsec_delete_policy(ipo);
@@ -1735,7 +1732,7 @@ pfkeyv2_send(struct socket *socket, void *message, int len)
 			    sizeof(struct sadb_ident);
 
 			ipo->ipo_dstid = malloc(clen + sizeof(struct ipsec_ref),
-			    M_CREDENTIALS, M_DONTWAIT);
+			    M_CREDENTIALS, M_NOWAIT);
 			if (ipo->ipo_dstid == NULL) {
 				if (exists)
 					ipsec_delete_policy(ipo);
@@ -1927,7 +1924,7 @@ pfkeyv2_acquire(struct ipsec_policy *ipo, union sockaddr_union *gw,
 		i += sizeof(struct sadb_x_cred) + PADUP(ipo->ipo_local_auth->ref_len);
 
 	/* Allocate */
-	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
+	if (!(p = malloc(i, M_PFKEY, M_NOWAIT | M_ZERO))) {
 		rval = ENOMEM;
 		goto ret;
 	}
@@ -2190,7 +2187,7 @@ pfkeyv2_expire(struct tdb *sa, u_int16_t type)
 	    sizeof(struct sadb_address) + PADUP(SA_LEN(&sa->tdb_src.sa)) +
 	    sizeof(struct sadb_address) + PADUP(SA_LEN(&sa->tdb_dst.sa));
 
-	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
+	if (!(p = malloc(i, M_PFKEY, M_NOWAIT | M_ZERO))) {
 		rval = ENOMEM;
 		goto ret;
 	}
@@ -2384,7 +2381,7 @@ pfkeyv2_dump_policy(struct ipsec_policy *ipo, void **headers, void **buffer,
 		goto ret;
 	}
 
-	if (!(p = malloc(i, M_PFKEY, M_DONTWAIT | M_ZERO))) {
+	if (!(p = malloc(i, M_PFKEY, M_NOWAIT | M_ZERO))) {
 		rval = ENOMEM;
 		goto ret;
 	} else

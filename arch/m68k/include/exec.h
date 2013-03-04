@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.h,v 1.4 2010/07/02 19:57:14 tedu Exp $ */
+/*	$OpenBSD: exec.h,v 1.6 2013/02/09 19:21:29 miod Exp $ */
 /*	$NetBSD: exec.h,v 1.8 1994/11/21 21:33:39 gwr Exp $	*/
 
 /*
@@ -33,20 +33,6 @@
 
 #define __LDPGSZ	8192
 
-/* Relocation format. */
-struct relocation_info_m68k {
-	int r_address;			/* offset in text or data segment */
-	unsigned int r_symbolnum : 24,	/* ordinal number of add symbol */
-			 r_pcrel :  1,	/* 1 if value should be pc-relative */
-			r_length :  2,	/* log base 2 of value's width */
-			r_extern :  1,	/* 1 if need to add symbol to value */
-		       r_baserel :  1,	/* linkage table relative */
-		      r_jmptable :  1,	/* relocate to jump table */
-		      r_relative :  1,	/* load address relative */
-			  r_copy :  1;	/* run time copy */
-};
-#define relocation_info	relocation_info_m68k
-
 #define ARCH_ELFSIZE		32
 
 #define ELF_TARG_CLASS          ELFCLASS32
@@ -57,6 +43,7 @@ struct relocation_info_m68k {
 #define _NLIST_DO_ELF
 
 #define _KERN_DO_AOUT
+#define _KERN_DO_ELF
 
 #define cpu_exec_aout_makecmds(p, epp)  (ENOEXEC)
 

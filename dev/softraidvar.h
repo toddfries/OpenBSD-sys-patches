@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.119 2012/10/09 13:55:36 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.126 2013/01/18 09:39:03 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -519,6 +519,7 @@ struct sr_discipline {
 #define SR_CAP_AUTO_ASSEMBLE	0x00000002	/* Can auto assemble. */
 #define SR_CAP_REBUILD		0x00000004	/* Supports rebuild. */
 #define SR_CAP_NON_COERCED	0x00000008	/* Uses non-coerced size. */
+#define SR_CAP_REDUNDANT	0x00000010	/* Redundant copies of data. */
 
 	union {
 	    struct sr_raid0	mdd_raid0;
@@ -596,6 +597,8 @@ struct sr_discipline {
 	/* SCSI emulation */
 	struct scsi_sense_data	sd_scsi_sense;
 	int			(*sd_scsi_rw)(struct sr_workunit *);
+	void			(*sd_scsi_intr)(struct buf *);
+	void			(*sd_scsi_done)(struct sr_workunit *);
 	int			(*sd_scsi_sync)(struct sr_workunit *);
 	int			(*sd_scsi_tur)(struct sr_workunit *);
 	int			(*sd_scsi_start_stop)(struct sr_workunit *);
@@ -645,10 +648,19 @@ int			sr_ccb_alloc(struct sr_discipline *);
 void			sr_ccb_free(struct sr_discipline *);
 struct sr_ccb		*sr_ccb_get(struct sr_discipline *);
 void			sr_ccb_put(struct sr_ccb *);
+struct sr_ccb		*sr_ccb_rw(struct sr_discipline *, int, daddr64_t,
+			    daddr64_t, u_int8_t *, int, int);
+void			sr_ccb_done(struct sr_ccb *);
 int			sr_wu_alloc(struct sr_discipline *);
 void			sr_wu_free(struct sr_discipline *);
 void			*sr_wu_get(void *);
 void			sr_wu_put(void *, void *);
+void			sr_wu_init(struct sr_discipline *,
+			    struct sr_workunit *);
+void			sr_wu_enqueue_ccb(struct sr_workunit *,
+			    struct sr_ccb *);
+void			sr_wu_release_ccbs(struct sr_workunit *);
+void			sr_wu_done(struct sr_workunit *);
 
 /* misc functions */
 void			sr_info(struct sr_softc *, const char *, ...);

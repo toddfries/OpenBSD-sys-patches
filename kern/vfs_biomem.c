@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_biomem.c,v 1.20 2012/11/18 16:56:41 beck Exp $ */
+/*	$OpenBSD: vfs_biomem.c,v 1.23 2013/01/18 10:07:37 beck Exp $ */
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
  *
@@ -29,8 +29,6 @@
 vaddr_t buf_kva_start, buf_kva_end;
 int buf_needva;
 TAILQ_HEAD(,buf) buf_valist;
-
-int buf_nkvmsleep;
 
 extern struct bcachestats bcstats;
 
@@ -84,18 +82,6 @@ buf_acquire(struct buf *bp)
 }
 
 /*
- * Busy a buffer, but don't map it.
- * If it has a mapping, we keep it, but we also keep the mapping on
- * the list since we assume that it won't be used anymore.
- */
-void
-buf_acquire_unmapped(struct buf *bp)
-{
-	splassert(IPL_BIO);
-	SET(bp->b_flags, B_BUSY|B_NOTMAPPED);
-}
-
-/*
  * Acquire a buf but do not map it. Preserve any mapping it did have.
  */
 void
@@ -103,9 +89,7 @@ buf_acquire_nomap(struct buf *bp)
 {
 	splassert(IPL_BIO);
 	SET(bp->b_flags, B_BUSY);
-	if (bp->b_data == NULL)
-		SET(bp->b_flags, B_NOTMAPPED);
-	else {
+	if (bp->b_data != NULL) {
 		TAILQ_REMOVE(&buf_valist, bp, b_valist);
 		bcstats.kvaslots_avail--;
 		bcstats.busymapped++;
@@ -135,10 +119,14 @@ buf_map(struct buf *bp)
 			/*
 			 * Find some buffer we can steal the space from.
 			 */
-			while ((vbp = TAILQ_FIRST(&buf_valist)) == NULL) {
+			vbp = TAILQ_FIRST(&buf_valist);
+			while ((curproc != syncerproc &&
+			   curproc != cleanerproc &&
+			   bcstats.kvaslots_avail <= RESERVE_SLOTS) ||
+			   vbp == NULL) {
 				buf_needva++;
-				buf_nkvmsleep++;
 				tsleep(&buf_needva, PRIBIO, "buf_needva", 0);
+				vbp = TAILQ_FIRST(&buf_valist);
 			}
 			va = buf_unmap(vbp);
 		}
@@ -160,8 +148,6 @@ buf_map(struct buf *bp)
 	}
 
 	bcstats.busymapped++;
-
-	CLR(bp->b_flags, B_NOTMAPPED);
 }
 
 void
@@ -169,7 +155,6 @@ buf_release(struct buf *bp)
 {
 
 	KASSERT(bp->b_flags & B_BUSY);
-	KASSERT((bp->b_data != NULL) || (bp->b_flags & B_NOTMAPPED));
 	splassert(IPL_BIO);
 
 	if (bp->b_data) {
@@ -177,11 +162,11 @@ buf_release(struct buf *bp)
 		TAILQ_INSERT_TAIL(&buf_valist, bp, b_valist);
 		bcstats.kvaslots_avail++;
 		if (buf_needva) {
-			buf_needva--;
-			wakeup_one(&buf_needva);
+			buf_needva=0;
+			wakeup(&buf_needva);
 		}
 	}
-	CLR(bp->b_flags, B_BUSY|B_NOTMAPPED);
+	CLR(bp->b_flags, B_BUSY);
 }
 
 /*
@@ -222,8 +207,13 @@ buf_dealloc_mem(struct buf *bp)
 	if (!(bp->b_flags & B_BUSY)) {		/* XXX - need better test */
 		TAILQ_REMOVE(&buf_valist, bp, b_valist);
 		bcstats.kvaslots_avail--;
-	} else
+	} else {
 		CLR(bp->b_flags, B_BUSY);
+		if (buf_needva) {
+			buf_needva = 0;
+			wakeup(&buf_needva);
+		}
+	}
 	SET(bp->b_flags, B_RELEASED);
 	TAILQ_INSERT_HEAD(&buf_valist, bp, b_valist);
 	bcstats.kvaslots_avail++;

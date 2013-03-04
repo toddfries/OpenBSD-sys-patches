@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.81 2012/11/17 23:08:22 beck Exp $	*/
+/*	$OpenBSD: buf.h,v 1.83 2013/01/18 08:52:04 beck Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -234,13 +234,12 @@ struct buf {
 #define	B_SCANNED	0x00100000	/* Block already pushed during sync */
 #define	B_PDAEMON	0x00200000	/* I/O started by pagedaemon */
 #define	B_RELEASED	0x00400000	/* free this buffer after its kvm */
-#define	B_NOTMAPPED	0x00800000	/* BUSY, but not necessarily mapped */
 
 #define	B_BITS	"\20\001AGE\002NEEDCOMMIT\003ASYNC\004BAD\005BUSY" \
     "\006CACHE\007CALL\010DELWRI\011DONE\012EINTR\013ERROR" \
     "\014INVAL\015NOCACHE\016PHYS\017RAW\020READ" \
     "\021WANTED\022WRITEINPROG\023XXX(FORMAT)\024DEFERRED" \
-    "\025SCANNED\026DAEMON\027RELEASED\030NOTMAPPED"
+    "\025SCANNED\026DAEMON\027RELEASED"
 
 /*
  * This structure describes a clustered I/O.  It is stored in the b_saveaddr
@@ -281,6 +280,15 @@ struct cluster_info {
 
 #ifdef _KERNEL
 __BEGIN_DECLS
+/* Kva slots (of size MAXPHYS) reserved for syncer and cleaner. */
+#define RESERVE_SLOTS 4
+/* Buffer cache pages reserved for syncer and cleaner. */
+#define RESERVE_PAGES (RESERVE_SLOTS * MAXPHYS / PAGE_SIZE)
+/* Minimum size of the buffer cache, in pages. */
+#define BCACHE_MIN (RESERVE_PAGES * 2)
+#define UNCLEAN_PAGES (bcstats.numbufpages - bcstats.numcleanpages)
+
+extern struct proc *cleanerproc;
 extern long bufpages;		/* Max number of pages for buffers' data */
 extern struct pool bufpool;
 extern struct bufhead bufhead;

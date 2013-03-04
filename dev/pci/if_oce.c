@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_oce.c,v 1.67 2012/11/27 18:08:21 gsoares Exp $	*/
+/*	$OpenBSD: if_oce.c,v 1.69 2013/01/17 00:48:04 henning Exp $	*/
 
 /*
  * Copyright (c) 2012 Mike Belopuhov
@@ -68,8 +68,6 @@
 #include <sys/queue.h>
 #include <sys/timeout.h>
 #include <sys/pool.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -461,7 +459,7 @@ static inline void *
 	oce_ring_next(struct oce_ring *);
 struct oce_pkt *
 	oce_pkt_alloc(struct oce_softc *, size_t size, int nsegs,
-	    int maxsegs);
+	    int maxsegsz);
 void	oce_pkt_free(struct oce_softc *, struct oce_pkt *);
 static inline struct oce_pkt *
 	oce_pkt_get(struct oce_pkt_list *);
@@ -505,12 +503,6 @@ int	oce_stats_be3(struct oce_softc *, uint64_t *, uint64_t *);
 int	oce_stats_xe(struct oce_softc *, uint64_t *, uint64_t *);
 
 struct pool *oce_pkt_pool;
-extern struct uvm_constraint_range no_constraint;
-const struct kmem_pa_mode kp_contig = {
-	.kp_constraint = &no_constraint,
-	.kp_maxseg = 1,
-	.kp_zero = 1
-};
 
 struct cfdriver oce_cd = {
 	NULL, "oce", DV_IFNET
@@ -605,7 +597,6 @@ oce_attach(struct device *parent, struct device *self, void *aux)
 		}
 		pool_init(oce_pkt_pool, sizeof(struct oce_pkt), 0, 0, 0,
 		    "ocepkts", NULL);
-		pool_set_constraints(oce_pkt_pool, &kp_contig);
 	}
 
 	/* We allocate a single interrupt resource */
@@ -1782,6 +1773,7 @@ oce_get_buf(struct oce_rq *rq)
 	}
 
 	pkt->mbuf->m_len = pkt->mbuf->m_pkthdr.len = MCLBYTES;
+	m_adj(pkt->mbuf, ETHER_ALIGN);
 
 	if (bus_dmamap_load_mbuf(sc->sc_dmat, pkt->map, pkt->mbuf,
 	    BUS_DMA_NOWAIT)) {
@@ -2633,14 +2625,14 @@ oce_ring_next(struct oce_ring *ring)
 }
 
 struct oce_pkt *
-oce_pkt_alloc(struct oce_softc *sc, size_t size, int nsegs, int maxsegs)
+oce_pkt_alloc(struct oce_softc *sc, size_t size, int nsegs, int maxsegsz)
 {
 	struct oce_pkt *pkt;
 
-	if ((pkt = pool_get(oce_pkt_pool, PR_NOWAIT)) == NULL)
+	if ((pkt = pool_get(oce_pkt_pool, PR_NOWAIT | PR_ZERO)) == NULL)
 		return (NULL);
 
-	if (bus_dmamap_create(sc->sc_dmat, size, nsegs, maxsegs, 0,
+	if (bus_dmamap_create(sc->sc_dmat, size, nsegs, maxsegsz, 0,
 	    BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW, &pkt->map)) {
 		pool_put(oce_pkt_pool, pkt);
 		return (NULL);
@@ -3087,8 +3079,8 @@ oce_config_rss(struct oce_softc *sc, int enable)
 	/*
 	 * Initialize the RSS CPU indirection table.
 	 *
-	 * The table is used to choose the queue to place incomming packets.
-	 * Incomming packets are hashed.  The lowest bits in the hash result
+	 * The table is used to choose the queue to place incoming packets.
+	 * Incoming packets are hashed.  The lowest bits in the hash result
 	 * are used as the index into the CPU indirection table.
 	 * Each entry in the table contains the RSS CPU-ID returned by the NIC
 	 * create.  Based on the CPU ID, the receive completion is routed to

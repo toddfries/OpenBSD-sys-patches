@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.267 2012/08/16 09:31:53 mikeb Exp $ */
+/* $OpenBSD: if_em.c,v 1.269 2013/01/27 04:18:02 brad Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -792,9 +792,9 @@ em_init(void *arg)
 		break;
 	case em_ich9lan:
 	case em_ich10lan:
-	case em_pchlan:
 		pba = E1000_PBA_10K;
 		break;
+	case em_pchlan:
 	case em_pch2lan:
 		pba = E1000_PBA_26K;
 		break;
@@ -1485,7 +1485,7 @@ em_update_link_status(struct em_softc *sc)
 			}
 			sc->link_active = 1;
 			sc->smartspeed = 0;
-			ifp->if_baudrate = sc->link_speed * 1000000;
+			ifp->if_baudrate = IF_Mbps(sc->link_speed);
 		}
 		if (!LINK_STATE_IS_UP(ifp->if_link_state)) {
 			if (sc->link_duplex == FULL_DUPLEX)

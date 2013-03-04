@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath_sym.c,v 1.7 2012/03/23 13:46:47 claudio Exp $ */
+/*	$OpenBSD: mpath_sym.c,v 1.8 2013/02/04 01:27:55 dlg Exp $ */
 
 /*
  * Copyright (c) 2010 David Gwynne <dlg@openbsd.org>
@@ -90,7 +90,8 @@ struct sym_device sym_devices[] = {
 /*	  " vendor "  "     device     " */
 /*	  "01234567"  "0123456789012345" */
 	{ "SEAGATE ", "ST" },
-	{ "FUJITSU ", "MBD" }
+	{ "FUJITSU ", "MBD" },
+	{ "FUJITSU ", "MAP" }
 };
 
 struct sym_device asym_devices[] = {
@@ -98,6 +99,7 @@ struct sym_device asym_devices[] = {
 /*	  "01234567"  "0123456789012345" */
 	{ "EQLOGIC", "100E-00" }, /* XXX move to mpath_t10 once implemented */
 	{ "DELL    ", "MD1220          " },
+	{ "SUN     ", "StorEdge 3510F D" },
 	{ "Transtec", "PROVIGO1100" },
 	{ "NetBSD", "NetBSD iSCSI" }
 };

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.142 2012/10/22 17:27:19 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.146 2013/02/15 22:58:17 kettenis Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -330,14 +330,11 @@ setregs(p, pack, stack, retval)
 	}
 	bzero((caddr_t)tf, sizeof *tf);
 	tf->tf_tstate = tstate;
-	/* %g4 needs to point to the start of the data segment */
-	tf->tf_global[4] = 0; 
 	tf->tf_pc = pack->ep_entry & ~3;
 	tf->tf_npc = tf->tf_pc + 4;
-	tf->tf_global[2] = tf->tf_global[7] = tf->tf_pc;
+	tf->tf_global[2] = tf->tf_pc;
 	stack -= sizeof(struct rwindow);
 	tf->tf_out[6] = stack - STACK_OFFSET;
-	tf->tf_out[7] = 0;
 #ifdef NOTDEF_DEBUG
 	printf("setregs: setting tf %p sp %p pc %p\n", (long)tf, 
 	       (long)tf->tf_out[6], (long)tf->tf_pc);
@@ -430,26 +427,21 @@ sendsig(catcher, sig, mask, code, type, val)
 	struct sigacts *psp = p->p_sigacts;
 	struct sigframe *fp;
 	struct trapframe64 *tf;
-	vaddr_t addr; 
-	struct rwindow *oldsp, *newsp;
+	vaddr_t addr, oldsp, newsp;
 	struct sigframe sf;
-	int onstack;
 
 	tf = p->p_md.md_tf;
-	oldsp = (struct rwindow *)(u_long)(tf->tf_out[6] + STACK_OFFSET);
+	oldsp = tf->tf_out[6] + STACK_OFFSET;
 
 	/*
 	 * Compute new user stack addresses, subtract off
 	 * one signal frame, and align.
 	 */
-	onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
-
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !onstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(oldsp) && (psp->ps_sigonstack & sigmask(sig)))
 		fp = (struct sigframe *)((caddr_t)p->p_sigstk.ss_sp +
 		    p->p_sigstk.ss_size);
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		fp = (struct sigframe *)oldsp;
 	/* Allocate an aligned sigframe */
 	fp = (struct sigframe *)((long)(fp - 1) & ~0x0f);
@@ -459,13 +451,13 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * and then copy it out.  We probably ought to just build it
 	 * directly in user space....
 	 */
+	bzero(&sf, sizeof(sf));
 	sf.sf_signo = sig;
 	sf.sf_sip = NULL;
 
 	/*
 	 * Build the signal context to be used by sigreturn.
 	 */
-	sf.sf_sc.sc_onstack = onstack;
 	sf.sf_sc.sc_mask = mask;
 	/* Save register context. */
 	sf.sf_sc.sc_sp = (long)tf->tf_out[6];
@@ -489,7 +481,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * joins seamlessly with the frame it was in when the signal occurred,
 	 * so that the debugger and _longjmp code can back up through it.
 	 */
-	newsp = (struct rwindow *)((vaddr_t)fp - sizeof(struct rwindow));
+	newsp = (vaddr_t)fp - sizeof(struct rwindow);
 	write_user_windows();
 
 	/* XXX do not copyout siginfo if not needed */
@@ -522,7 +514,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	tf->tf_global[1] = (vaddr_t)catcher;
 	tf->tf_pc = addr;
 	tf->tf_npc = addr + 4;
-	tf->tf_out[6] = (vaddr_t)newsp - STACK_OFFSET;
+	tf->tf_out[6] = newsp - STACK_OFFSET;
 }
 
 /*
@@ -591,12 +583,6 @@ sys_sigreturn(p, v, retval)
 	tf->tf_global[1] = (u_int64_t)scp->sc_g1;
 	tf->tf_out[0] = (u_int64_t)scp->sc_o0;
 	tf->tf_out[6] = (u_int64_t)scp->sc_sp;
-
-	/* Restore signal stack. */
-	if (sc.sc_onstack & SS_ONSTACK)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 
 	/* Restore signal mask. */
 	p->p_sigmask = scp->sc_mask & ~sigcantmask;
@@ -1595,8 +1581,6 @@ paddr_t sparc_bus_mmap(bus_space_tag_t, bus_space_tag_t, bus_addr_t, off_t,
     int, int);
 void *sparc_mainbus_intr_establish(bus_space_tag_t, bus_space_tag_t, int, int,
     int, int (*)(void *), void *, const char *);
-void sparc_bus_barrier(bus_space_tag_t, bus_space_tag_t,  bus_space_handle_t,
-    bus_size_t, bus_size_t, int);
 int sparc_bus_alloc(bus_space_tag_t, bus_space_tag_t, bus_addr_t, bus_addr_t,
     bus_size_t, bus_size_t, bus_size_t, int, bus_addr_t *,
     bus_space_handle_t *);
@@ -1851,19 +1835,6 @@ sparc_mainbus_intr_establish(bus_space_tag_t t, bus_space_tag_t t0, int number,
 	return (ih);
 }
 
-void
-sparc_bus_barrier(bus_space_tag_t t, bus_space_tag_t t0, bus_space_handle_t h,
-    bus_size_t offset, bus_size_t size, int flags)
-{
-	/* 
-	 * We have lots of alternatives depending on whether we're
-	 * synchronizing loads with loads, loads with stores, stores
-	 * with loads, or stores with stores.  The only ones that seem
-	 * generic are #Sync and #MemIssue.  I'll use #Sync for safety.
-	 */
-	membar(Sync);
-}
-
 int
 sparc_bus_alloc(bus_space_tag_t t, bus_space_tag_t t0, bus_addr_t rs,
     bus_addr_t re, bus_size_t s, bus_size_t a, bus_size_t b, int f,
@@ -1892,7 +1863,6 @@ static const struct sparc_bus_space_tag _mainbus_space_tag = {
 	sparc_bus_protect,		/* bus_space_protect */
 	sparc_bus_unmap,		/* bus_space_unmap */
 	sparc_bus_subregion,		/* bus_space_subregion */
-	sparc_bus_barrier,		/* bus_space_barrier */
 	sparc_bus_mmap,			/* bus_space_mmap */
 	sparc_mainbus_intr_establish,	/* bus_intr_establish */
 	sparc_bus_addr			/* bus_space_addr */
