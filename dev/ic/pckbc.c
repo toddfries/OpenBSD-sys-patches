@@ -1,4 +1,4 @@
-/* $OpenBSD: pckbc.c,v 1.31 2012/10/17 19:16:10 deraadt Exp $ */
+/* $OpenBSD: pckbc.c,v 1.33 2013/02/15 08:49:51 mpi Exp $ */
 /* $NetBSD: pckbc.c,v 1.5 2000/06/09 04:58:35 soda Exp $ */
 
 /*
@@ -46,6 +46,12 @@
 
 #if NPCKBD > 0
 #include <dev/pckbc/pckbdvar.h>
+#endif
+
+#ifdef PCKBCDEBUG
+#define DPRINTF(x...)	do { printf(x); } while (0);
+#else
+#define DPRINTF(x...)
 #endif
 
 /* descriptor for one device command */
@@ -102,9 +108,10 @@ int pckbcintr_internal(struct pckbc_internal *, struct pckbc_softc *);
 
 const char *pckbc_slot_names[] = { "kbd", "aux" };
 
-#define KBC_DEVCMD_ACK 0xfa
-#define KBC_DEVCMD_RESEND 0xfe
-#define KBC_DEVCMD_BAT 0xaa
+#define KBC_DEVCMD_ACK		0xfa
+#define KBC_DEVCMD_RESEND	0xfe
+#define KBC_DEVCMD_BAT_DONE	0xaa
+#define KBC_DEVCMD_BAT_FAIL	0xfc
 
 #define	KBD_DELAY	DELAY(8)
 
@@ -147,16 +154,12 @@ pckbc_poll_data1(bus_space_tag_t iot, bus_space_handle_t ioh_d,
 			c = bus_space_read_1(iot, ioh_d, 0);
 			if (checkaux && (stat & 0x20)) { /* aux data */
 				if (slot != PCKBC_AUX_SLOT) {
-#ifdef PCKBCDEBUG
-					printf("lost aux 0x%x\n", c);
-#endif
+					DPRINTF("lost aux 0x%x\n", c);
 					continue;
 				}
 			} else {
 				if (slot == PCKBC_AUX_SLOT) {
-#ifdef PCKBCDEBUG
-					printf("lost kbd 0x%x\n", c);
-#endif
+					DPRINTF("lost kbd 0x%x\n", c);
 					continue;
 				}
 			}
@@ -371,9 +374,7 @@ pckbc_attach(struct pckbc_softc *sc, int flags)
 			bus_space_write_1(iot, ioh_d, 0, 0x5a);
 			res = pckbc_poll_data1(iot, ioh_d, ioh_c,
 			    PCKBC_AUX_SLOT, 1);
-#ifdef PCKBCDEBUG
-			printf("kbc: aux echo: %x\n", res);
-#endif
+			DPRINTF("kbc: aux echo: %x\n", res);
 		}
 	}
 
@@ -385,9 +386,7 @@ pckbc_attach(struct pckbc_softc *sc, int flags)
 		 * We are satisfied if there is anything in the
 		 * aux output buffer.
 		 */
-#ifdef PCKBCDEBUG
-		printf("kbc: aux echo: %x\n", res);
-#endif
+		DPRINTF("kbc: aux echo: %x\n", res);
 		t->t_haveaux = 1;
 		if (pckbc_attach_slot(sc, PCKBC_AUX_SLOT, 0))
 			cmdbits |= KC8_MENABLE;
@@ -587,39 +586,32 @@ pckbc_poll_cmd1(struct pckbc_internal *t, pckbc_slot_t slot,
 				break;
 		}
 
-		if (c == KBC_DEVCMD_ACK) {
+		switch (c) {
+		case KBC_DEVCMD_ACK:
 			cmd->cmdidx++;
 			continue;
-		}
 		/*
 		 * Some legacy free PCs keep returning Basic Assurance Test
 		 * (BAT) instead of something usable, so fail gracefully.
 		 */
-		if (c == KBC_DEVCMD_RESEND || c == KBC_DEVCMD_BAT) {
-#ifdef PCKBCDEBUG
-			printf("pckbc_cmd: %s\n",
+		case KBC_DEVCMD_RESEND:
+		case KBC_DEVCMD_BAT_DONE:
+		case KBC_DEVCMD_BAT_FAIL:
+			DPRINTF("pckbc_cmd: %s\n",
 			    c == KBC_DEVCMD_RESEND ? "RESEND": "BAT");
-#endif
 			if (cmd->retries++ < 5)
 				continue;
-			else {
-#ifdef PCKBCDEBUG
-				printf("pckbc: cmd failed\n");
-#endif
-				cmd->status = ENXIO;
-				return;
-			}
-		}
-		if (c == -1) {
-#ifdef PCKBCDEBUG
-			printf("pckbc_cmd: timeout\n");
-#endif
+
+			DPRINTF("pckbc_cmd: cmd failed\n");
+			cmd->status = ENXIO;
+			return;
+		case -1:
+			DPRINTF("pckbc_cmd: timeout\n");
 			cmd->status = EIO;
 			return;
+		default:
+			DPRINTF("pckbc_cmd: lost 0x%x\n", c);
 		}
-#ifdef PCKBCDEBUG
-		printf("pckbc_cmd: lost 0x%x\n", c);
-#endif
 	}
 
 	while (cmd->responseidx < cmd->responselen) {
@@ -634,9 +626,7 @@ pckbc_poll_cmd1(struct pckbc_internal *t, pckbc_slot_t slot,
 				break;
 		}
 		if (c == -1) {
-#ifdef PCKBCDEBUG
-			printf("pckbc_cmd: no data\n");
-#endif
+			DPRINTF("pckbc_cmd: no data\n");
 			cmd->status = ETIMEDOUT;
 			return;
 		} else
@@ -818,9 +808,7 @@ pckbc_cmdresponse(struct pckbc_internal *t, pckbc_slot_t slot, u_char data)
 				/* try again last command */
 				goto restart;
 			} else {
-#ifdef PCKBCDEBUG
-				printf("pckbc: cmd failed\n");
-#endif
+				DPRINTF("pckbc: cmd failed\n");
 				cmd->status = ENXIO;
 				/* dequeue */
 			}
