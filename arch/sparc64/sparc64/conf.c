@@ -117,6 +117,7 @@ cdev_decl(pci);
 #include "hotplug.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -289,7 +290,8 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(1,diskmap),	/* 130: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 131: pppx */
 	cdev_gen_init(NVLDCP,vldcp),	/* 132: vldcp */
-	cdev_vdsp_init(NVDSP,vdsp)	/* 133: vdsp */
+	cdev_vdsp_init(NVDSP,vdsp),	/* 133: vdsp */
+	cdev_fuse_init(NFUSE, fuse)	/* 134: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 

@@ -111,6 +111,7 @@ cdev_decl(fd);
 #include "vscsi.h"
 #include "pppx.h"
 #include "hotplug.h"
+#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -171,6 +172,7 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(1,diskmap),	/* 54: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 55: pppx */
 	cdev_hotplug_init(NHOTPLUG,hotplug),	/* 56: devices hot plugging */
+	cdev_fuse_init(NFUSE, fuse),	/* 57: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 

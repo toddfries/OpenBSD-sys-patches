@@ -509,6 +509,13 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_type_mmap((*))) enodev }
 
+/* open, close, read, write, poll, ioctl */
+#define cdev_fuse_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
+	dev_init(c,n,write), dev_init(c,n,ioctl), \
+	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
+	(dev_type_mmap((*))) enodev }
+
 #endif
 
 /*
@@ -657,6 +664,7 @@ cdev_decl(urio);
 cdev_decl(hotplug);
 cdev_decl(gpio);
 cdev_decl(amdmsr);
+cdev_decl(fuse);
 
 #endif
 

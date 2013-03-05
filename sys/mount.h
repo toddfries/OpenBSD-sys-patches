@@ -258,6 +258,15 @@ struct procfs_args {
 #define PROCFS_ARGSVERSION      1
 #define PROCFSMNT_LINUXCOMPAT   0x01
 
+/*
+ * Arguments to mount fusefs filesystems
+ */
+struct fusefs_args {
+	char *name;
+	char *url;
+	int fd;
+	int flags;
+};
 
 /*
  * file system statistics
@@ -325,6 +334,7 @@ struct statfs {
 #define	MOUNT_NCPFS	"ncpfs"		/* NetWare Network File System */
 #define	MOUNT_NTFS	"ntfs"		/* NTFS */
 #define	MOUNT_UDF	"udf"		/* UDF */
+#define MOUNT_FUSEFS	"fuse"		/* FUSE */
 
 /*
  * Structure per mounted file system.  Each mounted file system has an
