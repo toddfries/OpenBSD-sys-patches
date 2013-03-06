@@ -175,7 +175,6 @@ cdev_decl(dl);
 #include "vscsi.h"
 #include "pppx.h"
 #include "audio.h"
-#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -261,7 +260,6 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(1,diskmap),	/* 79: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 80: pppx */
 	cdev_audio_init(NAUDIO,audio),	/* 81: /dev/audio */
-	cdev_fuse_init(NFUSE, fuse),	/* 82: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 
