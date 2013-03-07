@@ -31,14 +31,14 @@ struct fuse_filehandle {
 };
 
 struct fuse_node {
-    LIST_ENTRY(fuse_node) i_hash; 	/* Hash chain */
-    struct vnode *i_vnode;		/* vnode associated with this inode */
-    struct lockf *i_lockf;		/* Head of byte-level lock list. */
-    struct lock i_lock;    		/* node lock */
-    ino_t i_number;			/* the identity of the inode */
-    int i_fd;				/* fd of fuse session */
-    
-    struct fuse_mnt *i_mnt;		/* filesystem associated with this inode */
+    LIST_ENTRY(fuse_node) i_hash;    /* Hash chain */
+    struct vnode *i_vnode;        /* vnode associated with this inode */
+    struct lockf *i_lockf;        /* Head of byte-level lock list. */
+    struct lock i_lock;        /* node lock */
+    ino_t i_number;            /* the identity of the inode */
+    int i_fd;            /* fd of fuse session */
+
+    struct fuse_mnt *i_mnt;        /* fs associated with this inode */
     uint64_t parent;
 
     /** I/O **/
@@ -59,8 +59,8 @@ extern u_long fusehash;
 
 void fusefs_ihashinit(void);
 struct vnode *fusefs_ihashget(int, ino_t);
-int fusefs_ihashins(struct fuse_node *ip);
-void fusefs_ihashrem(struct fuse_node *ip);
+int fusefs_ihashins(struct fuse_node *);
+void fusefs_ihashrem(struct fuse_node *);
 #define ITOV(ip) ((ip)->i_vnode)
 #define VTOI(vp) ((struct fuse_node *)(vp)->v_data)
 

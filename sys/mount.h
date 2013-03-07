@@ -262,10 +262,10 @@ struct procfs_args {
  * Arguments to mount fusefs filesystems
  */
 struct fusefs_args {
-	char *name;
-	char *url;
-	int fd;
-	int flags;
+    char *name;
+    char *url;
+    int fd;
+    int flags;
 };
 
 /*

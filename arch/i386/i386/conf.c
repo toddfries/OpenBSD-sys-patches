@@ -185,7 +185,6 @@ cdev_decl(pci);
 #include "amdmsr.h"
 #include "vscsi.h"
 #include "pppx.h"
-#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -294,7 +293,6 @@ struct cdevsw	cdevsw[] =
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 90: vscsi */
 	cdev_disk_init(1,diskmap),	/* 91: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),     /* 92: pppx */
-	cdev_fuse_init(NFUSE, fuse),	/* 93: fuse */ 
 };
 int	nchrdev = nitems(cdevsw);
 
