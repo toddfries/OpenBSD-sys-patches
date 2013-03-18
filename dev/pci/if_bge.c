@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.320 2013/03/04 01:33:18 dlg Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.324 2013/03/17 10:17:54 brad Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -301,7 +301,9 @@ const struct pci_matchid bge_devices[] = {
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5906M },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57760 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57761 },
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57762 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57765 },
+	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57766 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57780 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57781 },
 	{ PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57785 },
@@ -959,6 +961,7 @@ bge_miibus_readreg(struct device *dev, int phy, int reg)
 
 	CSR_WRITE_4(sc, BGE_MI_COMM, BGE_MICMD_READ|BGE_MICOMM_BUSY|
 	    BGE_MIPHY(phy)|BGE_MIREG(reg));
+	CSR_READ_4(sc, BGE_MI_COMM); /* force write */
 
 	for (i = 0; i < 200; i++) {
 		delay(1);
@@ -1016,6 +1019,7 @@ bge_miibus_writereg(struct device *dev, int phy, int reg, int val)
 
 	CSR_WRITE_4(sc, BGE_MI_COMM, BGE_MICMD_WRITE|BGE_MICOMM_BUSY|
 	    BGE_MIPHY(phy)|BGE_MIREG(reg)|val);
+	CSR_READ_4(sc, BGE_MI_COMM); /* force write */
 
 	for (i = 0; i < 200; i++) {
 		delay(1);
@@ -3499,13 +3503,38 @@ bge_stats_update_regs(struct bge_softc *sc)
 {
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 
-	ifp->if_collisions += CSR_READ_4(sc, BGE_MAC_STATS +
+	sc->bge_tx_collisions += CSR_READ_4(sc, BGE_MAC_STATS +
 	    offsetof(struct bge_mac_stats_regs, etherStatsCollisions));
 
-	sc->bge_rx_discards += CSR_READ_4(sc, BGE_RXLP_LOCSTAT_IFIN_DROPS);
-	sc->bge_rx_inerrors += CSR_READ_4(sc, BGE_RXLP_LOCSTAT_IFIN_ERRORS);
 	sc->bge_rx_overruns += CSR_READ_4(sc, BGE_RXLP_LOCSTAT_OUT_OF_BDS);
 
+	/*
+	 * XXX
+	 * Unlike other controllers, BGE_RXLP_LOCSTAT_IFIN_DROPS
+	 * counter of BCM5717, BCM5718, BCM5719 A0 and BCM5720 A0
+	 * includes number of unwanted multicast frames. This comes
+	 * from silicon bug and known workaround to get rough(not
+	 * exact) counter is to enable interrupt on MBUF low water
+	 * attention. This can be accomplished by setting
+	 * BGE_HCCMODE_ATTN bit of BGE_HCC_MODE,
+	 * BGE_BMANMODE_LOMBUF_ATTN bit of BGE_BMAN_MODE and
+	 * BGE_MODECTL_FLOWCTL_ATTN_INTR bit of BGE_MODE_CTL.
+	 * However that change would generate more interrupts and
+	 * there are still possibilities of losing multiple frames
+	 * during BGE_MODECTL_FLOWCTL_ATTN_INTR interrupt handling.
+	 * Given that the workaround still would not get correct
+	 * counter I don't think it's worth to implement it. So
+	 * ignore reading the counter on controllers that have the
+	 * silicon bug.
+	 */
+	if (BGE_ASICREV(sc->bge_chipid) != BGE_ASICREV_BCM5717 &&
+	    sc->bge_chipid != BGE_CHIPID_BCM5719_A0 &&
+	    sc->bge_chipid != BGE_CHIPID_BCM5720_A0)
+		sc->bge_rx_discards += CSR_READ_4(sc, BGE_RXLP_LOCSTAT_IFIN_DROPS);
+
+	sc->bge_rx_inerrors += CSR_READ_4(sc, BGE_RXLP_LOCSTAT_IFIN_ERRORS);
+
+	ifp->if_collisions = sc->bge_tx_collisions;
 	ifp->if_ierrors = sc->bge_rx_discards + sc->bge_rx_inerrors +
 	    sc->bge_rx_overruns;
 }
@@ -3524,17 +3553,15 @@ bge_stats_update(struct bge_softc *sc)
 	ifp->if_collisions += (u_int32_t)(cnt - sc->bge_tx_collisions);
 	sc->bge_tx_collisions = cnt;
 
+	cnt = READ_STAT(sc, stats, nicNoMoreRxBDs.bge_addr_lo);
+	ifp->if_ierrors += (uint32_t)(cnt - sc->bge_rx_overruns);
+	sc->bge_rx_overruns = cnt;
+	cnt = READ_STAT(sc, stats, ifInErrors.bge_addr_lo);
+	ifp->if_ierrors += (uint32_t)(cnt - sc->bge_rx_inerrors);
+	sc->bge_rx_inerrors = cnt;
 	cnt = READ_STAT(sc, stats, ifInDiscards.bge_addr_lo);
 	ifp->if_ierrors += (u_int32_t)(cnt - sc->bge_rx_discards);
 	sc->bge_rx_discards = cnt;
-
-	cnt = READ_STAT(sc, stats, ifInErrors.bge_addr_lo);
-	ifp->if_ierrors += (u_int32_t)(cnt - sc->bge_rx_inerrors);
-	sc->bge_rx_inerrors = cnt;
-
-	cnt = READ_STAT(sc, stats, nicNoMoreRxBDs.bge_addr_lo);
-	ifp->if_ierrors += (u_int32_t)(cnt - sc->bge_rx_overruns);
-	sc->bge_rx_overruns = cnt;
 
 	cnt = READ_STAT(sc, stats, txstats.ifOutDiscards.bge_addr_lo);
 	ifp->if_oerrors += (u_int32_t)(cnt - sc->bge_tx_discards);
@@ -4021,7 +4048,6 @@ bge_ifmedia_upd(struct ifnet *ifp)
 					CSR_WRITE_4(sc, BGE_SGDIG_CFG, sgdig);
 				}
 			}
-			DELAY(40);
 			break;
 		case IFM_1000_SX:
 			if ((ifm->ifm_media & IFM_GMASK) == IFM_FDX) {
@@ -4031,6 +4057,7 @@ bge_ifmedia_upd(struct ifnet *ifp)
 				BGE_SETBIT(sc, BGE_MAC_MODE,
 				    BGE_MACMODE_HALF_DUPLEX);
 			}
+			DELAY(40);
 			break;
 		default:
 			return (EINVAL);
