@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.68 2012/04/06 15:10:39 jsing Exp $	*/
+/*	$OpenBSD: conf.c,v 1.70 2013/03/15 09:10:52 ratchov Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -54,6 +54,7 @@ bdev_decl(fd);
 #include "rd.h"
 #include "bktr.h"
 #include "radio.h"
+#include "fuse.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -97,8 +98,6 @@ cdev_decl(com);
 #include "wsmux.h"
 #include "midi.h"
 cdev_decl(midi);
-#include "sequencer.h"
-cdev_decl(music);
 
 #include "spkr.h"
 cdev_decl(spkr);
@@ -111,10 +110,6 @@ cdev_decl(wd);
 cdev_decl(fd);
 #include "cy.h"
 cdev_decl(cy);
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 #include "ksyms.h"
 
 /* USB Devices */
@@ -136,6 +131,7 @@ cdev_decl(pci);
 #include "hotplug.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -181,7 +177,7 @@ struct cdevsw	cdevsw[] =
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 39: Kernel symbols device */
 	cdev_spkr_init(NSPKR,spkr),	/* 40: PC speaker */
 	cdev_midi_init(NMIDI,midi),     /* 41: MIDI I/O */
-        cdev_midi_init(NSEQUENCER,sequencer),   /* 42: sequencer I/O */
+        cdev_notdef(),   		/* 42 was: sequencer I/O */
 	cdev_notdef(),			/* 43 was: RAIDframe disk driver */
 	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_usb_init(NUSB,usb),	/* 45: USB controller */
@@ -190,11 +186,7 @@ struct cdevsw	cdevsw[] =
 	cdev_usbdev_init(NUGEN,ugen),	/* 48: USB generic driver */
 	cdev_tty_init(NUCOM, ucom),	/* 49: USB tty */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 #ifdef USER_PCICONF
 	cdev_pci_init(NPCI,pci),	/* 52: PCI user */
 #else
@@ -214,6 +206,7 @@ struct cdevsw	cdevsw[] =
 	cdev_pppx_init(NPPPX,pppx),	/* 64: pppx */
 	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
 	cdev_usbdev_init(NUSCANNER,uscanner),	/* 66: USB scanners */
+	cdev_fuse_init(NFUSE, fuse),	/* 67: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 

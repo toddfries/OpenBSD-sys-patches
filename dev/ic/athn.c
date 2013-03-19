@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.72 2012/06/10 21:23:36 kettenis Exp $	*/
+/*	$OpenBSD: athn.c,v 1.75 2013/01/14 09:50:31 jsing Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -282,7 +282,8 @@ athn_attach(struct athn_softc *sc)
 	    IEEE80211_C_WEP |		/* WEP. */
 	    IEEE80211_C_RSN |		/* WPA/RSN. */
 #ifndef IEEE80211_STA_ONLY
-	    IEEE80211_C_HOSTAP |	/* Host Ap mode supported. */
+	    IEEE80211_C_HOSTAP |	/* Host AP mode supported. */
+	    IEEE80211_C_APPMGT |	/* Host AP power saving supported. */
 #endif
 	    IEEE80211_C_MONITOR |	/* Monitor mode supported. */
 	    IEEE80211_C_SHSLOT |	/* Short slot time supported. */
@@ -781,8 +782,7 @@ athn_write_serdes(struct athn_softc *sc, const struct athn_serdes *serdes)
 
 	/* Write sequence to Serializer/Deserializer. */
 	for (i = 0; i < serdes->nvals; i++)
-		AR_WRITE(sc, AR_PCIE_SERDES, serdes->vals[i]);
-	AR_WRITE(sc, AR_PCIE_SERDES2, 0);
+		AR_WRITE(sc, serdes->regs[i], serdes->vals[i]);
 	AR_WRITE_BARRIER(sc);
 }
 
@@ -807,6 +807,19 @@ athn_config_pcie(struct athn_softc *sc)
 /*
  * Serializer/Deserializer programming for non-PCIe devices.
  */
+static const uint32_t ar_nonpcie_serdes_regs[] = {
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES2,
+};
+
 static const uint32_t ar_nonpcie_serdes_vals[] = {
 	0x9248fc00,
 	0x24924924,
@@ -816,11 +829,13 @@ static const uint32_t ar_nonpcie_serdes_vals[] = {
 	0x00000000,
 	0x1aaabe40,
 	0xbe105554,
-	0x000e1007
+	0x000e1007,
+	0x00000000
 };
 
 static const struct athn_serdes ar_nonpcie_serdes = {
 	nitems(ar_nonpcie_serdes_vals),
+	ar_nonpcie_serdes_regs,
 	ar_nonpcie_serdes_vals
 };
 
@@ -2428,7 +2443,7 @@ athn_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 #ifndef IEEE80211_STA_ONLY
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
 			athn_set_hostap_timers(sc);
-			/* Enable sotfware beacon alert interrupts. */
+			/* Enable software beacon alert interrupts. */
 			sc->imask |= AR_IMR_SWBA;
 		} else
 #endif
@@ -2539,6 +2554,14 @@ athn_start(struct ifnet *ifp)
 		}
 		/* Send pending management frames first. */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
+		if (m != NULL) {
+			ni = (void *)m->m_pkthdr.rcvif;
+			goto sendit;
+		}
+		if (ic->ic_state != IEEE80211_S_RUN)
+			break;
+
+		IF_DEQUEUE(&ic->ic_pwrsaveq, m);
 		if (m != NULL) {
 			ni = (void *)m->m_pkthdr.rcvif;
 			goto sendit;

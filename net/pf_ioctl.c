@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.253 2012/07/08 07:58:09 henning Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.257 2013/02/26 14:56:05 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -324,6 +324,9 @@ void
 pf_purge_rule(struct pf_ruleset *ruleset, struct pf_rule *rule)
 {
 	u_int32_t		 nr;
+
+	if (ruleset == NULL || ruleset->anchor == NULL)
+		return;
 
 	pf_rm_rule(ruleset->rules.active.ptr, rule);
 	ruleset->rules.active.rcount--;
@@ -1088,10 +1091,9 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			error = EINVAL;
 		if (rule->rt && !rule->direction)
 			error = EINVAL;
-		if ((rule->set_prio[0] != PF_PRIO_NOTSET &&
-		    rule->set_prio[0] > IFQ_MAXPRIO) ||
-		    (rule->set_prio[1] != PF_PRIO_NOTSET &&
-                    rule->set_prio[1] > IFQ_MAXPRIO))
+		if (rule->scrub_flags & PFSTATE_SETPRIO &&
+		    (rule->set_prio[0] > IFQ_MAXPRIO ||
+		    rule->set_prio[1] > IFQ_MAXPRIO))
 			error = EINVAL;
 
 		if (error) {
@@ -1596,6 +1598,12 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			error = EBUSY;
 			goto fail;
 		}
+		/* Fragments reference mbuf clusters. */
+		if (pl->index == PF_LIMIT_FRAGS && pl->limit > nmbclust) {
+			error = EINVAL;
+			goto fail;
+		}
+
 		pf_pool_limits[pl->index].limit_new = pl->limit;
 		pl->limit = pf_pool_limits[pl->index].limit;
 		break;
@@ -2333,7 +2341,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 
 		p = psn->psn_src_nodes;
 		RB_FOREACH(n, pf_src_tree, &tree_src_tracking) {
-			int	secs = time_second, diff;
+			int	secs = time_uptime, diff;
 
 			if ((nr + 1) * sizeof(*p) > (unsigned)psn->psn_len)
 				break;
@@ -2341,7 +2349,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			bcopy(n, pstore, sizeof(*pstore));
 			if (n->rule.ptr != NULL)
 				pstore->rule.nr = n->rule.ptr->nr;
-			pstore->creation = time_uptime - pstore->creation;
+			pstore->creation = secs - pstore->creation;
 			if (pstore->expire > secs)
 				pstore->expire -= secs;
 			else

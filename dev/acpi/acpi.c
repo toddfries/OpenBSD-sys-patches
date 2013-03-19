@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.238 2012/07/13 11:51:41 pirofti Exp $ */
+/* $OpenBSD: acpi.c,v 1.242 2012/12/24 19:41:14 guenther Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -72,6 +72,8 @@ int	acpi_hasprocfvs;
 #define ACPIEN_RETRIES 15
 
 void 	acpi_pci_match(struct device *, struct pci_attach_args *);
+pcireg_t acpi_pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
+
 int	acpi_match(struct device *, void *, void *);
 void	acpi_attach(struct device *, struct device *, void *);
 int	acpi_submatch(struct device *, void *, void *);
@@ -389,6 +391,8 @@ acpi_match(struct device *parent, void *match, void *aux)
 
 TAILQ_HEAD(, acpi_pci) acpi_pcidevs =
     TAILQ_HEAD_INITIALIZER(acpi_pcidevs);
+TAILQ_HEAD(, acpi_pci) acpi_pcirootdevs = 
+    TAILQ_HEAD_INITIALIZER(acpi_pcirootdevs);
 
 int acpi_getpci(struct aml_node *node, void *arg);
 int acpi_getminbus(union acpi_resource *crs, void *arg);
@@ -477,6 +481,7 @@ acpi_getpci(struct aml_node *node, void *arg)
 			node->pci = pci;
 			dnprintf(10, "found PCI root: %s %d\n",
 			    aml_nodename(node), pci->bus);
+			TAILQ_INSERT_TAIL(&acpi_pcirootdevs, pci, next);
 		}
 		aml_freevalue(&res);
 		return 0;
@@ -498,6 +503,24 @@ acpi_getpci(struct aml_node *node, void *arg)
 	dnprintf(10, "%.2x:%.2x.%x -> %s\n", 
 		pci->bus, pci->dev, pci->fun,
 		aml_nodename(node));
+
+	/* Collect device power state information. */
+	if (aml_evalinteger(sc, node, "_S3D", 0, NULL, &val) == 0)
+		pci->_s3d = val;
+	else
+		pci->_s3d = -1;
+	if (aml_evalinteger(sc, node, "_S3W", 0, NULL, &val) == 0)
+		pci->_s3w = val;
+	else
+		pci->_s3w = -1;
+	if (aml_evalinteger(sc, node, "_S4D", 0, NULL, &val) == 0)
+		pci->_s4d = val;
+	else
+		pci->_s4d = -1;
+	if (aml_evalinteger(sc, node, "_S4W", 0, NULL, &val) == 0)
+		pci->_s4w = val;
+	else
+		pci->_s4w = -1;
 
 	/* Check if PCI device exists */
 	if (pci->dev > 0x1F || pci->fun > 7) {
@@ -545,6 +568,55 @@ acpi_pci_match(struct device *dev, struct pci_attach_args *pa)
 			    dev->dv_xname, aml_nodename(pdev->node));
 			pdev->device = dev;
 		}
+	}
+}
+
+pcireg_t
+acpi_pci_min_powerstate(pci_chipset_tag_t pc, pcitag_t tag)
+{
+	struct acpi_pci *pdev;
+	int bus, dev, fun;
+	int state = -1, defaultstate = pci_get_powerstate(pc, tag);
+
+	pci_decompose_tag(pc, tag, &bus, &dev, &fun);
+	TAILQ_FOREACH(pdev, &acpi_pcidevs, next) {
+		if (pdev->bus == bus && pdev->dev == dev && pdev->fun == fun) {
+			switch (acpi_softc->sc_state) {
+			case ACPI_STATE_S3:
+				defaultstate = PCI_PMCSR_STATE_D3;
+				state = MAX(pdev->_s3d, pdev->_s3w);
+				break;
+			case ACPI_STATE_S4:
+				state = MAX(pdev->_s4d, pdev->_s4w);
+				break;
+			case ACPI_STATE_S5:
+			default:
+				break;
+			}
+
+			if (state >= PCI_PMCSR_STATE_D0 &&
+			    state <= PCI_PMCSR_STATE_D3)
+				return state;
+		}
+	}
+
+	return defaultstate;
+}
+
+void
+acpi_pciroots_attach(struct device *dev, void *aux, cfprint_t pr)
+{
+	struct acpi_pci			*pdev;
+	struct pcibus_attach_args	*pba = aux;
+
+	KASSERT(pba->pba_busex != NULL);
+
+	TAILQ_FOREACH(pdev, &acpi_pcirootdevs, next) {
+		if (extent_alloc_region(pba->pba_busex, pdev->bus,
+		    1, EX_NOWAIT) != 0)
+			continue;
+		pba->pba_bus = pdev->bus;
+		config_found(dev, pba, pr);
 	}
 }
 
@@ -2056,7 +2128,14 @@ acpi_powerdown(void)
 	disable_intr();
 	cold = 1;
 
+	/* 1st powerdown AML step: _PTS(tostate) */
+	aml_node_setval(sc, sc->sc_pts, state);
+	
 	acpi_disable_allgpes(sc);
+	acpi_enable_wakegpes(sc, state);
+
+	/* 2nd powerdown AML step: _GTS(tostate) */
+	aml_node_setval(sc, sc->sc_gts, state);
 
 	acpi_sleep_pm(sc, state);
 	panic("acpi S5 transition did not happen");
@@ -2424,8 +2503,8 @@ acpiioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 #ifdef HIBERNATE
 	case APM_IOC_HIBERNATE:
-		if (suser(p, 0) != 0)
-			return (EPERM);
+		if ((error = suser(p, 0)) != 0)
+			break;
 		if ((flag & FWRITE) == 0) {
 			error = EBADF;
 			break;

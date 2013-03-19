@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.h,v 1.72 2012/07/16 18:05:36 markus Exp $	*/
+/*	$OpenBSD: in_pcb.h,v 1.76 2013/03/14 11:18:37 mpi Exp $	*/
 /*	$NetBSD: in_pcb.h,v 1.14 1996/02/13 23:42:00 christos Exp $	*/
 
 /*
@@ -148,6 +148,7 @@ struct inpcb {
 	void	*inp_pf_sk;
 	u_int	inp_rtableid;
 	int	inp_pipex;		/* pipex indication */
+	int	inp_divertfl;		/* divert flags */
 };
 
 struct inpcbtable {
@@ -196,6 +197,7 @@ struct inpcbtable {
  */
 #define IN6P_HIGHPORT		INP_HIGHPORT	/* user wants "high" port */
 #define IN6P_LOWPORT		INP_LOWPORT	/* user wants "low" port */
+#define IN6P_RECVDSTPORT	INP_RECVDSTPORT	/* receive IP dst addr before rdr */
 #define IN6P_PKTINFO		0x010000 /* receive IP6 dst and I/F */
 #define IN6P_HOPLIMIT		0x020000 /* receive hoplimit */
 #define IN6P_HOPOPTS		0x040000 /* receive hop-by-hop options */
@@ -206,7 +208,6 @@ struct inpcbtable {
 #define IN6P_AUTOFLOWLABEL	0x800000 /* attach flowlabel automatically */
 
 #define IN6P_ANONPORT		0x4000000 /* port chosen for user */
-#define IN6P_FAITH		0x8000000 /* accept FAITH'ed connections */
 #define IN6P_RFC2292		0x40000000 /* used RFC2292 API on the socket */
 #define IN6P_MTU		0x80000000 /* receive path MTU */
 
@@ -215,7 +216,7 @@ struct inpcbtable {
 #define IN6P_CONTROLOPTS	(IN6P_PKTINFO|IN6P_HOPLIMIT|IN6P_HOPOPTS|\
 				 IN6P_DSTOPTS|IN6P_RTHDR|IN6P_RTHDRDSTOPTS|\
 				 IN6P_TCLASS|IN6P_AUTOFLOWLABEL|IN6P_RFC2292|\
-				 IN6P_MTU)
+				 IN6P_MTU|IN6P_RECVDSTPORT)
 #endif
 
 #define	INPLOOKUP_WILDCARD	1
@@ -248,11 +249,11 @@ struct baddynamicports {
 #define sotopf(so)  (so->so_proto->pr_domain->dom_family)
 
 void	 in_losing(struct inpcb *);
-int	 in_pcballoc(struct socket *, void *);
-int	 in_pcbbind(void *, struct mbuf *, struct proc *);
-int	 in_pcbconnect(void *, struct mbuf *);
-void	 in_pcbdetach(void *);
-void	 in_pcbdisconnect(void *);
+int	 in_pcballoc(struct socket *, struct inpcbtable *);
+int	 in_pcbbind(struct inpcb *, struct mbuf *, struct proc *);
+int	 in_pcbconnect(struct inpcb *, struct mbuf *);
+void	 in_pcbdetach(struct inpcb *);
+void	 in_pcbdisconnect(struct inpcb *);
 struct inpcb *
 	 in_pcbhashlookup(struct inpcbtable *, struct in_addr,
 			       u_int, struct in_addr, u_int, u_int);

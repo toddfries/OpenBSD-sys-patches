@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.67 2011/05/25 07:42:15 mpi Exp $ */
+/*	$OpenBSD: cpu.c,v 1.70 2013/03/07 03:19:38 brad Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -208,6 +208,7 @@ ppc_check_procid()
 	cpu = pvr >> 16;
 
 	switch (cpu) {
+	case PPC_CPU_IBM970:
 	case PPC_CPU_IBM970FX:
 	case PPC_CPU_IBM970MP:
 		ppc_proc_is_64b = 1;
@@ -282,9 +283,21 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		ppc_altivec = 1;
 		snprintf(cpu_model, sizeof(cpu_model), "7447A");
 		break;
+	case PPC_CPU_MPC7448:
+		ppc_altivec = 1;
+		snprintf(cpu_model, sizeof(cpu_model), "7448");
+		break;
+	case PPC_CPU_IBM970:
+		ppc_altivec = 1;
+		snprintf(cpu_model, sizeof(cpu_model), "970");
+		break;
 	case PPC_CPU_IBM970FX:
 		ppc_altivec = 1;
 		snprintf(cpu_model, sizeof(cpu_model), "970FX");
+		break;
+	case PPC_CPU_IBM970MP:
+		ppc_altivec = 1;
+		snprintf(cpu_model, sizeof(cpu_model), "970MP");
 		break;
 	case PPC_CPU_IBM750FX:
 		snprintf(cpu_model, sizeof(cpu_model), "750FX");
@@ -380,6 +393,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		hid0 |= HID0_DPM;
 		break;
 	case PPC_CPU_MPC7447A:
+	case PPC_CPU_MPC7448:
 	case PPC_CPU_MPC7450:
 	case PPC_CPU_MPC7455:
 	case PPC_CPU_MPC7457:
@@ -394,7 +408,9 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		if (cpu == PPC_CPU_MPC7450 && (pvr & 0xffff) < 0x0200)
 			hid0 &= ~HID0_BTIC;
 		break;
+	case PPC_CPU_IBM970:
 	case PPC_CPU_IBM970FX:
+	case PPC_CPU_IBM970MP:
 		/* select NAP mode */
 		hid0 &= ~(HID0_NAP | HID0_DOZE | HID0_SLEEP);
 		hid0 |= HID0_DPM;
@@ -403,12 +419,19 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	if (ppc_proc_is_64b == 0)
 		ppc_mthid0(hid0);
 
-	/* if processor is G3 or G4, configure l2 cache */
-	if (cpu == PPC_CPU_MPC750 || cpu == PPC_CPU_MPC7400 ||
-	    cpu == PPC_CPU_IBM750FX || cpu == PPC_CPU_MPC7410 ||
-	    cpu == PPC_CPU_MPC7447A || cpu == PPC_CPU_MPC7450 ||
-	    cpu == PPC_CPU_MPC7455 || cpu == PPC_CPU_MPC7457) {
+	/* if processor is G3 or G4, configure L2 cache */
+	switch (cpu) {
+	case PPC_CPU_MPC750:
+	case PPC_CPU_MPC7400:
+	case PPC_CPU_IBM750FX:
+	case PPC_CPU_MPC7410:
+	case PPC_CPU_MPC7447A:
+	case PPC_CPU_MPC7448:
+	case PPC_CPU_MPC7450:
+	case PPC_CPU_MPC7455:
+	case PPC_CPU_MPC7457:
 		config_l2cr(cpu);
+		break;
 	}
 	printf("\n");
 }
@@ -500,6 +523,8 @@ config_l2cr(int cpu)
 		} else if (cpu == PPC_CPU_IBM750FX ||
 			   cpu == PPC_CPU_MPC7447A || cpu == PPC_CPU_MPC7457)
 			printf(": 512KB L2 cache");
+		else if (cpu == PPC_CPU_MPC7448)                                                                                                 
+			printf(": 1MB L2 cache");
 		else {
 			switch (l2cr & L2CR_L2SIZ) {
 			case L2SIZ_256K:

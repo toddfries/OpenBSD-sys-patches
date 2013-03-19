@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.140 2012/04/06 15:10:39 jsing Exp $	*/
+/*	$OpenBSD: conf.c,v 1.142 2013/03/15 09:10:52 ratchov Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -142,17 +142,11 @@ cdev_decl(cy);
 #include "audio.h"
 #include "video.h"
 #include "midi.h"
-#include "sequencer.h"
-cdev_decl(music);
 #include "joy.h"
 #include "bthub.h"
 #include "pctr.h"
 #include "bios.h"
 #include "iop.h"
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 #include "bktr.h"
 #include "ksyms.h"
 #include "usb.h"
@@ -189,6 +183,7 @@ cdev_decl(pci);
 #include "amdmsr.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -248,13 +243,9 @@ struct cdevsw	cdevsw[] =
 	cdev_ocis_init(NBIOS,bios),	/* 48: onboard BIOS PROM */
 	cdev_bktr_init(NBKTR,bktr),     /* 49: Bt848 video capture device */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 50: Kernel symbols device */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 	cdev_midi_init(NMIDI,midi),	/* 52: MIDI I/O */
-	cdev_midi_init(NSEQUENCER,sequencer),	/* 53: sequencer I/O */
+	cdev_notdef(),			/* 53 was: sequencer I/O */
 	cdev_notdef(),			/* 54 was: RAIDframe disk driver */
 	cdev_notdef(),			/* 55: */
 	/* The following slots are reserved for isdn4bsd. */
@@ -301,6 +292,7 @@ struct cdevsw	cdevsw[] =
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 90: vscsi */
 	cdev_disk_init(1,diskmap),	/* 91: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),     /* 92: pppx */
+	cdev_fuse_init(NFUSE, fuse),	/* 93: fuse */ 
 };
 int	nchrdev = nitems(cdevsw);
 

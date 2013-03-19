@@ -1,4 +1,4 @@
-/*      $OpenBSD: glxpcib.c,v 1.5 2012/03/06 12:57:36 mikeb Exp $	*/
+/*      $OpenBSD: glxpcib.c,v 1.10 2013/03/17 19:09:03 miod Exp $	*/
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -166,6 +166,15 @@
 #define AMD5536_SMB_CTL2_FREQ	0x78 /* 100 kHz */
 #define AMD5536_SMB_CTL3	0x06 /* control 3 */
 
+/* PMS */
+#define	MSR_LBAR_PMS		DIVIL_LBAR_PMS
+#define	MSR_PMS_SIZE		0x80
+#define	MSR_PMS_ADDR_MASK	0xff80
+#define	AMD5536_PMS_SSC		0x54
+#define	AMD5536_PMS_SSC_PI	0x00040000
+#define	AMD5536_PMS_SSC_CLR_PI	0x00020000
+#define	AMD5536_PMS_SSC_SET_PI	0x00010000
+
 /*
  * MSR registers we want to preserve accross suspend/resume
  */
@@ -211,6 +220,8 @@ struct cfdriver glxpcib_cd = {
 int	glxpcib_match(struct device *, void *, void *);
 void	glxpcib_attach(struct device *, struct device *, void *);
 int	glxpcib_activate(struct device *, int);
+int	glxpcib_search(struct device *, void *, void *);
+int	glxpcib_print(void *, const char *);
 
 struct cfattach glxpcib_ca = {
 	sizeof(struct glxpcib_softc), glxpcib_match, glxpcib_attach,
@@ -273,16 +284,13 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 	u_int64_t sa;
 	struct i2cbus_attach_args iba;
 	int i2c = 0;
+	bus_space_handle_t tmpioh;
 #endif
 	tc->tc_get_timecount = glxpcib_get_timecount;
 	tc->tc_counter_mask = 0xffffffff;
 	tc->tc_frequency = 3579545;
 	tc->tc_name = "CS5536";
-#ifdef __loongson__
-	tc->tc_quality = 0;
-#else
 	tc->tc_quality = 1000;
-#endif
 	tc->tc_priv = sc;
 	tc_init(tc);
 
@@ -300,8 +308,9 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 		/* count in seconds (as upper level desires) */
 		bus_space_write_2(sc->sc_iot, sc->sc_ioh, AMD5536_MFGPT0_SETUP,
 		    AMD5536_MFGPT_CNT_EN | AMD5536_MFGPT_CMP2EV |
-		    AMD5536_MFGPT_CMP2 | AMD5536_MFGPT_DIV_MASK);
-		wdog_register(sc, glxpcib_wdogctl_cb);
+		    AMD5536_MFGPT_CMP2 | AMD5536_MFGPT_DIV_MASK |
+		    AMD5536_MFGPT_STOP_EN);
+		wdog_register(glxpcib_wdogctl_cb, sc);
 		sc->sc_wdog = 1;
 		printf(", watchdog");
 	}
@@ -385,6 +394,18 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 		iba.iba_tag = &sc->sc_smb_ic;
 		i2c = 1;
 	}
+
+	/* Map PMS I/O space and enable the ``Power Immediate'' feature */
+	sa = rdmsr(MSR_LBAR_PMS);
+	if (sa & MSR_LBAR_ENABLE &&
+	    !bus_space_map(pa->pa_iot, sa & MSR_PMS_ADDR_MASK,
+	    MSR_PMS_SIZE, 0, &tmpioh)) {
+		bus_space_write_4(pa->pa_iot, tmpioh, AMD5536_PMS_SSC,
+		    AMD5536_PMS_SSC_SET_PI);
+		bus_space_barrier(pa->pa_iot, tmpioh, AMD5536_PMS_SSC, 4,
+		    BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
+		bus_space_unmap(pa->pa_iot, tmpioh, MSR_PMS_SIZE);
+	}
 #endif /* SMALL_KERNEL */
 	pcibattach(parent, self, aux);
 
@@ -396,6 +417,8 @@ glxpcib_attach(struct device *parent, struct device *self, void *aux)
 	if (i2c)
 		config_found(&sc->sc_dev, &iba, iicbus_print);
 #endif
+
+	config_search(glxpcib_search, self, pa);
 }
 
 int
@@ -681,6 +704,46 @@ glxpcib_smb_read_byte(void *arg, uint8_t *bytep, int flags)
 	    AMD5536_SMB_SDA);
 
 	return (0);
+}
+
+int
+glxpcib_print(void *args, const char *parentname)
+{
+	struct glxpcib_attach_args *gaa = (struct glxpcib_attach_args *)args;
+
+	if (parentname != NULL)
+		printf("%s at %s", gaa->gaa_name, parentname);
+
+	return UNCONF;
+}
+
+int
+glxpcib_search(struct device *parent, void *gcf, void *args)
+{
+	struct glxpcib_softc *sc = (struct glxpcib_softc *)parent;
+	struct cfdata *cf = (struct cfdata *)gcf;
+	struct pci_attach_args *pa = (struct pci_attach_args *)args;
+	struct glxpcib_attach_args gaa;
+
+	gaa.gaa_name = cf->cf_driver->cd_name;
+	gaa.gaa_pa = pa;
+	gaa.gaa_iot = sc->sc_iot;
+	gaa.gaa_ioh = sc->sc_ioh;
+
+	/*
+	 * These devices are attached directly, either from
+	 * glxpcib_attach() or later in time from pcib_callback().
+	 */
+	if (strcmp(cf->cf_driver->cd_name, "gpio") == 0 ||
+	    strcmp(cf->cf_driver->cd_name, "iic") == 0 ||
+	    strcmp(cf->cf_driver->cd_name, "isa") == 0)
+		return 0;
+
+	if (cf->cf_attach->ca_match(parent, cf, &gaa) == 0)
+		return 0;
+
+	config_attach(parent, cf, &gaa, glxpcib_print);
+	return 1;
 }
 
 int

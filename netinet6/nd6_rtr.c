@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_rtr.c,v 1.61 2012/08/21 19:50:39 bluhm Exp $	*/
+/*	$OpenBSD: nd6_rtr.c,v 1.68 2013/03/11 14:08:04 mpi Exp $	*/
 /*	$KAME: nd6_rtr.c,v 1.97 2001/02/07 11:09:13 itojun Exp $	*/
 
 /*
@@ -80,9 +80,6 @@ int rt6_deleteroute(struct radix_node *, void *, u_int);
 void nd6_addr_add(void *, void *);
 
 extern int nd6_recalc_reachtm_interval;
-
-static struct ifnet *nd6_defifp;
-int nd6_defifindex;
 
 /*
  * Receive Router Solicitation Message - just for routers.
@@ -913,7 +910,7 @@ purge_detached(struct ifnet *ifp)
 			ifa_next = ifa->ifa_list.tqe_next;
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
-			ia = (struct in6_ifaddr *)ifa;
+			ia = ifatoia6(ifa);
 			if ((ia->ia6_flags & IN6_IFF_AUTOCONF) ==
 			    IN6_IFF_AUTOCONF && ia->ia6_ndpr == pr) {
 				in6_purgeaddr(ifa);
@@ -1045,7 +1042,7 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 	struct nd_prefix *pr;
 	int s = splsoftnet();
 	int error = 0;
-	int tempaddr_preferred = 0, autoconf = 0;
+	int tempaddr_preferred = 0, autoconf = 0, statique = 0;
 	int auth;
 	struct in6_addrlifetime lt6_tmp;
 
@@ -1055,7 +1052,7 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 		 * Authenticity for NA consists authentication for
 		 * both IP header and IP datagrams, doesn't it ?
 		 */
-		auth = ((m->m_flags & M_AUTH_AH) && (m->m_flags & M_AUTH));
+		auth = (m->m_flags & M_AUTH);
 	}
 
 	if ((pr = nd6_prefix_lookup(new)) != NULL) {
@@ -1166,7 +1163,7 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 
-		ifa6 = (struct in6_ifaddr *)ifa;
+		ifa6 = ifatoia6(ifa);
 
 		/*
 		 * Spec is not clear here, but I believe we should concentrate
@@ -1185,8 +1182,10 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 		if (ia6_match == NULL) /* remember the first one */
 			ia6_match = ifa6;
 
-		if ((ifa6->ia6_flags & IN6_IFF_AUTOCONF) == 0)
+		if ((ifa6->ia6_flags & IN6_IFF_AUTOCONF) == 0) {
+			statique = 1;
 			continue;
+		}
 
 		/*
 		 * An already autoconfigured address matched.  Now that we
@@ -1273,11 +1272,13 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 	}
 
 	if ((!autoconf || ((ifp->if_xflags & IFXF_INET6_NOPRIVACY) == 0 &&
-	    !tempaddr_preferred)) && new->ndpr_vltime != 0) {
+	    !tempaddr_preferred)) && new->ndpr_vltime != 0 &&
+	    !((ifp->if_xflags & IFXF_INET6_NOPRIVACY) && statique)) {
 		/*
 		 * There is no SLAAC address and/or there is no preferred RFC
 		 * 4941 temporary address. And the valid prefix lifetime is
-		 * non-zero. Create new addresses in process context.
+		 * non-zero. And there is no static address in the same prefix.
+		 * Create new addresses in process context.
 		 */
 		pr->ndpr_refcnt++;
 		if (workq_add_task(NULL, 0, nd6_addr_add, pr, NULL))
@@ -1295,7 +1296,9 @@ nd6_addr_add(void *prptr, void *arg2)
 	struct nd_prefix *pr = (struct nd_prefix *)prptr;
 	struct in6_ifaddr *ia6 = NULL;
 	struct ifaddr *ifa;
-	int ifa_plen, autoconf, privacy;
+	int ifa_plen, autoconf, privacy, s;
+
+	s = splsoftnet();
 
 	autoconf = 1;
 	privacy = (pr->ndpr_ifp->if_xflags & IFXF_INET6_NOPRIVACY) == 0;
@@ -1309,7 +1312,7 @@ nd6_addr_add(void *prptr, void *arg2)
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 
-		ia6 = (struct in6_ifaddr *)ifa;
+		ia6 = ifatoia6(ifa);
 
 		/*
 		 * Spec is not clear here, but I believe we should concentrate
@@ -1359,6 +1362,8 @@ nd6_addr_add(void *prptr, void *arg2)
 		pfxlist_onlink_check();
 
 	pr->ndpr_refcnt--;
+
+	splx(s);
 }
 
 /*
@@ -1590,7 +1595,6 @@ nd6_prefix_onlink(struct nd_prefix *pr)
 	ifa = &in6ifa_ifpforlinklocal(ifp,
 	    IN6_IFF_NOTREADY | IN6_IFF_ANYCAST)->ia_ifa;
 	if (ifa == NULL) {
-		/* XXX: freebsd does not have ifa_ifwithaf */
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family == AF_INET6)
 				break;
@@ -1789,13 +1793,13 @@ in6_ifadd(struct nd_prefix *pr, int privacy)
 	 */
 	ifa = &in6ifa_ifpforlinklocal(ifp, 0)->ia_ifa; /* 0 is OK? */
 	if (ifa)
-		ib = (struct in6_ifaddr *)ifa;
+		ib = ifatoia6(ifa);
 	else
 		return NULL;
 
 #if 0 /* don't care link local addr state, and always do DAD */
 	/* if link-local address is not eligible, do not autoconfigure. */
-	if (((struct in6_ifaddr *)ifa)->ia6_flags & IN6_IFF_NOTREADY) {
+	if (ifatoia6(ifa)->ia6_flags & IN6_IFF_NOTREADY) {
 		printf("in6_ifadd: link-local address not ready\n");
 		return NULL;
 	}
@@ -2001,25 +2005,4 @@ rt6_deleteroute(struct radix_node *rn, void *arg, u_int id)
 	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 	return (rtrequest1(RTM_DELETE, &info, RTP_ANY, NULL, id));
 #undef SIN6
-}
-
-int
-nd6_setdefaultiface(int ifindex)
-{
-	int error = 0;
-
-	if (ifindex < 0 || if_indexlim <= ifindex)
-		return (EINVAL);
-	if (ifindex != 0 && !ifindex2ifnet[ifindex])
-		return (EINVAL);
-
-	if (nd6_defifindex != ifindex) {
-		nd6_defifindex = ifindex;
-		if (nd6_defifindex > 0) {
-			nd6_defifp = ifindex2ifnet[nd6_defifindex];
-		} else
-			nd6_defifp = NULL;
-	}
-
-	return (error);
 }

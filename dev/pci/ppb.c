@@ -1,4 +1,4 @@
-/*	$OpenBSD: ppb.c,v 1.53 2011/10/31 21:44:54 mikeb Exp $	*/
+/*	$OpenBSD: ppb.c,v 1.55 2012/10/08 21:47:50 deraadt Exp $	*/
 /*	$NetBSD: ppb.c,v 1.16 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -392,10 +392,15 @@ ppbactivate(struct device *self, int act)
 		break;
 	case DVACT_POWERDOWN:
 		rv = config_activate_children(self, act);
+		
 		if (pci_dopm) {	
-			/* Place the bridge into D3. */
+			/*
+			 * Place the bridge into the lowest possible
+			 * power state.
+			 */
 			sc->sc_pmcsr_state = pci_get_powerstate(pc, tag);
-			pci_set_powerstate(pc, tag, PCI_PMCSR_STATE_D3);
+			pci_set_powerstate(pc, tag,
+			    pci_min_powerstate(pc, tag));
 		}
 		break;
 	case DVACT_RESUME:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.55 2012/08/21 19:50:39 bluhm Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.58 2013/03/07 09:03:16 mpi Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -668,25 +668,20 @@ in6_ifdetach(struct ifnet *ifp)
 	nd6_purge(ifp);
 
 	/* nuke any of IPv6 addresses we have */
-	for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
-	    ifa != TAILQ_END(&ifp->if_addrlist); ifa = next) {
-		next = TAILQ_NEXT(ifa, ifa_list);
+	TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrlist, ifa_list, next) {
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 		in6_purgeaddr(ifa);
 	}
 
 	/* undo everything done by in6_ifattach(), just in case */
-	for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
-	    ifa != TAILQ_END(&ifp->if_addrlist); ifa = next) {
-		next = TAILQ_NEXT(ifa, ifa_list);
-
+	TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrlist, ifa_list, next) {
 		if (ifa->ifa_addr->sa_family != AF_INET6
 		 || !IN6_IS_ADDR_LINKLOCAL(&satosin6(&ifa->ifa_addr)->sin6_addr)) {
 			continue;
 		}
 
-		ia = (struct in6_ifaddr *)ifa;
+		ia = ifatoia6(ifa);
 
 		/*
 		 * leave from multicast groups we have joined for the interface
@@ -720,7 +715,7 @@ in6_ifdetach(struct ifnet *ifp)
 
 		/* remove from the linked list */
 		ifa_del(ifp, &ia->ia_ifa);
-		IFAFREE(&ia->ia_ifa);
+		ifafree(&ia->ia_ifa);
 
 		/* also remove from the IPv6 address chain(itojun&jinmei) */
 		oia = ia;
@@ -738,7 +733,7 @@ in6_ifdetach(struct ifnet *ifp)
 			}
 		}
 
-		IFAFREE(&oia->ia_ifa);
+		ifafree(&oia->ia_ifa);
 	}
 
 	/* cleanup multicast address kludge table, if there is any */

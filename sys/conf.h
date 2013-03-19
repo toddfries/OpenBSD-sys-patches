@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.118 2011/10/06 20:49:28 deraadt Exp $	*/
+/*	$OpenBSD: conf.h,v 1.120 2013/03/15 11:35:58 ratchov Exp $	*/
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -357,13 +357,6 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
 	(dev_type_mmap((*))) enodev, 0, 0, dev_init(c,n,kqfilter) }
 
-/* open, close, read, write, ioctl, poll, nokqfilter */
-#define cdev_nnpfs_init(c, n) { \
-	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
-	dev_init(c,n,write), dev_init(c,n,ioctl), \
-	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
-	(dev_type_mmap((*))) enodev }
-
 /* open, close, read */
 #define cdev_ksyms_init(c,n) { \
 	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
@@ -516,6 +509,13 @@ extern struct cdevsw cdevsw[];
 	(dev_type_stop((*))) enodev, 0, selfalse, \
 	(dev_type_mmap((*))) enodev }
 
+/* open, close, read, write, poll, ioctl */
+#define cdev_fuse_init(c,n) { \
+	dev_init(c,n,open), dev_init(c,n,close), dev_init(c,n,read), \
+	dev_init(c,n,write), dev_init(c,n,ioctl), \
+	(dev_type_stop((*))) enodev, 0, dev_init(c,n,poll), \
+	(dev_type_mmap((*))) enodev }
+
 #endif
 
 /*
@@ -590,7 +590,6 @@ cdev_decl(ctty);
 
 cdev_decl(audio);
 cdev_decl(midi);
-cdev_decl(sequencer);
 cdev_decl(radio);
 cdev_decl(video);
 cdev_decl(cn);
@@ -664,6 +663,7 @@ cdev_decl(urio);
 cdev_decl(hotplug);
 cdev_decl(gpio);
 cdev_decl(amdmsr);
+cdev_decl(fuse);
 
 #endif
 

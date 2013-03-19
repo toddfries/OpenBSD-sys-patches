@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.137 2012/07/13 20:27:25 claudio Exp $	*/
+/*	$OpenBSD: route.c,v 1.142 2013/03/07 09:03:16 mpi Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -225,9 +225,11 @@ route_init(void)
 }
 
 int
-rtable_add(u_int id)	/* must be called at splsoftnet */
+rtable_add(u_int id)
 {
 	void	*p, *q;
+
+	splsoftassert(IPL_SOFTNET);
 
 	if (id > RT_TABLEID_MAX)
 		return (EINVAL);
@@ -271,6 +273,8 @@ rtable_l2(u_int id)
 void
 rtable_l2set(u_int id, u_int parent)
 {
+	splsoftassert(IPL_SOFTNET);
+
 	if (!rtable_exists(id) || !rtable_exists(parent))
 		return;
 	rt_tab2dom[id] = parent;
@@ -397,7 +401,7 @@ rtfree(struct rtentry *rt)
 		rt_timer_remove_all(rt);
 		ifa = rt->rt_ifa;
 		if (ifa)
-			IFAFREE(ifa);
+			ifafree(ifa);
 		rtlabel_unref(rt->rt_labelid);
 #ifdef MPLS
 		if (rt->rt_flags & RTF_MPLS)
@@ -770,7 +774,7 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 		if (rn_mpath_capable(rnh)) {
 			if ((rn = rnh->rnh_lookup(info->rti_info[RTAX_DST],
 			    info->rti_info[RTAX_NETMASK], rnh)) != NULL &&
-			    rn_mpath_next(rn, 0) == NULL)
+			    rt_mpath_next((struct rtentry *)rn, 0) == NULL)
 				((struct rtentry *)rn)->rt_flags &= ~RTF_MPATH;
 		}
 #endif
@@ -922,7 +926,7 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 				if ((*ret_nrt)->rt_ifa->ifa_rtrequest)
 					(*ret_nrt)->rt_ifa->ifa_rtrequest(
 					    RTM_DELETE, *ret_nrt, NULL);
-				IFAFREE((*ret_nrt)->rt_ifa);
+				ifafree((*ret_nrt)->rt_ifa);
 				(*ret_nrt)->rt_ifa = ifa;
 				(*ret_nrt)->rt_ifp = ifa->ifa_ifp;
 				ifa->ifa_refcnt++;
@@ -953,7 +957,7 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 			RTFREE(crt);
 		}
 		if (rn == 0) {
-			IFAFREE(ifa);
+			ifafree(ifa);
 			if ((rt->rt_flags & RTF_CLONED) != 0 && rt->rt_parent)
 				rtfree(rt->rt_parent);
 			if (rt->rt_gwroute)
@@ -968,7 +972,7 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 		    (rn = rnh->rnh_lookup(info->rti_info[RTAX_DST],
 		    info->rti_info[RTAX_NETMASK], rnh)) != NULL &&
 		    (rn = rn_mpath_prio(rn, prio)) != NULL) {
-			if (rn_mpath_next(rn, 0) == NULL)
+			if (rt_mpath_next((struct rtentry *)rn, 0) == NULL)
 				((struct rtentry *)rn)->rt_flags &= ~RTF_MPATH;
 			else
 				((struct rtentry *)rn)->rt_flags |= RTF_MPATH;
@@ -1135,7 +1139,7 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 			    ifa, rt->rt_ifa);
 			if (rt->rt_ifa->ifa_rtrequest)
 				rt->rt_ifa->ifa_rtrequest(RTM_DELETE, rt, NULL);
-			IFAFREE(rt->rt_ifa);
+			ifafree(rt->rt_ifa);
 			rt->rt_ifa = ifa;
 			rt->rt_ifp = ifa->ifa_ifp;
 			ifa->ifa_refcnt++;
@@ -1315,7 +1319,7 @@ rt_gettable(sa_family_t af, u_int id)
 	return (rt_tables[id] ? rt_tables[id][af2rtafidx[af]] : NULL);
 }
 
-struct radix_node *
+struct rtentry *
 rt_lookup(struct sockaddr *dst, struct sockaddr *mask, u_int tableid)
 {
 	struct radix_node_head	*rnh;
@@ -1323,7 +1327,7 @@ rt_lookup(struct sockaddr *dst, struct sockaddr *mask, u_int tableid)
 	if ((rnh = rt_gettable(dst->sa_family, tableid)) == NULL)
 		return (NULL);
 
-	return (rnh->rnh_lookup(dst, mask, rnh));
+	return ((struct rtentry *)rnh->rnh_lookup(dst, mask, rnh));
 }
 
 /* ARGSUSED */
@@ -1534,7 +1538,7 @@ rt_if_linkstate_change(struct radix_node *rn, void *arg, u_int id)
 			}
 		} else {
 			if (rt->rt_flags & RTF_UP) {
-				/* take route done */
+				/* take route down */
 				rt->rt_flags &= ~RTF_UP;
 				rn_mpath_reprio(rn, rt->rt_priority | RTP_DOWN);
 			}
@@ -1543,5 +1547,13 @@ rt_if_linkstate_change(struct radix_node *rn, void *arg, u_int id)
 	}
 
 	return (0);
+}
+
+struct rtentry *
+rt_mpath_next(struct rtentry *rt, int all)
+{
+	struct radix_node *rn = (struct radix_node *)rt;
+
+	return ((struct rtentry *)rn_mpath_next(rn, all));
 }
 #endif

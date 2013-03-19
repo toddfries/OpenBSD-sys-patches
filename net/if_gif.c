@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gif.c,v 1.57 2012/05/12 12:58:16 mpf Exp $	*/
+/*	$OpenBSD: if_gif.c,v 1.59 2013/01/17 00:48:04 henning Exp $	*/
 /*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
 
 /*
@@ -171,12 +171,12 @@ gif_start(struct ifnet *ifp)
 		family = sc->gif_psrc->sa_family;
 
 		/*
-		 * Check if the packet is comming via bridge and needs
+		 * Check if the packet is coming via bridge and needs
 		 * etherip encapsulation or not. bridge(4) directly calls
 		 * the start function and bypasses the if_output function
 		 * so we need to do the encap here.
 		 */
-		if (ifp->if_bridge && (m->m_flags & M_PROTO1)) {
+		if (ifp->if_bridgeport && (m->m_flags & M_PROTO1)) {
 			int error = 0;
 			/*
 			 * Remove multicast and broadcast flags or encapsulated

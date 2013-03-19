@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpi.c,v 1.175 2012/01/16 10:55:46 dlg Exp $ */
+/*	$OpenBSD: mpi.c,v 1.183 2013/01/18 05:49:52 dlg Exp $ */
 
 /*
  * Copyright (c) 2005, 2006, 2009 David Gwynne <dlg@openbsd.org>
@@ -175,10 +175,13 @@ void		mpi_refresh_sensors(void *);
 
 #define mpi_read_db(s)		mpi_read((s), MPI_DOORBELL)
 #define mpi_write_db(s, v)	mpi_write((s), MPI_DOORBELL, (v))
-#define mpi_read_intr(s)	mpi_read((s), MPI_INTR_STATUS)
+#define mpi_read_intr(s)	bus_space_read_4((s)->sc_iot, (s)->sc_ioh, \
+				    MPI_INTR_STATUS)
 #define mpi_write_intr(s, v)	mpi_write((s), MPI_INTR_STATUS, (v))
-#define mpi_pop_reply(s)	mpi_read((s), MPI_REPLY_QUEUE)
-#define mpi_push_reply_db(s, v)	mpi_write((s), MPI_REPLY_QUEUE, (v))
+#define mpi_pop_reply(s)	bus_space_read_4((s)->sc_iot, (s)->sc_ioh, \
+				    MPI_REPLY_QUEUE)
+#define mpi_push_reply_db(s, v) bus_space_write_4((s)->sc_iot, (s)->sc_ioh, \
+				    MPI_REPLY_QUEUE, (v))	
 
 #define mpi_wait_db_int(s)	mpi_wait_ne((s), MPI_INTR_STATUS, \
 				    MPI_INTR_STATUS_DOORBELL, 0)
@@ -291,17 +294,23 @@ mpi_attach(struct mpi_softc *sc)
 
 	switch (sc->sc_porttype) {
 	case MPI_PORTFACTS_PORTTYPE_SCSI:
-		if (mpi_cfg_spi_port(sc) != 0)
+		if (mpi_cfg_spi_port(sc) != 0) {
+			printf("%s: unable to configure spi\n", DEVNAME(sc));
 			goto free_replies;
+		}
 		mpi_squash_ppr(sc);
 		break;
 	case MPI_PORTFACTS_PORTTYPE_SAS:
-		if (mpi_cfg_sas(sc) != 0)
+		if (mpi_cfg_sas(sc) != 0) {
+			printf("%s: unable to configure sas\n", DEVNAME(sc));
 			goto free_replies;
+		}
 		break;
 	case MPI_PORTFACTS_PORTTYPE_FC:
-		if (mpi_cfg_fc(sc) != 0)
+		if (mpi_cfg_fc(sc) != 0) {
+			printf("%s: unable to configure fc\n", DEVNAME(sc));
 			goto free_replies;
+		}
 		break;
 	}
 
@@ -345,7 +354,7 @@ mpi_attach(struct mpi_softc *sc)
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_target;
 	sc->sc_link.adapter_buswidth = sc->sc_buswidth;
-	sc->sc_link.openings = sc->sc_maxcmds / sc->sc_buswidth;
+	sc->sc_link.openings = MAX(sc->sc_maxcmds / sc->sc_buswidth, 16);
 	sc->sc_link.pool = &sc->sc_iopool;
 
 	bzero(&saa, sizeof(saa));
@@ -801,8 +810,7 @@ mpi_inq(struct mpi_softc *sc, u_int16_t target, int physdisk)
 
 	addr = ccb->ccb_cmd_dva +
 	    ((u_int8_t *)&bundle->inqbuf - (u_int8_t *)bundle);
-	sge->sg_hi_addr = htole32((u_int32_t)(addr >> 32));
-	sge->sg_lo_addr = htole32((u_int32_t)addr);
+	sge->sg_addr = htole64(addr);
 
 	if (mpi_poll(sc, ccb, 5000) != 0)
 		return (1);
@@ -825,25 +833,21 @@ mpi_cfg_sas(struct mpi_softc *sc)
 
 	if (mpi_ecfg_header(sc, MPI_CONFIG_REQ_EXTPAGE_TYPE_SAS_IO_UNIT, 1, 0,
 	    &ehdr) != 0)
-		return (EIO);
+		return (0);
 
 	pagelen = letoh16(ehdr.ext_page_length) * 4;
 	pg = malloc(pagelen, M_TEMP, M_NOWAIT | M_ZERO);
 	if (pg == NULL)
 		return (ENOMEM);
 
-	if (mpi_ecfg_page(sc, 0, &ehdr, 1, pg, pagelen) != 0) {
-		rv = EIO;
+	if (mpi_ecfg_page(sc, 0, &ehdr, 1, pg, pagelen) != 0)
 		goto out;
-	}
 
 	if (pg->max_sata_q_depth != 32) {
 		pg->max_sata_q_depth = 32;
 
-		if (mpi_ecfg_page(sc, 0, &ehdr, 0, pg, pagelen) != 0) {
-			rv = EIO;
+		if (mpi_ecfg_page(sc, 0, &ehdr, 0, pg, pagelen) != 0)
 			goto out;
-		}
 	}
 
 out:
@@ -1198,7 +1202,8 @@ mpi_start(struct mpi_softc *sc, struct mpi_ccb *ccb)
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 
 	ccb->ccb_state = MPI_CCB_QUEUED;
-	mpi_write(sc, MPI_REQ_QUEUE, ccb->ccb_cmd_dva);
+	bus_space_write_4(sc->sc_iot, sc->sc_ioh,
+	    MPI_REQ_QUEUE, ccb->ccb_cmd_dva);
 }
 
 int
@@ -1519,7 +1524,7 @@ mpi_load_xs(struct mpi_ccb *ccb)
 	}
 
 	error = bus_dmamap_load(sc->sc_dmat, dmap,
-	    xs->data, xs->datalen, NULL,
+	    xs->data, xs->datalen, NULL, BUS_DMA_STREAMING |
 	    (xs->flags & SCSI_NOSLEEP) ? BUS_DMA_NOWAIT : BUS_DMA_WAITOK);
 	if (error) {
 		printf("%s: error %d loading dmamap\n", DEVNAME(sc), error);
@@ -1541,9 +1546,9 @@ mpi_load_xs(struct mpi_ccb *ccb)
 			nsge++;
 			sge->sg_hdr |= htole32(MPI_SGE_FL_LAST);
 
-			DNPRINTF(MPI_D_DMA, "%s:   - 0x%08x 0x%08x 0x%08x\n",
+			DNPRINTF(MPI_D_DMA, "%s:   - 0x%08x 0x%016llx\n",
 			    DEVNAME(sc), sge->sg_hdr,
-			    sge->sg_hi_addr, sge->sg_lo_addr);
+			    sge->sg_addr);
 
 			if ((dmap->dm_nsegs - i) > sc->sc_chain_len) {
 				nce = &nsge[sc->sc_chain_len - 1];
@@ -1562,14 +1567,10 @@ mpi_load_xs(struct mpi_ccb *ccb)
 			ce_dva = ccb->ccb_cmd_dva +
 			    ((u_int8_t *)nsge - (u_int8_t *)mcb);
 
-			addr = (u_int32_t)(ce_dva >> 32);
-			ce->sg_hi_addr = htole32(addr);
-			addr = (u_int32_t)ce_dva;
-			ce->sg_lo_addr = htole32(addr);
+			ce->sg_addr = htole64(ce_dva);
 
-			DNPRINTF(MPI_D_DMA, "%s:  ce: 0x%08x 0x%08x 0x%08x\n",
-			    DEVNAME(sc), ce->sg_hdr, ce->sg_hi_addr,
-			    ce->sg_lo_addr);
+			DNPRINTF(MPI_D_DMA, "%s:  ce: 0x%08x 0x%016llx\n",
+			    DEVNAME(sc), ce->sg_hdr, ce->sg_addr);
 
 			ce = nce;
 		}
@@ -1581,14 +1582,10 @@ mpi_load_xs(struct mpi_ccb *ccb)
 		sge = nsge;
 
 		sge->sg_hdr = htole32(flags | dmap->dm_segs[i].ds_len);
-		addr = (u_int32_t)((u_int64_t)dmap->dm_segs[i].ds_addr >> 32);
-		sge->sg_hi_addr = htole32(addr);
-		addr = (u_int32_t)dmap->dm_segs[i].ds_addr;
-		sge->sg_lo_addr = htole32(addr);
+		sge->sg_addr = htole64(dmap->dm_segs[i].ds_addr);
 
-		DNPRINTF(MPI_D_DMA, "%s:  %d: 0x%08x 0x%08x 0x%08x\n",
-		    DEVNAME(sc), i, sge->sg_hdr, sge->sg_hi_addr,
-		    sge->sg_lo_addr);
+		DNPRINTF(MPI_D_DMA, "%s:  %d: 0x%08x 0x%016llx\n",
+		    DEVNAME(sc), i, sge->sg_hdr, sge->sg_addr);
 
 		nsge = sge + 1;
 	}
@@ -2037,11 +2034,9 @@ mpi_iocfacts(struct mpi_softc *sc)
 	DNPRINTF(MPI_D_MISC, "%s:  hi_priority_queue_depth: 0x%04x\n",
 	    DEVNAME(sc), letoh16(ifp.hi_priority_queue_depth));
 	DNPRINTF(MPI_D_MISC, "%s:  host_page_buffer_sge: hdr: 0x%08x "
-	    "addr 0x%08x %08x\n", DEVNAME(sc),
+	    "addr 0x%016llx\n", DEVNAME(sc),
 	    letoh32(ifp.host_page_buffer_sge.sg_hdr),
-	    letoh32(ifp.host_page_buffer_sge.sg_hi_addr),
-	    letoh32(ifp.host_page_buffer_sge.sg_lo_addr));
-
+	    letoh64(ifp.host_page_buffer_sge.sg_addr));
 	sc->sc_maxcmds = letoh16(ifp.global_credits);
 	sc->sc_maxchdepth = ifp.max_chain_depth;
 	sc->sc_ioc_number = ifp.ioc_number;
@@ -2104,7 +2099,7 @@ mpi_iocinit(struct mpi_softc *sc)
 
 	iiq.reply_frame_size = htole16(MPI_REPLY_SIZE);
 
-	hi_addr = (u_int32_t)((u_int64_t)MPI_DMA_DVA(sc->sc_requests) >> 32);
+	hi_addr = (u_int32_t)(MPI_DMA_DVA(sc->sc_requests) >> 32);
 	iiq.host_mfa_hi_addr = htole32(hi_addr);
 	iiq.sense_buffer_hi_addr = htole32(hi_addr);
 
@@ -2638,7 +2633,6 @@ mpi_fwupload(struct mpi_softc *sc)
 		struct mpi_sge				sge;
 	} __packed				*bundle;
 	struct mpi_msg_fwupload_reply		*upp;
-	u_int64_t				addr;
 	int					rv = 0;
 
 	if (sc->sc_fw_len == 0)
@@ -2674,9 +2668,7 @@ mpi_fwupload(struct mpi_softc *sc)
 	bundle->sge.sg_hdr = htole32(MPI_SGE_FL_TYPE_SIMPLE |
 	    MPI_SGE_FL_SIZE_64 | MPI_SGE_FL_LAST | MPI_SGE_FL_EOB |
 	    MPI_SGE_FL_EOL | (u_int32_t)sc->sc_fw_len);
-	addr = MPI_DMA_DVA(sc->sc_fw);
-	bundle->sge.sg_hi_addr = htole32((u_int32_t)(addr >> 32));
-	bundle->sge.sg_lo_addr = htole32((u_int32_t)addr);
+	bundle->sge.sg_addr = htole64(MPI_DMA_DVA(sc->sc_fw));
 
 	if (mpi_poll(sc, ccb, 50000) != 0) {
 		DNPRINTF(MPI_D_MISC, "%s: mpi_cfg_header poll\n", DEVNAME(sc));
@@ -2855,7 +2847,6 @@ mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int flags,
 	struct mpi_msg_config_reply		*cp;
 	struct mpi_cfg_hdr			*hdr = p;
 	struct mpi_ecfg_hdr			*ehdr = p;
-	u_int64_t				dva;
 	char					*kva;
 	int					page_length;
 	int					rv = 0;
@@ -2901,10 +2892,8 @@ mpi_req_cfg_page(struct mpi_softc *sc, u_int32_t address, int flags,
 	    (read ? MPI_SGE_FL_DIR_IN : MPI_SGE_FL_DIR_OUT));
 
 	/* bounce the page via the request space to avoid more bus_dma games */
-	dva = ccb->ccb_cmd_dva + sizeof(struct mpi_msg_config_request);
-
-	cq->page_buffer.sg_hi_addr = htole32((u_int32_t)(dva >> 32));
-	cq->page_buffer.sg_lo_addr = htole32((u_int32_t)dva);
+	cq->page_buffer.sg_addr = htole64(ccb->ccb_cmd_dva +
+	    sizeof(struct mpi_msg_config_request));
 
 	kva = ccb->ccb_cmd;
 	kva += sizeof(struct mpi_msg_config_request);
@@ -3411,7 +3400,7 @@ mpi_create_sensors(struct mpi_softc *sc)
 		return (0);
 
 	sc->sc_sensors = malloc(sizeof(struct ksensor) * vol,
-	    M_DEVBUF, M_WAITOK|M_CANFAIL|M_ZERO);
+	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sc_sensors == NULL)
 		return (1);
 

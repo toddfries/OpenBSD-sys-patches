@@ -1,4 +1,4 @@
-/*	$OpenBSD: pciide.c,v 1.339 2012/04/22 14:22:28 miod Exp $	*/
+/*	$OpenBSD: pciide.c,v 1.341 2013/01/05 08:27:48 jasper Exp $	*/
 /*	$NetBSD: pciide.c,v 1.127 2001/08/03 01:31:08 tsutsui Exp $	*/
 
 /*
@@ -566,6 +566,18 @@ const struct pciide_product_desc pciide_intel_products[] =  {
 	  piixsata_chip_map
 	},
 	{ PCI_PRODUCT_INTEL_6SERIES_SATA_4, /* Intel 6 Series SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_7SERIES_SATA_1, /* Intel 7 Series SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_7SERIES_SATA_2, /* Intel 7 Series SATA */
+	  0,
+	  piixsata_chip_map
+	},
+	{ PCI_PRODUCT_INTEL_7SERIES_SATA_3, /* Intel 7 Series SATA */
 	  0,
 	  piixsata_chip_map
 	},

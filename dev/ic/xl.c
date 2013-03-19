@@ -1,4 +1,4 @@
-/*	$OpenBSD: xl.c,v 1.105 2012/02/24 06:19:00 guenther Exp $	*/
+/*	$OpenBSD: xl.c,v 1.109 2013/03/14 01:42:45 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -205,9 +205,6 @@ xl_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_QUIESCE:
-#ifndef SMALL_KERNEL
-		xl_wol_power(sc);
-#endif
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_SUSPEND:
@@ -215,10 +212,13 @@ xl_activate(struct device *self, int act)
 			xl_reset(sc);
 			xl_stop(sc);
 		}
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
 #ifndef SMALL_KERNEL
 		xl_wol_power(sc);
 #endif
-		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
 		xl_reset(sc);
@@ -601,8 +601,7 @@ xl_iff_90x(struct xl_softc *sc)
 	 */
 	rxfilt |= XL_RXFILTER_BROADCAST | XL_RXFILTER_INDIVIDUAL;
 
-	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0 ||
-	    ac->ac_multicnt > 0) {
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multicnt > 0) {
 		ifp->if_flags |= IFF_ALLMULTI;
 		if (ifp->if_flags & IFF_PROMISC)
 			rxfilt |= XL_RXFILTER_ALLFRAMES;
@@ -1118,7 +1117,6 @@ xl_fill_rx_ring(struct xl_softc *sc)
 	}
 }
 
-
 /*
  * Initialize an RX descriptor and attach an MBUF cluster.
  */
@@ -1129,7 +1127,6 @@ xl_newbuf(struct xl_softc *sc, struct xl_chain_onefrag *c)
 	bus_dmamap_t	map;
 
 	m_new = MCLGETI(NULL, M_DONTWAIT, &sc->sc_arpcom.ac_if, MCLBYTES);
-	
 	if (!m_new)
 		return (ENOBUFS);
 
@@ -1170,7 +1167,6 @@ xl_newbuf(struct xl_softc *sc, struct xl_chain_onefrag *c)
 
 	return (0);
 }
-
 
 /*
  * A frame has been uploaded: pass the resulting mbuf chain up to
@@ -1270,7 +1266,9 @@ again:
 
 		ether_input_mbuf(ifp, m);
 	}
+
 	xl_fill_rx_ring(sc);
+
 	/*
 	 * Handle the 'end of channel' condition. When the upload
 	 * engine hits the end of the RX ring, it will stall. This
@@ -1291,7 +1289,6 @@ again:
 		xl_fill_rx_ring(sc);
 		goto again;
 	}
-
 }
 
 /*
@@ -1498,7 +1495,6 @@ xl_intr(void *arg)
 
 		if (status & XL_STAT_UP_COMPLETE)
 			xl_rxeof(sc);
-
 
 		if (status & XL_STAT_DOWN_COMPLETE) {
 			if (sc->xl_type == XL_TYPE_905B)
@@ -2071,7 +2067,7 @@ xl_init(void *xsc)
 
 	/* Set the RX early threshold */
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_RX_SET_THRESH|(XL_PACKET_SIZE >>2));
-	CSR_WRITE_2(sc, XL_DMACTL, XL_DMACTL_UP_RX_EARLY);
+	CSR_WRITE_4(sc, XL_DMACTL, XL_DMACTL_UP_RX_EARLY);
 
 	/* Enable receiver and transmitter. */
 	CSR_WRITE_2(sc, XL_COMMAND, XL_CMD_TX_ENABLE);
@@ -2519,6 +2515,8 @@ xl_attach(struct xl_softc *sc)
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
+	m_clsetwms(ifp, MCLBYTES, 2, XL_RX_LIST_CNT - 1);
+
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 #ifndef XL905B_TXCSUM_BROKEN
@@ -2672,7 +2670,6 @@ xl_attach(struct xl_softc *sc)
 	 */
 	if_attach(ifp);
 	ether_ifattach(ifp);
-	m_clsetwms(ifp, MCLBYTES, 2, XL_RX_LIST_CNT - 1);
 }
 
 int

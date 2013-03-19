@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raidp.c,v 1.23 2011/12/25 15:28:17 jsing Exp $ */
+/* $OpenBSD: softraid_raidp.c,v 1.31 2013/03/02 12:50:01 jsing Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -48,7 +48,7 @@
 int	sr_raidp_create(struct sr_discipline *, struct bioc_createraid *,
 	    int, int64_t);
 int	sr_raidp_assemble(struct sr_discipline *, struct bioc_createraid *,
-	    int);
+	    int, void *);
 int	sr_raidp_alloc_resources(struct sr_discipline *);
 int	sr_raidp_free_resources(struct sr_discipline *);
 int	sr_raidp_rw(struct sr_workunit *);
@@ -71,10 +71,14 @@ void	sr_put_block(struct sr_discipline *, void *, int);
 void
 sr_raidp_discipline_init(struct sr_discipline *sd, u_int8_t type)
 {
-
 	/* Fill out discipline members. */
 	sd->sd_type = type;
-	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE;
+	if (sd->sd_type == SR_MD_RAID4)
+		strlcpy(sd->sd_name, "RAID 4", sizeof(sd->sd_name));
+	else
+		strlcpy(sd->sd_name, "RAID 5", sizeof(sd->sd_name));
+	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE |
+	    SR_CAP_REDUNDANT;
 	sd->sd_max_ccb_per_wu = 4; /* only if stripsize <= MAXPHYS */
 	sd->sd_max_wu = SR_RAIDP_NOWU;
 
@@ -85,6 +89,7 @@ sr_raidp_discipline_init(struct sr_discipline *sd, u_int8_t type)
 	sd->sd_free_resources = sr_raidp_free_resources;
 	sd->sd_openings = sr_raidp_openings;
 	sd->sd_scsi_rw = sr_raidp_rw;
+	sd->sd_scsi_intr = sr_raidp_intr;
 	sd->sd_set_chunk_state = sr_raidp_set_chunk_state;
 	sd->sd_set_vol_state = sr_raidp_set_vol_state;
 }
@@ -96,11 +101,6 @@ sr_raidp_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 
 	if (no_chunk < 3)
 		return EINVAL;
-
-	if (sd->sd_type == SR_MD_RAID4)
-		strlcpy(sd->sd_name, "RAID 4", sizeof(sd->sd_name));
-	else
-		strlcpy(sd->sd_name, "RAID 5", sizeof(sd->sd_name));
 
 	/*
 	 * XXX add variable strip size later even though MAXPHYS is really
@@ -116,7 +116,7 @@ sr_raidp_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 
 int
 sr_raidp_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
-    int no_chunk)
+    int no_chunk, void *data)
 {
 
 	return 0;
@@ -132,9 +132,6 @@ int
 sr_raidp_alloc_resources(struct sr_discipline *sd)
 {
 	int			rv = EINVAL;
-
-	if (!sd)
-		return (rv);
 
 	DNPRINTF(SR_D_DIS, "%s: sr_raidp_alloc_resources\n",
 	    DEVNAME(sd->sd_sc));
@@ -159,9 +156,6 @@ int
 sr_raidp_free_resources(struct sr_discipline *sd)
 {
 	int			rv = EINVAL;
-
-	if (!sd)
-		return (rv);
 
 	DNPRINTF(SR_D_DIS, "%s: sr_raidp_free_resources\n",
 	    DEVNAME(sd->sd_sc));
@@ -619,10 +613,8 @@ sr_raidp_intr(struct buf *bp)
 			}
 		}
 
-		if (xs != NULL) {
+		if (xs != NULL)
 			xs->error = XS_NOERROR;
-			xs->resid = 0;
-		}
 
 		pend = 0;
 		TAILQ_FOREACH(wup, &sd->sd_wu_pendq, swu_link) {
@@ -658,7 +650,7 @@ sr_raidp_intr(struct buf *bp)
 			}
 		} else {
 			if (xs != NULL)
-				scsi_done(xs);
+				sr_scsi_done(sd, xs);
 			else
 				scsi_io_put(&sd->sd_iopool, wu);
 		}
@@ -676,7 +668,7 @@ bad:
 		wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
 		wakeup(wu);
 	} else {
-		scsi_done(xs);
+		sr_scsi_done(sd, xs);
 	}
 
 	splx(s);
@@ -687,17 +679,12 @@ sr_raidp_recreate_wu(struct sr_workunit *wu)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct sr_workunit	*wup = wu;
-	struct sr_ccb		*ccb;
 
 	do {
 		DNPRINTF(SR_D_INTR, "%s: sr_raidp_recreate_wu: %p\n", wup);
 
 		/* toss all ccbs */
-		while ((ccb = TAILQ_FIRST(&wup->swu_ccb)) != NULL) {
-			TAILQ_REMOVE(&wup->swu_ccb, ccb, ccb_link);
-			sr_ccb_put(ccb);
-		}
-		TAILQ_INIT(&wup->swu_ccb);
+		sr_wu_release_ccbs(wup);
 
 		/* recreate ccbs */
 		wup->swu_state = SR_WU_REQUEUE;

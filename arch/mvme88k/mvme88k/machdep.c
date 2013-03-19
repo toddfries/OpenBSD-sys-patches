@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.245 2011/10/09 17:01:34 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.248 2012/12/26 22:32:13 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -52,6 +52,7 @@
 #include <sys/buf.h>
 #include <sys/reboot.h>
 #include <sys/conf.h>
+#include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
@@ -160,7 +161,6 @@ struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 char  machine[] = MACHINE;	 /* cpu "architecture" */
 char  cpu_model[120];
 
-int boothowto;					/* set in locore.S */
 int bootdev;					/* set in locore.S */
 int cputyp;					/* set in locore.S */
 int brdtyp;					/* set in locore.S */
@@ -435,8 +435,8 @@ boot(howto)
 		dumpsys();
 
 haltsys:
-	/* Run any shutdown hooks. */
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		printf("System halted. Press any key to reboot...\n\n");

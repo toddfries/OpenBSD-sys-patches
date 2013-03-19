@@ -1358,13 +1358,19 @@ nfs_realign_fixup(struct mbuf *m, struct mbuf *n, unsigned int *off)
 	 * destination chain is aligned, or the end of the source is reached.
 	 */
 	do {
+		size_t trailingspace;
 		m = m->m_next;
 		if (m == NULL)
 			return;
 
 		padding = min(ALIGN(n->m_len) - n->m_len, m->m_len);
-		if (padding > M_TRAILINGSPACE(n))
-			panic("nfs_realign_fixup: no memory to pad to");
+		trailingspace = M_TRAILINGSPACE(n);
+		if (padding > trailingspace) {
+			printf("nfs_realign_fixup: no memory to pad to\n");
+			printf("nfs_realign_fixup: padding = %ld, "
+			    "trailing = %ld\n", padding, trailingspace);
+			return;
+		}
 
 		bcopy(mtod(m, void *), mtod(n, char *) + n->m_len, padding);
 

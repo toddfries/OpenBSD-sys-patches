@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.73 2012/04/17 16:02:33 guenther Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.79 2013/03/12 09:37:16 mpi Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -95,6 +95,7 @@ struct cpu_info {
 
 	u_int32_t	ci_feature_flags;
 	u_int32_t	ci_feature_eflags;
+	u_int32_t	ci_feature_sefflags;
 	u_int32_t	ci_signature;
 	u_int32_t	ci_family;
 	u_int32_t	ci_model;
@@ -127,6 +128,9 @@ struct cpu_info {
 
 	struct ksensordev	ci_sensordev;
 	struct ksensor		ci_sensor;
+#ifdef GPROF
+	struct gmonparam	*ci_gmon;
+#endif
 };
 
 #define CPUF_BSP	0x0001		/* CPU is the original BSP */
@@ -137,12 +141,15 @@ struct cpu_info {
 #define CPUF_IDENTIFY	0x0010		/* CPU may now identify */
 #define CPUF_IDENTIFIED	0x0020		/* CPU has been identified */
 
+#define CPUF_CONST_TSC	0x0040		/* CPU has constant TSC */
+
 #define CPUF_PRESENT	0x1000		/* CPU is present */
 #define CPUF_RUNNING	0x2000		/* CPU is running */
 #define CPUF_PAUSE	0x4000		/* CPU is paused in DDB */
 #define CPUF_GO		0x8000		/* CPU should start running */
 
 #define PROC_PC(p)	((p)->p_md.md_regs->tf_rip)
+#define PROC_STACK(p)	((p)->p_md.md_regs->tf_rsp)
 
 extern struct cpu_info cpu_info_primary;
 extern struct cpu_info *cpu_info_list;
@@ -257,6 +264,10 @@ extern int biosextmem;
 extern int cpu;
 extern int cpu_feature;
 extern int cpu_ecxfeature;
+extern int cpu_perf_eax;
+extern int cpu_perf_ebx;
+extern int cpu_perf_edx;
+extern int cpu_apmi_edx;
 extern int ecpu_ecxfeature;
 extern int cpu_id;
 extern char cpu_vendor[];

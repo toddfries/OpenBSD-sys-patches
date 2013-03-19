@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_proto.c,v 1.56 2011/03/31 10:36:42 jasper Exp $	*/
+/*	$OpenBSD: in_proto.c,v 1.58 2013/01/17 16:30:10 bluhm Exp $	*/
 /*	$NetBSD: in_proto.c,v 1.14 1996/02/18 18:58:32 christos Exp $	*/
 
 /*
@@ -184,7 +184,7 @@ struct protosw inetsw[] = {
   0,
   ip_init,	0,		ip_slowtimo,	ip_drain,	ip_sysctl
 },
-{ SOCK_DGRAM,	&inetdomain,	IPPROTO_UDP,	PR_ATOMIC|PR_ADDR,
+{ SOCK_DGRAM,	&inetdomain,	IPPROTO_UDP,	PR_ATOMIC|PR_ADDR|PR_SPLICE,
   udp_input,	0,		udp_ctlinput,	ip_ctloutput,
   udp_usrreq,
   udp_init,	0,		0,		0,		udp_sysctl
@@ -322,25 +322,3 @@ struct domain inetdomain =
       rn_inithead,
 #endif
       32, sizeof(struct sockaddr_in) };
-
-#ifdef notyet /* XXXX */
-#include "hy.h"
-#if NHY > 0
-/*
- * HYPERchannel protocol family: raw interface.
- */
-int	rhy_output();
-extern	struct domain hydomain;
-
-struct protosw hysw[] = {
-{ SOCK_RAW,	&hydomain,	0,		PR_ATOMIC|PR_ADDR,
-  0,		rhy_output,	0,		0,
-  rip_usrreq,
-  0,		0,		0,		0,
-},
-};
-
-struct domain hydomain =
-    { AF_HYLINK, "hy", 0, 0, 0, hysw, &hysw[nitems(hysw)] };
-#endif
-#endif

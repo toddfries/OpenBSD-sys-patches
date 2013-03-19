@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.116 2012/01/28 14:40:04 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.128 2013/03/10 09:05:12 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -254,7 +254,7 @@ struct sr_aoe_config {
 
 struct sr_boot_chunk {
 	struct sr_metadata *sbc_metadata;
-	dev_t		sbc_mm;			
+	dev_t		sbc_mm;			/* Device major/minor. */
 
 	u_int32_t	sbc_chunk_id;		/* Chunk ID. */
 	u_int32_t	sbc_state;		/* Chunk state. */
@@ -285,7 +285,11 @@ struct sr_boot_volume {
 	char		sbv_part;		/* Partition opened. */
 	void		*sbv_diskinfo;		/* MD disk information. */
 
+	u_int8_t	*sbv_keys;		/* Disk keys for volume. */
+	u_int8_t	*sbv_maskkey;		/* Mask key for disk keys. */
+
 	struct sr_boot_chunk_head sbv_chunks;	/* List of chunks. */
+	struct sr_meta_opt_head sbv_meta_opt;	/* List of optional metadata. */
 
 	SLIST_ENTRY(sr_boot_volume)	sbv_link;
 };
@@ -331,6 +335,9 @@ extern u_int32_t		sr_debug;
 #define	SR_MAX_STATES		7
 #define SR_VM_IGNORE_DIRTY	1
 #define SR_REBUILD_IO_SIZE	128 /* blocks */
+
+extern struct sr_uuid	sr_bootuuid;
+extern u_int8_t		sr_bootkey[SR_CRYPTO_MAXKEYBYTES];
 
 /* forward define to prevent dependency goo */
 struct sr_softc;
@@ -512,6 +519,7 @@ struct sr_discipline {
 #define SR_CAP_AUTO_ASSEMBLE	0x00000002	/* Can auto assemble. */
 #define SR_CAP_REBUILD		0x00000004	/* Supports rebuild. */
 #define SR_CAP_NON_COERCED	0x00000008	/* Uses non-coerced size. */
+#define SR_CAP_REDUNDANT	0x00000010	/* Redundant copies of data. */
 
 	union {
 	    struct sr_raid0	mdd_raid0;
@@ -573,7 +581,7 @@ struct sr_discipline {
 	int			(*sd_create)(struct sr_discipline *,
 				    struct bioc_createraid *, int, int64_t);
 	int			(*sd_assemble)(struct sr_discipline *,
-				    struct bioc_createraid *, int);
+				    struct bioc_createraid *, int, void *);
 	int			(*sd_alloc_resources)(struct sr_discipline *);
 	int			(*sd_free_resources)(struct sr_discipline *);
 	int			(*sd_ioctl_handler)(struct sr_discipline *,
@@ -589,6 +597,8 @@ struct sr_discipline {
 	/* SCSI emulation */
 	struct scsi_sense_data	sd_scsi_sense;
 	int			(*sd_scsi_rw)(struct sr_workunit *);
+	void			(*sd_scsi_intr)(struct buf *);
+	void			(*sd_scsi_done)(struct sr_workunit *);
 	int			(*sd_scsi_sync)(struct sr_workunit *);
 	int			(*sd_scsi_tur)(struct sr_workunit *);
 	int			(*sd_scsi_start_stop)(struct sr_workunit *);
@@ -598,7 +608,11 @@ struct sr_discipline {
 
 	/* background operation */
 	struct proc		*sd_background_proc;
+
+	TAILQ_ENTRY(sr_discipline) sd_link;
 };
+
+TAILQ_HEAD(sr_discipline_list, sr_discipline);
 
 struct sr_softc {
 	struct device		sc_dev;
@@ -619,11 +633,9 @@ struct sr_softc {
 	struct scsi_link	sc_link;	/* scsi prototype link */
 	struct scsibus_softc	*sc_scsibus;
 
-	/*
-	 * XXX expensive, alternative would be nice but has to be cheap
-	 * since the target lookup happens on each IO
-	 */
-	struct sr_discipline	*sc_dis[SR_MAX_LD];
+	/* The target lookup has to be cheap since it happens for each I/O. */
+	struct sr_discipline	*sc_targets[SR_MAX_LD];
+	struct sr_discipline_list sc_dis_list;
 };
 
 /* hotplug */
@@ -638,10 +650,19 @@ int			sr_ccb_alloc(struct sr_discipline *);
 void			sr_ccb_free(struct sr_discipline *);
 struct sr_ccb		*sr_ccb_get(struct sr_discipline *);
 void			sr_ccb_put(struct sr_ccb *);
+struct sr_ccb		*sr_ccb_rw(struct sr_discipline *, int, daddr64_t,
+			    daddr64_t, u_int8_t *, int, int);
+void			sr_ccb_done(struct sr_ccb *);
 int			sr_wu_alloc(struct sr_discipline *);
 void			sr_wu_free(struct sr_discipline *);
 void			*sr_wu_get(void *);
 void			sr_wu_put(void *, void *);
+void			sr_wu_init(struct sr_discipline *,
+			    struct sr_workunit *);
+void			sr_wu_enqueue_ccb(struct sr_workunit *,
+			    struct sr_ccb *);
+void			sr_wu_release_ccbs(struct sr_workunit *);
+void			sr_wu_done(struct sr_workunit *);
 
 /* misc functions */
 void			sr_info(struct sr_softc *, const char *, ...);

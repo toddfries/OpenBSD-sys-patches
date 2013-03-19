@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.92 2012/08/07 05:16:53 guenther Exp $	*/
+/*	$OpenBSD: systm.h,v 1.95 2013/02/09 20:56:35 miod Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -172,8 +172,10 @@ int	printf(const char *, ...)
     __attribute__((__format__(__kprintf__,1,2)));
 void	uprintf(const char *, ...)
     __attribute__((__format__(__kprintf__,1,2)));
-int	vprintf(const char *, va_list);
-int	vsnprintf(char *, size_t, const char *, va_list);
+int	vprintf(const char *, va_list)
+    __attribute__((__format__(__kprintf__,1,0)));
+int	vsnprintf(char *, size_t, const char *, va_list)
+    __attribute__((__format__(__kprintf__,3,0)));
 int	snprintf(char *buf, size_t, const char *, ...)
     __attribute__((__format__(__kprintf__,3,4)));
 struct tty;
@@ -261,7 +263,8 @@ int	tsleep(const volatile void *, int, const char *, int);
 int	msleep(const volatile void *, struct mutex *, int,  const char*, int);
 void	yield(void);
 
-void	wdog_register(void *, int (*)(void *, int));
+void	wdog_register(int (*)(void *, int), void *);
+void	wdog_shutdown(int (*)(void *, int), void *);
 
 /*
  * Startup/shutdown hooks.  Startup hooks are functions running after
@@ -310,8 +313,8 @@ struct uio;
 int	uiomove(void *, int, struct uio *);
 
 #if defined(_KERNEL)
-int	setjmp(label_t *);
-void	longjmp(label_t *);
+__returns_twice int	setjmp(label_t *);
+__dead void	longjmp(label_t *);
 #endif
 
 void	consinit(void);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.194 2012/07/16 18:05:36 markus Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.206 2013/03/15 20:45:34 tedu Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -132,9 +132,8 @@ int	bridge_bifconf(struct bridge_softc *, struct ifbifconf *);
 void	bridge_timer(void *);
 int	bridge_rtfind(struct bridge_softc *, struct ifbaconf *);
 void	bridge_rtage(struct bridge_softc *);
-void	bridge_rttrim(struct bridge_softc *);
 int	bridge_rtdaddr(struct bridge_softc *, struct ether_addr *);
-int	bridge_rtflush(struct bridge_softc *, int);
+void	bridge_rtflush(struct bridge_softc *, int);
 struct ifnet *	bridge_rtupdate(struct bridge_softc *,
     struct ether_addr *, struct ifnet *ifp, int, u_int8_t);
 struct ifnet *	bridge_rtlookup(struct bridge_softc *,
@@ -143,7 +142,7 @@ u_int32_t	bridge_hash(struct bridge_softc *, struct ether_addr *);
 int bridge_blocknonip(struct ether_header *, struct mbuf *);
 int		bridge_addrule(struct bridge_iflist *,
     struct ifbrlreq *, int out);
-int		bridge_flushrule(struct bridge_iflist *);
+void	bridge_flushrule(struct bridge_iflist *);
 int	bridge_brlconf(struct bridge_softc *, struct ifbrlconf *);
 u_int8_t bridge_filterrule(struct brl_head *, struct ether_header *,
     struct mbuf *);
@@ -205,8 +204,8 @@ bridge_clone_create(struct if_clone *ifc, int unit)
 	sc->sc_brtmax = BRIDGE_RTABLE_MAX;
 	sc->sc_brttimeout = BRIDGE_RTABLE_TIMEOUT;
 	timeout_set(&sc->sc_brtimeout, bridge_timer, sc);
-	LIST_INIT(&sc->sc_iflist);
-	LIST_INIT(&sc->sc_spanlist);
+	TAILQ_INIT(&sc->sc_iflist);
+	TAILQ_INIT(&sc->sc_spanlist);
 	for (i = 0; i < BRIDGE_RTABLE_SIZE; i++)
 		LIST_INIT(&sc->sc_rts[i]);
 	sc->sc_hashkey = arc4random();
@@ -247,10 +246,10 @@ bridge_clone_destroy(struct ifnet *ifp)
 
 	bridge_stop(sc);
 	bridge_rtflush(sc, IFBF_FLUSHALL);
-	while ((bif = LIST_FIRST(&sc->sc_iflist)) != NULL)
+	while ((bif = TAILQ_FIRST(&sc->sc_iflist)) != NULL)
 		bridge_delete(sc, bif);
-	while ((bif = LIST_FIRST(&sc->sc_spanlist)) != NULL) {
-		LIST_REMOVE(bif, next);
+	while ((bif = TAILQ_FIRST(&sc->sc_spanlist)) != NULL) {
+		TAILQ_REMOVE(&sc->sc_spanlist, bif, next);
 		free(bif, M_DEVBUF);
 	}
 
@@ -273,10 +272,10 @@ bridge_delete(struct bridge_softc *sc, struct bridge_iflist *p)
 	if (p->bif_flags & IFBIF_STP)
 		bstp_delete(p->bif_stp);
 
-	p->ifp->if_bridge = NULL;
+	p->ifp->if_bridgeport = NULL;
 	error = ifpromisc(p->ifp, 0);
 
-	LIST_REMOVE(p, next);
+	TAILQ_REMOVE(&sc->sc_iflist, p, next);
 	bridge_rtdelete(sc, p->ifp, 0);
 	bridge_flushrule(p);
 	free(p, M_DEVBUF);
@@ -310,21 +309,20 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = ENOENT;
 			break;
 		}
-		if (ifs->if_bridge == (caddr_t)sc) {
-			error = EEXIST;
-			break;
-		}
-		if (ifs->if_bridge != NULL) {
-			error = EBUSY;
+		if (ifs->if_bridgeport != NULL) {
+			p = (struct bridge_iflist *)ifs->if_bridgeport;
+			if (p->bridge_sc == sc)
+				error = EEXIST;
+			else
+				error = EBUSY;
 			break;
 		}
 
 		/* If it's in the span list, it can't be a member. */
-		LIST_FOREACH(p, &sc->sc_spanlist, next)
+		TAILQ_FOREACH(p, &sc->sc_spanlist, next)
 			if (p->ifp == ifs)
 				break;
-
-		if (p != LIST_END(&sc->sc_spanlist)) {
+		if (p != NULL) {
 			error = EBUSY;
 			break;
 		}
@@ -384,28 +382,28 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		}
 
+		p->bridge_sc = sc;
 		p->ifp = ifs;
 		p->bif_flags = IFBIF_LEARNING | IFBIF_DISCOVER;
 		SIMPLEQ_INIT(&p->bif_brlin);
 		SIMPLEQ_INIT(&p->bif_brlout);
-		ifs->if_bridge = (caddr_t)sc;
-		LIST_INSERT_HEAD(&sc->sc_iflist, p, next);
+		ifs->if_bridgeport = (caddr_t)p;
+		TAILQ_INSERT_TAIL(&sc->sc_iflist, p, next);
 		break;
 	case SIOCBRDGDEL:
 		if ((error = suser(curproc, 0)) != 0)
 			break;
-
-		LIST_FOREACH(p, &sc->sc_iflist, next) {
-			if (strncmp(p->ifp->if_xname, req->ifbr_ifsname,
-			    sizeof(p->ifp->if_xname)) == 0) {
-				error = bridge_delete(sc, p);
-				break;
-			}
-		}
-		if (p == LIST_END(&sc->sc_iflist)) {
+		ifs = ifunit(req->ifbr_ifsname);
+		if (ifs == NULL) {
 			error = ENOENT;
 			break;
 		}
+		p = (struct bridge_iflist *)ifs->if_bridgeport;
+		if (p == NULL || p->bridge_sc != sc) {
+			error = ESRCH;
+			break;
+		}
+		error = bridge_delete(sc, p);
 		break;
 	case SIOCBRDGIFS:
 		error = bridge_bifconf(sc, (struct ifbifconf *)data);
@@ -418,20 +416,16 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = ENOENT;
 			break;
 		}
-		if (ifs->if_bridge == (caddr_t)sc) {
-			error = EEXIST;
-			break;
-		}
-		if (ifs->if_bridge != NULL) {
+		if (ifs->if_bridgeport != NULL) {
 			error = EBUSY;
 			break;
 		}
-		LIST_FOREACH(p, &sc->sc_spanlist, next) {
+		TAILQ_FOREACH(p, &sc->sc_spanlist, next) {
 			if (p->ifp == ifs)
 				break;
 		}
-		if (p != LIST_END(&sc->sc_spanlist)) {
-			error = EBUSY;
+		if (p != NULL) {
+			error = EEXIST;
 			break;
 		}
 		p = malloc(sizeof(*p), M_DEVBUF, M_NOWAIT|M_ZERO);
@@ -443,20 +437,20 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		p->bif_flags = IFBIF_SPAN;
 		SIMPLEQ_INIT(&p->bif_brlin);
 		SIMPLEQ_INIT(&p->bif_brlout);
-		LIST_INSERT_HEAD(&sc->sc_spanlist, p, next);
+		TAILQ_INSERT_TAIL(&sc->sc_spanlist, p, next);
 		break;
 	case SIOCBRDGDELS:
 		if ((error = suser(curproc, 0)) != 0)
 			break;
-		LIST_FOREACH(p, &sc->sc_spanlist, next) {
+		TAILQ_FOREACH(p, &sc->sc_spanlist, next) {
 			if (strncmp(p->ifp->if_xname, req->ifbr_ifsname,
 			    sizeof(p->ifp->if_xname)) == 0) {
-				LIST_REMOVE(p, next);
+				TAILQ_REMOVE(&sc->sc_spanlist, p, next);
 				free(p, M_DEVBUF);
 				break;
 			}
 		}
-		if (p == LIST_END(&sc->sc_spanlist)) {
+		if (p == NULL) {
 			error = ENOENT;
 			break;
 		}
@@ -467,15 +461,8 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = ENOENT;
 			break;
 		}
-		if ((caddr_t)sc != ifs->if_bridge) {
-			error = ESRCH;
-			break;
-		}
-		LIST_FOREACH(p, &sc->sc_iflist, next) {
-			if (p->ifp == ifs)
-				break;
-		}
-		if (p == LIST_END(&sc->sc_iflist)) {
+		p = (struct bridge_iflist *)ifs->if_bridgeport;
+		if (p == NULL || p->bridge_sc != sc) {
 			error = ESRCH;
 			break;
 		}
@@ -515,15 +502,8 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = ENOENT;
 			break;
 		}
-		if ((caddr_t)sc != ifs->if_bridge) {
-			error = ESRCH;
-			break;
-		}
-		LIST_FOREACH(p, &sc->sc_iflist, next) {
-			if (p->ifp == ifs)
-				break;
-		}
-		if (p == LIST_END(&sc->sc_iflist)) {
+		p = (struct bridge_iflist *)ifs->if_bridgeport;
+		if (p == NULL || p->bridge_sc != sc) {
 			error = ESRCH;
 			break;
 		}
@@ -556,20 +536,18 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if ((error = suser(curproc, 0)) != 0)
 			break;
 
-		error = bridge_rtflush(sc, req->ifbr_ifsflags);
+		bridge_rtflush(sc, req->ifbr_ifsflags);
 		break;
 	case SIOCBRDGSADDR:
 		if ((error = suser(curproc, 0)) != 0)
 			break;
-
 		ifs = ifunit(bareq->ifba_ifsname);
 		if (ifs == NULL) {			/* no such interface */
 			error = ENOENT;
 			break;
 		}
-
-		if (ifs->if_bridge == NULL ||
-		    ifs->if_bridge != (caddr_t)sc) {
+		p = (struct bridge_iflist *)ifs->if_bridgeport;
+		if (p == NULL || p->bridge_sc != sc) {
 			error = ESRCH;
 			break;
 		}
@@ -591,7 +569,6 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if ((error = suser(curproc, 0)) != 0)
 			break;
 		sc->sc_brtmax = bparam->ifbrp_csize;
-		bridge_rttrim(sc);
 		break;
 	case SIOCBRDGSTO:
 		if ((error = suser(curproc, 0)) != 0)
@@ -626,16 +603,8 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = ENOENT;
 			break;
 		}
-		if (ifs->if_bridge == NULL ||
-		    ifs->if_bridge != (caddr_t)sc) {
-			error = ESRCH;
-			break;
-		}
-		LIST_FOREACH(p, &sc->sc_iflist, next) {
-			if (p->ifp == ifs)
-				break;
-		}
-		if (p == LIST_END(&sc->sc_iflist)) {
+		p = (struct bridge_iflist *)ifs->if_bridgeport;
+		if (p == NULL || p->bridge_sc != sc) {
 			error = ESRCH;
 			break;
 		}
@@ -664,20 +633,12 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			error = ENOENT;
 			break;
 		}
-		if (ifs->if_bridge == NULL ||
-		    ifs->if_bridge != (caddr_t)sc) {
+		p = (struct bridge_iflist *)ifs->if_bridgeport;
+		if (p == NULL || p->bridge_sc != sc) {
 			error = ESRCH;
 			break;
 		}
-		LIST_FOREACH(p, &sc->sc_iflist, next) {
-			if (p->ifp == ifs)
-				break;
-		}
-		if (p == LIST_END(&sc->sc_iflist)) {
-			error = ESRCH;
-			break;
-		}
-		error = bridge_flushrule(p);
+		bridge_flushrule(p);
 		break;
 	case SIOCBRDGGRL:
 		error = bridge_brlconf(sc, (struct ifbrlconf *)data);
@@ -731,51 +692,48 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 void
 bridge_ifdetach(struct ifnet *ifp)
 {
-	struct bridge_softc *sc = (struct bridge_softc *)ifp->if_bridge;
+	struct bridge_softc *sc;
 	struct bridge_iflist *bif;
 
-	LIST_FOREACH(bif, &sc->sc_iflist, next)
-		if (bif->ifp == ifp) {
-			bridge_delete(sc, bif);
-			break;
-		}
+	bif = (struct bridge_iflist *)ifp->if_bridgeport;
+	sc = bif->bridge_sc;
+
+	bridge_delete(sc, bif);
 }
 
 void
 bridge_update(struct ifnet *ifp, struct ether_addr *ea, int delete)
 {
-	struct bridge_softc *sc = (struct bridge_softc *)ifp->if_bridge;
+	struct bridge_softc *sc;
 	struct bridge_iflist *bif;
 	u_int8_t *addr;
 
 	addr = (u_int8_t *)ea;
 
-	LIST_FOREACH(bif, &sc->sc_iflist, next)
-		if (bif->ifp == ifp) {
-			/*
-			 * Update the bridge interface if it is in
-			 * the learning state.
-			 */
-			if ((bif->bif_flags & IFBIF_LEARNING) &&
-			    (ETHER_IS_MULTICAST(addr) == 0) &&
-			    !(addr[0] == 0 && addr[1] == 0 && addr[2] == 0 &&
-			    addr[3] == 0 && addr[4] == 0 && addr[5] == 0)) {
-				/* Care must be taken with spanning tree */
-				if ((bif->bif_flags & IFBIF_STP) &&
-				    (bif->bif_state == BSTP_IFSTATE_DISCARDING))
-					return;
+	bif = (struct bridge_iflist *)ifp->if_bridgeport;
+	sc = bif->bridge_sc;
 
-				/* Delete the address from the bridge */
-				bridge_rtdaddr(sc, ea);
-
-				if (!delete) {
-					/* Update the bridge table */
-					bridge_rtupdate(sc, ea, ifp, 0,
-					    IFBAF_DYNAMIC);
-				}
-			}
+	/*
+	 * Update the bridge interface if it is in
+	 * the learning state.
+	 */
+	if ((bif->bif_flags & IFBIF_LEARNING) &&
+	    (ETHER_IS_MULTICAST(addr) == 0) &&
+	    !(addr[0] == 0 && addr[1] == 0 && addr[2] == 0 &&
+	    addr[3] == 0 && addr[4] == 0 && addr[5] == 0)) {
+		/* Care must be taken with spanning tree */
+		if ((bif->bif_flags & IFBIF_STP) &&
+		    (bif->bif_state == BSTP_IFSTATE_DISCARDING))
 			return;
+
+		/* Delete the address from the bridge */
+		bridge_rtdaddr(sc, ea);
+
+		if (!delete) {
+			/* Update the bridge table */
+			bridge_rtupdate(sc, ea, ifp, 0, IFBAF_DYNAMIC);
 		}
+	}
 }
 
 int
@@ -788,10 +746,10 @@ bridge_bifconf(struct bridge_softc *sc, struct ifbifconf *bifc)
 	int error = 0;
 	struct ifbreq *breq = NULL;
 
-	LIST_FOREACH(p, &sc->sc_iflist, next)
+	TAILQ_FOREACH(p, &sc->sc_iflist, next)
 		total++;
 
-	LIST_FOREACH(p, &sc->sc_spanlist, next)
+	TAILQ_FOREACH(p, &sc->sc_spanlist, next)
 		total++;
 
 	if (bifc->ifbic_len == 0) {
@@ -803,7 +761,7 @@ bridge_bifconf(struct bridge_softc *sc, struct ifbifconf *bifc)
 	    malloc(sizeof(*breq), M_DEVBUF, M_NOWAIT)) == NULL)
 		goto done;
 
-	LIST_FOREACH(p, &sc->sc_iflist, next) {
+	TAILQ_FOREACH(p, &sc->sc_iflist, next) {
 		bzero(breq, sizeof(*breq));
 		if (bifc->ifbic_len < sizeof(*breq))
 			break;
@@ -843,7 +801,7 @@ bridge_bifconf(struct bridge_softc *sc, struct ifbifconf *bifc)
 		i++;
 		bifc->ifbic_len -= sizeof(*breq);
 	}
-	LIST_FOREACH(p, &sc->sc_spanlist, next) {
+	TAILQ_FOREACH(p, &sc->sc_spanlist, next) {
 		bzero(breq, sizeof(*breq));
 		if (bifc->ifbic_len < sizeof(*breq))
 			break;
@@ -879,13 +837,8 @@ bridge_brlconf(struct bridge_softc *sc, struct ifbrlconf *bc)
 	ifp = ifunit(bc->ifbrl_ifsname);
 	if (ifp == NULL)
 		return (ENOENT);
-	if (ifp->if_bridge == NULL || ifp->if_bridge != (caddr_t)sc)
-		return (ESRCH);
-	LIST_FOREACH(ifl, &sc->sc_iflist, next) {
-		if (ifl->ifp == ifp)
-			break;
-	}
-	if (ifl == LIST_END(&sc->sc_iflist))
+	ifl = (struct bridge_iflist *)ifp->if_bridgeport;
+	if (ifl == NULL || ifl->bridge_sc != sc)
 		return (ESRCH);
 
 	SIMPLEQ_FOREACH(n, &ifl->bif_brlin, brl_next) {
@@ -1005,11 +958,11 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 #endif /* IPSEC */
 
 	/* ifp must be a member interface of the bridge. */ 
-	sc = (struct bridge_softc *)ifp->if_bridge;
-	if (sc == NULL) {
+	if (ifp->if_bridgeport == NULL) {
 		m_freem(m);
 		return (EINVAL);
 	}
+	sc = ((struct bridge_iflist *)ifp->if_bridgeport)->bridge_sc;
 
 	if (m->m_len < sizeof(*eh)) {
 		m = m_pullup(m, sizeof(*eh));
@@ -1072,7 +1025,7 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 
 		bridge_span(sc, NULL, m);
 
-		LIST_FOREACH(p, &sc->sc_iflist, next) {
+		TAILQ_FOREACH(p, &sc->sc_iflist, next) {
 			dst_if = p->ifp;
 			if ((dst_if->if_flags & IFF_RUNNING) == 0)
 				continue;
@@ -1100,7 +1053,7 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 				sc->sc_if.if_oerrors++;
 				continue;
 			}
-			if (LIST_NEXT(p, next) == LIST_END(&sc->sc_iflist)) {
+			if (TAILQ_NEXT(p, next) == NULL) {
 				used = 1;
 				mc = m;
 			} else {
@@ -1207,11 +1160,8 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 	sc->sc_if.if_ipackets++;
 	sc->sc_if.if_ibytes += m->m_pkthdr.len;
 
-	LIST_FOREACH(ifl, &sc->sc_iflist, next)
-		if (ifl->ifp == src_if)
-			break;
-
-	if (ifl == LIST_END(&sc->sc_iflist)) {
+	ifl = (struct bridge_iflist *)src_if->if_bridgeport;
+	if (ifl == NULL) {
 		m_freem(m);
 		return;
 	}
@@ -1327,14 +1277,7 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 		m_freem(m);
 		return;
 	}
-	LIST_FOREACH(ifl, &sc->sc_iflist, next) {
-		if (ifl->ifp == dst_if)
-			break;
-	}
-	if (ifl == LIST_END(&sc->sc_iflist)) {
-		m_freem(m);
-		return;
-	}
+	ifl = (struct bridge_iflist *)dst_if->if_bridgeport;
 	if ((ifl->bif_flags & IFBIF_STP) &&
 	    (ifl->bif_state == BSTP_IFSTATE_DISCARDING)) {
 		m_freem(m);
@@ -1379,7 +1322,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 	/*
 	 * Make sure this interface is a bridge member.
 	 */
-	if (ifp == NULL || ifp->if_bridge == NULL || m == NULL)
+	if (ifp == NULL || ifp->if_bridgeport == NULL || m == NULL)
 		return (m);
 
 	if ((m->m_flags & M_PKTHDR) == 0)
@@ -1387,15 +1330,9 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 
 	m->m_flags &= ~M_PROTO1;	/* Loop prevention */
 
-	sc = (struct bridge_softc *)ifp->if_bridge;
+	ifl = (struct bridge_iflist *)ifp->if_bridgeport;
+	sc = ifl->bridge_sc;
 	if ((sc->sc_if.if_flags & IFF_RUNNING) == 0)
-		return (m);
-
-	LIST_FOREACH(ifl, &sc->sc_iflist, next) {
-		if (ifl->ifp == ifp)
-			break;
-	}
-	if (ifl == LIST_END(&sc->sc_iflist))
 		return (m);
 
 #if NBPFILTER > 0
@@ -1418,8 +1355,9 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 		    == 0) {
 			if (eh->ether_dhost[ETHER_ADDR_LEN - 1] == 0) {
 				/* STP traffic */
-				bstp_input(sc->sc_stp, ifl->bif_stp, eh, m);
-				return (NULL);
+				if ((m = bstp_input(sc->sc_stp, ifl->bif_stp,
+				    eh, m)) == NULL)
+					return (NULL);
 			} else if (eh->ether_dhost[ETHER_ADDR_LEN - 1] <= 0xf) {
 				m_freem(m);
 				return (NULL);
@@ -1455,11 +1393,11 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 		splx(s);
 		schednetisr(NETISR_BRIDGE);
 		if (ifp->if_type == IFT_GIF) {
-			LIST_FOREACH(ifl, &sc->sc_iflist, next) {
+			TAILQ_FOREACH(ifl, &sc->sc_iflist, next) {
 				if (ifl->ifp->if_type == IFT_ETHER)
 					break;
 			}
-			if (ifl != LIST_END(&sc->sc_iflist)) {
+			if (ifl != NULL) {
 				m->m_pkthdr.rcvif = ifl->ifp;
 				m->m_pkthdr.rdomain = ifl->ifp->if_rdomain;
 #if NBPFILTER > 0
@@ -1487,14 +1425,14 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 	 * Unicast, make sure it's not for us.
 	 */
 	srcifl = ifl;
-	LIST_FOREACH(ifl, &sc->sc_iflist, next) {
+	TAILQ_FOREACH(ifl, &sc->sc_iflist, next) {
 		if (ifl->ifp->if_type != IFT_ETHER)
 			continue;
 		ac = (struct arpcom *)ifl->ifp;
 		if (bcmp(ac->ac_enaddr, eh->ether_dhost, ETHER_ADDR_LEN) == 0
 #if NCARP > 0
 		    || (ifl->ifp->if_carp && carp_ourether(ifl->ifp->if_carp,
-			eh, 0) != NULL)
+			(u_int8_t *)&eh->ether_dhost) != NULL)
 #endif
 		    ) {
 			if (srcifl->bif_flags & IFBIF_LEARNING)
@@ -1535,7 +1473,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 		if (bcmp(ac->ac_enaddr, eh->ether_shost, ETHER_ADDR_LEN) == 0
 #if NCARP > 0
 		    || (ifl->ifp->if_carp && carp_ourether(ifl->ifp->if_carp,
-			eh, 1) != NULL)
+			(u_int8_t *)&eh->ether_shost) != NULL)
 #endif
 		    ) {
 			m_freem(m);
@@ -1574,7 +1512,7 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 
 	splassert(IPL_NET);
 
-	LIST_FOREACH(p, &sc->sc_iflist, next) {
+	TAILQ_FOREACH(p, &sc->sc_iflist, next) {
 		/*
 		 * Don't retransmit out of the same interface where
 		 * the packet was received from.
@@ -1614,7 +1552,7 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 		bridge_localbroadcast(sc, dst_if, eh, m);
 
 		/* If last one, reuse the passed-in mbuf */
-		if (LIST_NEXT(p, next) == LIST_END(&sc->sc_iflist)) {
+		if (TAILQ_NEXT(p, next) == NULL) {
 			mc = m;
 			used = 1;
 		} else {
@@ -1719,7 +1657,7 @@ bridge_span(struct bridge_softc *sc, struct ether_header *eh,
 	struct mbuf *mc, *m;
 	int error;
 
-	if (LIST_EMPTY(&sc->sc_spanlist))
+	if (TAILQ_EMPTY(&sc->sc_spanlist))
 		return;
 
 	m = m_copym2(morig, 0, M_COPYALL, M_NOWAIT);
@@ -1732,7 +1670,7 @@ bridge_span(struct bridge_softc *sc, struct ether_header *eh,
 		bcopy(eh, mtod(m, caddr_t), ETHER_HDR_LEN);
 	}
 
-	LIST_FOREACH(p, &sc->sc_spanlist, next) {
+	TAILQ_FOREACH(p, &sc->sc_spanlist, next) {
 		ifp = p->ifp;
 
 		if ((ifp->if_flags & IFF_RUNNING) == 0)
@@ -1770,7 +1708,7 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 
 	h = bridge_hash(sc, ea);
 	p = LIST_FIRST(&sc->sc_rts[h]);
-	if (p == LIST_END(&sc->sc_rts[h])) {
+	if (p == NULL) {
 		if (sc->sc_brtcnt >= sc->sc_brtmax)
 			goto done;
 		p = malloc(sizeof(*p), M_DEVBUF, M_NOWAIT);
@@ -1830,7 +1768,7 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 			goto want;
 		}
 
-		if (p == LIST_END(&sc->sc_rts[h])) {
+		if (p == NULL) {
 			if (sc->sc_brtcnt >= sc->sc_brtmax)
 				goto done;
 			p = malloc(sizeof(*p), M_DEVBUF, M_NOWAIT);
@@ -1849,7 +1787,7 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 			sc->sc_brtcnt++;
 			goto want;
 		}
-	} while (p != LIST_END(&sc->sc_rts[h]));
+	} while (p != NULL);
 
 done:
 	ifp = NULL;
@@ -1911,46 +1849,6 @@ bridge_hash(struct bridge_softc *sc, struct ether_addr *addr)
 	return (c & BRIDGE_RTABLE_MASK);
 }
 
-/*
- * Trim the routing table so that we've got a number of routes
- * less than or equal to the maximum.
- */
-void
-bridge_rttrim(struct bridge_softc *sc)
-{
-	struct bridge_rtnode *n, *p;
-	int i;
-
-	/*
-	 * Make sure we have to trim the address table
-	 */
-	if (sc->sc_brtcnt <= sc->sc_brtmax)
-		return;
-
-	/*
-	 * Force an aging cycle, this might trim enough addresses.
-	 */
-	bridge_rtage(sc);
-
-	if (sc->sc_brtcnt <= sc->sc_brtmax)
-		return;
-
-	for (i = 0; i < BRIDGE_RTABLE_SIZE; i++) {
-		n = LIST_FIRST(&sc->sc_rts[i]);
-		while (n != LIST_END(&sc->sc_rts[i])) {
-			p = LIST_NEXT(n, brt_next);
-			if ((n->brt_flags & IFBAF_TYPEMASK) == IFBAF_DYNAMIC) {
-				LIST_REMOVE(n, brt_next);
-				sc->sc_brtcnt--;
-				free(n, M_DEVBUF);
-				if (sc->sc_brtcnt <= sc->sc_brtmax)
-					return;
-			}
-			n = p;
-		}
-	}
-}
-
 void
 bridge_timer(void *vsc)
 {
@@ -1973,7 +1871,7 @@ bridge_rtage(struct bridge_softc *sc)
 
 	for (i = 0; i < BRIDGE_RTABLE_SIZE; i++) {
 		n = LIST_FIRST(&sc->sc_rts[i]);
-		while (n != LIST_END(&sc->sc_rts[i])) {
+		while (n != NULL) {
 			if ((n->brt_flags & IFBAF_TYPEMASK) == IFBAF_STATIC) {
 				n->brt_age = !n->brt_age;
 				if (n->brt_age)
@@ -1999,10 +1897,11 @@ bridge_rtage(struct bridge_softc *sc)
 void
 bridge_rtagenode(struct ifnet *ifp, int age)
 {
-	struct bridge_softc *sc = (struct bridge_softc *)ifp->if_bridge;
+	struct bridge_softc *sc;
 	struct bridge_rtnode *n;
 	int i;
 
+	sc = ((struct bridge_iflist *)ifp->if_bridgeport)->bridge_sc;
 	if (sc == NULL)
 		return;
 
@@ -2030,7 +1929,7 @@ bridge_rtagenode(struct ifnet *ifp, int age)
 /*
  * Remove all dynamic addresses from the cache
  */
-int
+void
 bridge_rtflush(struct bridge_softc *sc, int full)
 {
 	int i;
@@ -2038,7 +1937,7 @@ bridge_rtflush(struct bridge_softc *sc, int full)
 
 	for (i = 0; i < BRIDGE_RTABLE_SIZE; i++) {
 		n = LIST_FIRST(&sc->sc_rts[i]);
-		while (n != LIST_END(&sc->sc_rts[i])) {
+		while (n != NULL) {
 			if (full ||
 			    (n->brt_flags & IFBAF_TYPEMASK) == IFBAF_DYNAMIC) {
 				p = LIST_NEXT(n, brt_next);
@@ -2050,8 +1949,6 @@ bridge_rtflush(struct bridge_softc *sc, int full)
 				n = LIST_NEXT(n, brt_next);
 		}
 	}
-
-	return (0);
 }
 
 /*
@@ -2090,7 +1987,7 @@ bridge_rtdelete(struct bridge_softc *sc, struct ifnet *ifp, int dynonly)
 	 */
 	for (i = 0; i < BRIDGE_RTABLE_SIZE; i++) {
 		n = LIST_FIRST(&sc->sc_rts[i]);
-		while (n != LIST_END(&sc->sc_rts[i])) {
+		while (n != NULL) {
 			if (n->brt_if != ifp) {
 				/* Not ours */
 				n = LIST_NEXT(n, brt_next);
@@ -2271,7 +2168,7 @@ bridge_addrule(struct bridge_iflist *bif, struct ifbrlreq *req, int out)
 	return (0);
 }
 
-int
+void
 bridge_flushrule(struct bridge_iflist *bif)
 {
 	struct brl_node *p;
@@ -2292,7 +2189,6 @@ bridge_flushrule(struct bridge_iflist *bif)
 #endif
 		free(p, M_DEVBUF);
 	}
-	return (0);
 }
 
 #ifdef IPSEC
@@ -2395,7 +2291,7 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 		if (proto == 0)
 			goto skiplookup;
 
-		s = spltdb();
+		s = splsoftnet();
 
 		tdb = gettdb(ifp->if_rdomain, spi, &dst, proto);
 		if (tdb != NULL && (tdb->tdb_flags & TDBF_INVALID) == 0 &&

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.96 2012/08/10 18:50:04 krw Exp $	*/
+/*	$OpenBSD: bios.c,v 1.98 2013/03/12 16:31:48 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -74,6 +74,11 @@
 #include <sys/tty.h>
 #include <dev/ic/comvar.h>
 #include <dev/ic/comreg.h>
+#endif
+
+#include "softraid.h"
+#if NSOFTRAID > 0
+#include <dev/softraidvar.h>
 #endif
 
 struct bios_softc {
@@ -330,6 +335,43 @@ biosattach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
+	/* No SMBIOS extensions, go looking for Soekris comBIOS */
+	if (!(flags & BIOSF_SMBIOS) && smbiosrev == 0) {
+		const char *signature = "Soekris Engineering";
+
+		for (va = ISA_HOLE_VADDR(SMBIOS_START);
+		    va <= (u_int8_t *)ISA_HOLE_VADDR(SMBIOS_END -
+		    (strlen(signature) - 1)); va++)
+			if (!memcmp((u_int8_t *)va, signature,
+			    strlen(signature))) {
+				hw_vendor = malloc(strlen(signature) + 1,
+				    M_DEVBUF, M_NOWAIT);
+				if (hw_vendor)
+					strlcpy(hw_vendor, signature,
+					    strlen(signature) + 1);
+				va += strlen(signature);
+				break;
+			}
+
+		for (; hw_vendor &&
+		    va <= (u_int8_t *)ISA_HOLE_VADDR(SMBIOS_END - 6); va++)
+			/*
+			 * Search for "net(4(5xx|801)|[56]501)" which matches
+			 * the strings found in the comBIOS images
+			 */
+			if (!memcmp((u_int8_t *)va, "net45xx", 7) ||
+			    !memcmp((u_int8_t *)va, "net4801", 7) ||
+			    !memcmp((u_int8_t *)va, "net5501", 7) ||
+			    !memcmp((u_int8_t *)va, "net6501", 7)) {
+				hw_prod = malloc(8, M_DEVBUF, M_NOWAIT);
+				if (hw_prod) {
+					memcpy(hw_prod, (u_int8_t *)va, 7);
+					hw_prod[7] = '\0';
+				}
+				break;
+			}
+	}
+
 #if NAPM > 0
 	if (apm && ncpu < 2 && smbiosrev < 240) {
 		struct bios_attach_args ba;
@@ -456,6 +498,7 @@ bios_getopt()
 	bootarg_t *q;
 	bios_ddb_t *bios_ddb;
 	bios_bootduid_t *bios_bootduid;
+	bios_bootsr_t *bios_bootsr;
 
 #ifdef BIOS_DEBUG
 	printf("bootargv:");
@@ -552,6 +595,17 @@ bios_getopt()
 		case BOOTARG_BOOTDUID:
 			bios_bootduid = (bios_bootduid_t *)q->ba_arg;
 			bcopy(bios_bootduid, bootduid, sizeof(bootduid));
+			break;
+
+		case BOOTARG_BOOTSR:
+			bios_bootsr = (bios_bootsr_t *)q->ba_arg;
+#if NSOFTRAID > 0
+			bcopy(&bios_bootsr->uuid, &sr_bootuuid,
+			    sizeof(sr_bootuuid));
+			bcopy(&bios_bootsr->maskkey, &sr_bootkey,
+			    sizeof(sr_bootkey));
+#endif
+			explicit_bzero(bios_bootsr, sizeof(bios_bootsr_t));
 			break;
 
 		default:

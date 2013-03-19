@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_usrreq.c,v 1.66 2012/04/26 17:18:17 matthew Exp $	*/
+/*	$OpenBSD: uipc_usrreq.c,v 1.69 2012/10/12 20:45:49 guenther Exp $	*/
 /*	$NetBSD: uipc_usrreq.c,v 1.18 1996/02/09 19:00:50 christos Exp $	*/
 
 /*
@@ -48,6 +48,8 @@
 #include <sys/stat.h>
 #include <sys/mbuf.h>
 
+void	uipc_setaddr(const struct unpcb *, struct mbuf *);
+
 /*
  * Unix communications domain.
  *
@@ -58,6 +60,20 @@
  */
 struct	sockaddr sun_noname = { sizeof(sun_noname), AF_UNIX };
 ino_t	unp_ino;			/* prototype for fake inode numbers */
+
+void
+uipc_setaddr(const struct unpcb *unp, struct mbuf *nam)
+{
+	if (unp != NULL && unp->unp_addr != NULL) {
+		nam->m_len = unp->unp_addr->m_len;
+		bcopy(mtod(unp->unp_addr, caddr_t), mtod(nam, caddr_t),
+		    nam->m_len);
+	} else {
+		nam->m_len = sizeof(sun_noname);
+		bcopy(&sun_noname, mtod(nam, struct sockaddr *),
+		    nam->m_len);
+	}
+}
 
 /*ARGSUSED*/
 int
@@ -119,14 +135,7 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		 * if it was bound and we are still connected
 		 * (our peer may have closed already!).
 		 */
-		if (unp->unp_conn && unp->unp_conn->unp_addr) {
-			nam->m_len = unp->unp_conn->unp_addr->m_len;
-			bcopy(mtod(unp->unp_conn->unp_addr, caddr_t),
-			    mtod(nam, caddr_t), nam->m_len);
-		} else {
-			nam->m_len = sizeof(sun_noname);
-			*(mtod(nam, struct sockaddr *)) = sun_noname;
-		}
+		uipc_setaddr(unp->unp_conn, nam);
 		break;
 
 	case PRU_SHUTDOWN:
@@ -283,21 +292,11 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		break;
 
 	case PRU_SOCKADDR:
-		if (unp->unp_addr) {
-			nam->m_len = unp->unp_addr->m_len;
-			bcopy(mtod(unp->unp_addr, caddr_t),
-			    mtod(nam, caddr_t), nam->m_len);
-		} else
-			nam->m_len = 0;
+		uipc_setaddr(unp, nam);
 		break;
 
 	case PRU_PEERADDR:
-		if (unp->unp_conn && unp->unp_conn->unp_addr) {
-			nam->m_len = unp->unp_conn->unp_addr->m_len;
-			bcopy(mtod(unp->unp_conn->unp_addr, caddr_t),
-			    mtod(nam, caddr_t), nam->m_len);
-		} else
-			nam->m_len = 0;
+		uipc_setaddr(unp->unp_conn, nam);
 		break;
 
 	case PRU_SLOWTIMO:
@@ -710,8 +709,6 @@ restart:
 	 */
 	rp = ((struct file **)CMSG_DATA(cm));
 	for (i = 0; i < nfds; i++) {
-		bcopy(rp, &fp, sizeof(fp));
-		rp++;
 		if ((error = fdalloc(p, 0, &fdp[i])) != 0) {
 			/*
 			 * Back out what we've done so far.
@@ -739,7 +736,7 @@ restart:
 		 * fdalloc() works properly.. We finalize it all
 		 * in the loop below.
 		 */
-		p->p_fd->fd_ofiles[fdp[i]] = fp;
+		p->p_fd->fd_ofiles[fdp[i]] = *rp++;
 	}
 
 	/*
@@ -835,8 +832,9 @@ morespace:
 			error = EDEADLK;
 			goto fail;
 		}
-		/* kq descriptors cannot be copied */
-		if (fp->f_type == DTYPE_KQUEUE) {
+		/* kq and systrace descriptors cannot be copied */
+		if (fp->f_type == DTYPE_KQUEUE ||
+		    fp->f_type == DTYPE_SYSTRACE) {
 			error = EINVAL;
 			goto fail;
 		}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.30 2011/11/16 20:50:18 deraadt Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.34 2013/03/12 09:37:16 mpi Exp $	*/
 /*	$NetBSD: cpu.h,v 1.34 2003/06/23 11:01:08 martin Exp $	*/
 
 /*
@@ -154,6 +154,7 @@ extern int current_intr_depth;
  * PROC_PC: Find out the program counter for the given process.
  */
 #define PROC_PC(p)	((p)->p_addr->u_pcb.pcb_tf->tf_pc)
+#define PROC_STACK(p)	((p)->p_addr->u_pcb.pcb_tf->tf_usr_sp)
 
 /* The address of the vector page. */
 extern vaddr_t vector_page;
@@ -197,6 +198,9 @@ struct cpu_info {
 
 	uint32_t ci_cpl;
 	uint32_t ci_ipending;
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
+#endif
 };
 
 #ifndef MULTIPROCESSOR

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.253 2012/07/16 18:05:36 markus Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.256 2013/03/14 11:18:37 mpi Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -95,11 +95,6 @@
 #include <netinet/tcpip.h>
 #include <netinet/tcp_debug.h>
 
-#include "faith.h"
-#if NFAITH > 0
-#include <net/if_types.h>
-#endif
-
 #include "pf.h"
 #if NPF > 0
 #include <net/pfvar.h>
@@ -176,7 +171,7 @@ do { \
  * Macro to compute ACK transmission behavior.  Delay the ACK unless
  * we have already delayed an ACK (must send an ACK every two segments).
  * We also ACK immediately if we received a PUSH and the ACK-on-PUSH
- * option is enabled or when the packet is comming from a loopback
+ * option is enabled or when the packet is coming from a loopback
  * interface.
  */
 #define	TCP_SETUP_ACK(tp, tiflags, m) \
@@ -346,16 +341,6 @@ int
 tcp6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct mbuf *m = *mp;
-
-#if NFAITH > 0
-	if (m->m_pkthdr.rcvif) {
-		if (m->m_pkthdr.rcvif->if_type == IFT_FAITH) {
-			/* XXX send icmp6 host/port unreach? */
-			m_freem(m);
-			return IPPROTO_DONE;
-		}
-	}
-#endif
 
 	tcp_input(m, *offp, proto);
 	return IPPROTO_DONE;
@@ -899,6 +884,8 @@ findpcb:
 		((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp = inp;
 		inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
 	}
+	/* The statekey has finished finding the inp, it is no longer needed. */
+	m->m_pkthdr.pf.statekey = NULL;
 #endif
 
 #ifdef IPSEC

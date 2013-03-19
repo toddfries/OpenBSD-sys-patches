@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkeyv2_convert.c,v 1.36 2012/06/29 14:48:04 mikeb Exp $	*/
+/*	$OpenBSD: pfkeyv2_convert.c,v 1.38 2013/03/09 16:51:30 deraadt Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@keromytis.org)
  *
@@ -135,17 +135,8 @@ import_sa(struct tdb *tdb, struct sadb_sa *sadb_sa, struct ipsecinit *ii)
 		if (sadb_sa->sadb_sa_flags & SADB_SAFLAGS_PFS)
 			tdb->tdb_flags |= TDBF_PFS;
 
-		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_HALFIV)
-			tdb->tdb_flags |= TDBF_HALFIV;
-
 		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_TUNNEL)
 			tdb->tdb_flags |= TDBF_TUNNELING;
-
-		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_RANDOMPADDING)
-			tdb->tdb_flags |= TDBF_RANDOMPADDING;
-
-		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_NOREPLAY)
-			tdb->tdb_flags |= TDBF_NOREPLAY;
 
 		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_UDPENCAP)
 			tdb->tdb_flags |= TDBF_UDPENCAP;
@@ -279,18 +270,8 @@ export_sa(void **p, struct tdb *tdb)
 	if (tdb->tdb_flags & TDBF_PFS)
 		sadb_sa->sadb_sa_flags |= SADB_SAFLAGS_PFS;
 
-	/* Only relevant for the "old" IPsec transforms. */
-	if (tdb->tdb_flags & TDBF_HALFIV)
-		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_HALFIV;
-
 	if (tdb->tdb_flags & TDBF_TUNNELING)
 		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_TUNNEL;
-
-	if (tdb->tdb_flags & TDBF_RANDOMPADDING)
-		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_RANDOMPADDING;
-
-	if (tdb->tdb_flags & TDBF_NOREPLAY)
-		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_NOREPLAY;
 
 	if (tdb->tdb_flags & TDBF_UDPENCAP)
 		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_UDPENCAP;
@@ -1023,11 +1004,11 @@ export_tag(void **p, struct tdb *tdb)
 	struct sadb_x_tag *stag = (struct sadb_x_tag *)*p;
 	char *s = (char *)(stag + 1);
 
-	pf_tag2tagname(tdb->tdb_tag, s);
 	stag->sadb_x_tag_taglen = strlen(s) + 1;
 	stag->sadb_x_tag_len = (sizeof(struct sadb_x_tag) +
 	    PADUP(stag->sadb_x_tag_taglen)) / sizeof(uint64_t);
-	*p += PADUP(stag->sadb_x_tag_taglen) + sizeof(struct sadb_x_tag);
+	pf_tag2tagname(tdb->tdb_tag, s);
+	*p += sizeof(struct sadb_x_tag) + PADUP(stag->sadb_x_tag_taglen);
 }
 
 /* Import enc(4) tap device information for SA */

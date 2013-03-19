@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.63 2012/04/06 15:10:40 jsing Exp $	*/
+/*	$OpenBSD: conf.c,v 1.66 2012/12/08 20:38:10 kettenis Exp $	*/
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -81,7 +81,8 @@
 #include "magma.h"		/* has NMTTY and NMBPP */
 #include "spif.h"		/* has NSTTY and NSBPP */
 #include "uperf.h"
-#include "hvctl.h"
+#include "vldcp.h"
+#include "vdsp.h"
 
 #include "fdc.h"		/* has NFDC and NFD; see files.sparc */
 
@@ -109,11 +110,6 @@ cdev_decl(pci);
 
 #include "pf.h"
 
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
-
 #include "ksyms.h"
 #include "inet.h"
 
@@ -121,6 +117,7 @@ cdev_decl(nnpfs_dev);
 #include "hotplug.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -206,11 +203,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 #ifdef USER_PCICONF
 	cdev_pci_init(NPCI,pci),	/* 52: PCI user */
 #else
@@ -296,7 +289,9 @@ struct cdevsw	cdevsw[] =
 	cdev_bthub_init(NBTHUB,bthub),	/* 129: bluetooth hub */
 	cdev_disk_init(1,diskmap),	/* 130: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 131: pppx */
-	cdev_gen_init(NHVCTL,hvctl)	/* 132: hvctl */
+	cdev_gen_init(NVLDCP,vldcp),	/* 132: vldcp */
+	cdev_vdsp_init(NVDSP,vdsp),	/* 133: vdsp */
+	cdev_fuse_init(NFUSE, fuse)	/* 134: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 

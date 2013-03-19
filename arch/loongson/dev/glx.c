@@ -1,4 +1,4 @@
-/*	$OpenBSD: glx.c,v 1.7 2012/03/03 21:28:40 miod Exp $	*/
+/*	$OpenBSD: glx.c,v 1.9 2013/01/15 23:30:36 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2009 Miodrag Vallat.
@@ -24,6 +24,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/device.h>
+#include <sys/kernel.h>
 
 #include <machine/bus.h>
 
@@ -119,13 +120,18 @@ glx_init(pci_chipset_tag_t pc, pcitag_t tag, int dev)
 	msr |= 4 << 24;
 	msr |= 3 << 28;
 	wrmsr(PIC_YSEL_HIGH, msr);
+
+	/*
+	 * MFGPT runs on powers of two, adjust the hz value accordingly.
+	 */
+	stathz = hz = 128;
 }
 
 uint64_t
 rdmsr(uint msr)
 {
 	uint64_t lo, hi;
-	uint32_t sr;
+	register_t sr;
 
 #ifdef DIAGNOSTIC
 	if (glxbase_tag == 0)
@@ -143,7 +149,7 @@ rdmsr(uint msr)
 void
 wrmsr(uint msr, uint64_t value)
 {
-	uint32_t sr;
+	register_t sr;
 
 #ifdef DIAGNOSTIC
 	if (glxbase_tag == 0)

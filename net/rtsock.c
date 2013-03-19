@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsock.c,v 1.119 2012/03/28 18:10:38 claudio Exp $	*/
+/*	$OpenBSD: rtsock.c,v 1.125 2013/03/15 20:45:34 tedu Exp $	*/
 /*	$NetBSD: rtsock.c,v 1.18 1996/03/29 00:32:10 cgd Exp $	*/
 
 /*
@@ -617,12 +617,12 @@ route_output(struct mbuf *m, ...)
 			error = EAFNOSUPPORT;
 			goto flush;
 		}
-		rn = rt_lookup(dst, netmask, tableid);
+		rt = rt_lookup(dst, netmask, tableid);
+		rn = (struct radix_node *)rt;
 		if (rn == NULL || (rn->rn_flags & RNF_ROOT) != 0) {
 			error = ESRCH;
 			goto flush;
 		}
-		rt = (struct rtentry *)rn;
 #ifndef SMALL_KERNEL
 		/*
 		 * for RTM_CHANGE/LOCK, if we got multipath routes,
@@ -644,7 +644,7 @@ route_output(struct mbuf *m, ...)
 			}
 
 			/* if multipath routes */
-			if (rn_mpath_next(rn, 0)) {
+			if (rt_mpath_next(rt, 0)) {
 				if (gate)
 					rt = rt_mpath_matchgate(rt, gate, prio);
 				else if (rtm->rtm_type != RTM_GET)
@@ -681,8 +681,8 @@ route_output(struct mbuf *m, ...)
 		 * also a perfect match.
 		 */
 		if (rtm->rtm_type != RTM_GET && !rt_mask(rt) != !netmask) {
-				error = ESRCH;
-				goto flush;
+			error = ESRCH;
+			goto flush;
 		}
 
 		switch (rtm->rtm_type) {
@@ -784,7 +784,7 @@ report:
 				    if (oifa && oifa->ifa_rtrequest)
 					oifa->ifa_rtrequest(RTM_DELETE, rt,
 					    &info);
-				    IFAFREE(rt->rt_ifa);
+				    ifafree(rt->rt_ifa);
 				    rt->rt_ifa = ifa;
 				    ifa->ifa_refcnt++;
 				    rt->rt_ifp = ifp;
@@ -922,7 +922,7 @@ rt_setmetrics(u_long which, struct rt_metrics *in, struct rt_kmetrics *out)
 		out->rmx_mtu = in->rmx_mtu;
 	if (which & RTV_EXPIRE)
 		out->rmx_expire = in->rmx_expire;
-	/* RTV_PRIORITY handled befor */
+	/* RTV_PRIORITY handled before */
 }
 
 void
@@ -1346,8 +1346,7 @@ sysctl_iflist(int af, struct walkarg *w)
 			w->w_where += len;
 		}
 		ifpaddr = 0;
-		while ((ifa = TAILQ_NEXT(ifa, ifa_list)) !=
-		    TAILQ_END(&ifp->if_addrlist)) {
+		while ((ifa = TAILQ_NEXT(ifa, ifa_list)) != NULL) {
 			if (af && af != ifa->ifa_addr->sa_family)
 				continue;
 			ifaaddr = ifa->ifa_addr;

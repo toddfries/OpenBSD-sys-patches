@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.21 2010/09/28 20:27:55 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.25 2013/03/12 09:37:16 mpi Exp $	*/
 /*	$NetBSD: cpu.h,v 1.41 2006/01/21 04:24:12 uwe Exp $	*/
 
 /*-
@@ -65,6 +65,9 @@ struct cpu_info {
 #ifdef DIAGNOSTIC
 	int	ci_mutex_level;
 #endif
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
+#endif
 };
 
 extern struct cpu_info cpu_info_store;
@@ -97,8 +100,8 @@ struct clockframe {
  * This is used during profiling to integrate system time.  It can safely
  * assume that the process is resident.
  */
-#define	PROC_PC(p)							\
-	(((struct trapframe *)(p)->p_md.md_regs)->tf_spc)
+#define	PROC_PC(p)	((p)->p_md.md_regs->tf_spc)
+#define	PROC_STACK(p)	((p)->p_md.md_regs->tf_r15)
 
 /*
  * Preempt the current process if in interrupt from user mode,

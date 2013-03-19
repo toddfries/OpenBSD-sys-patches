@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.46 2010/09/28 20:27:55 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.51 2013/03/12 09:37:16 mpi Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 1996/09/30 16:34:21 ws Exp $	*/
 
 /*
@@ -85,6 +85,9 @@ struct cpu_info {
 #ifdef DIAGNOSTIC
 	int	ci_mutex_level;
 #endif
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
+#endif
 };
 
 static __inline struct cpu_info *
@@ -150,6 +153,7 @@ extern struct cpu_info cpu_info[PPC_MAXPROCS];
  * This is used during profiling to integrate system time.
  */
 #define	PROC_PC(p)		(trapframe(p)->srr0)
+#define	PROC_STACK(p)		(trapframe(p)->fixreg[1])
 
 void	delay(unsigned);
 #define	DELAY(n)		delay(n)
@@ -376,6 +380,7 @@ extern int ppc_proc_is_64b;
 #define	PPC_CPU_MPC750		8
 #define	PPC_CPU_MPC604ev	9
 #define	PPC_CPU_MPC7400		12
+#define	PPC_CPU_IBM970		0x0039
 #define	PPC_CPU_IBM970FX	0x003c
 #define	PPC_CPU_IBM970MP	0x0044
 #define	PPC_CPU_IBM750FX	0x7000

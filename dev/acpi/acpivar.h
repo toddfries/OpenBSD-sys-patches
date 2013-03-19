@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpivar.h,v 1.71 2011/04/15 17:34:51 oga Exp $	*/
+/*	$OpenBSD: acpivar.h,v 1.75 2012/11/27 17:38:46 pirofti Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -324,6 +324,14 @@ int	acpi_dotask(struct acpi_softc *);
 
 void	acpi_powerdown_task(void *, int);
 void	acpi_sleep_task(void *, int);
+
+/* Section 5.2.10.1: global lock acquire/release functions */
+#define	GL_BIT_PENDING	0x01
+#define	GL_BIT_OWNED	0x02
+int	acpi_acquire_glk(uint32_t *);
+int	acpi_release_glk(uint32_t *);
+
+void	acpi_pciroots_attach(struct device *, void *, cfprint_t);
 
 #endif
 

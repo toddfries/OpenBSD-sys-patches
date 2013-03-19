@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.241 2012/01/03 23:41:51 bluhm Exp $	*/
+/*	$OpenBSD: if.c,v 1.251 2013/03/15 20:45:34 tedu Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -67,6 +67,7 @@
 #include "carp.h"
 #include "pf.h"
 #include "trunk.h"
+#include "ether.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -531,7 +532,7 @@ if_detach(struct ifnet *ifp)
 
 #if NBRIDGE > 0
 	/* Remove the interface from any bridge it is part of.  */
-	if (ifp->if_bridge)
+	if (ifp->if_bridgeport)
 		bridge_ifdetach(ifp);
 #endif
 
@@ -553,8 +554,9 @@ if_detach(struct ifnet *ifp)
 	rt_if_remove(ifp);
 #ifdef INET
 	rti_delete(ifp);
-#if NETHER > 0
-	myip_ifp = NULL;
+#if NETHER > 0 && defined(NFSCLIENT) 
+	if (ifp == revarp_ifp)
+		revarp_ifp = NULL;
 #endif
 #ifdef MROUTING
 	vif_delete(ifp);
@@ -615,7 +617,7 @@ do { \
 			continue;
 
 		ifa->ifa_ifp = NULL;
-		IFAFREE(ifa);
+		ifafree(ifa);
 	}
 
 	for (ifg = TAILQ_FIRST(&ifp->if_groups); ifg;
@@ -625,7 +627,7 @@ do { \
 	if_free_sadl(ifp);
 
 	ifnet_addrs[ifp->if_index]->ifa_ifp = NULL;
-	IFAFREE(ifnet_addrs[ifp->if_index]);
+	ifafree(ifnet_addrs[ifp->if_index]);
 	ifnet_addrs[ifp->if_index] = NULL;
 
 	free(ifp->if_addrhooks, M_TEMP);
@@ -962,27 +964,6 @@ ifa_ifwithnet(struct sockaddr *addr, u_int rdomain)
 }
 
 /*
- * Find an interface using a specific address family
- */
-struct ifaddr *
-ifa_ifwithaf(int af, u_int rdomain)
-{
-	struct ifnet *ifp;
-	struct ifaddr *ifa;
-
-	rdomain = rtable_l2(rdomain);
-	TAILQ_FOREACH(ifp, &ifnet, if_list) {
-		if (ifp->if_rdomain != rdomain)
-			continue;
-		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-			if (ifa->ifa_addr->sa_family == af)
-				return (ifa);
-		}
-	}
-	return (NULL);
-}
-
-/*
  * Find an interface address specific to an interface best matching
  * a given address.
  */
@@ -1038,7 +1019,7 @@ link_rtrequest(int cmd, struct rtentry *rt, struct rt_addrinfo *info)
 		return;
 	if ((ifa = ifaof_ifpforaddr(dst, ifp)) != NULL) {
 		ifa->ifa_refcnt++;
-		IFAFREE(rt->rt_ifa);
+		ifafree(rt->rt_ifa);
 		rt->rt_ifa = ifa;
 		if (ifa->ifa_rtrequest && ifa->ifa_rtrequest != link_rtrequest)
 			ifa->ifa_rtrequest(cmd, rt, info);
@@ -1094,7 +1075,7 @@ if_down(struct ifnet *ifp)
 		carp_carpdev_state(ifp);
 #endif
 #if NBRIDGE > 0
-	if (ifp->if_bridge)
+	if (ifp->if_bridgeport)
 		bstp_ifstate(ifp);
 #endif
 	rt_ifmsg(ifp);
@@ -1130,7 +1111,7 @@ if_up(struct ifnet *ifp)
 		carp_carpdev_state(ifp);
 #endif
 #if NBRIDGE > 0
-	if (ifp->if_bridge)
+	if (ifp->if_bridgeport)
 		bstp_ifstate(ifp);
 #endif
 	rt_ifmsg(ifp);
@@ -1211,7 +1192,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	struct ifgroupreq *ifgr;
 	char ifdescrbuf[IFDESCRSIZE];
 	char ifrtlabelbuf[RTLABEL_LEN];
-	int error = 0;
+	int s, error = 0;
 	size_t bytesdone;
 	short oif_flags;
 	const char *label;
@@ -1266,6 +1247,10 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		ifr->ifr_mtu = ifp->if_mtu;
 		break;
 
+	case SIOCGIFHARDMTU:
+		ifr->ifr_hardmtu = ifp->if_hardmtu;
+		break;
+
 	case SIOCGIFDATA:
 		error = copyout((caddr_t)&ifp->if_data, ifr->ifr_data,
 		    sizeof(ifp->if_data));
@@ -1275,12 +1260,12 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		if ((error = suser(p, 0)) != 0)
 			return (error);
 		if (ifp->if_flags & IFF_UP && (ifr->ifr_flags & IFF_UP) == 0) {
-			int s = splnet();
+			s = splnet();
 			if_down(ifp);
 			splx(s);
 		}
 		if (ifr->ifr_flags & IFF_UP && (ifp->if_flags & IFF_UP) == 0) {
-			int s = splnet();
+			s = splnet();
 			if_up(ifp);
 			splx(s);
 		}
@@ -1297,7 +1282,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 #ifdef INET6
 		if (ifr->ifr_flags & IFXF_NOINET6 &&
 		    !(ifp->if_xflags & IFXF_NOINET6)) {
-			int s = splnet();
+			s = splnet();
 			in6_ifdetach(ifp);
 			splx(s);
 		}
@@ -1306,7 +1291,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			ifp->if_xflags &= ~IFXF_NOINET6;
 			if (ifp->if_flags & IFF_UP) {
 				/* configure link-local address */
-				int s = splnet();
+				s = splnet();
 				in6_if_up(ifp);
 				splx(s);
 			}
@@ -1316,7 +1301,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 #ifdef MPLS
 		if (ISSET(ifr->ifr_flags, IFXF_MPLS) &&
 		    !ISSET(ifp->if_xflags, IFXF_MPLS)) {
-			int s = splnet();
+			s = splnet();
 			ifp->if_xflags |= IFXF_MPLS;
 			ifp->if_ll_output = ifp->if_output; 
 			ifp->if_output = mpls_output;
@@ -1324,7 +1309,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		}
 		if (ISSET(ifp->if_xflags, IFXF_MPLS) &&
 		    !ISSET(ifr->ifr_flags, IFXF_MPLS)) {
-			int s = splnet();
+			s = splnet();
 			ifp->if_xflags &= ~IFXF_MPLS;
 			ifp->if_output = ifp->if_ll_output; 
 			ifp->if_ll_output = NULL;
@@ -1336,7 +1321,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		if (ifp->if_capabilities & IFCAP_WOL) {
 			if (ISSET(ifr->ifr_flags, IFXF_WOL) &&
 			    !ISSET(ifp->if_xflags, IFXF_WOL)) {
-				int s = splnet();
+				s = splnet();
 				ifp->if_xflags |= IFXF_WOL;
 				error = ifp->if_wol(ifp, 1);
 				splx(s);
@@ -1345,7 +1330,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			}
 			if (ISSET(ifp->if_xflags, IFXF_WOL) &&
 			    !ISSET(ifr->ifr_flags, IFXF_WOL)) {
-				int s = splnet();
+				s = splnet();
 				ifp->if_xflags &= ~IFXF_WOL;
 				error = ifp->if_wol(ifp, 0);
 				splx(s);
@@ -1477,9 +1462,12 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 
 		/* make sure that the routing table exists */
 		if (!rtable_exists(ifr->ifr_rdomainid)) {
-			if ((error = rtable_add(ifr->ifr_rdomainid)) != 0)
+			s = splsoftnet();
+			if ((error = rtable_add(ifr->ifr_rdomainid)) == 0)
+				rtable_l2set(ifr->ifr_rdomainid, ifr->ifr_rdomainid);
+			splx(s);
+			if (error)
 				return (error);
-			rtable_l2set(ifr->ifr_rdomainid, ifr->ifr_rdomainid);
 		}
 
 		/* make sure that the routing table is a real rdomain */
@@ -1489,13 +1477,10 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		/* remove all routing entries when switching domains */
 		/* XXX hell this is ugly */
 		if (ifr->ifr_rdomainid != ifp->if_rdomain) {
-			int s = splnet();
+			s = splnet();
 			rt_if_remove(ifp);
 #ifdef INET
 			rti_delete(ifp);
-#if NETHER > 0
-			myip_ifp = NULL;
-#endif
 #ifdef MROUTING
 			vif_delete(ifp);
 #endif
@@ -1517,7 +1502,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 				    (struct in_ifaddr *)ifa, ia_list);
 				ifa_del(ifp, ifa);
 				ifa->ifa_ifp = NULL;
-				IFAFREE(ifa);
+				ifafree(ifa);
 			}
 #endif
 			splx(s);
@@ -1657,7 +1642,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 #ifdef INET6
 		if (!(ifp->if_xflags & IFXF_NOINET6) &&
 		    (ifp->if_flags & IFF_UP) != 0) {
-			int s = splnet();
+			s = splnet();
 			in6_if_up(ifp);
 			splx(s);
 		}
@@ -1708,7 +1693,7 @@ ifconf(u_long cmd, caddr_t data)
 
 	ifrp = ifc->ifc_req;
 	for (ifp = TAILQ_FIRST(&ifnet); space >= sizeof(ifr) &&
-	    ifp != TAILQ_END(&ifnet); ifp = TAILQ_NEXT(ifp, if_list)) {
+	    ifp != NULL; ifp = TAILQ_NEXT(ifp, if_list)) {
 		bcopy(ifp->if_xname, ifr.ifr_name, IFNAMSIZ);
 		if (TAILQ_EMPTY(&ifp->if_addrlist)) {
 			bzero((caddr_t)&ifr.ifr_addr, sizeof(ifr.ifr_addr));
@@ -1720,7 +1705,7 @@ ifconf(u_long cmd, caddr_t data)
 		} else
 			for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
 			    space >= sizeof (ifr) &&
-			    ifa != TAILQ_END(&ifp->if_addrlist);
+			    ifa != NULL;
 			    ifa = TAILQ_NEXT(ifa, ifa_list)) {
 				struct sockaddr *sa = ifa->ifa_addr;
 #if defined(COMPAT_43) || defined(COMPAT_LINUX)
@@ -2062,7 +2047,6 @@ if_group_egress_build(void)
 #ifdef INET6
 	struct sockaddr_in6	 sa_in6;
 #endif
-	struct radix_node	*rn;
 	struct rtentry		*rt;
 
 	TAILQ_FOREACH(ifg, &ifg_head, ifg_next)
@@ -2078,32 +2062,30 @@ if_group_egress_build(void)
 	bzero(&sa_in, sizeof(sa_in));
 	sa_in.sin_len = sizeof(sa_in);
 	sa_in.sin_family = AF_INET;
-	if ((rn = rt_lookup(sintosa(&sa_in), sintosa(&sa_in), 0)) != NULL) {
+	if ((rt = rt_lookup(sintosa(&sa_in), sintosa(&sa_in), 0)) != NULL) {
 		do {
-			rt = (struct rtentry *)rn;
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			rn = rn_mpath_next(rn, 0);
+			rt = rt_mpath_next(rt, 0);
 #else
-			rn = NULL;
+			rt = NULL;
 #endif
-		} while (rn != NULL);
+		} while (rt != NULL);
 	}
 
 #ifdef INET6
 	bcopy(&sa6_any, &sa_in6, sizeof(sa_in6));
-	if ((rn = rt_lookup(sin6tosa(&sa_in6), sin6tosa(&sa_in6), 0)) != NULL) {
+	if ((rt = rt_lookup(sin6tosa(&sa_in6), sin6tosa(&sa_in6), 0)) != NULL) {
 		do {
-			rt = (struct rtentry *)rn;
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			rn = rn_mpath_next(rn, 0);
+			rt = rt_mpath_next(rt, 0);
 #else
-			rn = NULL;
+			rt = NULL;
 #endif
-		} while (rn != NULL);
+		} while (rt != NULL);
 	}
 #endif
 

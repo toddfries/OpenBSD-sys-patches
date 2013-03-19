@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.126 2012/08/17 17:29:00 krw Exp $ */
+/*	$OpenBSD: ehci.c,v 1.128 2012/10/09 13:41:04 deraadt Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -374,9 +374,6 @@ ehci_init(ehci_softc_t *sc)
 		    sc->sc_bus.bdev.dv_xname);
 		return (USBD_IOERROR);
 	}
-
-	/* XXX need proper intr scheduling */
-	sc->sc_rand = 96;
 
 	/* frame list size at default, read back what we got and use that */
 	switch (EHCI_CMD_FLS(EOREAD4(sc, EHCI_USBCMD))) {
@@ -1101,28 +1098,14 @@ ehci_activate(struct device *self, int act)
 
 		sc->sc_bus.use_polling--;
 		break;
+	case DVACT_POWERDOWN:
+		ehci_shutdown(sc);
+		break;
 	case DVACT_RESUME:
 		sc->sc_bus.use_polling++;
 
 		/* restore things in case the bios sucks */
 		EOWRITE4(sc, EHCI_CTRLDSSEGMENT, 0);
-
-#if 0
-		EOWRITE4(sc, EHCI_USBCMD, 0);	/* Halt controller */
-		usb_delay_ms(&sc->sc_bus, 1);
-		EOWRITE4(sc, EHCI_USBCMD, EHCI_CMD_HCRESET);
-		for (i = 0; i < 100; i++) {
-			usb_delay_ms(&sc->sc_bus, 1);
-			hcr = EOREAD4(sc, EHCI_USBCMD) & EHCI_CMD_HCRESET;
-			if (!hcr)
-				break;
-		}
-		if (hcr) {
-			printf("%s: reset timeout\n",
-			    sc->sc_bus.bdev.dv_xname);
-		}
-#endif
-
 		EOWRITE4(sc, EHCI_PERIODICLISTBASE, DMAADDR(&sc->sc_fldma, 0));
 		EOWRITE4(sc, EHCI_ASYNCLISTADDR,
 		    sc->sc_async_head->physaddr | EHCI_LINK_QH);
@@ -1186,19 +1169,10 @@ void
 ehci_shutdown(void *v)
 {
 	ehci_softc_t *sc = v;
-	u_int32_t hcr;
-	int i;
 
 	DPRINTF(("ehci_shutdown: stopping the HC\n"));
 	EOWRITE4(sc, EHCI_USBCMD, 0);	/* Halt controller */
-	usb_delay_ms(&sc->sc_bus, 1);
 	EOWRITE4(sc, EHCI_USBCMD, EHCI_CMD_HCRESET);
-	for (i = 0; i < 100; i++) {
-		usb_delay_ms(&sc->sc_bus, 1);
-		hcr = EOREAD4(sc, EHCI_USBCMD) & EHCI_CMD_HCRESET;
-		if (!hcr)
-			break;
-	}
 }
 
 usbd_status
@@ -3425,12 +3399,7 @@ ehci_device_setintr(ehci_softc_t *sc, ehci_soft_qh_t *sqh, int ival)
 
 	/* Pick an interrupt slot at the right level. */
 	/* XXX could do better than picking at random */
-	if (cold) {
-		/* XXX prevent panics at boot by not using arc4random */
-		sc->sc_rand = (sc->sc_rand + 192) % sc->sc_flsize;
-		islot = EHCI_IQHIDX(lev, sc->sc_rand);
-	} else
-		islot = EHCI_IQHIDX(lev, arc4random());
+	islot = EHCI_IQHIDX(lev, arc4random());
 
 	sqh->islot = islot;
 	isp = &sc->sc_islots[islot];

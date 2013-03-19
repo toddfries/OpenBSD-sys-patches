@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.106 2011/09/19 14:48:04 beck Exp $	*/
+/*	$OpenBSD: mount.h,v 1.108 2012/09/05 17:01:06 deraadt Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -258,6 +258,15 @@ struct procfs_args {
 #define PROCFS_ARGSVERSION      1
 #define PROCFSMNT_LINUXCOMPAT   0x01
 
+/*
+ * Arguments to mount fusefs filesystems
+ */
+struct fusefs_args {
+	char *name;
+	char *url;
+	int fd;
+	int flags;
+};
 
 /*
  * file system statistics
@@ -310,27 +319,6 @@ struct statfs {
 	union mount_info mount_info;	/* per-filesystem mount options */
 };
 
-/* old (pre-2.6) statfs structure */
-struct ostatfs {
-	short	f_type;			/* type of file system (unused; zero) */
-	short	f_flags;		/* copy of mount flags */
-	long	f_bsize;		/* fundamental file system block size */
-	long	f_iosize;		/* optimal transfer block size */
-	long	f_blocks;		/* total data blocks in file system */
-	long	f_bfree;		/* free blocks in fs */
-	long	f_bavail;		/* free blocks avail to non-superuser */
-	long	f_files;		/* total file nodes in file system */
-	long	f_ffree;		/* free file nodes in fs */
-	fsid_t	f_fsid;			/* file system id */
-	uid_t	f_owner;		/* user that mounted the file system */
-	long	f_syncwrites;		/* count of sync writes since mount */
-	long	f_asyncwrites;		/* count of async writes since mount */
-	long	f_spare[2];		/* spare for later */
-	char	f_fstypename[MFSNAMELEN]; /* fs type name */
-	char	f_mntonname[MNAMELEN];	  /* directory on which mounted */
-	char	f_mntfromname[MNAMELEN];  /* mounted file system */
-};
-
 /*
  * File system types.
  */
@@ -344,10 +332,9 @@ struct ostatfs {
 #define	MOUNT_CD9660	"cd9660"	/* ISO9660 (aka CDROM) Filesystem */
 #define	MOUNT_EXT2FS	"ext2fs"	/* Second Extended Filesystem */
 #define	MOUNT_NCPFS	"ncpfs"		/* NetWare Network File System */
-#define	MOUNT_XFS	"nnpfs"		/* nnpfs (temp) */
-#define	MOUNT_NNPFS	"nnpfs"		/* nnpfs */
 #define	MOUNT_NTFS	"ntfs"		/* NTFS */
 #define	MOUNT_UDF	"udf"		/* UDF */
+#define MOUNT_FUSEFS	"fuse"		/* FUSE */
 
 /*
  * Structure per mounted file system.  Each mounted file system has an

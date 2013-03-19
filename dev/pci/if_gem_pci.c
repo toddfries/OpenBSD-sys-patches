@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gem_pci.c,v 1.32 2011/04/03 15:36:02 jasper Exp $	*/
+/*	$OpenBSD: if_gem_pci.c,v 1.34 2012/10/16 10:58:04 jsg Exp $	*/
 /*	$NetBSD: if_gem_pci.c,v 1.1 2001/09/16 00:11:42 eeh Exp $ */
 
 /*
@@ -51,10 +51,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/if_ether.h>
-#endif
-
-#if NBPFILTER > 0
-#include <net/bpf.h>
 #endif
 
 #include <machine/bus.h>
@@ -227,22 +223,19 @@ gem_attach_pci(struct device *parent, struct device *self, void *aux)
 
 	sc->sc_pci = 1; /* XXXXX should all be done in bus_dma. */
 
-	if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SUN_GEMNETWORK)
+	switch (PCI_PRODUCT(pa->pa_id)) {
+	case PCI_PRODUCT_SUN_GEMNETWORK:
 		sc->sc_variant = GEM_SUN_GEM;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_SUN_ERINETWORK)
+		break;
+	case PCI_PRODUCT_SUN_ERINETWORK:
 		sc->sc_variant = GEM_SUN_ERI;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_INTREPID2_GMAC)
-		sc->sc_variant = GEM_APPLE_GMAC;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_PANGEA_GMAC)
-		sc->sc_variant = GEM_APPLE_GMAC;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_SHASTA_GMAC)
-		sc->sc_variant = GEM_APPLE_GMAC;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_UNINORTHGMAC)
-		sc->sc_variant = GEM_APPLE_GMAC;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_UNINORTH2GMAC)
-		sc->sc_variant = GEM_APPLE_GMAC;
-	else if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_APPLE_K2_GMAC)
+		break;
+	case PCI_PRODUCT_APPLE_K2_GMAC:
 		sc->sc_variant = GEM_APPLE_K2_GMAC;
+		break;
+	default:
+		sc->sc_variant = GEM_APPLE_GMAC;
+	}
 
 #define PCI_GEM_BASEADDR	0x10
 	if (pci_mapreg_map(pa, PCI_GEM_BASEADDR, type, 0,

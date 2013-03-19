@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.h,v 1.17 2012/08/08 14:44:13 mikeb Exp $	*/
+/*	$OpenBSD: if_ix.h,v 1.23 2012/12/17 14:23:48 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -133,11 +133,9 @@ struct ixgbe_tx_buf {
 };
 
 struct ixgbe_rx_buf {
-	struct mbuf	*m_head;
-	struct mbuf	*m_pack;
+	struct mbuf	*buf;
 	struct mbuf	*fmp;
-	bus_dmamap_t	hmap;
-	bus_dmamap_t	pmap;
+	bus_dmamap_t	map;
 };
 
 /*
@@ -204,7 +202,6 @@ struct rx_ring {
 	struct lro_ctrl		lro;
 #endif
 	int			lro_enabled;
-	int			hdr_split;
 	int			hw_rsc;
 	int			discard;
 	unsigned int		next_to_refresh;
@@ -218,7 +215,6 @@ struct rx_ring {
 
 	/* Soft stats */
 	uint64_t		rx_irq;
-	uint64_t		rx_split_packets;
 	uint64_t		rx_packets;
 	uint64_t		rx_bytes;
 	uint64_t		rx_discarded;
@@ -261,7 +257,6 @@ struct ix_softc {
 	/* Info about the interface */
 	uint			optics;
 	int			advertise;  /* link speeds */
-	int			link_active;
 	uint16_t		max_frame_size;
 	uint16_t		num_segs;
 	uint32_t		link_speed;
@@ -305,9 +300,6 @@ struct ix_softc {
 
 	/* Misc stats maintained by the driver */
 	unsigned long   dropped_pkts;
-	unsigned long   mbuf_defrag_failed;
-	unsigned long   mbuf_header_failed;
-	unsigned long   mbuf_packet_failed;
 	unsigned long   no_tx_map_avail;
 	unsigned long   no_tx_dma_setup;
 	unsigned long   watchdog_events;

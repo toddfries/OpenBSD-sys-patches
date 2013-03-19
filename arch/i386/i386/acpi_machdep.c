@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.43 2012/06/20 17:31:55 mlarkin Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.46 2012/11/27 17:38:45 pirofti Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -23,6 +23,7 @@
 #include <sys/memrange.h>
 #include <sys/proc.h>
 #include <sys/user.h>
+#include <sys/reboot.h>
 #include <sys/hibernate.h>
 
 #include <uvm/uvm_extern.h>
@@ -128,6 +129,7 @@ acpi_scan(struct acpi_mem_map *handle, paddr_t pa, size_t len)
 				return (ptr);
 		}
 	acpi_unmap(handle);
+
 	return (NULL);
 }
 
@@ -179,6 +181,44 @@ havebase:
 #endif
 
 	return (1);
+}
+
+/*
+ * Acquire the global lock.  If busy, set the pending bit.  The caller
+ * will wait for notification from the BIOS that the lock is available
+ * and then attempt to acquire it again.
+ */
+int
+acpi_acquire_glk(uint32_t *lock)
+{
+	uint32_t	new, old;
+
+	do {
+		old = *lock;
+		new = (old & ~GL_BIT_PENDING) | GL_BIT_OWNED;
+		if ((old & GL_BIT_OWNED) != 0)
+			new |= GL_BIT_PENDING;
+	} while (i386_atomic_cas_int32(lock, old, new) == 0);
+
+	return ((new & GL_BIT_PENDING) == 0);
+}
+
+/*
+ * Release the global lock, returning whether there is a waiter pending.
+ * If the BIOS set the pending bit, OSPM must notify the BIOS when it
+ * releases the lock.
+ */
+int
+acpi_release_glk(uint32_t *lock)
+{
+	uint32_t	new, old;
+
+	do {
+		old = *lock;
+		new = old & ~(GL_BIT_PENDING | GL_BIT_OWNED);
+	} while (i386_atomic_cas_int32(lock, old, new) == 0);
+
+	return ((old & GL_BIT_PENDING) != 0);
 }
 
 #ifndef SMALL_KERNEL
@@ -294,7 +334,13 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 		}
 #endif
 
+		/* XXX
+		 * Flag to disk drivers that they should "power down" the disk
+		 * when we get to DVACT_POWERDOWN.
+		 */
+		boothowto |= RB_POWERDOWN;
 		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+		boothowto &= ~RB_POWERDOWN;
 
 		acpi_sleep_pm(sc, state);
 		printf("%s: acpi_sleep_pm failed", DEVNAME(sc));

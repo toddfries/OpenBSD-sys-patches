@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.510 2012/05/23 08:23:43 mikeb Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.520 2013/02/13 21:21:34 martynas Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -165,6 +165,8 @@ extern struct proc *npxproc;
 #include <dev/ic/comvar.h>
 #endif /* NCOM > 0 */
 
+void	replacesmap(void);
+
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
 
@@ -305,6 +307,8 @@ int allowaperture = 1;
 int allowaperture = 0;
 #endif
 #endif
+
+int has_rdrand;
 
 void	winchip_cpu_setup(struct cpu_info *);
 void	amd_family5_setperf_setup(struct cpu_info *);
@@ -972,7 +976,7 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 	{ CPUID_CMOV,	"CMOV" },
 	{ CPUID_PAT,	"PAT" },
 	{ CPUID_PSE36,	"PSE36" },
-	{ CPUID_SER,	"SER" },
+	{ CPUID_PSN,	"PSN" },
 	{ CPUID_CFLUSH,	"CFLUSH" },
 	{ CPUID_DS,	"DS" },
 	{ CPUID_ACPI,	"ACPI" },
@@ -983,7 +987,7 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 	{ CPUID_SS,	"SS" },
 	{ CPUID_HTT,	"HTT" },
 	{ CPUID_TM,	"TM" },
-	{ CPUID_SBF,	"SBF" }
+	{ CPUID_PBE,	"PBE" }
 };
 
 const struct cpu_cpuid_feature i386_ecpuid_features[] = {
@@ -999,6 +1003,7 @@ const struct cpu_cpuid_feature i386_ecpuid_features[] = {
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
 	{ CPUIDECX_PCLMUL,	"PCLMUL" },
+	{ CPUIDECX_DTES64,	"DTES64" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_DSCPL,	"DS-CPL" },
 	{ CPUIDECX_VMX,		"VMX" },
@@ -1011,26 +1016,65 @@ const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_CX16,	"CX16" },
 	{ CPUIDECX_XTPR,	"xTPR" },
 	{ CPUIDECX_PDCM,	"PDCM" },
+	{ CPUIDECX_PCID,	"PCID" },
 	{ CPUIDECX_DCA,		"DCA" },
 	{ CPUIDECX_SSE41,	"SSE4.1" },
 	{ CPUIDECX_SSE42,	"SSE4.2" },
 	{ CPUIDECX_X2APIC,	"x2APIC" },
 	{ CPUIDECX_MOVBE,	"MOVBE" },
 	{ CPUIDECX_POPCNT,	"POPCNT" },
+	{ CPUIDECX_DEADLINE,	"DEADLINE" },
 	{ CPUIDECX_AES,		"AES" },
 	{ CPUIDECX_XSAVE,	"XSAVE" },
 	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
 	{ CPUIDECX_AVX,		"AVX" },
+	{ CPUIDECX_F16C,	"F16C" },
+	{ CPUIDECX_RDRAND,	"RDRAND" },
 };
 
 const struct cpu_cpuid_feature i386_ecpuid_ecxfeatures[] = {
 	{ CPUIDECX_LAHF,	"LAHF" },
+	{ CPUIDECX_CMPLEG,	"CMPLEG" },
 	{ CPUIDECX_SVM,		"SVM" },
+	{ CPUIDECX_EAPICSP,	"EAPICSP" },
+	{ CPUIDECX_AMCR8,	"AMCR8" },
 	{ CPUIDECX_ABM,		"ABM" },
 	{ CPUIDECX_SSE4A,	"SSE4A" },
+	{ CPUIDECX_MASSE,	"MASSE" },
+	{ CPUIDECX_3DNOWP,	"3DNOWP" },
+	{ CPUIDECX_OSVW,	"OSVW" },
+	{ CPUIDECX_IBS,		"IBS" },
 	{ CPUIDECX_XOP,		"XOP" },
+	{ CPUIDECX_SKINIT,	"SKINIT" },
 	{ CPUIDECX_WDT,		"WDT" },
-	{ CPUIDECX_FMA4,	"FMA4" }
+	{ CPUIDECX_LWP,		"LWP" },
+	{ CPUIDECX_FMA4,	"FMA4" },
+	{ CPUIDECX_NODEID,	"NODEID" },
+	{ CPUIDECX_TBM,		"TBM" },
+	{ CPUIDECX_TOPEXT,	"TOPEXT" },
+};
+
+const struct cpu_cpuid_feature cpu_seff0_ebxfeatures[] = {
+	{ SEFF0EBX_FSGSBASE,	"FSGSBASE" },
+	{ SEFF0EBX_BMI1,	"BMI1" },
+	{ SEFF0EBX_HLE,		"HLE" },
+	{ SEFF0EBX_AVX2,	"AVX2" },
+	{ SEFF0EBX_SMEP,	"SMEP" },
+	{ SEFF0EBX_BMI2,	"BMI2" },
+	{ SEFF0EBX_ERMS,	"ERMS" },
+	{ SEFF0EBX_INVPCID,	"INVPCID" },
+	{ SEFF0EBX_RTM,		"RTM" },
+	{ SEFF0EBX_RDSEED,	"RDSEED" },
+	{ SEFF0EBX_ADX,		"ADX" },
+	{ SEFF0EBX_SMAP,	"SMAP" },
+};
+
+const struct cpu_cpuid_feature i386_cpuid_eaxperf[] = {
+	{ CPUIDEAX_VERID,	"PERF" },
+};
+
+const struct cpu_cpuid_feature i386_cpuid_edxapmi[] = {
+	{ CPUIDEDX_ITSC,	"ITSC" },
 };
 
 void
@@ -1495,14 +1539,14 @@ intel686_cpu_setup(struct cpu_info *ci)
 	/*
 	 * Disable the Pentium3 serial number.
 	 */
-	if ((model == 7) && (ci->ci_feature_flags & CPUID_SER)) {
+	if ((model == 7) && (ci->ci_feature_flags & CPUID_PSN)) {
 		msr119 = rdmsr(MSR_BBL_CR_CTL);
 		msr119 |= 0x0000000000200000LL;
 		wrmsr(MSR_BBL_CR_CTL, msr119);
 
 		printf("%s: disabling processor serial number\n",
 			 ci->ci_dev.dv_xname);
-		ci->ci_feature_flags &= ~CPUID_SER;
+		ci->ci_feature_flags &= ~CPUID_PSN;
 		ci->ci_level = 2;
 	}
 
@@ -1802,7 +1846,20 @@ identifycpu(struct cpu_info *ci)
 	}
 
 	if (ci->ci_feature_flags && (ci->ci_feature_flags & CPUID_TSC)) {
-		/* Has TSC */
+		/* Has TSC, check if it's constant */
+		switch (vendor) {
+		case CPUVENDOR_INTEL:
+			if ((ci->ci_family == 0x0f && ci->ci_model >= 0x03) ||
+			    (ci->ci_family == 0x06 && ci->ci_model >= 0x0e)) {
+				ci->ci_flags |= CPUF_CONST_TSC;
+			}
+			break;
+		case CPUVENDOR_VIA:
+			if (ci->ci_model >= 0x0f) {
+				ci->ci_flags |= CPUF_CONST_TSC;
+			}
+			break;
+		}
 		calibrate_cyclecounter();
 		if (cpuspeed > 994) {
 			int ghz, fr;
@@ -1864,8 +1921,49 @@ identifycpu(struct cpu_info *ci)
 					numbits++;
 				}
 			}
+			for (i = 0; i < nitems(i386_cpuid_eaxperf); i++) {
+				if (cpu_perf_eax &
+				    i386_cpuid_eaxperf[i].feature_bit) {
+					printf("%s%s", (numbits == 0 ? "" : ","),
+					    i386_cpuid_eaxperf[i].feature_name);
+					numbits++;
+				}
+			}
+			for (i = 0; i < nitems(i386_cpuid_edxapmi); i++) {
+				if (cpu_apmi_edx &
+				    i386_cpuid_edxapmi[i].feature_bit) {
+					printf("%s%s", (numbits == 0 ? "" : ","),
+					    i386_cpuid_edxapmi[i].feature_name);
+					numbits++;
+				}
+			}
+
+			if (cpuid_level >= 0x07) {
+				u_int dummy;
+
+				/* "Structured Extended Feature Flags" */
+				CPUID_LEAF(0x7, 0, dummy,
+				    ci->ci_feature_sefflags, dummy, dummy);
+				max = sizeof(cpu_seff0_ebxfeatures) /
+				    sizeof(cpu_seff0_ebxfeatures[0]);
+				for (i = 0; i < max; i++)
+					if (ci->ci_feature_sefflags &
+					    cpu_seff0_ebxfeatures[i].feature_bit)
+						printf("%s%s",
+						    (numbits == 0 ? "" : ","),
+						    cpu_seff0_ebxfeatures[i].feature_name);
+			}
 			printf("\n");
 		}
+	}
+
+	if (ci->ci_flags & CPUF_PRIMARY) {
+		if (cpu_ecxfeature & CPUIDECX_RDRAND)
+			has_rdrand = 1;
+#ifndef SMALL_KERNEL
+		if (ci->ci_feature_sefflags & SEFF0EBX_SMAP)
+			replacesmap();
+#endif
 	}
 
 #ifndef SMALL_KERNEL
@@ -2217,21 +2315,20 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
 	register_t sp;
-	int oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/*
 	 * Build the argument list for the signal handler.
 	 */
+	bzero(&frame, sizeof(frame));
 	frame.sf_signum = sig;
 
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !oonstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(tf->tf_esp) && (psp->ps_sigonstack & sigmask(sig)))
 		sp = (long)p->p_sigstk.ss_sp + p->p_sigstk.ss_size;
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		sp = tf->tf_esp;
 
 	frame.sf_sc.sc_fpstate = NULL;
@@ -2258,7 +2355,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	 */
 	frame.sf_sc.sc_err = tf->tf_err;
 	frame.sf_sc.sc_trapno = tf->tf_trapno;
-	frame.sf_sc.sc_onstack = oonstack;
 	frame.sf_sc.sc_mask = mask;
 #ifdef VM86
 	if (tf->tf_eflags & PSL_VM) {
@@ -2404,10 +2500,6 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		p->p_md.md_flags |= MDP_USEDFPU;
 	}
 
-	if (context.sc_onstack & 01)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = context.sc_mask & ~sigcantmask;
 
 	return (EJUSTRETURN);
@@ -2485,6 +2577,7 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	i386_broadcast_ipi(I386_IPI_HALT);
@@ -3158,8 +3251,8 @@ init386(paddr_t first_avail)
 	printf("physload: ");
 #endif
 	kb = atop(KERNTEXTOFF - KERNBASE);
-	if (kb > atop(0x100000)) {
-		paddr_t lim = atop(0x100000);
+	if (kb > atop(IOM_END)) {
+		paddr_t lim = atop(IOM_END);
 #ifdef DEBUG
 		printf(" %x-%x (<16M)", lim, kb);
 #endif
@@ -3749,6 +3842,16 @@ bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 {
 	*nbshp = bsh + offset;
 	return (0);
+}
+
+paddr_t
+bus_space_mmap(bus_space_tag_t t, bus_addr_t addr, off_t off, int prot, int flags)
+{
+	/* Can't mmap I/O space. */
+	if (t == I386_BUS_SPACE_IO)
+		return (-1);
+
+	return (addr + off);
 }
 
 #ifdef DIAGNOSTIC

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.105 2011/06/22 16:44:27 tedu Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.110 2013/03/17 00:29:16 brad Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -873,7 +873,6 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 {
 	int			i;
 	const char		*intrstr = NULL;
-	pcireg_t		command;
 	struct sis_softc	*sc = (struct sis_softc *)self;
 	struct pci_attach_args	*pa = aux;
 	pci_chipset_tag_t	pc = pa->pa_pc;
@@ -883,33 +882,7 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->sis_stopped = 1;
 
-	/*
-	 * Handle power management nonsense.
-	 */
-	command = pci_conf_read(pc, pa->pa_tag, SIS_PCI_CAPID) & 0x000000FF;
-	if (command == 0x01) {
-
-		command = pci_conf_read(pc, pa->pa_tag, SIS_PCI_PWRMGMTCTRL);
-		if (command & SIS_PSTATE_MASK) {
-			u_int32_t		iobase, membase, irq;
-
-			/* Save important PCI config data. */
-			iobase = pci_conf_read(pc, pa->pa_tag, SIS_PCI_LOIO);
-			membase = pci_conf_read(pc, pa->pa_tag, SIS_PCI_LOMEM);
-			irq = pci_conf_read(pc, pa->pa_tag, SIS_PCI_INTLINE);
-
-			/* Reset the power state. */
-			printf("%s: chip is in D%d power mode -- setting to D0\n",
-			    sc->sc_dev.dv_xname, command & SIS_PSTATE_MASK);
-			command &= 0xFFFFFFFC;
-			pci_conf_write(pc, pa->pa_tag, SIS_PCI_PWRMGMTCTRL, command);
-
-			/* Restore PCI config data. */
-			pci_conf_write(pc, pa->pa_tag, SIS_PCI_LOIO, iobase);
-			pci_conf_write(pc, pa->pa_tag, SIS_PCI_LOMEM, membase);
-			pci_conf_write(pc, pa->pa_tag, SIS_PCI_INTLINE, irq);
-		}
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/*
 	 * Map control/status registers.
@@ -1117,10 +1090,10 @@ sis_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = sis_ioctl;
 	ifp->if_start = sis_start;
 	ifp->if_watchdog = sis_watchdog;
-	ifp->if_baudrate = 10000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, SIS_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
+	ifp->if_hardmtu = 1518; /* determined experimentally on DP83815 */
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
@@ -1695,23 +1668,23 @@ sis_init(void *xsc)
 	}
 
         /*
-	 * Short Cable Receive Errors (MP21.E)
-	 * also: Page 78 of the DP83815 data sheet (september 2002 version)
+	 * Page 78 of the DP83815 data sheet (september 2002 version)
 	 * recommends the following register settings "for optimum
-	 * performance." for rev 15C.  The driver from NS also sets  
+	 * performance." for rev 15C.  The driver from NS also sets
 	 * the PHY_CR register for later versions.
+	 *
+	 * This resolves an issue with tons of errors in AcceptPerfectMatch
+	 * (non-IFF_PROMISC) mode.
 	 */
 	 if (sc->sis_type == SIS_TYPE_83815 && sc->sis_srr <= NS_SRR_15D) {
 		CSR_WRITE_4(sc, NS_PHY_PAGE, 0x0001);
 		CSR_WRITE_4(sc, NS_PHY_CR, 0x189C);
-		if (sc->sis_srr == NS_SRR_15C) {  
-			/* set val for c2 */
-			CSR_WRITE_4(sc, NS_PHY_TDATA, 0x0000);
-			/* load/kill c2 */ 
-			CSR_WRITE_4(sc, NS_PHY_DSPCFG, 0x5040);
-			/* rais SD off, from 4 to c */
-			CSR_WRITE_4(sc, NS_PHY_SDCFG, 0x008C);
-		}
+		/* set val for c2 */
+		CSR_WRITE_4(sc, NS_PHY_TDATA, 0x0000);
+		/* load/kill c2 */
+		CSR_WRITE_4(sc, NS_PHY_DSPCFG, 0x5040);
+		/* raise SD off, from 4 to c */
+		CSR_WRITE_4(sc, NS_PHY_SDCFG, 0x008C);
 		CSR_WRITE_4(sc, NS_PHY_PAGE, 0);
 	}
 
@@ -1768,17 +1741,20 @@ sis_init(void *xsc)
 		SIS_SETBIT(sc, SIS_TX_CFG, SIS_TXCFG_MPII03D);
  	}
 
+	/*
+	 * Some DP83815s experience problems when used with short
+	 * (< 30m/100ft) Ethernet cables in 100baseTX mode.  This
+	 * sequence adjusts the DSP's signal attenuation to fix the
+	 * problem.
+	 */
 	if (sc->sis_type == SIS_TYPE_83815 && sc->sis_srr < NS_SRR_16A &&
-	     IFM_SUBTYPE(mii->mii_media_active) == IFM_100_TX) {
+	    IFM_SUBTYPE(mii->mii_media_active) == IFM_100_TX) {
 		uint32_t reg;
 
-		/*
-		 * Short Cable Receive Errors (MP21.E)
-		 */
 		CSR_WRITE_4(sc, NS_PHY_PAGE, 0x0001);
 		reg = CSR_READ_4(sc, NS_PHY_DSPCFG) & 0xfff;
 		CSR_WRITE_4(sc, NS_PHY_DSPCFG, reg | 0x1000);
-		DELAY(100000);
+		DELAY(100);
 		reg = CSR_READ_4(sc, NS_PHY_TDATA) & 0xff;
 		if ((reg & 0x0080) == 0 || (reg > 0xd8 && reg <= 0xff)) {
 #ifdef DEBUG
@@ -1786,8 +1762,7 @@ sis_init(void *xsc)
 			    sc->sc_dev.dv_xname, reg);
 #endif
 			CSR_WRITE_4(sc, NS_PHY_TDATA, 0x00e8);
-			reg = CSR_READ_4(sc, NS_PHY_DSPCFG);
-			SIS_SETBIT(sc, NS_PHY_DSPCFG, reg | 0x20);
+			SIS_SETBIT(sc, NS_PHY_DSPCFG, 0x20);
 		}
 		CSR_WRITE_4(sc, NS_PHY_PAGE, 0);
 	}

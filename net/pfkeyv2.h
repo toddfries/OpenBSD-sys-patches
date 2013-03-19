@@ -1,4 +1,4 @@
-/* $OpenBSD: pfkeyv2.h,v 1.61 2012/06/29 14:48:04 mikeb Exp $ */
+/* $OpenBSD: pfkeyv2.h,v 1.63 2013/03/09 02:27:07 deraadt Exp $ */
 /*
  *	@(#)COPYRIGHT	1.1 (NRL) January 1998
  * 
@@ -331,11 +331,8 @@ struct sadb_x_tap {
 #define SADB_X_CALG_MAX		3
 
 #define SADB_SAFLAGS_PFS		0x001	/* perfect forward secrecy */
-#define SADB_X_SAFLAGS_HALFIV		0x002	/* Used for ESP-old */
 #define SADB_X_SAFLAGS_TUNNEL		0x004	/* Force tunneling */
 #define SADB_X_SAFLAGS_CHAINDEL		0x008	/* Delete whole SA chain */
-#define SADB_X_SAFLAGS_RANDOMPADDING	0x080	/* Random ESP padding */
-#define SADB_X_SAFLAGS_NOREPLAY		0x100	/* No replay counter */
 #define SADB_X_SAFLAGS_UDPENCAP		0x200	/* ESP in UDP  */
 #define SADB_X_SAFLAGS_ESN		0x400	/* Extended Sequence Number */
 
@@ -403,8 +400,7 @@ struct mbuf;
 #define EXTLEN(x) (((struct sadb_ext *)(x))->sadb_ext_len * sizeof(uint64_t))
 #define PADUP(x) (((x) + sizeof(uint64_t) - 1) & ~(sizeof(uint64_t) - 1))
 
-struct pfkey_version
-{
+struct pfkey_version {
 	int protocol;
 	int (*create)(struct socket *socket);
 	int (*release)(struct socket *socket);
@@ -412,8 +408,7 @@ struct pfkey_version
 	int (*sysctl)(int *, u_int, void *, size_t *, void *, size_t);
 };
 
-struct pfkeyv2_socket
-{
+struct pfkeyv2_socket {
 	struct pfkeyv2_socket *next;
 	struct socket *socket;
 	int flags;
@@ -422,8 +417,7 @@ struct pfkeyv2_socket
 	uint rdomain;
 };
 
-struct dump_state
-{
+struct dump_state {
 	struct sadb_msg *sadb_msg;
 	struct socket *socket;
 };

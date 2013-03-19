@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.94 2011/10/10 19:42:37 miod Exp $	*/
+/*	$OpenBSD: pci.c,v 1.98 2013/02/09 20:43:33 miod Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -176,6 +176,7 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ioex = pba->pba_ioex;
 	sc->sc_memex = pba->pba_memex;
 	sc->sc_pmemex = pba->pba_pmemex;
+	sc->sc_busex = pba->pba_busex;
 	sc->sc_domain = pba->pba_domain;
 	sc->sc_bus = pba->pba_bus;
 	sc->sc_bridgetag = pba->pba_bridgetag;
@@ -183,7 +184,13 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_maxndevs = pci_bus_maxdevs(pba->pba_pc, pba->pba_bus);
 	sc->sc_intrswiz = pba->pba_intrswiz;
 	sc->sc_intrtag = pba->pba_intrtag;
+
+	/* Reserve our own bus number. */
+	if (sc->sc_busex)
+		extent_alloc_region(sc->sc_busex, sc->sc_bus, 1, EX_NOWAIT);
+
 	pci_enumerate_bus(sc, pci_reserve_resources, NULL);
+
 	pci_enumerate_bus(sc, pci_count_vga, NULL);
 	if (pci_enumerate_bus(sc, pci_primary_vga, NULL))
 		pci_vga_pci = sc;
@@ -284,11 +291,14 @@ pci_powerdown(struct pci_softc *sc)
 			continue;
 
 		if (pci_dopm) {
-			/* Place the device into D3. */
+			/*
+			 * Place the device into the lowest possible
+			 * power state.
+			 */
 			pd->pd_pmcsr_state = pci_get_powerstate(sc->sc_pc,
 			    pd->pd_tag);
 			pci_set_powerstate(sc->sc_pc, pd->pd_tag,
-			    PCI_PMCSR_STATE_D3);
+			    pci_min_powerstate(sc->sc_pc, pd->pd_tag));
 		}
 	}
 }
@@ -310,11 +320,10 @@ pci_resume(struct pci_softc *sc)
 		if (PCI_HDRTYPE_TYPE(bhlc) != 0)
 			continue;
 
-		if (pci_dopm) {
-			/* Restore power. */
+		/* Restore power. */
+		if (pci_dopm)
 			pci_set_powerstate(sc->sc_pc, pd->pd_tag,
 			    pd->pd_pmcsr_state);
-		}
 
 		/* Restore the registers saved above. */
 		for (i = 0; i < NMAPREG; i++)
@@ -421,6 +430,7 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	pa.pa_ioex = sc->sc_ioex;
 	pa.pa_memex = sc->sc_memex;
 	pa.pa_pmemex = sc->sc_pmemex;
+	pa.pa_busex = sc->sc_busex;
 	pa.pa_domain = sc->sc_domain;
 	pa.pa_bus = bus;
 	pa.pa_device = device;
@@ -769,11 +779,15 @@ pci_reserve_resources(struct pci_attach_args *pa)
 {
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pcitag_t tag = pa->pa_tag;
-	pcireg_t bhlc, blr, type;
+	pcireg_t bhlc, blr, type, bir;
 	bus_addr_t base, limit;
 	bus_size_t size;
 	int reg, reg_start, reg_end;
+	int bus, dev, func;
+	int sec, sub;
 	int flags;
+
+	pci_decompose_tag(pc, tag, &bus, &dev, &func);
 
 	bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
 	switch (PCI_HDRTYPE_TYPE(bhlc)) {
@@ -806,17 +820,15 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		switch (type) {
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
-#ifdef BUS_SPACE_MAP_PREFETCHABLE
 			if (ISSET(flags, BUS_SPACE_MAP_PREFETCHABLE) &&
 			    pa->pa_pmemex && extent_alloc_region(pa->pa_pmemex,
 			    base, size, EX_NOWAIT) == 0) {
 				break;
 			}
-#endif
 			if (pa->pa_memex && extent_alloc_region(pa->pa_memex,
 			    base, size, EX_NOWAIT)) {
-				printf("mem address conflict 0x%x/0x%x\n",
-				    base, size);
+				printf("%d:%d:%d: mem address conflict 0x%x/0x%x\n",
+				    bus, dev, func, base, size);
 				pci_conf_write(pc, tag, reg, 0);
 				if (type & PCI_MAPREG_MEM_TYPE_64BIT)
 					pci_conf_write(pc, tag, reg + 4, 0);
@@ -825,8 +837,8 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		case PCI_MAPREG_TYPE_IO:
 			if (pa->pa_ioex && extent_alloc_region(pa->pa_ioex,
 			    base, size, EX_NOWAIT)) {
-				printf("io address conflict 0x%x/0x%x\n",
-				    base, size);
+				printf("%d:%d:%d: io address conflict 0x%x/0x%x\n",
+				    bus, dev, func, base, size);
 				pci_conf_write(pc, tag, reg, 0);
 			}
 			break;
@@ -852,8 +864,8 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		size = 0;
 	if (pa->pa_ioex && base > 0 && size > 0) {
 		if (extent_alloc_region(pa->pa_ioex, base, size, EX_NOWAIT)) {
-			printf("bridge io address conflict 0x%x/0x%x\n",
-			       base, size);
+			printf("%d:%d:%d: bridge io address conflict 0x%x/0x%x\n",
+			    bus, dev, func, base, size);
 			blr &= 0xffff0000;
 			blr |= 0x000000f0;
 			pci_conf_write(pc, tag, PPB_REG_IOSTATUS, blr);
@@ -870,8 +882,8 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		size = 0;
 	if (pa->pa_memex && base > 0 && size > 0) {
 		if (extent_alloc_region(pa->pa_memex, base, size, EX_NOWAIT)) {
-			printf("bridge mem address conflict 0x%x/0x%x\n",
-			       base, size);
+			printf("%d:%d:%d: bridge mem address conflict 0x%x/0x%x\n",
+			    bus, dev, func, base, size);
 			pci_conf_write(pc, tag, PPB_REG_MEM, 0x0000fff0);
 		}
 	}
@@ -886,15 +898,27 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		size = 0;
 	if (pa->pa_pmemex && base > 0 && size > 0) {
 		if (extent_alloc_region(pa->pa_pmemex, base, size, EX_NOWAIT)) {
-			printf("bridge mem address conflict 0x%x/0x%x\n",
-			       base, size);
+			printf("%d:%d:%d: bridge mem address conflict 0x%x/0x%x\n",
+			    bus, dev, func, base, size);
 			pci_conf_write(pc, tag, PPB_REG_PREFMEM, 0x0000fff0);
 		}
 	} else if (pa->pa_memex && base > 0 && size > 0) {
 		if (extent_alloc_region(pa->pa_memex, base, size, EX_NOWAIT)) {
-			printf("bridge mem address conflict 0x%x/0x%x\n",
-			       base, size);
+			printf("%d:%d:%d: bridge mem address conflict 0x%x/0x%x\n",
+			    bus, dev, func, base, size);
 			pci_conf_write(pc, tag, PPB_REG_PREFMEM, 0x0000fff0);
+		}
+	}
+
+	/* Figure out the bus range handled by the bridge. */
+	bir = pci_conf_read(pc, tag, PPB_REG_BUSINFO);
+	sec = PPB_BUSINFO_SECONDARY(bir);
+	sub = PPB_BUSINFO_SUBORDINATE(bir);
+	if (pa->pa_busex && sub >= sec) {
+		if (extent_alloc_region(pa->pa_busex, sec, sub - sec + 1,
+		    EX_NOWAIT)) {
+			printf("%d:%d:%d: bridge bus conflict %d-%d\n",
+			    bus, dev, func, sec, sub);
 		}
 	}
 

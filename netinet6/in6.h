@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.h,v 1.57 2012/07/10 11:49:42 guenther Exp $	*/
+/*	$OpenBSD: in6.h,v 1.63 2013/03/14 14:28:38 mpi Exp $	*/
 /*	$KAME: in6.h,v 1.83 2001/03/29 02:55:07 jinmei Exp $	*/
 
 /*
@@ -451,6 +451,8 @@ struct route_in6 {
 #define IPV6_DONTFRAG		62   /* bool; disable IPv6 fragmentation */
 #define IPV6_PIPEX		63   /* bool; using PIPEX */
 
+#define IPV6_RECVDSTPORT	64   /* bool; receive IP dst port w/dgram */
+
 #define IPV6_RTABLE		0x1021	/* int; routing table, see SO_RTABLE */
 
 /* to define items, should talk with KAME guys first, for *BSD compatibility */
@@ -615,7 +617,6 @@ struct ip6_mtuinfo {
 #define IPV6CTL_SOURCECHECK	10	/* verify source route and intf */
 #define IPV6CTL_SOURCECHECK_LOGINT 11	/* minimume logging interval */
 #define IPV6CTL_ACCEPT_RTADV	12
-#define IPV6CTL_KEEPFAITH	13
 #define IPV6CTL_LOG_INTERVAL	14
 #define IPV6CTL_HDRNESTLIMIT	15
 #define IPV6CTL_DAD_COUNT	16
@@ -658,7 +659,7 @@ struct ip6_mtuinfo {
 	{ "sourcecheck", CTLTYPE_INT }, \
 	{ "sourcecheck_logint", CTLTYPE_INT }, \
 	{ "accept_rtadv", CTLTYPE_INT }, \
-	{ "keepfaith", CTLTYPE_INT }, \
+	{ 0, 0 }, \
 	{ "log_interval", CTLTYPE_INT }, \
 	{ "hdrnestlimit", CTLTYPE_INT }, \
 	{ "dad_count", CTLTYPE_INT }, \
@@ -711,7 +712,7 @@ struct ip6_mtuinfo {
 	NULL, \
 	NULL, \
 	&ip6_accept_rtadv, \
-	&ip6_keepfaith, \
+	NULL, \
 	&ip6_log_interval, \
 	&ip6_hdrnestlimit, \
 	&ip6_dad_count, \
@@ -769,6 +770,12 @@ int	in6_mask2len(struct in6_addr *, u_char *);
 #endif /* _KERNEL */
 
 #if __BSD_VISIBLE
+
+#ifndef	_SOCKLEN_T_DEFINED_
+#define	_SOCKLEN_T_DEFINED_
+typedef	__socklen_t	socklen_t;	/* length type for network syscalls */
+#endif
+
 __BEGIN_DECLS
 struct cmsghdr;
 

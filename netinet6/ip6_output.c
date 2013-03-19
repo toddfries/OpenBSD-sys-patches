@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.125 2012/07/16 18:05:36 markus Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.134 2013/03/14 11:18:37 mpi Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -82,6 +82,8 @@
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
+#include <netinet/udp.h>
+#include <netinet/tcp.h>
 
 #include <netinet/ip6.h>
 #include <netinet/icmp6.h>
@@ -99,8 +101,6 @@
 #include <netinet/ip_ipsp.h>
 #include <netinet/ip_ah.h>
 #include <netinet/ip_esp.h>
-#include <netinet/udp.h>
-#include <netinet/tcp.h>
 #include <net/pfkeyv2.h>
 
 extern u_int8_t get_sa_require(struct inpcb *);
@@ -222,7 +222,7 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 		goto done_spd;
 
 	/*
-	 * splnet is chosen over spltdb because we are not allowed to
+	 * splnet is chosen over splsoftnet because we are not allowed to
 	 * lower the level, and udp6_output calls us in splnet(). XXX check
 	 */
 	s = splnet();
@@ -588,7 +588,7 @@ reroute:
 	 * then rt (for unicast) and ifp must be non-NULL valid values.
 	 */
 	if (rt) {
-		ia = (struct in6_ifaddr *)(rt->rt_ifa);
+		ia = ifatoia6(rt->rt_ifa);
 		rt->rt_use++;
 	}
 
@@ -1347,7 +1347,6 @@ ip6_ctloutput(int op, struct socket *so, int level, int optname,
 				/* FALLTHROUGH */
 			case IPV6_UNICAST_HOPS:
 			case IPV6_HOPLIMIT:
-			case IPV6_FAITH:
 
 			case IPV6_RECVPKTINFO:
 			case IPV6_RECVHOPLIMIT:
@@ -1356,6 +1355,7 @@ ip6_ctloutput(int op, struct socket *so, int level, int optname,
 			case IPV6_RECVTCLASS:
 			case IPV6_V6ONLY:
 			case IPV6_AUTOFLOWLABEL:
+			case IPV6_RECVDSTPORT:
 				if (m == NULL || m->m_len != sizeof(int)) {
 					error = EINVAL;
 					break;
@@ -1460,10 +1460,6 @@ do { \
 					OPTSET(IN6P_RTHDR);
 					break;
 
-				case IPV6_FAITH:
-					OPTSET(IN6P_FAITH);
-					break;
-
 				case IPV6_RECVPATHMTU:
 					/*
 					 * We ignore this option for TCP
@@ -1504,6 +1500,9 @@ do { \
 					OPTSET(IN6P_AUTOFLOWLABEL);
 					break;
 
+				case IPV6_RECVDSTPORT:
+					OPTSET(IN6P_RECVDSTPORT);
+					break;
 				}
 				break;
 
@@ -1649,7 +1648,7 @@ do { \
 					break;
 				}
 				tdbip = mtod(m, struct tdb_ident *);
-				s = spltdb();
+				s = splsoftnet();
 				tdb = gettdb(tdbip->rdomain, tdbip->spi,
 				    &tdbip->dst, tdbip->proto);
 				if (tdb == NULL)
@@ -1761,11 +1760,11 @@ do { \
 			case IPV6_RECVRTHDR:
 			case IPV6_RECVPATHMTU:
 
-			case IPV6_FAITH:
 			case IPV6_V6ONLY:
 			case IPV6_PORTRANGE:
 			case IPV6_RECVTCLASS:
 			case IPV6_AUTOFLOWLABEL:
+			case IPV6_RECVDSTPORT:
 				switch (optname) {
 
 				case IPV6_RECVHOPOPTS:
@@ -1800,10 +1799,6 @@ do { \
 					optval = OPTBIT(IN6P_MTU);
 					break;
 
-				case IPV6_FAITH:
-					optval = OPTBIT(IN6P_FAITH);
-					break;
-
 				case IPV6_V6ONLY:
 					optval = (ip6_v6only != 0); /* XXX */
 					break;
@@ -1826,6 +1821,10 @@ do { \
 
 				case IPV6_AUTOFLOWLABEL:
 					optval = OPTBIT(IN6P_AUTOFLOWLABEL);
+					break;
+
+				case IPV6_RECVDSTPORT:
+					optval = OPTBIT(IN6P_RECVDSTPORT);
 					break;
 				}
 				if (error)
@@ -1921,7 +1920,7 @@ do { \
 #ifndef IPSEC
 				error = EINVAL;
 #else
-				s = spltdb();
+				s = splsoftnet();
 				if (inp->inp_tdb_out == NULL) {
 					error = ENOENT;
 				} else {
@@ -2726,7 +2725,7 @@ ip6_setpktopts(struct mbuf *control, struct ip6_pktopts *opt,
 		if (clen < CMSG_LEN(0))
 			return (EINVAL);
 		cm = (struct cmsghdr *)cmsgs;
-		if (cm->cmsg_len < CMSG_LEN(0) ||
+		if (cm->cmsg_len < CMSG_LEN(0) || cm->cmsg_len > clen ||
 		    CMSG_ALIGN(cm->cmsg_len) > clen)
 			return (EINVAL);
 		if (cm->cmsg_level == IPPROTO_IPV6) {

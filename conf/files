@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.537 2012/04/26 01:22:31 matthew Exp $
+#	$OpenBSD: files,v 1.542 2013/03/15 09:10:52 ratchov Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -196,6 +196,10 @@ device	isp: scsi
 file	dev/ic/isp.c			isp
 file	dev/ic/isp_openbsd.c		isp
 file	dev/ic/isp_library.c		isp
+
+# Advanced Host Controller Interface for Serial ATA
+device	ahci: scsi, atascsi
+file	dev/ic/ahci.c			ahci | ahci_pci | ahci_jmb needs-flag
 
 # LSI Logic Fusion-MPT Message Passing Interface
 device	mpi: scsi
@@ -454,6 +458,10 @@ device wbsd: sdmmcbus
 file	dev/ic/w83l518d.c		wbsd
 file	dev/ic/w83l518d_sdmmc.c		wbsd
 
+# Realtek RTS5209 Card Reader
+device	rtsx: sdmmcbus
+file	dev/ic/rtsx.c			rtsx	needs-flag
+
 # AMD 7930 audio/ISDN codec
 define	am7930
 file	dev/ic/am7930.c			am7930
@@ -521,7 +529,6 @@ pseudo-device bridge: ifnet, ether
 pseudo-device vlan: ifnet, ether
 pseudo-device carp: ifnet, ether
 pseudo-device sppp: ifnet
-pseudo-device faith: ifnet
 pseudo-device gif: ifnet
 pseudo-device gre: ifnet
 pseudo-device crypto: ifnet
@@ -530,11 +537,19 @@ pseudo-device mpe: ifnet, ether
 pseudo-device vether: ifnet, ether
 pseudo-device pppx: ifnet
 
-pseudo-device sequencer
 pseudo-device systrace
 
 pseudo-device ksyms
 file	dev/ksyms.c			ksyms needs-flag
+
+pseudo-device fuse
+file	miscfs/fuse/fuse_device.c	fuse	needs-flag
+file	miscfs/fuse/fuse_file.c		fuse
+file	miscfs/fuse/fuse_lookup.c	fuse
+file	miscfs/fuse/fuse_node.c		fuse
+file	miscfs/fuse/fuse_vfsops.c	fuse
+file	miscfs/fuse/fuse_vnops.c	fuse
+file	miscfs/fuse/fuse_subr.c		fuse
 
 pseudo-device pf: ifnet
 file	net/pf.c			pf	needs-flag
@@ -609,7 +624,6 @@ file dev/ic/tc921x.c			tc921x
 file dev/ic/pt2254a.c			pt2254a
 file dev/midi.c				midi | midibus		needs-flag
 file dev/mulaw.c			mulaw
-file dev/sequencer.c			sequencer		needs-flag
 file dev/systrace.c			systrace		needs-flag
 file dev/vnd.c				vnd			needs-flag
 file dev/rnd.c
@@ -916,20 +930,6 @@ file ufs/ext2fs/ext2fs_readwrite.c	ext2fs
 file ufs/ext2fs/ext2fs_subr.c		ext2fs
 file ufs/ext2fs/ext2fs_vfsops.c		ext2fs
 file ufs/ext2fs/ext2fs_vnops.c		ext2fs
-file nnpfs/nnpfs_common-bsd.c		nnpfs
-file nnpfs/nnpfs_deb.c			nnpfs
-file nnpfs/nnpfs_dev-bsd.c		nnpfs
-file nnpfs/nnpfs_dev-common.c		nnpfs
-file nnpfs/nnpfs_message.c		nnpfs
-file nnpfs/nnpfs_node.c			nnpfs
-file nnpfs/nnpfs_node-bsd.c		nnpfs
-file nnpfs/nnpfs_syscalls-common.c	nnpfs
-file nnpfs/nnpfs_vfsops-bsd.c		nnpfs
-file nnpfs/nnpfs_vfsops-common.c	nnpfs
-file nnpfs/nnpfs_vfsops-openbsd.c	nnpfs
-file nnpfs/nnpfs_vnodeops-bsd.c		nnpfs
-file nnpfs/nnpfs_vnodeops-common.c	nnpfs
-file nnpfs/nnpfs_syscalls-dummy.c	!nnpfs
 file uvm/uvm_addr.c
 file uvm/uvm_amap.c
 file uvm/uvm_anon.c
@@ -957,7 +957,6 @@ file uvm/uvm_user.c
 file uvm/uvm_vnode.c
 
 # IPv6
-file net/if_faith.c			faith			needs-count
 file net/if_gif.c			gif			needs-count
 file netinet/ip_ecn.c			inet | inet6
 file netinet/in_gif.c			gif & inet
@@ -1053,4 +1052,3 @@ file lib/libz/zopenbsd.c		ppp_deflate | ipsec | crypto
 file lib/libz/trees.c			ppp_deflate | ipsec | crypto
 file lib/libz/compress.c		ppp_deflate | ipsec | crypto
 
-include "puffs/files.puffs"

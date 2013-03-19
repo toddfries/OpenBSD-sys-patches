@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsp.c,v 1.10 2011/01/07 00:46:48 kettenis Exp $	*/
+/*	$OpenBSD: vdsp.c,v 1.18 2012/12/08 20:38:10 kettenis Exp $	*/
 /*
  * Copyright (c) 2009, 2011 Mark Kettenis
  *
@@ -16,6 +16,7 @@
  */
 
 #include <sys/param.h>
+#include <sys/conf.h>
 #include <sys/proc.h>
 #include <sys/buf.h>
 #include <sys/device.h>
@@ -28,6 +29,7 @@
 #include <sys/workq.h>
 
 #include <machine/autoconf.h>
+#include <machine/conf.h>
 #include <machine/hypervisor.h>
 #include <machine/mdesc.h>
 
@@ -185,6 +187,7 @@ struct vdsk_desc_msg {
  */
 #define VD_OP_MASK \
     ((1 << VD_OP_BREAD) | (1 << VD_OP_BWRITE) | (1 << VD_OP_FLUSH) | \
+     (1 << VD_OP_GET_WCE) | (1 << VD_OP_SET_WCE) | \
      (1 << VD_OP_GET_VTOC) | (1 << VD_OP_SET_VTOC) | \
      (1 << VD_OP_GET_DISKGEOM))
 
@@ -274,10 +277,10 @@ void	vdsp_rx_vio_desc_data(struct vdsp_softc *sc, struct vio_msg_tag *);
 void	vdsp_ldc_reset(struct ldc_conn *);
 void	vdsp_ldc_start(struct ldc_conn *);
 
-void	vdsp_sendmsg(struct vdsp_softc *, void *, size_t);
+void	vdsp_sendmsg(struct vdsp_softc *, void *, size_t, int dowait);
 
-void	vdsp_mountroot(void *);
 void	vdsp_open(void *, void *);
+void	vdsp_close(void *, void *);
 void	vdsp_alloc(void *, void *);
 void	vdsp_readlabel(struct vdsp_softc *);
 int	vdsp_writelabel(struct vdsp_softc *);
@@ -338,14 +341,6 @@ vdsp_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	/*
-	 * Disable interrupts while we have no queues allocated.
-	 * Otherwise we may end up with an interrupt storm as soon as
-	 * our peer places a packet in their transmit queue.
-	 */
-	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_DISABLED);
-	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_DISABLED);
-
 	lc = &sc->sc_lc;
 	lc->lc_id = ca->ca_id;
 	lc->lc_sc = sc;
@@ -367,7 +362,6 @@ vdsp_attach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-	mountroothook_establish(vdsp_mountroot, sc);
 	return;
 
 #if 0
@@ -384,8 +378,14 @@ vdsp_tx_intr(void *arg)
 	struct vdsp_softc *sc = arg;
 	struct ldc_conn *lc = &sc->sc_lc;
 	uint64_t tx_head, tx_tail, tx_state;
+	int err;
 
 	hv_ldc_tx_get_state(lc->lc_id, &tx_head, &tx_tail, &tx_state);
+	if (err != H_EOK) {
+		printf("hv_ldc_rx_get_state %d\n", err);
+		return (0);
+	}
+
 	if (tx_state != lc->lc_tx_state) {
 		switch (tx_state) {
 		case LDC_CHANNEL_DOWN:
@@ -401,6 +401,7 @@ vdsp_tx_intr(void *arg)
 		lc->lc_tx_state = tx_state;
 	}
 
+	wakeup(lc->lc_txq);
 	return (1);
 }
 
@@ -538,7 +539,7 @@ vdsp_rx_vio_ver_info(struct vdsp_softc *sc, struct vio_msg_tag *tag)
 			    sc->sc_dv.dv_xname);
 			vi->tag.stype = VIO_SUBTYPE_NACK;
 			vi->major = 0;
-			vdsp_sendmsg(sc, vi, sizeof(*vi));
+			vdsp_sendmsg(sc, vi, sizeof(*vi), 0);
 			return;
 		}
 
@@ -546,7 +547,7 @@ vdsp_rx_vio_ver_info(struct vdsp_softc *sc, struct vio_msg_tag *tag)
 			vi->tag.stype = VIO_SUBTYPE_NACK;
 			vi->major = VDSK_MAJOR;
 			vi->minor = VDSK_MINOR;
-			vdsp_sendmsg(sc, vi, sizeof(*vi));
+			vdsp_sendmsg(sc, vi, sizeof(*vi), 0);
 			return;
 		}
 
@@ -558,7 +559,7 @@ vdsp_rx_vio_ver_info(struct vdsp_softc *sc, struct vio_msg_tag *tag)
 		if (vi->minor > VDSK_MINOR)
 			vi->minor = VDSK_MINOR;
 		vi->dev_class = VDEV_DISK_SERVER;
-		vdsp_sendmsg(sc, vi, sizeof(*vi));
+		vdsp_sendmsg(sc, vi, sizeof(*vi), 0);
 		sc->sc_vio_state |= VIO_RCV_VER_INFO;
 		break;
 
@@ -586,7 +587,7 @@ vdsp_rx_vio_attr_info(struct vdsp_softc *sc, struct vio_msg_tag *tag)
 			printf("%s: peer uses unsupported xfer mode 0x%02x\n",
 			    sc->sc_dv.dv_xname, ai->xfer_mode);
 			ai->tag.stype = VIO_SUBTYPE_NACK;
-			vdsp_sendmsg(sc, ai, sizeof(*ai));
+			vdsp_sendmsg(sc, ai, sizeof(*ai), 0);
 			return;
 		}
 		sc->sc_xfer_mode = ai->xfer_mode;
@@ -618,7 +619,7 @@ vdsp_rx_vio_dring_reg(struct vdsp_softc *sc, struct vio_msg_tag *tag)
 		    dr->descriptor_size > VDSK_MAX_DESCRIPTOR_SIZE ||
 		    dr->ncookies > 1) {
 			dr->tag.stype = VIO_SUBTYPE_NACK;
-			vdsp_sendmsg(sc, dr, sizeof(*dr));
+			vdsp_sendmsg(sc, dr, sizeof(*dr), 0);
 			return;
 		}
 		sc->sc_num_descriptors = dr->num_descriptors;
@@ -648,7 +649,7 @@ vdsp_rx_vio_rdx(struct vdsp_softc *sc, struct vio_msg_tag *tag)
 
 		tag->stype = VIO_SUBTYPE_ACK;
 		tag->sid = sc->sc_local_sid;
-		vdsp_sendmsg(sc, tag, sizeof(*tag));
+		vdsp_sendmsg(sc, tag, sizeof(*tag), 0);
 		sc->sc_vio_state |= VIO_RCV_RDX;
 		break;
 
@@ -706,7 +707,7 @@ vdsp_rx_vio_dring_data(struct vdsp_softc *sc, struct vio_msg_tag *tag)
 		if (dm->dring_ident != sc->sc_dring_ident ||
 		    dm->start_idx >= sc->sc_num_descriptors) {
 			dm->tag.stype = VIO_SUBTYPE_NACK;
-			vdsp_sendmsg(sc, dm, sizeof(*dm));
+			vdsp_sendmsg(sc, dm, sizeof(*dm), 0);
 			return;
 		}
 
@@ -718,15 +719,15 @@ vdsp_rx_vio_dring_data(struct vdsp_softc *sc, struct vio_msg_tag *tag)
 			pmap_extract(pmap_kernel(), va, &pa);
 			nbytes = min(size, PAGE_SIZE - (off & PAGE_MASK));
 			err = hv_ldc_copy(sc->sc_lc.lc_id, LDC_COPY_IN,
-			    sc->sc_dring_cookie.addr | off, pa,
+			    sc->sc_dring_cookie.addr + off, pa,
 			    nbytes, &nbytes);
+			if (err != H_EOK) {
+				printf("%s: hv_ldc_copy %d\n", __func__, err);
+				return;
+			}
 			va += nbytes;
 			size -= nbytes;
 			off += nbytes;
-		}
-		if (err != H_EOK) {
-			printf("%s: hv_ldc_copy %d\n", __func__, err);
-			return;
 		}
 
 		DPRINTF(("%s: start_idx %d, end_idx %d, operation %x\n",
@@ -750,6 +751,17 @@ vdsp_rx_vio_dring_data(struct vdsp_softc *sc, struct vio_msg_tag *tag)
 			break;
 		case VD_OP_GET_DISKGEOM:
 			workq_add_task(NULL, 0, vdsp_get_diskgeom, sc, vd);
+			break;
+		case VD_OP_GET_WCE:
+		case VD_OP_SET_WCE:
+		case VD_OP_GET_DEVID:
+			/*
+			 * Solaris issues VD_OP_GET_DEVID despite the
+			 * fact that we don't advertise it.  It seems
+			 * to be able to handle failure just fine, so
+			 * we silently ignore it.
+			 */
+			workq_add_task(NULL, 0, vdsp_unimp, sc, vd);
 			break;
 		default:
 			printf("%s: unsupported operation 0x%02x\n",
@@ -822,6 +834,8 @@ vdsp_ldc_reset(struct ldc_conn *lc)
 		free(sc->sc_label, M_DEVBUF);
 		sc->sc_label = NULL;
 	}
+
+	workq_add_task(NULL, 0, vdsp_close, sc, NULL);
 }
 
 void
@@ -831,60 +845,23 @@ vdsp_ldc_start(struct ldc_conn *lc)
 }
 
 void
-vdsp_sendmsg(struct vdsp_softc *sc, void *msg, size_t len)
+vdsp_sendmsg(struct vdsp_softc *sc, void *msg, size_t len, int dowait)
 {
-	struct ldc_conn *lc = &sc->sc_lc;
-	struct ldc_pkt *lp;
-	uint64_t tx_head, tx_tail, tx_state;
-	uint8_t *p = msg;
-	int err;
-
-	err = hv_ldc_tx_get_state(lc->lc_id, &tx_head, &tx_tail, &tx_state);
-	if (err != H_EOK)
-		return;
-
-	while (len > 0) {
-		lp = (struct ldc_pkt *)(lc->lc_txq->lq_va + tx_tail);
-		bzero(lp, sizeof(struct ldc_pkt));
-		lp->type = LDC_DATA;
-		lp->stype = LDC_INFO;
-		lp->env = min(len, LDC_PKT_PAYLOAD);
-		if (p == msg)
-			lp->env |= LDC_FRAG_START;
-		if (len <= LDC_PKT_PAYLOAD)
-			lp->env |= LDC_FRAG_STOP;
-		lp->seqid = lc->lc_tx_seqid++;
-		bcopy(p, &lp->major, min(len, LDC_PKT_PAYLOAD));
-
-		tx_tail += sizeof(*lp);
-		tx_tail &= ((lc->lc_txq->lq_nentries * sizeof(*lp)) - 1);
-		err = hv_ldc_tx_set_qtail(lc->lc_id, tx_tail);
-		if (err != H_EOK)
-			printf("%s: hv_ldc_tx_set_qtail: %d\n", __func__, err);
-		p += min(len, LDC_PKT_PAYLOAD);
-		len -= min(len, LDC_PKT_PAYLOAD);
-	}
-}
-
-void
-vdsp_mountroot(void *arg)
-{
-	struct vdsp_softc *sc = arg;
 	struct ldc_conn *lc = &sc->sc_lc;
 	int err;
 
-	err = hv_ldc_tx_qconf(lc->lc_id,
-	    lc->lc_txq->lq_map->dm_segs[0].ds_addr, lc->lc_txq->lq_nentries);
-	if (err != H_EOK)
-		printf("%s: hv_ldc_tx_qconf %d\n", __func__, err);
-
-	err = hv_ldc_rx_qconf(lc->lc_id,
-	    lc->lc_rxq->lq_map->dm_segs[0].ds_addr, lc->lc_rxq->lq_nentries);
-	if (err != H_EOK)
-		printf("%s: hv_ldc_rx_qconf %d\n", err, __func__);
-
-	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_ENABLED);
-	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_ENABLED);
+	do {
+		err = ldc_send_unreliable(lc, msg, len);
+		if (dowait && err == EWOULDBLOCK) {
+			/*
+			 * Seems like the hypervisor doesn't actually
+			 * generate interrupts for transmit queues, so
+			 * we specify a timeout such that we don't
+			 * block forever.
+			 */
+			err = tsleep(lc->lc_txq, PWAIT, "vdsp", 1);
+		}
+	} while (dowait && err == EWOULDBLOCK);
 }
 
 void
@@ -905,7 +882,7 @@ vdsp_open(void *arg1, void *arg2)
 			return;
 
 		NDINIT(&nd, LOOKUP, FOLLOW, UIO_SYSSPACE, name, p);
-		error = vn_open(&nd, FREAD, 0);
+		error = vn_open(&nd, FREAD | FWRITE, 0);
 		if (error) {
 			printf("VOP_OPEN: %s, %d\n", name, error);
 			return;
@@ -940,7 +917,19 @@ vdsp_open(void *arg1, void *arg2)
 	ai.operations = VD_OP_MASK;
 	ai.vdisk_size = sc->sc_vdisk_size;
 	ai.max_xfer_sz = MAXPHYS / sc->sc_vdisk_block_size;
-	vdsp_sendmsg(sc, &ai, sizeof(ai));
+	vdsp_sendmsg(sc, &ai, sizeof(ai), 1);
+}
+
+void
+vdsp_close(void *arg1, void *arg2)
+{
+	struct vdsp_softc *sc = arg1;
+	struct proc *p = curproc;
+
+	if (sc->sc_vp) {
+		vn_close(sc->sc_vp, FREAD | FWRITE, p->p_ucred, p);
+		sc->sc_vp = NULL;
+	}
 }
 
 void
@@ -1055,7 +1044,7 @@ vdsp_alloc(void *arg1, void *arg2)
 	dr.tag.stype_env = VIO_DRING_REG;
 	dr.tag.sid = sc->sc_local_sid;
 	dr.dring_ident = ++sc->sc_dring_ident;
-	vdsp_sendmsg(sc, &dr, sizeof(dr));
+	vdsp_sendmsg(sc, &dr, sizeof(dr), 1);
 }
 
 void
@@ -1122,7 +1111,7 @@ vdsp_read(void *arg1, void *arg2)
 	dm->tag.stype = VIO_SUBTYPE_ACK;
 	dm->tag.sid = sc->sc_local_sid;
 	vdsp_sendmsg(sc, dm, sizeof(*dm) +
-	    (dm->ncookies - 1) * sizeof(struct ldc_cookie));
+	    (dm->ncookies - 1) * sizeof(struct ldc_cookie), 1);
 }
 
 void
@@ -1565,14 +1554,14 @@ vdsp_ack_desc(struct vdsp_softc *sc, struct vd_desc *vd)
 		pmap_extract(pmap_kernel(), va, &pa);
 		nbytes = min(size, PAGE_SIZE - (off & PAGE_MASK));
 		err = hv_ldc_copy(sc->sc_lc.lc_id, LDC_COPY_OUT,
-		    sc->sc_dring_cookie.addr | off, pa, nbytes, &nbytes);
+		    sc->sc_dring_cookie.addr + off, pa, nbytes, &nbytes);
+		if (err != H_EOK) {
+			printf("%s: hv_ldc_copy %d\n", __func__, err);
+			return;
+		}
 		va += nbytes;
 		size -= nbytes;
 		off += nbytes;
-	}
-	if (err != H_EOK) {
-		printf("%s: hv_ldc_copy %d\n", __func__, err);
-		return;
 	}
 
 	/* ACK the descriptor. */
@@ -1586,5 +1575,78 @@ vdsp_ack_desc(struct vdsp_softc *sc, struct vd_desc *vd)
 	off = (caddr_t)vd - sc->sc_vd;
 	dm.start_idx = off / sc->sc_descriptor_size;
 	dm.end_idx = off / sc->sc_descriptor_size;
-	vdsp_sendmsg(sc, &dm, sizeof(dm));
+	vdsp_sendmsg(sc, &dm, sizeof(dm), 1);
+}
+
+int
+vdspopen(dev_t dev, int flag, int mode, struct proc *p)
+{
+	struct vdsp_softc *sc;
+	struct ldc_conn *lc;
+	int unit = minor(dev);
+	int err;
+
+	if (unit >= vdsp_cd.cd_ndevs)
+		return (ENXIO);
+	sc = vdsp_cd.cd_devs[unit];
+	if (sc == NULL)
+		return (ENXIO);
+
+	lc = &sc->sc_lc;
+
+	err = hv_ldc_tx_qconf(lc->lc_id,
+	    lc->lc_txq->lq_map->dm_segs[0].ds_addr, lc->lc_txq->lq_nentries);
+	if (err != H_EOK)
+		printf("%s: hv_ldc_tx_qconf %d\n", __func__, err);
+
+	err = hv_ldc_rx_qconf(lc->lc_id,
+	    lc->lc_rxq->lq_map->dm_segs[0].ds_addr, lc->lc_rxq->lq_nentries);
+	if (err != H_EOK)
+		printf("%s: hv_ldc_rx_qconf %d\n", err, __func__);
+
+	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_ENABLED);
+	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_ENABLED);
+
+	return (0);
+}
+
+int
+vdspclose(dev_t dev, int flag, int mode, struct proc *p)
+{
+	struct vdsp_softc *sc;
+	int unit = minor(dev);
+
+	if (unit >= vdsp_cd.cd_ndevs)
+		return (ENXIO);
+	sc = vdsp_cd.cd_devs[unit];
+	if (sc == NULL)
+		return (ENXIO);
+
+	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_DISABLED);
+	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_DISABLED);
+
+	hv_ldc_tx_qconf(sc->sc_lc.lc_id, 0, 0);
+	hv_ldc_rx_qconf(sc->sc_lc.lc_id, 0, 0);
+
+	if (sc->sc_vp) {
+		vn_close(sc->sc_vp, FREAD | FWRITE, p->p_ucred, p);
+		sc->sc_vp = NULL;
+	}
+
+	return (0);
+}
+
+int
+vdspioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
+{
+	struct vdsp_softc *sc;
+	int unit = minor(dev);
+
+	if (unit >= vdsp_cd.cd_ndevs)
+		return (ENXIO);
+	sc = vdsp_cd.cd_devs[unit];
+	if (sc == NULL)
+		return (ENXIO);
+
+	return (ENOTTY);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.c,v 1.91 2012/01/03 23:41:51 bluhm Exp $	*/
+/*	$OpenBSD: nd6.c,v 1.95 2013/03/11 14:08:04 mpi Exp $	*/
 /*	$KAME: nd6.c,v 1.280 2002/06/08 19:52:07 itojun Exp $	*/
 
 /*
@@ -623,10 +623,6 @@ nd6_purge(struct ifnet *ifp)
 		}
 	}
 
-	/* cancel default outgoing interface setting */
-	if (nd6_defifindex == ifp->if_index)
-		nd6_setdefaultiface(0);
-
 	if (!ip6_forwarding && ip6_accept_rtadv) { /* XXX: too restrictive? */
 		/* refresh default router list */
 		defrouter_select();
@@ -790,17 +786,6 @@ nd6_is_addr_neighbor(struct sockaddr_in6 *addr, struct ifnet *ifp)
 		if (IN6_ARE_MASKED_ADDR_EQUAL(&pr->ndpr_prefix.sin6_addr,
 		    &addr->sin6_addr, &pr->ndpr_mask))
 			return (1);
-	}
-
-	/*
-	 * If the default router list is empty, all addresses are regarded
-	 * as on-link, and thus, as a neighbor.
-	 * XXX: we restrict the condition to hosts, because routers usually do
-	 * not have the "default router list".
-	 */
-	if (!ip6_forwarding && TAILQ_EMPTY(&nd_defrouter) &&
-	    nd6_defifindex == ifp->if_index) {
-		return (1);
 	}
 
 	/*
@@ -1197,7 +1182,7 @@ nd6_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 				 * of the loopback address.
 				 */
 				if (ifa != rt->rt_ifa) {
-					IFAFREE(rt->rt_ifa);
+					ifafree(rt->rt_ifa);
 					ifa->ifa_refcnt++;
 					rt->rt_ifa = ifa;
 				}
@@ -1268,7 +1253,6 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 	struct in6_oprlist *oprl = (struct in6_oprlist *)data;
 	struct in6_ndireq *ndi = (struct in6_ndireq *)data;
 	struct in6_nbrinfo *nbi = (struct in6_nbrinfo *)data;
-	struct in6_ndifreq *ndif = (struct in6_ndifreq *)data;
 	struct nd_defrouter *dr;
 	struct nd_prefix *pr;
 	struct rtentry *rt;
@@ -1389,6 +1373,7 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 		struct nd_prefix *pr, *next;
 
 		s = splsoftnet();
+		/* First purge the addresses referenced by a prefix. */
 		for (pr = LIST_FIRST(&nd_prefix); pr; pr = next) {
 			struct in6_ifaddr *ia, *ia_next;
 
@@ -1408,6 +1393,18 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 				if (ia->ia6_ndpr == pr)
 					in6_purgeaddr(&ia->ia_ifa);
 			}
+		}
+		/*
+		 * Purging the addresses might remove the prefix as well.
+		 * So run the loop again to access only prefixes that have
+		 * not been freed already.
+		 */
+		for (pr = LIST_FIRST(&nd_prefix); pr; pr = next) {
+			next = LIST_NEXT(pr, ndpr_entry);
+
+			if (IN6_IS_ADDR_LINKLOCAL(&pr->ndpr_prefix.sin6_addr))
+				continue; /* XXX */
+
 			prelist_remove(pr);
 		}
 		splx(s);
@@ -1458,12 +1455,6 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 
 		break;
 	}
-	case SIOCGDEFIFACE_IN6:	/* XXX: should be implemented as a sysctl? */
-		ndif->ifindex = nd6_defifindex;
-		break;
-	case SIOCSDEFIFACE_IN6:	/* XXX: should be implemented as a sysctl? */
-		return (nd6_setdefaultiface(ndif->ifindex));
-		break;
 	}
 	return (error);
 }
@@ -1719,8 +1710,7 @@ nd6_slowtimo(void *ignored_arg)
 
 	timeout_set(&nd6_slowtimo_ch, nd6_slowtimo, NULL);
 	timeout_add_sec(&nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL);
-	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list))
-	{
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		nd6if = ND_IFINFO(ifp);
 		if (nd6if->basereachable && /* already initialized */
 		    (nd6if->recalctm -= ND6_SLOWTIMER_INTERVAL) <= 0) {

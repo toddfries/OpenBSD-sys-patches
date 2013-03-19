@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_i810.c,v 1.70 2011/09/14 10:26:16 oga Exp $	*/
+/*	$OpenBSD: agp_i810.c,v 1.74 2013/03/18 12:02:56 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2000 Doug Rabson
@@ -60,6 +60,10 @@
 /* Memory is snooped, must not be accessed through gtt from the cpu. */
 #define	INTEL_COHERENT	0x6	
 
+#define GEN6_PTE_UNCACHED		(1 << 1)
+#define GEN6_PTE_CACHE_LLC		(2 << 1)
+#define GEN6_PTE_CACHE_LLC_MLC		(3 << 1)
+
 enum {
 	CHIP_NONE	= 0,	/* not integrated graphics */
 	CHIP_I810	= 1,	/* i810/i815 */
@@ -72,6 +76,7 @@ enum {
 	CHIP_PINEVIEW	= 8,	/* Pineview/Pineview M */
 	CHIP_IRONLAKE	= 9,	/* Clarkdale/Arrandale */
 	CHIP_SANDYBRIDGE=10,	/* Sandybridge */
+	CHIP_IVYBRIDGE	=11,	/* Ivybridge */
 };
 
 struct agp_i810_softc {
@@ -201,7 +206,16 @@ agp_i810_get_chiptype(struct pci_attach_args *pa)
 	case PCI_PRODUCT_INTEL_CORE2G_M_GT2_PLUS:
 		return (CHIP_SANDYBRIDGE);
 		break;
+	case PCI_PRODUCT_INTEL_CORE3G_D_GT1:
+	case PCI_PRODUCT_INTEL_CORE3G_M_GT1:
+	case PCI_PRODUCT_INTEL_CORE3G_S_GT1:
+	case PCI_PRODUCT_INTEL_CORE3G_D_GT2:
+	case PCI_PRODUCT_INTEL_CORE3G_M_GT2:
+	case PCI_PRODUCT_INTEL_CORE3G_S_GT2:
+		return (CHIP_IVYBRIDGE);
+		break;
 	}
+	
 	return (CHIP_NONE);
 }
 
@@ -258,6 +272,7 @@ agp_i810_attach(struct device *parent, struct device *self, void *aux)
 	case CHIP_G4X:
 	case CHIP_IRONLAKE:
 	case CHIP_SANDYBRIDGE:
+	case CHIP_IVYBRIDGE:
 		gmaddr = AGP_I965_GMADR;
 		mmaddr = AGP_I965_MMADR;
 		memtype = PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT;
@@ -490,6 +505,7 @@ agp_i810_attach(struct device *parent, struct device *self, void *aux)
 		break;
 
 	case CHIP_SANDYBRIDGE:
+	case CHIP_IVYBRIDGE:
 
 		/* Stolen memory is set up at the beginning of the aperture by
 		 * the BIOS, consisting of the GATT followed by 4kb for the
@@ -582,6 +598,7 @@ agp_i810_attach(struct device *parent, struct device *self, void *aux)
 
 	isc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_i810_methods,
 	    isc->isc_apaddr, isc->isc_apsize, &isc->dev);
+	isc->agpdev->sc_stolen_entries = isc->stolen;
 	return;
 out:
 
@@ -624,6 +641,7 @@ agp_i810_activate(struct device *arg, int act)
 	case CHIP_G4X:
 	case CHIP_IRONLAKE:
 	case CHIP_SANDYBRIDGE:
+	case CHIP_IVYBRIDGE:
 		offset = AGP_G4X_GTT;
 		break;
 	default:
@@ -712,8 +730,21 @@ agp_i810_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
 	 * COHERENT mappings mean set the snoop bit. this should never be
 	 * accessed by the gpu through the gtt.
 	 */
-	if (flags & BUS_DMA_COHERENT)
-		physical |= INTEL_COHERENT;
+	switch (isc->chiptype) {
+	case CHIP_SANDYBRIDGE:
+	case CHIP_IVYBRIDGE:
+		if (flags & BUS_DMA_GTT_NOCACHE)
+			physical |= GEN6_PTE_UNCACHED;
+		if (flags & BUS_DMA_GTT_CACHE_LLC)
+			physical |= GEN6_PTE_CACHE_LLC;
+		if (flags & BUS_DMA_GTT_CACHE_LLC_MLC)
+			physical |= GEN6_PTE_CACHE_LLC_MLC;
+		break;
+	default:
+		if (flags & BUS_DMA_COHERENT)
+			physical |= INTEL_COHERENT;
+		break;
+	}
 
 	intagp_write_gtt(isc, offset - isc->isc_apaddr, physical);
 }
@@ -932,13 +963,19 @@ intagp_write_gtt(struct agp_i810_softc *isc, bus_size_t off, paddr_t v)
 	if (v != 0) {
 		pte = v | INTEL_ENABLED;
 		/* 965+ can do 36-bit addressing, add in the extra bits */
-		if (isc->chiptype == CHIP_I965 ||
-		    isc->chiptype == CHIP_G4X ||
-		    isc->chiptype == CHIP_PINEVIEW ||
-		    isc->chiptype == CHIP_G33 ||
-		    isc->chiptype == CHIP_IRONLAKE ||
-		    isc->chiptype == CHIP_SANDYBRIDGE) {
+		switch (isc->chiptype) {
+		case CHIP_I965:
+		case CHIP_G4X:
+		case CHIP_PINEVIEW:
+		case CHIP_G33:
+		case CHIP_IRONLAKE:
 			pte |= (v & 0x0000000f00000000ULL) >> 28;
+			break;
+		/* gen6+ can do 40 bit addressing */
+		case CHIP_SANDYBRIDGE:
+		case CHIP_IVYBRIDGE:
+			pte |= (v & 0x000000ff00000000ULL) >> 28;
+			break;
 		}
 	}
 
@@ -958,6 +995,7 @@ intagp_write_gtt(struct agp_i810_softc *isc, bus_size_t off, paddr_t v)
 	case CHIP_G4X:
 	case CHIP_IRONLAKE:
 	case CHIP_SANDYBRIDGE:
+	case CHIP_IVYBRIDGE:
 		baseoff = AGP_G4X_GTT;
 		break;
 	default:

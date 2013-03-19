@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci_pci.c,v 1.23 2011/04/26 00:37:34 deraadt Exp $ */
+/*	$OpenBSD: ehci_pci.c,v 1.25 2012/10/20 19:13:25 deraadt Exp $ */
 /*	$NetBSD: ehci_pci.c,v 1.15 2004/04/23 21:13:06 itojun Exp $	*/
 
 /*
@@ -75,7 +75,9 @@ int	ehci_pci_match(struct device *, void *, void *);
 void	ehci_pci_attach(struct device *, struct device *, void *);
 int	ehci_pci_detach(struct device *, int);
 int	ehci_pci_activate(struct device *, int);
+#if 0
 void	ehci_pci_givecontroller(struct ehci_pci_softc *);
+#endif
 void	ehci_pci_takecontroller(struct ehci_pci_softc *, int);
 
 struct cfattach ehci_pci_ca = {
@@ -233,21 +235,28 @@ int
 ehci_pci_activate(struct device *self, int act)
 {
 	struct ehci_pci_softc *sc = (struct ehci_pci_softc *)self;
+	int rv;
 
-	/* On resume, take ownership from the BIOS */
+	/* ehci_pci_attach previously failed in some way */
+	if (sc->sc.sc_child == NULL)
+		return (0);
+
 	switch (act) {
-	case DVACT_POWERDOWN:
-#if 0
-		ehci_shutdown(&sc->sc);
-		ehci_pci_givecontroller(sc);
-#endif
-		break;
 	case DVACT_RESUME:
 		ehci_pci_takecontroller(sc, 1);
 		break;
 	}
 
-	return ehci_activate(self, act);
+	rv = ehci_activate(self, act);
+
+#if 0
+	switch (act) {
+	case DVACT_POWERDOWN:
+		ehci_pci_givecontroller(sc);
+		break;
+	}
+#endif
+	return (rv);
 }
 
 int
@@ -275,7 +284,7 @@ void
 ehci_pci_givecontroller(struct ehci_pci_softc *sc)
 {
 	u_int32_t cparams, eec, legsup;
-	int eecp, i;
+	int eecp;
 
 	cparams = EREAD4(&sc->sc, EHCI_HCCPARAMS);
 	for (eecp = EHCI_HCC_EECP(cparams); eecp != 0;
@@ -286,13 +295,6 @@ ehci_pci_givecontroller(struct ehci_pci_softc *sc)
 		legsup = eec;
 		pci_conf_write(sc->sc_pc, sc->sc_tag, eecp,
 		    legsup & ~EHCI_LEGSUP_OSOWNED);
-		for (i = 0; i < 5000; i++) {
-			legsup = pci_conf_read(sc->sc_pc, sc->sc_tag,
-			    eecp);
-			if ((legsup & EHCI_LEGSUP_BIOSOWNED) == 0)
-				break;
-			DELAY(1000);
-		}
 	}
 }
 #endif

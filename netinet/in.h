@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.h,v 1.93 2012/07/16 18:05:36 markus Exp $	*/
+/*	$OpenBSD: in.h,v 1.95 2012/10/21 13:06:03 benno Exp $	*/
 /*	$NetBSD: in.h,v 1.20 1996/02/13 23:41:47 christos Exp $	*/
 
 /*
@@ -45,6 +45,11 @@
 #ifndef _KERNEL
 #include <sys/types.h>
 #include <machine/endian.h>
+#endif
+
+#ifndef	_SA_FAMILY_T_DEFINED_
+#define	_SA_FAMILY_T_DEFINED_
+typedef	__sa_family_t	sa_family_t;	/* sockaddr address family type */
 #endif
 
 /*
@@ -301,7 +306,11 @@ struct ip_opts {
 #define IP_IPSECFLOWINFO	36   /* bool; IPsec flow info for dgram */
 
 #define IP_RTABLE		0x1021	/* int; routing table, see SO_RTABLE */
+#define IP_DIVERTFL		0x1022	/* int; divert direction flag opt */
 
+/* Values used by IP_DIVERTFL socket option */
+#define IPPROTO_DIVERT_RESP	0x01	/* divert response packets */
+#define IPPROTO_DIVERT_INIT	0x02	/* divert packets initial direction */
 
 #if __BSD_VISIBLE
 /*

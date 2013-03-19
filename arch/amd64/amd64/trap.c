@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.29 2012/08/07 05:16:53 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.32 2012/12/31 06:46:13 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.2 2003/05/04 23:51:56 fvdl Exp $	*/
 
 /*-
@@ -320,6 +320,15 @@ copyfault:
 			goto we_re_toast;
 		cr2 = rcr2();
 		KERNEL_LOCK();
+		/* This will only trigger if SMEP is enabled */
+		if (cr2 <= VM_MAXUSER_ADDRESS && frame->tf_err & PGEX_I)
+			panic("attempt to execute user address %p "
+			    "in supervisor mode", (void *)cr2);
+		/* This will only trigger if SMAP is enabled */
+		if (pcb->pcb_onfault == NULL && cr2 <= VM_MAXUSER_ADDRESS &&
+		    frame->tf_err & PGEX_P)
+			panic("attempt to access user address %p "
+			    "in supervisor mode", (void *)cr2);
 		goto faultcommon;
 
 	case T_PAGEFLT|T_USER: {	/* page fault */
@@ -358,7 +367,7 @@ faultcommon:
 
 #ifdef DIAGNOSTIC
 		if (map == kernel_map && va == 0) {
-			printf("trap: bad kernel access at %lx\n", va);
+			printf("trap: bad kernel access at %lx\n", fa);
 			goto we_re_toast;
 		}
 #endif
@@ -390,7 +399,7 @@ faultcommon:
 				goto copyfault;
 			}
 			printf("uvm_fault(%p, 0x%lx, 0, %d) -> %x\n",
-			    map, va, ftype, error);
+			    map, fa, ftype, error);
 			goto we_re_toast;
 		}
 		if (error == ENOMEM) {
@@ -403,7 +412,7 @@ faultcommon:
 		} else {
 #ifdef TRAP_SIGDEBUG
 			printf("pid %d (%s): SEGV at rip %lx addr %lx\n",
-			    p->p_pid, p->p_comm, frame->tf_rip, va);
+			    p->p_pid, p->p_comm, frame->tf_rip, fa);
 			frame_dump(frame);
 #endif
 			sv.sival_ptr = (void *)fa;

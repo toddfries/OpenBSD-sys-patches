@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.54 2011/10/25 18:38:06 miod Exp $ */
+/*	$OpenBSD: cpu.h,v 1.59 2013/03/12 09:37:16 mpi Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * Copyright (c) 1992, 1993
@@ -172,6 +172,9 @@ struct cpu_info {
 #ifdef DIAGNOSTIC
 	int	ci_mutex_level;
 #endif
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
+#endif
 };
 
 extern cpuid_t master_cpu;
@@ -191,7 +194,7 @@ curcpu(void)
 {
 	struct cpu_info *cpuptr;
 
-	__asm__ __volatile__ ("ldcr %0, cr17" : "=r" (cpuptr));
+	__asm__ __volatile__ ("ldcr %0, %%cr17" : "=r" (cpuptr));
 	return cpuptr;
 }
 
@@ -266,6 +269,7 @@ struct clockframe {
 	  ((regs)->snip & NIP_V ? (regs)->snip & NIP_ADDR :		\
 				   (regs)->sfip & FIP_ADDR)))
 #define	PROC_PC(p)	PC_REGS((struct reg *)((p)->p_md.md_tf))
+#define	PROC_STACK(p)	((p)->p_md.md_tf->tf_sp)
 
 #define clear_resched(ci) 	(ci)->ci_want_resched = 0
 

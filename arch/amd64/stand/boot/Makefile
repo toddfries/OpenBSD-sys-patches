@@ -1,38 +1,47 @@
-#	$OpenBSD: Makefile,v 1.9 2012/08/21 14:46:18 pascal Exp $
+#	$OpenBSD: Makefile,v 1.21 2013/01/18 21:09:04 espie Exp $
 
-.include "${.CURDIR}/../Makefile.inc"
+MAN?=	boot.8
+MLINKS?=boot.8 boot.conf.5
 
-MAN=	boot.8
-MLINKS=	boot.8 boot.conf.5
+.if !empty(CFLAGS:M-DFDBOOT)
+SOFTRAID?=no
+.else
+SOFTRAID?=yes
+.endif
 
 .if ${MACHINE} == "amd64"
-S	=${.CURDIR}/../../../..
+S=	${.CURDIR}/../../../..
 SADIR=	${.CURDIR}/..
 
-PROG=	boot
+PROG?=	boot
 SRCS=	srt0.S conf.c
 LD?=	ld
 SIZE?=	size
-LDFLAGS+=-melf_i386 -nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -noinhibit-exec
-LDFLAGS+=-L/usr/libdata 
+LDFLAGS+=-nostdlib -Bstatic -Ttext $(LINKADDR) -N -x -nopie
+LDFLAGS+=-melf_i386 -L/usr/libdata 
 
 .PATH:	${SADIR}/libsa
-# i386 stuff (so, it will possibly load in the same 64k)
-SRCS+=	machdep.c dev_i386.c exec_i386.c cmd_i386.c
-SRCS+=	gidt.S alloca.S biosdev.c bioscons.c gateA20.c \
-	memprobe.c diskprobe.c time.c ## biosprobe.c
+SRCS+=	alloca.S gidt.S
+SRCS+=	cmd_i386.c dev_i386.c exec_i386.c gateA20.c machdep.c
+SRCS+=	bioscons.c biosdev.c diskprobe.c memprobe.c time.c
+.if ${SOFTRAID:L} == "yes"
+SRCS+=	softraid.c
+.endif
 
 .PATH:	${S}/stand/boot
-SRCS+=	boot.c cmd.c vars.c bootarg.c
+SRCS+=	boot.c bootarg.c cmd.c vars.c
 
 .PATH:	${S}/lib/libsa
-SRCS+=	alloc.c exit.c getfile.c gets.c globals.c strcmp.c strlen.c \
-	strncmp.c memcmp.c memcpy.c memset.c printf.c snprintf.c \
-	strerror.c strncpy.c strtol.c strtoll.c ctime.c strlcpy.c strlcat.c
-SRCS+=	close.c closeall.c dev.c disklabel.c dkcksum.c fstat.c ioctl.c lseek.c \
-	open.c read.c stat.c write.c cread.c readdir.c cons.c loadfile.c \
-	elf32.c elf64.c
+SRCS+=	alloc.c ctime.c exit.c getfile.c gets.c globals.c memcmp.c memcpy.c \
+	memset.c printf.c snprintf.c strcmp.c strerror.c strlcat.c strlcpy.c \
+	strlen.c strncmp.c strncpy.c strtol.c strtoll.c
+SRCS+=	close.c closeall.c cons.c cread.c dev.c disklabel.c dkcksum.c fstat.c \
+	ioctl.c lseek.c open.c read.c readdir.c stat.c write.c
+SRCS+=	elf32.c elf64.c loadfile.c
 SRCS+=	ufs.c
+.if ${SOFTRAID:L} == "yes"
+SRCS+=	aes_xts.c explicit_bzero.c hmac_sha1.c pbkdf2.c rijndael.c sha1.c
+.endif
 
 .PATH:	${S}/lib/libkern/arch/amd64 ${S}/lib/libkern
 SRCS+=	divdi3.c moddi3.c qdivrem.c
@@ -43,8 +52,14 @@ SRCS+=	adler32.c crc32.c inflate.c inftrees.c
 boot.bin: boot
 	objcopy -v -O binary ${PROG} boot.bin
 
+CLEANFILES+= ${PROG}.new
+
+.depend srt0.o gidt.o: assym.h
+
 ${PROG}: $(OBJS)
-	$(LD) $(LDFLAGS) -o ${PROG} $(OBJS)
+	$(LD) $(LDFLAGS) -o ${PROG}.new $(OBJS)
+	@perl ${SADIR}/boot/check-boot.pl ${PROG}.new
+	@mv ${PROG}.new ${PROG}
 	@$(SIZE) ${PROG}
 
 .else
@@ -53,11 +68,13 @@ NOPROG=
 
 .include <bsd.prog.mk>
 
+.if ${SOFTRAID:L} == "yes"
+CPPFLAGS+=-DSOFTRAID
+.endif
 CPPFLAGS+=-DBOOTMAGIC=$(BOOTMAGIC) ${DEBUGFLAGS} -DLINKADDR=${LINKADDR}
 CPPFLAGS+=-DSLOW -DSMALL -DNOBYFOUR -DNO_GZIP -DDYNAMIC_CRC_TABLE
 CPPFLAGS+=-DHEAP_LIMIT=${HEAP_LIMIT} -I${S}/stand/boot #-DCOMPAT_UFS
-CFLAGS+=-m32 $(SACFLAGS) -D__INTERNAL_LIBSA_CREAD
-CFLAGS+=${NOPIE_FLAGS}
+CFLAGS+=-m32 $(SACFLAGS) -D__INTERNAL_LIBSA_CREAD -fno-pie
 AFLAGS+=-m32 # -Wa,-R
-AFLAGS+=${NOPIE_FLAGS}
 # AFLAGS+=-Wa,-a
+AFLAGS+=-fno-pie

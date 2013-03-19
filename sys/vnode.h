@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.111 2012/07/11 12:39:20 guenther Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.113 2012/10/08 15:43:08 jsing Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -31,6 +31,9 @@
  *
  *	@(#)vnode.h	8.11 (Berkeley) 11/21/94
  */
+
+#ifndef _SYS_VNODE_H_
+#define _SYS_VNODE_H_
 
 #include <sys/buf.h>
 #include <sys/types.h>
@@ -68,13 +71,13 @@ enum vtype	{ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD };
 enum vtagtype	{
 	VT_NON, VT_UFS, VT_NFS, VT_MFS, VT_MSDOSFS,
 	VT_PORTAL, VT_PROCFS, VT_AFS, VT_ISOFS, VT_ADOSFS,
-	VT_EXT2FS, VT_VFS, VT_NNPFS, VT_NTFS, VT_UDF, VT_XFS = VT_NNPFS
+	VT_EXT2FS, VT_VFS, VT_NTFS, VT_UDF, VT_FUSEFS
 };
 
 #define	VTAG_NAMES \
     "NON", "UFS", "NFS", "MFS", "MSDOSFS",			\
     "PORTAL", "PROCFS", "AFS", "ISOFS", "ADOSFS",		\
-    "EXT2FS", "VFS", "NNPFS", "NTFS", "UDF"
+    "EXT2FS", "VFS", "NTFS", "UDF", "FUSEFS"
 
 /*
  * Each underlying filesystem allocates its own private area and hangs
@@ -666,3 +669,4 @@ int	softdep_fsync(struct vnode *);
 int 	getvnode(struct filedesc *, int, struct file **);
 
 #endif /* _KERNEL */
+#endif /* _SYS_VNODE_H_ */

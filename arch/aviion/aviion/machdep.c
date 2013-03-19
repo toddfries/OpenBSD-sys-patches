@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.47 2011/10/09 17:09:27 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.49 2012/12/26 22:32:13 miod Exp $	*/
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -163,9 +163,6 @@ u_int	aviion_delay_const = 33;
 vaddr_t first_addr;
 vaddr_t last_addr;
 
-vaddr_t avail_start, avail_end;
-vaddr_t virtual_avail, virtual_end;
-
 extern struct user *proc0paddr;
 
 /*
@@ -329,8 +326,8 @@ boot(howto)
 		dumpsys();
 
 haltsys:
-	/* Run any shutdown hooks. */
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		printf("System halted.\n\n");
@@ -684,6 +681,8 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 void
 aviion_bootstrap()
 {
+	vaddr_t avail_start;
+	extern vaddr_t avail_end;
 	extern char *end;
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;

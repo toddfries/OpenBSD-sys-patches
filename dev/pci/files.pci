@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.285 2012/08/14 00:28:23 dlg Exp $
+#	$OpenBSD: files.pci,v 1.293 2013/01/21 11:17:48 patrick Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -15,6 +15,7 @@ file	dev/pci/pci_subr.c		pci
 # Generic VGA
 attach	vga at pci with vga_pci
 file	dev/pci/vga_pci.c		vga_pci
+file	dev/pci/vga_pci_common.c	vga_pci | vgafb
 
 device	tga: wsemuldisplaydev, rasops8, rasops32
 attach	tga at pci
@@ -84,10 +85,9 @@ attach	jmb at pci
 file	dev/pci/jmb.c			jmb
 
 # Advanced Host Controller Interface for Serial ATA
-device	ahci: scsi, atascsi
 attach	ahci at pci with ahci_pci
 attach	ahci at jmb with ahci_jmb
-file	dev/pci/ahci.c			ahci | ahci_pci | ahci_jmb needs-flag
+file	dev/pci/ahci_pci.c		ahci_pci | ahci_jmb
 
 # AMI MegaRAID Express x00/Elite 1500/Express 1x00 RAID Controllers
 attach	ami at pci with ami_pci
@@ -407,7 +407,6 @@ file	dev/pci/if_myx.c		myx
 device	oce: ether, ifnet, ifmedia
 attach	oce at pci
 file	dev/pci/if_oce.c		oce
-file	dev/pci/oce.c			oce
 
 # DEC/Intel 21143 and "tulip" clone ethernet
 attach	dc at pci with dc_pci
@@ -819,6 +818,29 @@ attach	itherm at pci
 file	dev/pci/itherm.c		itherm
 
 # AMD Geode CS5536 PCI-ISA bridge
-device	glxpcib: isabus, gpiobus, i2cbus
+device	glxpcib{}: isabus, gpiobus, i2cbus
 attach	glxpcib at pci
 file	dev/pci/glxpcib.c		glxpcib
+
+# Realtek RTS5209 Card Reader
+attach	rtsx at pci with rtsx_pci
+file	dev/pci/rtsx_pci.c		rtsx
+
+# VirtIO
+device	virtio {}
+file	dev/pci/virtio.c		virtio
+
+attach	virtio at pci with virtio_pci
+file	dev/pci/virtio_pci.c		virtio_pci
+
+device	vio
+attach	vio at virtio
+file	dev/pci/if_vio.c		vio
+
+device	vioblk: scsi
+attach	vioblk at virtio
+file	dev/pci/vioblk.c		vioblk
+
+device	viomb
+attach	viomb at virtio
+file	dev/pci/viomb.c			viomb

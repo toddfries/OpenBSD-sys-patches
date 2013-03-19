@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.226 2012/06/02 05:44:27 guenther Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.231 2013/02/11 11:11:42 mpi Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -70,9 +70,7 @@
 #include <sys/socket.h>
 #include <sys/domain.h>
 #include <sys/protosw.h>
-#ifdef __HAVE_TIMECOUNTER
 #include <sys/timetc.h>
-#endif
 #include <sys/evcount.h>
 #include <sys/unpcb.h>
 
@@ -291,9 +289,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		case KERN_WATCHDOG:
 		case KERN_EMUL:
 		case KERN_EVCOUNT:
-#ifdef __HAVE_TIMECOUNTER
 		case KERN_TIMECOUNTER:
-#endif
 		case KERN_CPTIME2:
 		case KERN_FILE2:
 			break;
@@ -557,11 +553,9 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (evcount_sysctl(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
 #endif
-#ifdef __HAVE_TIMECOUNTER
 	case KERN_TIMECOUNTER:
 		return (sysctl_tc(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
-#endif
 	case KERN_MAXLOCKSPERUID:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxlocksperuid));
 	case KERN_CPTIME2:
@@ -1246,7 +1240,7 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 	elem_count = name[3];
 	outsize = MIN(sizeof(*kf), elem_size);
 
-	if (elem_size < 1 || elem_count < 0)
+	if (elem_size < 1)
 		return (EINVAL);
 
 	kf = malloc(sizeof(*kf), M_TEMP, M_WAITOK);
@@ -1370,7 +1364,7 @@ int
 sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 {
 	struct kinfo_proc *kproc = NULL;
-	struct proc *p;
+	struct proc *p, *pp;
 	struct process *pr;
 	char *dp;
 	int arg, buflen, doingzomb, elem_size, elem_count;
@@ -1467,6 +1461,15 @@ again:
 		if ((p->p_flag & P_THREAD) == 0) {
 			if (buflen >= elem_size && elem_count > 0) {
 				fill_kproc(p, kproc, 0);
+				/* Update %cpu for all threads */
+				if (!dothreads) {
+					TAILQ_FOREACH(pp, &pr->ps_threads,
+					    p_thr_link) {
+						if (pp == p)
+							continue;
+						kproc->p_pctcpu += pp->p_pctcpu;
+					}
+				}
 				error = copyout(kproc, dp, elem_size);
 				if (error)
 					goto err;
@@ -1614,6 +1617,12 @@ sysctl_proc_args(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	/* Execing - danger. */
 	if ((vp->p_p->ps_flags & PS_INEXEC))
 		return (EBUSY);
+	
+	/* Only owner or root can get env */
+	if ((op == KERN_PROC_NENV || op == KERN_PROC_ENV) &&
+	    (vp->p_ucred->cr_uid != cp->p_ucred->cr_uid &&
+	    (error = suser(cp, 0)) != 0))
+		return (error);
 
 	vm = vp->p_vmspace;
 	vm->vm_refcnt++;
@@ -1768,6 +1777,7 @@ sysctl_proc_cwd(int *name, u_int namelen, void *oldp, size_t *oldlenp,
     struct proc *cp)
 {
 	struct proc *findp;
+	struct vnode *vp;
 	pid_t pid;
 	int error;
 	size_t lenused, len;
@@ -1806,6 +1816,10 @@ sysctl_proc_cwd(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (ERANGE);
 	*oldlenp = 0;
 
+	/* snag a reference to the vnode before we can sleep */
+	vp = findp->p_fd->fd_cdir;
+	vref(vp);
+
 	path = malloc(len, M_TEMP, M_WAITOK);
 
 	bp = &path[len];
@@ -1813,13 +1827,14 @@ sysctl_proc_cwd(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	*(--bp) = '\0';
 
 	/* Same as sys__getcwd */
-	error = vfs_getcwd_common(findp->p_fd->fd_cdir, NULL,
+	error = vfs_getcwd_common(vp, NULL,
 	    &bp, path, len / 2, GETCWD_CHECK_ACCESS, cp);
 	if (error == 0) {
 		*oldlenp = lenused = bend - bp;
 		error = copyout(bp, oldp, lenused);
 	}
 
+	vrele(vp);
 	free(path, M_TEMP);
 
 	return (error);

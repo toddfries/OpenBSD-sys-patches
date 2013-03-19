@@ -1,4 +1,4 @@
-/*	$OpenBSD: socketvar.h,v 1.52 2012/07/13 10:51:30 claudio Exp $	*/
+/*	$OpenBSD: socketvar.h,v 1.55 2013/01/15 11:12:57 bluhm Exp $	*/
 /*	$NetBSD: socketvar.h,v 1.18 1996/02/09 18:25:38 christos Exp $	*/
 
 /*-
@@ -35,6 +35,11 @@
 #include <sys/selinfo.h>			/* for struct selinfo */
 #include <sys/queue.h>
 #include <sys/timeout.h>
+
+#ifndef	_SOCKLEN_T_DEFINED_
+#define	_SOCKLEN_T_DEFINED_
+typedef	__socklen_t	socklen_t;	/* length type for network syscalls */
+#endif
 
 TAILQ_HEAD(soqhead, socket);
 
@@ -99,6 +104,7 @@ struct socket {
 		struct mbuf *sb_lastrecord;/* first mbuf of last record in
 					      socket buffer */
 		struct	selinfo sb_sel;	/* process selecting read/write */
+		int	sb_flagsintr;	/* flags, changed during interrupt */
 		short	sb_flags;	/* flags, see below */
 		u_short	sb_timeo;	/* timeout for read/write */
 	} so_rcv, so_snd;
@@ -108,9 +114,9 @@ struct socket {
 #define	SB_WAIT		0x04		/* someone is waiting for data/space */
 #define	SB_SEL		0x08		/* someone is selecting */
 #define	SB_ASYNC	0x10		/* ASYNC I/O, need signals */
+#define	SB_SPLICE	0x20		/* buffer is splice source or drain */
 #define	SB_NOINTR	0x40		/* operations not interruptible */
 #define	SB_KNOTE	0x80		/* kernel note attached */
-#define	SB_SPLICE	0x0100		/* buffer is splice source or drain */
 
 	void	(*so_upcall)(struct socket *so, caddr_t arg, int waitf);
 	caddr_t	so_upcallarg;		/* Arg for above */
@@ -146,8 +152,8 @@ struct socket {
 /*
  * Do we need to notify the other side when I/O is possible?
  */
-#define	sb_notify(sb)	(((sb)->sb_flags & (SB_WAIT|SB_SEL|SB_ASYNC| \
-    SB_KNOTE|SB_SPLICE)) != 0)
+#define	sb_notify(sb)	((((sb)->sb_flags | (sb)->sb_flagsintr) & \
+    (SB_WAIT|SB_SEL|SB_ASYNC|SB_SPLICE|SB_KNOTE)) != 0)
 
 /*
  * How much space is there in a socket buffer (so->so_snd or so->so_rcv)?
@@ -258,7 +264,6 @@ int	sbappendaddr(struct sockbuf *sb, struct sockaddr *asa,
 int	sbappendcontrol(struct sockbuf *sb, struct mbuf *m0,
 	    struct mbuf *control);
 void	sbappendrecord(struct sockbuf *sb, struct mbuf *m0);
-void	sbcheck(struct sockbuf *sb);
 void	sbcompress(struct sockbuf *sb, struct mbuf *m, struct mbuf *n);
 struct mbuf *
 	sbcreatecontrol(caddr_t p, int size, int type, int level);
@@ -320,9 +325,12 @@ void	sblastrecordchk(struct sockbuf *, const char *);
 
 void	sblastmbufchk(struct sockbuf *, const char *);
 #define	SBLASTMBUFCHK(sb, where)	sblastmbufchk((sb), (where))
+void	sbcheck(struct sockbuf *sb);
+#define	SBCHECK(sb)			sbcheck(sb)
 #else
 #define	SBLASTRECORDCHK(sb, where)	/* nothing */
 #define	SBLASTMBUFCHK(sb, where)	/* nothing */
+#define	SBCHECK(sb)			/* nothing */
 #endif /* SOCKBUF_DEBUG */
 
 #endif /* _KERNEL */

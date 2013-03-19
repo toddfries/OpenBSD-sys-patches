@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.189 2012/07/26 12:25:31 mikeb Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.195 2012/10/30 12:09:05 florian Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -366,7 +366,7 @@ pfsync_clone_destroy(struct ifnet *ifp)
 	if (sc->sc_link_demoted)
 		carp_group_demote_adj(&sc->sc_if, -1, "pfsync destroy");
 #endif
-	if (sc->sc_lhcookie != NULL)
+	if (sc->sc_sync_if)
 		hook_disestablish(
 		    sc->sc_sync_if->if_linkstatehooks,
 		    sc->sc_lhcookie);
@@ -574,8 +574,8 @@ pfsync_state_import(struct pfsync_state *sp, int flags)
 	/* copy to state */
 	bcopy(&sp->rt_addr, &st->rt_addr, sizeof(st->rt_addr));
 	st->creation = time_uptime - ntohl(sp->creation);
-	st->expire = time_second;
-	if (sp->expire) {
+	st->expire = time_uptime;
+	if (ntohl(sp->expire)) {
 		u_int32_t timeout;
 
 		timeout = r->timeout[sp->timeout];
@@ -948,7 +948,7 @@ pfsync_in_upd(caddr_t buf, int len, int count, int flags)
 		if (sync < 2) {
 			pfsync_alloc_scrub_memory(&sp->dst, &st->dst);
 			pf_state_peer_ntoh(&sp->dst, &st->dst);
-			st->expire = time_second;
+			st->expire = time_uptime;
 			st->timeout = sp->timeout;
 		}
 		st->pfsync_time = time_uptime;
@@ -1022,7 +1022,7 @@ pfsync_in_upd_c(caddr_t buf, int len, int count, int flags)
 		if (sync < 2) {
 			pfsync_alloc_scrub_memory(&up->dst, &st->dst);
 			pf_state_peer_ntoh(&up->dst, &st->dst);
-			st->expire = time_second;
+			st->expire = time_uptime;
 			st->timeout = up->timeout;
 		}
 		st->pfsync_time = time_uptime;
@@ -1207,10 +1207,10 @@ pfsync_update_net_tdb(struct pfsync_tdb *pt)
 	     pt->dst.sa.sa_family != AF_INET6))
 		goto bad;
 
-	s = spltdb();
+	s = splsoftnet();
 	tdb = gettdb(ntohs(pt->rdomain), pt->spi, &pt->dst, pt->sproto);
 	if (tdb) {
-		pt->rpl = ntohl(pt->rpl);
+		pt->rpl = betoh64(pt->rpl);
 		pt->cur_bytes = betoh64(pt->cur_bytes);
 
 		/* Neither replay nor byte counter should ever decrease. */
@@ -1296,14 +1296,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    (ifp->if_flags & IFF_UP) == 0) {
 			ifp->if_flags &= ~IFF_RUNNING;
 
-#if NCARP > 0
-			if (sc->sc_initial_bulk) {
-				carp_group_demote_adj(&sc->sc_if, -32,
-				    "pfsync init");
-				sc->sc_initial_bulk = 0;
-			}
-#endif
-
 			/* drop everything */
 			timeout_del(&sc->sc_tmo);
 			pfsync_drop(sc);
@@ -1357,7 +1349,7 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		sc->sc_defer = pfsyncr.pfsyncr_defer;
 
 		if (pfsyncr.pfsyncr_syncdev[0] == 0) {
-			if (sc->sc_lhcookie != NULL)
+			if (sc->sc_sync_if)
 				hook_disestablish(
 				    sc->sc_sync_if->if_linkstatehooks,
 				    sc->sc_lhcookie);
@@ -1381,6 +1373,11 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		    sifp->if_mtu < sc->sc_sync_if->if_mtu) ||
 		    sifp->if_mtu < MCLBYTES - sizeof(struct ip))
 			pfsync_sendout();
+
+		if (sc->sc_sync_if)
+			hook_disestablish(
+			    sc->sc_sync_if->if_linkstatehooks,
+			    sc->sc_lhcookie);
 		sc->sc_sync_if = sifp;
 
 		if (imo->imo_num_memberships > 0) {
@@ -1393,10 +1390,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			struct in_addr addr;
 
 			if (!(sc->sc_sync_if->if_flags & IFF_MULTICAST)) {
-				if (sc->sc_lhcookie != NULL)
-					hook_disestablish(
-					    sc->sc_sync_if->if_linkstatehooks,
-					    sc->sc_lhcookie);
 				sc->sc_sync_if = NULL;
 				splx(s);
 				return (EADDRNOTAVAIL);
@@ -1406,10 +1399,6 @@ pfsyncioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 			if ((imo->imo_membership[0] =
 			    in_addmulti(&addr, sc->sc_sync_if)) == NULL) {
-				if (sc->sc_lhcookie != NULL)
-					hook_disestablish(
-					    sc->sc_sync_if->if_linkstatehooks,
-					    sc->sc_lhcookie);
 				sc->sc_sync_if = NULL;
 				splx(s);
 				return (ENOBUFS);
@@ -1908,8 +1897,20 @@ void
 pfsync_cancel_full_update(struct pfsync_softc *sc)
 {
 	if (timeout_pending(&sc->sc_bulkfail_tmo) ||
-	    timeout_pending(&sc->sc_bulk_tmo))
+	    timeout_pending(&sc->sc_bulk_tmo)) {
+#if NCARP > 0
+		if (!pfsync_sync_ok)
+			carp_group_demote_adj(&sc->sc_if, -1,
+			    "pfsync bulk cancelled");
+		if (sc->sc_initial_bulk) {
+			carp_group_demote_adj(&sc->sc_if, -32,
+			    "pfsync init");
+			sc->sc_initial_bulk = 0;
+		}
+#endif
+		pfsync_sync_ok = 1;
 		DPFPRINTF(LOG_INFO, "cancelling bulk update");
+	}
 	timeout_del(&sc->sc_bulkfail_tmo);
 	timeout_del(&sc->sc_bulk_tmo);
 	sc->sc_bulk_next = NULL;
@@ -2199,7 +2200,7 @@ pfsync_out_tdb(struct tdb *t, void *buf)
 	 * this edge case.
 	 */
 #define RPL_INCR 16384
-	ut->rpl = htonl(t->tdb_rpl + (ISSET(t->tdb_flags, TDBF_PFSYNC_RPL) ?
+	ut->rpl = htobe64(t->tdb_rpl + (ISSET(t->tdb_flags, TDBF_PFSYNC_RPL) ?
 	    RPL_INCR : 0));
 	ut->cur_bytes = htobe64(t->tdb_cur_bytes);
 	ut->sproto = t->tdb_sproto;

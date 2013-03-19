@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.80 2011/09/20 21:44:09 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.84 2013/03/12 09:37:16 mpi Exp $	*/
 
 /*
  * Copyright (c) 2000-2004 Michael Shalayeff
@@ -103,6 +103,9 @@ struct cpu_info {
 #ifdef DIAGNOSTIC
 	int		ci_mutex_level;
 #endif
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
+#endif
 } __attribute__((__aligned__(64)));
 
 #define		CPUF_RUNNING	0x0001		/* CPU is running. */
@@ -202,6 +205,7 @@ extern int cpu_hvers;
 
 #define	need_proftick(p)	setsoftast(p)
 #define	PROC_PC(p)		((p)->p_md.md_regs->tf_iioq_head)
+#define	PROC_STACK(p)		((p)->p_md.md_regs->tf_sp)
 
 #ifndef _LOCORE
 #ifdef _KERNEL

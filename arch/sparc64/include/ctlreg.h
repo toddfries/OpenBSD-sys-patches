@@ -1,4 +1,4 @@
-/*	$OpenBSD: ctlreg.h,v 1.23 2009/11/30 22:59:29 kettenis Exp $	*/
+/*	$OpenBSD: ctlreg.h,v 1.25 2012/11/07 16:31:03 kettenis Exp $	*/
 /*	$NetBSD: ctlreg.h,v 1.28 2001/08/06 23:55:34 eeh Exp $ */
 
 /*
@@ -126,6 +126,8 @@
 #define	ASI_ERROR_EN_REG		0x4b	/* [4u] asynchronous error enables */
 #define	ASI_AFSR			0x4c	/* [4u] asynchronous fault status register */
 #define	ASI_AFAR			0x4d	/* [4u] asynchronous fault address register */
+
+#define	ASI_SCRATCH			0x4f	/* [VI] scratch registers */
 
 #define	ASI_ICACHE_DATA			0x66	/* [4u] diagnostic access to D-cache data RAM */
 #define	ASI_ICACHE_TAG			0x67	/* [4u] diagnostic access to D-cache tag RAM */
@@ -735,6 +737,8 @@ void flush(void *p)
 #define tick() (sparc_rdpr(tick) & TICK_TICKS)
 #define sys_tick() (sparc_rd(sys_tick) & TICK_TICKS)
 extern u_int64_t stick(void);
+
+extern void tick_enable(void);
 
 extern void tickcmpr_set(u_int64_t);
 extern void sys_tickcmpr_set(u_int64_t);

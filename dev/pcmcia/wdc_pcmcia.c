@@ -1,4 +1,4 @@
-/*	$OpenBSD: wdc_pcmcia.c,v 1.27 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: wdc_pcmcia.c,v 1.28 2012/10/08 21:47:50 deraadt Exp $	*/
 /*	$NetBSD: wdc_pcmcia.c,v 1.19 1999/02/19 21:49:43 abs Exp $ */
 
 /*-

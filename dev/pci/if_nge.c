@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nge.c,v 1.71 2011/06/22 16:44:27 tedu Exp $	*/
+/*	$OpenBSD: if_nge.c,v 1.73 2012/11/29 21:10:32 brad Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -729,42 +729,13 @@ nge_attach(parent, self, aux)
 	bus_dmamap_t		dmamap;
 	int			rseg;
 	u_char			eaddr[ETHER_ADDR_LEN];
-	pcireg_t		command;
 #ifndef NGE_USEIOSPACE
 	pcireg_t		memtype;
 #endif
 	struct ifnet		*ifp;
 	caddr_t			kva;
 
-	/*
-	 * Handle power management nonsense.
-	 */
-	DPRINTFN(5, ("%s: preparing for conf read\n", sc->sc_dv.dv_xname));
-	command = pci_conf_read(pc, pa->pa_tag, NGE_PCI_CAPID) & 0x000000FF;
-	if (command == 0x01) {
-		command = pci_conf_read(pc, pa->pa_tag, NGE_PCI_PWRMGMTCTRL);
-		if (command & NGE_PSTATE_MASK) {
-			pcireg_t	iobase, membase, irq;
-
-			/* Save important PCI config data. */
-			iobase = pci_conf_read(pc, pa->pa_tag, NGE_PCI_LOIO);
-			membase = pci_conf_read(pc, pa->pa_tag, NGE_PCI_LOMEM);
-			irq = pci_conf_read(pc, pa->pa_tag, NGE_PCI_INTLINE);
-
-			/* Reset the power state. */
-			printf("%s: chip is in D%d power mode "
-			       "-- setting to D0\n", sc->sc_dv.dv_xname,
-			       command & NGE_PSTATE_MASK);
-			command &= 0xFFFFFFFC;
-			pci_conf_write(pc, pa->pa_tag,
-				       NGE_PCI_PWRMGMTCTRL, command);
-
-			/* Restore PCI config data. */
-			pci_conf_write(pc, pa->pa_tag, NGE_PCI_LOIO, iobase);
-			pci_conf_write(pc, pa->pa_tag, NGE_PCI_LOMEM, membase);
-			pci_conf_write(pc, pa->pa_tag, NGE_PCI_INTLINE, irq);
-		}
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/*
 	 * Map control/status registers.
@@ -877,7 +848,6 @@ nge_attach(parent, self, aux)
 	ifp->if_ioctl = nge_ioctl;
 	ifp->if_start = nge_start;
 	ifp->if_watchdog = nge_watchdog;
-	ifp->if_baudrate = 1000000000;
 	ifp->if_hardmtu = NGE_JUMBO_MTU;
 	IFQ_SET_MAXLEN(&ifp->if_snd, NGE_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);

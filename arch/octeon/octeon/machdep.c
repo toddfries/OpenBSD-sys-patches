@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.19 2012/07/16 16:06:40 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.27 2013/03/15 09:19:31 jasper Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -73,82 +73,14 @@
 #include <machine/autoconf.h>
 #include <mips64/cache.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/memconf.h>
 
 #include <dev/cons.h>
 
-#include <mips64/archtype.h>
-
 #include <octeon/dev/iobusvar.h>
 #include <octeon/dev/octeonreg.h>
-
-struct boot_desc {
-	uint32_t desc_ver;
-	uint32_t desc_size;
-	uint64_t stack_top;
-	uint64_t heap_start;
-	uint64_t heap_end;
-	uint64_t __unused17;
-	uint64_t __unused16;
-	uint32_t __unused18;
-	uint32_t __unused15;
-	uint32_t __unused14;
-	uint32_t argc;
-	uint32_t argv[64];
-	uint32_t flags;
-	uint32_t core_mask;
-	uint32_t dram_size;
-	uint32_t phy_mem_desc_addr;
-	uint32_t debugger_flag_addr;
-	uint32_t eclock;
-	uint32_t __unused10;
-	uint32_t __unused9;
-	uint16_t __unused8;
-	uint8_t __unused7;
-	uint8_t __unused6;
-	uint16_t __unused5;
-	uint8_t __unused4;
-	uint8_t __unused3;
-	uint8_t __unused2[20];
-	uint8_t __unused1[6];
-	uint8_t __unused0;
-	uint64_t boot_info_addr;
-};
-
-struct boot_info {
-	uint32_t ver_major;
-	uint32_t ver_minor;
-	uint64_t stack_top;
-	uint64_t heap_start;
-	uint64_t heap_end;
-	uint64_t boot_desc_addr;
-	uint32_t exception_base_addr;
-	uint32_t stack_size;
-	uint32_t flags;
-	uint32_t core_mask;
-	uint32_t dram_size;
-	uint32_t phys_mem_desc_addr;
-	uint32_t debugger_flags_addr;
-	uint32_t eclock;
-	uint32_t dclock;
-	uint32_t __unused0;
-	uint16_t board_type;
-	uint8_t board_rev_major;
-	uint8_t board_rev_minor;
-	uint16_t __unused1;
-	uint8_t __unused2;
-	uint8_t __unused3;
-	char board_serial[20];
-	uint8_t mac_addr_base[6];
-	uint8_t mac_addr_count;
-	uint64_t cf_common_addr;
-	uint64_t cf_attr_addr;
-	uint64_t led_display_addr;
-	uint32_t dfaclock;
-	uint32_t config_flags;
-};
-
-#define BOARD_TYPE_SIM 1
+#include <machine/octeonvar.h>
 
 /* The following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* Machine "architecture" */
@@ -316,6 +248,7 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 	extern char start[], edata[], end[];
 	extern char exception[], e_exception[];
 	extern void xtlb_miss;
+	extern uint64_t cf_found;
 
 	boot_desc = (struct boot_desc *)a3;
 	boot_info = 
@@ -426,10 +359,13 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 	Octeon_ConfigCache(curcpu());
 	Octeon_SyncCache(curcpu());
 
-	tlb_set_page_mask(TLB_PAGE_MASK);
-	tlb_set_wired(0);
-	tlb_flush(bootcpu_hwinfo.tlbsize);
-	tlb_set_wired(UPAGES / 2);
+	tlb_init(bootcpu_hwinfo.tlbsize);
+
+	/*
+	 * Save some initial values needed for device configuration.
+	 */
+
+	bcopy(&boot_info->cf_common_addr, &cf_found, sizeof(cf_found));
 
 	/*
 	 * Get a console, very early but after initial mapping setup.
@@ -438,6 +374,7 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 	consinit();
 	printf("Initial setup done, switching console.\n");
 
+#define DEBUG
 #ifdef DEBUG
 #define DUMP_BOOT_DESC(field, format) \
 	printf("boot_desc->" #field ":" #format "\n", boot_desc->field)
@@ -497,7 +434,7 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 	proc0.p_addr = proc0paddr = curcpu()->ci_curprocpaddr =
 	    (struct user *)pmap_steal_memory(USPACE, NULL, NULL);
 	proc0.p_md.md_regs = (struct trap_frame *)&proc0paddr->u_pcb.pcb_regs;
-	tlb_set_pid(1);
+	tlb_set_pid(MIN_USER_ASID);
 
 	/*
 	 * Bootstrap VM system.
@@ -677,6 +614,7 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		if (howto & RB_POWERDOWN)
@@ -685,12 +623,11 @@ haltsys:
 		else
 			printf("System Halt.\n");
 	} else {
-		void (*__reset)(void) = (void (*)(void))RESET_EXC_VEC;
 		printf("System restart.\n");
 		(void)disableintr();
 		tlb_set_wired(0);
 		tlb_flush(bootcpu_hwinfo.tlbsize);
-		__reset();
+		octeon_write_csr(OCTEON_CIU_BASE + CIU_SOFT_RST, 1);
 	}
 
 	for (;;) ;
@@ -796,11 +733,7 @@ hw_cpu_hatch(struct cpu_info *ci)
 	 */
 	setsr(getsr() | SR_KX | SR_UX);
 
-	tlb_set_page_mask(TLB_PAGE_MASK);
-	tlb_set_wired(0);
-	tlb_flush(64);
-	tlb_set_wired(UPAGES / 2);
-
+	tlb_init(64);
 	tlb_set_pid(0);
 
 	/*

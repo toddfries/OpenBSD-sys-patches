@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.78 2011/07/06 22:26:44 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.82 2013/03/12 09:37:16 mpi Exp $	*/
 /*	$NetBSD: cpu.h,v 1.28 2001/06/14 22:56:58 thorpej Exp $ */
 
 /*
@@ -156,6 +156,9 @@ struct cpu_info {
 #ifdef DIAGNOSTIC
 	int	ci_mutex_level;
 #endif
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
+#endif
 };
 
 #define CPUF_RUNNING	0x0001		/* CPU is running */
@@ -238,6 +241,7 @@ extern void need_resched(struct cpu_info *);
  * This is used during profiling to integrate system time.
  */
 #define	PROC_PC(p)	((p)->p_md.md_tf->tf_pc)
+#define	PROC_STACK(p)	((p)->p_md.md_tf->tf_out[6] + (2048-1))	/* BIAS */
 
 /*
  * Give a profiling tick to the current process when the user profiling

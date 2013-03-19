@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.54 2011/03/23 16:54:35 pirofti Exp $	*/
+/*	$OpenBSD: bus.h,v 1.58 2013/03/17 21:49:00 kettenis Exp $	*/
 /*	$NetBSD: bus.h,v 1.6 1996/11/10 03:19:25 thorpej Exp $	*/
 
 /*-
@@ -101,6 +101,7 @@ void	_bus_space_unmap(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t, bus_addr_t *);
 int	bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 	    bus_size_t offset, bus_size_t size, bus_space_handle_t *nbshp);
+paddr_t	bus_space_mmap(bus_space_tag_t, bus_addr_t, off_t, int, int);
 
 int	bus_space_alloc(bus_space_tag_t t, bus_addr_t rstart,
 	    bus_addr_t rend, bus_size_t size, bus_size_t align,
@@ -125,12 +126,15 @@ u_int16_t	bus_space_read_2(bus_space_tag_t, bus_space_handle_t,
 u_int32_t	bus_space_read_4(bus_space_tag_t, bus_space_handle_t,
 		    bus_size_t);
 
-#if 0	/* Cause a link error for bus_space_read_8 */
-#define	bus_space_read_8(t, h, o)	!!! bus_space_read_8 unimplemented !!!
-#endif
+#define bus_space_read_raw_2(t, h, o) \
+    bus_space_read_2((t), (h), (o))
+#define bus_space_read_raw_4(t, h, o) \
+    bus_space_read_4((t), (h), (o))
 
-#if 0	/* Cause a link error for bus_space_read_8 */
+#if 0
+/* Cause a link error for bus_space_read_8 and bus_space_read_raw_8 */
 #define	bus_space_read_8(t, h, o)	!!! bus_space_read_8 unimplemented !!!
+#define	bus_space_read_raw_8(t, h, o)	!!! bus_space_read_raw_8 unimplemented !!!
 #endif
 
 /*
@@ -238,8 +242,15 @@ void	bus_space_write_2(bus_space_tag_t, bus_space_handle_t,
 void	bus_space_write_4(bus_space_tag_t, bus_space_handle_t,
 	    bus_size_t, u_int32_t);
 
-#if 0	/* Cause a link error for bus_space_write_8 */
+#define bus_space_write_raw_2(t, h, o, v) \
+    bus_space_write_2((t), (h), (o), (v))
+#define bus_space_write_raw_4(t, h, o, v) \
+    bus_space_write_4((t), (h), (o), (v))
+
+#if 0
+/* Cause a link error for bus_space_write_8 and bus_space_write_raw_8  */
 #define	bus_space_write_8	!!! bus_space_write_8 not implemented !!!
+#define	bus_space_write_raw_8	!!! bus_space_write_raw_8 not implemented !!!
 #endif
 
 /*
@@ -682,8 +693,8 @@ int	sg_dmamap_load_buffer(bus_dma_tag_t, bus_dmamap_t, void *, bus_size_t,
 	    struct proc *, int, int *, int);
 int	sg_dmamap_load_physarray(bus_dma_tag_t, bus_dmamap_t, paddr_t *,
 	    int, int, int *, int);
+void	sg_dmamap_reload(bus_dma_tag_t, bus_dmamap_t, int);
 int	sg_dmamem_alloc(bus_dma_tag_t, bus_size_t, bus_size_t, bus_size_t,
 	    bus_dma_segment_t *, int, int *, int);
-
 
 #endif /* _MACHINE_BUS_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.164 2011/10/12 18:30:09 miod Exp $	*/
+/*	$OpenBSD: locore.s,v 1.169 2013/02/05 09:33:29 mpi Exp $	*/
 /*	$NetBSD: locore.s,v 1.137 2001/08/13 06:10:10 jdolecek Exp $	*/
 
 /*
@@ -101,10 +101,30 @@
 _C_LABEL(sun4v_patch):
 	.previous
 
+	.section	.sun4v_patch_end, "ax"
+	.globl _C_LABEL(sun4v_patch_end)
+_C_LABEL(sun4v_patch_end):
+	.previous
+
 #ifdef MULTIPROCESSOR
 	.section	.sun4v_mp_patch, "ax"
 	.globl _C_LABEL(sun4v_mp_patch)
 _C_LABEL(sun4v_mp_patch):
+	.previous
+
+	.section	.sun4v_mp_patch_end, "ax"
+	.globl _C_LABEL(sun4v_mp_patch_end)
+_C_LABEL(sun4v_mp_patch_end):
+	.previous
+
+	.section	.sun4u_mtp_patch, "ax"
+	.globl _C_LABEL(sun4u_mtp_patch)
+_C_LABEL(sun4u_mtp_patch):
+	.previous
+
+	.section	.sun4u_mtp_patch_end, "ax"
+	.globl _C_LABEL(sun4u_mtp_patch_end)
+_C_LABEL(sun4u_mtp_patch_end):
 	.previous
 #endif
 
@@ -120,6 +140,10 @@ _C_LABEL(sun4v_mp_patch):
 	.section	.sun4v_mp_patch, "ax"	;\
 	.word	999b				;\
 	ldxa	[%g0] ASI_SCRATCHPAD, ci	;\
+	.previous				;\
+	.section	.sun4u_mtp_patch, "ax"	;\
+	.word	999b				;\
+	ldxa	[%g0] ASI_SCRATCH, ci		;\
 	.previous
 
 #define GET_CPCB(pcb) \
@@ -4059,7 +4083,7 @@ sun4v_dev_mondo:
 #endif
 
 #ifdef MULTIPROCESSOR
-ENTRY(sun4u_ipi_tlb_page_demap)
+NENTRY(sun4u_ipi_tlb_page_demap)
 	rdpr	%pstate, %g1
 	andn	%g1, PSTATE_IE, %g2
 	wrpr	%g2, %pstate				! disable interrupts
@@ -4068,7 +4092,7 @@ ENTRY(sun4u_ipi_tlb_page_demap)
 	brnz	%g2, 1f
 	 add	%g2, 1, %g4
 	wrpr	%g0, %g4, %tl				! Switch to traplevel > 0
-1:	
+1:
 	mov	CTX_PRIMARY, %g4
 	andn	%g3, 0xfff, %g3				! drop unused va bits
 	ldxa	[%g4] ASI_DMMU, %g6			! Save primary context
@@ -4090,7 +4114,7 @@ ENTRY(sun4u_ipi_tlb_page_demap)
 	ba,a	ret_from_intr_vector
 	 nop
 
-ENTRY(sun4u_ipi_tlb_context_demap)
+NENTRY(sun4u_ipi_tlb_context_demap)
 	rdpr	%pstate, %g1
 	andn	%g1, PSTATE_IE, %g2
 	wrpr	%g2, %pstate				! disable interrupts
@@ -4099,7 +4123,7 @@ ENTRY(sun4u_ipi_tlb_context_demap)
 	brnz	%g2, 1f
 	 add	%g2, 1, %g4
 	wrpr	%g0, %g4, %tl				! Switch to traplevel > 0
-1:	
+1:
 	mov	CTX_PRIMARY, %g4
 	sethi	%hi(KERNBASE), %g7
 	ldxa	[%g4] ASI_DMMU, %g6			! Save primary context
@@ -4114,14 +4138,14 @@ ENTRY(sun4u_ipi_tlb_context_demap)
 	stxa	%g6, [%g4] ASI_DMMU
 	membar	#Sync
 	flush	%g7
-	
+
 	wrpr	%g2, %tl
 	wrpr	%g1, %pstate
 	ba,a	ret_from_intr_vector
 	 nop
 
 #ifdef SUN4V
-ENTRY(sun4v_ipi_tlb_page_demap)
+NENTRY(sun4v_ipi_tlb_page_demap)
 	mov	%o0, %g1
 	mov	%o1, %g2
 	mov	%o2, %g4
@@ -4135,11 +4159,11 @@ ENTRY(sun4v_ipi_tlb_page_demap)
 
 	retry
 
-ENTRY(sun4v_ipi_tlb_context_demap)
+NENTRY(sun4v_ipi_tlb_context_demap)
 	NOTREACHED
 #endif
 
-ENTRY(ipi_save_fpstate)
+NENTRY(ipi_save_fpstate)
 	GET_CPUINFO_VA(%g1)
 	ldx	[%g1 + CI_FPPROC], %g2
 	cmp	%g2, %g3
@@ -4195,7 +4219,7 @@ ENTRY(ipi_save_fpstate)
 	ba	ret_from_intr_vector
 	 nop
 
-ENTRY(ipi_drop_fpstate)
+NENTRY(ipi_drop_fpstate)
 	rdpr	%pstate, %g1
 	wr	%g0, FPRS_FEF, %fprs
 	or	%g1, PSTATE_PEF, %g1
@@ -4210,7 +4234,7 @@ ENTRY(ipi_drop_fpstate)
 	ba	ret_from_intr_vector
 	 nop
 
-ENTRY(ipi_softint)
+NENTRY(ipi_softint)
 	ba	ret_from_intr_vector
 	 wr	%g3, 0, SET_SOFTINT
 #endif
@@ -8892,9 +8916,37 @@ ENTRY(write_user_windows)
 	 nop
 
 /*
+ * Clear the Nonpriviliged Trap (NPT( bit of %tick such that it can be
+ * read from userland.  This requires us to read the current value and
+ * write it back with the bit cleared.  As a result we will lose a
+ * couple of ticks.  In order to limit the number of lost ticks, we
+ * block interrupts and make sure the instructions to read and write
+ * %tick live in the same cache line.  We tag on an extra read to work
+ * around a Blackbird (UltraSPARC-II) errata (see below).
+ */
+ENTRY(tick_enable)
+	rdpr	%pstate, %o0
+	andn	%o0, PSTATE_IE, %o1
+	wrpr	%o1, 0, %pstate		! disable interrupts
+	rdpr	%tick, %o2
+	brgez,pn %o2, 1f
+	 clr	%o1
+	mov	1, %o1
+	sllx	%o1, 63, %o1
+	ba,pt	%xcc, 1f
+	 nop
+	.align	64
+1:	rdpr	%tick, %o2
+	wrpr	%o2, %o1, %tick
+	rdpr	%tick, %g0
+
+	retl
+	 wrpr	%o0, 0, %pstate		! restore interrupts
+
+/*
  * On Blackbird (UltraSPARC-II) CPUs, writes to %tick_cmpr may fail.
  * The workaround is to do a read immediately after the write and make
- * sure the same cache line.
+ * sure those two instructions are in the same cache line.
  */
 ENTRY(tickcmpr_set)
 	ba	1f
@@ -9170,15 +9222,3 @@ _C_LABEL(dlflush_start):
 	.xword	dlflush4
 	.xword	dlflush5
 	.xword	0
-
-	.section	.sun4v_patch, "ax"
-	.globl _C_LABEL(sun4v_patch_end)
-_C_LABEL(sun4v_patch_end):
-	.previous
-
-#ifdef MULTIPROCESSOR
-	.section	.sun4v_mp_patch, "ax"
-	.globl _C_LABEL(sun4v_mp_patch_end)
-_C_LABEL(sun4v_mp_patch_end):
-	.previous
-#endif

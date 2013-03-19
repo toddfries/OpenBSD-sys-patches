@@ -1,4 +1,4 @@
-/*	$OpenBSD: pccbb.c,v 1.87 2010/12/08 20:22:49 miod Exp $	*/
+/*	$OpenBSD: pccbb.c,v 1.89 2012/10/18 21:40:49 deraadt Exp $	*/
 /*	$NetBSD: pccbb.c,v 1.96 2004/03/28 09:49:31 nakayama Exp $	*/
 
 /*
@@ -457,8 +457,6 @@ pccbbattach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
-	shutdownhook_establish(pccbb_shutdown, sc);
-
 	/* Disable legacy register mapping. */
 	pccbb_legacy_disable(sc);
 
@@ -608,6 +606,9 @@ pccbb_chipinit(struct pccbb_softc *sc)
 	pcitag_t tag = sc->sc_tag;
 	pcireg_t reg;
 
+	/* Power on the controller if the BIOS didn't */
+	pci_set_powerstate(pc, tag, PCI_PMCSR_STATE_D0);
+
 	/*
 	 * Set PCI command reg.
 	 * Some laptop's BIOSes (i.e. TICO) do not enable CardBus chip.
@@ -732,12 +733,6 @@ pccbb_chipinit(struct pccbb_softc *sc)
 		bus_space_write_1(sc->sc_base_memt, sc->sc_base_memh,
 		    0x800 + 0x3e, bus_space_read_1(sc->sc_base_memt,
 		    sc->sc_base_memh, 0x800 + 0x3e) | 0x03);
-
-		/* Power on the controller if the BIOS didn't */
-		reg = pci_conf_read(pc, tag, TOPIC100_PMCSR);
-		if ((reg & TOPIC100_PMCSR_MASK) != TOPIC100_PMCSR_D0)
-			pci_conf_write(pc, tag, TOPIC100_PMCSR,
-			    (reg & ~TOPIC100_PMCSR_MASK) | TOPIC100_PMCSR_D0);
 		break;
 
 	case CB_OLDO2MICRO:
@@ -2843,6 +2838,7 @@ pccbbactivate(struct device *self, int act)
 		break;
 	case DVACT_POWERDOWN:
 		rv = config_activate_children(self, act);
+		pccbb_shutdown(self);
 		break;
 	case DVACT_RESUME:
 		/* Restore the registers saved above. */

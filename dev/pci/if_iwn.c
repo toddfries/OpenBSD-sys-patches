@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.113 2012/01/26 00:45:40 deraadt Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.118 2012/11/17 14:02:51 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -90,7 +90,8 @@ static const struct pci_matchid iwn_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1030_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1030_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_1 },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_2 }
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6235_1 },
 };
 
 int		iwn_match(struct device *, void *, void *);
@@ -638,7 +639,15 @@ iwn5000_attach(struct iwn_softc *sc, pci_product_id_t pid)
 		break;
 	case IWN_HW_REV_TYPE_6005:
 		sc->limits = &iwn6000_sensitivity_limits;
-		sc->fwname = "iwn-6005";
+		if (pid == PCI_PRODUCT_INTEL_WL_1030_1 ||
+		    pid == PCI_PRODUCT_INTEL_WL_1030_2 ||
+		    pid == PCI_PRODUCT_INTEL_WL_6030_1 ||
+		    pid == PCI_PRODUCT_INTEL_WL_6030_2 ||
+		    pid == PCI_PRODUCT_INTEL_WL_6235_1) {
+			sc->fwname = "iwn-6030";
+			sc->sc_flags |= IWN_FLAG_ADV_BT_COEX;
+		} else
+			sc->fwname = "iwn-6005";
 		break;
 	default:
 		printf(": adapter type %d not supported\n", sc->hw_type);
@@ -2711,6 +2720,7 @@ iwn_tx(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		tid = qos & IEEE80211_QOS_TID;
 		ac = ieee80211_up_to_ac(ic, tid);
 	} else {
+		qos = 0;
 		tid = 0;
 		ac = EDCA_AC_BE;
 	}
@@ -4191,11 +4201,15 @@ iwn_config(struct iwn_softc *sc)
 	}
 
 	/* Configure bluetooth coexistence. */
-	error = iwn_send_btcoex(sc);
-	if (error != 0) {
-		printf("%s: could not configure bluetooth coexistence\n",
-		    sc->sc_dev.dv_xname);
-		return error;
+	if (sc->sc_flags & IWN_FLAG_ADV_BT_COEX) {
+		/* XXX Advanced bluetooth coexistence isn't implemented yet. */
+	} else {
+		error = iwn_send_btcoex(sc);
+		if (error != 0) {
+			printf("%s: could not configure bluetooth coexistence\n",
+			    sc->sc_dev.dv_xname);
+			return error;
+		}
 	}
 
 	/* Set mode, channel, RX filter and enable RX. */

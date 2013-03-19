@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 2012/08/02 13:38:39 okan Exp $
+#	$OpenBSD: Makefile,v 1.4 2013/01/02 12:29:33 deraadt Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
@@ -9,13 +9,14 @@ LIB=	sa
 CLEANFILES += machine mips64
 
 CFLAGS+= ${CEXTRAFLAGS} ${SAABI} -nostdinc -mno-abicalls -D_NO_ABICALLS \
+	-fno-pie \
 	-I${.CURDIR} -I${.CURDIR}/../include -I${.CURDIR}/../.. \
 	-I${.CURDIR}/../../.. -I${.CURDIR}/../../../.. \
 	-I${.CURDIR}/../../../../lib/libsa \
 	-I${.OBJDIR}
 
 # stand routines
-SRCS=	alloc.c cons.c ctime.c exit.c exec.c getfile.c gets.c globals.c \
+SRCS=	alloc.c cons.c ctime.c exit.c getfile.c gets.c globals.c \
 	memcmp.c memcpy.c memset.c printf.c \
 	snprintf.c strchr.c strcmp.c strerror.c strncmp.c strncpy.c strtol.c
 

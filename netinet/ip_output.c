@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.230 2012/07/16 18:05:36 markus Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.235 2012/11/06 12:32:42 henning Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -269,7 +269,7 @@ reroute:
 		goto done_spd;
 
 	/*
-	 * splnet is chosen over spltdb because we are not allowed to
+	 * splnet is chosen over splsoftnet because we are not allowed to
 	 * lower the level, and udp_output calls us in splnet().
 	 */
 	s = splnet();
@@ -740,7 +740,7 @@ sendit:
 	if (ntohs(ip->ip_len) <= mtu) {
 		ip->ip_sum = 0;
 		if ((ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-		    (ifp->if_bridge == NULL)) {
+		    (ifp->if_bridgeport == NULL)) {
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 			ipstat.ips_outhwcsum++;
 		} else
@@ -887,7 +887,7 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		mhip->ip_sum = 0;
 		if ((ifp != NULL) &&
 		    (ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-		    (ifp->if_bridge == NULL)) {
+		    (ifp->if_bridgeport == NULL)) {
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 			ipstat.ips_outhwcsum++;
 		} else
@@ -907,7 +907,7 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 	ip->ip_sum = 0;
 	if ((ifp != NULL) &&
 	    (ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-	    (ifp->if_bridge == NULL)) {
+	    (ifp->if_bridgeport == NULL)) {
 		m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 		ipstat.ips_outhwcsum++;
 	} else
@@ -1184,14 +1184,14 @@ ip_ctloutput(op, so, level, optname, mp)
 
 			/* Unlink cached output TDB to force a re-search */
 			if (inp->inp_tdb_out) {
-				int s = spltdb();
+				int s = splsoftnet();
 				TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out,
 				    inp, inp_tdb_out_next);
 				splx(s);
 			}
 
 			if (inp->inp_tdb_in) {
-				int s = spltdb();
+				int s = splsoftnet();
 				TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in,
 				    inp, inp_tdb_in_next);
 				splx(s);
@@ -1380,14 +1380,14 @@ ip_ctloutput(op, so, level, optname, mp)
 
 			/* Unlink cached output TDB to force a re-search */
 			if (inp->inp_tdb_out) {
-				int s = spltdb();
+				int s = splsoftnet();
 				TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out,
 				    inp, inp_tdb_out_next);
 				splx(s);
 			}
 
 			if (inp->inp_tdb_in) {
-				int s = spltdb();
+				int s = splsoftnet();
 				TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in,
 				    inp, inp_tdb_in_next);
 				splx(s);
@@ -2150,13 +2150,13 @@ in_proto_cksum_out(struct mbuf *m, struct ifnet *ifp)
 {
 	if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT) {
 		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_TCPv4) ||
-		    ifp->if_bridge != NULL) {
+		    ifp->if_bridgeport != NULL) {
 			in_delayed_cksum(m);
 			m->m_pkthdr.csum_flags &= ~M_TCP_CSUM_OUT; /* Clear */
 		}
 	} else if (m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT) {
 		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_UDPv4) ||
-		    ifp->if_bridge != NULL) {
+		    ifp->if_bridgeport != NULL) {
 			in_delayed_cksum(m);
 			m->m_pkthdr.csum_flags &= ~M_UDP_CSUM_OUT; /* Clear */
 		}

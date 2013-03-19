@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.27 2011/08/16 17:36:37 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.31 2013/03/12 09:37:16 mpi Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -109,6 +109,9 @@ struct cpu_info {
 #ifdef DIAGNOSTIC
 	int		ci_mutex_level;
 #endif
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
+#endif
 };
 
 struct cpu_info *curcpu(void);
@@ -162,6 +165,9 @@ extern int cpu_hvers;
 #define	need_resched(ci)	(want_resched = 1, setsoftast())
 #define clear_resched(ci) 	want_resched = 0
 #define	need_proftick(p)	setsoftast()
+
+#define	PROC_PC(p)		((p)->p_md.md_regs->tf_iioq[0])
+#define	PROC_STACK(p)		((p)->p_md.md_regs->tf_sp)
 
 #ifndef _LOCORE
 #ifdef _KERNEL

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.47 2012/04/06 15:10:40 jsing Exp $ */
+/*	$OpenBSD: conf.c,v 1.51 2013/03/15 09:10:52 ratchov Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -95,11 +95,6 @@ cdev_decl(com);
 
 #include "tun.h"
 
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
-
 #ifdef LKM
 #define NLKM 1
 #else
@@ -119,6 +114,10 @@ cdev_decl(nnpfs_dev);
 
 #include "apm.h"
 #include "bthub.h"
+#include "agp.h"
+cdev_decl(agp);
+#include "drm.h"
+cdev_decl(drm);
 
 #include "wsmux.h"
 
@@ -130,7 +129,6 @@ cdev_decl(pci);
 #include "audio.h"
 #include "video.h"
 #include "midi.h"
-#include "sequencer.h"
 
 #include "pf.h"
 
@@ -196,13 +194,9 @@ struct cdevsw cdevsw[] = {
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 	cdev_midi_init(NMIDI,midi),	/* 52: MIDI I/O */
-	cdev_midi_init(NSEQUENCER,sequencer),	/* 53: sequencer I/O */
+	cdev_notdef(),			/* 53 was: sequencer I/O */
 	cdev_notdef(),			/* 54 was: RAIDframe disk driver */
 	cdev_notdef(),			/* 55 */
 	/* The following slots are reserved for isdn4bsd. */
@@ -243,6 +237,8 @@ struct cdevsw cdevsw[] = {
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 83: vscsi */
 	cdev_disk_init(1,diskmap),	/* 84: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 85: pppx */
+	cdev_agp_init(NAGP,agp),	/* 86: agp */
+	cdev_drm_init(NDRM,drm),	/* 87: drm */
 };
 int nchrdev = nitems(cdevsw);
 

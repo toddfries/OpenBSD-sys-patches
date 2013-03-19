@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.103 2012/04/03 15:03:08 mikeb Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.107 2013/03/14 11:18:37 mpi Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -101,7 +101,6 @@
 
 #include <netinet6/ip6protosw.h>
 
-#include "faith.h"
 #include "gif.h"
 #include "bpfilter.h"
 
@@ -488,7 +487,7 @@ ip6_input(struct mbuf *m)
 #endif
 	    ip6_forward_rt.ro_rt->rt_ifp->if_type == IFT_LOOP) {
 		struct in6_ifaddr *ia6 =
-			(struct in6_ifaddr *)ip6_forward_rt.ro_rt->rt_ifa;
+			ifatoia6(ip6_forward_rt.ro_rt->rt_ifa);
 		if (ia6->ia6_flags & IN6_IFF_ANYCAST)
 			isanycast = 1;
 		/*
@@ -510,21 +509,6 @@ ip6_input(struct mbuf *m)
 			goto bad;
 		}
 	}
-
-	/*
-	 * FAITH (Firewall Aided Internet Translator)
-	 */
-#if defined(NFAITH) && 0 < NFAITH
-	if (ip6_keepfaith) {
-		if (ip6_forward_rt.ro_rt && ip6_forward_rt.ro_rt->rt_ifp
-		 && ip6_forward_rt.ro_rt->rt_ifp->if_type == IFT_FAITH) {
-			/* XXX do we need more sanity checks? */
-			ours = 1;
-			deliverifp = ip6_forward_rt.ro_rt->rt_ifp; /*faith*/
-			goto hbhcheck;
-		}
-	}
-#endif
 
 #if 0
     {

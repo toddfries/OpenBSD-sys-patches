@@ -1,4 +1,4 @@
-/*	$OpenBSD: malloc.h,v 1.100 2012/04/06 15:10:40 jsing Exp $	*/
+/*	$OpenBSD: malloc.h,v 1.101 2013/02/07 11:06:42 mikeb Exp $	*/
 /*	$NetBSD: malloc.h,v 1.39 1998/07/12 19:52:01 augustss Exp $	*/
 
 /*
@@ -118,7 +118,8 @@
 #define	M_TTYS		62	/* allocated tty structures */
 #define	M_EXEC		63	/* argument lists & other mem used by exec */
 #define	M_MISCFSMNT	64	/* miscfs mount structures */
-/* 65-73 - free */
+#define M_FUSEFS	65	/* fusefs mount structures */
+/* 66-73 - free */
 #define	M_PFKEY		74	/* pfkey data */
 #define	M_TDB		75	/* Transforms database */
 #define	M_XDATA		76	/* IPsec data */
@@ -143,8 +144,7 @@
 #define M_CRYPTO_DATA	108	/* Crypto framework data buffers (keys etc.) */
 /* 109 - free */
 #define M_CREDENTIALS	110	/* IPsec-related credentials and ID info */
-#define M_PACKET_TAGS	111	/* Packet-attached information */
-/* 112-113 - free */
+/* 111-113 - free */
 #define	M_EMULDATA	114	/* Per-process emulation data */
 /* 115-122 - free */
 
@@ -248,7 +248,7 @@
 	"ttys",		/* 62 M_TTYS */ \
 	"exec",		/* 63 M_EXEC */ \
 	"miscfs mount",	/* 64 M_MISCFSMNT */ \
-	NULL, \
+	"fusefs mount", /* 65 M_FUSEFS */ \
 	NULL, \
 	NULL, \
 	NULL, \
@@ -284,7 +284,7 @@
 	"crypto data",	/* 108 M_CRYPTO_DATA */ \
 	NULL, \
 	"IPsec creds",	/* 110 M_CREDENTIALS */ \
-	"packet tags",	/* 111 M_PACKET_TAGS */ \
+	NULL, \
 	NULL, \
 	NULL, \
 	"emuldata",	/* 114 M_EMULDATA */ \

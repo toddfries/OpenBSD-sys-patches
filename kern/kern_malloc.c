@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_malloc.c,v 1.92 2012/03/30 23:03:42 pirofti Exp $	*/
+/*	$OpenBSD: kern_malloc.c,v 1.95 2013/03/15 19:10:43 tedu Exp $	*/
 /*	$NetBSD: kern_malloc.c,v 1.15.4.2 1996/06/13 17:10:56 cgd Exp $	*/
 
 /*
@@ -140,7 +140,41 @@ const long addrmask[] = { 0,
 #else
 #define WEIRD_ADDR	((unsigned) 0xdeadbeef)
 #endif
-#define MAX_COPY	32
+#define POISON_SIZE	32
+
+static void
+poison(void *v, size_t len)
+{
+	uint32_t *ip = v;
+	size_t i;
+
+	if (len > POISON_SIZE)
+		len = POISON_SIZE;
+	len = len / sizeof(*ip);
+	for (i = 0; i < len; i++) {
+		ip[i] = WEIRD_ADDR;
+	}
+}
+
+static size_t
+poison_check(void *v, size_t len)
+{
+
+	uint32_t *ip = v;
+	size_t i;
+
+	if (len > POISON_SIZE)
+		len = POISON_SIZE;
+	len = len / sizeof(*ip);
+	for (i = 0; i < len; i++) {
+		if (ip[i] != WEIRD_ADDR) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+
 
 /*
  * Normally the freelist structure is used only to hold the list pointer
@@ -180,8 +214,8 @@ malloc(unsigned long size, int type, int flags)
 	int s;
 	caddr_t va, cp, savedlist;
 #ifdef DIAGNOSTIC
-	int32_t *end, *lp;
-	int copysize, freshalloc;
+	size_t pidx;
+	int freshalloc;
 	char *savedtype;
 #endif
 #ifdef KMEMSTATS
@@ -232,14 +266,11 @@ malloc(unsigned long size, int type, int flags)
 	}
 	ksp->ks_size |= 1 << indx;
 #endif
-#ifdef DIAGNOSTIC
-	copysize = 1 << indx < MAX_COPY ? 1 << indx : MAX_COPY;
-#endif
+	if (size > MAXALLOCSAVE)
+		allocsize = round_page(size);
+	else
+		allocsize = 1 << indx;
 	if (kbp->kb_next == NULL) {
-		if (size > MAXALLOCSAVE)
-			allocsize = round_page(size);
-		else
-			allocsize = 1 << indx;
 		npg = atop(round_page(allocsize));
 		va = (caddr_t)uvm_km_kmemalloc_pla(kmem_map, NULL,
 		    (vsize_t)ptoa(npg), 0,
@@ -294,9 +325,7 @@ malloc(unsigned long size, int type, int flags)
 			 * Copy in known text to detect modification
 			 * after freeing.
 			 */
-			end = (int32_t *)&cp[copysize];
-			for (lp = (int32_t *)cp; lp < end; lp++)
-				*lp = WEIRD_ADDR;
+			poison(cp, allocsize);
 			freep->type = M_FREE;
 #endif /* DIAGNOSTIC */
 			if (cp <= va)
@@ -328,39 +357,27 @@ malloc(unsigned long size, int type, int flags)
 		vm_map_unlock(kmem_map);
 
 		if (!rv)  {
-			printf("%s %d of object %p size 0x%lx %s %s"
+			printf("%s %zd of object %p size 0x%lx %s %s"
 			    " (invalid addr %p)\n",
 			    "Data modified on freelist: word", 
 			    (int32_t *)&kbp->kb_next - (int32_t *)kbp, va, size,
-			    "previous type", savedtype, addr);
+			    "previous type", savedtype, (void *)addr);
 			kbp->kb_next = NULL;
 		}
 	}
 
 	/* Fill the fields that we've used with WEIRD_ADDR */
-#if BYTE_ORDER == BIG_ENDIAN
-	freep->type = WEIRD_ADDR >> 16;
-#endif
-#if BYTE_ORDER == LITTLE_ENDIAN
-	freep->type = (short)WEIRD_ADDR;
-#endif
-	end = (int32_t *)&freep->next +
-	    (sizeof(freep->next) / sizeof(int32_t));
-	for (lp = (int32_t *)&freep->next; lp < end; lp++)
-		*lp = WEIRD_ADDR;
+	poison(freep, sizeof(*freep));
 
 	/* and check that the data hasn't been modified. */
 	if (freshalloc == 0) {
-		end = (int32_t *)&va[copysize];
-		for (lp = (int32_t *)va; lp < end; lp++) {
-			if (*lp == WEIRD_ADDR)
-				continue;
-			printf("%s %d of object %p size 0x%lx %s %s"
+		if ((pidx = poison_check(va, allocsize)) != -1) {
+			printf("%s %zd of object %p size 0x%lx %s %s"
 			    " (0x%x != 0x%x)\n",
 			    "Data modified on freelist: word",
-			    lp - (int32_t *)va, va, size,
-			    "previous type", savedtype, *lp, WEIRD_ADDR);
-			break;
+			    pidx, va, size, "previous type",
+			    savedtype, ((int32_t*)va)[pidx], WEIRD_ADDR);
+			panic("boom");
 		}
 	}
 
@@ -404,8 +421,7 @@ free(void *addr, int type)
 	int s;
 #ifdef DIAGNOSTIC
 	caddr_t cp;
-	int32_t *end, *lp;
-	long alloc, copysize;
+	long alloc;
 #endif
 #ifdef KMEMSTATS
 	struct kmemstats *ksp = &kmemstats[type];
@@ -476,10 +492,8 @@ free(void *addr, int type)
 	 * so we can list likely culprit if modification is detected
 	 * when the object is reallocated.
 	 */
-	copysize = size < MAX_COPY ? size : MAX_COPY;
-	end = (int32_t *)&((caddr_t)addr)[copysize];
-	for (lp = (int32_t *)addr; lp < end; lp++)
-		*lp = WEIRD_ADDR;
+	poison(addr, size);
+
 	freep->type = type;
 #endif /* DIAGNOSTIC */
 #ifdef KMEMSTATS
@@ -710,7 +724,8 @@ malloc_roundup(size_t sz)
 #include <ddb/db_output.h>
 
 void
-malloc_printit(int (*pr)(const char *, ...))
+malloc_printit(
+    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
 {
 #ifdef KMEMSTATS
 	struct kmemstats *km;

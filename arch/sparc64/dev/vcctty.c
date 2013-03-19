@@ -1,4 +1,4 @@
-/*	$OpenBSD: vcctty.c,v 1.6 2010/07/02 17:27:01 nicm Exp $	*/
+/*	$OpenBSD: vcctty.c,v 1.10 2012/12/02 19:40:45 kettenis Exp $	*/
 /*
  * Copyright (c) 2009 Mark Kettenis
  *
@@ -82,11 +82,12 @@ struct cfdriver vcctty_cd = {
 int	vcctty_tx_intr(void *);
 int	vcctty_rx_intr(void *);
 
-void	vcctty_send_data(struct vcctty_softc *, int);
+void	vcctty_send_data(struct vcctty_softc *, struct tty *);
 void	vcctty_send_break(struct vcctty_softc *);
 
 void	vccttystart(struct tty *);
 int	vccttyparam(struct tty *, struct termios *);
+int	vccttyhwiflow(struct tty *, int);
 
 int
 vcctty_match(struct device *parent, void *match, void *aux)
@@ -153,6 +154,9 @@ vcctty_attach(struct device *parent, struct device *self, void *aux)
 	    lc->lc_rxq->lq_map->dm_segs[0].ds_addr, lc->lc_rxq->lq_nentries);
 	if (err != H_EOK)
 		printf("%d: hv_ldc_rx_qconf %d\n", __func__, err);
+
+	cbus_intr_setenabled(sc->sc_tx_sysino, INTR_ENABLED);
+	cbus_intr_setenabled(sc->sc_rx_sysino, INTR_ENABLED);
 
 	printf(" domain \"%s\"\n", ca->ca_name);
 	return;
@@ -247,10 +251,11 @@ vcctty_rx_intr(void *arg)
 }
 
 void
-vcctty_send_data(struct vcctty_softc *sc, int c)
+vcctty_send_data(struct vcctty_softc *sc, struct tty *tp)
 {
 	struct ldc_conn *lc = &sc->sc_lc;
 	uint64_t tx_head, tx_tail, tx_state;
+	uint64_t next_tx_tail;
 	struct vcctty_msg *msg;
 	int err;
 
@@ -258,17 +263,23 @@ vcctty_send_data(struct vcctty_softc *sc, int c)
 	if (err != H_EOK || tx_state != LDC_CHANNEL_UP)
 		return;
 
-	msg = (struct vcctty_msg *)(lc->lc_txq->lq_va + tx_tail);
-	bzero(msg, sizeof(*msg));
-	msg->type = LDC_CONSOLE_DATA;
-	msg->size = 1;
-	msg->data[0] = c;
+	while (tp->t_outq.c_cc > 0) {
+		next_tx_tail = tx_tail + sizeof(*msg);
+		next_tx_tail &= ((lc->lc_txq->lq_nentries * sizeof(*msg)) - 1);
 
-	tx_tail += sizeof(*msg);
-	tx_tail &= ((lc->lc_txq->lq_nentries * sizeof(*msg)) - 1);
-	err = hv_ldc_tx_set_qtail(lc->lc_id, tx_tail);
-	if (err != H_EOK)
-		printf("%s: hv_ldc_tx_set_qtail: %d\n", __func__, err);
+		if (next_tx_tail == tx_head)
+			return;
+
+		msg = (struct vcctty_msg *)(lc->lc_txq->lq_va + tx_tail);
+		bzero(msg, sizeof(*msg));
+		msg->type = LDC_CONSOLE_DATA;
+		msg->size = q_to_b(&tp->t_outq, msg->data, sizeof(msg->data));
+
+		err = hv_ldc_tx_set_qtail(lc->lc_id, next_tx_tail);
+		if (err != H_EOK)
+			printf("%s: hv_ldc_tx_set_qtail: %d\n", __func__, err);
+		tx_tail = next_tx_tail;
+	}
 }
 
 void
@@ -302,7 +313,7 @@ vccttyopen(dev_t dev, int flag, int mode, struct proc *p)
 	struct tty *tp;
 	int unit = minor(dev);
 
-	if (unit > vcctty_cd.cd_ndevs)
+	if (unit >= vcctty_cd.cd_ndevs)
 		return (ENXIO);
 	sc = vcctty_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -315,12 +326,13 @@ vccttyopen(dev_t dev, int flag, int mode, struct proc *p)
 
 	tp->t_oproc = vccttystart;
 	tp->t_param = vccttyparam;
+	tp->t_hwiflow = vccttyhwiflow;
 	tp->t_dev = dev;
 	if ((tp->t_state & TS_ISOPEN) == 0) {
 		ttychars(tp);
 		tp->t_iflag = TTYDEF_IFLAG;
 		tp->t_oflag = TTYDEF_OFLAG;
-		tp->t_cflag = TTYDEF_CFLAG;
+		tp->t_cflag = TTYDEF_CFLAG | CRTSCTS;
 		tp->t_lflag = TTYDEF_LFLAG;
 		tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
 		ttsetwater(tp);
@@ -338,7 +350,7 @@ vccttyclose(dev_t dev, int flag, int mode, struct proc *p)
 	struct tty *tp;
 	int unit = minor(dev);
 
-	if (unit > vcctty_cd.cd_ndevs)
+	if (unit >= vcctty_cd.cd_ndevs)
 		return (ENXIO);
 	sc = vcctty_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -357,7 +369,7 @@ vccttyread(dev_t dev, struct uio *uio, int flag)
 	struct tty *tp;
 	int unit = minor(dev);
 
-	if (unit > vcctty_cd.cd_ndevs)
+	if (unit >= vcctty_cd.cd_ndevs)
 		return (ENXIO);
 	sc = vcctty_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -374,7 +386,7 @@ vccttywrite(dev_t dev, struct uio *uio, int flag)
 	struct tty *tp;
 	int unit = minor(dev);
 
-	if (unit > vcctty_cd.cd_ndevs)
+	if (unit >= vcctty_cd.cd_ndevs)
 		return (ENXIO);
 	sc = vcctty_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -392,7 +404,7 @@ vccttyioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	int unit = minor(dev);
 	int error;
 
-	if (unit > vcctty_cd.cd_ndevs)
+	if (unit >= vcctty_cd.cd_ndevs)
 		return (ENXIO);
 	sc = vcctty_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -430,15 +442,19 @@ vccttystart(struct tty *tp)
 	int s;
 
 	s = spltty();
-	if (tp->t_state & (TS_TTSTOP | TS_BUSY)) {
+	if (tp->t_state & (TS_TIMEOUT | TS_BUSY | TS_TTSTOP)) {
 		splx(s);
 		return;
 	}
 	ttwakeupwr(tp);
 	tp->t_state |= TS_BUSY;
-	while (tp->t_outq.c_cc != 0)
-		vcctty_send_data(sc, getc(&tp->t_outq));
+	if (tp->t_outq.c_cc > 0)
+		vcctty_send_data(sc, tp);
 	tp->t_state &= ~TS_BUSY;
+	if (tp->t_outq.c_cc > 0) {
+		tp->t_state |= TS_TIMEOUT;
+		timeout_add(&tp->t_rstrt_to, 1);
+	}
 	splx(s);
 }
 
@@ -461,7 +477,7 @@ vccttytty(dev_t dev)
 	struct vcctty_softc *sc;
 	int unit = minor(dev);
 
-	if (unit > vcctty_cd.cd_ndevs)
+	if (unit >= vcctty_cd.cd_ndevs)
 		return (NULL);
 	sc = vcctty_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -477,4 +493,20 @@ vccttyparam(struct tty *tp, struct termios *t)
 	tp->t_ospeed = t->c_ospeed;
 	tp->t_cflag = t->c_cflag;
 	return (0);
+}
+
+int
+vccttyhwiflow(struct tty *tp, int stop)
+{
+	struct vcctty_softc *sc = vcctty_cd.cd_devs[minor(tp->t_dev)];
+
+	if (stop) {
+		cbus_intr_setenabled(sc->sc_tx_sysino, INTR_DISABLED);
+		cbus_intr_setenabled(sc->sc_rx_sysino, INTR_DISABLED);
+	} else {
+		cbus_intr_setenabled(sc->sc_tx_sysino, INTR_ENABLED);
+		cbus_intr_setenabled(sc->sc_rx_sysino, INTR_ENABLED);
+	}
+
+	return (1);
 }

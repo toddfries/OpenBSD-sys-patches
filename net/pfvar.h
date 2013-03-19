@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.367 2012/07/26 12:25:31 mikeb Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.377 2013/03/11 19:48:40 sthen Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -648,7 +648,6 @@ struct pf_rule {
 #define PF_FLUSH		0x01
 #define PF_FLUSH_GLOBAL		0x02
 	u_int8_t		 flush;
-#define PF_PRIO_NOTSET		0xff
 	u_int8_t		 set_prio[2];
 	sa_family_t		 naf;
 
@@ -709,8 +708,8 @@ struct pf_src_node {
 	u_int32_t		 states;
 	u_int32_t		 conn;
 	struct pf_threshold	 conn_rate;
-	u_int32_t		 creation;
-	u_int32_t		 expire;
+	int32_t			 creation;
+	int32_t			 expire;
 	sa_family_t		 af;
 	sa_family_t		 naf;
 	u_int8_t		 type;
@@ -824,9 +823,9 @@ struct pf_state {
 	struct pfi_kif		*rt_kif;
 	u_int64_t		 packets[2];
 	u_int64_t		 bytes[2];
-	u_int32_t		 creation;
-	u_int32_t		 expire;
-	u_int32_t		 pfsync_time;
+	int32_t			 creation;
+	int32_t			 expire;
+	int32_t			 pfsync_time;
 	u_int16_t		 qid;
 	u_int16_t		 pqid;
 	u_int16_t		 tag;
@@ -840,7 +839,9 @@ struct pf_state {
 #define	PFSTATE_SETTOS		0x0040
 #define	PFSTATE_RANDOMID	0x0080
 #define	PFSTATE_SCRUB_TCP	0x0100
+#define	PFSTATE_SETPRIO		0x0200
 #define	PFSTATE_SCRUBMASK (PFSTATE_NODF|PFSTATE_RANDOMID|PFSTATE_SCRUB_TCP)
+#define	PFSTATE_SETMASK   (PFSTATE_SETTOS|PFSTATE_SETPRIO)
 	u_int8_t		 log;
 	u_int8_t		 timeout;
 	u_int8_t		 sync_state; /* PFSYNC_S_x */
@@ -1236,7 +1237,7 @@ struct pf_pdesc {
 	struct pf_addr	 nsaddr;	/* src address after NAT */
 	struct pf_addr	 ndaddr;	/* dst address after NAT */
 
-	struct pfi_kif	*kif;		/* incomming interface */
+	struct pfi_kif	*kif;		/* incoming interface */
 	struct mbuf	*m;		/* mbuf containing the packet */
 	struct ether_header
 			*eh;
@@ -1292,7 +1293,8 @@ struct pf_pdesc {
 #define PFRES_MAXSTATES	12		/* State limit */
 #define PFRES_SRCLIMIT	13		/* Source node/conn limit */
 #define PFRES_SYNPROXY	14		/* SYN proxy */
-#define PFRES_MAX	15		/* total+1 */
+#define PFRES_TRANSLATE	15		/* No translation address available */
+#define PFRES_MAX	16		/* total+1 */
 
 #define PFRES_NAMES { \
 	"match", \
@@ -1310,6 +1312,7 @@ struct pf_pdesc {
 	"state-limit", \
 	"src-limit", \
 	"synproxy", \
+	"translate", \
 	NULL \
 }
 
@@ -1481,10 +1484,9 @@ struct pf_divert {
 	u_int16_t	rdomain;
 };
 
-#define PFFRAG_FRENT_HIWAT	5000	/* Number of fragment entries */
-#define PFFRAG_FRAG_HIWAT	1000	/* Number of fragmented packets */
-#define PFFRAG_FRCENT_HIWAT	50000	/* Number of fragment cache entries */
-#define PFFRAG_FRCACHE_HIWAT	10000	/* Number of fragment descriptors */
+/* Fragment entries reference mbuf clusters, so base the default on that. */
+#define PFFRAG_FRENT_HIWAT	(NMBCLUSTERS / 4) /* Number of entries */
+#define PFFRAG_FRAG_HIWAT	(NMBCLUSTERS / 8) /* Number of packets */
 
 #define PFR_KTABLE_HIWAT	1000	/* Number of tables */
 #define PFR_KENTRY_HIWAT	200000	/* Number of table entries */
@@ -1818,8 +1820,7 @@ int	pf_normalize_tcp_stateful(struct pf_pdesc *, u_short *,
 	    int *);
 int	pf_normalize_mss(struct pf_pdesc *, u_int16_t);
 void	pf_scrub(struct mbuf *, u_int16_t, sa_family_t, u_int8_t, u_int8_t);
-u_int32_t
-	pf_state_expires(const struct pf_state *);
+int32_t	pf_state_expires(const struct pf_state *);
 void	pf_purge_expired_fragments(void);
 int	pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *,
 	    int);
@@ -1841,10 +1842,8 @@ void	pfr_initialize(void);
 int	pfr_match_addr(struct pfr_ktable *, struct pf_addr *, sa_family_t);
 void	pfr_update_stats(struct pfr_ktable *, struct pf_addr *, sa_family_t,
 	    u_int64_t, int, int, int);
-int	pfr_pool_get(struct pfr_ktable *, int *, struct pf_addr *,
-	    struct pf_addr **, struct pf_addr **, struct pfi_kif **,
-	    u_int64_t *, u_int16_t *, int *,
-	    sa_family_t, int (*)(sa_family_t, struct pf_addr *));
+int	pfr_pool_get(struct pf_pool *, struct pf_addr **,
+	    struct pf_addr **, sa_family_t);
 int	pfr_states_increase(struct pfr_ktable *, struct pf_addr *, int);
 int	pfr_states_decrease(struct pfr_ktable *, struct pf_addr *, int);
 struct pfr_kentry *

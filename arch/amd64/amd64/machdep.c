@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.155 2012/06/04 15:19:47 jsing Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.161 2013/03/02 07:02:07 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -139,6 +139,15 @@ extern int db_console;
 #include <dev/ic/comvar.h>
 #include <dev/ic/comreg.h>
 #endif
+
+#include "softraid.h"
+#if NSOFTRAID > 0
+#include <dev/softraidvar.h>
+#endif
+
+#ifdef HIBERNATE
+#include <machine/hibernate_var.h>
+#endif /* HIBERNATE */
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
@@ -548,16 +557,14 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 #endif
 
 	bcopy(tf, &ksc, sizeof(*tf));
-	ksc.sc_onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
+	bzero((char *)&ksc + sizeof(*tf), sizeof(ksc) - sizeof(*tf));
 	ksc.sc_mask = mask;
-	ksc.sc_fpstate = NULL;
 
 	/* Allocate space for the signal handler context. */
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !ksc.sc_onstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(tf->tf_rsp) && (psp->ps_sigonstack & sigmask(sig)))
 		sp = (register_t)p->p_sigstk.ss_sp + p->p_sigstk.ss_size;
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		sp = tf->tf_rsp - 128;
 
 	sp &= ~15ULL;	/* just in case */
@@ -663,11 +670,7 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	ksc.sc_err = tf->tf_err;
 	bcopy(&ksc, tf, sizeof(*tf));
 
-	/* Restore signal stack. */
-	if (ksc.sc_onstack)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
+	/* Restore signal mask. */
 	p->p_sigmask = ksc.sc_mask & ~sigcantmask;
 
 	/*
@@ -752,6 +755,7 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	x86_broadcast_ipi(X86_IPI_HALT);
@@ -1285,6 +1289,11 @@ init_x86_64(paddr_t first_avail)
 		avail_start = ACPI_TRAMPOLINE + PAGE_SIZE;
 #endif
 
+#ifdef HIBERNATE
+	if (avail_start < HIBERNATE_HIBALLOC_PAGE + PAGE_SIZE)
+		avail_start = HIBERNATE_HIBALLOC_PAGE + PAGE_SIZE;
+#endif /* HIBERNATE */
+
 	/*
 	 * We need to go through the BIOS memory map given, and
 	 * fill out mem_clusters and mem_cluster_cnt stuff, taking
@@ -1523,9 +1532,6 @@ init_x86_64(paddr_t first_avail)
 		idt_allocmap[x] = 1;
 	}
 
-	/* 128 was the old interrupt gate for syscalls; remove in 2013 */
-	idt_allocmap[128] = 1;
-
 	setregion(&region, gdtstore, GDT_SIZE - 1);
 	lgdt(&region);
 
@@ -1746,6 +1752,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 	bootarg32_t *q;
 	bios_ddb_t *bios_ddb;
 	bios_bootduid_t *bios_bootduid;
+	bios_bootsr_t *bios_bootsr;
 
 #undef BOOTINFO_DEBUG
 #ifdef BOOTINFO_DEBUG
@@ -1817,6 +1824,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 					comconsunit = unit;
 					comconsaddr = consaddr;
 					comconsrate = cdp->conspeed;
+					comconsiot = X86_BUS_SPACE_IO;
 
 					/* Probe the serial port this time. */
 					cninit();
@@ -1843,6 +1851,17 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 		case BOOTARG_BOOTDUID:
 			bios_bootduid = (bios_bootduid_t *)q->ba_arg;
 			bcopy(bios_bootduid, bootduid, sizeof(bootduid));
+			break;
+
+		case BOOTARG_BOOTSR:
+			bios_bootsr = (bios_bootsr_t *)q->ba_arg;
+#if NSOFTRAID > 0
+			bcopy(&bios_bootsr->uuid, &sr_bootuuid,
+			    sizeof(sr_bootuuid));
+			bcopy(&bios_bootsr->maskkey, &sr_bootkey,
+			    sizeof(sr_bootkey));
+#endif
+			explicit_bzero(bios_bootsr, sizeof(bios_bootsr_t));
 			break;
 
 		default:
