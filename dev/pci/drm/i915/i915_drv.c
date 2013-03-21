@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.1 2013/03/18 12:36:51 jsg Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.4 2013/03/20 12:37:41 jsg Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -528,7 +528,6 @@ i915_drm_freeze(struct drm_device *dev)
 		intel_modeset_disable(dev);
 
 		drm_irq_uninstall(dev);
-		dev_priv->enable_hotplug_processing = false;
 	}
 
 	i915_save_state(dev);
@@ -560,19 +559,9 @@ __i915_drm_thaw(struct drm_device *dev)
 		error = i915_gem_init_hw(dev);
 		DRM_UNLOCK();
 
-		/* We need working interrupts for modeset enabling ... */
-		drm_irq_install(dev);
-
 		intel_modeset_init_hw(dev);
 		intel_modeset_setup_hw_state(dev, false);
-
-		/*
-		 * ... but also need to make sure that hotplug processing
-		 * doesn't cause havoc. Like in the driver load code we don't
-		 * bother with the tiny race here where we might loose hotplug
-		 * notifications.
-		 * */
-		dev_priv->enable_hotplug_processing = true;
+		drm_irq_install(dev);
 	}
 
 	intel_opregion_init(dev);
@@ -665,7 +654,7 @@ inteldrm_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 			dp->min = 0;
 			dp->max = _intel_panel_get_max_backlight(dev);
 			dp->curval = dev_priv->backlight_level;
-			return 0;
+			return (dp->max > dp->min) ? 0 : -1;
 		}
 		break;
 	case WSDISPLAYIO_SETPARAM:
@@ -970,6 +959,8 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	dev_priv->dmat = pa->pa_dmat;
 	dev_priv->bst = pa->pa_memt;
 
+	printf("\n");
+
 	/* All intel chipsets need to be treated as agp, so just pass one */
 	dev_priv->drmdev = drm_attach_pci(&inteldrm_driver, pa, 1, self);
 
@@ -1096,7 +1087,8 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 
 	dev_priv->mm.interruptible = true;
 
-	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
+	printf("%s: %s\n", dev_priv->dev.dv_xname,
+	    pci_intr_string(pa->pa_pc, dev_priv->ih));
 
 	mtx_init(&dev_priv->irq_lock, IPL_TTY);
 	mtx_init(&dev_priv->rps.lock, IPL_NONE);
