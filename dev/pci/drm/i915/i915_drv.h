@@ -512,8 +512,11 @@ struct inteldrm_softc {
 	struct workq_task	 switchwqt;
 	struct rasops_info	 ro;
 
-	int			 noaccel;
-	struct wsdisplay_emulops noaccel_ops;
+	int	noaccel;
+	int	(*noaccel_copycols)(void *, int, int, int, int);
+	int	(*noaccel_erasecols)(void *, int, int, int, long);
+	int	(*noaccel_copyrows)(void *, int, int, int);
+	int	(*noaccel_eraserows)(void *, int, int, long);
 
 	uint32_t		 gpio_mmio_base;
 
