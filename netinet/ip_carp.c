@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.198 2012/10/08 18:48:25 camield Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.201 2013/03/26 13:19:26 mpi Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -894,7 +894,7 @@ carp_clone_create(ifc, unit)
 	ifp->if_addrlen = ETHER_ADDR_LEN;
 	ifp->if_hdrlen = ETHER_HDR_LEN;
 	ifp->if_mtu = ETHERMTU;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 	if_attach(ifp);
 
@@ -1028,8 +1028,7 @@ carp_destroy_vhosts(struct carp_softc *sc)
 	/* XXX bow out? */
 	struct carp_vhost_entry *vhe, *nvhe;
 
-	for (vhe = LIST_FIRST(&sc->carp_vhosts);
-	     vhe != LIST_END(&sc->carp_vhosts); vhe = nvhe) {
+	for (vhe = LIST_FIRST(&sc->carp_vhosts); vhe != NULL; vhe = nvhe) {
 		nvhe = LIST_NEXT(vhe, vhost_entries);
 		free(vhe, M_DEVBUF);
 	}
@@ -2110,7 +2109,7 @@ carp_set_addr6(struct carp_softc *sc, struct sockaddr_in6 *sin6)
 
 	/* we have to do this by hand to ensure we don't match on ourselves */
 	ia_if = NULL;
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next) {
+	TAILQ_FOREACH(ia, &in6_ifaddr, ia_list) {
 		int i;
 
 		for (i = 0; i < 4; i++) {

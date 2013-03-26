@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.4 2013/03/20 12:37:41 jsg Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.8 2013/03/26 21:01:02 kettenis Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -682,23 +682,16 @@ inteldrm_alloc_screen(void *v, const struct wsscreen_descr *type,
 	struct inteldrm_softc *dev_priv = v;
 	struct rasops_info *ri = &dev_priv->ro;
 
-	if (dev_priv->nscreens > 8)
-		return (ENOMEM);
-
-	*cookiep = ri;
-	*curxp = 0;
-	*curyp =0;
-	ri->ri_ops.alloc_attr(ri, 0, 0, 0, attrp);
-	dev_priv->nscreens++;
-	return (0);
+	return rasops_alloc_screen(ri, cookiep, curxp, curyp, attrp);
 }
 
 void
 inteldrm_free_screen(void *v, void *cookie)
 {
 	struct inteldrm_softc *dev_priv = v;
+	struct rasops_info *ri = &dev_priv->ro;
 
-	dev_priv->nscreens--;
+	return rasops_free_screen(ri, cookie);
 }
 
 int
@@ -706,6 +699,10 @@ inteldrm_show_screen(void *v, void *cookie, int waitok,
     void (*cb)(void *, int, int), void *cbarg)
 {
 	struct inteldrm_softc *dev_priv = v;
+	struct rasops_info *ri = &dev_priv->ro;
+
+	if (cookie == ri->ri_active)
+		return (0);
 
 	dev_priv->switchcb = cb;
 	dev_priv->switchcbarg = cbarg;
@@ -724,8 +721,10 @@ void
 inteldrm_doswitch(void *v, void *cookie)
 {
 	struct inteldrm_softc *dev_priv = v;
+	struct rasops_info *ri = &dev_priv->ro;
 	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
 
+	rasops_show_screen(ri, cookie, 0, NULL, NULL);
 	intel_fb_restore_mode(dev);
 
 	if (dev_priv->switchcb)
@@ -751,7 +750,7 @@ inteldrm_copycols(void *cookie, int row, int src, int dst, int num)
 	struct drm_device *dev = (struct drm_device *)sc->drmdev;
 
 	if (dev->open_count > 0 || sc->noaccel)
-		return sc->noaccel_ops.copycols(cookie, row, src, dst, num);
+		return sc->noaccel_copycols(cookie, row, src, dst, num);
 
 	num *= ri->ri_font->fontwidth;
 	src *= ri->ri_font->fontwidth;
@@ -774,7 +773,7 @@ inteldrm_erasecols(void *cookie, int row, int col, int num, long attr)
 	int bg, fg;
 
 	if (dev->open_count > 0 || sc->noaccel)
-		return sc->noaccel_ops.erasecols(cookie, row, col, num, attr);
+		return sc->noaccel_erasecols(cookie, row, col, num, attr);
 
 	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 
@@ -796,7 +795,7 @@ inteldrm_copyrows(void *cookie, int src, int dst, int num)
 	struct drm_device *dev = (struct drm_device *)sc->drmdev;
 
 	if (dev->open_count > 0 || sc->noaccel)
-		return sc->noaccel_ops.copyrows(cookie, src, dst, num);
+		return sc->noaccel_copyrows(cookie, src, dst, num);
 
 	num *= ri->ri_font->fontheight;
 	src *= ri->ri_font->fontheight;
@@ -818,7 +817,7 @@ inteldrm_eraserows(void *cookie, int row, int num, long attr)
 	int x, y, w;
 
 	if (dev->open_count > 0 || sc->noaccel)
-		return sc->noaccel_ops.eraserows(cookie, row, num, attr);
+		return sc->noaccel_eraserows(cookie, row, num, attr);
 
 	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 
@@ -1152,16 +1151,18 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 
 	intel_fb_restore_mode(dev);
 
-	ri->ri_flg = RI_CENTER;
+	ri->ri_flg = RI_CENTER | RI_VCONS;
 	rasops_init(ri, 96, 132);
 
-	dev_priv->noaccel_ops = ri->ri_ops;
-
 	ri->ri_hw = dev_priv;
-	ri->ri_ops.copyrows = inteldrm_copyrows;
-	ri->ri_ops.copycols = inteldrm_copycols;
-	ri->ri_ops.eraserows = inteldrm_eraserows;
-	ri->ri_ops.erasecols = inteldrm_erasecols;
+	dev_priv->noaccel_copyrows = ri->ri_copyrows;
+	dev_priv->noaccel_copycols = ri->ri_copycols;
+	dev_priv->noaccel_eraserows = ri->ri_eraserows;
+	dev_priv->noaccel_erasecols = ri->ri_erasecols;
+	ri->ri_copyrows = inteldrm_copyrows;
+	ri->ri_copycols = inteldrm_copycols;
+	ri->ri_eraserows = inteldrm_eraserows;
+	ri->ri_erasecols = inteldrm_erasecols;
 
 	inteldrm_stdscreen.capabilities = ri->ri_caps;
 	inteldrm_stdscreen.nrows = ri->ri_rows;
@@ -1179,8 +1180,9 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	if (wsdisplay_console_initted) {
 		long defattr;
 
-		ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
-		wsdisplay_cnattach(&inteldrm_stdscreen, ri, 0, 0, defattr);
+		ri->ri_ops.alloc_attr(ri->ri_active, 0, 0, 0, &defattr);
+		wsdisplay_cnattach(&inteldrm_stdscreen, ri->ri_active,
+		    0, 0, defattr);
 		aa.console = 1;
 	}
 
@@ -1306,7 +1308,7 @@ inteldrm_doioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 		case DRM_IOCTL_I915_GEM_THROTTLE:
 			return (i915_gem_ring_throttle(dev, file_priv));
 		case DRM_IOCTL_I915_GEM_MMAP:
-			return (i915_gem_gtt_map_ioctl(dev, data, file_priv));
+			return (i915_gem_mmap_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_MMAP_GTT:
 			return (i915_gem_mmap_gtt_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_CREATE:
@@ -1329,6 +1331,8 @@ inteldrm_doioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			return (intel_get_pipe_from_crtc_id(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_MADVISE:
 			return (i915_gem_madvise_ioctl(dev, data, file_priv));
+		case DRM_IOCTL_I915_GEM_SW_FINISH:
+			return (i915_gem_sw_finish_ioctl(dev, data, file_priv));
 		default:
 			break;
 		}
@@ -1469,57 +1473,6 @@ inteldrm_set_max_obj_size(struct inteldrm_softc *dev_priv)
 	dev_priv->max_gem_obj_size = (dev->gtt_total -
 	    atomic_read(&dev->pin_memory)) * 3 / 4 / 2;
 
-}
-
-int
-i915_gem_gtt_map_ioctl(struct drm_device *dev, void *data,
-    struct drm_file *file_priv)
-{
-	struct drm_i915_gem_mmap	*args = data;
-	struct drm_obj			*obj;
-	struct drm_i915_gem_object	*obj_priv;
-	vaddr_t				 addr;
-	voff_t				 offset;
-	vsize_t				 end, nsize;
-	int				 ret;
-
-	obj = drm_gem_object_lookup(dev, file_priv, args->handle);
-	if (obj == NULL)
-		return (EBADF);
-
-	/* Since we are doing purely uvm-related operations here we do
-	 * not need to hold the object, a reference alone is sufficient
-	 */
-	obj_priv = to_intel_bo(obj);
-
-	/* Check size. Also ensure that the object is not purgeable */
-	if (args->size == 0 || args->offset > obj->size || args->size >
-	    obj->size || (args->offset + args->size) > obj->size ||
-	    i915_gem_object_is_purgeable(obj_priv)) {
-		ret = EINVAL;
-		goto done;
-	}
-
-	end = round_page(args->offset + args->size);
-	offset = trunc_page(args->offset);
-	nsize = end - offset;
-
-	/*
-	 * We give our reference from object_lookup to the mmap, so only
-	 * must free it in the case that the map fails.
-	 */
-	addr = 0;
-	ret = uvm_map(&curproc->p_vmspace->vm_map, &addr, nsize, &obj->uobj,
-	    offset, 0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
-	    UVM_INH_SHARE, UVM_ADV_RANDOM, 0));
-
-done:
-	if (ret == 0)
-		args->addr_ptr = (uint64_t) addr + (args->offset & PAGE_MASK);
-	else
-		drm_unref(&obj->uobj);
-
-	return (ret);
 }
 
 struct drm_obj *

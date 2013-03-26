@@ -1,4 +1,4 @@
-/*	$OpenBSD: malloc.h,v 1.101 2013/02/07 11:06:42 mikeb Exp $	*/
+/*	$OpenBSD: malloc.h,v 1.103 2013/03/26 16:36:01 tedu Exp $	*/
 /*	$NetBSD: malloc.h,v 1.39 1998/07/12 19:52:01 augustss Exp $	*/
 
 /*
@@ -34,6 +34,8 @@
 
 #ifndef _SYS_MALLOC_H_
 #define	_SYS_MALLOC_H_
+
+#include <sys/queue.h>
 
 #define KERN_MALLOC_BUCKETS	1
 #define KERN_MALLOC_BUCKET	2
@@ -340,11 +342,25 @@ struct kmemusage {
 #define	ku_pagecnt ku_un.pagecnt
 
 /*
+ * Normally the freelist structure is used only to hold the list pointer
+ * for free objects.  However, when running with diagnostics, the first
+ * 8 bytes of the structure is unused except for diagnostic information,
+ * and the free list pointer is at offset 8 in the structure.  Since the
+ * first 8 bytes is the portion of the structure most often modified, this
+ * helps to detect memory reuse problems and avoid free list corruption.
+ */
+struct kmem_freelist {
+	int32_t	kf_spare0;
+	int16_t	kf_type;
+	int16_t	kf_spare1;
+	SIMPLEQ_ENTRY(kmem_freelist) kf_flist;
+};
+
+/*
  * Set of buckets for each size of memory block that is retained
  */
 struct kmembuckets {
-	caddr_t   kb_next;	/* list of free blocks */
-	caddr_t   kb_last;	/* last free block */
+	SIMPLEQ_HEAD(, kmem_freelist) kb_freelist; /* list of free blocks */
 	u_int64_t kb_calls;	/* total calls to allocate this size */
 	u_int64_t kb_total;	/* total number of blocks allocated */
 	u_int64_t kb_totalfree;	/* # of free elements in this bucket */
@@ -353,15 +369,33 @@ struct kmembuckets {
 	u_int64_t kb_couldfree;	/* over high water mark and could free */
 };
 
+/*
+ * Constants for setting the parameters of the kernel memory allocator.
+ *
+ * 2 ** MINBUCKET is the smallest unit of memory that will be
+ * allocated. It must be at least large enough to hold a pointer.
+ *
+ * Units of memory less or equal to MAXALLOCSAVE will permanently
+ * allocate physical memory; requests for these size pieces of
+ * memory are quite fast. Allocations greater than MAXALLOCSAVE must
+ * always allocate and free physical memory; requests for these
+ * size allocations should be done infrequently as they will be slow.
+ *
+ * Constraints: PAGE_SIZE <= MAXALLOCSAVE <= 2 ** (MINBUCKET + 14), and
+ * MAXALLOCSIZE must be a power of two.
+ */
+#define MINBUCKET	4		/* 4 => min allocation of 16 bytes */
+
 #ifdef _KERNEL
 
 #define	MINALLOCSIZE	(1 << MINBUCKET)
+#define	MAXALLOCSAVE	(2 * PAGE_SIZE)
 
 /*
  * Turn virtual addresses into kmem map indices
  */
-#define	kmemxtob(alloc)	(kmembase + (alloc) * NBPG)
-#define	btokmemx(addr)	(((caddr_t)(addr) - kmembase) / NBPG)
+#define	kmemxtob(alloc)	(kmembase + (alloc) * PAGE_SIZE)
+#define	btokmemx(addr)	(((caddr_t)(addr) - kmembase) / PAGE_SIZE)
 #define	btokup(addr)	(&kmemusage[((caddr_t)(addr) - kmembase) >> PAGE_SHIFT])
 
 extern struct kmemstats kmemstats[];

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem.c,v 1.1 2013/03/18 12:36:52 jsg Exp $	*/
+/*	$OpenBSD: i915_gem.c,v 1.4 2013/03/22 22:51:00 kettenis Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -310,13 +310,6 @@ i915_gem_object_needs_bit17_swizzle(struct drm_i915_gem_object *obj)
 		obj->tiling_mode != I915_TILING_NONE;
 }
 
-// __copy_to_user_swizzled
-// __copy_from_user_swizzled
-// shmem_pread_fast
-// shmem_clflush_swizzled_range
-// shmem_pread_slow
-// i915_gem_shmem_pread
-
 /**
  * Reads data from the object referenced by handle.
  *
@@ -383,12 +376,6 @@ out:
 
 	return (ret);
 }
-
-// fast_user_write
-// i915_gem_gtt_pwrite_fast
-// shmem_pwrite_fast
-// shmem_pwrite_slow
-// i915_gem_shmem_pwrite
 
 /**
  * Writes data to the object referenced by handle.
@@ -657,8 +644,92 @@ unlock:
 	return ret;
 }
 
-// i915_gem_sw_finish_ioctl
-// i915_gem_mmap_ioctl
+/**
+ * Called when user space has done writes to this buffer
+ */
+int
+i915_gem_sw_finish_ioctl(struct drm_device *dev, void *data,
+			 struct drm_file *file)
+{
+	struct drm_i915_gem_sw_finish *args = data;
+	struct drm_i915_gem_object *obj;
+	int ret = 0;
+
+	ret = i915_mutex_lock_interruptible(dev);
+	if (ret)
+		return ret;
+
+	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
+	if (&obj->base == NULL) {
+		ret = ENOENT;
+		goto unlock;
+	}
+
+	/* Pinned buffers may be scanout, so flush the cache */
+	if (obj->pin_count)
+		i915_gem_object_flush_cpu_write_domain(obj);
+
+	drm_gem_object_unreference(&obj->base);
+unlock:
+	DRM_UNLOCK();
+	return ret;
+}
+
+/**
+ * Maps the contents of an object, returning the address it is mapped
+ * into.
+ *
+ * While the mapping holds a reference on the contents of the object, it doesn't
+ * imply a ref on the object itself.
+ */
+int
+i915_gem_mmap_ioctl(struct drm_device *dev, void *data,
+		    struct drm_file *file)
+{
+	struct drm_i915_gem_mmap *args = data;
+	struct drm_obj *obj;
+	vaddr_t addr;
+	voff_t offset;
+	vsize_t end, nsize;
+	int ret;
+
+	obj = drm_gem_object_lookup(dev, file, args->handle);
+	if (obj == NULL)
+		return ENOENT;
+
+	/* Since we are doing purely uvm-related operations here we do
+	 * not need to hold the object, a reference alone is sufficient
+	 */
+
+	/* Check size. Also ensure that the object is not purgeable */
+	if (args->size == 0 || args->offset > obj->size || args->size >
+	    obj->size || (args->offset + args->size) > obj->size ||
+	    i915_gem_object_is_purgeable(to_intel_bo(obj))) {
+		ret = EINVAL;
+		goto done;
+	}
+
+	end = round_page(args->offset + args->size);
+	offset = trunc_page(args->offset);
+	nsize = end - offset;
+
+	/*
+	 * We give our reference from object_lookup to the mmap, so only
+	 * must free it in the case that the map fails.
+	 */
+	addr = 0;
+	ret = uvm_map(&curproc->p_vmspace->vm_map, &addr, nsize, &obj->uobj,
+	    offset, 0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
+	    UVM_INH_SHARE, UVM_ADV_RANDOM, 0));
+
+done:
+	if (ret == 0)
+		args->addr_ptr = (uint64_t) addr + (args->offset & PAGE_MASK);
+	else
+		drm_unref(&obj->uobj);
+
+	return (ret);
+}
 
 int
 i915_gem_fault(struct drm_obj *gem_obj, struct uvm_faultinfo *ufi,

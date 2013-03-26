@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.19 2013/03/21 15:50:28 deraadt Exp $	*/
+/*	$OpenBSD: param.h,v 1.22 2013/03/26 05:04:10 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -30,9 +30,10 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)param.h     5.8 (Berkeley) 6/28/91
  */
+
+#ifndef	_MACHINE_PARAM_H_
+#define	_MACHINE_PARAM_H_
 
 #ifdef _KERNEL
 #ifdef _LOCORE
@@ -46,69 +47,43 @@
 #define	MACHINE		"amd64"
 #define	_MACHINE_ARCH	amd64
 #define	MACHINE_ARCH	"amd64"
-#define MID_MACHINE	MID_AMD64
+#define	MID_MACHINE	MID_AMD64
 
-#define	ALIGNBYTES		_ALIGNBYTES
-#define	ALIGN(p)		_ALIGN(p)
-#define	ALIGNED_POINTER(p,t)	_ALIGNED_POINTER(p,t)
+#define	PAGE_SHIFT	12
+#define	PAGE_SIZE	(1 << PAGE_SHIFT)
+#define	PAGE_MASK	(PAGE_SIZE - 1)
 
-#define	PGSHIFT		12		/* LOG2(NBPG) */
-#define	NBPG		(1 << PGSHIFT)	/* bytes/page */
-#define	PGOFSET		(NBPG-1)	/* byte offset into page */
+#define	KERNBASE	0xffffffff80000000	/* start of kernel virtual space */
 
-#define PAGE_SHIFT	12
-#define PAGE_SIZE	(1 << PAGE_SHIFT)
-#define PAGE_MASK	(PAGE_SIZE - 1)
+#ifdef _KERNEL
 
-#define	NPTEPG		(NBPG/(sizeof (pt_entry_t)))
+#define	KERNTEXTOFF	(KERNBASE+0x1000000)	/* start of kernel text */
+#define	KERNTEXTOFF_HI	0xffffffff
+#define	KERNTEXTOFF_LO	0x81000000
 
-#define	KERNBASE	0xffffffff80000000 /* start of kernel virtual space */
-#define KERNTEXTOFF	(KERNBASE+0x1000000)	/* start of kernel text */
+#define	KERNBASE_HI	0xffffffff
+#define	KERNBASE_LO	0x80000000
 
-#define KERNTEXTOFF_HI	0xffffffff
-#define KERNTEXTOFF_LO	0x81000000
+#define	NBPG		PAGE_SIZE		/* bytes/page */
+#define	PGSHIFT		PAGE_SHIFT		/* LOG2(PAGE_SIZE) */
+#define	PGOFSET		PAGE_MASK		/* byte offset into page */
 
-#define KERNBASE_HI	0xffffffff
-#define KERNBASE_LO	0x80000000
+#define	UPAGES		5			/* pages of u-area */
+#define	USPACE		(UPAGES * PAGE_SIZE)	/* total size of u-area */
+#define	USPACE_ALIGN	0			/* u-area alignment 0-none */
 
-#define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
-#define	DEV_BSIZE	(1 << DEV_BSHIFT)
-#define	BLKDEV_IOSIZE	2048
-#ifndef	MAXPHYS
-#define	MAXPHYS		(64 * 1024)	/* max raw I/O transfer size */
-#endif
+#define	NMBCLUSTERS	6144			/* map size, max cluster allocation */
 
-#define	UPAGES		5		/* pages of u-area */
-#define	USPACE		(UPAGES * NBPG)	/* total size of u-area */
-#define	USPACE_ALIGN	(0)		/* u-area alignment 0-none */
-
-#ifndef MSGBUFSIZE
-#define MSGBUFSIZE	16*NBPG		/* default message buffer size */
+#ifndef	MSGBUFSIZE
+#define	MSGBUFSIZE	(16 * PAGE_SIZE)	/* default message buffer size */
 #endif
 
 /*
- * Constants related to network buffer management.
- */
-#define	NMBCLUSTERS	6144		/* map size, max cluster allocation */
-
-/*
- * Minimum and maximum sizes of the kernel malloc arena in PAGE_SIZE-sized
+ * Maximum size of the kernel malloc arena in PAGE_SIZE-sized
  * logical pages.
  */
-#define	NKMEMPAGES_MIN_DEFAULT	((8 * 1024 * 1024) >> PAGE_SHIFT)
 #define	NKMEMPAGES_MAX_DEFAULT	((128 * 1024 * 1024) >> PAGE_SHIFT)
 
-/* pages ("clicks") to disk blocks */
-#define	ctod(x)		((x) << (PGSHIFT - DEV_BSHIFT))
-#define	dtoc(x)		((x) >> (PGSHIFT - DEV_BSHIFT))
+#endif /* _KERNEL */
 
-/* bytes to disk blocks */
-#define	dbtob(x)	((x) << DEV_BSHIFT)
-#define	btodb(x)	((x) >> DEV_BSHIFT)
-
-/*
- * Mach derived conversion macros
- */
-#define	x86_round_pdr(x) \
-	((((unsigned long)(x)) + (NBPD_L2 - 1)) & ~(NBPD_L2 - 1))
-#define	x86_trunc_pdr(x)	((unsigned long)(x) & ~(NBPD_L2 - 1))
+#endif /* _MACHINE_PARAM_H_ */

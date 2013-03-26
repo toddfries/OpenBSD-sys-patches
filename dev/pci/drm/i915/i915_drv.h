@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.h,v 1.3 2013/03/21 08:27:32 jsg Exp $ */
+/* $OpenBSD: i915_drv.h,v 1.6 2013/03/25 19:50:56 kettenis Exp $ */
 /* i915_drv.h -- Private header for the I915 driver -*- linux-c -*-
  */
 /*
@@ -512,8 +512,11 @@ struct inteldrm_softc {
 	struct workq_task	 switchwqt;
 	struct rasops_info	 ro;
 
-	int			 noaccel;
-	struct wsdisplay_emulops noaccel_ops;
+	int	noaccel;
+	int	(*noaccel_copycols)(void *, int, int, int, int);
+	int	(*noaccel_erasecols)(void *, int, int, int, long);
+	int	(*noaccel_copyrows)(void *, int, int, int);
+	int	(*noaccel_eraserows)(void *, int, int, long);
 
 	uint32_t		 gpio_mmio_base;
 
@@ -1037,9 +1040,10 @@ int	i915_gem_get_aperture_ioctl(struct drm_device *, void *,
 	    struct drm_file *);
 int	i915_gem_set_tiling(struct drm_device *, void *, struct drm_file *);
 int	i915_gem_get_tiling(struct drm_device *, void *, struct drm_file *);
-int	i915_gem_gtt_map_ioctl(struct drm_device *, void *, struct drm_file *);
+int	i915_gem_mmap_ioctl(struct drm_device *, void *, struct drm_file *);
 int	i915_gem_mmap_gtt_ioctl(struct drm_device *, void *, struct drm_file *);
 int	i915_gem_madvise_ioctl(struct drm_device *, void *, struct drm_file *);
+int	i915_gem_sw_finish_ioctl(struct drm_device *, void *, struct drm_file *);
 
 /* GEM memory manager functions */
 int	i915_gem_init_object(struct drm_obj *);
