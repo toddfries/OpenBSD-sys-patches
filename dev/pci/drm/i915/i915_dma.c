@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_dma.c,v 1.2 2013/03/20 12:37:41 jsg Exp $	*/
+/*	$OpenBSD: i915_dma.c,v 1.5 2013/03/27 12:37:49 jsg Exp $	*/
 /* i915_dma.c -- DMA support for the I915 -*- linux-c -*-
  */
 /*
@@ -94,10 +94,10 @@ i915_getparam(struct inteldrm_softc *dev_priv, void *data)
 		value = 1;
 		break;
 	case I915_PARAM_HAS_BSD:
-		value = HAS_BSD(dev);
+		value = intel_ring_initialized(&dev_priv->rings[VCS]);
 		break;
 	case I915_PARAM_HAS_BLT:
-		value = HAS_BLT(dev);
+		value = intel_ring_initialized(&dev_priv->rings[BCS]);
 		break;
 	case I915_PARAM_HAS_RELAXED_FENCING:
 #ifdef notyet
@@ -105,6 +105,9 @@ i915_getparam(struct inteldrm_softc *dev_priv, void *data)
 #else
 		return EINVAL;
 #endif
+		break;
+	case I915_PARAM_HAS_COHERENT_RINGS:
+		value = 1;
 		break;
 	case I915_PARAM_HAS_EXEC_CONSTANTS:
 		value = INTEL_INFO(dev)->gen >= 4;
@@ -117,6 +120,12 @@ i915_getparam(struct inteldrm_softc *dev_priv, void *data)
 		break;
 	case I915_PARAM_HAS_SEMAPHORES:
 		value = i915_semaphore_is_enabled(dev);
+		break;
+	case I915_PARAM_HAS_SECURE_BATCHES:
+		value = DRM_SUSER(curproc);
+		break;
+	case I915_PARAM_HAS_PINNED_BATCHES:
+		value = 1;
 		break;
 	default:
 		DRM_DEBUG("Unknown parameter %d\n", param->param);
