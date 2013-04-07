@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_input.c,v 1.108 2012/09/26 14:53:23 markus Exp $	*/
+/*	$OpenBSD: ipsec_input.c,v 1.111 2013/03/31 00:59:52 bluhm Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -42,9 +42,9 @@
 #include <sys/protosw.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/kernel.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -137,6 +137,9 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 
 	if ((sproto == IPPROTO_ESP && !esp_enable) ||
 	    (sproto == IPPROTO_AH && !ah_enable) ||
+#if NPF > 0
+	    (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) ||
+#endif
 	    (sproto == IPPROTO_IPCOMP && !ipcomp_enable)) {
 		switch (af) {
 #ifdef INET

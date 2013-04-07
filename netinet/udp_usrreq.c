@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.154 2013/03/14 11:18:37 mpi Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.159 2013/04/04 19:23:39 bluhm Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -259,12 +259,6 @@ udp_input(struct mbuf *m, ...)
 	if (ip)
 		save_ip = *ip;
 
-	/*
-	 * Checksum extended UDP header and data.
-	 * from W.R.Stevens: check incoming udp cksums even if
-	 *	udpcksum is not set.
-	 */
-	savesum = uh->uh_sum;
 #ifdef INET6
 	if (ip6) {
 		/* Be proactive about malicious use of IPv4 mapped address */
@@ -273,56 +267,55 @@ udp_input(struct mbuf *m, ...)
 			/* XXX stat */
 			goto bad;
 		}
+	}
+#endif /* INET6 */
 
+	/*
+	 * Checksum extended UDP header and data.
+	 * from W.R.Stevens: check incoming udp cksums even if
+	 *	udpcksum is not set.
+	 */
+	savesum = uh->uh_sum;
+	if (uh->uh_sum == 0) {
+		udpstat.udps_nosum++;
+#ifdef INET6
 		/*
 		 * In IPv6, the UDP checksum is ALWAYS used.
 		 */
-		if (uh->uh_sum == 0) {
-			udpstat.udps_nosum++;
+		if (ip6)
 			goto bad;
-		}
-		if ((m->m_pkthdr.csum_flags & M_UDP_CSUM_IN_OK) == 0) {
-			if (m->m_pkthdr.csum_flags & M_UDP_CSUM_IN_BAD) {
-				udpstat.udps_badsum++;
-				udpstat.udps_inhwcsum++;
-				goto bad;
-			}
-
-			if ((uh->uh_sum = in6_cksum(m, IPPROTO_UDP,
-			    iphlen, len))) {
-				udpstat.udps_badsum++;
-				goto bad;
-			}
-		} else {
-			m->m_pkthdr.csum_flags &= ~M_UDP_CSUM_IN_OK;
-			udpstat.udps_inhwcsum++;
-		}
-	} else
 #endif /* INET6 */
-	if (uh->uh_sum) {
+	} else {
 		if ((m->m_pkthdr.csum_flags & M_UDP_CSUM_IN_OK) == 0) {
 			if (m->m_pkthdr.csum_flags & M_UDP_CSUM_IN_BAD) {
 				udpstat.udps_badsum++;
 				udpstat.udps_inhwcsum++;
-				m_freem(m);
-				return;
+				goto bad;
 			}
 
-			if ((uh->uh_sum = in4_cksum(m, IPPROTO_UDP,
-			    iphlen, len))) {
+			if (ip)
+				uh->uh_sum = in4_cksum(m, IPPROTO_UDP,
+				    iphlen, len);
+#ifdef INET6
+			else if (ip6)
+				uh->uh_sum = in6_cksum(m, IPPROTO_UDP,
+				    iphlen, len);
+#endif /* INET6 */
+			if (uh->uh_sum != 0) {
 				udpstat.udps_badsum++;
-				m_freem(m);
-				return;
+				goto bad;
 			}
 		} else {
 			m->m_pkthdr.csum_flags &= ~M_UDP_CSUM_IN_OK;
 			udpstat.udps_inhwcsum++;
 		}
-	} else
-		udpstat.udps_nosum++;
+	}
 
 #ifdef IPSEC
 	if (udpencap_enable && udpencap_port &&
+#if NPF > 0
+	    !(m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) &&
+#endif
 	    uh->uh_dport == htons(udpencap_port)) {
 		u_int32_t spi;
 		int skip = iphlen + sizeof(struct udphdr);
@@ -549,7 +542,7 @@ udp_input(struct mbuf *m, ...)
 	 */
 #if 0
 	if (m->m_pkthdr.pf.statekey)
-		inp = ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp;
+		inp = m->m_pkthdr.pf.statekey->inp;
 #endif
 	if (inp == NULL) {
 #ifdef INET6
@@ -562,8 +555,7 @@ udp_input(struct mbuf *m, ...)
 		    ip->ip_dst, uh->uh_dport, m->m_pkthdr.rdomain);
 #if NPF > 0
 		if (m->m_pkthdr.pf.statekey && inp) {
-			((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp =
-			    inp;
+			m->m_pkthdr.pf.statekey->inp = inp;
 			inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
 		}
 #endif
@@ -1151,20 +1143,18 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 			break;
 		}
 		s = splsoftnet();
-		error = in_pcballoc(so, &udbtable);
+		if ((error = soreserve(so, udp_sendspace, udp_recvspace)) ||
+		    (error = in_pcballoc(so, &udbtable))) {
+			splx(s);
+			break;
+		}
 		splx(s);
-		if (error)
-			break;
-		error = soreserve(so, udp_sendspace, udp_recvspace);
-		if (error)
-			break;
 #ifdef INET6
-		if (((struct inpcb *)so->so_pcb)->inp_flags & INP_IPV6)
-			((struct inpcb *) so->so_pcb)->inp_ipv6.ip6_hlim =
-			    ip6_defhlim;
+		if (sotoinpcb(so)->inp_flags & INP_IPV6)
+			sotoinpcb(so)->inp_ipv6.ip6_hlim = ip6_defhlim;
 		else
 #endif /* INET6 */
-			((struct inpcb *) so->so_pcb)->inp_ip.ip_ttl = ip_defttl;
+			sotoinpcb(so)->inp_ip.ip_ttl = ip_defttl;
 		break;
 
 	case PRU_DETACH:

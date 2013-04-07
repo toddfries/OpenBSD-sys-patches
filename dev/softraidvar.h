@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.129 2013/03/25 16:01:49 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.133 2013/03/31 11:37:40 jsing Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -382,9 +382,10 @@ struct sr_workunit {
 
 	int			swu_flags;	/* additional hints */
 #define SR_WUF_REBUILD		(1<<0)		/* rebuild io */
-#define SR_WUF_REBUILDIOCOMP	(1<<1)		/* rbuild io complete */
+#define SR_WUF_REBUILDIOCOMP	(1<<1)		/* rebuild io complete */
 #define SR_WUF_FAIL		(1<<2)		/* RAID6: failure */
 #define SR_WUF_FAILIOCOMP	(1<<3)
+#define SR_WUF_WAKEUP		(1<<4)		/* Wakeup on I/O completion. */
 
 	int			swu_fake;	/* faked wu */
 	/* workunit io range */
@@ -583,7 +584,7 @@ struct sr_discipline {
 	int			(*sd_assemble)(struct sr_discipline *,
 				    struct bioc_createraid *, int, void *);
 	int			(*sd_alloc_resources)(struct sr_discipline *);
-	int			(*sd_free_resources)(struct sr_discipline *);
+	void			(*sd_free_resources)(struct sr_discipline *);
 	int			(*sd_ioctl_handler)(struct sr_discipline *,
 				    struct bioc_discipline *);
 	int			(*sd_start_discipline)(struct sr_discipline *);
@@ -687,6 +688,9 @@ int			sr_validate_io(struct sr_workunit *, daddr64_t *,
 int			sr_check_io_collision(struct sr_workunit *);
 void			sr_scsi_done(struct sr_discipline *,
 			    struct scsi_xfer *);
+struct sr_workunit	*sr_scsi_wu_get(struct sr_discipline *, int);
+void			sr_scsi_wu_put(struct sr_discipline *,
+			    struct sr_workunit *);
 int			sr_chunk_in_use(struct sr_softc *, dev_t);
 
 /* discipline functions */
@@ -696,6 +700,7 @@ int			sr_raid_tur(struct sr_workunit *);
 int			sr_raid_request_sense( struct sr_workunit *);
 int			sr_raid_start_stop(struct sr_workunit *);
 int			sr_raid_sync(struct sr_workunit *);
+void			sr_raid_intr(struct buf *);
 void			sr_raid_startwu(struct sr_workunit *);
 void			sr_raid_recreate_wu(struct sr_workunit *);
 

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.36 2013/03/27 14:30:11 jsing Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.44 2013/03/31 15:44:52 jsing Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -53,8 +53,7 @@ int	sr_raid6_create(struct sr_discipline *, struct bioc_createraid *,
 	    int, int64_t);
 int	sr_raid6_assemble(struct sr_discipline *, struct bioc_createraid *,
 	    int, void *);
-int	sr_raid6_alloc_resources(struct sr_discipline *);
-int	sr_raid6_free_resources(struct sr_discipline *);
+int	sr_raid6_init(struct sr_discipline *);
 int	sr_raid6_rw(struct sr_workunit *);
 int	sr_raid6_openings(struct sr_discipline *);
 void	sr_raid6_intr(struct buf *);
@@ -104,10 +103,8 @@ sr_raid6_discipline_init(struct sr_discipline *sd)
 	sd->sd_max_wu = SR_RAID6_NOWU;
 
 	/* Setup discipline specific function pointers. */
-	sd->sd_alloc_resources = sr_raid6_alloc_resources;
 	sd->sd_assemble = sr_raid6_assemble;
 	sd->sd_create = sr_raid6_create;
-	sd->sd_free_resources = sr_raid6_free_resources;
 	sd->sd_openings = sr_raid6_openings;
 	sd->sd_scsi_rw = sr_raid6_rw;
 	sd->sd_scsi_intr = sr_raid6_intr;
@@ -119,29 +116,41 @@ int
 sr_raid6_create(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, int64_t coerced_size)
 {
-
-	if (no_chunk < 4)
+	if (no_chunk < 4) {
+		sr_error(sd->sd_sc, "%s requires four or more chunks",
+		    sd->sd_name);
 		return EINVAL;
+	}
 
 	/*
 	 * XXX add variable strip size later even though MAXPHYS is really
 	 * the clever value, users like * to tinker with that type of stuff.
 	 */
-        sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
-        sd->sd_meta->ssdi.ssd_size = (coerced_size &
+	sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
+	sd->sd_meta->ssdi.ssd_size = (coerced_size &
 	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) *
 	    (no_chunk - 2);
 
-	/* only if stripsize <= MAXPHYS */
-	sd->sd_max_ccb_per_wu = max(6, 2 * no_chunk);
-
-	return 0;
+	return sr_raid6_init(sd);
 }
 
 int
 sr_raid6_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, void *data)
 {
+	return sr_raid6_init(sd);
+}
+
+int
+sr_raid6_init(struct sr_discipline *sd)
+{
+	/* Initialise runtime values. */
+	sd->mds.mdd_raid6.sr6_strip_bits =
+	    sr_validate_stripsize(sd->sd_meta->ssdi.ssd_strip_size);
+	if (sd->mds.mdd_raid6.sr6_strip_bits == -1) {
+		sr_error(sd->sd_sc, "invalid strip size");
+		return EINVAL;
+	}
 
 	/* only if stripsize <= MAXPHYS */
 	sd->sd_max_ccb_per_wu = max(6, 2 * sd->sd_meta->ssdi.ssd_chunk_no);
@@ -153,45 +162,6 @@ int
 sr_raid6_openings(struct sr_discipline *sd)
 {
 	return (sd->sd_max_wu >> 1); /* 2 wu's per IO */
-}
-
-int
-sr_raid6_alloc_resources(struct sr_discipline *sd)
-{
-	int			rv = EINVAL;
-
-	DNPRINTF(SR_D_DIS, "%s: sr_raid6_alloc_resources\n",
-	    DEVNAME(sd->sd_sc));
-
-	if (sr_wu_alloc(sd))
-		goto bad;
-	if (sr_ccb_alloc(sd))
-		goto bad;
-
-	/* setup runtime values */
-	sd->mds.mdd_raid6.sr6_strip_bits =
-	    sr_validate_stripsize(sd->sd_meta->ssdi.ssd_strip_size);
-	if (sd->mds.mdd_raid6.sr6_strip_bits == -1)
-		goto bad;
-
-	rv = 0;
-bad:
-	return (rv);
-}
-
-int
-sr_raid6_free_resources(struct sr_discipline *sd)
-{
-	int			rv = EINVAL;
-
-	DNPRINTF(SR_D_DIS, "%s: sr_raid6_free_resources\n",
-	    DEVNAME(sd->sd_sc));
-
-	sr_wu_free(sd);
-	sr_ccb_free(sd);
-
-	rv = 0;
-	return (rv);
 }
 
 void
@@ -395,7 +365,7 @@ die:
 
 /*  modes:
  *   readq: sr_raid6_addio(i, lba, length, NULL, SCSI_DATA_IN,
- *	        SR_CCBF_FREEBUF, qbuf, NULL, 0);
+ *		SR_CCBF_FREEBUF, qbuf, NULL, 0);
  *   readp: sr_raid6_addio(i, lba, length, NULL, SCSI_DATA_IN,
  *		SR_CCBF_FREEBUF, pbuf, NULL, 0);
  *   readx: sr_raid6_addio(i, lba, length, NULL, SCSI_DATA_IN,
@@ -413,7 +383,7 @@ sr_raid6_rw(struct sr_workunit *wu)
 	daddr64_t		blk, lbaoffs, strip_no, chunk, qchunk, pchunk, fchunk;
 	daddr64_t		strip_size, no_chunk, lba, chunk_offs, phys_offs;
 	daddr64_t		strip_bits, length, strip_offs, datalen, row_size;
-	void		        *pbuf, *data, *qbuf;
+	void			*pbuf, *data, *qbuf;
 
 	/* blk and scsi error will be handled by sr_validate_io */
 	if (sr_validate_io(wu, &blk, "sr_raid6_rw"))
@@ -430,7 +400,7 @@ sr_raid6_rw(struct sr_workunit *wu)
 
 	if (xs->flags & SCSI_DATA_OUT)
 		/* create write workunit */
-		if ((wu_r = scsi_io_get(&sd->sd_iopool, SCSI_NOSLEEP)) == NULL){
+		if ((wu_r = sr_scsi_wu_get(sd, SCSI_NOSLEEP)) == NULL){
 			printf("%s: can't get wu_r", DEVNAME(sd->sd_sc));
 			goto bad;
 		}
@@ -689,7 +659,7 @@ queued:
 bad:
 	/* wu is unwound by sr_wu_put */
 	if (wu_r)
-		scsi_io_put(&sd->sd_iopool, wu_r);
+		sr_scsi_wu_put(sd, wu_r);
 	return (1);
 }
 
@@ -721,52 +691,32 @@ sr_raid6_intr(struct buf *bp)
 	struct sr_raid6_opaque  *pq = ccb->ccb_opaque;
 	int			s;
 
-	DNPRINTF(SR_D_INTR, "%s: sr_intr bp %p xs %p\n",
+	DNPRINTF(SR_D_INTR, "%s: sr_raid6_intr bp %p xs %p\n",
 	    DEVNAME(sc), bp, xs);
-
-	DNPRINTF(SR_D_INTR, "%s: sr_intr: b_bcount: %d b_resid: %d"
-	    " b_flags: 0x%0x block: %lld target: %d\n", DEVNAME(sc),
-	    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_resid, ccb->ccb_buf.b_flags,
-	    ccb->ccb_buf.b_blkno, ccb->ccb_target);
 
 	s = splbio();
 
-	if (ccb->ccb_buf.b_flags & B_ERROR) {
-		DNPRINTF(SR_D_INTR, "%s: i/o error on block %lld target: %d\n",
-		    DEVNAME(sc), ccb->ccb_buf.b_blkno, ccb->ccb_target);
-		printf("io error: disk %x\n", ccb->ccb_target);
-		wu->swu_ios_failed++;
-		ccb->ccb_state = SR_CCB_FAILED;
-		if (ccb->ccb_target != -1)
-			sd->sd_set_chunk_state(sd, ccb->ccb_target,
-			    BIOC_SDOFFLINE);
-		else
-			panic("%s: invalid target on wu: %p", DEVNAME(sc), wu);
-	} else {
-		ccb->ccb_state = SR_CCB_OK;
-		wu->swu_ios_succeeded++;
+	sr_ccb_done(ccb);
 
-		/* XOR data to result */
-		if (pq) {
-			if (pq->pbuf)
-				/* Calculate xor-parity */
-				sr_raid6_xorp(pq->pbuf, ccb->ccb_buf.b_data,
-				    ccb->ccb_buf.b_bcount);
-			if (pq->qbuf)
-				/* Calculate q-parity */
-				sr_raid6_xorq(pq->qbuf, ccb->ccb_buf.b_data,
-				    ccb->ccb_buf.b_bcount, pq->gn);
-			free(pq, M_DEVBUF);
-			ccb->ccb_opaque = NULL;
-		}
+	/* XOR data to result. */
+	if (ccb->ccb_state == SR_CCB_OK && pq) {
+		if (pq->pbuf)
+			/* Calculate xor-parity */
+			sr_raid6_xorp(pq->pbuf, ccb->ccb_buf.b_data,
+			    ccb->ccb_buf.b_bcount);
+		if (pq->qbuf)
+			/* Calculate q-parity */
+			sr_raid6_xorq(pq->qbuf, ccb->ccb_buf.b_data,
+			    ccb->ccb_buf.b_bcount, pq->gn);
+		free(pq, M_DEVBUF);
+		ccb->ccb_opaque = NULL;
 	}
 
-	/* free allocated data buffer */
+	/* Free allocated data buffer. */
 	if (ccb->ccb_flag & SR_CCBF_FREEBUF) {
 		sr_put_block(sd, ccb->ccb_buf.b_data, ccb->ccb_buf.b_bcount);
 		ccb->ccb_buf.b_data = NULL;
 	}
-	wu->swu_ios_complete++;
 
 	DNPRINTF(SR_D_INTR, "%s: sr_intr: comp: %d count: %d failed: %d\n",
 	    DEVNAME(sc), wu->swu_ios_complete, wu->swu_io_count,
@@ -784,8 +734,7 @@ sr_raid6_intr(struct buf *bp)
 		if (xs->flags & SCSI_DATA_IN) {
 			printf("%s: retrying read on block %lld\n",
 			    DEVNAME(sc), ccb->ccb_buf.b_blkno);
-			sr_ccb_put(ccb);
-			TAILQ_INIT(&wu->swu_ccb);
+			sr_wu_release_ccbs(wu);
 			wu->swu_state = SR_WU_RESTART;
 			if (sd->sd_scsi_rw(wu) == 0)
 				goto done;
@@ -819,21 +768,17 @@ sr_raid6_intr(struct buf *bp)
 			sr_raid_startwu(wu->swu_collider);
 	}
 
-	if (wu->swu_flags & SR_WUF_REBUILD) {
-		/* XXX - decouple from SCSI_DATA_OUT. */
-		if (wu->swu_xs->flags & SCSI_DATA_OUT) {
-			wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
-			wakeup(wu);
-		}
-	} else {
-		if (xs != NULL)
+	if (wu->swu_flags & SR_WUF_REBUILD)
+		wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
+	if (wu->swu_flags & SR_WUF_WAKEUP)
+		wakeup(wu);
+	if (!(wu->swu_flags & SR_WUF_REBUILD)) {
+		if (xs == NULL) {
+			sr_scsi_wu_put(sd, wu);
+		} else {
 			sr_scsi_done(sd, xs);
-		else
-			scsi_io_put(&sd->sd_iopool, wu);
+		}
 	}
-
-	if (sd->sd_sync && sd->sd_wu_pending == 0)
-		wakeup(sd);
 
 done:
 	splx(s);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem.c,v 1.4 2013/03/22 22:51:00 kettenis Exp $	*/
+/*	$OpenBSD: i915_gem.c,v 1.9 2013/04/03 19:57:17 kettenis Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -330,7 +330,7 @@ i915_gem_pread_ioctl(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
 	if (obj == NULL)
-		return (EBADF);
+		return ENOENT;
 	DRM_READLOCK();
 	drm_hold_object(&obj->base);
 
@@ -397,7 +397,7 @@ i915_gem_pwrite_ioctl(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
 	if (obj == NULL)
-		return (EBADF);
+		return ENOENT;
 	DRM_READLOCK();
 	drm_hold_object(&obj->base);
 
@@ -623,7 +623,7 @@ i915_gem_set_domain_ioctl(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
 	if (&obj->base == NULL) {
-		ret = EBADF;
+		ret = ENOENT;
 		goto unlock;
 	}
 
@@ -996,7 +996,7 @@ i915_gem_mmap_gtt(struct drm_file *file, struct drm_device *dev,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, handle));
 	if (obj == NULL)
-		return (EBADF);
+		return ENOENT;
 
 	/* Since we are doing purely uvm-related operations here we do
 	 * not need to hold the object, a reference alone is sufficient
@@ -1340,8 +1340,6 @@ i915_add_request(struct intel_ring_buffer *ring,
 	was_empty = list_empty(&ring->request_list);
 	list_add_tail(&request->list, &ring->request_list);
 
-	DRM_DEBUG("%d\n", request->seqno);
-
 	if (file) {
 		struct drm_i915_file_private *file_priv = file->driver_priv;
 
@@ -1354,12 +1352,15 @@ i915_add_request(struct intel_ring_buffer *ring,
 
 	ring->outstanding_lazy_request = 0;
 
-	if (dev_priv->mm.suspended == 0) {
-		if (was_empty)
+	if (!dev_priv->mm.suspended) {
+		if (i915_enable_hangcheck) {
+			timeout_add_msec(&dev_priv->hangcheck_timer,
+			    DRM_I915_HANGCHECK_PERIOD);
+		}
+		if (was_empty) {
 			timeout_add_sec(&dev_priv->mm.retire_timer, 1);
-		/* XXX was_empty? */
-		timeout_add_msec(&dev_priv->hangcheck_timer,
-		    DRM_I915_HANGCHECK_PERIOD);
+			intel_mark_busy(ring->dev);
+		}
 	}
 
 	if (out_seqno)
@@ -1522,12 +1523,25 @@ i915_gem_retire_requests(struct inteldrm_softc *dev_priv)
 void
 i915_gem_retire_work_handler(void *arg1, void *unused)
 {
-	struct inteldrm_softc	*dev_priv = arg1;
+	struct inteldrm_softc *dev_priv = arg1;
+	struct drm_device *dev;
 	struct intel_ring_buffer *ring;
-	bool			 idle;
-	int			 i;
+	bool idle;
+	int i;
+
+	dev = (struct drm_device *)dev_priv->drmdev;
+
+	/* Come back later if the device is busy... */
+	if (rw_enter(&dev->dev_lock, RW_NOSLEEP | RW_WRITE)) {
+		timeout_add_sec(&dev_priv->mm.retire_timer, 1);
+		return;
+	}
 
 	i915_gem_retire_requests(dev_priv);
+
+        /* Send a periodic flush down the ring so we don't hold onto GEM
+	 * objects indefinitely.
+	 */
 	idle = true;
 	for_each_ring(ring, dev_priv, i) {
 		if (ring->gpu_caches_dirty)
@@ -1537,6 +1551,10 @@ i915_gem_retire_work_handler(void *arg1, void *unused)
 	}
 	if (!dev_priv->mm.suspended && !idle)
 		timeout_add_sec(&dev_priv->mm.retire_timer, 1);
+	if (idle)
+		intel_mark_idle(dev);
+
+	DRM_UNLOCK();
 }
 
 /**
@@ -2378,8 +2396,69 @@ i915_gem_object_set_cache_level(struct drm_i915_gem_object *obj,
 	return 0;
 }
 
-// i915_gem_get_caching_ioctl
-// i915_gem_set_caching_ioctl
+int
+i915_gem_get_caching_ioctl(struct drm_device *dev, void *data,
+			       struct drm_file *file)
+{
+	struct drm_i915_gem_caching *args = data;
+	struct drm_i915_gem_object *obj;
+	int ret;
+
+	ret = i915_mutex_lock_interruptible(dev);
+	if (ret)
+		return ret;
+
+	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
+	if (&obj->base == NULL) {
+		ret = ENOENT;
+		goto unlock;
+	}
+
+	args->caching = obj->cache_level != I915_CACHE_NONE;
+
+	drm_gem_object_unreference(&obj->base);
+unlock:
+	DRM_UNLOCK();
+	return ret;
+}
+
+int
+i915_gem_set_caching_ioctl(struct drm_device *dev, void *data,
+			       struct drm_file *file)
+{
+	struct drm_i915_gem_caching *args = data;
+	struct drm_i915_gem_object *obj;
+	enum i915_cache_level level;
+	int ret;
+
+	switch (args->caching) {
+	case I915_CACHING_NONE:
+		level = I915_CACHE_NONE;
+		break;
+	case I915_CACHING_CACHED:
+		level = I915_CACHE_LLC;
+		break;
+	default:
+		return EINVAL;
+	}
+
+	ret = i915_mutex_lock_interruptible(dev);
+	if (ret)
+		return ret;
+
+	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
+	if (&obj->base == NULL) {
+		ret = ENOENT;
+		goto unlock;
+	}
+
+	ret = i915_gem_object_set_cache_level(obj, level);
+
+	drm_gem_object_unreference(&obj->base);
+unlock:
+	DRM_UNLOCK();
+	return ret;
+}
 
 int
 i915_gem_object_pin_to_display_plane(struct drm_i915_gem_object *obj,
@@ -2630,7 +2709,7 @@ i915_gem_pin_ioctl(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
 	if (&obj->base == NULL) {
-		ret = EBADF;
+		ret = ENOENT;
 		goto unlock;
 	}
 
@@ -2677,7 +2756,7 @@ i915_gem_unpin_ioctl(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
 	if (&obj->base == NULL) {
-		ret = EBADF;
+		ret = ENOENT;
 		goto unlock;
 	}
 
@@ -2715,7 +2794,7 @@ i915_gem_busy_ioctl(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
 	if (&obj->base == NULL) {
-		ret = EBADF;
+		ret = ENOENT;
 		goto unlock;
 	}
 
@@ -2752,7 +2831,7 @@ i915_gem_madvise_ioctl(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file_priv, args->handle));
 	if (&obj->base == NULL) {
-		ret = EBADF;
+		ret = ENOENT;
 		goto unlock;
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.115 2013/03/26 16:37:45 tedu Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.118 2013/04/06 13:41:11 deraadt Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -78,18 +78,10 @@ struct pool_item_header {
 };
 
 struct pool_item {
-#ifdef DIAGNOSTIC
 	u_int32_t pi_magic;
-#endif
 	/* Other entries use only this list entry */
 	SIMPLEQ_ENTRY(pool_item)	pi_list;
 };
-
-#ifdef DEADBEEF1
-#define	PI_MAGIC DEADBEEF1
-#else
-#define	PI_MAGIC 0xdeafbeef
-#endif
 
 #ifdef POOL_DEBUG
 int	pool_debug = 1;
@@ -462,8 +454,10 @@ pool_alloc_item_header(struct pool *pp, caddr_t storage, int flags)
 	else
 		ph = pool_get(&phpool, (flags & ~(PR_WAITOK | PR_ZERO)) |
 		    PR_NOWAIT);
+#ifdef DIAGNOSTIC
 	if (pool_debug && ph != NULL)
-		ph->ph_magic = PI_MAGIC;
+		ph->ph_magic = poison_value(ph);
+#endif
 	return (ph);
 }
 
@@ -526,9 +520,6 @@ pool_do_get(struct pool *pp, int flags)
 	struct pool_item_header *ph;
 	void *v;
 	int slowdown = 0;
-#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
-	int i, *ip;
-#endif
 
 #ifdef MALLOC_DEBUG
 	if (pp->pr_roflags & PR_DEBUG) {
@@ -641,23 +632,22 @@ startover:
 #endif
 
 #ifdef DIAGNOSTIC
-	if (pi->pi_magic != PI_MAGIC)
+	if (pi->pi_magic != poison_value(pi))
 		panic("pool_do_get(%s): free list modified: "
 		    "page %p; item addr %p; offset 0x%x=0x%x",
 		    pp->pr_wchan, ph->ph_page, pi, 0, pi->pi_magic);
-#ifdef POOL_DEBUG
 	if (pool_debug && ph->ph_magic) {
-		for (ip = (int *)pi, i = sizeof(*pi) / sizeof(int);
-		    i < pp->pr_size / sizeof(int); i++) {
-			if (ip[i] != ph->ph_magic) {
-				panic("pool_do_get(%s): free list modified: "
-				    "page %p; item addr %p; offset 0x%zx=0x%x",
-				    pp->pr_wchan, ph->ph_page, pi,
-				    i * sizeof(int), ip[i]);
-			}
+		size_t pidx;
+		int pval;
+		if (poison_check(pi + 1, pp->pr_size - sizeof(*pi),
+		    &pidx, &pval)) {
+			int *ip = (int *)(pi + 1);
+			panic("pool_do_get(%s): free list modified: "
+			    "page %p; item addr %p; offset 0x%zx=0x%x",
+			    pp->pr_wchan, ph->ph_page, pi,
+			    pidx * sizeof(int), ip[pidx]);
 		}
 	}
-#endif /* POOL_DEBUG */
 #endif /* DIAGNOSTIC */
 
 	/*
@@ -745,9 +735,6 @@ pool_do_put(struct pool *pp, void *v)
 {
 	struct pool_item *pi = v;
 	struct pool_item_header *ph;
-#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
-	int i, *ip;
-#endif
 
 	if (v == NULL)
 		panic("pool_put of NULL");
@@ -778,14 +765,10 @@ pool_do_put(struct pool *pp, void *v)
 	 * Return to item list.
 	 */
 #ifdef DIAGNOSTIC
-	pi->pi_magic = PI_MAGIC;
-#ifdef POOL_DEBUG
+	pi->pi_magic = poison_value(pi);
 	if (ph->ph_magic) {
-		for (ip = (int *)pi, i = sizeof(*pi)/sizeof(int);
-		    i < pp->pr_size / sizeof(int); i++)
-			ip[i] = ph->ph_magic;
+		poison_mem(pi + 1, pp->pr_size - sizeof(*pi));
 	}
-#endif /* POOL_DEBUG */
 #endif /* DIAGNOSTIC */
 
 	SIMPLEQ_INSERT_HEAD(&ph->ph_itemlist, pi, pi_list);
@@ -886,9 +869,6 @@ pool_prime_page(struct pool *pp, caddr_t storage, struct pool_item_header *ph)
 	unsigned int align = pp->pr_align;
 	unsigned int ioff = pp->pr_itemoffset;
 	int n;
-#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
-	int i, *ip;
-#endif
 
 	/*
 	 * Insert page header.
@@ -932,14 +912,10 @@ pool_prime_page(struct pool *pp, caddr_t storage, struct pool_item_header *ph)
 		SIMPLEQ_INSERT_TAIL(&ph->ph_itemlist, pi, pi_list);
 
 #ifdef DIAGNOSTIC
-		pi->pi_magic = PI_MAGIC;
-#ifdef POOL_DEBUG
+		pi->pi_magic = poison_value(pi);
 		if (ph->ph_magic) {
-			for (ip = (int *)pi, i = sizeof(*pi)/sizeof(int);
-			    i < pp->pr_size / sizeof(int); i++)
-				ip[i] = ph->ph_magic;
+			poison_mem(pi + 1, pp->pr_size - sizeof(*pi));
 		}
-#endif /* POOL_DEBUG */
 #endif /* DIAGNOSTIC */
 		cp = (caddr_t)(cp + pp->pr_size);
 	}
@@ -1155,7 +1131,7 @@ pool_print_pagelist(struct pool_pagelist *pl,
 		    ph->ph_page, ph->ph_nmissing);
 #ifdef DIAGNOSTIC
 		SIMPLEQ_FOREACH(pi, &ph->ph_itemlist, pi_list) {
-			if (pi->pi_magic != PI_MAGIC) {
+			if (pi->pi_magic != poison_value(pi)) {
 				(*pr)("\t\t\titem %p, magic 0x%x\n",
 				    pi, pi->pi_magic);
 			}
@@ -1293,9 +1269,6 @@ pool_chk_page(struct pool *pp, struct pool_item_header *ph, int expected)
 	struct pool_item *pi;
 	caddr_t page;
 	int n;
-#if defined(DIAGNOSTIC) && defined(POOL_DEBUG)
-	int i, *ip;
-#endif
 	const char *label = pp->pr_wchan;
 
 	page = (caddr_t)((u_long)ph & pp->pr_alloc->pa_pagemask);
@@ -1313,7 +1286,7 @@ pool_chk_page(struct pool *pp, struct pool_item_header *ph, int expected)
 	     pi = SIMPLEQ_NEXT(pi,pi_list), n++) {
 
 #ifdef DIAGNOSTIC
-		if (pi->pi_magic != PI_MAGIC) {
+		if (pi->pi_magic != poison_value(pi)) {
 			printf("%s: ", label);
 			printf("pool(%s): free list modified: "
 			    "page %p; item ordinal %d; addr %p "
@@ -1321,21 +1294,19 @@ pool_chk_page(struct pool *pp, struct pool_item_header *ph, int expected)
 			    pp->pr_wchan, ph->ph_page, n, pi, page,
 			    0, pi->pi_magic);
 		}
-#ifdef POOL_DEBUG
 		if (pool_debug && ph->ph_magic) {
-			for (ip = (int *)pi, i = sizeof(*pi) / sizeof(int);
-			    i < pp->pr_size / sizeof(int); i++) {
-				if (ip[i] != ph->ph_magic) {
-					printf("pool(%s): free list modified: "
-					    "page %p; item ordinal %d; addr %p "
-					    "(p %p); offset 0x%zx=0x%x\n",
-					    pp->pr_wchan, ph->ph_page, n, pi,
-					    page, i * sizeof(int), ip[i]);
-				}
+			size_t pidx;
+			int pval;
+			if (poison_check(pi + 1, pp->pr_size - sizeof(*pi),
+			    &pidx, &pval)) {
+				int *ip = (int *)(pi + 1);
+				printf("pool(%s): free list modified: "
+				    "page %p; item ordinal %d; addr %p "
+				    "(p %p); offset 0x%zx=0x%x\n",
+				    pp->pr_wchan, ph->ph_page, n, pi,
+				    page, pidx * sizeof(int), ip[pidx]);
 			}
 		}
-
-#endif /* POOL_DEBUG */
 #endif /* DIAGNOSTIC */
 		page =
 		    (caddr_t)((u_long)pi & pp->pr_alloc->pa_pagemask);

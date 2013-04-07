@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.114 2012/12/28 17:52:06 gsoares Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.117 2013/04/02 18:27:47 bluhm Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -70,10 +70,10 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/timeout.h>
 #include <sys/protosw.h>
 #include <sys/kernel.h>
 #include <sys/pool.h>
@@ -459,7 +459,7 @@ tcp_newtcpcb(struct inpcb *inp)
 
 	tp = pool_get(&tcpcb_pool, PR_NOWAIT|PR_ZERO);
 	if (tp == NULL)
-		return ((struct tcpcb *)0);
+		return (NULL);
 	TAILQ_INIT(&tp->t_segq);
 	tp->t_maxseg = tcp_mssdflt;
 	tp->t_maxopd = 0;
@@ -576,7 +576,7 @@ tcp_close(struct tcpcb *tp)
 	inp->inp_ppcb = 0;
 	soisdisconnected(so);
 	in_pcbdetach(inp);
-	return ((struct tcpcb *)0);
+	return (NULL);
 }
 
 void
@@ -629,7 +629,7 @@ tcp_notify(inp, error)
 	struct inpcb *inp;
 	int error;
 {
-	struct tcpcb *tp = (struct tcpcb *)inp->inp_ppcb;
+	struct tcpcb *tp = intotcpcb(inp);
 	struct socket *so = inp->inp_socket;
 
 	/*

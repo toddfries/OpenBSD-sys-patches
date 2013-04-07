@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.8 2013/03/26 21:01:02 kettenis Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.17 2013/04/05 02:54:51 jsg Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -109,6 +109,13 @@ int i915_panel_use_ssc = -1;
  * (-2=ignore, -1=auto [default], index in VBT BIOS table)
  */
 int i915_vbt_sdvo_panel_type = -1;
+
+/*
+ * Periodically check GPU activity for detecting hangs.
+ * WARNING: Disabling this can cause system wide hangs.
+ * (default: true)
+ */
+bool i915_enable_hangcheck = true;
 
 const struct intel_device_info *
 	i915_get_device_id(int);
@@ -639,6 +646,9 @@ struct wsdisplay_accessops inteldrm_accessops = {
 	inteldrm_show_screen
 };
 
+extern int (*ws_get_param)(struct wsdisplay_param *);
+extern int (*ws_set_param)(struct wsdisplay_param *);
+
 int
 inteldrm_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
@@ -649,6 +659,9 @@ inteldrm_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 	switch (cmd) {
 	case WSDISPLAYIO_GETPARAM:
+		if (ws_get_param && ws_get_param(dp) == 0)
+			return 0;
+
 		switch (dp->param) {
 		case WSDISPLAYIO_PARAM_BRIGHTNESS:
 			dp->min = 0;
@@ -658,6 +671,9 @@ inteldrm_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 		}
 		break;
 	case WSDISPLAYIO_SETPARAM:
+		if (ws_set_param && ws_set_param(dp) == 0)
+			return 0;
+
 		switch (dp->param) {
 		case WSDISPLAYIO_PARAM_BRIGHTNESS:
 			intel_panel_set_backlight(dev, dp->curval);
@@ -1333,6 +1349,12 @@ inteldrm_doioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			return (i915_gem_madvise_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_SW_FINISH:
 			return (i915_gem_sw_finish_ioctl(dev, data, file_priv));
+		case DRM_IOCTL_I915_GEM_SET_CACHING:
+			return (i915_gem_set_caching_ioctl(dev, data,
+			    file_priv));
+		case DRM_IOCTL_I915_GEM_GET_CACHING:
+			return (i915_gem_get_caching_ioctl(dev, data,
+			    file_priv));
 		default:
 			break;
 		}
@@ -1475,47 +1497,6 @@ inteldrm_set_max_obj_size(struct inteldrm_softc *dev_priv)
 
 }
 
-struct drm_obj *
-i915_gem_find_inactive_object(struct inteldrm_softc *dev_priv,
-    size_t min_size)
-{
-	struct drm_obj		*obj, *best = NULL, *first = NULL;
-	struct drm_i915_gem_object *obj_priv;
-
-	/*
-	 * We don't need references to the object as long as we hold the list
-	 * lock, they won't disappear until we release the lock.
-	 */
-	list_for_each_entry(obj_priv, &dev_priv->mm.inactive_list, mm_list) {
-		obj = &obj_priv->base;
-		if (obj->size >= min_size) {
-			if ((!obj_priv->dirty ||
-			    i915_gem_object_is_purgeable(obj_priv)) &&
-			    (best == NULL || obj->size < best->size)) {
-				best = obj;
-				if (best->size == min_size)
-					break;
-			}
-		}
-		if (first == NULL)
-			first = obj;
-	}
-	if (best == NULL)
-		best = first;
-	if (best) {
-		drm_ref(&best->uobj);
-		/*
-		 * if we couldn't grab it, we may as well fail and go
-		 * onto the next step for the sake of simplicity.
-		 */
-		if (drm_try_hold_object(best) == 0) {
-			drm_unref(&best->uobj);
-			best = NULL;
-		}
-	}
-	return (best);
-}
-
 void
 inteldrm_wipe_mappings(struct drm_obj *obj)
 {
@@ -1588,7 +1569,7 @@ i915_gem_object_pin_and_relocate(struct drm_obj *obj,
 		/* object must have come before us in the list */
 		if (target_obj == NULL) {
 			i915_gem_object_unpin(obj_priv);
-			return (EBADF);
+			return (ENOENT);
 		}
 		if ((target_obj->do_flags & I915_IN_EXEC) == 0) {
 			printf("%s: object not already in execbuffer\n",
@@ -1659,12 +1640,6 @@ i915_gem_object_pin_and_relocate(struct drm_obj *obj,
 			goto err;
 		}
 
-		if (reloc->delta > target_obj->size) {
-			DRM_ERROR("reloc larger than target\n");
-			ret = EINVAL;
-			goto err;
-		}
-
 		/* Map the page containing the relocation we're going to
 		 * perform.
 		 */
@@ -1709,11 +1684,17 @@ i915_gem_get_relocs_from_user(struct drm_i915_gem_exec_object2 *exec_list,
     u_int32_t buffer_count, struct drm_i915_gem_relocation_entry **relocs)
 {
 	u_int32_t	reloc_count = 0, reloc_index = 0, i;
-	int		ret;
+	int		ret, relocs_max;
+
+	relocs_max = INT_MAX / sizeof(struct drm_i915_gem_relocation_entry);
 
 	*relocs = NULL;
 	for (i = 0; i < buffer_count; i++) {
-		if (reloc_count + exec_list[i].relocation_count < reloc_count)
+		/* First check for malicious input causing overflow in
+		 * the worst case where we need to allocate the entire
+		 * relocation tree as a single array.
+		 */
+		if (exec_list[i].relocation_count > relocs_max - reloc_count)
 			return (EINVAL);
 		reloc_count += exec_list[i].relocation_count;
 	}

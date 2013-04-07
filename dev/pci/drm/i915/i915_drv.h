@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.h,v 1.6 2013/03/25 19:50:56 kettenis Exp $ */
+/* $OpenBSD: i915_drv.h,v 1.12 2013/04/03 07:36:57 jsg Exp $ */
 /* i915_drv.h -- Private header for the I915 driver -*- linux-c -*-
  */
 /*
@@ -248,11 +248,6 @@ struct sdvo_device_mapping {
 	u8 ddc_pin;
 };
 
-struct gmbus_port {
-	struct inteldrm_softc *dev_priv;
-	int port;
-};
-
 enum intel_pch {
 	PCH_NONE = 0,	/* No PCH present */
 	PCH_IBX,	/* Ibexpeak PCH */
@@ -272,8 +267,13 @@ enum intel_sbi_destination {
 struct intel_fbdev;
 
 struct intel_gmbus {
-	struct i2c_controller	 controller;
-	struct gmbus_port	 gp;
+	struct i2c_controller controller;
+	u32 port;
+	u32 speed;
+	u32 force_bit;
+	u32 reg0;
+	u32 gpio_reg;
+	struct inteldrm_softc *dev_priv;
 };
 
 struct i915_suspend_saved_registers {
@@ -863,6 +863,8 @@ struct drm_i915_gem_object {
 	/** This object's place on the active/flushing/inactive lists */
 	struct list_head			 ring_list;
 	struct list_head			 mm_list;
+	/** This object's place in the batchbuffer or on the eviction list */
+	struct list_head			 exec_list;
 	/* GTT binding. */
 	bus_dmamap_t				 dmamap;
 	bus_dma_segment_t			*dma_segs;
@@ -936,6 +938,12 @@ struct drm_i915_gem_object {
 	unsigned int fenced_gpu_access:1;
 
 	unsigned int cache_level:2;
+
+	/**
+	 * Used for performing relocations during execbuffer insertion.
+	 */
+	unsigned long exec_handle;
+	struct drm_i915_gem_exec_object2 *exec_entry;
 
 	/** for phy allocated objects */
 	struct drm_i915_gem_phys_object *phys_obj;
@@ -1044,6 +1052,10 @@ int	i915_gem_mmap_ioctl(struct drm_device *, void *, struct drm_file *);
 int	i915_gem_mmap_gtt_ioctl(struct drm_device *, void *, struct drm_file *);
 int	i915_gem_madvise_ioctl(struct drm_device *, void *, struct drm_file *);
 int	i915_gem_sw_finish_ioctl(struct drm_device *, void *, struct drm_file *);
+int	i915_gem_get_caching_ioctl(struct drm_device *, void *,
+	    struct drm_file *);
+int	i915_gem_set_caching_ioctl(struct drm_device *, void *,
+	    struct drm_file *);
 
 /* GEM memory manager functions */
 int	i915_gem_init_object(struct drm_obj *);
@@ -1077,9 +1089,9 @@ void	i915_dispatch_gem_execbuffer(struct intel_ring_buffer *,
 int	i915_gem_object_pin_and_relocate(struct drm_obj *,
 	    struct drm_file *, struct drm_i915_gem_exec_object2 *,
 	    struct drm_i915_gem_relocation_entry *);
-
-struct drm_obj	*i915_gem_find_inactive_object(struct inteldrm_softc *,
-		     size_t);
+int	i915_gem_execbuffer_reserve_object(struct drm_i915_gem_object *,
+	    struct intel_ring_buffer *);
+void	i915_gem_execbuffer_unreserve_object(struct drm_i915_gem_object *);
 
 extern int i915_gem_get_seqno(struct drm_device *, u32 *);
 
@@ -1125,8 +1137,6 @@ void inteldrm_verify_inactive(struct inteldrm_softc *, char *, int);
 #endif
 
 void i915_gem_retire_requests(struct inteldrm_softc *);
-struct drm_obj  *i915_gem_find_inactive_object(struct inteldrm_softc *,
-	size_t);
 int i915_gem_object_unbind(struct drm_i915_gem_object *);
 int i915_wait_seqno(struct intel_ring_buffer *, uint32_t);
 #define I915_GEM_GPU_DOMAINS	(~(I915_GEM_DOMAIN_CPU | I915_GEM_DOMAIN_GTT))
@@ -1190,10 +1200,16 @@ extern int i915_restore_state(struct drm_device *);
 
 /* intel_i2c.c */
 extern int intel_setup_gmbus(struct inteldrm_softc *);
-struct i2c_controller *intel_gmbus_get_adapter(drm_i915_private_t *, unsigned);
 static inline bool intel_gmbus_is_port_valid(unsigned port)
 {
 	return (port >= GMBUS_PORT_SSC && port <= GMBUS_PORT_DPD);
+}
+
+struct i2c_controller *intel_gmbus_get_adapter(drm_i915_private_t *, unsigned);
+extern void intel_gmbus_force_bit(struct i2c_controller *, bool);
+static inline bool intel_gmbus_is_forced_bit(struct i2c_controller *i2c)
+{
+	return container_of(i2c, struct intel_gmbus, controller)->force_bit;
 }
 
 /* i915_gem.c */
@@ -1527,6 +1543,7 @@ extern int i915_semaphores;
 extern int i915_vbt_sdvo_panel_type;
 extern int i915_enable_rc6;
 extern int i915_enable_fbc;
+extern bool i915_enable_hangcheck;
 
 /* Inlines */
 

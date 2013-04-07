@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.325 2013/03/20 02:46:33 brad Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.327 2013/04/07 03:22:05 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -510,7 +510,7 @@ bge_ape_lock_init(struct bge_softc *sc)
 			bit = BGE_APE_LOCK_GRANT_DRIVER0;
 			break;
 		default:
-			if (pa->pa_function != 0)
+			if (pa->pa_function == 0)
 				bit = BGE_APE_LOCK_GRANT_DRIVER0;
 			else
 				bit = (1 << pa->pa_function);
@@ -1594,7 +1594,7 @@ bge_phy_addr(struct bge_softc *sc)
 	case BGE_ASICREV_BCM5719:
 	case BGE_ASICREV_BCM5720:
 		phy_addr = pa->pa_function;
-		if (sc->bge_chipid == BGE_CHIPID_BCM5717_A0) {
+		if (sc->bge_chipid != BGE_CHIPID_BCM5717_A0) {
 			phy_addr += (CSR_READ_4(sc, BGE_SGDIG_STS) &
 			    BGE_SGDIGSTS_IS_SERDES) ? 8 : 1;
 		} else {

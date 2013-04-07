@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.256 2013/03/14 11:18:37 mpi Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.259 2013/04/02 18:27:47 bluhm Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -74,6 +74,7 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/timeout.h>
 #include <sys/kernel.h>
 #include <sys/pool.h>
 
@@ -359,7 +360,7 @@ tcp_input(struct mbuf *m, ...)
 	u_int8_t *optp = NULL;
 	int optlen = 0;
 	int tlen, off;
-	struct tcpcb *tp = 0;
+	struct tcpcb *tp = NULL;
 	int tiflags;
 	struct socket *so = NULL;
 	int todrop, acked, ourfinisacked;
@@ -593,7 +594,7 @@ tcp_input(struct mbuf *m, ...)
 	 */
 #if NPF > 0
 	if (m->m_pkthdr.pf.statekey)
-		inp = ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp;
+		inp = m->m_pkthdr.pf.statekey->inp;
 #endif
 findpcb:
 	if (inp == NULL) {
@@ -612,8 +613,7 @@ findpcb:
 		}
 #if NPF > 0
 		if (m->m_pkthdr.pf.statekey && inp) {
-			((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp =
-			    inp;
+			m->m_pkthdr.pf.statekey->inp = inp;
 			inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
 		}
 #endif
@@ -764,7 +764,7 @@ findpcb:
 					 * full-blown connection.
 					 */
 					tp = NULL;
-					inp = (struct inpcb *)so->so_pcb;
+					inp = sotoinpcb(so);
 					tp = intotcpcb(inp);
 					if (tp == NULL)
 						goto badsyn;	/*XXX*/
@@ -881,7 +881,7 @@ findpcb:
 
 #if NPF > 0
 	if (m->m_pkthdr.pf.statekey) {
-		((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp = inp;
+		m->m_pkthdr.pf.statekey->inp = inp;
 		inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
 	}
 	/* The statekey has finished finding the inp, it is no longer needed. */
@@ -3657,7 +3657,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	struct syn_cache *sc;
 	struct syn_cache_head *scp;
 	struct inpcb *inp = NULL;
-	struct tcpcb *tp = 0;
+	struct tcpcb *tp = NULL;
 	struct mbuf *am;
 	int s;
 	struct socket *oso;
@@ -3708,7 +3708,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	 * IPsec-related information.
 	 */
 	{
-	  struct inpcb *newinp = (struct inpcb *)so->so_pcb;
+	  struct inpcb *newinp = sotoinpcb(so);
 	  bcopy(inp->inp_seclevel, newinp->inp_seclevel,
 		sizeof(inp->inp_seclevel));
 	  newinp->inp_secrequire = inp->inp_secrequire;
@@ -3736,7 +3736,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	  int flags = inp->inp_flags;
 	  struct inpcb *oldinpcb = inp;
 
-	  inp = (struct inpcb *)so->so_pcb;
+	  inp = sotoinpcb(so);
 	  inp->inp_flags |= (flags & INP_IPV6);
 	  if ((inp->inp_flags & INP_IPV6) != 0) {
 	    inp->inp_ipv6.ip6_hlim =
@@ -3744,7 +3744,7 @@ syn_cache_get(struct sockaddr *src, struct sockaddr *dst, struct tcphdr *th,
 	  }
 	}
 #else /* INET6 */
-	inp = (struct inpcb *)so->so_pcb;
+	inp = sotoinpcb(so);
 #endif /* INET6 */
 
 #if NPF > 0

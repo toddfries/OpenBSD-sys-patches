@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.203 2013/03/28 00:32:11 bluhm Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.206 2013/03/29 13:16:14 bluhm Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -43,7 +43,6 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/syslog.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/pool.h>
 
@@ -673,7 +672,7 @@ in_ouraddr(struct in_addr ina, struct mbuf *m)
 	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED)
 		return (1);
 
-	key = (struct pf_state_key *)m->m_pkthdr.pf.statekey;
+	key = m->m_pkthdr.pf.statekey;
 	if (key != NULL) {
 		if (key->inp != NULL)
 			return (1);
@@ -688,8 +687,7 @@ in_ouraddr(struct in_addr ina, struct mbuf *m)
 	sin.sin_len = sizeof(sin);
 	sin.sin_family = AF_INET;
 	sin.sin_addr = ina;
-	ia = (struct in_ifaddr *)ifa_ifwithaddr(sintosa(&sin),
-	    m->m_pkthdr.rdomain);
+	ia = ifatoia(ifa_ifwithaddr(sintosa(&sin), m->m_pkthdr.rdomain));
 
 	if (ia == NULL) {
 		/*
@@ -745,7 +743,7 @@ in_iawithaddr(struct in_addr ina, u_int rdomain)
 	sin.sin_len = sizeof(sin);
 	sin.sin_family = AF_INET;
 	sin.sin_addr = ina;
-	ia = (struct in_ifaddr *)ifa_ifwithaddr(sintosa(&sin), rdomain);
+	ia = ifatoia(ifa_ifwithaddr(sintosa(&sin), rdomain));
 	if (ia == NULL || ina.s_addr == ia->ia_addr.sin_addr.s_addr)
 		return (ia);
 
@@ -1256,7 +1254,7 @@ ip_rtaddr(struct in_addr dst, u_int rtableid)
 		    rtableid);
 	}
 	if (ipforward_rt.ro_rt == 0)
-		return ((struct in_ifaddr *)0);
+		return (NULL);
 	return (ifatoia(ipforward_rt.ro_rt->rt_ifa));
 }
 
