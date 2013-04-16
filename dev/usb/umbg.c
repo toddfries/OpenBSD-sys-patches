@@ -1,4 +1,4 @@
-/*	$OpenBSD: umbg.c,v 1.19 2013/03/28 03:58:03 tedu Exp $ */
+/*	$OpenBSD: umbg.c,v 1.21 2013/04/15 09:23:02 mglocker Exp $ */
 
 /*
  * Copyright (c) 2007 Marc Balmer <mbalmer@openbsd.org>
@@ -49,13 +49,13 @@ int umbgdebug = 0;
 
 struct umbg_softc {
 	struct device		sc_dev;		/* base device */
-	usbd_device_handle	sc_udev;	/* USB device */
-	usbd_interface_handle	sc_iface;	/* data interface */
+	struct usbd_device	*sc_udev;	/* USB device */
+	struct usbd_interface	*sc_iface;	/* data interface */
 
 	int			sc_bulkin_no;
-	usbd_pipe_handle	sc_bulkin_pipe;
+	struct usbd_pipe	*sc_bulkin_pipe;
 	int			sc_bulkout_no;
-	usbd_pipe_handle	sc_bulkout_pipe;
+	struct usbd_pipe	*sc_bulkout_pipe;
 
 	struct timeout		sc_to;		/* get time from device */
 	struct usb_task		sc_task;
@@ -172,8 +172,8 @@ umbg_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct umbg_softc *sc = (struct umbg_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	usbd_device_handle dev = uaa->device;
-	usbd_interface_handle iface = uaa->iface;
+	struct usbd_device *dev = uaa->device;
+	struct usbd_interface *iface = uaa->iface;
 	struct mbg_time tframe;
 	usb_endpoint_descriptor_t *ed;
 	usbd_status err;
@@ -393,7 +393,7 @@ umbg_read(struct umbg_softc *sc, u_int8_t cmd, char *buf, size_t len,
     struct timespec *tstamp)
 {
 	usbd_status err;
-	usbd_xfer_handle xfer;
+	struct usbd_xfer *xfer;
 
 	xfer = usbd_alloc_xfer(sc->sc_udev);
 	if (xfer == NULL) {
@@ -402,10 +402,10 @@ umbg_read(struct umbg_softc *sc, u_int8_t cmd, char *buf, size_t len,
 	}
 
 	usbd_setup_xfer(xfer, sc->sc_bulkout_pipe, NULL, &cmd, sizeof(cmd),
-	    USBD_SHORT_XFER_OK, USBD_DEFAULT_TIMEOUT, NULL);
+	    USBD_SHORT_XFER_OK | USBD_SYNCHRONOUS, USBD_DEFAULT_TIMEOUT, NULL);
 	if (tstamp)
 		nanotime(tstamp);
-	err = usbd_sync_transfer(xfer);
+	err = usbd_transfer(xfer);
 	if (err) {
 		DPRINTF(("%s: sending of command failed: %s\n",
 		    sc->sc_dev.dv_xname, usbd_errstr(err)));
@@ -414,9 +414,9 @@ umbg_read(struct umbg_softc *sc, u_int8_t cmd, char *buf, size_t len,
 	}
 
 	usbd_setup_xfer(xfer, sc->sc_bulkin_pipe, NULL, buf, len,
-	    USBD_SHORT_XFER_OK, USBD_DEFAULT_TIMEOUT, NULL);
+	    USBD_SHORT_XFER_OK | USBD_SYNCHRONOUS, USBD_DEFAULT_TIMEOUT, NULL);
 
-	err = usbd_sync_transfer(xfer);
+	err = usbd_transfer(xfer);
 	usbd_free_xfer(xfer);
 	if (err) {
 		DPRINTF(("%s: reading data failed: %s\n",

@@ -1,4 +1,4 @@
-/* $OpenBSD: pms.c,v 1.37 2013/03/18 16:31:01 stsp Exp $ */
+/* $OpenBSD: pms.c,v 1.40 2013/04/15 09:14:41 mpi Exp $ */
 /* $NetBSD: psm.c,v 1.11 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -118,7 +118,6 @@ struct elantech_softc {
 #define ELANTECH_F_2FINGER_PACKET	0x04
 #define ELANTECH_F_HW_V1_OLD		0x08
 
-	int hw_version;
 	int min_x, min_y;
 	int max_x, max_y;
 
@@ -233,6 +232,7 @@ int	pms_set_scaling(struct pms_softc *, int);
 int	pms_reset(struct pms_softc *);
 int	pms_dev_enable(struct pms_softc *);
 int	pms_dev_disable(struct pms_softc *);
+void	pms_protocol_lookup(struct pms_softc *);
 
 int	pms_enable_intelli(struct pms_softc *);
 
@@ -313,15 +313,6 @@ const struct pms_protocol pms_protocols[] = {
 		pms_proc_mouse,
 		NULL
 	},
-	/* Microsoft IntelliMouse */
-	{
-		PMS_INTELLI, 4,
-		pms_enable_intelli,
-		pms_ioctl_mouse,
-		pms_sync_mouse,
-		pms_proc_mouse,
-		NULL
-	},
 	/* Synaptics touchpad */
 	{
 		PMS_SYNAPTICS, 6,
@@ -365,6 +356,15 @@ const struct pms_protocol pms_protocols[] = {
 		pms_ioctl_elantech,
 		pms_sync_elantech_v3,
 		pms_proc_elantech_v3,
+		NULL
+	},
+	/* Microsoft IntelliMouse */
+	{
+		PMS_INTELLI, 4,
+		pms_enable_intelli,
+		pms_ioctl_mouse,
+		pms_sync_mouse,
+		pms_proc_mouse,
 		NULL
 	},
 };
@@ -490,6 +490,23 @@ pms_dev_disable(struct pms_softc *sc)
 	return (res);
 }
 
+void
+pms_protocol_lookup(struct pms_softc *sc)
+{
+	int i;
+
+	sc->protocol = &pms_protocols[0];
+	for (i = 1; i < nitems(pms_protocols); i++) {
+		pms_reset(sc);
+		if (pms_protocols[i].enable(sc)) {
+			sc->protocol = &pms_protocols[i];
+			break;
+		}
+	}
+
+	DPRINTF("%s: protocol type %d\n", DEVNAME(sc), sc->protocol->type);
+}
+
 int
 pms_enable_intelli(struct pms_softc *sc)
 {
@@ -611,7 +628,6 @@ pmsattach(struct device *parent, struct device *self, void *aux)
 	struct pms_softc *sc = (void *)self;
 	struct pckbc_attach_args *pa = aux;
 	struct wsmousedev_attach_args a;
-	int i;
 
 	sc->sc_kbctag = pa->pa_tag;
 
@@ -634,14 +650,8 @@ pmsattach(struct device *parent, struct device *self, void *aux)
 	sc->poll = 1;
 	sc->sc_dev_enable = 0;
 
-	sc->protocol = &pms_protocols[0];
-	for (i = 1; i < nitems(pms_protocols); i++) {
-		pms_reset(sc);
-		if (pms_protocols[i].enable(sc))
-			sc->protocol = &pms_protocols[i];
-	}
-
-	DPRINTF("%s: protocol type %d\n", DEVNAME(sc), sc->protocol->type);
+	/* See if the device understands an extended (touchpad) protocol. */
+	pms_protocol_lookup(sc);
 
 	/* no interrupts until enabled */
 	pms_change_state(sc, PMS_STATE_DISABLED, PMS_DEV_IGNORE);
@@ -670,8 +680,6 @@ pmsactivate(struct device *self, int act)
 int
 pms_change_state(struct pms_softc *sc, int newstate, int dev)
 {
-	int i;
-
 	if (dev != PMS_DEV_IGNORE) {
 		switch (newstate) {
 		case PMS_STATE_ENABLED:
@@ -704,21 +712,9 @@ pms_change_state(struct pms_softc *sc, int newstate, int dev)
 			pckbc_flush(sc->sc_kbctag, PCKBC_AUX_SLOT);
 
 		pms_reset(sc);
-
-		if (sc->protocol->type != PMS_STANDARD &&
+		if (sc->protocol->type == PMS_STANDARD ||
 		    sc->protocol->enable(sc) == 0)
-			sc->protocol = &pms_protocols[0];
-
-		if (sc->protocol->type == PMS_STANDARD)
-			for (i = 1; i < nitems(pms_protocols); i++) {
-				pms_reset(sc);
-				if (pms_protocols[i].enable(sc))
-					sc->protocol = &pms_protocols[i];
-			}
-
-#ifdef DEBUG
-		printf("%s: protocol type %d\n", DEVNAME(sc), sc->protocol->type);
-#endif
+			pms_protocol_lookup(sc);
 
 		pms_dev_enable(sc);
 		break;
@@ -726,7 +722,7 @@ pms_change_state(struct pms_softc *sc, int newstate, int dev)
 	case PMS_STATE_SUSPENDED:
 		pms_dev_disable(sc);
 
-		if (sc->protocol && sc->protocol->disable)
+		if (sc->protocol->disable)
 			sc->protocol->disable(sc);
 
 		pckbc_slot_enable(sc->sc_kbctag, PCKBC_AUX_SLOT, 0);
@@ -760,7 +756,7 @@ pms_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct pms_softc *sc = v;
 
-	if (sc->protocol && sc->protocol->ioctl)
+	if (sc->protocol->ioctl)
 		return (sc->protocol->ioctl(sc, cmd, data, flag, p));
 	else
 		return (-1);
@@ -1715,10 +1711,6 @@ pms_enable_elantech_v1(struct pms_softc *sc)
 	struct elantech_softc *elantech = sc->elantech;
 	int i;
 
-	/* Check if a different hardware version has been detected. */
-	if (elantech && elantech->hw_version != 0 && elantech->hw_version != 1)
-		return (0);
-
 	if (elantech_knock(sc))
 		goto err;
 
@@ -1741,8 +1733,6 @@ pms_enable_elantech_v1(struct pms_softc *sc)
 	for (i = 0; i < nitems(sc->elantech->parity); i++)
 		sc->elantech->parity[i] = sc->elantech->parity[i & (i - 1)] ^ 1;
 
-	elantech->hw_version = 1;
-
 	return (1);
 
 err:
@@ -1760,10 +1750,6 @@ int
 pms_enable_elantech_v2(struct pms_softc *sc)
 {
 	struct elantech_softc *elantech = sc->elantech;
-
-	/* Check if a different hardware version has been detected. */
-	if (elantech && elantech->hw_version != 0 && elantech->hw_version != 2)
-		return (0);
 
 	if (elantech_knock(sc))
 		goto err;
@@ -1784,8 +1770,6 @@ pms_enable_elantech_v2(struct pms_softc *sc)
 	} else if (elantech_set_absolute_mode_v2(sc))
 		goto err;
 
-	elantech->hw_version = 2;
-
 	return (1);
 
 err:
@@ -1804,10 +1788,6 @@ pms_enable_elantech_v3(struct pms_softc *sc)
 {
 	struct elantech_softc *elantech = sc->elantech;
 
-	/* Check if a different hardware version has been detected. */
-	if (elantech && elantech->hw_version != 0 && elantech->hw_version != 3)
-		return (0);
-		
 	if (elantech_knock(sc))
 		goto err;
 
@@ -1826,8 +1806,6 @@ pms_enable_elantech_v3(struct pms_softc *sc)
 		printf("%s: Elantech Touchpad, version %d\n", DEVNAME(sc), 3);
 	} else if (elantech_set_absolute_mode_v3(sc))
 		goto err;
-
-	elantech->hw_version = 3;
 
 	return (1);
 

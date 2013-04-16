@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_input.c,v 1.111 2013/03/31 00:59:52 bluhm Exp $	*/
+/*	$OpenBSD: ipsec_input.c,v 1.113 2013/04/11 12:06:25 mpi Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -83,6 +83,17 @@
 #include "bpfilter.h"
 
 void *ipsec_common_ctlinput(u_int, int, struct sockaddr *, void *, int);
+#ifdef INET
+int ah4_input_cb(struct mbuf *, ...);
+int esp4_input_cb(struct mbuf *, ...);
+int ipcomp4_input_cb(struct mbuf *, ...);
+#endif
+
+#ifdef INET6
+int ah6_input_cb(struct mbuf *, int, int);
+int esp6_input_cb(struct mbuf *, int, int);
+int ipcomp6_input_cb(struct mbuf *, int, int);
+#endif
 
 #ifdef ENCDEBUG
 #define DPRINTF(x)	if (encdebug) printf x
@@ -952,7 +963,6 @@ void *
 ipsec_common_ctlinput(u_int rdomain, int cmd, struct sockaddr *sa,
     void *v, int proto)
 {
-	extern u_int ip_mtudisc_timeout;
 	struct ip *ip = v;
 	int s;
 

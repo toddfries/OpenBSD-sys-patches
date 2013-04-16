@@ -1,4 +1,4 @@
-/*	$OpenBSD: uow.c,v 1.31 2013/03/28 03:58:03 tedu Exp $	*/
+/*	$OpenBSD: uow.c,v 1.33 2013/04/15 09:23:02 mglocker Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -43,13 +43,13 @@ struct uow_softc {
 	struct onewire_bus	 sc_ow_bus;
 	struct device		*sc_ow_dev;
 
-	usbd_device_handle	 sc_udev;
-	usbd_interface_handle	 sc_iface;
-	usbd_pipe_handle	 sc_ph_ibulk;
-	usbd_pipe_handle	 sc_ph_obulk;
-	usbd_pipe_handle	 sc_ph_intr;
+	struct usbd_device	*sc_udev;
+	struct usbd_interface	*sc_iface;
+	struct usbd_pipe	*sc_ph_ibulk;
+	struct usbd_pipe	*sc_ph_obulk;
+	struct usbd_pipe	*sc_ph_intr;
 	u_int8_t		 sc_regs[DS2490_NREGS];
-	usbd_xfer_handle	 sc_xfer;
+	struct usbd_xfer	*sc_xfer;
 	u_int8_t		 sc_fifo[DS2490_DATAFIFOSIZE];
 };
 
@@ -89,7 +89,7 @@ int	uow_cmd(struct uow_softc *, int, int, int);
 #define uow_commcmd(s, c, p)	uow_cmd((s), DS2490_COMM_CMD, (c), (p))
 #define uow_modecmd(s, c, p)	uow_cmd((s), DS2490_MODE_CMD, (c), (p))
 
-void	uow_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void	uow_intr(struct usbd_xfer *, void *, usbd_status);
 int	uow_read(struct uow_softc *, void *, int);
 int	uow_write(struct uow_softc *, const void *, int);
 int	uow_reset(struct uow_softc *);
@@ -429,7 +429,7 @@ again:
 }
 
 void
-uow_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+uow_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct uow_softc *sc = priv;
 
@@ -462,8 +462,8 @@ uow_read(struct uow_softc *sc, void *buf, int len)
 		return (-1);
 	}
 	usbd_setup_xfer(sc->sc_xfer, sc->sc_ph_ibulk, sc, buf, len,
-	    USBD_SHORT_XFER_OK, UOW_TIMEOUT, NULL);
-	error = usbd_sync_transfer(sc->sc_xfer);
+	    USBD_SHORT_XFER_OK | USBD_SYNCHRONOUS, UOW_TIMEOUT, NULL);
+	error = usbd_transfer(sc->sc_xfer);
 	usbd_free_xfer(sc->sc_xfer);
 	if (error != 0) {
 		printf("%s: read failed, len %d: %s\n",
@@ -492,9 +492,9 @@ uow_write(struct uow_softc *sc, const void *buf, int len)
 		printf("%s: failed to alloc xfer\n", sc->sc_dev.dv_xname);
 		return (-1);
 	}
-	usbd_setup_xfer(sc->sc_xfer, sc->sc_ph_obulk, sc, (void *)buf, len, 0,
-	    UOW_TIMEOUT, NULL);
-	error = usbd_sync_transfer(sc->sc_xfer);
+	usbd_setup_xfer(sc->sc_xfer, sc->sc_ph_obulk, sc, (void *)buf, len,
+	    USBD_SYNCHRONOUS, UOW_TIMEOUT, NULL);
+	error = usbd_transfer(sc->sc_xfer);
 	usbd_free_xfer(sc->sc_xfer);
 	if (error != 0) {
 		printf("%s: write failed, len %d: %s\n",
