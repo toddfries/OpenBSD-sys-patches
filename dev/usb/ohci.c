@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.109 2013/04/15 09:23:01 mglocker Exp $ */
+/*	$OpenBSD: ohci.c,v 1.111 2013/04/19 08:58:53 mpi Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -111,7 +111,6 @@ usbd_status	ohci_device_request(struct usbd_xfer *xfer);
 void		ohci_add_ed(struct ohci_soft_ed *, struct ohci_soft_ed *);
 void		ohci_rem_ed(struct ohci_soft_ed *, struct ohci_soft_ed *);
 void		ohci_hash_add_td(struct ohci_softc *, struct ohci_soft_td *);
-void		ohci_hash_rem_td(struct ohci_softc *, struct ohci_soft_td *);
 struct ohci_soft_td *ohci_hash_find_td(struct ohci_softc *, ohci_physaddr_t);
 void		ohci_hash_add_itd(struct ohci_softc *, struct ohci_soft_itd *);
 void		ohci_hash_rem_itd(struct ohci_softc *, struct ohci_soft_itd *);
@@ -119,9 +118,6 @@ struct ohci_soft_itd *ohci_hash_find_itd(struct ohci_softc *, ohci_physaddr_t);
 
 usbd_status	ohci_setup_isoc(struct usbd_pipe *pipe);
 void		ohci_device_isoc_enter(struct usbd_xfer *);
-
-usbd_status	ohci_allocm(struct usbd_bus *, struct usb_dma *, u_int32_t);
-void		ohci_freem(struct usbd_bus *, struct usb_dma *);
 
 struct usbd_xfer *ohci_allocx(struct usbd_bus *);
 void		ohci_freex(struct usbd_bus *, struct usbd_xfer *);
@@ -262,8 +258,6 @@ struct usbd_bus_methods ohci_bus_methods = {
 	ohci_open,
 	ohci_softintr,
 	ohci_poll,
-	ohci_allocm,
-	ohci_freem,
 	ohci_allocx,
 	ohci_freex,
 };
@@ -496,7 +490,7 @@ ohci_free_std(struct ohci_softc *sc, struct ohci_soft_td *std)
 	int s;
 
 	s = splusb();
-	ohci_hash_rem_td(sc, std);
+	LIST_REMOVE(std, hnext);
 	std->nexttd = sc->sc_freetds;
 	sc->sc_freetds = std;
 	splx(s);
@@ -947,22 +941,6 @@ ohci_init(struct ohci_softc *sc)
  bad1:
 	usb_freemem(&sc->sc_bus, &sc->sc_hccadma);
 	return (err);
-}
-
-usbd_status
-ohci_allocm(struct usbd_bus *bus, struct usb_dma *dma, u_int32_t size)
-{
-	struct ohci_softc *sc = (struct ohci_softc *)bus;
-
-	return (usb_allocmem(&sc->sc_bus, size, 0, dma));
-}
-
-void
-ohci_freem(struct usbd_bus *bus, struct usb_dma *dma)
-{
-	struct ohci_softc *sc = (struct ohci_softc *)bus;
-
-	usb_freemem(&sc->sc_bus, dma);
 }
 
 struct usbd_xfer *
@@ -1817,15 +1795,6 @@ ohci_hash_add_td(struct ohci_softc *sc, struct ohci_soft_td *std)
 	SPLUSBCHECK;
 
 	LIST_INSERT_HEAD(&sc->sc_hash_tds[h], std, hnext);
-}
-
-/* Called at splusb() */
-void
-ohci_hash_rem_td(struct ohci_softc *sc, struct ohci_soft_td *std)
-{
-	SPLUSBCHECK;
-
-	LIST_REMOVE(std, hnext);
 }
 
 struct ohci_soft_td *

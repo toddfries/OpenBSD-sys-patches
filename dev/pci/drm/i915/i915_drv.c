@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.18 2013/04/14 19:04:37 kettenis Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.22 2013/04/21 14:41:26 kettenis Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -524,10 +524,10 @@ i915_drm_freeze(struct drm_device *dev)
 
 	/* If KMS is active, we do the leavevt stuff here */
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
-		int error = i915_gem_idle(dev_priv);
+		int error = i915_gem_idle(dev);
 		if (error) {
 			printf("GEM idle failed, resume might fail\n");
-			return (error);
+			return error;
 		}
 
 		timeout_del(&dev_priv->rps.delayed_resume_to);
@@ -759,22 +759,38 @@ inteldrm_copyrows(void *cookie, int src, int dst, int num)
 	struct rasops_info *ri = cookie;
 	struct inteldrm_softc *sc = ri->ri_hw;
 
-	if (dst == 0 && (src + num) == ri->ri_rows) {
+	if ((dst == 0 && (src + num) == ri->ri_rows) ||
+	    (src == 0 && (dst + num) == ri->ri_rows)) {
 		struct inteldrm_softc *dev_priv = sc;
 		struct drm_fb_helper *helper = &dev_priv->fbdev->helper;
 		size_t size = dev_priv->fbdev->ifb.obj->base.size / 2;
-		int delta = src * ri->ri_font->fontheight * ri->ri_stride;
 		int i;
 
-		bzero(ri->ri_bits, delta);
+		if (dst == 0) {
+			int delta = src * ri->ri_font->fontheight * ri->ri_stride;
+			bzero(ri->ri_bits, delta);
 
-		sc->sc_offset += delta;
-		ri->ri_bits += delta;
-		ri->ri_origbits += delta;
-		if (sc->sc_offset > size) {
-			sc->sc_offset -= size;
-			ri->ri_bits -= size;
-			ri->ri_origbits -= size;
+			sc->sc_offset += delta;
+			ri->ri_bits += delta;
+			ri->ri_origbits += delta;
+			if (sc->sc_offset > size) {
+				sc->sc_offset -= size;
+				ri->ri_bits -= size;
+				ri->ri_origbits -= size;
+			}
+		} else {
+			int delta = dst * ri->ri_font->fontheight * ri->ri_stride;
+
+			sc->sc_offset -= delta;
+			ri->ri_bits -= delta;
+			ri->ri_origbits -= delta;
+			if (sc->sc_offset < 0) {
+				sc->sc_offset += size;
+				ri->ri_bits += size;
+				ri->ri_origbits += size;
+			}
+
+			bzero(ri->ri_bits, delta);
 		}
 
 		for (i = 0; i < helper->crtc_count; i++) {
@@ -878,45 +894,10 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* GEM init */
-	INIT_LIST_HEAD(&dev_priv->mm.active_list);
-	INIT_LIST_HEAD(&dev_priv->mm.inactive_list);
-	INIT_LIST_HEAD(&dev_priv->mm.bound_list);
-	INIT_LIST_HEAD(&dev_priv->mm.fence_list);
-	for (i = 0; i < I915_NUM_RINGS; i++)
-		init_ring_lists(&dev_priv->rings[i]);
-	timeout_set(&dev_priv->mm.retire_timer, inteldrm_timeout, dev_priv);
 	timeout_set(&dev_priv->hangcheck_timer, i915_hangcheck_elapsed, dev_priv);
 	dev_priv->next_seqno = 1;
 	dev_priv->mm.suspended = 1;
 	dev_priv->error_completion = 0;
-
-	/* On GEN3 we really need to make sure the ARB C3 LP bit is set */
-	if (IS_GEN3(dev)) {
-		u_int32_t tmp = I915_READ(MI_ARB_STATE);
-		if (!(tmp & MI_ARB_C3_LP_WRITE_ENABLE)) {
-			/*
-			 * arb state is a masked write, so set bit + bit
-			 * in mask
-			 */
-			I915_WRITE(MI_ARB_STATE,
-			           _MASKED_BIT_ENABLE(MI_ARB_C3_LP_WRITE_ENABLE));
-		}
-	}
-
-	dev_priv->relative_constants_mode = I915_EXEC_CONSTANTS_REL_GENERAL;
-
-	/* Old X drivers will take 0-2 for front, back, depth buffers */
-	if (!drm_core_check_feature(dev, DRIVER_MODESET))
-		dev_priv->fence_reg_start = 3;
-
-	if (INTEL_INFO(dev)->gen >= 4 || IS_I945G(dev) ||
-	    IS_I945GM(dev) || IS_G33(dev))
-		dev_priv->num_fence_regs = 16;
-	else
-		dev_priv->num_fence_regs = 8;
-
-	/* Initialise fences to zero, else on some macs we'll get corruption */
-	i915_gem_reset_fences(dev);
 
 	if (pci_find_device(&bpa, inteldrm_gmch_match) == 0) {
 		printf(": can't find GMCH\n");
@@ -947,12 +928,10 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	i915_gem_detect_bit_6_swizzle(dev_priv, &bpa);
+        /* Try to make sure MCHBAR is enabled before poking at it */
+        intel_setup_mchbar(dev_priv, &bpa);
 
-	dev_priv->mm.interruptible = true;
-
-	printf("%s: %s\n", dev_priv->dev.dv_xname,
-	    pci_intr_string(pa->pa_pc, dev_priv->ih));
+	i915_gem_load(dev);
 
 	mtx_init(&dev_priv->irq_lock, IPL_TTY);
 	mtx_init(&dev_priv->rps.lock, IPL_NONE);
@@ -1017,7 +996,7 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	intel_fb_restore_mode(dev);
 
 	ri->ri_flg = RI_CENTER | RI_VCONS;
-	rasops_init(ri, 96, 132);
+	rasops_init(ri, 160, 160);
 
 	ri->ri_hw = dev_priv;
 	dev_priv->sc_copyrows = ri->ri_copyrows;
@@ -1595,7 +1574,7 @@ inteldrm_quiesce(struct inteldrm_softc *dev_priv)
 	 * sure that everything is unbound.
 	 */
 	KASSERT(dev_priv->mm.suspended);
-	KASSERT(dev_priv->rings[RCS].obj == NULL);
+	KASSERT(dev_priv->ring[RCS].obj == NULL);
 	atomic_setbits_int(&dev_priv->sc_flags, INTELDRM_QUIET);
 	while (dev_priv->entries)
 		tsleep(&dev_priv->entries, 0, "intelquiet", 0);

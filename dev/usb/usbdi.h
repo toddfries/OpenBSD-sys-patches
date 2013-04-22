@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi.h,v 1.48 2013/04/15 09:23:02 mglocker Exp $ */
+/*	$OpenBSD: usbdi.h,v 1.50 2013/04/19 08:54:50 mpi Exp $ */
 /*	$NetBSD: usbdi.h,v 1.62 2002/07/11 21:14:35 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.18 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -115,7 +115,6 @@ usbd_status usbd_device2interface_handle(struct usbd_device *dev,
 struct usbd_device *usbd_pipe2device_handle(struct usbd_pipe *);
 void *usbd_alloc_buffer(struct usbd_xfer *xfer, u_int32_t size);
 void usbd_free_buffer(struct usbd_xfer *xfer);
-void *usbd_get_buffer(struct usbd_xfer *xfer);
 usbd_status usbd_open_pipe_intr(struct usbd_interface *iface, u_int8_t address,
     u_int8_t flags, struct usbd_pipe **pipe, void *priv,
     void *buffer, u_int32_t length, usbd_callback, int);
@@ -133,9 +132,6 @@ usbd_status usbd_set_interface(struct usbd_interface *, int);
 int usbd_get_no_alts(usb_config_descriptor_t *, int);
 usbd_status  usbd_get_interface(struct usbd_interface *iface, u_int8_t *aiface);
 void usbd_fill_deviceinfo(struct usbd_device *, struct usb_device_info *, int);
-void usbd_fill_di_task(void *);
-void usbd_fill_udc_task(void *);
-void usbd_fill_udf_task(void *);
 usb_config_descriptor_t *usbd_get_cdesc(struct usbd_device *, int, int *);
 int usbd_get_interface_altindex(struct usbd_interface *iface);
 
