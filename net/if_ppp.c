@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ppp.c,v 1.67 2012/11/29 22:56:08 yasuoka Exp $	*/
+/*	$OpenBSD: if_ppp.c,v 1.69 2013/03/28 16:55:27 deraadt Exp $	*/
 /*	$NetBSD: if_ppp.c,v 1.39 1997/05/17 21:11:59 christos Exp $	*/
 
 /*
@@ -150,7 +150,6 @@
 #include <net/ppp_defs.h>
 #include <net/if_ppp.h>
 #include <net/if_pppvar.h>
-#include <machine/cpu.h>
 
 #ifdef PPP_COMPRESS
 #define PACKETPTR	struct mbuf *
@@ -244,10 +243,10 @@ ppp_clone_create(struct if_clone *ifc, int unit)
     sc->sc_if.if_ioctl = pppsioctl;
     sc->sc_if.if_output = pppoutput;
     sc->sc_if.if_start = ppp_ifstart;
-    IFQ_SET_MAXLEN(&sc->sc_if.if_snd, ifqmaxlen);
-    IFQ_SET_MAXLEN(&sc->sc_inq, ifqmaxlen);
-    IFQ_SET_MAXLEN(&sc->sc_fastq, ifqmaxlen);
-    IFQ_SET_MAXLEN(&sc->sc_rawq, ifqmaxlen);
+    IFQ_SET_MAXLEN(&sc->sc_if.if_snd, IFQ_MAXLEN);
+    IFQ_SET_MAXLEN(&sc->sc_inq, IFQ_MAXLEN);
+    IFQ_SET_MAXLEN(&sc->sc_fastq, IFQ_MAXLEN);
+    IFQ_SET_MAXLEN(&sc->sc_rawq, IFQ_MAXLEN);
     IFQ_SET_READY(&sc->sc_if.if_snd);
     if_attach(&sc->sc_if);
     if_alloc_sadl(&sc->sc_if);
