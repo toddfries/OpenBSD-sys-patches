@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipe.h,v 1.13 2005/11/21 18:16:46 millert Exp $	*/
+/*	$OpenBSD: pipe.h,v 1.15 2013/03/25 17:21:35 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 John S. Dyson
@@ -24,11 +24,10 @@
 #ifndef _SYS_PIPE_H_
 #define _SYS_PIPE_H_
 
-#include <sys/time.h>			/* for struct timeval */
+#ifndef _KERNEL
+#include <sys/time.h>			/* for struct timespec */
 #include <sys/selinfo.h>		/* for struct selinfo */
-#include <sys/rwlock.h>
-
-#include <machine/param.h>		/* for PAGE_SIZE */
+#endif /* _KERNEL */
 
 /*
  * Pipe buffer size, keep moderate in value, pipes take kva space.

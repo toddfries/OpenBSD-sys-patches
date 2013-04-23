@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflow.c,v 1.24 2013/02/05 11:58:39 florian Exp $	*/
+/*	$OpenBSD: if_pflow.c,v 1.28 2013/04/10 08:50:59 mpi Exp $	*/
 
 /*
  * Copyright (c) 2011 Florian Obser <florian@narrans.de>
@@ -25,9 +25,9 @@
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <sys/ioctl.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <dev/rndvar.h>
 
@@ -105,10 +105,6 @@ int	copy_flow6_to_m(struct pflow_flow6 *flow, struct pflow_softc *sc);
 struct if_clone	pflow_cloner =
     IF_CLONE_INITIALIZER("pflow", pflow_clone_create,
     pflow_clone_destroy);
-
-/* from in_pcb.c */
-extern int ipport_hifirstauto;
-extern int ipport_hilastauto;
 
 /* from udp_usrreq.c */
 extern int udpcksum;
@@ -231,7 +227,7 @@ pflow_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_output = pflowoutput;
 	ifp->if_start = pflowstart;
 	ifp->if_type = IFT_PFLOW;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	ifp->if_hdrlen = PFLOW_HDRLEN;
 	ifp->if_flags = IFF_UP;
 	ifp->if_flags &= ~IFF_RUNNING;	/* not running, need receiver */

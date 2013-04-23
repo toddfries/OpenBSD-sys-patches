@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.140 2012/11/17 22:28:26 deraadt Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.144 2013/03/28 03:29:44 guenther Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -61,6 +61,7 @@
 #include <sys/hash.h>
 #include <sys/queue.h>
 #include <sys/specdev.h>
+#include <sys/unistd.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -2455,7 +2456,8 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 					info.nmi_md = mdsav2;
 					dp->d_type = IFTODT(
 						VTTOIF(np->n_vattr.va_type));
-					if (cnp->cn_namelen <= NCHNAMLEN) {
+					if (cnp->cn_namelen <=
+					    NAMECACHE_MAXLEN) {
 						ndp->ni_vp = newvp;
 						cache_purge(ndp->ni_dvp);
 						nfs_cache_enter(ndp->ni_dvp,
@@ -2937,19 +2939,63 @@ loop:
 
 /*
  * Return POSIX pathconf information applicable to nfs.
- *
- * The NFS V2 protocol doesn't support this, so just return EINVAL
- * for V2.
+ * Fake it. For v3 we could ask the server, but such code
+ * hasn't been written yet.
  */
 /* ARGSUSED */
 int
 nfs_pathconf(void *v)
 {
-#if 0
 	struct vop_pathconf_args *ap = v;
-#endif
+	struct nfsmount *nmp = VFSTONFS(ap->a_vp->v_mount);
+	int error = 0;
 
-	return (EINVAL);
+	switch (ap->a_name) {
+	case _PC_LINK_MAX:
+		*ap->a_retval = LINK_MAX;
+		break;
+	case _PC_NAME_MAX:
+		*ap->a_retval = NAME_MAX;
+		break;
+	case _PC_CHOWN_RESTRICTED:
+		*ap->a_retval = 1;
+		break;
+	case _PC_NO_TRUNC:
+		*ap->a_retval = 1;
+		break;
+	case _PC_ALLOC_SIZE_MIN:
+		*ap->a_retval = NFS_FABLKSIZE;
+		break;
+	case _PC_FILESIZEBITS:
+		*ap->a_retval = 64;
+		break;
+	case _PC_REC_INCR_XFER_SIZE:
+		*ap->a_retval = min(nmp->nm_rsize, nmp->nm_wsize);
+		break;
+	case _PC_REC_MAX_XFER_SIZE:
+		*ap->a_retval = -1; /* means ``unlimited'' */
+		break;
+	case _PC_REC_MIN_XFER_SIZE:
+		*ap->a_retval = min(nmp->nm_rsize, nmp->nm_wsize);
+		break;
+	case _PC_REC_XFER_ALIGN:
+		*ap->a_retval = PAGE_SIZE;
+		break;
+	case _PC_SYMLINK_MAX:
+		*ap->a_retval = MAXPATHLEN;
+		break;
+	case _PC_2_SYMLINKS:
+		*ap->a_retval = 1;
+		break;
+	case _PC_TIMESTAMP_RESOLUTION:
+		*ap->a_retval = NFS_ISV3(ap->a_vp) ? 1 : 1000;
+		break;
+	default:
+		error = EINVAL;
+		break;
+	}
+
+	return (error);
 }
 
 /*
