@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.h,v 1.119 2012/08/23 06:12:49 deraadt Exp $	*/
+/*	$OpenBSD: conf.h,v 1.121 2013/04/19 15:02:41 florian Exp $	*/
 /*	$NetBSD: conf.h,v 1.33 1996/05/03 20:03:32 christos Exp $	*/
 
 /*-
@@ -538,7 +538,6 @@ extern struct linesw linesw[];
 struct swdevt {
 	dev_t	sw_dev;
 	int	sw_flags;
-	struct	vnode *sw_vp;
 };
 #define	SW_FREED	0x01
 #define	SW_SEQUENTIAL	0x02
@@ -583,7 +582,6 @@ cdev_decl(ctty);
 
 cdev_decl(audio);
 cdev_decl(midi);
-cdev_decl(sequencer);
 cdev_decl(radio);
 cdev_decl(video);
 cdev_decl(cn);

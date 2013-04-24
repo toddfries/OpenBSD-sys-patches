@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kue.c,v 1.64 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: if_kue.c,v 1.67 2013/04/15 09:23:01 mglocker Exp $ */
 /*	$NetBSD: if_kue.c,v 1.50 2002/07/16 22:00:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -80,7 +80,6 @@
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -175,8 +174,8 @@ int kue_rx_list_init(struct kue_softc *);
 int kue_newbuf(struct kue_softc *, struct kue_chain *,struct mbuf *);
 int kue_send(struct kue_softc *, struct mbuf *, int);
 int kue_open_pipes(struct kue_softc *);
-void kue_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void kue_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void kue_rxeof(struct usbd_xfer *, void *, usbd_status);
+void kue_txeof(struct usbd_xfer *, void *, usbd_status);
 void kue_start(struct ifnet *);
 int kue_ioctl(struct ifnet *, u_long, caddr_t);
 void kue_init(void *);
@@ -233,7 +232,7 @@ kue_ctl(struct kue_softc *sc, int rw, u_int8_t breq, u_int16_t val,
 int
 kue_load_fw(struct kue_softc *sc)
 {
-	usb_device_descriptor_t dd;
+	usb_device_descriptor_t *dd;
 	usbd_status		err;
 	struct kue_firmware	*fw;
 	u_char			*buf;
@@ -255,9 +254,9 @@ kue_load_fw(struct kue_softc *sc)
 	 * it's probed while the firmware is still loaded and
 	 * running.
 	 */
-	if (usbd_get_device_desc(sc->kue_udev, &dd))
+	if ((dd = usbd_get_device_descriptor(sc->kue_udev)) == NULL)
 		return (EIO);
-	if (UGETW(dd.bcdDevice) >= KUE_WARM_REV) {
+	if (UGETW(dd->bcdDevice) >= KUE_WARM_REV) {
 		printf("%s: warm boot, no firmware download\n",
 		       sc->kue_dev.dv_xname);
 		return (0);
@@ -417,8 +416,8 @@ kue_attachhook(void *xsc)
 	struct kue_softc *sc = xsc;
 	int			s;
 	struct ifnet		*ifp;
-	usbd_device_handle	dev = sc->kue_udev;
-	usbd_interface_handle	iface;
+	struct usbd_device	*dev = sc->kue_udev;
+	struct usbd_interface	*iface;
 	usbd_status		err;
 	usb_interface_descriptor_t	*id;
 	usb_endpoint_descriptor_t	*ed;
@@ -523,7 +522,7 @@ kue_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct kue_softc	*sc = (struct kue_softc *)self;
 	struct usb_attach_arg	*uaa = aux;
-	usbd_device_handle	dev = uaa->device;
+	struct usbd_device	*dev = uaa->device;
 	usbd_status		err;
 
 	DPRINTFN(5,(" : kue_attach: sc=%p, dev=%p", sc, dev));
@@ -699,7 +698,7 @@ kue_tx_list_init(struct kue_softc *sc)
  * the higher level protocols.
  */
 void
-kue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+kue_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct kue_chain	*c = priv;
 	struct kue_softc	*sc = c->kue_sc;
@@ -802,7 +801,7 @@ kue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
  */
 
 void
-kue_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+kue_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct kue_chain	*c = priv;
 	struct kue_softc	*sc = c->kue_sc;

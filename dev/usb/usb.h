@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.h,v 1.41 2012/06/20 10:51:27 fgsch Exp $ */
+/*	$OpenBSD: usb.h,v 1.44 2013/04/17 11:53:10 mglocker Exp $ */
 /*	$NetBSD: usb.h,v 1.69 2002/09/22 23:20:50 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb.h,v 1.14 1999/11/17 22:33:46 n_hibma Exp $	*/
 
@@ -560,6 +560,13 @@ struct usb_config_desc {
 	usb_config_descriptor_t ucd_desc;
 };
 
+struct usb_device_cdesc {
+	u_int8_t		udc_bus;
+	u_int8_t		udc_addr;	/* device address */
+	int			udc_config_index;
+	usb_config_descriptor_t udc_desc;
+};
+
 struct usb_interface_desc {
 	int	uid_config_index;
 	int	uid_interface_index;
@@ -579,6 +586,20 @@ struct usb_full_desc {
 	int	ufd_config_index;
 	u_int	ufd_size;
 	u_char	*ufd_data;
+};
+
+struct usb_device_fdesc {
+	u_int8_t	 udf_bus;
+	u_int8_t	 udf_addr;	/* device address */
+	int		 udf_config_index;
+	u_int		 udf_size;
+	u_char		*udf_data;
+};
+
+struct usb_device_ddesc {
+	u_int8_t	udd_bus;
+	u_int8_t	udd_addr;	/* device address */
+	usb_device_descriptor_t udd_desc;
 };
 
 struct usb_string_desc {
@@ -622,27 +643,6 @@ struct usb_device_info {
 	char		udi_serial[USB_MAX_STRING_LEN];
 };
 
-/* OpenBSD <= 4.8 version, to be removed eventually */
-struct usb_device_info_48 {
-	u_int8_t	udi_bus;
-	u_int8_t	udi_addr;	/* device address */
-	char		udi_product[USB_MAX_STRING_LEN];
-	char		udi_vendor[USB_MAX_STRING_LEN];
-	char		udi_release[8];
-	u_int16_t	udi_productNo;
-	u_int16_t	udi_vendorNo;
-	u_int16_t	udi_releaseNo;
-	u_int8_t	udi_class;
-	u_int8_t	udi_subclass;
-	u_int8_t	udi_protocol;
-	u_int8_t	udi_config;
-	u_int8_t	udi_speed;
-	int		udi_power;	/* power consumption in mA, 0 if selfpowered */
-	int		udi_nports;
-	char		udi_devnames[USB_MAX_DEVNAMES][USB_MAX_DEVNAMELEN];
-	u_int8_t	udi_ports[16];/* hub only: addresses of devices on ports */
-};
-
 struct usb_ctl_report {
 	int	ucr_report;
 	u_char	ucr_data[1024];	/* filled data size will vary */
@@ -657,8 +657,10 @@ struct usb_device_stats {
 #define USB_SETDEBUG		_IOW ('U', 2, unsigned int)
 #define USB_DISCOVER		_IO  ('U', 3)
 #define USB_DEVICEINFO		_IOWR('U', 4, struct usb_device_info)
-#define USB_DEVICEINFO_48	_IOWR('U', 4, struct usb_device_info_48)
 #define USB_DEVICESTATS		_IOR ('U', 5, struct usb_device_stats)
+#define USB_DEVICE_GET_CDESC	_IOWR('U', 6, struct usb_device_cdesc)
+#define USB_DEVICE_GET_FDESC	_IOWR('U', 7, struct usb_device_fdesc)
+#define USB_DEVICE_GET_DDESC	_IOWR('U', 8, struct usb_device_ddesc)
 
 /* Generic HID device */
 #define USB_GET_REPORT_DESC	_IOR ('U', 21, struct usb_ctl_report_desc)

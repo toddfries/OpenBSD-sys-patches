@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.818 2013/01/20 22:51:16 bluhm Exp $ */
+/*	$OpenBSD: pf.c,v 1.822 2013/04/10 08:50:59 mpi Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -89,7 +89,7 @@
 
 #ifdef INET6
 #include <netinet/ip6.h>
-#include <netinet/in_pcb.h>
+#include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
 #include <netinet6/nd6.h>
 #include <netinet6/ip6_divert.h>
@@ -1018,8 +1018,8 @@ pf_find_state(struct pfi_kif *kif, struct pf_state_key_cmp *key, u_int dir,
 	}
 
 	if (dir == PF_OUT && m->m_pkthdr.pf.statekey &&
-	    ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->reverse)
-		sk = ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->reverse;
+	    m->m_pkthdr.pf.statekey->reverse)
+		sk = m->m_pkthdr.pf.statekey->reverse;
 	else {
 		if ((sk = RB_FIND(pf_state_tree, &pf_statetbl,
 		    (struct pf_state_key *)key)) == NULL)
@@ -1027,8 +1027,7 @@ pf_find_state(struct pfi_kif *kif, struct pf_state_key_cmp *key, u_int dir,
 		if (dir == PF_OUT && m->m_pkthdr.pf.statekey &&
 		    pf_compare_state_keys(m->m_pkthdr.pf.statekey, sk,
 		    kif, dir) == 0) {
-			((struct pf_state_key *)
-			    m->m_pkthdr.pf.statekey)->reverse = sk;
+			m->m_pkthdr.pf.statekey->reverse = sk;
 			sk->reverse = m->m_pkthdr.pf.statekey;
 		}
 	}
@@ -3487,7 +3486,7 @@ pf_test_rule(struct pf_pdesc *pd, struct pf_rule **rm, struct pf_state **sm,
 				if (r->rule_flag & PFRULE_AFTO)
 					pd->naf = r->naf;
 				if (pf_get_transaddr(r, pd, sns, &nr) == -1) {
-					REASON_SET(&reason, PFRES_MEMORY);
+					REASON_SET(&reason, PFRES_TRANSLATE);
 					goto cleanup;
 				}
 				if (r->log || act.log & PF_LOG_MATCHES) {
@@ -3526,7 +3525,7 @@ pf_test_rule(struct pf_pdesc *pd, struct pf_rule **rm, struct pf_state **sm,
 	if (r->rule_flag & PFRULE_AFTO)
 		pd->naf = r->naf;
 	if (pf_get_transaddr(r, pd, sns, &nr) == -1) {
-		REASON_SET(&reason, PFRES_MEMORY);
+		REASON_SET(&reason, PFRES_TRANSLATE);
 		goto cleanup;
 	}
 	REASON_SET(&reason, PFRES_MATCH);
@@ -5713,9 +5712,7 @@ pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *kif,
 	struct sockaddr_in	*dst;
 	int			 ret = 1;
 	int			 check_mpath;
-	extern int		 ipmultipath;
 #ifdef INET6
-	extern int		 ip6_multipath;
 	struct sockaddr_in6	*dst6;
 	struct route_in6	 ro;
 #else
@@ -5730,7 +5727,7 @@ pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *kif,
 	switch (af) {
 #ifdef INET
 	case AF_INET:
-		dst = satosin(&ro.ro_dst);
+		dst = (struct sockaddr_in *)&ro.ro_dst;
 		dst->sin_family = AF_INET;
 		dst->sin_len = sizeof(*dst);
 		dst->sin_addr = addr->v4;
@@ -5746,7 +5743,7 @@ pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *kif,
 		 */
 		if (IN6_IS_SCOPE_EMBED(&addr->v6))
 			goto out;
-		dst6 = (struct sockaddr_in6 *)&ro.ro_dst;
+		dst6 = &ro.ro_dst;
 		dst6->sin6_family = AF_INET6;
 		dst6->sin6_len = sizeof(*dst6);
 		dst6->sin6_addr = addr->v6;
@@ -5811,7 +5808,7 @@ pf_rtlabel_match(struct pf_addr *addr, sa_family_t af, struct pf_addr_wrap *aw,
 	switch (af) {
 #ifdef INET
 	case AF_INET:
-		dst = satosin(&ro.ro_dst);
+		dst = (struct sockaddr_in *)(&ro.ro_dst);
 		dst->sin_family = AF_INET;
 		dst->sin_len = sizeof(*dst);
 		dst->sin_addr = addr->v4;
@@ -5819,7 +5816,7 @@ pf_rtlabel_match(struct pf_addr *addr, sa_family_t af, struct pf_addr_wrap *aw,
 #endif /* INET */
 #ifdef INET6
 	case AF_INET6:
-		dst6 = (struct sockaddr_in6 *)&ro.ro_dst;
+		dst6 = &ro.ro_dst;
 		dst6->sin6_family = AF_INET6;
 		dst6->sin6_len = sizeof(*dst6);
 		dst6->sin6_addr = addr->v6;
