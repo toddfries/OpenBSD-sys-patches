@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpufunc.h,v 1.10 2013/01/23 19:57:47 patrick Exp $	*/
+/*	$OpenBSD: cpufunc.h,v 1.14 2013/03/30 01:30:30 patrick Exp $	*/
 /*	$NetBSD: cpufunc.h,v 1.29 2003/09/06 09:08:35 rearnsha Exp $	*/
 
 /*
@@ -135,6 +135,11 @@ struct cpu_functions {
 	void	(*cf_idcache_wbinv_all)	(void);
 	void	(*cf_idcache_wbinv_range) (vaddr_t, vsize_t);
 
+	void	(*cf_sdcache_wbinv_all)	(void);
+	void	(*cf_sdcache_wbinv_range) (vaddr_t, paddr_t, vsize_t);
+	void	(*cf_sdcache_inv_range)	(vaddr_t, paddr_t, vsize_t);
+	void	(*cf_sdcache_wb_range)	(vaddr_t, paddr_t, vsize_t);
+
 	/* Other functions */
 
 	void	(*cf_flush_prefetchbuf)	(void);
@@ -178,6 +183,12 @@ extern u_int cputype;
 
 #define	cpu_idcache_wbinv_all()	cpufuncs.cf_idcache_wbinv_all()
 #define	cpu_idcache_wbinv_range(a, s) cpufuncs.cf_idcache_wbinv_range((a), (s))
+
+#define	cpu_sdcache_enabled()	(cpufuncs.cf_sdcache_wbinv_all != cpufunc_nullop)
+#define	cpu_sdcache_wbinv_all()	cpufuncs.cf_sdcache_wbinv_all()
+#define	cpu_sdcache_wbinv_range(va, pa, s) cpufuncs.cf_sdcache_wbinv_range((va), (pa), (s))
+#define	cpu_sdcache_inv_range(va, pa, s) cpufuncs.cf_sdcache_inv_range((va), (pa), (s))
+#define	cpu_sdcache_wb_range(va, pa, s) cpufuncs.cf_sdcache_wb_range((va), (pa), (s))
 
 #define	cpu_flush_prefetchbuf()	cpufuncs.cf_flush_prefetchbuf()
 #define	cpu_drain_writebuf()	cpufuncs.cf_drain_writebuf()
@@ -296,6 +307,7 @@ void	arm10_tlb_flushI_SE	(u_int);
 
 void	arm10_context_switch	(u_int);
 
+void	arm9e_setup		(void);
 void	arm10_setup		(void);
 #endif
 
@@ -360,7 +372,6 @@ void	armv7_tlb_flushID_SE	(u_int);
 void	armv7_tlb_flushI_SE	(u_int);
 
 void	armv7_context_switch	(u_int);
-void	armv7_context_switch	(u_int);
 
 void	armv7_setup		(void);
 void	armv7_tlb_flushID	(void);
@@ -371,7 +382,7 @@ void	armv7_tlb_flushD_SE	(u_int va);
 void	armv7_drain_writebuf	(void);
 void	armv7_cpu_sleep		(int mode);
 
-void	armv7_setttb			(u_int);
+u_int	armv7_periphbase	(void);
 
 void	armv7_icache_sync_all		(void);
 void	armv7_icache_sync_range		(vaddr_t, vsize_t);

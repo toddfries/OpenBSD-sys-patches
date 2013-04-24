@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.257 2013/02/26 14:56:05 mikeb Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.259 2013/03/28 16:45:16 tedu Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -49,7 +49,6 @@
 #include <sys/time.h>
 #include <sys/timeout.h>
 #include <sys/pool.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kthread.h>
 #include <sys/rwlock.h>
@@ -1354,14 +1353,14 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				sk = s->key[PF_SK_STACK];
 				srcaddr = &sk->addr[1];
 				dstaddr = &sk->addr[0];
-				srcport = sk->port[0];
+				srcport = sk->port[1];
 				dstport = sk->port[0];
 			} else {
 				sk = s->key[PF_SK_WIRE];
 				srcaddr = &sk->addr[0];
 				dstaddr = &sk->addr[1];
 				srcport = sk->port[0];
-				dstport = sk->port[0];
+				dstport = sk->port[1];
 			}
 			if ((!psk->psk_af || sk->af == psk->psk_af)
 			    && (!psk->psk_proto || psk->psk_proto ==

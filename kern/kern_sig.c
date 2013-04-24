@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.148 2013/02/08 04:30:37 guenther Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.150 2013/04/06 06:08:20 tedu Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -66,7 +66,6 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-#include <machine/cpu.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -1612,9 +1611,6 @@ sys___thrsigdivert(struct proc *p, void *v, register_t *retval)
 	sigset_t *m;
 	long long to_ticks = 0;
 	int error;
-
-	if (!rthreads_enabled)
-		return (ENOTSUP);
 
 	m = NULL;
 	mask = SCARG(uap, sigmask) &~ sigcantmask;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_bufq.c,v 1.23 2012/10/17 23:58:25 beck Exp $	*/
+/*	$OpenBSD: kern_bufq.c,v 1.25 2013/04/10 01:35:55 guenther Exp $	*/
 /*
  * Copyright (c) 2010 Thordur I. Bjornsson <thib@openbsd.org>
  * Copyright (c) 2010 David Gwynne <dlg@openbsd.org>
@@ -28,7 +28,7 @@
 
 #include <sys/disklabel.h>
 
-SLIST_HEAD(, bufq)	bufqs = SLIST_HEAD_INITIALIZER(&bufq);
+SLIST_HEAD(, bufq)	bufqs = SLIST_HEAD_INITIALIZER(bufqs);
 struct mutex		bufqs_mtx = MUTEX_INITIALIZER(IPL_NONE);
 int			bufqs_stop;
 
@@ -453,7 +453,6 @@ bufq_fifo_peek(void *data)
 struct bufq_nscan_data {
 	struct bufq_nscan_head sorted;
 	struct bufq_nscan_head fifo;
-	int dir;
 	int leftoverroom; /* Remaining number of buffer inserts allowed  */
 };
 
