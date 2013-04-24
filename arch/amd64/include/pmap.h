@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.39 2011/06/30 22:18:01 jsg Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.41 2013/03/31 17:07:02 deraadt Exp $	*/
 /*	$NetBSD: pmap.h,v 1.1 2003/04/26 18:39:46 fvdl Exp $	*/
 
 /*
@@ -76,10 +76,12 @@
 #define	_MACHINE_PMAP_H_
 
 #ifndef _LOCORE
+#ifdef _KERNEL
 #include <machine/cpufunc.h>
-#include <machine/pte.h>
 #include <machine/segments.h>
+#endif /* _KERNEL */
 #include <uvm/uvm_object.h>
+#include <machine/pte.h>
 #endif
 
 /*
@@ -201,7 +203,7 @@
 
 #define NKL4_KIMG_ENTRIES	1
 #define NKL3_KIMG_ENTRIES	1
-#define NKL2_KIMG_ENTRIES	8
+#define NKL2_KIMG_ENTRIES	16
 
 #define NDML4_ENTRIES		1
 #define NDML3_ENTRIES		1

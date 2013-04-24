@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.132 2012/08/02 03:18:48 guenther Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.134 2013/03/30 06:32:25 tedu Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -61,7 +61,6 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <machine/cpu.h>
 #include <machine/reg.h>
 
 #ifdef __HAVE_MD_TCB
@@ -266,6 +265,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	size_t pathbuflen;
 #endif
 	char *pathbuf = NULL;
+	struct vnode *otvp;
 
 	/* get other threads to stop */
 	if ((error = single_thread_set(p, SINGLE_UNWIND, 1)))
@@ -478,10 +478,11 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	pr->ps_acflag &= ~AFORK;
 
 	/* record proc's vnode, for use by procfs and others */
-	if (p->p_textvp)
-		vrele(p->p_textvp);
+	otvp = p->p_textvp;
 	vref(pack.ep_vp);
 	p->p_textvp = pack.ep_vp;
+	if (otvp)
+		vrele(otvp);
 
 	atomic_setbits_int(&pr->ps_flags, PS_EXEC);
 	if (pr->ps_flags & PS_PPWAIT) {
