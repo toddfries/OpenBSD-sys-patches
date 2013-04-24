@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.59 2012/11/23 20:12:03 sthen Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.61 2013/03/28 16:45:16 tedu Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -45,7 +45,6 @@
 #include "pf.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
@@ -600,9 +599,8 @@ recompute:
 			error = EINVAL;
 			break;
 		}
-		sc->g_src = (satosin((struct sockadrr *)&lifr->addr))->sin_addr;
-		sc->g_dst =
-		    (satosin((struct sockadrr *)&lifr->dstaddr))->sin_addr;
+		sc->g_src = ((struct sockaddr_in *)&lifr->addr)->sin_addr;
+		sc->g_dst = ((struct sockaddr_in *)&lifr->dstaddr)->sin_addr;
 		goto recompute;
 	case SIOCDIFPHYADDR:
 		if ((error = suser(prc, 0)) != 0)

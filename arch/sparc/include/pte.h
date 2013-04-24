@@ -1,4 +1,4 @@
-/*	$OpenBSD: pte.h,v 1.8 2010/07/10 19:32:24 miod Exp $	*/
+/*	$OpenBSD: pte.h,v 1.10 2013/03/25 20:19:03 deraadt Exp $	*/
 /*	$NetBSD: pte.h,v 1.19 1997/08/05 11:00:10 pk Exp $ */
 
 /*
@@ -174,7 +174,7 @@ typedef u_char smeg_t;		/* 8 bits needed per Sun-4 regmap entry */
  *	pte |= PG_U;					(mark used/accessed)
  *	if (writing) pte |= PG_M;			(mark modified)
  *	ptetable[physseg][va.va_pg] = pte;
- *	physadr = ((pte & PG_PFNUM) << PGSHIFT) | va.va_off;
+ *	physadr = ((pte & PG_PFNUM) << PAGE_SHIFT) | va.va_off;
  */
 
 #if defined(SUN4_MMU3L) && !defined(SUN4)
@@ -195,7 +195,7 @@ typedef u_char smeg_t;		/* 8 bits needed per Sun-4 regmap entry */
 extern int nptesg;
 #define	NPTESG	nptesg		/* (which someone will have to initialize) */
 #else
-#define	NPTESG	(NBPSG / NBPG)
+#define	NPTESG	(NBPSG / PAGE_SIZE)
 #endif
 
 /* virtual address to virtual region number */

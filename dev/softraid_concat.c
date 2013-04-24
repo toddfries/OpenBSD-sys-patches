@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_concat.c,v 1.11 2013/03/02 12:50:01 jsing Exp $ */
+/* $OpenBSD: softraid_concat.c,v 1.15 2013/03/31 15:44:52 jsing Exp $ */
 /*
  * Copyright (c) 2008 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2011 Joel Sing <jsing@openbsd.org>
@@ -36,10 +36,8 @@ int	sr_concat_create(struct sr_discipline *, struct bioc_createraid *,
 	    int, int64_t);
 int	sr_concat_assemble(struct sr_discipline *, struct bioc_createraid *,
 	    int, void *);
-int	sr_concat_alloc_resources(struct sr_discipline *);
-int	sr_concat_free_resources(struct sr_discipline *);
+int	sr_concat_init(struct sr_discipline *);
 int	sr_concat_rw(struct sr_workunit *);
-void	sr_concat_intr(struct buf *);
 
 /* Discipline initialisation. */
 void
@@ -53,12 +51,9 @@ sr_concat_discipline_init(struct sr_discipline *sd)
 	sd->sd_max_wu = SR_CONCAT_NOWU;
 
 	/* Setup discipline specific function pointers. */
-	sd->sd_alloc_resources = sr_concat_alloc_resources;
 	sd->sd_assemble = sr_concat_assemble;
 	sd->sd_create = sr_concat_create;
-	sd->sd_free_resources = sr_concat_free_resources;
 	sd->sd_scsi_rw = sr_concat_rw;
-	sd->sd_scsi_intr = sr_concat_intr;
 }
 
 int
@@ -68,7 +63,8 @@ sr_concat_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 	int			i;
 
 	if (no_chunk < 2) {
-		sr_error(sd->sd_sc, "CONCAT requires two or more chunks");
+		sr_error(sd->sd_sc, "%s requires two or more chunks",
+		    sd->sd_name);
 		return EINVAL;
         }
 
@@ -76,51 +72,23 @@ sr_concat_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 	for (i = 0; i < no_chunk; i++)
 		sd->sd_meta->ssdi.ssd_size +=
 		    sd->sd_vol.sv_chunks[i]->src_size;
-	sd->sd_max_ccb_per_wu = SR_CONCAT_NOWU * no_chunk;
 
-	return 0;
+	return sr_concat_init(sd);
 }
 
 int
 sr_concat_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, void *data)
 {
-	sd->sd_max_ccb_per_wu = SR_CONCAT_NOWU * no_chunk;
+	return sr_concat_init(sd);
+}
+
+int
+sr_concat_init(struct sr_discipline *sd)
+{
+	sd->sd_max_ccb_per_wu = SR_CONCAT_NOWU * sd->sd_meta->ssdi.ssd_chunk_no;
 
 	return 0;
-}
-
-int
-sr_concat_alloc_resources(struct sr_discipline *sd)
-{
-	int			rv = EINVAL;
-
-	DNPRINTF(SR_D_DIS, "%s: sr_concat_alloc_resources\n",
-	    DEVNAME(sd->sd_sc));
-
-	if (sr_wu_alloc(sd))
-		goto bad;
-	if (sr_ccb_alloc(sd))
-		goto bad;
-
-	rv = 0;
-bad:
-	return (rv);
-}
-
-int
-sr_concat_free_resources(struct sr_discipline *sd)
-{
-	int			rv = EINVAL;
-
-	DNPRINTF(SR_D_DIS, "%s: sr_concat_free_resources\n",
-	    DEVNAME(sd->sd_sc));
-
-	sr_wu_free(sd);
-	sr_ccb_free(sd);
-
-	rv = 0;
-	return (rv);
 }
 
 int
@@ -206,24 +174,4 @@ sr_concat_rw(struct sr_workunit *wu)
 bad:
 	/* wu is unwound by sr_wu_put */
 	return (1);
-}
-
-void
-sr_concat_intr(struct buf *bp)
-{
-	struct sr_ccb		*ccb = (struct sr_ccb *)bp;
-	struct sr_workunit	*wu = ccb->ccb_wu;
-#ifdef SR_DEBUG
-	struct sr_discipline	*sd = wu->swu_dis;
-	struct scsi_xfer	*xs = wu->swu_xs;
-#endif
-	int			s;
-
-	DNPRINTF(SR_D_INTR, "%s: %s %s intr bp %x xs %x\n",
-	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, sd->sd_name, bp, xs);
-
-	s = splbio();
-	sr_ccb_done(ccb);
-	sr_wu_done(wu);
-	splx(s);
 }

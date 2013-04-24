@@ -1,4 +1,4 @@
-/*	$OpenBSD: rndvar.h,v 1.29 2011/01/08 19:45:08 deraadt Exp $	*/
+/*	$OpenBSD: rndvar.h,v 1.31 2013/03/29 01:35:37 tedu Exp $	*/
 
 /*
  * Copyright (c) 1996,2000 Michael Shalayeff.
@@ -44,14 +44,9 @@
 struct rndstats {
 	quad_t rnd_total;	/* total bits of entropy generated */
 	quad_t rnd_used;	/* strong data bits read so far */
-	quad_t rnd_reads;	/* strong read calls -- unused */
 	quad_t arc4_reads;	/* aRC4 data bytes read so far */
 	quad_t arc4_nstirs;	/* arc4 pool stirs */
-	quad_t arc4_stirs;	/* arc4 pool stirs (bits used) -- unused */
 
-	quad_t rnd_pad[5];
-
-	quad_t rnd_waits;	/* sleeps for data -- unused */
 	quad_t rnd_enqs;	/* enqueue calls */
 	quad_t rnd_deqs;	/* dequeue calls */
 	quad_t rnd_drops;	/* queue-full drops */
@@ -76,6 +71,7 @@ extern struct rndstats rndstats;
 
 void random_init(void);
 void random_start(void);
+void random_hostseed(void);
 
 void enqueue_randomness(int, int);
 void arc4random_buf(void *, size_t);
