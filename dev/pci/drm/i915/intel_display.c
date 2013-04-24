@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_display.c,v 1.1 2013/03/18 12:36:52 jsg Exp $	*/
+/*	$OpenBSD: intel_display.c,v 1.5 2013/04/17 20:04:04 kettenis Exp $	*/
 /*
  * Copyright © 2006-2007 Intel Corporation
  *
@@ -7778,7 +7778,7 @@ intel_gen2_queue_flip(struct drm_device *dev,
 	struct inteldrm_softc *dev_priv = dev->dev_private;
 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
 	u32 flip_mask;
-	struct intel_ring_buffer *ring = &dev_priv->rings[RCS];
+	struct intel_ring_buffer *ring = &dev_priv->ring[RCS];
 	int ret;
 
 	ret = intel_pin_and_fence_fb_obj(dev, obj, ring);
@@ -7823,7 +7823,7 @@ intel_gen3_queue_flip(struct drm_device *dev,
 	struct inteldrm_softc *dev_priv = dev->dev_private;
 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
 	u32 flip_mask;
-	struct intel_ring_buffer *ring = &dev_priv->rings[RCS];
+	struct intel_ring_buffer *ring = &dev_priv->ring[RCS];
 	int ret;
 
 	ret = intel_pin_and_fence_fb_obj(dev, obj, ring);
@@ -7865,7 +7865,7 @@ intel_gen4_queue_flip(struct drm_device *dev,
 	struct inteldrm_softc *dev_priv = dev->dev_private;
 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
 	uint32_t pf, pipesrc;
-	struct intel_ring_buffer *ring = &dev_priv->rings[RCS];
+	struct intel_ring_buffer *ring = &dev_priv->ring[RCS];
 	int ret;
 
 	ret = intel_pin_and_fence_fb_obj(dev, obj, ring);
@@ -7913,7 +7913,7 @@ intel_gen6_queue_flip(struct drm_device *dev,
 {
 	struct inteldrm_softc *dev_priv = dev->dev_private;
 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
-	struct intel_ring_buffer *ring = &dev_priv->rings[RCS];
+	struct intel_ring_buffer *ring = &dev_priv->ring[RCS];
 	uint32_t pf, pipesrc;
 	int ret;
 
@@ -7964,7 +7964,7 @@ intel_gen7_queue_flip(struct drm_device *dev,
 {
 	struct inteldrm_softc *dev_priv = dev->dev_private;
 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
-	struct intel_ring_buffer *ring = &dev_priv->rings[BCS];
+	struct intel_ring_buffer *ring = &dev_priv->ring[BCS];
 	uint32_t plane_bit = 0;
 	int ret;
 
@@ -8025,8 +8025,8 @@ intel_crtc_page_flip(struct drm_crtc *crtc,
 {
 	struct drm_device *dev = crtc->dev;
 	struct inteldrm_softc *dev_priv = dev->dev_private;
-	struct intel_framebuffer *intel_fb;
-	struct drm_i915_gem_object *obj;
+	struct drm_framebuffer *old_fb = crtc->fb;
+	struct drm_i915_gem_object *obj = to_intel_framebuffer(fb)->obj;
 	struct intel_crtc *intel_crtc = to_intel_crtc(crtc);
 	struct intel_unpin_work *work;
 	int ret;
@@ -8050,8 +8050,7 @@ intel_crtc_page_flip(struct drm_crtc *crtc,
 
 	work->event = event;
 	work->crtc = crtc;
-	intel_fb = to_intel_framebuffer(crtc->fb);
-	work->old_fb_obj = intel_fb->obj;
+	work->old_fb_obj = to_intel_framebuffer(old_fb)->obj;
 
 	ret = drm_vblank_get(dev, intel_crtc->pipe);
 	if (ret)
@@ -8069,9 +8068,6 @@ intel_crtc_page_flip(struct drm_crtc *crtc,
 	}
 	intel_crtc->unpin_work = work;
 	mtx_leave(&dev->event_lock);
-
-	intel_fb = to_intel_framebuffer(fb);
-	obj = intel_fb->obj;
 
 #ifdef notyet
 	if (atomic_read(&intel_crtc->unpin_work_count) >= 2)
@@ -8112,6 +8108,7 @@ intel_crtc_page_flip(struct drm_crtc *crtc,
 
 cleanup_pending:
 	atomic_dec(&intel_crtc->unpin_work_count);
+	crtc->fb = old_fb;
 	atomic_sub(1 << intel_crtc->plane, &work->old_fb_obj->pending_flip);
 	drm_gem_object_unreference(&work->old_fb_obj->base);
 	drm_gem_object_unreference(&obj->base);
@@ -9523,6 +9520,15 @@ static struct intel_quirk intel_quirks[] = {
 
 	/* Acer Aspire 4736Z */
 	{ 0x2a42, 0x1025, 0x0260, quirk_invert_brightness },
+
+	/* Acer/eMachines G725 */
+	{ 0x2a42, 0x1025, 0x0210, quirk_invert_brightness },
+
+	/* Acer/eMachines e725 */
+	{ 0x2a42, 0x1025, 0x0212, quirk_invert_brightness },
+
+	/* Acer/Packard Bell NCL20 */
+	{ 0x2a42, 0x1025, 0x034b, quirk_invert_brightness },
 };
 
 void
@@ -9622,7 +9628,7 @@ intel_modeset_init(struct drm_device *dev)
 #ifdef notyet
 	dev->mode_config.fb_base = dev_priv->mm.gtt_base_addr;
 #else
-	printf("%s todo set fb base\n", __func__);
+	DRM_DEBUG_KMS("todo set fb base\n");
 #endif
 
 	DRM_DEBUG_KMS("%d display pipe%s available.\n",

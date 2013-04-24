@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.139 2013/03/07 09:40:19 mpi Exp $	*/
+/*	$OpenBSD: if.h,v 1.142 2013/04/02 08:54:37 mpi Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -307,6 +307,7 @@ struct ifnet {				/* and the entries */
 					/* timer routine */
 	void	(*if_watchdog)(struct ifnet *);
 	int	(*if_wol)(struct ifnet *, int);
+	struct	ifaddr *if_lladdr;	/* pointer to link-level address */
 	struct	ifaltq if_snd;		/* output queue (includes altq) */
 	struct sockaddr_dl *if_sadl;	/* pointer to our sockaddr_dl */
 
@@ -796,11 +797,8 @@ do {									\
 #define IF_WIRED_DEFAULT_PRIORITY 0
 #define IF_WIRELESS_DEFAULT_PRIORITY 4
 
-extern int ifqmaxlen;
 extern struct ifnet_head ifnet;
-extern struct ifnet **ifindex2ifnet;
 extern struct ifnet *lo0ifp;
-extern int if_indexlim;
 
 #define	ether_input_mbuf(ifp, m)        ether_input((ifp), NULL, (m))
 
@@ -833,6 +831,7 @@ int	if_addgroup(struct ifnet *, const char *);
 int	if_delgroup(struct ifnet *, const char *);
 void	if_group_routechange(struct sockaddr *, struct sockaddr *);
 struct	ifnet *ifunit(const char *);
+struct	ifnet *if_get(unsigned int);
 void	if_start(struct ifnet *);
 void	ifnewlladdr(struct ifnet *);
 

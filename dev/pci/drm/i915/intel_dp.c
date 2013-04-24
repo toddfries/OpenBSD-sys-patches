@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_dp.c,v 1.1 2013/03/18 12:36:52 jsg Exp $	*/
+/*	$OpenBSD: intel_dp.c,v 1.4 2013/04/08 05:46:12 jsg Exp $	*/
 /*
  * Copyright © 2008 Intel Corporation
  *
@@ -753,14 +753,14 @@ intel_dp_i2c_aux_ch(struct i2c_controller *adapter, int mode,
 			break;
 		case AUX_NATIVE_REPLY_NACK:
 			DRM_DEBUG_KMS("aux_ch native nack\n");
-			return EIO;
+			return -EIO;
 		case AUX_NATIVE_REPLY_DEFER:
 			DELAY(100);
 			continue;
 		default:
 			DRM_ERROR("aux_ch invalid native reply 0x%02x\n",
 				  reply[0]);
-			return EIO;
+			return -EIO;
 		}
 
 		switch (reply[0] & AUX_I2C_REPLY_MASK) {
@@ -771,19 +771,19 @@ intel_dp_i2c_aux_ch(struct i2c_controller *adapter, int mode,
 			return reply_bytes - 1;
 		case AUX_I2C_REPLY_NACK:
 			DRM_DEBUG_KMS("aux_i2c nack\n");
-			return EIO;
+			return -EIO;
 		case AUX_I2C_REPLY_DEFER:
 			DRM_DEBUG_KMS("aux_i2c defer\n");
 			DELAY(100);
 			break;
 		default:
 			DRM_ERROR("aux_i2c invalid reply 0x%02x\n", reply[0]);
-			return EIO;
+			return -EIO;
 		}
 	}
 
 	DRM_ERROR("too many retries, giving up\n");
-	return EIO;
+	return -EIO;
 }
 
 int
@@ -911,6 +911,7 @@ intel_dp_set_m_n(struct drm_crtc *crtc, struct drm_display_mode *mode,
 	struct intel_dp_m_n m_n;
 	int pipe = intel_crtc->pipe;
 	enum transcoder cpu_transcoder = intel_crtc->cpu_transcoder;
+	int target_clock;
 
 	/*
 	 * Find the lane count in the intel_encoder private
@@ -926,13 +927,22 @@ intel_dp_set_m_n(struct drm_crtc *crtc, struct drm_display_mode *mode,
 		}
 	}
 
+	target_clock = mode->clock;
+	for_each_encoder_on_crtc(dev, crtc, intel_encoder) {
+		if (intel_encoder->type == INTEL_OUTPUT_EDP) {
+			target_clock = intel_edp_target_clock(intel_encoder,
+							      mode);
+			break;
+		}
+	}
+
 	/*
 	 * Compute the GMCH and Link ratios. The '3' here is
 	 * the number of bytes_per_pixel post-LUT, which we always
 	 * set up for 8-bits of R/G/B, or 3 bytes total.
 	 */
 	intel_dp_compute_m_n(intel_crtc->bpp, lane_count,
-			     mode->clock, adjusted_mode->clock, &m_n);
+			     target_clock, adjusted_mode->clock, &m_n);
 
 	if (IS_HASWELL(dev)) {
 		I915_WRITE(PIPE_DATA_M1(cpu_transcoder),
@@ -2013,7 +2023,7 @@ intel_dp_start_link_train(struct intel_dp *intel_dp)
 		for (i = 0; i < intel_dp->lane_count; i++)
 			if ((intel_dp->train_set[i] & DP_TRAIN_MAX_SWING_REACHED) == 0)
 				break;
-		if (i == intel_dp->lane_count && voltage_tries == 5) {
+		if (i == intel_dp->lane_count) {
 			++loop_tries;
 			if (loop_tries == 5) {
 				DRM_DEBUG_KMS("too many full retries, give up\n");

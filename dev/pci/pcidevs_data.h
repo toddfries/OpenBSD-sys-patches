@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1670 2013/03/14 14:47:00 brynet Exp 
+ *	OpenBSD: pcidevs,v 1.1673 2013/04/21 20:46:07 deraadt Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -4728,6 +4728,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "BCM5716S",
 	},
 	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5725,
+	    "BCM5725",
+	},
+	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5700,
 	    "BCM5700",
 	},
@@ -4828,6 +4832,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "BCM57712E",
 	},
 	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5717C,
+	    "BCM5717C",
+	},
+	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5714,
 	    "BCM5714",
 	},
@@ -4910,6 +4918,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57766,
 	    "BCM57766",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5762,
+	    "BCM5762",
 	},
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5761S,
@@ -5038,6 +5050,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5781,
 	    "BCM5781",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5727,
+	    "BCM5727",
 	},
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5753,
@@ -7234,6 +7250,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_IDT, PCI_PRODUCT_IDT_89HPES4T4,
 	    "89HPES4T4",
+	},
+	{
+	    PCI_VENDOR_IDT, PCI_PRODUCT_IDT_89HPES5T5ZB,
+	    "89HPES5T5ZB",
 	},
 	{
 	    PCI_VENDOR_IDT, PCI_PRODUCT_IDT_89HPES24T3G2,
@@ -17821,6 +17841,10 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_DIGI, PCI_PRODUCT_DIGI_NEO8,
+	    "Neo-8",
+	},
+	{
+	    PCI_VENDOR_DIGI, PCI_PRODUCT_DIGI_NEO8_PCIE,
 	    "Neo-8",
 	},
 	{

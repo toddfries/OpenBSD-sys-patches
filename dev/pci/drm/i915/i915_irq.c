@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_irq.c,v 1.1 2013/03/18 12:36:52 jsg Exp $	*/
+/*	$OpenBSD: i915_irq.c,v 1.5 2013/04/17 20:04:04 kettenis Exp $	*/
 /* i915_irq.c -- IRQ support for the I915 -*- linux-c -*-
  */
 /*
@@ -348,10 +348,6 @@ i915_hotplug_work_func(void *arg1, void *arg2)
 	struct drm_mode_config *mode_config = &dev->mode_config;
 	struct intel_encoder *encoder;
 
-	/* HPD irq before everything is fully set up. */
-	if (!dev_priv->enable_hotplug_processing)
-		return;
-
 	rw_enter_write(&mode_config->rwl);
 	DRM_DEBUG_KMS("running encoder hotplug functions\n");
 
@@ -420,17 +416,11 @@ notify_ring(struct drm_device *dev,
 //	trace_i915_gem_request_complete(ring, ring->get_seqno(ring, false));
 
 	wakeup(ring);
-	dev_priv->hangcheck_count = 0;
-	timeout_add_msec(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD);
-
-#ifdef notyet
-	wakeup(&ring->irq_queue);
 	if (i915_enable_hangcheck) {
 		dev_priv->hangcheck_count = 0;
-		mod_timer(&dev_priv->hangcheck_timer,
-			  round_jiffies_up(jiffies + DRM_I915_HANGCHECK_JIFFIES));
+		timeout_add_msec(&dev_priv->hangcheck_timer,
+				 DRM_I915_HANGCHECK_PERIOD);
 	}
-#endif
 }
 
 void
@@ -564,11 +554,11 @@ snb_gt_irq_handler(struct drm_device *dev,
 
 	if (gt_iir & (GEN6_RENDER_USER_INTERRUPT |
 		      GEN6_RENDER_PIPE_CONTROL_NOTIFY_INTERRUPT))
-		notify_ring(dev, &dev_priv->rings[RCS]);
+		notify_ring(dev, &dev_priv->ring[RCS]);
 	if (gt_iir & GEN6_BSD_USER_INTERRUPT)
-		notify_ring(dev, &dev_priv->rings[VCS]);
+		notify_ring(dev, &dev_priv->ring[VCS]);
 	if (gt_iir & GEN6_BLITTER_USER_INTERRUPT)
-		notify_ring(dev, &dev_priv->rings[BCS]);
+		notify_ring(dev, &dev_priv->ring[BCS]);
 
 	if (gt_iir & (GT_GEN6_BLT_CS_ERROR_INTERRUPT |
 		      GT_GEN6_BSD_CS_ERROR_INTERRUPT |
@@ -789,10 +779,8 @@ ivybridge_intr(void *arg)
 
 	de_iir = I915_READ(DEIIR);
 	if (de_iir) {
-#ifdef notyet
 		if (de_iir & DE_GSE_IVB)
 			intel_opregion_gse_intr(dev);
-#endif
 
 		for (i = 0; i < 3; i++) {
 			if (de_iir & (DE_PIPEA_VBLANK_IVB << (5 * i)))
@@ -837,9 +825,9 @@ ilk_gt_irq_handler(struct drm_device *dev,
 			       u32 gt_iir)
 {
 	if (gt_iir & (GT_USER_INTERRUPT | GT_PIPE_NOTIFY))
-		notify_ring(dev, &dev_priv->rings[RCS]);
+		notify_ring(dev, &dev_priv->ring[RCS]);
 	if (gt_iir & GT_BSD_USER_INTERRUPT)
-		notify_ring(dev, &dev_priv->rings[VCS]);
+		notify_ring(dev, &dev_priv->ring[VCS]);
 }
 
 int
@@ -873,10 +861,8 @@ ironlake_intr(void *arg)
 	else
 		snb_gt_irq_handler(dev, dev_priv, gt_iir);
 
-#ifdef notyet
 	if (de_iir & DE_GSE)
 		intel_opregion_gse_intr(dev);
-#endif
 
 	if (de_iir & DE_PIPEA_VBLANK)
 		drm_handle_vblank(dev, 0);
@@ -1857,10 +1843,8 @@ i915_hangcheck_elapsed(void *arg)
 	bool err = false, idle;
 	int i;
 
-#ifdef notyet
 	if (!i915_enable_hangcheck)
 		return;
-#endif
 
 	memset(acthd, 0, sizeof(acthd));
 	idle = true;
@@ -2326,7 +2310,7 @@ i8xx_intr(void *arg)
 //		i915_update_dri1_breadcrumb(dev);
 
 		if (iir & I915_USER_INTERRUPT)
-			notify_ring(dev, &dev_priv->rings[RCS]);
+			notify_ring(dev, &dev_priv->ring[RCS]);
 
 		if (pipe_stats[0] & PIPE_VBLANK_INTERRUPT_STATUS &&
 		    drm_handle_vblank(dev, 0)) {
@@ -2402,11 +2386,7 @@ i915_irq_postinstall(struct drm_device *dev)
 
 	/* Unmask the interrupts that we always want on. */
 	dev_priv->irq_mask =
-#ifdef notyet
 		~(I915_ASLE_INTERRUPT |
-#else
-		~(
-#endif
 		  I915_DISPLAY_PIPE_A_EVENT_INTERRUPT |
 		  I915_DISPLAY_PIPE_B_EVENT_INTERRUPT |
 		  I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT |
@@ -2414,9 +2394,7 @@ i915_irq_postinstall(struct drm_device *dev)
 		  I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT);
 
 	enable_mask =
-#ifdef notyet
 		I915_ASLE_INTERRUPT |
-#endif
 		I915_DISPLAY_PIPE_A_EVENT_INTERRUPT |
 		I915_DISPLAY_PIPE_B_EVENT_INTERRUPT |
 		I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT |
@@ -2456,7 +2434,7 @@ i915_irq_postinstall(struct drm_device *dev)
 		I915_WRITE(PORT_HOTPLUG_EN, hotplug_en);
 	}
 
-//	intel_opregion_enable_asle(dev);
+	intel_opregion_enable_asle(dev);
 
 	return 0;
 }
@@ -2529,7 +2507,7 @@ i915_intr(void *arg)
 		new_iir = I915_READ(IIR); /* Flush posted writes */
 
 		if (iir & I915_USER_INTERRUPT)
-			notify_ring(dev, &dev_priv->rings[RCS]);
+			notify_ring(dev, &dev_priv->ring[RCS]);
 
 		for_each_pipe(pipe) {
 			int plane = pipe;
@@ -2548,10 +2526,8 @@ i915_intr(void *arg)
 				blc_event = true;
 		}
 
-#ifdef notyet
 		if (blc_event || (iir & I915_ASLE_INTERRUPT))
 			intel_opregion_asle_intr(dev);
-#endif
 
 		/* With MSI, interrupts are only generated when iir
 		 * transitions from zero to nonzero.  If another bit got
@@ -2628,11 +2604,7 @@ i965_irq_postinstall(struct drm_device *dev)
 	u32 error_mask;
 
 	/* Unmask the interrupts that we always want on. */
-#ifdef notyet
 	dev_priv->irq_mask = ~(I915_ASLE_INTERRUPT |
-#else
-	dev_priv->irq_mask = ~(
-#endif
 			       I915_DISPLAY_PORT_INTERRUPT |
 			       I915_DISPLAY_PIPE_A_EVENT_INTERRUPT |
 			       I915_DISPLAY_PIPE_B_EVENT_INTERRUPT |
@@ -2703,9 +2675,7 @@ i965_irq_postinstall(struct drm_device *dev)
 
 	I915_WRITE(PORT_HOTPLUG_EN, hotplug_en);
 
-#ifdef notyet
 	intel_opregion_enable_asle(dev);
-#endif
 
 	return 0;
 }
@@ -2778,9 +2748,9 @@ i965_intr(void *arg)
 		new_iir = I915_READ(IIR); /* Flush posted writes */
 
 		if (iir & I915_USER_INTERRUPT)
-			notify_ring(dev, &dev_priv->rings[RCS]);
+			notify_ring(dev, &dev_priv->ring[RCS]);
 		if (iir & I915_BSD_USER_INTERRUPT)
-			notify_ring(dev, &dev_priv->rings[VCS]);
+			notify_ring(dev, &dev_priv->ring[VCS]);
 
 		if (iir & I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT)
 			intel_prepare_page_flip(dev, 0);
@@ -2800,10 +2770,8 @@ i965_intr(void *arg)
 		}
 
 
-#ifdef notyet
 		if (blc_event || (iir & I915_ASLE_INTERRUPT))
 			intel_opregion_asle_intr(dev);
-#endif
 
 		/* With MSI, interrupts are only generated when iir
 		 * transitions from zero to nonzero.  If another bit got

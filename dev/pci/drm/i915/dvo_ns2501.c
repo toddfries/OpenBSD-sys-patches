@@ -1,4 +1,4 @@
-/*	$OpenBSD: dvo_ns2501.c,v 1.1 2013/03/18 12:36:51 jsg Exp $	*/
+/*	$OpenBSD: dvo_ns2501.c,v 1.3 2013/03/31 11:43:23 kettenis Exp $	*/
 /*
  *
  * Copyright (c) 2012 Gilles Dartiguelongue, Thomas Richter
@@ -111,7 +111,7 @@ enable_dvo(struct intel_dvo_device *dvo)
 	struct intel_gmbus *bus = container_of(adapter,
 					       struct intel_gmbus,
 					       controller);
-	drm_i915_private_t *dev_priv = bus->gp.dev_priv;
+	drm_i915_private_t *dev_priv = bus->dev_priv;
 
 	DRM_DEBUG_KMS("%s: Trying to re-enable the DVO\n", __FUNCTION__);
 
@@ -139,7 +139,7 @@ restore_dvo(struct intel_dvo_device *dvo)
 	struct intel_gmbus *bus = container_of(adapter,
 					       struct intel_gmbus,
 					       controller);
-	drm_i915_private_t *dev_priv = bus->gp.dev_priv;
+	drm_i915_private_t *dev_priv = bus->dev_priv;
 	struct ns2501_priv *ns = (struct ns2501_priv *)(dvo->dev_priv);
 
 	I915_WRITE(DVOC, ns->dvoc);
@@ -162,18 +162,13 @@ ns2501_readb(struct intel_dvo_device *dvo, int addr, uint8_t * ch)
 	u8 out_buf[2];
 	u8 in_buf[2];
 	int ret;
-	uint8_t cmd = 0;
 
 	out_buf[0] = addr;
 	out_buf[1] = 0;
 
 	iic_acquire_bus(adapter, 0);
-	ret = iic_exec(adapter, I2C_OP_WRITE_WITH_STOP, dvo->slave_addr,
-	    &cmd, 1, out_buf, 1, 0);
-	if (ret)
-		goto read_err;
 	ret = iic_exec(adapter, I2C_OP_READ_WITH_STOP, dvo->slave_addr,
-	    &cmd, 1, in_buf, 1, 0);
+	    &out_buf, 1, in_buf, 1, 0);
 	if (ret)
 		goto read_err;
 	iic_release_bus(adapter, 0);
@@ -205,14 +200,13 @@ ns2501_writeb(struct intel_dvo_device *dvo, int addr, uint8_t ch)
 	struct i2c_controller *adapter = dvo->i2c_bus;
 	uint8_t out_buf[2];
 	int ret;
-	uint8_t cmd = 0;
 
 	out_buf[0] = addr;
 	out_buf[1] = ch;
 
 	iic_acquire_bus(adapter, 0);
 	ret = iic_exec(adapter, I2C_OP_WRITE_WITH_STOP, dvo->slave_addr,
-	    &cmd, 1, out_buf, 2, 0);
+	    NULL, 0, out_buf, 2, 0);
 	iic_release_bus(adapter, 0);
 	if (ret)
 		goto write_err;

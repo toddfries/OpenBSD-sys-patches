@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.h,v 1.1 2013/03/18 12:36:52 jsg Exp $ */
+/* $OpenBSD: i915_drv.h,v 1.15 2013/04/21 14:41:26 kettenis Exp $ */
 /* i915_drv.h -- Private header for the I915 driver -*- linux-c -*-
  */
 /*
@@ -40,6 +40,8 @@
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 #include <dev/rasops/rasops.h>
+
+#include "acpi.h"
 
 /* General customization:
  */
@@ -246,11 +248,6 @@ struct sdvo_device_mapping {
 	u8 ddc_pin;
 };
 
-struct gmbus_port {
-	struct inteldrm_softc *dev_priv;
-	int port;
-};
-
 enum intel_pch {
 	PCH_NONE = 0,	/* No PCH present */
 	PCH_IBX,	/* Ibexpeak PCH */
@@ -270,8 +267,13 @@ enum intel_sbi_destination {
 struct intel_fbdev;
 
 struct intel_gmbus {
-	struct i2c_controller	 controller;
-	struct gmbus_port	 gp;
+	struct i2c_controller controller;
+	u32 port;
+	u32 speed;
+	u32 force_bit;
+	u32 reg0;
+	u32 gpio_reg;
+	struct inteldrm_softc *dev_priv;
 };
 
 struct i915_suspend_saved_registers {
@@ -510,8 +512,8 @@ struct inteldrm_softc {
 	struct workq_task	 switchwqt;
 	struct rasops_info	 ro;
 
-	int			 noaccel;
-	struct wsdisplay_emulops noaccel_ops;
+	int	sc_offset;
+	int	(*sc_copyrows)(void *, int, int, int);
 
 	uint32_t		 gpio_mmio_base;
 
@@ -525,7 +527,7 @@ struct inteldrm_softc {
 	struct mutex gt_lock;
 
 	drm_i915_sarea_t *sarea_priv;
-	struct intel_ring_buffer rings[I915_NUM_RINGS];
+	struct intel_ring_buffer ring[I915_NUM_RINGS];
 	uint32_t next_seqno;
 
 	struct drm_dmamem *status_page_dmah;
@@ -560,7 +562,6 @@ struct inteldrm_softc {
 
 	u_int32_t		 hotplug_supported_mask;
 	struct workq_task	 hotplug_task;
-	bool			 enable_hotplug_processing;
 
 	int			 num_pipe;
 	int			 num_pch_pll;
@@ -642,6 +643,12 @@ struct inteldrm_softc {
 		/** List of all objects in gtt_space. Used to restore gtt
 		 * mappings on resume */
 		struct list_head bound_list;
+		/**
+		 * List of objects which are not bound to the GTT (thus
+		 * are idle and not used by the GPU) but still have
+		 * (presumably uncached) pages still attached.
+		 */
+		struct list_head unbound_list;
 
 		/**
 		 * List of objects currently involved in rendering from the
@@ -795,7 +802,7 @@ typedef struct inteldrm_softc drm_i915_private_t;
 /* Iterate over initialised rings */
 #define for_each_ring(ring__, dev_priv__, i__) \
 	for ((i__) = 0; (i__) < I915_NUM_RINGS; (i__)++) \
-		if (((ring__) = &(dev_priv__)->rings[(i__)]), intel_ring_initialized((ring__)))
+		if (((ring__) = &(dev_priv__)->ring[(i__)]), intel_ring_initialized((ring__)))
 
 enum hdmi_force_audio {
 	HDMI_AUDIO_OFF_DVI = -2,	/* no aux data for HDMI-DVI converter */
@@ -859,6 +866,8 @@ struct drm_i915_gem_object {
 	/** This object's place on the active/flushing/inactive lists */
 	struct list_head			 ring_list;
 	struct list_head			 mm_list;
+	/** This object's place in the batchbuffer or on the eviction list */
+	struct list_head			 exec_list;
 	/* GTT binding. */
 	bus_dmamap_t				 dmamap;
 	bus_dma_segment_t			*dma_segs;
@@ -932,6 +941,12 @@ struct drm_i915_gem_object {
 	unsigned int fenced_gpu_access:1;
 
 	unsigned int cache_level:2;
+
+	/**
+	 * Used for performing relocations during execbuffer insertion.
+	 */
+	unsigned long exec_handle;
+	struct drm_i915_gem_exec_object2 *exec_entry;
 
 	/** for phy allocated objects */
 	struct drm_i915_gem_phys_object *phys_obj;
@@ -1013,6 +1028,7 @@ void	i915_enable_pipestat(struct inteldrm_softc *, int, u_int32_t);
 void	i915_disable_pipestat(struct inteldrm_softc *, int, u_int32_t);
 void	intel_irq_init(struct drm_device *dev);
 void	i915_hangcheck_elapsed(void *);
+void	intel_enable_asle(struct drm_device *);
 
 extern void intel_gt_init(struct drm_device *dev);
 extern void intel_gt_reset(struct drm_device *dev);
@@ -1035,23 +1051,27 @@ int	i915_gem_get_aperture_ioctl(struct drm_device *, void *,
 	    struct drm_file *);
 int	i915_gem_set_tiling(struct drm_device *, void *, struct drm_file *);
 int	i915_gem_get_tiling(struct drm_device *, void *, struct drm_file *);
-int	i915_gem_gtt_map_ioctl(struct drm_device *, void *, struct drm_file *);
+int	i915_gem_mmap_ioctl(struct drm_device *, void *, struct drm_file *);
 int	i915_gem_mmap_gtt_ioctl(struct drm_device *, void *, struct drm_file *);
 int	i915_gem_madvise_ioctl(struct drm_device *, void *, struct drm_file *);
+int	i915_gem_sw_finish_ioctl(struct drm_device *, void *, struct drm_file *);
+int	i915_gem_get_caching_ioctl(struct drm_device *, void *,
+	    struct drm_file *);
+int	i915_gem_set_caching_ioctl(struct drm_device *, void *,
+	    struct drm_file *);
 
 /* GEM memory manager functions */
 int	i915_gem_init_object(struct drm_obj *);
 void	i915_gem_free_object(struct drm_obj *);
 int	i915_gem_object_pin(struct drm_i915_gem_object *, uint32_t, bool);
 void	i915_gem_object_unpin(struct drm_i915_gem_object *);
-void	i915_gem_retire_request(struct inteldrm_softc *,
-	    struct drm_i915_gem_request *);
+void	i915_gem_retire_requests(struct drm_device *);
 void	i915_gem_retire_requests_ring(struct intel_ring_buffer *);
 int	i915_gem_check_wedge(struct inteldrm_softc *,
 			     bool interruptible);
 
 void	i915_gem_retire_work_handler(void *, void*);
-int	i915_gem_idle(struct inteldrm_softc *);
+int	i915_gem_idle(struct drm_device *);
 void	i915_gem_object_move_to_active(struct drm_i915_gem_object *,
 	    struct intel_ring_buffer *);
 void	i915_gem_object_move_to_inactive(struct drm_i915_gem_object *);
@@ -1071,9 +1091,9 @@ void	i915_dispatch_gem_execbuffer(struct intel_ring_buffer *,
 int	i915_gem_object_pin_and_relocate(struct drm_obj *,
 	    struct drm_file *, struct drm_i915_gem_exec_object2 *,
 	    struct drm_i915_gem_relocation_entry *);
-
-struct drm_obj	*i915_gem_find_inactive_object(struct inteldrm_softc *,
-		     size_t);
+int	i915_gem_execbuffer_reserve_object(struct drm_i915_gem_object *,
+	    struct intel_ring_buffer *);
+void	i915_gem_execbuffer_unreserve_object(struct drm_i915_gem_object *);
 
 extern int i915_gem_get_seqno(struct drm_device *, u32 *);
 
@@ -1118,9 +1138,6 @@ void inteldrm_verify_inactive(struct inteldrm_softc *, char *, int);
 #define inteldrm_verify_inactive(dev,file,line)
 #endif
 
-void i915_gem_retire_requests(struct inteldrm_softc *);
-struct drm_obj  *i915_gem_find_inactive_object(struct inteldrm_softc *,
-	size_t);
 int i915_gem_object_unbind(struct drm_i915_gem_object *);
 int i915_wait_seqno(struct intel_ring_buffer *, uint32_t);
 #define I915_GEM_GPU_DOMAINS	(~(I915_GEM_DOMAIN_CPU | I915_GEM_DOMAIN_GTT))
@@ -1160,13 +1177,12 @@ void	inteldrm_timeout(void *);
 bool	i915_semaphore_is_enabled(struct drm_device *);
 
 /* i915_gem_evict.c */
-int i915_gem_evict_everything(struct inteldrm_softc *);
+int i915_gem_evict_everything(struct drm_device *);
 int i915_gem_evict_something(struct inteldrm_softc *, size_t);
 int i915_gem_evict_inactive(struct inteldrm_softc *);
 
 /* i915_gem_tiling.c */
-void	i915_gem_detect_bit_6_swizzle(struct inteldrm_softc *, 
-	    struct pci_attach_args *);
+void	i915_gem_detect_bit_6_swizzle(struct drm_device *);
 void	i915_gem_object_do_bit_17_swizzle(struct drm_i915_gem_object *);
 void	i915_gem_object_save_bit_17_swizzle(struct drm_i915_gem_object *);
 int	i915_gem_swizzle_page(struct vm_page *page);
@@ -1184,10 +1200,16 @@ extern int i915_restore_state(struct drm_device *);
 
 /* intel_i2c.c */
 extern int intel_setup_gmbus(struct inteldrm_softc *);
-struct i2c_controller *intel_gmbus_get_adapter(drm_i915_private_t *, unsigned);
 static inline bool intel_gmbus_is_port_valid(unsigned port)
 {
 	return (port >= GMBUS_PORT_SSC && port <= GMBUS_PORT_DPD);
+}
+
+struct i2c_controller *intel_gmbus_get_adapter(drm_i915_private_t *, unsigned);
+extern void intel_gmbus_force_bit(struct i2c_controller *, bool);
+static inline bool intel_gmbus_is_forced_bit(struct i2c_controller *i2c)
+{
+	return container_of(i2c, struct intel_gmbus, controller)->force_bit;
 }
 
 /* i915_gem.c */
@@ -1209,6 +1231,7 @@ void i915_gem_reset(struct drm_device *);
 void i915_gem_clflush_object(struct drm_i915_gem_object *);
 void i915_gem_release(struct drm_device *, struct drm_file *);
 void i915_gem_release_mmap(struct drm_i915_gem_object *);
+void i915_gem_load(struct drm_device *dev);
 
 uint32_t
 i915_gem_get_unfenced_gtt_alignment(struct drm_device *dev,
@@ -1222,10 +1245,19 @@ int i915_mutex_lock_interruptible(struct drm_device *dev);
 
 /* intel_opregion.c */
 int intel_opregion_setup(struct drm_device *dev);
-extern int intel_opregion_init(struct drm_device *dev);
+#if NACPI > 0
+extern void intel_opregion_init(struct drm_device *dev);
 extern void intel_opregion_fini(struct drm_device *dev);
-extern void opregion_asle_intr(struct drm_device *dev);
-extern void opregion_enable_asle(struct drm_device *dev);
+extern void intel_opregion_asle_intr(struct drm_device *dev);
+extern void intel_opregion_gse_intr(struct drm_device *dev);
+extern void intel_opregion_enable_asle(struct drm_device *dev);
+#else
+static inline void intel_opregion_init(struct drm_device *dev) { return; }
+static inline void intel_opregion_fini(struct drm_device *dev) { return; }
+static inline void intel_opregion_asle_intr(struct drm_device *dev) { return; }
+static inline void intel_opregion_gse_intr(struct drm_device *dev) { return; }
+static inline void intel_opregion_enable_asle(struct drm_device *dev) { return; }
+#endif
 
 /* i915_gem_gtt.c */
 void i915_gem_cleanup_aliasing_ppgtt(struct drm_device *dev);
@@ -1333,7 +1365,7 @@ read64(struct inteldrm_softc *dev_priv, bus_size_t off)
 #define	INTELDRM_VPRINTF(fmt, args...)
 #endif
 
-#define LP_RING(d) (&((struct inteldrm_softc *)(d))->rings[RCS])
+#define LP_RING(d) (&((struct inteldrm_softc *)(d))->ring[RCS])
 
 #define BEGIN_LP_RING(n) \
 	intel_ring_begin(LP_RING(dev_priv), (n))
@@ -1512,6 +1544,7 @@ extern int i915_semaphores;
 extern int i915_vbt_sdvo_panel_type;
 extern int i915_enable_rc6;
 extern int i915_enable_fbc;
+extern bool i915_enable_hangcheck;
 
 /* Inlines */
 

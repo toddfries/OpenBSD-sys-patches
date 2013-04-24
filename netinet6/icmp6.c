@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.120 2013/03/14 11:18:37 mpi Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.126 2013/04/24 10:17:08 mpi Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -129,10 +129,6 @@
  */
 #define in6p_ip6_nxt	inp_ipv6.ip6_nxt
 
-extern struct domain inet6domain;
-extern struct ip6protosw inet6sw[];
-extern u_char ip6_protox[];
-
 struct icmp6stat icmp6stat;
 
 extern struct inpcbtable rawin6pcbtable;
@@ -150,7 +146,7 @@ struct icmp6_mtudisc_callback {
 };
 
 LIST_HEAD(, icmp6_mtudisc_callback) icmp6_mtudisc_callbacks =
-    LIST_HEAD_INITIALIZER(&icmp6_mtudisc_callbacks);
+    LIST_HEAD_INITIALIZER(icmp6_mtudisc_callbacks);
 
 static struct rttimer_queue *icmp6_mtudisc_timeout_q = NULL;
 extern int pmtu_expire;
@@ -1738,7 +1734,7 @@ ni6_store_addrs(struct icmp6_nodeinfo *ni6, struct icmp6_nodeinfo *nni6,
 
   again:
 
-	for (; ifp != TAILQ_END(&ifnet); ifp = TAILQ_NEXT(ifp, if_list)) {
+	for (; ifp != NULL; ifp = TAILQ_NEXT(ifp, if_list)) {
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
@@ -1819,11 +1815,15 @@ ni6_store_addrs(struct icmp6_nodeinfo *ni6, struct icmp6_nodeinfo *nni6,
 			if (ifa6->ia6_lifetime.ia6t_expire == 0)
 				ltime = ND6_INFINITE_LIFETIME;
 			else {
-				if (ifa6->ia6_lifetime.ia6t_expire >
-				    time_second)
-					ltime = htonl(ifa6->ia6_lifetime.ia6t_expire - time_second);
-				else
+				time_t diff = ifa6->ia6_lifetime.ia6t_expire -
+				    time_second;
+
+				if (diff <= 0)
 					ltime = 0;
+				else if (diff >= ND6_INFINITE_LIFETIME)
+					ltime = ND6_INFINITE_LIFETIME;
+				else
+					ltime = htonl((u_int32_t)diff);
 			}
 
 			bcopy(&ltime, cp, sizeof(u_int32_t));
@@ -2040,7 +2040,7 @@ icmp6_reflect(struct mbuf *m, size_t off)
 	 * (for example) when we encounter an error while forwarding procedure
 	 * destined to a duplicated address of ours.
 	 */
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next)
+	TAILQ_FOREACH(ia, &in6_ifaddr, ia_list)
 		if (IN6_ARE_ADDR_EQUAL(&t, &ia->ia_addr.sin6_addr) &&
 		    (ia->ia6_flags & (IN6_IFF_ANYCAST|IN6_IFF_NOTREADY)) == 0) {
 			src = &t;
@@ -2809,7 +2809,6 @@ icmp6_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 }
 
 #include <uvm/uvm_extern.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 int *icmpv6ctl_vars[ICMPV6CTL_MAXID] = ICMPV6CTL_VARS;

@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.542 2013/03/15 09:10:52 ratchov Exp $
+#	$OpenBSD: files,v 1.545 2013/03/31 13:30:23 kettenis Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -54,6 +54,12 @@ define	rasops24
 define	rasops32
 define	rasops_bswap
 define	rasops_rotation
+
+# I2C bus bit-banging
+define	i2c_bitbang
+
+# 1-Wire bus bit-banging
+define	onewire_bitbang
 
 # net device attributes - we have generic code for ether(net),
 # and fddi.
@@ -125,9 +131,6 @@ define	atapi {[channel = -1]}
 # Common code for ESDI/IDE/etc. controllers
 device	wdc: ata, atapi, wdc_base
 file	dev/ic/wdc.c			wdc_base
-
-# 1-Wire bus bit-banging
-define	onewire_bitbang
 
 # "Chipset" drivers.  These are the bus-independent routines which
 # contain the cfdrivers.  Attachments are provided by files.<bus>
@@ -687,6 +690,7 @@ file kern/subr_evcount.c
 file kern/subr_extent.c
 file kern/subr_hibernate.c		hibernate
 file kern/subr_log.c
+file kern/subr_poison.c			diagnostic
 file kern/subr_pool.c
 file kern/dma_alloc.c
 file kern/subr_prf.c
@@ -991,7 +995,6 @@ file net/pfkeyv2_parsemessage.c		key | ipsec | tcp_signature
 file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
 
 # COMPAT_* support code (base and other shared code)
-file compat/common/compat_exec.c	!small_kernel
 file compat/common/compat_util.c	!small_kernel
 file compat/common/compat_dir.c		!small_kernel
 file compat/common/tty_43.c		compat_43

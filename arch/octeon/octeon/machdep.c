@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.27 2013/03/15 09:19:31 jasper Exp $ */
+/*	$OpenBSD: machdep.c,v 1.33 2013/04/08 09:42:26 jasper Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -84,13 +84,18 @@
 
 /* The following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* Machine "architecture" */
-char	cpu_model[30];
+char	cpu_model[64];
 
 struct uvm_constraint_range  dma_constraint = { 0x0, 0xffffffffUL };
 struct uvm_constraint_range *uvm_md_constraints[] = { NULL };
 
 vm_map_t exec_map;
 vm_map_t phys_map;
+
+struct boot_desc *octeon_boot_desc;
+struct boot_info *octeon_boot_info;
+
+char uboot_rootdev[OCTEON_ARGV_MAX];
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -118,6 +123,10 @@ void	dumpconf(void);
 vaddr_t	mips_init(__register_t, __register_t, __register_t, __register_t);
 boolean_t is_memory_range(paddr_t, psize_t, psize_t);
 void	octeon_memory_init(struct boot_info *);
+int	octeon_cpuspeed(int *);
+static void	process_bootargs(void);
+
+extern void parse_uboot_root(void);
 
 cons_decl(cn30xxuart);
 struct consdev uartcons = cons_init(cn30xxuart);
@@ -171,15 +180,11 @@ octeon_memory_init(struct boot_info *boot_info)
 	 * Octeon Memory looks as follows:
          *   PA
 	 * First 256 MB DR0
-	 * 0000 0000 0000 0000     to  0000 0000 0000 0000
-	 * 0000 0000 0FFF FFFF     to  0000 0000 0FFF FFFF
+	 * 0000 0000 0000 0000     to  0000 0000 0FFF FFFF
 	 * Second 256 MB DR1 
-	 * 0000 0004 1000 0000     to  0000 0004 1000 0000
-	 * 0000 0004 1FFF FFFF     to  0000 0004 1FFF FFFF
+	 * 0000 0004 1000 0000     to  0000 0004 1FFF FFFF
 	 * Over 512MB Memory DR2  15.5GB
-	 * 0000 0000 2000 0000     to  0000 0000 2000 0000
-	 * 0000 0003 FFFF FFFF     to  0000 0003 FFFF FFFF
-	 *
+	 * 0000 0000 2000 0000     to  0000 0003 FFFF FFFF
 	 */
 	physmem = atop(phys_avail[1] - phys_avail[0]);
 
@@ -248,7 +253,6 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 	extern char start[], edata[], end[];
 	extern char exception[], e_exception[];
 	extern void xtlb_miss;
-	extern uint64_t cf_found;
 
 	boot_desc = (struct boot_desc *)a3;
 	boot_info = 
@@ -362,10 +366,21 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 	tlb_init(bootcpu_hwinfo.tlbsize);
 
 	/*
-	 * Save some initial values needed for device configuration.
+	 * Save the the boot information for future reference since we can't
+	 * retrieve it anymore after we've fully bootstrapped the kernel.
 	 */
 
-	bcopy(&boot_info->cf_common_addr, &cf_found, sizeof(cf_found));
+	bcopy(&boot_info, &octeon_boot_info, sizeof(octeon_boot_info));
+	bcopy(&boot_desc, &octeon_boot_desc, sizeof(octeon_boot_desc));
+
+	snprintf(cpu_model, sizeof(cpu_model), "Cavium OCTEON (rev %d.%d) @ %d MHz",
+		 (bootcpu_hwinfo.c0prid >> 4) & 0x0f,
+		 bootcpu_hwinfo.c0prid & 0x0f,
+		 bootcpu_hwinfo.clock / 1000000);
+
+	cpu_cpuspeed = octeon_cpuspeed;
+
+	process_bootargs();
 
 	/*
 	 * Get a console, very early but after initial mapping setup.
@@ -493,7 +508,7 @@ consinit()
 }
 
 /*
- * cpu_startup: allocate memory for variable-sized tables, initialize CPU, and 
+ * cpu_startup: allocate memory for variable-sized tables, initialize CPU, and
  * do auto-configuration.
  */
 void
@@ -536,6 +551,53 @@ cpu_startup()
 #else
 		printf("kernel does not support -c; continuing..\n");
 #endif
+	}
+}
+
+int
+octeon_cpuspeed(int *freq)
+{
+	extern struct boot_info *octeon_boot_info;
+	*freq = octeon_boot_info->eclock / 1000000;
+	return (0);
+}
+
+
+static void
+process_bootargs(void)
+{
+	int i;
+	extern struct boot_desc *octeon_boot_desc;
+
+	/*
+	 * The kernel is booted via a bootoctlinux command. Thus we need to skip
+	 * argv[0] when we start to decode the boot arguments (${bootargs}).
+	 * Note that U-Boot doesn't pass us anything by default, we need
+	 * explicitly pass the rootdevice.
+	 */
+	for (i = 1; i < octeon_boot_desc->argc; i++ ) {
+		const char *arg =
+		    (const char*)PHYS_TO_CKSEG0(octeon_boot_desc->argv[i]);
+
+		if (arg == NULL)
+			continue;
+
+#ifdef DEBUG
+		printf("boot_desc->argv[%d] = %s\n",
+		       i, PHYS_TO_CKSEG0(octeon_boot_desc->argv[i]));
+#endif
+
+		/*
+		 * XXX: We currently only expect one other argument,
+		 * argv[1], root=ROOTDEV.
+		 */
+		if (strncmp(arg, "root=", 5) == 0) {
+			if (*uboot_rootdev == '\0') {
+				strlcpy(uboot_rootdev, arg,
+					sizeof(uboot_rootdev));
+				parse_uboot_root();
+                        }
+		}
 	}
 }
 
@@ -705,7 +767,7 @@ hw_cpu_boot_secondary(struct cpu_info *ci)
 	vaddr_t kstack;
 
 	kstack = alloc_contiguous_pages(USPACE);
-	if (kstack == NULL)
+	if (kstack == 0)
 		panic("unable to allocate idle stack\n");
 	ci->ci_curprocpaddr = (void *)kstack;
 	cpu_spinup_a0 = (uint64_t)ci;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_dma.c,v 1.1 2013/03/18 12:36:51 jsg Exp $	*/
+/*	$OpenBSD: i915_dma.c,v 1.7 2013/04/17 20:04:04 kettenis Exp $	*/
 /* i915_dma.c -- DMA support for the I915 -*- linux-c -*-
  */
 /*
@@ -94,10 +94,10 @@ i915_getparam(struct inteldrm_softc *dev_priv, void *data)
 		value = 1;
 		break;
 	case I915_PARAM_HAS_BSD:
-		value = HAS_BSD(dev);
+		value = intel_ring_initialized(&dev_priv->ring[VCS]);
 		break;
 	case I915_PARAM_HAS_BLT:
-		value = HAS_BLT(dev);
+		value = intel_ring_initialized(&dev_priv->ring[BCS]);
 		break;
 	case I915_PARAM_HAS_RELAXED_FENCING:
 #ifdef notyet
@@ -106,8 +106,14 @@ i915_getparam(struct inteldrm_softc *dev_priv, void *data)
 		return EINVAL;
 #endif
 		break;
+	case I915_PARAM_HAS_COHERENT_RINGS:
+		value = 1;
+		break;
 	case I915_PARAM_HAS_EXEC_CONSTANTS:
 		value = INTEL_INFO(dev)->gen >= 4;
+		break;
+	case I915_PARAM_HAS_RELAXED_DELTA:
+		value = 1;
 		break;
 	case I915_PARAM_HAS_GEN7_SOL_RESET:
 		value = 1;
@@ -117,6 +123,12 @@ i915_getparam(struct inteldrm_softc *dev_priv, void *data)
 		break;
 	case I915_PARAM_HAS_SEMAPHORES:
 		value = i915_semaphore_is_enabled(dev);
+		break;
+	case I915_PARAM_HAS_SECURE_BATCHES:
+		value = DRM_SUSER(curproc);
+		break;
+	case I915_PARAM_HAS_PINNED_BATCHES:
+		value = 1;
 		break;
 	default:
 		DRM_DEBUG("Unknown parameter %d\n", param->param);
@@ -301,19 +313,17 @@ i915_load_modeset_init(struct drm_device *dev)
 	if (ret)
 		goto cleanup_vga_switcheroo;
 #endif
-	ret = drm_irq_install(dev);
-	if (ret)
-		goto cleanup_gem_stolen;
-
-	/* Important: The output setup functions called by modeset_init need
-	 * working irqs for e.g. gmbus and dp aux transfers. */
 	intel_modeset_init(dev);
 
 	ret = i915_gem_init(dev);
 	if (ret)
-		goto cleanup_irq;
+		goto cleanup_gem_stolen;
 
 	intel_modeset_gem_init(dev);
+
+	ret = drm_irq_install(dev);
+	if (ret)
+		goto cleanup_gem;
 
 	/* Always safe in the mode setting case. */
 	/* FIXME: do pre/post-mode set stuff in core KMS code */
@@ -321,10 +331,7 @@ i915_load_modeset_init(struct drm_device *dev)
 
 	ret = intel_fbdev_init(dev);
 	if (ret)
-		goto cleanup_gem;
-
-	/* Only enable hotplug handling once the fbdev is fully set up. */
-	dev_priv->enable_hotplug_processing = true;
+		goto cleanup_irq;
 
 	drm_kms_helper_poll_init(dev);
 
@@ -333,13 +340,13 @@ i915_load_modeset_init(struct drm_device *dev)
 
 	return (0);
 
+cleanup_irq:
+	drm_irq_uninstall(dev);
 cleanup_gem:
 	DRM_LOCK();
 	i915_gem_cleanup_ringbuffer(dev);
 	DRM_UNLOCK();
 	i915_gem_cleanup_aliasing_ppgtt(dev);
-cleanup_irq:
-	drm_irq_uninstall(dev);
 cleanup_gem_stolen:
 #ifdef notyet
 	i915_gem_cleanup_stolen(dev);
@@ -359,7 +366,7 @@ i915_driver_lastclose(struct drm_device *dev)
 		return;
 	}
 
-	ret = i915_gem_idle(dev_priv);
+	ret = i915_gem_idle(dev);
 	if (ret)
 		DRM_ERROR("failed to idle hardware: %d\n", ret);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_sdvo.c,v 1.1 2013/03/18 12:36:52 jsg Exp $	*/
+/*	$OpenBSD: intel_sdvo.c,v 1.6 2013/03/31 14:18:38 kettenis Exp $	*/
 /*
  * Copyright 2006 Dave Airlie <airlied@linux.ie>
  * Copyright © 2006-2007 Intel Corporation
@@ -392,13 +392,18 @@ intel_sdvo_write_sdvox(struct intel_sdvo *intel_sdvo, u32 val)
 bool
 intel_sdvo_read_byte(struct intel_sdvo *intel_sdvo, u8 addr, u8 *ch)
 {
-	uint8_t cmd = 0;
+	int ret;
 
 	iic_acquire_bus(intel_sdvo->i2c, 0);
-	iic_exec(intel_sdvo->i2c, I2C_OP_READ_WITH_STOP, addr, &cmd, 1, ch, 1, 0);
+	ret = iic_exec(intel_sdvo->i2c, I2C_OP_READ_WITH_STOP,
+		       intel_sdvo->slave_addr, &addr, 1, ch, 1, 0);
 	iic_release_bus(intel_sdvo->i2c, 0);
 
-	return true;
+	if (ret == 0)
+		return true;
+
+	DRM_DEBUG_KMS("i2c transfer returned %d\n", ret);
+	return false;
 }
 
 #define SDVO_CMD_NAME_ENTRY(cmd) {cmd, #cmd}
@@ -531,20 +536,21 @@ intel_sdvo_debug_write(struct intel_sdvo *intel_sdvo, u8 cmd,
 	DRM_DEBUG_KMS("%s: W: %02X ",
 				SDVO_NAME(intel_sdvo), cmd);
 	for (i = 0; i < args_len; i++)
-		printf("%02X ", ((u8 *)args)[i]);
+		DRM_LOG_KMS("%02X ", ((u8 *)args)[i]);
 	for (; i < 8; i++)
-		printf("   ");
+		DRM_LOG_KMS("   ");
 	for (i = 0; i < ARRAY_SIZE(sdvo_cmd_names); i++) {
 		if (cmd == sdvo_cmd_names[i].cmd) {
-			printf("(%s)", sdvo_cmd_names[i].name);
+			DRM_LOG_KMS("(%s)", sdvo_cmd_names[i].name);
 			break;
 		}
 	}
 	if (i == ARRAY_SIZE(sdvo_cmd_names))
-		printf("(%02X)", cmd);
-	printf("\n");
+		DRM_LOG_KMS("(%02X)", cmd);
+	DRM_LOG_KMS("\n");
 }
 
+#ifdef DRMDEBUG
 static const char *cmd_status_names[] = {
 	"Power on",
 	"Success",
@@ -554,6 +560,7 @@ static const char *cmd_status_names[] = {
 	"Target not specified",
 	"Scaling not supported"
 };
+#endif
 
 struct i2c_msg {
 	i2c_op_t	 op;
@@ -569,7 +576,6 @@ intel_sdvo_write_cmd(struct intel_sdvo *intel_sdvo, u8 cmd,
 	u8 *buf, status;
 	struct i2c_msg *msgs;
 	int i, ret = true, x;
-	uint8_t c = 0;
 
         /* Would be simpler to allocate both in one go ? */        
 	buf = (u8 *)malloc(args_len * 2 + 2, M_DRM,
@@ -577,7 +583,7 @@ intel_sdvo_write_cmd(struct intel_sdvo *intel_sdvo, u8 cmd,
 	if (!buf)
 		return false;
 
-	msgs = malloc(args_len + 3 * sizeof(*msgs), M_DRM,
+	msgs = malloc((args_len + 3) * sizeof(*msgs), M_DRM,
 	    M_WAITOK | M_ZERO);
 	if (!msgs) {
 	        free(buf, M_DRM);
@@ -587,14 +593,14 @@ intel_sdvo_write_cmd(struct intel_sdvo *intel_sdvo, u8 cmd,
 	intel_sdvo_debug_write(intel_sdvo, cmd, args, args_len);
 
 	for (i = 0; i < args_len; i++) {
-		msgs[i].op = I2C_OP_WRITE_WITH_STOP;
+		msgs[i].op = I2C_OP_WRITE;
 		msgs[i].addr = intel_sdvo->slave_addr;
 		msgs[i].len = 2;
 		msgs[i].buf = buf + 2 *i;
 		buf[2*i + 0] = SDVO_I2C_ARG_0 - i;
 		buf[2*i + 1] = ((u8*)args)[i];
 	}
-	msgs[i].op = I2C_OP_WRITE_WITH_STOP;
+	msgs[i].op = I2C_OP_WRITE;
 	msgs[i].addr = intel_sdvo->slave_addr;
 	msgs[i].len = 2;
 	msgs[i].buf = buf + 2*i;
@@ -603,7 +609,7 @@ intel_sdvo_write_cmd(struct intel_sdvo *intel_sdvo, u8 cmd,
 
 	/* the following two are to read the response */
 	status = SDVO_I2C_CMD_STATUS;
-	msgs[i+1].op = I2C_OP_WRITE_WITH_STOP;
+	msgs[i+1].op = I2C_OP_WRITE;
 	msgs[i+1].addr = intel_sdvo->slave_addr;
 	msgs[i+1].len = 1;
 	msgs[i+1].buf = &status;
@@ -616,13 +622,16 @@ intel_sdvo_write_cmd(struct intel_sdvo *intel_sdvo, u8 cmd,
 	iic_acquire_bus(intel_sdvo->i2c, 0);
 	for (x = 0; x < i+3; x++) {
 		ret = iic_exec(intel_sdvo->i2c, msgs[x].op, msgs[x].addr,
-		    &c, 1, msgs[x].buf, msgs[x].len, 0);
+		    NULL, 0, msgs[x].buf, msgs[x].len, 0);
 		if (ret) {
 			DRM_DEBUG_KMS("sdvo i2c transfer failed\n");
 			ret = false;
-			break;
+			goto out;
 		}
 	}
+	ret = true;
+
+out:
 	iic_release_bus(intel_sdvo->i2c, 0);
 
 	free(msgs, M_DRM);
@@ -675,9 +684,9 @@ intel_sdvo_read_response(struct intel_sdvo *intel_sdvo,
 	}
 
 	if (status <= SDVO_CMD_STATUS_SCALING_NOT_SUPP)
-		printf("(%s)", cmd_status_names[status]);
+		DRM_LOG_KMS("(%s)", cmd_status_names[status]);
 	else
-		printf("(??? %d)", status);
+		DRM_LOG_KMS("(??? %d)", status);
 
 	if (status != SDVO_CMD_STATUS_SUCCESS)
 		goto log_fail;
@@ -688,13 +697,13 @@ intel_sdvo_read_response(struct intel_sdvo *intel_sdvo,
 					  SDVO_I2C_RETURN_0 + i,
 					  &((u8 *)response)[i]))
 			goto log_fail;
-		printf(" %02X", ((u8 *)response)[i]);
+		DRM_LOG_KMS(" %02X", ((u8 *)response)[i]);
 	}
-	printf("\n");
+	DRM_LOG_KMS("\n");
 	return true;
 
 log_fail:
-	printf("... failed\n");
+	DRM_LOG_KMS("... failed\n");
 	return false;
 }
 
@@ -2309,21 +2318,17 @@ intel_sdvo_select_i2c_bus(struct inteldrm_softc *dev_priv,
 
 	sdvo->i2c = intel_gmbus_get_adapter(dev_priv, pin);
 
-#ifdef notyet
 	/* With gmbus we should be able to drive sdvo i2c at 2MHz, but somehow
 	 * our code totally fails once we start using gmbus. Hence fall back to
 	 * bit banging for now. */
 	intel_gmbus_force_bit(sdvo->i2c, true);
-#endif
 }
 
 /* undo any changes intel_sdvo_select_i2c_bus() did to sdvo->i2c */
 void
 intel_sdvo_unselect_i2c_bus(struct intel_sdvo *sdvo)
 {
-#ifdef notyet
 	intel_gmbus_force_bit(sdvo->i2c, false);
-#endif
 }
 
 bool
@@ -2870,7 +2875,7 @@ intel_sdvo_ddc_proxy_acquire_bus(void *cookie, int flags)
 	struct intel_sdvo *sdvo = cookie;
 	struct i2c_controller *i2c = sdvo->i2c;
 
-	return ((i2c->ic_acquire_bus)(i2c->ic_cookie, flags));
+	return iic_acquire_bus(i2c, flags);
 }
 
 void
@@ -2879,7 +2884,7 @@ intel_sdvo_ddc_proxy_release_bus(void *cookie, int flags)
 	struct intel_sdvo *sdvo = cookie;
 	struct i2c_controller *i2c = sdvo->i2c;
 
-	(i2c->ic_release_bus)(i2c->ic_cookie, flags);
+	iic_release_bus(i2c, flags);
 }
 
 int
@@ -2890,10 +2895,9 @@ intel_sdvo_ddc_proxy_exec(void *cookie, i2c_op_t op, i2c_addr_t addr,
 	struct i2c_controller *i2c = sdvo->i2c;
 
 	if (!intel_sdvo_set_control_bus_switch(sdvo, sdvo->ddc_bus))
-		return -EIO;
+		return EIO;
 
-	return ((i2c->ic_exec)(i2c->ic_cookie,
-	    op, addr, cmdbuf, cmdlen, buffer, len, flags));
+	return iic_exec(i2c, op, addr, cmdbuf, cmdlen, buffer, len, flags);
 }
 
 bool

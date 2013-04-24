@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.97 2013/03/07 09:03:16 mpi Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.101 2013/03/28 23:10:05 tedu Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -47,9 +47,9 @@
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
-#include <sys/proc.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -105,7 +105,6 @@ struct ifnet *revarp_ifp;
 #endif /* NFSCLIENT */
 
 #ifdef DDB
-#include <uvm/uvm_extern.h>
 
 void	db_print_sa(struct sockaddr *);
 void	db_print_ifa(struct ifaddr *);
@@ -126,8 +125,7 @@ arptimer(void *arg)
 
 	s = splsoftnet();
 	timeout_add_sec(to, arpt_prune);
-	for (la = LIST_FIRST(&llinfo_arp); la != LIST_END(&llinfo_arp);
-	    la = nla) {
+	for (la = LIST_FIRST(&llinfo_arp); la != NULL; la = nla) {
 		struct rtentry *rt = la->la_rt;
 
 		nla = LIST_NEXT(la, la_list);
@@ -830,7 +828,7 @@ arplookup(u_int32_t addr, int create, int proxy, u_int tableid)
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = addr;
 	sin.sin_other = proxy ? SIN_PROXY : 0;
-	rt = rtalloc1(sintosa(&sin), create, tableid);
+	rt = rtalloc1((struct sockaddr *)&sin, create, tableid);
 	if (rt == 0)
 		return (0);
 	rt->rt_refcnt--;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_fb.c,v 1.1 2013/03/18 12:36:52 jsg Exp $	*/
+/*	$OpenBSD: intel_fb.c,v 1.4 2013/04/17 20:15:14 kettenis Exp $	*/
 /*
  * Copyright © 2007 David Airlie
  *
@@ -66,13 +66,14 @@ intelfb_create(struct intel_fbdev *ifbdev,
 							  sizes->surface_depth);
 
 	size = mode_cmd.pitches[0] * mode_cmd.height;
-	size = roundup2(size, PAGE_SIZE);
+	size = roundup2(size, PAGE_SIZE) * 2;
 	obj = i915_gem_alloc_object(dev, size);
 	if (!obj) {
 		DRM_ERROR("failed to allocate framebuffer\n");
 		ret = -ENOMEM;
 		goto out;
 	}
+	obj->dma_flags |= BUS_DMA_GTT_WRAPAROUND;
 
 	DRM_LOCK();
 
@@ -166,6 +167,14 @@ intelfb_create(struct intel_fbdev *ifbdev,
 		ri->ri_bnum = 8;
 		ri->ri_bpos = 0;
 		break;
+	case DRM_FORMAT_RGB565:
+		ri->ri_rnum = 5;
+		ri->ri_rpos = 11;
+		ri->ri_gnum = 6;
+		ri->ri_gpos = 5;
+		ri->ri_bnum = 5;
+		ri->ri_bpos = 0;
+		break;
 	}
 }
 #endif
@@ -176,7 +185,7 @@ intelfb_create(struct intel_fbdev *ifbdev,
 
 	DRM_UNLOCK();
 #if 1
-	printf("skipping call to vga_switcheroo_client_fb_set\n");
+	DRM_DEBUG_KMS("skipping call to vga_switcheroo_client_fb_set\n");
 #else
 	vga_switcheroo_client_fb_set(dev->pdev, info);
 #endif

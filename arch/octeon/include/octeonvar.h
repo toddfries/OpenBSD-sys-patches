@@ -203,6 +203,8 @@ struct octeon_fau_map {
 #define	BOARD_TYPE_UBIQUITI_E100	20002
 
 #ifdef _KERNEL
+#define OCTEON_ARGV_MAX 64
+
 struct boot_desc {
 	uint32_t desc_ver;
 	uint32_t desc_size;
@@ -215,7 +217,7 @@ struct boot_desc {
 	uint32_t __unused15;
 	uint32_t __unused14;
 	uint32_t argc;
-	uint32_t argv[64];
+	uint32_t argv[OCTEON_ARGV_MAX];
 	uint32_t flags;
 	uint32_t core_mask;
 	uint32_t dram_size;
@@ -269,10 +271,14 @@ struct boot_info {
 	uint32_t config_flags;
 };
 
-/* Contains the address for the CF bus, if one was found. */
-uint64_t cf_found;
+extern struct boot_desc *octeon_boot_desc;
+extern struct boot_info *octeon_boot_info;
 
-extern struct octeon_config	octeon_configuration;
+/* Device capabilities advertised in boot_info->config_flags */
+#define BOOTINFO_CFG_FLAG_PCI_HOST	(1ull << 0)
+#define BOOTINFO_CFG_FLAG_PCI_TARGET	(1ull << 1)
+#define BOOTINFO_CFG_FLAG_DEBUG		(1ull << 2)
+#define BOOTINFO_CFG_FLAG_NO_MAGIC	(1ull << 3)
 
 void	octeon_bus_io_init(bus_space_tag_t, void *);
 void	octeon_bus_mem_init(bus_space_tag_t, void *);

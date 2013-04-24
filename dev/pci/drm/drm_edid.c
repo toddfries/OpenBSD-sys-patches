@@ -1,4 +1,4 @@
-/*	$OpenBSD: drm_edid.c,v 1.1 2013/03/18 12:36:51 jsg Exp $	*/
+/*	$OpenBSD: drm_edid.c,v 1.5 2013/04/03 06:03:58 jsg Exp $	*/
 /*
  * Copyright (c) 2006 Luc Verhaegen (quirks list)
  * Copyright (c) 2007-2008 Intel Corporation
@@ -330,29 +330,24 @@ int
 drm_do_probe_ddc_edid(struct i2c_controller *adapter, unsigned char *buf,
 		      int block, int len)
 {
-	uint8_t cmd = 0;
 	unsigned char start = block * EDID_LENGTH;
 	unsigned char segment = block >> 1;
-	int ret;
+	int ret = 0;
 
 	iic_acquire_bus(adapter, 0);
 	if (segment) {
-		ret = iic_exec(adapter, I2C_OP_WRITE_WITH_STOP,
-		    DDC_SEGMENT_ADDR, &cmd, 1, &segment, 1, 0);
+		ret = iic_exec(adapter, I2C_OP_WRITE,
+		    DDC_SEGMENT_ADDR, NULL, 0, &segment, 1, 0);
 		if (ret)
-			return ret;
+			goto i2c_err;
 	}
-	ret = iic_exec(adapter, I2C_OP_WRITE_WITH_STOP, DDC_ADDR, &cmd, 1,
-	    &start, 1, 0);
-	if (ret)
-		return (ret);
-	ret = iic_exec(adapter, I2C_OP_READ_WITH_STOP, DDC_ADDR, &cmd, 1,
-	    buf, len, 0);
-	if (ret)
-		return (ret);
+	ret = iic_exec(adapter, I2C_OP_READ_WITH_STOP, DDC_ADDR,
+	    &start, 1, buf, len, 0);
+
+i2c_err:
 	iic_release_bus(adapter, 0);
 
-	return 0;
+	return (ret);
 }
 
 bool
@@ -960,7 +955,7 @@ drm_mode_detailed(struct drm_device *dev,
 	unsigned vblank = (pt->vactive_vblank_hi & 0xf) << 8 | pt->vblank_lo;
 	unsigned hsync_offset = (pt->hsync_vsync_offset_pulse_width_hi & 0xc0) << 2 | pt->hsync_offset_lo;
 	unsigned hsync_pulse_width = (pt->hsync_vsync_offset_pulse_width_hi & 0x30) << 4 | pt->hsync_pulse_width_lo;
-	unsigned vsync_offset = (pt->hsync_vsync_offset_pulse_width_hi & 0xc) >> 2 | pt->vsync_offset_pulse_width_lo >> 4;
+	unsigned vsync_offset = (pt->hsync_vsync_offset_pulse_width_hi & 0xc) << 2 | pt->vsync_offset_pulse_width_lo >> 4;
 	unsigned vsync_pulse_width = (pt->hsync_vsync_offset_pulse_width_hi & 0x3) << 4 | (pt->vsync_offset_pulse_width_lo & 0xf);
 
 	/* ignore tiny modes */
@@ -1041,6 +1036,7 @@ set_size:
 	}
 
 	mode->type = DRM_MODE_TYPE_DRIVER;
+	mode->vrefresh = drm_mode_vrefresh(mode);
 	drm_mode_set_name(mode);
 
 	return mode;

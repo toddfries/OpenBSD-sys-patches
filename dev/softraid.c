@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.290 2013/03/10 09:05:12 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.301 2013/04/23 12:49:52 jsing Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -117,6 +117,8 @@ void			sr_chunks_unwind(struct sr_softc *,
 void			sr_discipline_free(struct sr_discipline *);
 void			sr_discipline_shutdown(struct sr_discipline *, int);
 int			sr_discipline_init(struct sr_discipline *, int);
+int			sr_alloc_resources(struct sr_discipline *);
+void			sr_free_resources(struct sr_discipline *);
 void			sr_set_chunk_state(struct sr_discipline *, int, int);
 void			sr_set_vol_state(struct sr_discipline *);
 
@@ -2008,7 +2010,7 @@ sr_ccb_put(struct sr_ccb *ccb)
 
 struct sr_ccb *
 sr_ccb_rw(struct sr_discipline *sd, int chunk, daddr64_t blkno,
-    daddr64_t len, u_int8_t *data, int xsflags, int ccbflag)
+    daddr64_t len, u_int8_t *data, int xsflags, int ccbflags)
 {
 	struct sr_chunk		*sc = sd->sd_vol.sv_chunks[chunk];
 	struct sr_ccb		*ccb = NULL;
@@ -2017,7 +2019,7 @@ sr_ccb_rw(struct sr_discipline *sd, int chunk, daddr64_t blkno,
 	if (ccb == NULL)
 		goto out;
 
-	ccb->ccb_flag = ccbflag;
+	ccb->ccb_flags = ccbflags;
 	ccb->ccb_target = chunk;
 
 	ccb->ccb_buf.b_flags = B_PHYS | B_CALL;
@@ -2253,42 +2255,65 @@ sr_wu_done_callback(void *arg1, void *arg2)
 
 	s = splbio();
 
-	TAILQ_FOREACH(wup, &sd->sd_wu_pendq, swu_link)
-		if (wup == wu)
-			break;
-
-	if (wup == NULL)
-		panic("%s: wu %p not on pending queue",
-		    DEVNAME(sd->sd_sc), wu);
-
-	TAILQ_REMOVE(&sd->sd_wu_pendq, wu, swu_link);
-
-	if (wu->swu_collider) {
-		wu->swu_collider->swu_state = SR_WU_INPROGRESS;
-		TAILQ_REMOVE(&sd->sd_wu_defq, wu->swu_collider, swu_link);
-		sr_raid_startwu(wu->swu_collider);
-	}
-
 	if (wu->swu_ios_failed)
 		xs->error = XS_DRIVER_STUFFUP;
 	else
 		xs->error = XS_NOERROR;
 
+	if (sd->sd_scsi_wu_done) {
+		if (sd->sd_scsi_wu_done(wu) == SR_WU_RESTART)
+			goto done;
+	}
+
+	/* Remove work unit from pending queue. */
+	TAILQ_FOREACH(wup, &sd->sd_wu_pendq, swu_link)
+		if (wup == wu)
+			break;
+	if (wup == NULL)
+		panic("%s: wu %p not on pending queue",
+		    DEVNAME(sd->sd_sc), wu);
+	TAILQ_REMOVE(&sd->sd_wu_pendq, wu, swu_link);
+
+	if (wu->swu_collider) {
+		if (wu->swu_ios_failed)
+			sr_raid_recreate_wu(wu->swu_collider);
+
+		/* XXX Should the collider be failed if this xs failed? */
+		wu->swu_collider->swu_state = SR_WU_INPROGRESS;
+		TAILQ_REMOVE(&sd->sd_wu_defq, wu->swu_collider, swu_link);
+		sr_raid_startwu(wu->swu_collider);
+	}
+
 	/*
 	 * If a discipline provides its own sd_scsi_done function, then it
 	 * is responsible for calling sr_scsi_done() once I/O is complete.
 	 */
-	if (sd->sd_scsi_done) {
+	if (wu->swu_flags & SR_WUF_REBUILD)
+		wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
+	if (wu->swu_flags & SR_WUF_WAKEUP)
+		wakeup(wu);
+	if (sd->sd_scsi_done)
 		sd->sd_scsi_done(wu);
-	} else {
+	else if (!(wu->swu_flags & SR_WUF_REBUILD))
 		sr_scsi_done(sd, xs);
 
-		/* XXX - move to sr_scsi_done? */
-		if (sd->sd_sync && sd->sd_wu_pending == 0)
-			wakeup(sd);
-	}
-
+done:
 	splx(s);
+}
+
+struct sr_workunit *
+sr_scsi_wu_get(struct sr_discipline *sd, int flags)
+{
+	return scsi_io_get(&sd->sd_iopool, flags);
+}
+
+void
+sr_scsi_wu_put(struct sr_discipline *sd, struct sr_workunit *wu)
+{
+	scsi_io_put(&sd->sd_iopool, wu);
+
+	if (sd->sd_sync && sd->sd_wu_pending == 0)
+		wakeup(sd);
 }
 
 void
@@ -2300,6 +2325,9 @@ sr_scsi_done(struct sr_discipline *sd, struct scsi_xfer *xs)
 		xs->resid = 0;
 
 	scsi_done(xs);
+
+	if (sd->sd_sync && sd->sd_wu_pending == 0)
+		wakeup(sd);
 }
 
 void
@@ -3480,7 +3508,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc,
 		    sizeof(sd->sd_meta->ssd_devname));
 
 		sr_info(sc, "%s volume attached as %s",
-		    sd->sd_meta->ssdi.ssd_product, sd->sd_meta->ssd_devname); 
+		    sd->sd_name, sd->sd_meta->ssd_devname); 
 
 		/* Update device name on any roaming chunks. */
 		sr_roam_chunks(sd);
@@ -3525,8 +3553,8 @@ sr_ioctl_deleteraid(struct sr_softc *sc, struct bioc_deleteraid *bd)
 	struct sr_discipline	*sd;
 	int			rv = 1;
 
-	DNPRINTF(SR_D_IOCTL, "%s: sr_ioctl_deleteraid %s\n", DEVNAME(sc),
-	    dr->bd_dev);
+	DNPRINTF(SR_D_IOCTL, "%s: sr_ioctl_deleteraid %s\n",
+	    DEVNAME(sc), bd->bd_dev);
 
 	TAILQ_FOREACH(sd, &sc->sc_dis_list, sd_link) {
 		if (!strncmp(sd->sd_meta->ssd_devname, bd->bd_dev,
@@ -3862,10 +3890,10 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 	int			rv = 1;
 
 	/* Initialise discipline function pointers with defaults. */
-	sd->sd_alloc_resources = NULL;
+	sd->sd_alloc_resources = sr_alloc_resources;
 	sd->sd_assemble = NULL;
 	sd->sd_create = NULL;
-	sd->sd_free_resources = NULL;
+	sd->sd_free_resources = sr_free_resources;
 	sd->sd_ioctl_handler = NULL;
 	sd->sd_openings = NULL;
 	sd->sd_meta_opt_handler = NULL;
@@ -3876,7 +3904,8 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 	sd->sd_scsi_start_stop = sr_raid_start_stop;
 	sd->sd_scsi_sync = sr_raid_sync;
 	sd->sd_scsi_rw = NULL;
-	sd->sd_scsi_intr = NULL;
+	sd->sd_scsi_intr = sr_raid_intr;
+	sd->sd_scsi_wu_done = NULL;
 	sd->sd_scsi_done = NULL;
 	sd->sd_set_chunk_state = sr_set_chunk_state;
 	sd->sd_set_vol_state = sr_set_vol_state;
@@ -4068,21 +4097,40 @@ sr_raid_sync(struct sr_workunit *wu)
 
 	s = splbio();
 	sd->sd_sync = 1;
-
-	while (sd->sd_wu_pending > ios)
+	while (sd->sd_wu_pending > ios) {
 		if (tsleep(sd, PRIBIO, "sr_sync", 15 * hz) == EWOULDBLOCK) {
 			DNPRINTF(SR_D_DIS, "%s: sr_raid_sync timeout\n",
 			    DEVNAME(sd->sd_sc));
 			rv = 1;
 			break;
 		}
-
+	}
 	sd->sd_sync = 0;
 	splx(s);
 
 	wakeup(&sd->sd_sync);
 
 	return (rv);
+}
+
+void
+sr_raid_intr(struct buf *bp)
+{
+	struct sr_ccb		*ccb = (struct sr_ccb *)bp;
+	struct sr_workunit	*wu = ccb->ccb_wu;
+#ifdef SR_DEBUG
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct scsi_xfer	*xs = wu->swu_xs;
+#endif
+	int			s;
+
+	DNPRINTF(SR_D_INTR, "%s: %s %s intr bp %p xs %p\n",
+	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, sd->sd_name, bp, xs);
+
+	s = splbio();
+	sr_ccb_done(ccb);
+	sr_wu_done(wu);
+	splx(s);
 }
 
 void
@@ -4125,6 +4173,50 @@ sr_raid_startwu(struct sr_workunit *wu)
 	/* start all individual ios */
 	workq_queue_task(sd->sd_workq, &wu->swu_wqt, 0, sr_startwu_callback,
 	    sd, wu);
+}
+
+void
+sr_raid_recreate_wu(struct sr_workunit *wu)
+{
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct sr_workunit	*wup = wu;
+
+	/*
+	 * Recreate a work unit by releasing the associated CCBs and reissuing
+	 * the SCSI I/O request. This process is then repeated for all of the
+	 * colliding work units.
+	 */
+	do {
+		sr_wu_release_ccbs(wup);
+
+		wup->swu_state = SR_WU_REQUEUE;
+		if (sd->sd_scsi_rw(wup))
+			panic("could not requeue I/O");
+
+		wup = wup->swu_collider;
+	} while (wup);
+}
+
+int
+sr_alloc_resources(struct sr_discipline *sd)
+{
+	if (sr_wu_alloc(sd)) {
+		sr_error(sd->sd_sc, "unable to allocate work units");
+		return (ENOMEM);
+	}
+	if (sr_ccb_alloc(sd)) {
+		sr_error(sd->sd_sc, "unable to allocate ccbs");
+		return (ENOMEM);
+	}
+
+	return (0);
+}
+
+void
+sr_free_resources(struct sr_discipline *sd)
+{
+	sr_wu_free(sd);
+	sr_ccb_free(sd);
 }
 
 void
@@ -4514,10 +4606,8 @@ sr_rebuild_thread(void *arg)
 		}
 
 		/* get some wu */
-		if ((wu_r = scsi_io_get(&sd->sd_iopool, 0)) == NULL)
-			panic("%s: rebuild exhausted wu_r", DEVNAME(sc));
-		if ((wu_w = scsi_io_get(&sd->sd_iopool, 0)) == NULL)
-			panic("%s: rebuild exhausted wu_w", DEVNAME(sc));
+		wu_r = sr_scsi_wu_get(sd, 0);
+		wu_w = sr_scsi_wu_get(sd, 0);
 
 		/* setup read io */
 		bzero(&xs_r, sizeof xs_r);
@@ -4551,7 +4641,7 @@ sr_rebuild_thread(void *arg)
 		cw->opcode = WRITE_16;
 		_lto4b(sz, cw->length);
 		_lto8b(lba, cw->addr);
-		wu_w->swu_flags |= SR_WUF_REBUILD;
+		wu_w->swu_flags |= SR_WUF_REBUILD | SR_WUF_WAKEUP;
 		wu_w->swu_xs = &xs_w;
 		if (sd->sd_scsi_rw(wu_w)) {
 			printf("%s: could not create write io\n",
@@ -4586,11 +4676,12 @@ queued:
 		if (slept == 0)
 			tsleep(sc, PWAIT, "sr_yield", 1);
 
-		scsi_io_put(&sd->sd_iopool, wu_r);
-		scsi_io_put(&sd->sd_iopool, wu_w);
+		sr_scsi_wu_put(sd, wu_r);
+		sr_scsi_wu_put(sd, wu_w);
 
 		sd->sd_meta->ssd_rebuild = lba;
 
+		/* XXX - this should be based on size, not percentage. */
 		/* save metadata every percent */
 		psz = sd->sd_meta->ssdi.ssd_size;
 		rb = sd->sd_meta->ssd_rebuild;

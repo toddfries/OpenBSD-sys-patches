@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.206 2013/03/15 20:45:34 tedu Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.210 2013/03/28 23:10:05 tedu Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -38,14 +38,13 @@
 #include "vlan.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/kernel.h>
-#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -219,7 +218,7 @@ bridge_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_start = bridge_start;
 	ifp->if_type = IFT_BRIDGE;
 	ifp->if_hdrlen = ETHER_HDR_LEN;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
 	if_attach(ifp);

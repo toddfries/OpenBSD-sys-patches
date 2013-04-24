@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.1 2013/03/18 12:36:51 jsg Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.22 2013/04/21 14:41:26 kettenis Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -109,6 +109,13 @@ int i915_panel_use_ssc = -1;
  * (-2=ignore, -1=auto [default], index in VBT BIOS table)
  */
 int i915_vbt_sdvo_panel_type = -1;
+
+/*
+ * Periodically check GPU activity for detecting hangs.
+ * WARNING: Disabling this can cause system wide hangs.
+ * (default: true)
+ */
+bool i915_enable_hangcheck = true;
 
 const struct intel_device_info *
 	i915_get_device_id(int);
@@ -517,10 +524,10 @@ i915_drm_freeze(struct drm_device *dev)
 
 	/* If KMS is active, we do the leavevt stuff here */
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
-		int error = i915_gem_idle(dev_priv);
+		int error = i915_gem_idle(dev);
 		if (error) {
 			printf("GEM idle failed, resume might fail\n");
-			return (error);
+			return error;
 		}
 
 		timeout_del(&dev_priv->rps.delayed_resume_to);
@@ -528,7 +535,6 @@ i915_drm_freeze(struct drm_device *dev)
 		intel_modeset_disable(dev);
 
 		drm_irq_uninstall(dev);
-		dev_priv->enable_hotplug_processing = false;
 	}
 
 	i915_save_state(dev);
@@ -560,19 +566,9 @@ __i915_drm_thaw(struct drm_device *dev)
 		error = i915_gem_init_hw(dev);
 		DRM_UNLOCK();
 
-		/* We need working interrupts for modeset enabling ... */
-		drm_irq_install(dev);
-
 		intel_modeset_init_hw(dev);
 		intel_modeset_setup_hw_state(dev, false);
-
-		/*
-		 * ... but also need to make sure that hotplug processing
-		 * doesn't cause havoc. Like in the driver load code we don't
-		 * bother with the tiny race here where we might loose hotplug
-		 * notifications.
-		 * */
-		dev_priv->enable_hotplug_processing = true;
+		drm_irq_install(dev);
 	}
 
 	intel_opregion_init(dev);
@@ -650,6 +646,9 @@ struct wsdisplay_accessops inteldrm_accessops = {
 	inteldrm_show_screen
 };
 
+extern int (*ws_get_param)(struct wsdisplay_param *);
+extern int (*ws_set_param)(struct wsdisplay_param *);
+
 int
 inteldrm_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
@@ -660,15 +659,21 @@ inteldrm_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 
 	switch (cmd) {
 	case WSDISPLAYIO_GETPARAM:
+		if (ws_get_param && ws_get_param(dp) == 0)
+			return 0;
+
 		switch (dp->param) {
 		case WSDISPLAYIO_PARAM_BRIGHTNESS:
 			dp->min = 0;
 			dp->max = _intel_panel_get_max_backlight(dev);
 			dp->curval = dev_priv->backlight_level;
-			return 0;
+			return (dp->max > dp->min) ? 0 : -1;
 		}
 		break;
 	case WSDISPLAYIO_SETPARAM:
+		if (ws_set_param && ws_set_param(dp) == 0)
+			return 0;
+
 		switch (dp->param) {
 		case WSDISPLAYIO_PARAM_BRIGHTNESS:
 			intel_panel_set_backlight(dev, dp->curval);
@@ -693,23 +698,16 @@ inteldrm_alloc_screen(void *v, const struct wsscreen_descr *type,
 	struct inteldrm_softc *dev_priv = v;
 	struct rasops_info *ri = &dev_priv->ro;
 
-	if (dev_priv->nscreens > 8)
-		return (ENOMEM);
-
-	*cookiep = ri;
-	*curxp = 0;
-	*curyp =0;
-	ri->ri_ops.alloc_attr(ri, 0, 0, 0, attrp);
-	dev_priv->nscreens++;
-	return (0);
+	return rasops_alloc_screen(ri, cookiep, curxp, curyp, attrp);
 }
 
 void
 inteldrm_free_screen(void *v, void *cookie)
 {
 	struct inteldrm_softc *dev_priv = v;
+	struct rasops_info *ri = &dev_priv->ro;
 
-	dev_priv->nscreens--;
+	return rasops_free_screen(ri, cookie);
 }
 
 int
@@ -717,6 +715,10 @@ inteldrm_show_screen(void *v, void *cookie, int waitok,
     void (*cb)(void *, int, int), void *cbarg)
 {
 	struct inteldrm_softc *dev_priv = v;
+	struct rasops_info *ri = &dev_priv->ro;
+
+	if (cookie == ri->ri_active)
+		return (0);
 
 	dev_priv->switchcb = cb;
 	dev_priv->switchcbarg = cbarg;
@@ -735,8 +737,10 @@ void
 inteldrm_doswitch(void *v, void *cookie)
 {
 	struct inteldrm_softc *dev_priv = v;
+	struct rasops_info *ri = &dev_priv->ro;
 	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
 
+	rasops_show_screen(ri, cookie, 0, NULL, NULL);
 	intel_fb_restore_mode(dev);
 
 	if (dev_priv->switchcb)
@@ -747,204 +751,69 @@ inteldrm_doswitch(void *v, void *cookie)
  * Accelerated routines.
  */
 
-int inteldrm_copycols(void *, int, int, int, int);
-int inteldrm_erasecols(void *, int, int, int, long);
 int inteldrm_copyrows(void *, int, int, int);
-int inteldrm_eraserows(void *cookie, int, int, long);
-void inteldrm_copyrect(struct inteldrm_softc *, int, int, int, int, int, int);
-void inteldrm_fillrect(struct inteldrm_softc *, int, int, int, int, int);
-
-int
-inteldrm_copycols(void *cookie, int row, int src, int dst, int num)
-{
-	struct rasops_info *ri = cookie;
-	struct inteldrm_softc *sc = ri->ri_hw;
-	struct drm_device *dev = (struct drm_device *)sc->drmdev;
-
-	if (dev->open_count > 0 || sc->noaccel)
-		return sc->noaccel_ops.copycols(cookie, row, src, dst, num);
-
-	num *= ri->ri_font->fontwidth;
-	src *= ri->ri_font->fontwidth;
-	dst *= ri->ri_font->fontwidth;
-	row *= ri->ri_font->fontheight;
-
-	inteldrm_copyrect(sc, ri->ri_xorigin + src, ri->ri_yorigin + row,
-	    ri->ri_xorigin + dst, ri->ri_yorigin + row,
-	    num, ri->ri_font->fontheight);
-
-	return 0;
-}
-
-int
-inteldrm_erasecols(void *cookie, int row, int col, int num, long attr)
-{
-	struct rasops_info *ri = cookie;
-	struct inteldrm_softc *sc = ri->ri_hw;
-	struct drm_device *dev = (struct drm_device *)sc->drmdev;
-	int bg, fg;
-
-	if (dev->open_count > 0 || sc->noaccel)
-		return sc->noaccel_ops.erasecols(cookie, row, col, num, attr);
-
-	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
-
-	row *= ri->ri_font->fontheight;
-	col *= ri->ri_font->fontwidth;
-	num *= ri->ri_font->fontwidth;
-
-	inteldrm_fillrect(sc, ri->ri_xorigin + col, ri->ri_yorigin + row,
-	    num, ri->ri_font->fontheight, ri->ri_devcmap[bg]);
-
-	return 0;
-}
 
 int
 inteldrm_copyrows(void *cookie, int src, int dst, int num)
 {
 	struct rasops_info *ri = cookie;
 	struct inteldrm_softc *sc = ri->ri_hw;
-	struct drm_device *dev = (struct drm_device *)sc->drmdev;
 
-	if (dev->open_count > 0 || sc->noaccel)
-		return sc->noaccel_ops.copyrows(cookie, src, dst, num);
+	if ((dst == 0 && (src + num) == ri->ri_rows) ||
+	    (src == 0 && (dst + num) == ri->ri_rows)) {
+		struct inteldrm_softc *dev_priv = sc;
+		struct drm_fb_helper *helper = &dev_priv->fbdev->helper;
+		size_t size = dev_priv->fbdev->ifb.obj->base.size / 2;
+		int i;
 
-	num *= ri->ri_font->fontheight;
-	src *= ri->ri_font->fontheight;
-	dst *= ri->ri_font->fontheight;
+		if (dst == 0) {
+			int delta = src * ri->ri_font->fontheight * ri->ri_stride;
+			bzero(ri->ri_bits, delta);
 
-	inteldrm_copyrect(sc, ri->ri_xorigin, ri->ri_yorigin + src,
-	    ri->ri_xorigin, ri->ri_yorigin + dst, ri->ri_emuwidth, num);
+			sc->sc_offset += delta;
+			ri->ri_bits += delta;
+			ri->ri_origbits += delta;
+			if (sc->sc_offset > size) {
+				sc->sc_offset -= size;
+				ri->ri_bits -= size;
+				ri->ri_origbits -= size;
+			}
+		} else {
+			int delta = dst * ri->ri_font->fontheight * ri->ri_stride;
 
-	return 0;
-}
+			sc->sc_offset -= delta;
+			ri->ri_bits -= delta;
+			ri->ri_origbits -= delta;
+			if (sc->sc_offset < 0) {
+				sc->sc_offset += size;
+				ri->ri_bits += size;
+				ri->ri_origbits += size;
+			}
 
-int
-inteldrm_eraserows(void *cookie, int row, int num, long attr)
-{
-	struct rasops_info *ri = cookie;
-	struct inteldrm_softc *sc = ri->ri_hw;
-	struct drm_device *dev = (struct drm_device *)sc->drmdev;
-	int bg, fg;
-	int x, y, w;
+			bzero(ri->ri_bits, delta);
+		}
 
-	if (dev->open_count > 0 || sc->noaccel)
-		return sc->noaccel_ops.eraserows(cookie, row, num, attr);
+		for (i = 0; i < helper->crtc_count; i++) {
+			struct drm_mode_set *mode_set =
+			    &helper->crtc_info[i].mode_set;
+			struct drm_crtc *crtc = mode_set->crtc;
+			struct drm_framebuffer *fb = helper->fb;
 
-	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
+			if (!crtc->enabled)
+				continue;
 
-	if ((num == ri->ri_rows) && ISSET(ri->ri_flg, RI_FULLCLEAR)) {
-		num = ri->ri_height;
-		x = y = 0;
-		w = ri->ri_width;
-	} else {
-		num *= ri->ri_font->fontheight;
-		x = ri->ri_xorigin;
-		y = ri->ri_yorigin + row * ri->ri_font->fontheight;
-		w = ri->ri_emuwidth;
-	}
-	inteldrm_fillrect(sc, x, y, w, num, ri->ri_devcmap[bg]);
+			mode_set->x = (sc->sc_offset % ri->ri_stride) /
+			    (ri->ri_depth / 8);
+			mode_set->y = sc->sc_offset / ri->ri_stride;
+			if (fb == crtc->fb)
+				dev_priv->display.update_plane(crtc, fb,
+				    mode_set->x, mode_set->y);
+		}
 
-	return 0;
-}
-
-void
-inteldrm_copyrect(struct inteldrm_softc *dev_priv, int sx, int sy,
-    int dx, int dy, int w, int h)
-{
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
-	bus_addr_t base = dev_priv->fbdev->ifb.obj->gtt_offset;
-	uint32_t pitch = dev_priv->fbdev->ifb.base.pitches[0];
-	struct intel_ring_buffer *ring;
-	uint32_t seqno;
-	int ret, i;
-
-	if (HAS_BLT(dev))
-		ring = &dev_priv->rings[BCS];
-	else
-		ring = &dev_priv->rings[RCS];
-
-	ret = intel_ring_begin(ring, 8);
-	if (ret)
-		return;
-
-	intel_ring_emit(ring, XY_SRC_COPY_BLT_CMD |
-	    XY_SRC_COPY_BLT_WRITE_ALPHA | XY_SRC_COPY_BLT_WRITE_RGB);
-	intel_ring_emit(ring, BLT_DEPTH_32 | BLT_ROP_GXCOPY | pitch);
-	intel_ring_emit(ring, (dx << 0) | (dy << 16));
-	intel_ring_emit(ring, ((dx + w) << 0) | ((dy + h) << 16));
-	intel_ring_emit(ring, base);
-	intel_ring_emit(ring, (sx << 0) | (sy << 16));
-	intel_ring_emit(ring, pitch);
-	intel_ring_emit(ring, base);
-	intel_ring_advance(ring);
-
-	ret = ring->flush(ring, 0, I915_GEM_GPU_DOMAINS);
-	if (ret)
-		return;
-
-	ret = i915_add_request(ring, NULL, &seqno);
-	if (ret)
-		return;
-
-	for (i = 1000000; i != 0; i--) {
-		if (i915_seqno_passed(ring->get_seqno(ring, true), seqno))
-			break;
-		DELAY(1);
+		return 0;
 	}
 
-	i915_gem_retire_requests_ring(ring);
-}
-
-void
-inteldrm_fillrect(struct inteldrm_softc *dev_priv, int x, int y,
-    int w, int h, int color)
-{
-	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev;
-	bus_addr_t base = dev_priv->fbdev->ifb.obj->gtt_offset;
-	uint32_t pitch = dev_priv->fbdev->ifb.base.pitches[0];
-	struct intel_ring_buffer *ring;
-	uint32_t seqno;
-	int ret, i;
-
-	if (HAS_BLT(dev))
-		ring = &dev_priv->rings[BCS];
-	else
-		ring = &dev_priv->rings[RCS];
-
-	ret = intel_ring_begin(ring, 6);
-	if (ret)
-		return;
-
-#define XY_COLOR_BLT_CMD		((2<<29)|(0x50<<22)|4)
-#define XY_COLOR_BLT_WRITE_ALPHA	(1<<21)
-#define XY_COLOR_BLT_WRITE_RGB		(1<<20)
-#define   BLT_ROP_PATCOPY		(0xf0<<16)
-
-	intel_ring_emit(ring, XY_COLOR_BLT_CMD |
-	    XY_COLOR_BLT_WRITE_ALPHA | XY_COLOR_BLT_WRITE_RGB);
-	intel_ring_emit(ring, BLT_DEPTH_32 | BLT_ROP_PATCOPY | pitch);
-	intel_ring_emit(ring, (x << 0) | (y << 16));
-	intel_ring_emit(ring, ((x + w) << 0) | ((y + h) << 16));
-	intel_ring_emit(ring, base);
-	intel_ring_emit(ring, color);
-	intel_ring_advance(ring);
-
-	ret = ring->flush(ring, 0, I915_GEM_GPU_DOMAINS);
-	if (ret)
-		return;
-
-	ret = i915_add_request(ring, NULL, &seqno);
-	if (ret)
-		return;
-
-	for (i = 1000000; i != 0; i--) {
-		if (i915_seqno_passed(ring->get_seqno(ring, true), seqno))
-			break;
-		DELAY(1);
-	}
-
-	i915_gem_retire_requests_ring(ring);
+	return sc->sc_copyrows(cookie, src, dst, num);
 }
 
 void
@@ -969,6 +838,8 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	dev_priv->tag = pa->pa_tag;
 	dev_priv->dmat = pa->pa_dmat;
 	dev_priv->bst = pa->pa_memt;
+
+	printf("\n");
 
 	/* All intel chipsets need to be treated as agp, so just pass one */
 	dev_priv->drmdev = drm_attach_pci(&inteldrm_driver, pa, 1, self);
@@ -1023,45 +894,10 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* GEM init */
-	INIT_LIST_HEAD(&dev_priv->mm.active_list);
-	INIT_LIST_HEAD(&dev_priv->mm.inactive_list);
-	INIT_LIST_HEAD(&dev_priv->mm.bound_list);
-	INIT_LIST_HEAD(&dev_priv->mm.fence_list);
-	for (i = 0; i < I915_NUM_RINGS; i++)
-		init_ring_lists(&dev_priv->rings[i]);
-	timeout_set(&dev_priv->mm.retire_timer, inteldrm_timeout, dev_priv);
 	timeout_set(&dev_priv->hangcheck_timer, i915_hangcheck_elapsed, dev_priv);
 	dev_priv->next_seqno = 1;
 	dev_priv->mm.suspended = 1;
 	dev_priv->error_completion = 0;
-
-	/* On GEN3 we really need to make sure the ARB C3 LP bit is set */
-	if (IS_GEN3(dev)) {
-		u_int32_t tmp = I915_READ(MI_ARB_STATE);
-		if (!(tmp & MI_ARB_C3_LP_WRITE_ENABLE)) {
-			/*
-			 * arb state is a masked write, so set bit + bit
-			 * in mask
-			 */
-			I915_WRITE(MI_ARB_STATE,
-			           _MASKED_BIT_ENABLE(MI_ARB_C3_LP_WRITE_ENABLE));
-		}
-	}
-
-	dev_priv->relative_constants_mode = I915_EXEC_CONSTANTS_REL_GENERAL;
-
-	/* Old X drivers will take 0-2 for front, back, depth buffers */
-	if (!drm_core_check_feature(dev, DRIVER_MODESET))
-		dev_priv->fence_reg_start = 3;
-
-	if (INTEL_INFO(dev)->gen >= 4 || IS_I945G(dev) ||
-	    IS_I945GM(dev) || IS_G33(dev))
-		dev_priv->num_fence_regs = 16;
-	else
-		dev_priv->num_fence_regs = 8;
-
-	/* Initialise fences to zero, else on some macs we'll get corruption */
-	i915_gem_reset_fences(dev);
 
 	if (pci_find_device(&bpa, inteldrm_gmch_match) == 0) {
 		printf(": can't find GMCH\n");
@@ -1092,11 +928,10 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	i915_gem_detect_bit_6_swizzle(dev_priv, &bpa);
+        /* Try to make sure MCHBAR is enabled before poking at it */
+        intel_setup_mchbar(dev_priv, &bpa);
 
-	dev_priv->mm.interruptible = true;
-
-	printf(": %s\n", pci_intr_string(pa->pa_pc, dev_priv->ih));
+	i915_gem_load(dev);
 
 	mtx_init(&dev_priv->irq_lock, IPL_TTY);
 	mtx_init(&dev_priv->rps.lock, IPL_NONE);
@@ -1160,16 +995,12 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 
 	intel_fb_restore_mode(dev);
 
-	ri->ri_flg = RI_CENTER;
-	rasops_init(ri, 96, 132);
-
-	dev_priv->noaccel_ops = ri->ri_ops;
+	ri->ri_flg = RI_CENTER | RI_VCONS;
+	rasops_init(ri, 160, 160);
 
 	ri->ri_hw = dev_priv;
-	ri->ri_ops.copyrows = inteldrm_copyrows;
-	ri->ri_ops.copycols = inteldrm_copycols;
-	ri->ri_ops.eraserows = inteldrm_eraserows;
-	ri->ri_ops.erasecols = inteldrm_erasecols;
+	dev_priv->sc_copyrows = ri->ri_copyrows;
+	ri->ri_copyrows = inteldrm_copyrows;
 
 	inteldrm_stdscreen.capabilities = ri->ri_caps;
 	inteldrm_stdscreen.nrows = ri->ri_rows;
@@ -1187,10 +1018,13 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	if (wsdisplay_console_initted) {
 		long defattr;
 
-		ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
-		wsdisplay_cnattach(&inteldrm_stdscreen, ri, 0, 0, defattr);
+		ri->ri_ops.alloc_attr(ri->ri_active, 0, 0, 0, &defattr);
+		wsdisplay_cnattach(&inteldrm_stdscreen, ri->ri_active,
+		    0, 0, defattr);
 		aa.console = 1;
 	}
+
+	printf("%s: %dx%d\n", dev_priv->dev.dv_xname, ri->ri_width, ri->ri_height);
 
 	vga_sc->sc_type = -1;
 	config_found(parent, &aa, wsemuldisplaydevprint);
@@ -1247,7 +1081,6 @@ inteldrm_activate(struct device *arg, int act)
 	switch (act) {
 	case DVACT_QUIESCE:
 //		inteldrm_quiesce(dev_priv);
-		dev_priv->noaccel = 1;
 		i915_drm_freeze(dev);
 		break;
 	case DVACT_SUSPEND:
@@ -1260,7 +1093,6 @@ inteldrm_activate(struct device *arg, int act)
 //		wakeup(&dev_priv->flags);
 		i915_drm_thaw(dev);
 		intel_fb_restore_mode(dev);
-		dev_priv->noaccel = 0;
 		break;
 	}
 
@@ -1314,7 +1146,7 @@ inteldrm_doioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 		case DRM_IOCTL_I915_GEM_THROTTLE:
 			return (i915_gem_ring_throttle(dev, file_priv));
 		case DRM_IOCTL_I915_GEM_MMAP:
-			return (i915_gem_gtt_map_ioctl(dev, data, file_priv));
+			return (i915_gem_mmap_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_MMAP_GTT:
 			return (i915_gem_mmap_gtt_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_CREATE:
@@ -1337,6 +1169,14 @@ inteldrm_doioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			return (intel_get_pipe_from_crtc_id(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_MADVISE:
 			return (i915_gem_madvise_ioctl(dev, data, file_priv));
+		case DRM_IOCTL_I915_GEM_SW_FINISH:
+			return (i915_gem_sw_finish_ioctl(dev, data, file_priv));
+		case DRM_IOCTL_I915_GEM_SET_CACHING:
+			return (i915_gem_set_caching_ioctl(dev, data,
+			    file_priv));
+		case DRM_IOCTL_I915_GEM_GET_CACHING:
+			return (i915_gem_get_caching_ioctl(dev, data,
+			    file_priv));
 		default:
 			break;
 		}
@@ -1479,98 +1319,6 @@ inteldrm_set_max_obj_size(struct inteldrm_softc *dev_priv)
 
 }
 
-int
-i915_gem_gtt_map_ioctl(struct drm_device *dev, void *data,
-    struct drm_file *file_priv)
-{
-	struct drm_i915_gem_mmap	*args = data;
-	struct drm_obj			*obj;
-	struct drm_i915_gem_object	*obj_priv;
-	vaddr_t				 addr;
-	voff_t				 offset;
-	vsize_t				 end, nsize;
-	int				 ret;
-
-	obj = drm_gem_object_lookup(dev, file_priv, args->handle);
-	if (obj == NULL)
-		return (EBADF);
-
-	/* Since we are doing purely uvm-related operations here we do
-	 * not need to hold the object, a reference alone is sufficient
-	 */
-	obj_priv = to_intel_bo(obj);
-
-	/* Check size. Also ensure that the object is not purgeable */
-	if (args->size == 0 || args->offset > obj->size || args->size >
-	    obj->size || (args->offset + args->size) > obj->size ||
-	    i915_gem_object_is_purgeable(obj_priv)) {
-		ret = EINVAL;
-		goto done;
-	}
-
-	end = round_page(args->offset + args->size);
-	offset = trunc_page(args->offset);
-	nsize = end - offset;
-
-	/*
-	 * We give our reference from object_lookup to the mmap, so only
-	 * must free it in the case that the map fails.
-	 */
-	addr = 0;
-	ret = uvm_map(&curproc->p_vmspace->vm_map, &addr, nsize, &obj->uobj,
-	    offset, 0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
-	    UVM_INH_SHARE, UVM_ADV_RANDOM, 0));
-
-done:
-	if (ret == 0)
-		args->addr_ptr = (uint64_t) addr + (args->offset & PAGE_MASK);
-	else
-		drm_unref(&obj->uobj);
-
-	return (ret);
-}
-
-struct drm_obj *
-i915_gem_find_inactive_object(struct inteldrm_softc *dev_priv,
-    size_t min_size)
-{
-	struct drm_obj		*obj, *best = NULL, *first = NULL;
-	struct drm_i915_gem_object *obj_priv;
-
-	/*
-	 * We don't need references to the object as long as we hold the list
-	 * lock, they won't disappear until we release the lock.
-	 */
-	list_for_each_entry(obj_priv, &dev_priv->mm.inactive_list, mm_list) {
-		obj = &obj_priv->base;
-		if (obj->size >= min_size) {
-			if ((!obj_priv->dirty ||
-			    i915_gem_object_is_purgeable(obj_priv)) &&
-			    (best == NULL || obj->size < best->size)) {
-				best = obj;
-				if (best->size == min_size)
-					break;
-			}
-		}
-		if (first == NULL)
-			first = obj;
-	}
-	if (best == NULL)
-		best = first;
-	if (best) {
-		drm_ref(&best->uobj);
-		/*
-		 * if we couldn't grab it, we may as well fail and go
-		 * onto the next step for the sake of simplicity.
-		 */
-		if (drm_try_hold_object(best) == 0) {
-			drm_unref(&best->uobj);
-			best = NULL;
-		}
-	}
-	return (best);
-}
-
 void
 inteldrm_wipe_mappings(struct drm_obj *obj)
 {
@@ -1643,7 +1391,7 @@ i915_gem_object_pin_and_relocate(struct drm_obj *obj,
 		/* object must have come before us in the list */
 		if (target_obj == NULL) {
 			i915_gem_object_unpin(obj_priv);
-			return (EBADF);
+			return (ENOENT);
 		}
 		if ((target_obj->do_flags & I915_IN_EXEC) == 0) {
 			printf("%s: object not already in execbuffer\n",
@@ -1714,12 +1462,6 @@ i915_gem_object_pin_and_relocate(struct drm_obj *obj,
 			goto err;
 		}
 
-		if (reloc->delta > target_obj->size) {
-			DRM_ERROR("reloc larger than target\n");
-			ret = EINVAL;
-			goto err;
-		}
-
 		/* Map the page containing the relocation we're going to
 		 * perform.
 		 */
@@ -1764,11 +1506,17 @@ i915_gem_get_relocs_from_user(struct drm_i915_gem_exec_object2 *exec_list,
     u_int32_t buffer_count, struct drm_i915_gem_relocation_entry **relocs)
 {
 	u_int32_t	reloc_count = 0, reloc_index = 0, i;
-	int		ret;
+	int		ret, relocs_max;
+
+	relocs_max = INT_MAX / sizeof(struct drm_i915_gem_relocation_entry);
 
 	*relocs = NULL;
 	for (i = 0; i < buffer_count; i++) {
-		if (reloc_count + exec_list[i].relocation_count < reloc_count)
+		/* First check for malicious input causing overflow in
+		 * the worst case where we need to allocate the entire
+		 * relocation tree as a single array.
+		 */
+		if (exec_list[i].relocation_count > relocs_max - reloc_count)
 			return (EINVAL);
 		reloc_count += exec_list[i].relocation_count;
 	}
@@ -1826,7 +1574,7 @@ inteldrm_quiesce(struct inteldrm_softc *dev_priv)
 	 * sure that everything is unbound.
 	 */
 	KASSERT(dev_priv->mm.suspended);
-	KASSERT(dev_priv->rings[RCS].obj == NULL);
+	KASSERT(dev_priv->ring[RCS].obj == NULL);
 	atomic_setbits_int(&dev_priv->sc_flags, INTELDRM_QUIET);
 	while (dev_priv->entries)
 		tsleep(&dev_priv->entries, 0, "intelquiet", 0);
