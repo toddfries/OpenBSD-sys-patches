@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.119 2013/03/04 14:42:25 bluhm Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.125 2013/04/10 01:35:55 guenther Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -61,7 +61,6 @@
  *	@(#)ip_icmp.c	8.2 (Berkeley) 1/4/94
  */
 
-#include "faith.h"
 #include "carp.h"
 #include "pf.h"
 
@@ -151,7 +150,7 @@ struct icmp6_mtudisc_callback {
 };
 
 LIST_HEAD(, icmp6_mtudisc_callback) icmp6_mtudisc_callbacks =
-    LIST_HEAD_INITIALIZER(&icmp6_mtudisc_callbacks);
+    LIST_HEAD_INITIALIZER(icmp6_mtudisc_callbacks);
 
 static struct rttimer_queue *icmp6_mtudisc_timeout_q = NULL;
 extern int pmtu_expire;
@@ -457,24 +456,6 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		icmp6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_error);
 		goto freeit;
 	}
-
-#if defined(NFAITH) && 0 < NFAITH
-	if (m->m_pkthdr.rcvif && m->m_pkthdr.rcvif->if_type == IFT_FAITH) {
-		/*
-		 * Deliver very specific ICMP6 type only.
-		 * This is important to deliver TOOBIG.  Otherwise PMTUD
-		 * will not work.
-		 */
-		switch (icmp6->icmp6_type) {
-		case ICMP6_DST_UNREACH:
-		case ICMP6_PACKET_TOO_BIG:
-		case ICMP6_TIME_EXCEEDED:
-			break;
-		default:
-			goto freeit;
-		}
-	}
-#endif
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
@@ -1757,7 +1738,7 @@ ni6_store_addrs(struct icmp6_nodeinfo *ni6, struct icmp6_nodeinfo *nni6,
 
   again:
 
-	for (; ifp != TAILQ_END(&ifnet); ifp = TAILQ_NEXT(ifp, if_list)) {
+	for (; ifp != NULL; ifp = TAILQ_NEXT(ifp, if_list)) {
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
@@ -1838,11 +1819,15 @@ ni6_store_addrs(struct icmp6_nodeinfo *ni6, struct icmp6_nodeinfo *nni6,
 			if (ifa6->ia6_lifetime.ia6t_expire == 0)
 				ltime = ND6_INFINITE_LIFETIME;
 			else {
-				if (ifa6->ia6_lifetime.ia6t_expire >
-				    time_second)
-					ltime = htonl(ifa6->ia6_lifetime.ia6t_expire - time_second);
-				else
+				time_t diff = ifa6->ia6_lifetime.ia6t_expire -
+				    time_second;
+
+				if (diff <= 0)
 					ltime = 0;
+				else if (diff >= ND6_INFINITE_LIFETIME)
+					ltime = ND6_INFINITE_LIFETIME;
+				else
+					ltime = htonl((u_int32_t)diff);
 			}
 
 			bcopy(&ltime, cp, sizeof(u_int32_t));
@@ -2059,7 +2044,7 @@ icmp6_reflect(struct mbuf *m, size_t off)
 	 * (for example) when we encounter an error while forwarding procedure
 	 * destined to a duplicated address of ours.
 	 */
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next)
+	TAILQ_FOREACH(ia, &in6_ifaddr, ia_list)
 		if (IN6_ARE_ADDR_EQUAL(&t, &ia->ia_addr.sin6_addr) &&
 		    (ia->ia6_flags & (IN6_IFF_ANYCAST|IN6_IFF_NOTREADY)) == 0) {
 			src = &t;
@@ -2828,7 +2813,6 @@ icmp6_redirect_timeout(struct rtentry *rt, struct rttimer *r)
 }
 
 #include <uvm/uvm_extern.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 int *icmpv6ctl_vars[ICMPV6CTL_MAXID] = ICMPV6CTL_VARS;

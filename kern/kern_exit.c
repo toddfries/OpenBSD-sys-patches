@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.119 2012/09/08 14:52:00 kettenis Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.122 2013/04/06 03:44:34 tedu Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -70,7 +70,6 @@
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-#include <machine/cpu.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -97,9 +96,6 @@ sys___threxit(struct proc *p, void *v, register_t *retval)
 		syscallarg(pid_t *) notdead;
 	} */ *uap = v;
 
-	if (!rthreads_enabled)
-		return (EINVAL);
-
 	if (SCARG(uap, notdead) != NULL) {
 		pid_t zero = 0;
 		if (copyout(&zero, SCARG(uap, notdead), sizeof(zero))) {
@@ -121,6 +117,7 @@ exit1(struct proc *p, int rv, int flags)
 {
 	struct process *pr, *qr, *nqr;
 	struct rusage *rup;
+	struct vnode *ovp;
 
 	if (p->p_pid == 1)
 		panic("init died (signal %d, exit %d)",
@@ -217,9 +214,10 @@ exit1(struct proc *p, int rv, int flags)
 						VOP_REVOKE(sp->s_ttyvp,
 						    REVOKEALL);
 				}
-				if (sp->s_ttyvp)
-					vrele(sp->s_ttyvp);
+				ovp = sp->s_ttyvp;
 				sp->s_ttyvp = NULL;
+				if (ovp)
+					vrele(ovp);
 				/*
 				 * s_ttyp is not zero'd; we use this to
 				 * indicate that the session once had a
@@ -605,6 +603,7 @@ void
 proc_zap(struct proc *p)
 {
 	struct process *pr = p->p_p;
+	struct vnode *otvp;
 
 	/*
 	 * Finally finished with old proc entry.
@@ -625,8 +624,10 @@ proc_zap(struct proc *p)
 	/*
 	 * Release reference to text vnode
 	 */
-	if (p->p_textvp)
-		vrele(p->p_textvp);
+	otvp = p->p_textvp;
+	p->p_textvp = NULL;
+	if (otvp)
+		vrele(otvp);
 
 	/*
 	 * Remove us from our process list, possibly killing the process

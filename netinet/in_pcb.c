@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.131 2013/02/05 19:09:52 bluhm Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.137 2013/04/09 08:35:38 mpi Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -104,11 +104,6 @@
 
 struct	in_addr zeroin_addr;
 
-extern int ipsec_auth_default_level;
-extern int ipsec_esp_trans_default_level;
-extern int ipsec_esp_network_default_level;
-extern int ipsec_ipcomp_default_level;
-
 /*
  * These configure the range of local port addresses assigned to
  * "unspecified" outgoing connections/packets/whatever.
@@ -177,6 +172,8 @@ in_pcballoc(struct socket *so, struct inpcbtable *table)
 	struct inpcb *inp;
 	int s;
 
+	splsoftassert(IPL_SOFTNET);
+
 	if (inpcb_pool_initialized == 0) {
 		pool_init(&inpcb_pool, sizeof(struct inpcb), 0, 0, 0,
 		    "inpcbpl", NULL);
@@ -187,10 +184,10 @@ in_pcballoc(struct socket *so, struct inpcbtable *table)
 		return (ENOBUFS);
 	inp->inp_table = table;
 	inp->inp_socket = so;
-	inp->inp_seclevel[SL_AUTH] = ipsec_auth_default_level;
-	inp->inp_seclevel[SL_ESP_TRANS] = ipsec_esp_trans_default_level;
-	inp->inp_seclevel[SL_ESP_NETWORK] = ipsec_esp_network_default_level;
-	inp->inp_seclevel[SL_IPCOMP] = ipsec_ipcomp_default_level;
+	inp->inp_seclevel[SL_AUTH] = IPSEC_AUTH_LEVEL_DEFAULT;
+	inp->inp_seclevel[SL_ESP_TRANS] = IPSEC_ESP_TRANS_LEVEL_DEFAULT;
+	inp->inp_seclevel[SL_ESP_NETWORK] = IPSEC_ESP_NETWORK_LEVEL_DEFAULT;
+	inp->inp_seclevel[SL_IPCOMP] = IPSEC_IPCOMP_LEVEL_DEFAULT;
 	inp->inp_rtableid = curproc->p_p->ps_rtableid;
 	s = splnet();
 	CIRCLEQ_INSERT_HEAD(&table->inpt_queue, inp, inp_queue);
@@ -500,7 +497,7 @@ in_pcbdetach(struct inpcb *inp)
 #endif
 #if NPF > 0
 	if (inp->inp_pf_sk)
-		((struct pf_state_key *)inp->inp_pf_sk)->inp = NULL;
+		inp->inp_pf_sk->inp = NULL;
 #endif
 	s = splnet();
 	LIST_REMOVE(inp, inp_lhash);
@@ -655,7 +652,7 @@ struct inpcb *
 in_pcblookup(struct inpcbtable *table, void *faddrp, u_int fport_arg,
     void *laddrp, u_int lport_arg, int flags, u_int rdomain)
 {
-	struct inpcb *inp, *match = 0;
+	struct inpcb *inp, *match = NULL;
 	int matchwild = 3, wildcard;
 	u_int16_t fport = fport_arg, lport = lport_arg;
 	struct in_addr faddr = *(struct in_addr *)faddrp;
@@ -789,9 +786,8 @@ in_selectsrc(struct sockaddr_in *sin, struct route *ro, int soopts,
     struct ip_moptions *mopts, int *errorp, u_int rtableid)
 {
 	struct sockaddr_in *sin2;
-	struct in_ifaddr *ia;
+	struct in_ifaddr *ia = NULL;
 
-	ia = (struct in_ifaddr *)0;
 	/*
 	 * If the destination address is multicast and an outgoing
 	 * interface has been set as a multicast option, use the
@@ -810,7 +806,7 @@ in_selectsrc(struct sockaddr_in *sin, struct route *ro, int soopts,
 				*errorp = EADDRNOTAVAIL;
 				return NULL;
 			}
-			return satosin(&ia->ia_addr);
+			return (&ia->ia_addr);
 		}
 	}
 	/*
@@ -863,7 +859,7 @@ in_selectsrc(struct sockaddr_in *sin, struct route *ro, int soopts,
 			return NULL;
 		}
 	}
-	return satosin(&ia->ia_addr);
+	return (&ia->ia_addr);
 }
 
 void
