@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.190 2013/01/30 18:21:08 matthew Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.192 2013/04/15 15:32:19 jsing Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -68,6 +68,9 @@ static int change_dir(struct nameidata *, struct proc *);
 void checkdirs(struct vnode *);
 
 int copyout_statfs(struct statfs *, void *, struct proc *);
+#ifdef COMPAT_O53
+int copyout_statfs53(struct statfs *, void *, struct proc *);
+#endif
 
 int getdirentries_internal(struct proc *, int, char *, int, off_t *,
     register_t *);
@@ -324,42 +327,44 @@ update:
 /*
  * Scan all active processes to see if any of them have a current
  * or root directory onto which the new filesystem has just been
- * mounted. If so, replace them with the new mount point.
+ * mounted. If so, replace them with the new mount point, keeping
+ * track of how many were replaced.  That's the number of references
+ * the old vnode had that we've replaced, so finish by vrele()'ing
+ * it that many times.  This puts off any possible sleeping until
+ * we've finished walking the allprocs list.
  */
 void
 checkdirs(struct vnode *olddp)
 {
 	struct filedesc *fdp;
-	struct vnode *newdp, *vp;
+	struct vnode *newdp;
 	struct proc *p;
+	u_int  free_count = 0;
 
 	if (olddp->v_usecount == 1)
 		return;
 	if (VFS_ROOT(olddp->v_mountedhere, &newdp))
 		panic("mount: lost mount");
-again:
 	LIST_FOREACH(p, &allproc, p_list) {
 		fdp = p->p_fd;
 		if (fdp->fd_cdir == olddp) {
-			vp = fdp->fd_cdir;
+			free_count++;
 			vref(newdp);
 			fdp->fd_cdir = newdp;
-			if (vrele(vp))
-				goto again;
 		}
 		if (fdp->fd_rdir == olddp) {
-			vp = fdp->fd_rdir;
+			free_count++;
 			vref(newdp);
 			fdp->fd_rdir = newdp;
-			if (vrele(vp))
-				goto again;
 		}
 	}
 	if (rootvnode == olddp) {
-		vrele(rootvnode);
+		free_count++;
 		vref(newdp);
 		rootvnode = newdp;
 	}
+	while (free_count-- > 0)
+		vrele(olddp);
 	vput(newdp);
 }
 
@@ -686,6 +691,191 @@ sys_getfsstat(struct proc *p, void *v, register_t *retval)
 	return (0);
 }
 
+#ifdef COMPAT_O53
+int
+copyout_statfs53(struct statfs *sp, void *uaddr, struct proc *p)
+{
+	struct statfs53 st;
+
+	/* make sure any padding in the changed area is zeroed */
+	memset(&st, 0, sizeof(st));
+	memcpy(&st, sp, offsetof(struct statfs53, f_owner) +
+	    sizeof(st.f_owner));
+	st.f_ctime = sp->f_ctime;
+	memcpy(&st.f_fstypename,  &sp->f_fstypename,  sizeof(st.f_fstypename));
+	memcpy(&st.f_mntonname,   &sp->f_mntonname,   sizeof(st.f_mntonname));
+	memcpy(&st.f_mntfromname, &sp->f_mntfromname, sizeof(st.f_mntfromname));
+	memcpy(&st.mount_info,    &sp->mount_info,    sizeof(st.mount_info));
+
+	/* Don't let non-root see filesystem id (for NFS security) */
+	if (suser(p, 0))
+		memset(&st.f_fsid, 0, sizeof(st.f_fsid));
+
+	return (copyout(&st, uaddr, sizeof(st)));
+}
+
+/*
+ * Get filesystem statistics.
+ */
+/* ARGSUSED */
+int
+compat_o53_sys_statfs(struct proc *p, void *v, register_t *retval)
+{
+	struct compat_o53_sys_statfs_args /* {
+		syscallarg(const char *) path;
+		syscallarg(struct statfs53 *) buf;
+	} */ *uap = v;
+	struct mount *mp;
+	struct statfs *sp;
+	int error;
+	struct nameidata nd;
+
+	NDINIT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, SCARG(uap, path), p);
+	if ((error = namei(&nd)) != 0)
+		return (error);
+	mp = nd.ni_vp->v_mount;
+	sp = &mp->mnt_stat;
+	vrele(nd.ni_vp);
+	if ((error = VFS_STATFS(mp, sp, p)) != 0)
+		return (error);
+	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
+
+	return (copyout_statfs53(sp, SCARG(uap, buf), p));
+}
+
+/*
+ * Get filesystem statistics.
+ */
+/* ARGSUSED */
+int
+compat_o53_sys_fstatfs(struct proc *p, void *v, register_t *retval)
+{
+	struct compat_o53_sys_fstatfs_args /* {
+		syscallarg(int) fd;
+		syscallarg(struct statfs53 *) buf;
+	} */ *uap = v;
+	struct file *fp;
+	struct mount *mp;
+	struct statfs *sp;
+	int error;
+
+	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
+		return (error);
+	mp = ((struct vnode *)fp->f_data)->v_mount;
+	if (!mp) {
+		FRELE(fp, p);
+		return (ENOENT);
+	}
+	sp = &mp->mnt_stat;
+	error = VFS_STATFS(mp, sp, p);
+	FRELE(fp, p);
+	if (error)
+		return (error);
+	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
+
+	return (copyout_statfs53(sp, SCARG(uap, buf), p));
+}
+
+int
+compat_o53_sys_getfsstat(struct proc *p, void *v, register_t *retval)
+{
+	struct compat_o53_sys_getfsstat_args /* {
+		syscallarg(struct statfs53 *) buf;
+		syscallarg(size_t) bufsize;
+		syscallarg(int) flags;
+	} */ *uap = v;
+	struct mount *mp, *nmp;
+	struct statfs *sp;
+	struct statfs53 *sfsp;
+	size_t count, maxcount;
+	int error, flags = SCARG(uap, flags);
+
+	maxcount = SCARG(uap, bufsize) / sizeof(struct statfs53);
+	sfsp = SCARG(uap, buf);
+	count = 0;
+
+	for (mp = CIRCLEQ_FIRST(&mountlist); mp != CIRCLEQ_END(&mountlist);
+	    mp = nmp) {
+		if (vfs_busy(mp, VB_READ|VB_NOWAIT)) {
+			nmp = CIRCLEQ_NEXT(mp, mnt_list);
+			continue;
+		}
+		if (sfsp && count < maxcount) {
+			sp = &mp->mnt_stat;
+
+			/* Refresh stats unless MNT_NOWAIT is specified */
+			if (flags != MNT_NOWAIT &&
+			    flags != MNT_LAZY &&
+			    (flags == MNT_WAIT ||
+			    flags == 0) &&
+			    (error = VFS_STATFS(mp, sp, p))) {
+				nmp = CIRCLEQ_NEXT(mp, mnt_list);
+				vfs_unbusy(mp);
+ 				continue;
+			}
+
+			sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
+#if notyet
+			if (mp->mnt_flag & MNT_SOFTDEP)
+				sp->f_eflags = STATFS_SOFTUPD;
+#endif
+			error = (copyout_statfs53(sp, sfsp, p));
+			if (error) {
+				vfs_unbusy(mp);
+				return (error);
+			}
+			sfsp++;
+		}
+		count++;
+		nmp = CIRCLEQ_NEXT(mp, mnt_list);
+		vfs_unbusy(mp);
+	}
+
+	if (sfsp && count > maxcount)
+		*retval = maxcount;
+	else
+		*retval = count;
+
+	return (0);
+}
+
+/* ARGSUSED */
+int
+compat_o53_sys_fhstatfs(struct proc *p, void *v, register_t *retval)
+{
+	struct compat_o53_sys_fhstatfs_args /* {
+		syscallarg(const fhandle_t *) fhp;
+		syscallarg(struct statfs53 *) buf;
+	} */ *uap = v;
+	struct statfs *sp;
+	fhandle_t fh;
+	struct mount *mp;
+	struct vnode *vp;
+	int error;
+
+	/*
+	 * Must be super user
+	 */
+	if ((error = suser(p, 0)))
+		return (error);
+
+	if ((error = copyin(SCARG(uap, fhp), &fh, sizeof(fhandle_t))) != 0)
+		return (error);
+
+	if ((mp = vfs_getvfs(&fh.fh_fsid)) == NULL)
+		return (ESTALE);
+	if ((error = VFS_FHTOVP(mp, &fh.fh_fid, &vp)))
+		return (error);
+	mp = vp->v_mount;
+	sp = &mp->mnt_stat;
+	vput(vp);
+	if ((error = VFS_STATFS(mp, sp, p)) != 0)
+		return (error);
+	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
+	return (copyout_statfs53(sp, SCARG(uap, buf), p));
+}
+#endif /* COMPAT_O53 */
+
 /*
  * Change current working directory to a given file descriptor.
  */
@@ -697,7 +887,7 @@ sys_fchdir(struct proc *p, void *v, register_t *retval)
 		syscallarg(int) fd;
 	} */ *uap = v;
 	struct filedesc *fdp = p->p_fd;
-	struct vnode *vp, *tdp;
+	struct vnode *vp, *tdp, *old_cdir;
 	struct mount *mp;
 	struct file *fp;
 	int error;
@@ -726,8 +916,9 @@ sys_fchdir(struct proc *p, void *v, register_t *retval)
 		return (error);
 	}
 	VOP_UNLOCK(vp, 0, p);
-	vrele(fdp->fd_cdir);
+	old_cdir = fdp->fd_cdir;
 	fdp->fd_cdir = vp;
+	vrele(old_cdir);
 	return (0);
 }
 
@@ -742,6 +933,7 @@ sys_chdir(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 	} */ *uap = v;
 	struct filedesc *fdp = p->p_fd;
+	struct vnode *old_cdir;
 	int error;
 	struct nameidata nd;
 
@@ -749,8 +941,9 @@ sys_chdir(struct proc *p, void *v, register_t *retval)
 	    SCARG(uap, path), p);
 	if ((error = change_dir(&nd, p)) != 0)
 		return (error);
-	vrele(fdp->fd_cdir);
+	old_cdir = fdp->fd_cdir;
 	fdp->fd_cdir = nd.ni_vp;
+	vrele(old_cdir);
 	return (0);
 }
 
@@ -765,6 +958,7 @@ sys_chroot(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 	} */ *uap = v;
 	struct filedesc *fdp = p->p_fd;
+	struct vnode *old_cdir, *old_rdir;
 	int error;
 	struct nameidata nd;
 
@@ -779,12 +973,14 @@ sys_chroot(struct proc *p, void *v, register_t *retval)
 		 * A chroot() done inside a changed root environment does
 		 * an automatic chdir to avoid the out-of-tree experience.
 		 */
-		vrele(fdp->fd_rdir);
-		vrele(fdp->fd_cdir);
 		vref(nd.ni_vp);
-		fdp->fd_cdir = nd.ni_vp;
-	}
-	fdp->fd_rdir = nd.ni_vp;
+		old_rdir = fdp->fd_rdir;
+		old_cdir = fdp->fd_cdir;
+		fdp->fd_rdir = fdp->fd_cdir = nd.ni_vp;
+		vrele(old_rdir);
+		vrele(old_cdir);
+	} else
+		fdp->fd_rdir = nd.ni_vp;
 	return (0);
 }
 

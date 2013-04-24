@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.30 2013/02/12 08:06:22 mpi Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.32 2013/03/23 16:12:22 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -108,6 +108,9 @@ struct cpu_info {
 	u_long		ci_itmr;
 #ifdef DIAGNOSTIC
 	int		ci_mutex_level;
+#endif
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
 #endif
 };
 
@@ -250,7 +253,7 @@ void sync_caches(void);
  * Boot arguments stuff
  */
 
-#define	BOOTARG_LEN	(NBPG)
+#define	BOOTARG_LEN	(PAGE_SIZE)
 #define	BOOTARG_OFF	(0x10000)
 
 /*

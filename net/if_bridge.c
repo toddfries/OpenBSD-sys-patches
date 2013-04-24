@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.205 2013/01/23 13:28:36 camield Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.210 2013/03/28 23:10:05 tedu Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -38,14 +38,13 @@
 #include "vlan.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/kernel.h>
-#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -219,7 +218,7 @@ bridge_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_start = bridge_start;
 	ifp->if_type = IFT_BRIDGE;
 	ifp->if_hdrlen = ETHER_HDR_LEN;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
 	if_attach(ifp);
@@ -322,7 +321,7 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		TAILQ_FOREACH(p, &sc->sc_spanlist, next)
 			if (p->ifp == ifs)
 				break;
-		if (p != TAILQ_END(&sc->sc_spanlist)) {
+		if (p != NULL) {
 			error = EBUSY;
 			break;
 		}
@@ -424,7 +423,7 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			if (p->ifp == ifs)
 				break;
 		}
-		if (p != TAILQ_END(&sc->sc_spanlist)) {
+		if (p != NULL) {
 			error = EEXIST;
 			break;
 		}
@@ -450,7 +449,7 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 				break;
 			}
 		}
-		if (p == TAILQ_END(&sc->sc_spanlist)) {
+		if (p == NULL) {
 			error = ENOENT;
 			break;
 		}
@@ -1053,7 +1052,7 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 				sc->sc_if.if_oerrors++;
 				continue;
 			}
-			if (TAILQ_NEXT(p, next) == TAILQ_END(&sc->sc_iflist)) {
+			if (TAILQ_NEXT(p, next) == NULL) {
 				used = 1;
 				mc = m;
 			} else {
@@ -1397,7 +1396,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 				if (ifl->ifp->if_type == IFT_ETHER)
 					break;
 			}
-			if (ifl != TAILQ_END(&sc->sc_iflist)) {
+			if (ifl != NULL) {
 				m->m_pkthdr.rcvif = ifl->ifp;
 				m->m_pkthdr.rdomain = ifl->ifp->if_rdomain;
 #if NBPFILTER > 0
@@ -1552,7 +1551,7 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 		bridge_localbroadcast(sc, dst_if, eh, m);
 
 		/* If last one, reuse the passed-in mbuf */
-		if (TAILQ_NEXT(p, next) == TAILQ_END(&sc->sc_iflist)) {
+		if (TAILQ_NEXT(p, next) == NULL) {
 			mc = m;
 			used = 1;
 		} else {
@@ -1708,7 +1707,7 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 
 	h = bridge_hash(sc, ea);
 	p = LIST_FIRST(&sc->sc_rts[h]);
-	if (p == LIST_END(&sc->sc_rts[h])) {
+	if (p == NULL) {
 		if (sc->sc_brtcnt >= sc->sc_brtmax)
 			goto done;
 		p = malloc(sizeof(*p), M_DEVBUF, M_NOWAIT);
@@ -1768,7 +1767,7 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 			goto want;
 		}
 
-		if (p == LIST_END(&sc->sc_rts[h])) {
+		if (p == NULL) {
 			if (sc->sc_brtcnt >= sc->sc_brtmax)
 				goto done;
 			p = malloc(sizeof(*p), M_DEVBUF, M_NOWAIT);
@@ -1787,7 +1786,7 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 			sc->sc_brtcnt++;
 			goto want;
 		}
-	} while (p != LIST_END(&sc->sc_rts[h]));
+	} while (p != NULL);
 
 done:
 	ifp = NULL;
@@ -1871,7 +1870,7 @@ bridge_rtage(struct bridge_softc *sc)
 
 	for (i = 0; i < BRIDGE_RTABLE_SIZE; i++) {
 		n = LIST_FIRST(&sc->sc_rts[i]);
-		while (n != LIST_END(&sc->sc_rts[i])) {
+		while (n != NULL) {
 			if ((n->brt_flags & IFBAF_TYPEMASK) == IFBAF_STATIC) {
 				n->brt_age = !n->brt_age;
 				if (n->brt_age)
@@ -1937,7 +1936,7 @@ bridge_rtflush(struct bridge_softc *sc, int full)
 
 	for (i = 0; i < BRIDGE_RTABLE_SIZE; i++) {
 		n = LIST_FIRST(&sc->sc_rts[i]);
-		while (n != LIST_END(&sc->sc_rts[i])) {
+		while (n != NULL) {
 			if (full ||
 			    (n->brt_flags & IFBAF_TYPEMASK) == IFBAF_DYNAMIC) {
 				p = LIST_NEXT(n, brt_next);
@@ -1987,7 +1986,7 @@ bridge_rtdelete(struct bridge_softc *sc, struct ifnet *ifp, int dynonly)
 	 */
 	for (i = 0; i < BRIDGE_RTABLE_SIZE; i++) {
 		n = LIST_FIRST(&sc->sc_rts[i]);
-		while (n != LIST_END(&sc->sc_rts[i])) {
+		while (n != NULL) {
 			if (n->brt_if != ifp) {
 				/* Not ours */
 				n = LIST_NEXT(n, brt_next);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: udcf.c,v 1.54 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: udcf.c,v 1.57 2013/04/15 09:23:02 mglocker Exp $ */
 
 /*
  * Copyright (c) 2006, 2007, 2008 Marc Balmer <mbalmer@openbsd.org>
@@ -22,12 +22,11 @@
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/select.h>
-#include <sys/proc.h>
-#include <sys/vnode.h>
 #include <sys/device.h>
 #include <sys/poll.h>
 #include <sys/time.h>
 #include <sys/sensors.h>
+#include <sys/timeout.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -66,8 +65,8 @@ static const char	*clockname[2] = {
 
 struct udcf_softc {
 	struct device		sc_dev;		/* base device */
-	usbd_device_handle	sc_udev;	/* USB device */
-	usbd_interface_handle	sc_iface;	/* data interface */
+	struct usbd_device	*sc_udev;	/* USB device */
+	struct usbd_interface	*sc_iface;	/* data interface */
 
 	struct timeout		sc_to;
 	struct usb_task		sc_task;
@@ -179,8 +178,8 @@ udcf_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct udcf_softc		*sc = (struct udcf_softc *)self;
 	struct usb_attach_arg		*uaa = aux;
-	usbd_device_handle		 dev = uaa->device;
-	usbd_interface_handle		 iface;
+	struct usbd_device		*dev = uaa->device;
+	struct usbd_interface		*iface;
 	struct timeval			 t;
 	usbd_status			 err;
 
