@@ -1,4 +1,4 @@
-/* $OpenBSD: if_mpe.c,v 1.27 2012/04/14 09:39:47 yasuoka Exp $ */
+/* $OpenBSD: if_mpe.c,v 1.29 2013/03/28 16:45:16 tedu Exp $ */
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@spootnik.org>
@@ -20,7 +20,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/ioctl.h>
@@ -105,7 +104,7 @@ mpe_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_start = mpestart;
 	ifp->if_type = IFT_MPLS;
 	ifp->if_hdrlen = MPE_HDRLEN;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 	if_attach(ifp);
 	if_alloc_sadl(ifp);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: malloc.h,v 1.101 2013/02/07 11:06:42 mikeb Exp $	*/
+/*	$OpenBSD: malloc.h,v 1.104 2013/04/06 03:53:25 tedu Exp $	*/
 /*	$NetBSD: malloc.h,v 1.39 1998/07/12 19:52:01 augustss Exp $	*/
 
 /*
@@ -34,6 +34,8 @@
 
 #ifndef _SYS_MALLOC_H_
 #define	_SYS_MALLOC_H_
+
+#include <sys/queue.h>
 
 #define KERN_MALLOC_BUCKETS	1
 #define KERN_MALLOC_BUCKET	2
@@ -339,12 +341,13 @@ struct kmemusage {
 #define	ku_freecnt ku_un.freecnt
 #define	ku_pagecnt ku_un.pagecnt
 
+struct kmem_freelist;
+
 /*
  * Set of buckets for each size of memory block that is retained
  */
 struct kmembuckets {
-	caddr_t   kb_next;	/* list of free blocks */
-	caddr_t   kb_last;	/* last free block */
+	SIMPLEQ_HEAD(, kmem_freelist) kb_freelist; /* list of free blocks */
 	u_int64_t kb_calls;	/* total calls to allocate this size */
 	u_int64_t kb_total;	/* total number of blocks allocated */
 	u_int64_t kb_totalfree;	/* # of free elements in this bucket */
@@ -353,15 +356,33 @@ struct kmembuckets {
 	u_int64_t kb_couldfree;	/* over high water mark and could free */
 };
 
+/*
+ * Constants for setting the parameters of the kernel memory allocator.
+ *
+ * 2 ** MINBUCKET is the smallest unit of memory that will be
+ * allocated. It must be at least large enough to hold a pointer.
+ *
+ * Units of memory less or equal to MAXALLOCSAVE will permanently
+ * allocate physical memory; requests for these size pieces of
+ * memory are quite fast. Allocations greater than MAXALLOCSAVE must
+ * always allocate and free physical memory; requests for these
+ * size allocations should be done infrequently as they will be slow.
+ *
+ * Constraints: PAGE_SIZE <= MAXALLOCSAVE <= 2 ** (MINBUCKET + 14), and
+ * MAXALLOCSIZE must be a power of two.
+ */
+#define MINBUCKET	4		/* 4 => min allocation of 16 bytes */
+
 #ifdef _KERNEL
 
 #define	MINALLOCSIZE	(1 << MINBUCKET)
+#define	MAXALLOCSAVE	(2 * PAGE_SIZE)
 
 /*
  * Turn virtual addresses into kmem map indices
  */
-#define	kmemxtob(alloc)	(kmembase + (alloc) * NBPG)
-#define	btokmemx(addr)	(((caddr_t)(addr) - kmembase) / NBPG)
+#define	kmemxtob(alloc)	(kmembase + (alloc) * PAGE_SIZE)
+#define	btokmemx(addr)	(((caddr_t)(addr) - kmembase) / PAGE_SIZE)
 #define	btokup(addr)	(&kmemusage[((caddr_t)(addr) - kmembase) >> PAGE_SHIFT])
 
 extern struct kmemstats kmemstats[];
@@ -376,6 +397,10 @@ extern int sysctl_malloc(int *, u_int, void *, size_t *, void *, size_t,
 
 size_t malloc_roundup(size_t);
 void	malloc_printit(int (*)(const char *, ...));
+
+void	poison_mem(void *, size_t);
+int	poison_check(void *, size_t, size_t *, int *);
+int32_t poison_value(void *);
 
 #ifdef MALLOC_DEBUG
 int	debug_malloc(unsigned long, int, int, void **);

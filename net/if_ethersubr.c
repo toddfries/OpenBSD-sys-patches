@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.153 2013/01/18 12:10:11 sthen Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.155 2013/03/28 16:55:27 deraadt Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -87,7 +87,6 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <sys/syslog.h>
 #include <sys/timeout.h>
 
-#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -815,7 +814,7 @@ ether_ifdetach(ifp)
 	struct ether_multi *enm;
 
 	for (enm = LIST_FIRST(&ac->ac_multiaddrs);
-	    enm != LIST_END(&ac->ac_multiaddrs);
+	    enm != NULL;
 	    enm = LIST_FIRST(&ac->ac_multiaddrs)) {
 		LIST_REMOVE(enm, enm_list);
 		free(enm, M_IFMADDR);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fifo_vnops.c,v 1.37 2012/06/20 17:30:22 matthew Exp $	*/
+/*	$OpenBSD: fifo_vnops.c,v 1.39 2013/03/28 03:29:44 guenther Exp $	*/
 /*	$NetBSD: fifo_vnops.c,v 1.18 1996/03/16 23:52:42 christos Exp $	*/
 
 /*
@@ -414,10 +414,10 @@ fifo_pathconf(void *v)
 	case _PC_LINK_MAX:
 		*ap->a_retval = LINK_MAX;
 		break;
-	case _PC_PIPE_BUF:
-		*ap->a_retval = PIPE_BUF;
-		break;
 	case _PC_CHOWN_RESTRICTED:
+		*ap->a_retval = 1;
+		break;
+	case _PC_TIMESTAMP_RESOLUTION:
 		*ap->a_retval = 1;
 		break;
 	default:
