@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.104 2013/03/04 14:42:25 bluhm Exp $	*/
+/*	$OpenBSD: in6.c,v 1.110 2013/03/28 16:45:16 tedu Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -72,7 +72,6 @@
 #include <sys/socketvar.h>
 #include <sys/sockio.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/time.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
@@ -194,7 +193,7 @@ in6_ifloop_request(int cmd, struct ifaddr *ifa)
 	 * of the loopback address.
 	 */
 	if (cmd == RTM_ADD && nrt && ifa != nrt->rt_ifa) {
-		IFAFREE(nrt->rt_ifa);
+		ifafree(nrt->rt_ifa);
 		ifa->ifa_refcnt++;
 		nrt->rt_ifa = ifa;
 	}
@@ -267,7 +266,7 @@ in6_ifremloop(struct ifaddr *ifa)
 	 * (probably p2p) interfaces.
 	 * XXX: we should avoid such a configuration in IPv6...
 	 */
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next) {
+	TAILQ_FOREACH(ia, &in6_ifaddr, ia_list) {
 		if (IN6_ARE_ADDR_EQUAL(IFA_IN6(ifa), &ia->ia_addr.sin6_addr)) {
 			ia_count++;
 			if (ia_count > 1)
@@ -358,7 +357,6 @@ in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 	case SIOCSNDFLUSH_IN6:
 	case SIOCSPFXFLUSH_IN6:
 	case SIOCSRTRFLUSH_IN6:
-	case SIOCSDEFIFACE_IN6:
 	case SIOCSIFINFO_FLAGS:
 		if (!privileged)
 			return (EPERM);
@@ -368,7 +366,6 @@ in6_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 	case SIOCGDRLST_IN6:
 	case SIOCGPRLST_IN6:
 	case SIOCGNBRINFO_IN6:
-	case SIOCGDEFIFACE_IN6:
 		return (nd6_ioctl(cmd, data, ifp));
 	}
 
@@ -745,7 +742,6 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
     struct in6_ifaddr *ia)
 {
 	int error = 0, hostIsNew = 0, plen = -1;
-	struct in6_ifaddr *oia;
 	struct sockaddr_in6 dst6;
 	struct in6_addrlifetime *lt;
 	struct in6_multi_mship *imm;
@@ -901,12 +897,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		    (struct sockaddr *)&ia->ia_prefixmask;
 
 		ia->ia_ifp = ifp;
-		if ((oia = in6_ifaddr) != NULL) {
-			for ( ; oia->ia_next; oia = oia->ia_next)
-				continue;
-			oia->ia_next = ia;
-		} else
-			in6_ifaddr = ia;
+		TAILQ_INSERT_TAIL(&in6_ifaddr, ia, ia_list);
 		ia->ia_addr = ifra->ifra_addr;
 		ifa_add(ifp, &ia->ia_ifa);
 	}
@@ -1237,46 +1228,33 @@ in6_purgeaddr(struct ifaddr *ifa)
 void
 in6_unlink_ifa(struct in6_ifaddr *ia, struct ifnet *ifp)
 {
-	struct in6_ifaddr *oia;
 	int	s = splnet();
 
 	ifa_del(ifp, &ia->ia_ifa);
 
-	oia = ia;
-	if (oia == (ia = in6_ifaddr))
-		in6_ifaddr = ia->ia_next;
-	else {
-		while (ia->ia_next && (ia->ia_next != oia))
-			ia = ia->ia_next;
-		if (ia->ia_next)
-			ia->ia_next = oia->ia_next;
-		else {
-			/* search failed */
-			printf("Couldn't unlink in6_ifaddr from in6_ifaddr\n");
-		}
-	}
+	TAILQ_REMOVE(&in6_ifaddr, ia, ia_list);
 
-	if (!LIST_EMPTY(&oia->ia6_multiaddrs)) {
-		in6_savemkludge(oia);
+	if (!LIST_EMPTY(&ia->ia6_multiaddrs)) {
+		in6_savemkludge(ia);
 	}
 
 	/* Release the reference to the base prefix. */
-	if (oia->ia6_ndpr == NULL) {
-		if (!IN6_IS_ADDR_LINKLOCAL(IA6_IN6(oia)))
+	if (ia->ia6_ndpr == NULL) {
+		if (!IN6_IS_ADDR_LINKLOCAL(IA6_IN6(ia)))
 			log(LOG_NOTICE, "in6_unlink_ifa: interface address "
-			    "%p has no prefix\n", oia);
+			    "%p has no prefix\n", ia);
 	} else {
-		oia->ia6_flags &= ~IN6_IFF_AUTOCONF;
-		if (--oia->ia6_ndpr->ndpr_refcnt == 0)
-			prelist_remove(oia->ia6_ndpr);
-		oia->ia6_ndpr = NULL;
+		ia->ia6_flags &= ~IN6_IFF_AUTOCONF;
+		if (--ia->ia6_ndpr->ndpr_refcnt == 0)
+			prelist_remove(ia->ia6_ndpr);
+		ia->ia6_ndpr = NULL;
 	}
 
 	/*
 	 * release another refcnt for the link from in6_ifaddr.
 	 * Note that we should decrement the refcnt at least once for all *BSD.
 	 */
-	IFAFREE(&oia->ia_ifa);
+	ifafree(&ia->ia_ifa);
 
 	splx(s);
 }
@@ -1594,9 +1572,9 @@ in6_savemkludge(struct in6_ifaddr *oia)
 	IFP_TO_IA6(oia->ia_ifp, ia);
 	if (ia) {	/* there is another address */
 		for (in6m = LIST_FIRST(&oia->ia6_multiaddrs);
-		    in6m != LIST_END(&oia->ia6_multiaddrs); in6m = next) {
+		    in6m != NULL; in6m = next) {
 			next = LIST_NEXT(in6m, in6m_entry);
-			IFAFREE(&in6m->in6m_ia->ia_ifa);
+			ifafree(&in6m->in6m_ia->ia_ifa);
 			ia->ia_ifa.ifa_refcnt++;
 			in6m->in6m_ia = ia;
 			LIST_INSERT_HEAD(&ia->ia6_multiaddrs, in6m, in6m_entry);
@@ -1612,9 +1590,9 @@ in6_savemkludge(struct in6_ifaddr *oia)
 			panic("in6_savemkludge: no kludge space");
 
 		for (in6m = LIST_FIRST(&oia->ia6_multiaddrs);
-		    in6m != LIST_END(&oia->ia6_multiaddrs); in6m = next) {
+		    in6m != NULL; in6m = next) {
 			next = LIST_NEXT(in6m, in6m_entry);
-			IFAFREE(&in6m->in6m_ia->ia_ifa); /* release reference */
+			ifafree(&in6m->in6m_ia->ia_ifa); /* release reference */
 			in6m->in6m_ia = NULL;
 			LIST_INSERT_HEAD(&mk->mk_head, in6m, in6m_entry);
 		}
@@ -1635,8 +1613,7 @@ in6_restoremkludge(struct in6_ifaddr *ia, struct ifnet *ifp)
 		if (mk->mk_ifp == ifp) {
 			struct in6_multi *in6m, *next;
 
-			for (in6m = LIST_FIRST(&mk->mk_head);
-			    in6m != LIST_END(&mk->mk_head);
+			for (in6m = LIST_FIRST(&mk->mk_head); in6m != NULL;
 			    in6m = next) {
 				next = LIST_NEXT(in6m, in6m_entry);
 				in6m->in6m_ia = ia;
@@ -1762,7 +1739,7 @@ in6_addmulti(struct in6_addr *maddr6, struct ifnet *ifp, int *errorp)
 		if (*errorp) {
 			LIST_REMOVE(in6m, in6m_entry);
 			free(in6m, M_IPMADDR);
-			IFAFREE(&ia->ia_ifa);
+			ifafree(&ia->ia_ifa);
 			splx(s);
 			return (NULL);
 		}
@@ -1797,7 +1774,7 @@ in6_delmulti(struct in6_multi *in6m)
 		 */
 		LIST_REMOVE(in6m, in6m_entry);
 		if (in6m->in6m_ia) {
-			IFAFREE(&in6m->in6m_ia->ia_ifa); /* release reference */
+			ifafree(&in6m->in6m_ia->ia_ifa); /* release reference */
 		}
 
 		/*
@@ -2438,14 +2415,6 @@ in6if_do_dad(struct ifnet *ifp)
 		return (0);
 
 	switch (ifp->if_type) {
-	case IFT_FAITH:
-		/*
-		 * These interfaces do not have the IFF_LOOPBACK flag,
-		 * but loop packets back.  We do not have to do DAD on such
-		 * interfaces.  We should even omit it, because loop-backed
-		 * NS would confuse the DAD procedure.
-		 */
-		return (0);
 #if NCARP > 0
 	case IFT_CARP:
 		/*

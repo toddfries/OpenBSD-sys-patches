@@ -1,4 +1,4 @@
-/* $OpenBSD: linux_futex.c,v 1.11 2013/01/15 10:47:35 guenther Exp $ */
+/* $OpenBSD: linux_futex.c,v 1.14 2013/04/10 13:17:41 pirofti Exp $ */
 /*	$NetBSD: linux_futex.c,v 1.26 2010/07/07 01:30:35 chs Exp $ */
 
 /*-
@@ -69,6 +69,7 @@
 
 struct pool futex_pool;
 struct pool futex_wp_pool;
+int futex_pool_initialized;
 
 struct futex;
 
@@ -172,6 +173,7 @@ linux_do_futex(struct proc *p, const struct linux_sys_futex_args *uap,
 	switch (SCARG(uap, op) & ~LINUX_FUTEX_PRIVATE_FLAG) {
 	case LINUX_FUTEX_WAIT:
 
+		DPRINTF(("FUTEX_WAIT\n"));
 		mtx_enter(&futex_lock);
 		if ((error = copyin(SCARG(uap, uaddr), 
 		    &uaddr_val, sizeof(uaddr_val))) != 0) {
@@ -221,12 +223,14 @@ linux_do_futex(struct proc *p, const struct linux_sys_futex_args *uap,
 			mtx_leave(&futex_lock);
 			return EAGAIN;
 		}
+		DPRINTF(("FUTEX_WAIT: get wp %p\n", wp));
 
 		f = futex_get(SCARG(uap, uaddr));
 		ret = futex_sleep(&f, p, timeout_hz, wp);
 		futex_put(f);
 		mtx_leave(&futex_lock);
 
+		DPRINTF(("FUTEX_WAIT: put wp %p\n", wp));
 		pool_put(&futex_wp_pool, wp);
 
 		DPRINTF(("FUTEX_WAIT %d: Woke up from uaddr %8.8X with "
@@ -275,6 +279,7 @@ linux_do_futex(struct proc *p, const struct linux_sys_futex_args *uap,
 
 	case LINUX_FUTEX_CMP_REQUEUE:
 
+		DPRINTF(("FUTEX_CMP_REQUEUE\n"));
 		if (args_val < 0)
 			return EINVAL;
 
@@ -407,10 +412,14 @@ void
 futex_pool_init(void)
 {
 	DPRINTF(("Inside futex_pool_init()\n"));
-	pool_init(&futex_pool, sizeof(struct futex), 0, 0, PR_DEBUGCHK,
-	    "futexpl", &pool_allocator_nointr);
-	pool_init(&futex_wp_pool, sizeof(struct waiting_proc), 0, 0,
-	    PR_DEBUGCHK, "futexwppl", &pool_allocator_nointr);
+
+	if (!futex_pool_initialized) {
+		pool_init(&futex_pool, sizeof(struct futex), 0, 0, PR_DEBUGCHK,
+		    "futexpl", &pool_allocator_nointr);
+		pool_init(&futex_wp_pool, sizeof(struct waiting_proc), 0, 0,
+		    PR_DEBUGCHK, "futexwppl", &pool_allocator_nointr);
+		futex_pool_initialized = 1;
+	}
 }
 
 /*
@@ -436,12 +445,14 @@ futex_get(void *uaddr)
 
 	/* Not found, create it */
 	newf = pool_get(&futex_pool, PR_WAITOK|PR_ZERO);
+	DPRINTF(("futex_get: get %p\n", newf));
 
 	mtx_enter(&futex_lock);
 	/* Did someone else create it in the meantime? */
 	LIST_FOREACH(f, &futex_list, f_list) {
 		if (f->f_uaddr == uaddr) {
 			f->f_refcount++;
+			DPRINTF(("futex_get: put %p (found %p)\n", newf, f));
 			pool_put(&futex_pool, newf);
 			return f;
 		}
@@ -473,7 +484,9 @@ futex_ref(struct futex *f)
 void 
 futex_put(struct futex *f)
 {
+	DPRINTF(("futex_put: put %p ref %d\n", f, f->f_refcount));
 	MUTEX_ASSERT_LOCKED(&futex_lock);
+	KASSERT(f->f_refcount > 0);
 	f->f_refcount--;
 	if (f->f_refcount == 0) {
 		KASSERT(TAILQ_EMPTY(&f->f_waiting_proc));
