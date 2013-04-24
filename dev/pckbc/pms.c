@@ -1,4 +1,4 @@
-/* $OpenBSD: pms.c,v 1.35 2012/11/05 19:08:29 shadchin Exp $ */
+/* $OpenBSD: pms.c,v 1.41 2013/04/20 08:01:37 tobias Exp $ */
 /* $NetBSD: psm.c,v 1.11 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -134,6 +134,7 @@ struct pms_softc {		/* driver status information */
 	struct device sc_dev;
 
 	pckbc_tag_t sc_kbctag;
+	int sc_slot;
 
 	int sc_state;
 #define PMS_STATE_DISABLED	0
@@ -232,6 +233,7 @@ int	pms_set_scaling(struct pms_softc *, int);
 int	pms_reset(struct pms_softc *);
 int	pms_dev_enable(struct pms_softc *);
 int	pms_dev_disable(struct pms_softc *);
+void	pms_protocol_lookup(struct pms_softc *);
 
 int	pms_enable_intelli(struct pms_softc *);
 
@@ -312,15 +314,6 @@ const struct pms_protocol pms_protocols[] = {
 		pms_proc_mouse,
 		NULL
 	},
-	/* Microsoft IntelliMouse */
-	{
-		PMS_INTELLI, 4,
-		pms_enable_intelli,
-		pms_ioctl_mouse,
-		pms_sync_mouse,
-		pms_proc_mouse,
-		NULL
-	},
 	/* Synaptics touchpad */
 	{
 		PMS_SYNAPTICS, 6,
@@ -339,7 +332,6 @@ const struct pms_protocol pms_protocols[] = {
 		pms_proc_alps,
 		NULL
 	},
-#ifdef notyet
 	/* Elantech touchpad (hardware version 1) */
 	{
 		PMS_ELANTECH_V1, 4,
@@ -358,7 +350,6 @@ const struct pms_protocol pms_protocols[] = {
 		pms_proc_elantech_v2,
 		NULL
 	},
-#endif
 	/* Elantech touchpad (hardware version 3) */
 	{
 		PMS_ELANTECH_V3, 6,
@@ -368,16 +359,25 @@ const struct pms_protocol pms_protocols[] = {
 		pms_proc_elantech_v3,
 		NULL
 	},
+	/* Microsoft IntelliMouse */
+	{
+		PMS_INTELLI, 4,
+		pms_enable_intelli,
+		pms_ioctl_mouse,
+		pms_sync_mouse,
+		pms_proc_mouse,
+		NULL
+	},
 };
 
 int
 pms_cmd(struct pms_softc *sc, u_char *cmd, int len, u_char *resp, int resplen)
 {
 	if (sc->poll) {
-		return pckbc_poll_cmd(sc->sc_kbctag, PCKBC_AUX_SLOT,
+		return pckbc_poll_cmd(sc->sc_kbctag, sc->sc_slot,
 		    cmd, len, resplen, resp, 1);
 	} else {
-		return pckbc_enqueue_cmd(sc->sc_kbctag, PCKBC_AUX_SLOT,
+		return pckbc_enqueue_cmd(sc->sc_kbctag, sc->sc_slot,
 		    cmd, len, resplen, 1, resp);
 	}
 }
@@ -491,6 +491,23 @@ pms_dev_disable(struct pms_softc *sc)
 	return (res);
 }
 
+void
+pms_protocol_lookup(struct pms_softc *sc)
+{
+	int i;
+
+	sc->protocol = &pms_protocols[0];
+	for (i = 1; i < nitems(pms_protocols); i++) {
+		pms_reset(sc);
+		if (pms_protocols[i].enable(sc)) {
+			sc->protocol = &pms_protocols[i];
+			break;
+		}
+	}
+
+	DPRINTF("%s: protocol type %d\n", DEVNAME(sc), sc->protocol->type);
+}
+
 int
 pms_enable_intelli(struct pms_softc *sc)
 {
@@ -586,7 +603,7 @@ pmsprobe(struct device *parent, void *match, void *aux)
 	u_char cmd[1], resp[2];
 	int res;
 
-	if (pa->pa_slot != PCKBC_AUX_SLOT)
+	if (pa->pa_slot < PCKBC_AUX_SLOT)
 		return (0);
 
 	/* Flush any garbage. */
@@ -612,13 +629,13 @@ pmsattach(struct device *parent, struct device *self, void *aux)
 	struct pms_softc *sc = (void *)self;
 	struct pckbc_attach_args *pa = aux;
 	struct wsmousedev_attach_args a;
-	int i;
 
 	sc->sc_kbctag = pa->pa_tag;
+	sc->sc_slot = pa->pa_slot;
 
 	printf("\n");
 
-	pckbc_set_inputhandler(sc->sc_kbctag, PCKBC_AUX_SLOT,
+	pckbc_set_inputhandler(sc->sc_kbctag, sc->sc_slot,
 	    pmsinput, sc, DEVNAME(sc));
 
 	a.accessops = &pms_accessops;
@@ -635,14 +652,8 @@ pmsattach(struct device *parent, struct device *self, void *aux)
 	sc->poll = 1;
 	sc->sc_dev_enable = 0;
 
-	sc->protocol = &pms_protocols[0];
-	for (i = 1; i < nitems(pms_protocols); i++) {
-		pms_reset(sc);
-		if (pms_protocols[i].enable(sc))
-			sc->protocol = &pms_protocols[i];
-	}
-
-	DPRINTF("%s: protocol type %d\n", DEVNAME(sc), sc->protocol->type);
+	/* See if the device understands an extended (touchpad) protocol. */
+	pms_protocol_lookup(sc);
 
 	/* no interrupts until enabled */
 	pms_change_state(sc, PMS_STATE_DISABLED, PMS_DEV_IGNORE);
@@ -671,8 +682,6 @@ pmsactivate(struct device *self, int act)
 int
 pms_change_state(struct pms_softc *sc, int newstate, int dev)
 {
-	int i;
-
 	if (dev != PMS_DEV_IGNORE) {
 		switch (newstate) {
 		case PMS_STATE_ENABLED:
@@ -699,27 +708,15 @@ pms_change_state(struct pms_softc *sc, int newstate, int dev)
 	case PMS_STATE_ENABLED:
 		sc->inputstate = 0;
 
-		pckbc_slot_enable(sc->sc_kbctag, PCKBC_AUX_SLOT, 1);
+		pckbc_slot_enable(sc->sc_kbctag, sc->sc_slot, 1);
 
 		if (sc->poll)
-			pckbc_flush(sc->sc_kbctag, PCKBC_AUX_SLOT);
+			pckbc_flush(sc->sc_kbctag, sc->sc_slot);
 
 		pms_reset(sc);
-
-		if (sc->protocol->type != PMS_STANDARD &&
+		if (sc->protocol->type == PMS_STANDARD ||
 		    sc->protocol->enable(sc) == 0)
-			sc->protocol = &pms_protocols[0];
-
-		if (sc->protocol->type == PMS_STANDARD)
-			for (i = 1; i < nitems(pms_protocols); i++) {
-				pms_reset(sc);
-				if (pms_protocols[i].enable(sc))
-					sc->protocol = &pms_protocols[i];
-			}
-
-#ifdef DEBUG
-		printf("%s: protocol type %d\n", DEVNAME(sc), sc->protocol->type);
-#endif
+			pms_protocol_lookup(sc);
 
 		pms_dev_enable(sc);
 		break;
@@ -727,10 +724,10 @@ pms_change_state(struct pms_softc *sc, int newstate, int dev)
 	case PMS_STATE_SUSPENDED:
 		pms_dev_disable(sc);
 
-		if (sc->protocol && sc->protocol->disable)
+		if (sc->protocol->disable)
 			sc->protocol->disable(sc);
 
-		pckbc_slot_enable(sc->sc_kbctag, PCKBC_AUX_SLOT, 0);
+		pckbc_slot_enable(sc->sc_kbctag, sc->sc_slot, 0);
 		break;
 	}
 
@@ -761,7 +758,7 @@ pms_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct pms_softc *sc = v;
 
-	if (sc->protocol && sc->protocol->ioctl)
+	if (sc->protocol->ioctl)
 		return (sc->protocol->ioctl(sc, cmd, data, flag, p));
 	else
 		return (-1);
