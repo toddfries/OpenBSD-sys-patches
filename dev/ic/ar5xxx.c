@@ -87,7 +87,6 @@ u_int32_t	 ar5k_ar5110_chan2athchan(HAL_CHANNEL *);
 HAL_BOOL	 ar5k_ar5111_channel(struct ath_hal *, HAL_CHANNEL *);
 HAL_BOOL	 ar5k_ar5111_chan2athchan(u_int, struct ar5k_athchan_2ghz *);
 HAL_BOOL	 ar5k_ar5112_channel(struct ath_hal *, HAL_CHANNEL *);
-HAL_BOOL	 ar5k_ar2425_channel(struct ath_hal *, HAL_CHANNEL *);
 HAL_BOOL	 ar5k_check_channel(struct ath_hal *, u_int16_t, u_int flags);
 
 HAL_BOOL	 ar5k_ar5111_rfregs(struct ath_hal *, HAL_CHANNEL *, u_int);
@@ -895,12 +894,6 @@ ar5k_eeprom_init(struct ath_hal *hal)
 	if (hal->ah_ee_version >= AR5K_EEPROM_VERSION_4_0) {
 		AR5K_EEPROM_READ_HDR(AR5K_EEPROM_MISC0, ee_misc0);
 		AR5K_EEPROM_READ_HDR(AR5K_EEPROM_MISC1, ee_misc1);
-
-		/* XXX: Don't know which versions include these two */
-		AR5K_EEPROM_READ_HDR(AR5K_EEPROM_MISC2, ee_misc2);
-
-		if (ee->ee_version >= AR5K_EEPROM_VERSION_4_3)
-			AR5K_EEPROM_READ_HDR(AR5K_EEPROM_MISC3, ee_misc3);
 	}
 
 	if (hal->ah_ee_version < AR5K_EEPROM_VERSION_3_3) {
@@ -912,12 +905,6 @@ ar5k_eeprom_init(struct ath_hal *hal)
 		ee->ee_ob[AR5K_EEPROM_MODE_11G][0] = val & 0x7;
 		ee->ee_db[AR5K_EEPROM_MODE_11G][0] = (val >> 3) & 0x7;
 	}
-
-	AR5K_EEPROM_READ(AR5K_EEPROM_IS_HB63, val);
-	if ((hal->ah_mac_version == (AR5K_SREV_VER_AR2425 >> 4)) && val)
-		ee->ee_is_hb63 = AH_TRUE;
-	else
-		ee->ee_is_hb63 = AH_FALSE;
 
 	/*
 	 * Get conformance test limit values
@@ -1142,8 +1129,6 @@ ar5k_channel(struct ath_hal *hal, HAL_CHANNEL *channel)
 		ret = ar5k_ar5110_channel(hal, channel);
 	else if (hal->ah_radio == AR5K_AR5111)
 		ret = ar5k_ar5111_channel(hal, channel);
-	else if (hal->ah_radio == AR5K_AR2425)
-		ret = ar5k_ar2425_channel(hal, channel);
 	else
 		ret = ar5k_ar5112_channel(hal, channel);
 
@@ -1303,44 +1288,6 @@ ar5k_ar5112_channel(struct ath_hal *hal, HAL_CHANNEL *channel)
 
 	return (AH_TRUE);
 }
-
-HAL_BOOL
-ar5k_ar2425_channel(struct ath_hal *hal, HAL_CHANNEL *channel)
-{
-	u_int32_t data, data0, data2;
-	u_int16_t c;
-
-	data = data0 = data2 = 0;
-	c = channel->c_channel + hal->ah_chanoff;
-
-	/*
-	 * Set the channel on the AR2425
-	 */
-	if (c < 4800) {
-		data0 = ar5k_bitswap((c - 2272), 8);
-		data2 = 0;
-	} else if ((c - (c % 5)) != 2 || c > 5435) {
-		if (!(c % 20) && c < 5120)
-			data0 = ar5k_bitswap(((c - 4800) / 20 << 2), 8);
-		else if (!(c % 10))
-			data0 = ar5k_bitswap(((c - 4800) / 10 << 1), 8);
-		else if (!(c % 5))
-			data0 = ar5k_bitswap((c - 4800) / 5, 8);
-		else
-			return (AH_FALSE);
-		data2 = ar5k_bitswap(1, 2);
-	} else {
-		data0 = ar5k_bitswap((10 * (c - 2) - 4800) / 25 + 1, 8);
-		data2 = ar5k_bitswap(0, 2);
-	}
-
-	data = (data0 << 4) | (data2 << 2) | 0x1001;
-
-	AR5K_PHY_WRITE(0x27, data & 0xff);
-	AR5K_PHY_WRITE(0x36, (data >> 8) & 0x7f);
- 
-	return (AH_TRUE);
- }
 
 u_int
 ar5k_rfregs_op(u_int32_t *rf, u_int32_t offset, u_int32_t reg, u_int32_t bits,
