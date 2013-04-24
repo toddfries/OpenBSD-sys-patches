@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vio.c,v 1.9 2012/12/05 23:20:20 deraadt Exp $	*/
+/*	$OpenBSD: if_vio.c,v 1.12 2013/03/16 19:08:37 sf Exp $	*/
 
 /*
  * Copyright (c) 2012 Stefan Fritsch, Alexander Fiveg.
@@ -93,6 +93,7 @@
 
 static const struct virtio_feature_name virtio_net_feature_names[] = {
 	{ VIRTIO_NET_F_CSUM,		"CSum" },
+	{ VIRTIO_NET_F_GUEST_CSUM,	"GuestCSum" },
 	{ VIRTIO_NET_F_MAC,		"MAC" },
 	{ VIRTIO_NET_F_GSO,		"GSO" },
 	{ VIRTIO_NET_F_GUEST_TSO4,	"GuestTSO4" },
@@ -232,11 +233,13 @@ struct vio_softc {
 	((sc)->sc_hdr_size == sizeof(struct virtio_net_hdr))
 
 #define VIRTIO_NET_TX_MAXNSEGS		16 /* for larger chains, defrag */
-#define VIRTIO_NET_CTRL_MAC_MAXENTRIES	64 /* for more entries, use ALLMULTI */
+#define VIRTIO_NET_CTRL_MAC_MC_ENTRIES	64 /* for more entries, use ALLMULTI */
+#define VIRTIO_NET_CTRL_MAC_UC_ENTRIES	 1 /* one entry for own unicast addr */
 
 #define VIO_CTRL_MAC_INFO_SIZE 					\
 	(2*sizeof(struct virtio_net_ctrl_mac_tbl) + 		\
-	 (VIRTIO_NET_CTRL_MAC_MAXENTRIES + 1) * ETHER_ADDR_LEN)
+	 (VIRTIO_NET_CTRL_MAC_MC_ENTRIES + 			\
+	  VIRTIO_NET_CTRL_MAC_UC_ENTRIES) * ETHER_ADDR_LEN)
 
 /* cfattach interface functions */
 int	vio_match(struct device *, void *, void *);
@@ -281,6 +284,9 @@ int	vio_alloc_mem(struct vio_softc *);
 int	vio_alloc_dmamem(struct vio_softc *);
 void	vio_free_dmamem(struct vio_softc *);
 
+#if VIRTIO_DEBUG
+void	vio_dump(struct vio_softc *);
+#endif
 
 int
 vio_match(struct device *parent, void *match, void *aux)
@@ -391,9 +397,7 @@ vio_alloc_mem(struct vio_softc *sc)
 		allocsize += sizeof(struct virtio_net_ctrl_cmd) * 1;
 		allocsize += sizeof(struct virtio_net_ctrl_status) * 1;
 		allocsize += sizeof(struct virtio_net_ctrl_rx) * 1;
-		allocsize += sizeof(struct virtio_net_ctrl_mac_tbl)
-			+ sizeof(struct virtio_net_ctrl_mac_tbl)
-			+ ETHER_ADDR_LEN * VIRTIO_NET_CTRL_MAC_MAXENTRIES;
+		allocsize += VIO_CTRL_MAC_INFO_SIZE;
 	}
 	sc->sc_dma_size = allocsize;
 
@@ -413,7 +417,8 @@ vio_alloc_mem(struct vio_softc *sc)
 		sc->sc_ctrl_rx = (void*)(kva + offset);
 		offset += sizeof(*sc->sc_ctrl_rx);
 		sc->sc_ctrl_mac_tbl_uc = (void*)(kva + offset);
-		offset += sizeof(*sc->sc_ctrl_mac_tbl_uc);
+		offset += sizeof(*sc->sc_ctrl_mac_tbl_uc) +
+		    ETHER_ADDR_LEN * VIRTIO_NET_CTRL_MAC_UC_ENTRIES;
 		sc->sc_ctrl_mac_tbl_mc = (void*)(kva + offset);
 	}
 
@@ -497,7 +502,7 @@ vio_attach(struct device *parent, struct device *self, void *aux)
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
 
 	if (vsc->sc_child != NULL) {
-		printf("child already attached for %s; something wrong...\n",
+		printf(": child already attached for %s; something wrong...\n",
 		       parent->dv_xname);
 		return;
 	}
@@ -521,7 +526,7 @@ vio_attach(struct device *parent, struct device *self, void *aux)
 	    !(vsc->sc_dev.dv_cfdata->cf_flags & 2))
 		features |= VIRTIO_F_RING_EVENT_IDX;
 	else
-		printf("RingEventIdx disabled by UKC\n");
+		printf(": RingEventIdx disabled by UKC");
 
 	features = virtio_negotiate_features(vsc, features,
 	    virtio_net_feature_names);
@@ -776,6 +781,27 @@ again:
 	}
 }
 
+#if VIRTIO_DEBUG
+void
+vio_dump(struct vio_softc *sc)
+{
+	struct ifnet *ifp = &sc->sc_ac.ac_if;
+	struct virtio_softc *vsc = sc->sc_virtio;
+
+	printf("%s status dump:\n", ifp->if_xname);
+	printf("TX virtqueue:\n");
+	virtio_vq_dump(&vsc->sc_vqs[VQTX]);
+	printf("tx tick active: %d\n", !timeout_triggered(&sc->sc_tick));
+	printf("RX virtqueue:\n");
+	virtio_vq_dump(&vsc->sc_vqs[VQRX]);
+	if (vsc->sc_nvqs == 3) {
+		printf("CTL virtqueue:\n");
+		virtio_vq_dump(&vsc->sc_vqs[VQCTL]);
+		printf("ctrl_inuse: %d\n", sc->sc_ctrl_inuse);
+	}
+}
+#endif
+
 int
 vio_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
@@ -796,6 +822,10 @@ vio_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
+#if VIRTIO_DEBUG
+			if (ifp->if_flags & IFF_DEBUG)
+				vio_dump(sc);
+#endif
 			if (ifp->if_flags & IFF_RUNNING)
 				r = ENETRESET;
 			else
@@ -1342,7 +1372,7 @@ vio_iff(struct vio_softc *sc)
 	}
 
 	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0 ||
-	    ac->ac_multicnt >= VIRTIO_NET_CTRL_MAC_MAXENTRIES) {
+	    ac->ac_multicnt >= VIRTIO_NET_CTRL_MAC_MC_ENTRIES) {
 		ifp->if_flags |= IFF_ALLMULTI;
 		if (ifp->if_flags & IFF_PROMISC)
 			promisc = 1;

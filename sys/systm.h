@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.95 2013/02/09 20:56:35 miod Exp $	*/
+/*	$OpenBSD: systm.h,v 1.99 2013/04/24 17:29:02 matthew Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -109,8 +109,6 @@ extern struct vnode *swapdev_vp;/* vnode equivalent to above */
 struct proc;
 struct process;
 #define curproc curcpu()->ci_curproc
-
-extern int rthreads_enabled;
 
 typedef int	sy_call_t(struct proc *, void *, register_t *);
 
@@ -227,8 +225,10 @@ int	copyin(const void *, void *, size_t)
 int	copyout(const void *, void *, size_t);
 
 struct timeval;
+struct timespec;
 int	hzto(const struct timeval *);
 int	tvtohz(const struct timeval *);
+int	tstohz(const struct timespec *);
 void	realitexpire(void *);
 
 struct clockframe;

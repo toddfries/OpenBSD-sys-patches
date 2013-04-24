@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vnops.c,v 1.57 2012/09/26 04:32:40 brad Exp $	*/
+/*	$OpenBSD: cd9660_vnops.c,v 1.59 2013/03/28 03:29:44 guenther Exp $	*/
 /*	$NetBSD: cd9660_vnops.c,v 1.42 1997/10/16 23:56:57 christos Exp $	*/
 
 /*-
@@ -876,17 +876,14 @@ cd9660_pathconf(void *v)
 		else
 			*ap->a_retval = 37;
 		break;
-	case _PC_PATH_MAX:
-		*ap->a_retval = PATH_MAX;
-		break;
-	case _PC_PIPE_BUF:
-		*ap->a_retval = PIPE_BUF;
-		break;
 	case _PC_CHOWN_RESTRICTED:
 		*ap->a_retval = 1;
 		break;
 	case _PC_NO_TRUNC:
 		*ap->a_retval = 1;
+		break;
+	case _PC_TIMESTAMP_RESOLUTION:
+		*ap->a_retval = 1000000000;	/* one billion nanoseconds */
 		break;
 	default:
 		error = EINVAL;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.248 2012/11/23 20:12:03 sthen Exp $	*/
+/*	$OpenBSD: if.c,v 1.258 2013/04/02 08:54:37 mpi Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -73,9 +73,9 @@
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/pool.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/timeout.h>
 #include <sys/protosw.h>
 #include <sys/kernel.h>
 #include <sys/ioctl.h>
@@ -137,8 +137,6 @@ void	if_attachsetup(struct ifnet *);
 void	if_attachdomain1(struct ifnet *);
 void	if_attach_common(struct ifnet *);
 
-int	ifqmaxlen = IFQ_MAXLEN;
-
 void	if_detach_queues(struct ifnet *, struct ifqueue *);
 void	if_detached_start(struct ifnet *);
 int	if_detached_ioctl(struct ifnet *, u_long, caddr_t);
@@ -190,9 +188,8 @@ ifinit()
 	if_slowtimo(&if_slowtim);
 }
 
-static int if_index = 0;
-int if_indexlim = 0;
-struct ifaddr **ifnet_addrs = NULL;
+static unsigned int if_index = 0;
+static unsigned int if_indexlim = 0;
 struct ifnet **ifindex2ifnet = NULL;
 struct ifnet_head ifnet = TAILQ_HEAD_INITIALIZER(ifnet);
 struct ifnet_head iftxlist = TAILQ_HEAD_INITIALIZER(iftxlist);
@@ -239,10 +236,9 @@ if_attachsetup(struct ifnet *ifp)
 	/*
 	 * We have some arrays that should be indexed by if_index.
 	 * since if_index will grow dynamically, they should grow too.
-	 *	struct ifaddr **ifnet_addrs
 	 *	struct ifnet **ifindex2ifnet
 	 */
-	if (ifnet_addrs == 0 || ifindex2ifnet == 0 || if_index >= if_indexlim) {
+	if (ifindex2ifnet == NULL || if_index >= if_indexlim) {
 		size_t m, n, oldlim;
 		caddr_t q;
 
@@ -251,16 +247,6 @@ if_attachsetup(struct ifnet *ifp)
 			if_indexlim = 8;
 		while (if_index >= if_indexlim)
 			if_indexlim <<= 1;
-
-		/* grow ifnet_addrs */
-		m = oldlim * sizeof(struct ifaddr *);
-		n = if_indexlim * sizeof(struct ifaddr *);
-		q = (caddr_t)malloc(n, M_IFADDR, M_WAITOK|M_ZERO);
-		if (ifnet_addrs) {
-			bcopy((caddr_t)ifnet_addrs, q, m);
-			free((caddr_t)ifnet_addrs, M_IFADDR);
-		}
-		ifnet_addrs = (struct ifaddr **)q;
 
 		/* grow ifindex2ifnet */
 		m = oldlim * sizeof(struct ifnet *);
@@ -280,7 +266,7 @@ if_attachsetup(struct ifnet *ifp)
 	ifindex2ifnet[if_index] = ifp;
 
 	if (ifp->if_snd.ifq_maxlen == 0)
-		IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+		IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 #ifdef ALTQ
 	ifp->if_snd.altq_type = 0;
 	ifp->if_snd.altq_disc = NULL;
@@ -338,7 +324,7 @@ if_alloc_sadl(struct ifnet *ifp)
 	sdl->sdl_alen = ifp->if_addrlen;
 	sdl->sdl_index = ifp->if_index;
 	sdl->sdl_type = ifp->if_type;
-	ifnet_addrs[ifp->if_index] = ifa;
+	ifp->if_lladdr = ifa;
 	ifa->ifa_ifp = ifp;
 	ifa->ifa_rtrequest = link_rtrequest;
 	ifa->ifa_addr = (struct sockaddr *)sdl;
@@ -362,7 +348,7 @@ if_free_sadl(struct ifnet *ifp)
 	struct ifaddr *ifa;
 	int s;
 
-	ifa = ifnet_addrs[ifp->if_index];
+	ifa = ifp->if_lladdr;
 	if (ifa == NULL)
 		return;
 
@@ -370,7 +356,7 @@ if_free_sadl(struct ifnet *ifp)
 	rtinit(ifa, RTM_DELETE, 0);
 #if 0
 	ifa_del(ifp, ifa);
-	ifnet_addrs[ifp->if_index] = NULL;
+	ifp->if_lladdr = NULL;
 #endif
 	ifp->if_sadl = NULL;
 
@@ -384,7 +370,7 @@ if_attachdomain()
 	int s;
 
 	s = splnet();
-	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list))
+	TAILQ_FOREACH(ifp, &ifnet, if_list)
 		if_attachdomain1(ifp);
 	splx(s);
 }
@@ -609,26 +595,24 @@ do { \
 		ifa_del(ifp, ifa);
 #ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
-			TAILQ_REMOVE(&in_ifaddr, (struct in_ifaddr *)ifa,
-			    ia_list);
+			TAILQ_REMOVE(&in_ifaddr, ifatoia(ifa), ia_list);
 #endif
 		/* XXX if_free_sadl needs this */
-		if (ifa == ifnet_addrs[ifp->if_index])
+		if (ifa == ifp->if_lladdr)
 			continue;
 
 		ifa->ifa_ifp = NULL;
-		IFAFREE(ifa);
+		ifafree(ifa);
 	}
 
-	for (ifg = TAILQ_FIRST(&ifp->if_groups); ifg;
-	    ifg = TAILQ_FIRST(&ifp->if_groups))
+	while ((ifg = TAILQ_FIRST(&ifp->if_groups)) != NULL)
 		if_delgroup(ifp, ifg->ifgl_group->ifg_group);
 
 	if_free_sadl(ifp);
 
-	ifnet_addrs[ifp->if_index]->ifa_ifp = NULL;
-	IFAFREE(ifnet_addrs[ifp->if_index]);
-	ifnet_addrs[ifp->if_index] = NULL;
+	ifp->if_lladdr->ifa_ifp = NULL;
+	ifafree(ifp->if_lladdr);
+	ifp->if_lladdr = NULL;
 
 	free(ifp->if_addrhooks, M_TEMP);
 	free(ifp->if_linkstatehooks, M_TEMP);
@@ -825,13 +809,16 @@ if_clone_list(struct if_clonereq *ifcr)
 	count = (if_cloners_count < ifcr->ifcr_count) ?
 	    if_cloners_count : ifcr->ifcr_count;
 
-	for (ifc = LIST_FIRST(&if_cloners); ifc != NULL && count != 0;
-	    ifc = LIST_NEXT(ifc, ifc_list), count--, dst += IFNAMSIZ) {
+	LIST_FOREACH(ifc, &if_cloners, ifc_list) {
+		if (count == 0)
+			break;
 		bzero(outbuf, sizeof outbuf);
 		strlcpy(outbuf, ifc->ifc_name, IFNAMSIZ);
 		error = copyout(outbuf, dst, IFNAMSIZ);
 		if (error)
 			break;
+		count--;
+		dst += IFNAMSIZ;
 	}
 
 	return (error);
@@ -932,9 +919,8 @@ ifa_ifwithnet(struct sockaddr *addr, u_int rdomain)
 	rdomain = rtable_l2(rdomain);
 	if (af == AF_LINK) {
 		struct sockaddr_dl *sdl = (struct sockaddr_dl *)addr;
-		if (sdl->sdl_index && sdl->sdl_index < if_indexlim &&
-		    ifindex2ifnet[sdl->sdl_index])
-			return (ifnet_addrs[sdl->sdl_index]);
+		if (sdl->sdl_index && (ifp = if_get(sdl->sdl_index)) != NULL)
+			return (ifp->if_lladdr);
 	}
 	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		if (ifp->if_rdomain != rdomain)
@@ -961,27 +947,6 @@ ifa_ifwithnet(struct sockaddr *addr, u_int rdomain)
 		}
 	}
 	return (ifa_maybe);
-}
-
-/*
- * Find an interface using a specific address family
- */
-struct ifaddr *
-ifa_ifwithaf(int af, u_int rdomain)
-{
-	struct ifnet *ifp;
-	struct ifaddr *ifa;
-
-	rdomain = rtable_l2(rdomain);
-	TAILQ_FOREACH(ifp, &ifnet, if_list) {
-		if (ifp->if_rdomain != rdomain)
-			continue;
-		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-			if (ifa->ifa_addr->sa_family == af)
-				return (ifa);
-		}
-	}
-	return (NULL);
 }
 
 /*
@@ -1040,7 +1005,7 @@ link_rtrequest(int cmd, struct rtentry *rt, struct rt_addrinfo *info)
 		return;
 	if ((ifa = ifaof_ifpforaddr(dst, ifp)) != NULL) {
 		ifa->ifa_refcnt++;
-		IFAFREE(rt->rt_ifa);
+		ifafree(rt->rt_ifa);
 		rt->rt_ifa = ifa;
 		if (ifa->ifa_rtrequest && ifa->ifa_rtrequest != link_rtrequest)
 			ifa->ifa_rtrequest(cmd, rt, info);
@@ -1058,7 +1023,7 @@ if_downall(void)
 	int s;
 
 	s = splnet();
-	for (ifp = TAILQ_FIRST(&ifnet); ifp; ifp = TAILQ_NEXT(ifp, if_list)) {
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
 		if ((ifp->if_flags & IFF_UP) == 0)
 			continue;
 		if_down(ifp);
@@ -1185,8 +1150,7 @@ if_slowtimo(void *arg)
 }
 
 /*
- * Map interface name to
- * interface structure pointer.
+ * Map interface name to interface structure pointer.
  */
 struct ifnet *
 ifunit(const char *name)
@@ -1198,6 +1162,20 @@ ifunit(const char *name)
 			return (ifp);
 	}
 	return (NULL);
+}
+
+/*
+ * Map interface index to interface structure pointer.
+ */
+struct ifnet *
+if_get(unsigned int index)
+{
+	struct ifnet *ifp = NULL;
+
+	if (index < if_indexlim)
+		ifp = ifindex2ifnet[index];
+
+	return (ifp);
 }
 
 /*
@@ -1511,19 +1489,16 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			ifp->if_xflags |= IFXF_NOINET6;
 #endif
 #ifdef INET
-			for (ifa = TAILQ_FIRST(&ifp->if_addrlist); ifa != NULL;
-			    ifa = nifa) {
-				nifa = TAILQ_NEXT(ifa, ifa_list);
-
+			TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrlist, ifa_list,
+			    nifa) {
 				/* only remove AF_INET */
 				if (ifa->ifa_addr->sa_family != AF_INET)
 					continue;
 
-				TAILQ_REMOVE(&in_ifaddr,
-				    (struct in_ifaddr *)ifa, ia_list);
+				TAILQ_REMOVE(&in_ifaddr, ifatoia(ifa), ia_list);
 				ifa_del(ifp, ifa);
 				ifa->ifa_ifp = NULL;
-				IFAFREE(ifa);
+				ifafree(ifa);
 			}
 #endif
 			splx(s);
@@ -1564,7 +1539,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	case SIOCSIFLLADDR:
 		if ((error = suser(p, 0)))
 			return (error);
-		ifa = ifnet_addrs[ifp->if_index];
+		ifa = ifp->if_lladdr;
 		if (ifa == NULL)
 			return (EINVAL);
 		sdl = (struct sockaddr_dl *)ifa->ifa_addr;
@@ -1713,8 +1688,9 @@ ifconf(u_long cmd, caddr_t data)
 	}
 
 	ifrp = ifc->ifc_req;
-	for (ifp = TAILQ_FIRST(&ifnet); space >= sizeof(ifr) &&
-	    ifp != TAILQ_END(&ifnet); ifp = TAILQ_NEXT(ifp, if_list)) {
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
+		if (space < sizeof(ifr))
+			break;
 		bcopy(ifp->if_xname, ifr.ifr_name, IFNAMSIZ);
 		if (TAILQ_EMPTY(&ifp->if_addrlist)) {
 			bzero((caddr_t)&ifr.ifr_addr, sizeof(ifr.ifr_addr));
@@ -1724,11 +1700,11 @@ ifconf(u_long cmd, caddr_t data)
 				break;
 			space -= sizeof (ifr), ifrp++;
 		} else
-			for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
-			    space >= sizeof (ifr) &&
-			    ifa != TAILQ_END(&ifp->if_addrlist);
-			    ifa = TAILQ_NEXT(ifa, ifa_list)) {
+			TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 				struct sockaddr *sa = ifa->ifa_addr;
+
+				if (space < sizeof(ifr))
+					break;
 #if defined(COMPAT_43) || defined(COMPAT_LINUX)
 				if (cmd == OSIOCGIFCONF) {
 					struct osockaddr *osa =
@@ -2075,10 +2051,8 @@ if_group_egress_build(void)
 			break;
 
 	if (ifg != NULL)
-		for (ifgm = TAILQ_FIRST(&ifg->ifg_members); ifgm; ifgm = next) {
-			next = TAILQ_NEXT(ifgm, ifgm_next);
+		TAILQ_FOREACH_SAFE(ifgm, &ifg->ifg_members, ifgm_next, next)
 			if_delgroup(ifgm->ifgm_ifp, IFG_EGRESS);
-		}
 
 	bzero(&sa_in, sizeof(sa_in));
 	sa_in.sin_len = sizeof(sa_in);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: adb.c,v 1.34 2011/06/16 10:51:48 mpi Exp $	*/
+/*	$OpenBSD: adb.c,v 1.37 2013/04/23 07:38:05 mpi Exp $	*/
 /*	$NetBSD: adb.c,v 1.6 1999/08/16 06:28:09 tsubai Exp $	*/
 /*	$NetBSD: adb_direct.c,v 1.14 2000/06/08 22:10:45 tsubai Exp $	*/
 
@@ -44,11 +44,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Bradley A. Grantham.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -1363,6 +1358,7 @@ adb_read_date_time(time_t *time)
 	int result;
 	int retcode;
 	volatile int flag = 0;
+	u_int32_t t;
 
 	switch (adbHardware) {
 	case ADB_HW_PMU:
@@ -1385,7 +1381,8 @@ adb_read_date_time(time_t *time)
 			;
 
 		delay(20); /* completion occurs too soon? */
-		memcpy(time, output + 1, 4);
+		memcpy(&t, output + 1, sizeof(t));
+		*time = (time_t)t;
 		retcode = 0;
 		break;
 
@@ -1412,18 +1409,21 @@ adb_set_date_time(time_t time)
 	u_char output[ADB_MAX_MSG_LENGTH];
 	int result;
 	volatile int flag = 0;
+	u_int32_t t;
 
 	time += DIFF19041970;
 	switch (adbHardware) {
 
 	case ADB_HW_CUDA:
+		t = time;		/* XXX eventually truncates */
+
 		output[0] = 0x06;	/* 6 byte message */
 		output[1] = 0x01;	/* to pram/rtc device */
 		output[2] = 0x09;	/* set date/time */
-		output[3] = (u_char)(time >> 24);
-		output[4] = (u_char)(time >> 16);
-		output[5] = (u_char)(time >> 8);
-		output[6] = (u_char)(time);
+		output[3] = (u_char)(t >> 24);
+		output[4] = (u_char)(t >> 16);
+		output[5] = (u_char)(t >> 8);
+		output[6] = (u_char)(t);
 		result = send_adb_cuda((u_char *)output, (u_char *)0,
 		    (void *)adb_op_comprout, (void *)&flag, (int)0);
 		if (result != 0)	/* exit if not sent */
@@ -1591,7 +1591,6 @@ adbattach(struct device *parent, struct device *self, void *aux)
 	struct confargs nca;
 	char name[32];
 	int node;
-
 	ADBDataBlock adbdata;
 	struct adb_attach_args aa_args;
 	int totaladbs;
@@ -1624,7 +1623,8 @@ adbattach(struct device *parent, struct device *self, void *aux)
 	}
 
 	adb_polling = 1;
-	adb_reinit();
+	if (!adbempty)
+		adb_reinit();
 
 	mac_intr_establish(parent, ca->ca_intr[0], IST_LEVEL, IPL_HIGH,
 	    adb_intr, sc, sc->sc_dev.dv_xname);
@@ -1632,28 +1632,6 @@ adbattach(struct device *parent, struct device *self, void *aux)
 	/* init powerpc globals which control RTC functionality */
 	time_read = adb_read_date_time;
 	time_write = adb_set_date_time;
-
-#ifdef ADB_DEBUG
-	if (adb_debug)
-		printf("adb: done with adb_reinit\n");
-#endif
-	totaladbs = count_adbs();
-
-	printf(" irq %d: %s, %d target%s\n", ca->ca_intr[0], ca->ca_name,
-	    totaladbs, (totaladbs == 1) ? "" : "s");
-
-	/* for each ADB device */
-	for (adbindex = 1; adbindex <= totaladbs; adbindex++) {
-		/* Get the ADB information */
-		adbaddr = get_ind_adb_info(&adbdata, adbindex);
-
-		aa_args.name = adb_device_name;
-		aa_args.origaddr = adbdata.origADBAddr;
-		aa_args.adbaddr = adbaddr;
-		aa_args.handler_id = adbdata.devType;
-
-		(void)config_found(self, &aa_args, adbprint);
-	}
 
 #if NAPM > 0
 	if (adbHardware == ADB_HW_PMU) {
@@ -1679,6 +1657,36 @@ adbattach(struct device *parent, struct device *self, void *aux)
 		adb_cuda_fileserver_mode();
 	if (adbHardware == ADB_HW_PMU)
 		pmu_fileserver_mode(1);
+
+	/*
+	 * XXX If the machine doesn't have an ADB bus (PowerBook5,6+)
+	 * yes it sounds stupid to attach adb(4), but don't try to send
+	 * ADB commands otherwise the PMU may shutdown the machine...
+	 */
+	if (adbempty)
+		return;
+
+#ifdef ADB_DEBUG
+	if (adb_debug)
+		printf("adb: done with adb_reinit\n");
+#endif
+	totaladbs = count_adbs();
+
+	printf(" irq %d: %s, %d target%s\n", ca->ca_intr[0], ca->ca_name,
+	    totaladbs, (totaladbs == 1) ? "" : "s");
+
+	/* for each ADB device */
+	for (adbindex = 1; adbindex <= totaladbs; adbindex++) {
+		/* Get the ADB information */
+		adbaddr = get_ind_adb_info(&adbdata, adbindex);
+
+		aa_args.name = adb_device_name;
+		aa_args.origaddr = adbdata.origADBAddr;
+		aa_args.adbaddr = adbaddr;
+		aa_args.handler_id = adbdata.devType;
+
+		(void)config_found(self, &aa_args, adbprint);
+	}
 
 	if (adbHardware == ADB_HW_CUDA)
 		adb_cuda_autopoll();
