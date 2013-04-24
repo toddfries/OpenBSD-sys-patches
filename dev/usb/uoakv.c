@@ -1,4 +1,4 @@
-/*	$OpenBSD: uoakv.c,v 1.2 2012/10/19 14:52:38 deraadt Exp $   */
+/*	$OpenBSD: uoakv.c,v 1.4 2013/04/15 09:23:02 mglocker Exp $   */
 
 /*
  * Copyright (c) 2012 Yojiro UO <yuo@nui.org>
@@ -20,7 +20,6 @@
 /* http://developer.toradex.com/files/toradex-dev/uploads/media/Oak/Oak_ProgrammingGuide.pdf */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
@@ -132,7 +131,7 @@ uoakv_attach(struct device *parent, struct device *self, void *aux)
 	struct uoakv_softc *sc = (struct uoakv_softc *)self;
 	struct usb_attach_arg *uaa = aux;
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
-	usbd_device_handle dev = uha->parent->sc_udev;
+	struct usbd_device *dev = uha->parent->sc_udev;
 
 	struct uoak_softc *scc = &sc->sc_uoak_softc;
 	int i, err, size, repid;
