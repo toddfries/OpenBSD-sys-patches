@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_i810.c,v 1.71 2012/09/25 10:19:46 jsg Exp $	*/
+/*	$OpenBSD: agp_i810.c,v 1.75 2013/04/05 22:26:41 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2000 Doug Rabson
@@ -59,6 +59,10 @@
 #define	INTEL_LOCAL	0x2
 /* Memory is snooped, must not be accessed through gtt from the cpu. */
 #define	INTEL_COHERENT	0x6	
+
+#define GEN6_PTE_UNCACHED		(1 << 1)
+#define GEN6_PTE_CACHE_LLC		(2 << 1)
+#define GEN6_PTE_CACHE_LLC_MLC		(3 << 1)
 
 enum {
 	CHIP_NONE	= 0,	/* not integrated graphics */
@@ -502,79 +506,11 @@ agp_i810_attach(struct device *parent, struct device *self, void *aux)
 
 	case CHIP_SANDYBRIDGE:
 	case CHIP_IVYBRIDGE:
-
-		/* Stolen memory is set up at the beginning of the aperture by
-		 * the BIOS, consisting of the GATT followed by 4kb for the
-		 * BIOS display.
+		/*
+		 * Even though stolen memory exists on these machines,
+		 * it isn't necessarily mapped into the aperture.
 		 */
-
-		gcc1 = (u_int16_t)pci_conf_read(bpa.pa_pc, bpa.pa_tag,
-		    AGP_INTEL_SNB_GMCH_CTRL);
-
-		stolen = 4;
-
-		switch (gcc1 & AGP_INTEL_SNB_GMCH_GMS_STOLEN_MASK) {
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_32M:
-			isc->stolen = (32768 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_64M:
-			isc->stolen = (65536 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_96M:
-			isc->stolen = (98304 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_128M:
-			isc->stolen = (131072 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_160M:
-			isc->stolen = (163840 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_192M:
-			isc->stolen = (196608 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_224M:
-			isc->stolen = (229376 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_256M:
-			isc->stolen = (262144 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_288M:
-			isc->stolen = (294912 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_320M:
-			isc->stolen = (327680 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_352M:
-			isc->stolen = (360448 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_384M:
-			isc->stolen = (393216 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_416M:
-			isc->stolen = (425984 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_448M:
-			isc->stolen = (458752 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_480M:
-			isc->stolen = (491520 - stolen) * 1024 / 4096;
-			break;
-		case AGP_INTEL_SNB_GMCH_GMS_STOLEN_512M:
-			isc->stolen = (524288 - stolen) * 1024 / 4096;
-			break;
-		default:
-			isc->stolen = 0;
-			printf("unknown memory configuration, disabling\n");
-			goto out;
-		}
-
-#ifdef DEBUG
-		if (isc->stolen > 0) {
-			printf(": detected %dk stolen memory",
-			    isc->stolen * 4);
-		} else
-			printf(": no preallocated video memory\n");
-#endif
+		isc->stolen = 0;
 
 		/* GATT address is already in there, make sure it's enabled */
 		gatt->ag_physical = READ4(AGP_I810_PGTBL_CTL) & ~1;
@@ -594,6 +530,7 @@ agp_i810_attach(struct device *parent, struct device *self, void *aux)
 
 	isc->agpdev = (struct agp_softc *)agp_attach_bus(pa, &agp_i810_methods,
 	    isc->isc_apaddr, isc->isc_apsize, &isc->dev);
+	isc->agpdev->sc_stolen_entries = isc->stolen;
 	return;
 out:
 
@@ -725,8 +662,21 @@ agp_i810_bind_page(void *sc, bus_addr_t offset, paddr_t physical, int flags)
 	 * COHERENT mappings mean set the snoop bit. this should never be
 	 * accessed by the gpu through the gtt.
 	 */
-	if (flags & BUS_DMA_COHERENT)
-		physical |= INTEL_COHERENT;
+	switch (isc->chiptype) {
+	case CHIP_SANDYBRIDGE:
+	case CHIP_IVYBRIDGE:
+		if (flags & BUS_DMA_GTT_NOCACHE)
+			physical |= GEN6_PTE_UNCACHED;
+		if (flags & BUS_DMA_GTT_CACHE_LLC)
+			physical |= GEN6_PTE_CACHE_LLC;
+		if (flags & BUS_DMA_GTT_CACHE_LLC_MLC)
+			physical |= GEN6_PTE_CACHE_LLC_MLC;
+		break;
+	default:
+		if (flags & BUS_DMA_COHERENT)
+			physical |= INTEL_COHERENT;
+		break;
+	}
 
 	intagp_write_gtt(isc, offset - isc->isc_apaddr, physical);
 }
@@ -945,14 +895,19 @@ intagp_write_gtt(struct agp_i810_softc *isc, bus_size_t off, paddr_t v)
 	if (v != 0) {
 		pte = v | INTEL_ENABLED;
 		/* 965+ can do 36-bit addressing, add in the extra bits */
-		if (isc->chiptype == CHIP_I965 ||
-		    isc->chiptype == CHIP_G4X ||
-		    isc->chiptype == CHIP_PINEVIEW ||
-		    isc->chiptype == CHIP_G33 ||
-		    isc->chiptype == CHIP_IRONLAKE ||
-		    isc->chiptype == CHIP_SANDYBRIDGE ||
-		    isc->chiptype == CHIP_IVYBRIDGE) {
+		switch (isc->chiptype) {
+		case CHIP_I965:
+		case CHIP_G4X:
+		case CHIP_PINEVIEW:
+		case CHIP_G33:
+		case CHIP_IRONLAKE:
 			pte |= (v & 0x0000000f00000000ULL) >> 28;
+			break;
+		/* gen6+ can do 40 bit addressing */
+		case CHIP_SANDYBRIDGE:
+		case CHIP_IVYBRIDGE:
+			pte |= (v & 0x000000ff00000000ULL) >> 28;
+			break;
 		}
 	}
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.106 2013/03/04 14:42:25 bluhm Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.112 2013/04/24 10:17:08 mpi Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -74,9 +74,9 @@
 #include <sys/socketvar.h>
 #include <sys/errno.h>
 #include <sys/time.h>
+#include <sys/timeout.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
-#include <sys/proc.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -101,7 +101,6 @@
 
 #include <netinet6/ip6protosw.h>
 
-#include "faith.h"
 #include "gif.h"
 #include "bpfilter.h"
 
@@ -118,12 +117,7 @@
 #include <netinet/ip_carp.h>
 #endif
 
-extern struct domain inet6domain;
-extern struct ip6protosw inet6sw[];
-
-u_char ip6_protox[IPPROTO_MAX];
-static int ip6qmaxlen = IFQ_MAXLEN;
-struct in6_ifaddr *in6_ifaddr;
+struct in6_ifaddrhead in6_ifaddr;
 struct ifqueue ip6intrq;
 
 struct ip6stat ip6stat;
@@ -155,7 +149,8 @@ ip6_init(void)
 		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW &&
 		    pr->pr_protocol < IPPROTO_MAX)
 			ip6_protox[pr->pr_protocol] = pr - inet6sw;
-	IFQ_SET_MAXLEN(&ip6intrq, ip6qmaxlen);
+	IFQ_SET_MAXLEN(&ip6intrq, IFQ_MAXLEN);
+	TAILQ_INIT(&in6_ifaddr);
 	ip6_randomid_init();
 	nd6_init();
 	frag6_init();
@@ -510,21 +505,6 @@ ip6_input(struct mbuf *m)
 			goto bad;
 		}
 	}
-
-	/*
-	 * FAITH (Firewall Aided Internet Translator)
-	 */
-#if defined(NFAITH) && 0 < NFAITH
-	if (ip6_keepfaith) {
-		if (ip6_forward_rt.ro_rt && ip6_forward_rt.ro_rt->rt_ifp
-		 && ip6_forward_rt.ro_rt->rt_ifp->if_type == IFT_FAITH) {
-			/* XXX do we need more sanity checks? */
-			ours = 1;
-			deliverifp = ip6_forward_rt.ro_rt->rt_ifp; /*faith*/
-			goto hbhcheck;
-		}
-	}
-#endif
 
 #if 0
     {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.22 2012/08/10 18:50:04 krw Exp $	*/
+/*	$OpenBSD: bios.c,v 1.24 2013/04/24 08:23:44 blambert Exp $	*/
 /*
  * Copyright (c) 2006 Gordon Willem Klok <gklok@cogeco.ca>
  *
@@ -37,6 +37,8 @@
 
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
+
+#include <dev/rndvar.h>
 
 #include "acpi.h"
 #include "mpbios.h"
@@ -95,6 +97,7 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 	vaddr_t va;
 	paddr_t pa, end;
 	u_int8_t *p;
+	int smbiosrev = 0;
 
 	/* see if we have SMBIOS extentions */
 	for (p = ISA_HOLE_VADDR(SMBIOS_START);
@@ -137,6 +140,10 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 		printf(": SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
 		    hdr->majrev, hdr->minrev, hdr->addr, hdr->count);
 
+		smbiosrev = hdr->majrev * 100 + hdr->minrev;
+		if (hdr->minrev < 10)
+			smbiosrev = hdr->majrev * 100 + hdr->minrev * 10;
+
 		bios.cookie = 0;
 		if (smbios_find_table(SMBIOS_TYPE_BIOS, &bios)) {
 			sb = bios.tblhdr;
@@ -158,6 +165,39 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 		break;
 	}
 	printf("\n");
+
+	/* No SMBIOS extensions, go looking for Soekris comBIOS */
+	if (smbiosrev == 0) {
+		const char *signature = "Soekris Engineering";
+
+		for (p = ISA_HOLE_VADDR(SMBIOS_START);
+		    p <= (u_int8_t *)ISA_HOLE_VADDR(SMBIOS_END -
+		    (strlen(signature) - 1)); p++)
+			if (!memcmp(p, signature, strlen(signature))) {
+				hw_vendor = malloc(strlen(signature) + 1,
+				    M_DEVBUF, M_NOWAIT);
+				if (hw_vendor)
+					strlcpy(hw_vendor, signature,
+					    strlen(signature) + 1);
+				p += strlen(signature);
+				break;
+			}
+
+		for (; hw_vendor &&
+		    p <= (u_int8_t *)ISA_HOLE_VADDR(SMBIOS_END - 6); p++)
+			/*
+			 * Search only for "net6501" in the comBIOS as that's
+			 * the only Soekris platform that can run amd64
+			 */
+			if (!memcmp(p, "net6501", 7)) {
+				hw_prod = malloc(8, M_DEVBUF, M_NOWAIT);
+				if (hw_prod) {
+					memcpy(hw_prod, p, 7);
+					hw_prod[7] = '\0';
+				}
+				break;
+			}
+	}
 
 #if NACPI > 0
 	{
@@ -383,6 +423,8 @@ smbios_info(char * str)
 		sminfop = fixstring(p);
 	if (sminfop) {
 		infolen = strlen(sminfop) + 1;
+		for (i = 0; i < infolen - 1; i++)
+			add_timer_randomness(sminfop[i]);
 		hw_serial = malloc(infolen, M_DEVBUF, M_NOWAIT);
 		if (hw_serial)
 			strlcpy(hw_serial, sminfop, infolen);
@@ -406,6 +448,8 @@ smbios_info(char * str)
 		else if (uuidf & SMBIOS_UUID_NSET)
 			hw_uuid = "Not Set";
 		else {
+			for (i = 0; i < sizeof(sys->uuid); i++)
+				add_timer_randomness(sys->uuid[i]);
 			hw_uuid = malloc(SMBIOS_UUID_REPLEN, M_DEVBUF,
 			    M_NOWAIT);
 			if (hw_uuid) {

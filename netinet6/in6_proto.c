@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_proto.c,v 1.64 2013/01/17 16:30:10 bluhm Exp $	*/
+/*	$OpenBSD: in6_proto.c,v 1.67 2013/04/24 10:17:08 mpi Exp $	*/
 /*	$KAME: in6_proto.c,v 1.66 2000/10/10 15:35:47 itojun Exp $	*/
 
 /*
@@ -122,8 +122,7 @@
 /*
  * TCP/IP protocol family: IP6, ICMP6, UDP, TCP.
  */
-
-extern	struct domain inet6domain;
+u_char ip6_protox[IPPROTO_MAX];
 
 struct ip6protosw inet6sw[] = {
 { 0,		&inet6domain,	IPPROTO_IPV6,	0,
@@ -176,20 +175,20 @@ struct ip6protosw inet6sw[] = {
 },
 #ifdef IPSEC
 { SOCK_RAW,	&inet6domain,	IPPROTO_AH,	PR_ATOMIC|PR_ADDR,
-  ah6_input,	0,	 	0,		0,
-  0,
+  ah6_input,	rip6_output, 	0,		rip6_ctloutput,
+  rip6_usrreq,
   0,		0,		0,		0,
   ah_sysctl,
 },
 { SOCK_RAW,	&inet6domain,	IPPROTO_ESP,	PR_ATOMIC|PR_ADDR,
-  esp6_input,	0,	 	0,		0,
-  0,
+  esp6_input,	rip6_output,	0,		rip6_ctloutput,
+  rip6_usrreq,
   0,		0,		0,		0,
   esp_sysctl,
 },
 { SOCK_RAW,	&inet6domain,	IPPROTO_IPCOMP,	PR_ATOMIC|PR_ADDR,
-  ipcomp6_input, 0,	 	0,		0,
-  0,
+  ipcomp6_input, rip6_output,	0,		rip6_ctloutput,
+  rip6_usrreq,
   0,		0,		0,		0,
   ipcomp_sysctl,
 },
@@ -294,7 +293,6 @@ int	ip6_neighborgcthresh = 2048; /* Threshold # of NDP entries for GC */
 int	ip6_maxifprefixes = 16; /* Max acceptable prefixes via RA per IF */
 int	ip6_maxifdefrouters = 16; /* Max acceptable def routers via RA */
 int	ip6_maxdynroutes = 4096; /* Max # of routes created via redirect */
-int	ip6_keepfaith = 0;
 time_t	ip6_log_time = (time_t)0L;
 
 /* icmp6 */
