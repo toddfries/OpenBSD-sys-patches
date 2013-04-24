@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.743 2013/01/12 13:02:22 sf Exp $
+#	$OpenBSD: GENERIC,v 1.746 2013/04/05 02:56:15 deraadt Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -391,7 +391,7 @@ pcppi0		at isa?
 com0	at isa? port 0x3f8 irq 4	# standard PC serial ports
 com1	at isa? port 0x2f8 irq 3
 com2	at isa? port 0x3e8 irq 5
-#com3	at isa? port 0x2e8 irq 9	# (conflicts with some video cards)
+com3	at isa? disable port 0x2e8 irq 9 # (conflicts with some video cards)
 #com4	at isa? port 0x220 irq 4	# Fujitsu Stylistic Touchscreen 
 ast0	at isa? port 0x1a0 irq 5	# AST 4-port serial card
 #ast1	at isa? port 0x2a0 irq 6	# 2nd AST 4-port serial card
@@ -524,9 +524,6 @@ lc1	at isa? port 0x280			# DEC EtherWorks
 le0	at isa? port 0x360 irq 15 drq 6		# IsoLan, NE2100, and DEPCA
 ex0	at isa? port 0x320 irq 5		# Intel EtherExpress PRO/10
 sm0	at isa? port 0x300 irq 10		# SMC 91cxx-based ethernet
-#tr0	at isa? port 0xa20 iomem 0xd8000	# IBM TROPIC based Token-Ring
-#tr1	at isa? port 0xa24 iomem 0xd0000	# IBM TROPIC based Token-Ring
-#tr*	at isa?				# 3COM TROPIC based Token-Ring
 ep*	at eisa?			# 3C579 ethernet
 fea*	at eisa?			# DEC DEFEA FDDI
 lmc*	at pci?				# Lan Media Corp SSI/T3/HSSI
@@ -790,7 +787,6 @@ owctr*	at onewire?		# Counter device
 pseudo-device	pctr		1
 pseudo-device	mtrr		1	# Memory range attributes control
 pseudo-device	nvram		1
-pseudo-device	sequencer	1
 pseudo-device	hotplug		1	# devices hot plugging
 
 # mouse & keyboard multiplexor pseudo-devices
