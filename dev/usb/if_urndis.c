@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.36 2013/02/02 15:03:58 fgsch Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.38 2013/04/15 09:23:01 mglocker Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
@@ -27,7 +27,6 @@
 #include <sys/rwlock.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 
 #include <sys/device.h>
@@ -75,8 +74,8 @@ void urndis_watchdog(struct ifnet *);
 #endif
 
 void urndis_start(struct ifnet *);
-void urndis_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void urndis_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void urndis_rxeof(struct usbd_xfer *, void *, usbd_status);
+void urndis_txeof(struct usbd_xfer *, void *, usbd_status);
 int urndis_rx_list_init(struct urndis_softc *);
 int urndis_tx_list_init(struct urndis_softc *);
 
@@ -1218,8 +1217,8 @@ urndis_start(struct ifnet *ifp)
 }
 
 void
-urndis_rxeof(usbd_xfer_handle xfer,
-    usbd_private_handle priv,
+urndis_rxeof(struct usbd_xfer *xfer,
+    void *priv,
     usbd_status status)
 {
 	struct urndis_chain	*c;
@@ -1260,8 +1259,8 @@ done:
 }
 
 void
-urndis_txeof(usbd_xfer_handle xfer,
-    usbd_private_handle priv,
+urndis_txeof(struct usbd_xfer *xfer,
+    void *priv,
     usbd_status status)
 {
 	struct urndis_chain	*c;

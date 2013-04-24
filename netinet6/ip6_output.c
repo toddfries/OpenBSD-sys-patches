@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.133 2013/03/04 14:42:25 bluhm Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.139 2013/04/11 12:06:25 mpi Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -71,7 +71,6 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 
 #include <net/if.h>
 #include <net/if_enc.h>
@@ -102,13 +101,6 @@
 #include <netinet/ip_ah.h>
 #include <netinet/ip_esp.h>
 #include <net/pfkeyv2.h>
-
-extern u_int8_t get_sa_require(struct inpcb *);
-
-extern int ipsec_auth_default_level;
-extern int ipsec_esp_trans_default_level;
-extern int ipsec_esp_network_default_level;
-extern int ipsec_ipcomp_default_level;
 #endif /* IPSEC */
 
 struct ip6_exthdrs {
@@ -742,9 +734,9 @@ reroute:
 		 */
 		origifp = NULL;
 		if (IN6_IS_SCOPE_EMBED(&ip6->ip6_src))
-			origifp = ifindex2ifnet[ntohs(ip6->ip6_src.s6_addr16[1])];
+			origifp = if_get(ntohs(ip6->ip6_src.s6_addr16[1]));
 		else if (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst))
-			origifp = ifindex2ifnet[ntohs(ip6->ip6_dst.s6_addr16[1])];
+			origifp = if_get(ntohs(ip6->ip6_dst.s6_addr16[1]));
 		/*
 		 * XXX: origifp can be NULL even in those two cases above.
 		 * For example, if we remove the (only) link-local address
@@ -1347,7 +1339,6 @@ ip6_ctloutput(int op, struct socket *so, int level, int optname,
 				/* FALLTHROUGH */
 			case IPV6_UNICAST_HOPS:
 			case IPV6_HOPLIMIT:
-			case IPV6_FAITH:
 
 			case IPV6_RECVPKTINFO:
 			case IPV6_RECVHOPLIMIT:
@@ -1459,10 +1450,6 @@ do { \
 						break;
 					}
 					OPTSET(IN6P_RTHDR);
-					break;
-
-				case IPV6_FAITH:
-					OPTSET(IN6P_FAITH);
 					break;
 
 				case IPV6_RECVPATHMTU:
@@ -1685,7 +1672,7 @@ do { \
 
 				switch (optname) {
 				case IPV6_AUTH_LEVEL:
-				        if (optval < ipsec_auth_default_level &&
+				        if (optval < IPSEC_AUTH_LEVEL_DEFAULT &&
 					    suser(p, 0)) {
 						error = EACCES;
 						break;
@@ -1694,7 +1681,7 @@ do { \
 					break;
 
 				case IPV6_ESP_TRANS_LEVEL:
-				        if (optval < ipsec_esp_trans_default_level &&
+				        if (optval < IPSEC_ESP_TRANS_LEVEL_DEFAULT &&
 					    suser(p, 0)) {
 						error = EACCES;
 						break;
@@ -1703,7 +1690,7 @@ do { \
 					break;
 
 				case IPV6_ESP_NETWORK_LEVEL:
-				        if (optval < ipsec_esp_network_default_level &&
+				        if (optval < IPSEC_ESP_NETWORK_LEVEL_DEFAULT &&
 					    suser(p, 0)) {
 						error = EACCES;
 						break;
@@ -1712,7 +1699,7 @@ do { \
 					break;
 
 				case IPV6_IPCOMP_LEVEL:
-				        if (optval < ipsec_ipcomp_default_level &&
+				        if (optval < IPSEC_IPCOMP_LEVEL_DEFAULT &&
 					    suser(p, 0)) {
 						error = EACCES;
 						break;
@@ -1765,7 +1752,6 @@ do { \
 			case IPV6_RECVRTHDR:
 			case IPV6_RECVPATHMTU:
 
-			case IPV6_FAITH:
 			case IPV6_V6ONLY:
 			case IPV6_PORTRANGE:
 			case IPV6_RECVTCLASS:
@@ -1803,10 +1789,6 @@ do { \
 
 				case IPV6_RECVPATHMTU:
 					optval = OPTBIT(IN6P_MTU);
-					break;
-
-				case IPV6_FAITH:
-					optval = OPTBIT(IN6P_FAITH);
 					break;
 
 				case IPV6_V6ONLY:
@@ -2126,7 +2108,6 @@ ip6_initpktopts(struct ip6_pktopts *opt)
 	opt->ip6po_minmtu = IP6PO_MINMTU_MCASTONLY;
 }
 
-#define sin6tosa(sin6)	((struct sockaddr *)(sin6)) /* XXX */
 int
 ip6_pcbopt(int optname, u_char *buf, int len, struct ip6_pktopts **pktopt,
     int priv, int uproto)
@@ -2390,14 +2371,12 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 		if (ifindex == 0)
 			ifp = NULL;
 		else {
-			if (ifindex < 0 || if_indexlim <= ifindex ||
-			    !ifindex2ifnet[ifindex]) {
+			ifp = if_get(ifindex);
+			if (ifp == NULL) {
 				error = ENXIO;	/* XXX EINVAL? */
 				break;
 			}
-			ifp = ifindex2ifnet[ifindex];
-			if (ifp == NULL ||
-			    (ifp->if_flags & IFF_MULTICAST) == 0) {
+			if ((ifp->if_flags & IFF_MULTICAST) == 0) {
 				error = EADDRNOTAVAIL;
 				break;
 			}
@@ -2494,13 +2473,11 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 			/*
 			 * If the interface is specified, validate it.
 			 */
-			if (mreq->ipv6mr_interface < 0 ||
-			    if_indexlim <= mreq->ipv6mr_interface ||
-			    !ifindex2ifnet[mreq->ipv6mr_interface]) {
+			ifp = if_get(mreq->ipv6mr_interface);
+			if (ifp == NULL) {
 				error = ENXIO;	/* XXX EINVAL? */
 				break;
 			}
-			ifp = ifindex2ifnet[mreq->ipv6mr_interface];
 		}
 
 		/*
@@ -2568,13 +2545,11 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 		if (mreq->ipv6mr_interface == 0)
 			ifp = NULL;
 		else {
-			if (mreq->ipv6mr_interface < 0 ||
-			    if_indexlim <= mreq->ipv6mr_interface ||
-			    !ifindex2ifnet[mreq->ipv6mr_interface]) {
+			ifp = if_get(mreq->ipv6mr_interface);
+			if (ifp == NULL) {
 				error = ENXIO;	/* XXX EINVAL? */
 				break;
 			}
-			ifp = ifindex2ifnet[mreq->ipv6mr_interface];
 		}
 
 		/*
@@ -2837,13 +2812,8 @@ ip6_setpktopt(int optname, u_char *buf, int len, struct ip6_pktopts *opt,
 			return (EINVAL);
 		}
 
-		/* validate the interface index if specified. */
-		if (pktinfo->ipi6_ifindex >= if_indexlim ||
-		    pktinfo->ipi6_ifindex < 0) {
-			 return (ENXIO);
-		}
 		if (pktinfo->ipi6_ifindex) {
-			ifp = ifindex2ifnet[pktinfo->ipi6_ifindex];
+			ifp = if_get(pktinfo->ipi6_ifindex);
 			if (ifp == NULL)
 				return (ENXIO);
 		}
@@ -2931,9 +2901,7 @@ ip6_setpktopt(int optname, u_char *buf, int len, struct ip6_pktopts *opt,
 				return (EINVAL);
 			}
 			if (IN6_IS_SCOPE_EMBED(&sa6->sin6_addr)) {
-				if (sa6->sin6_scope_id < 0 ||
-				    if_indexlim <= sa6->sin6_scope_id ||
-				    !ifindex2ifnet[sa6->sin6_scope_id])
+				if (if_get(sa6->sin6_scope_id) == NULL)
 					return (EINVAL);
 				sa6->sin6_addr.s6_addr16[1] =
 				    htonl(sa6->sin6_scope_id);

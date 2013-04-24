@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.231 2013/02/11 11:11:42 mpi Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.234 2013/04/06 03:44:34 tedu Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -121,11 +121,13 @@ int sysctl_sensors(int *, u_int, void *, size_t *, void *, size_t);
 int sysctl_emul(int *, u_int, void *, size_t *, void *, size_t);
 int sysctl_cptime2(int *, u_int, void *, size_t *, void *, size_t);
 
+void fill_file2(struct kinfo_file2 *, struct file *, struct filedesc *,
+    int, struct vnode *, struct proc *, struct proc *, int);
+void fill_kproc(struct proc *, struct kinfo_proc *, int, int);
+
 int (*cpu_cpuspeed)(int *);
 void (*cpu_setperf)(int);
 int perflevel = 100;
-
-int rthreads_enabled = 1;
 
 /*
  * Lock to avoid too many processes vslocking a large amount of memory
@@ -561,9 +563,6 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_CPTIME2:
 		return (sysctl_cptime2(name + 1, namelen -1, oldp, oldlenp,
 		    newp, newlen));
-	case KERN_RTHREADS:
-		return (sysctl_int(oldp, oldlenp, newp, newlen,
-		    &rthreads_enabled));
 	case KERN_CACHEPCT: {
 		u_int64_t dmapages;
 		int opct, pgs;
@@ -1058,7 +1057,8 @@ sysctl_file(char *where, size_t *sizep, struct proc *p)
 #ifndef SMALL_KERNEL
 void
 fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
-	  int fd, struct vnode *vp, struct proc *pp, struct proc *p)
+	  int fd, struct vnode *vp, struct proc *pp, struct proc *p,
+	  int show_pointers)
 {
 	struct vattr va;
 
@@ -1067,17 +1067,21 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 	kf->fd_fd = fd;		/* might not really be an fd */
 
 	if (fp != NULL) {
-		kf->f_fileaddr = PTRTOINT64(fp);
+		if (show_pointers)
+			kf->f_fileaddr = PTRTOINT64(fp);
 		kf->f_flag = fp->f_flag;
 		kf->f_iflags = fp->f_iflags;
 		kf->f_type = fp->f_type;
 		kf->f_count = fp->f_count;
 		kf->f_msgcount = fp->f_msgcount;
-		kf->f_ucred = PTRTOINT64(fp->f_cred);
+		if (show_pointers)
+			kf->f_ucred = PTRTOINT64(fp->f_cred);
 		kf->f_uid = fp->f_cred->cr_uid;
 		kf->f_gid = fp->f_cred->cr_gid;
-		kf->f_ops = PTRTOINT64(fp->f_ops);
-		kf->f_data = PTRTOINT64(fp->f_data);
+		if (show_pointers)
+			kf->f_ops = PTRTOINT64(fp->f_ops);
+		if (show_pointers)
+			kf->f_data = PTRTOINT64(fp->f_data);
 		kf->f_usecount = 0;
 
 		if (suser(p, 0) == 0 || p->p_ucred->cr_uid == fp->f_cred->cr_uid) {
@@ -1103,12 +1107,15 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		if (fp != NULL)
 			vp = (struct vnode *)fp->f_data;
 
-		kf->v_un = PTRTOINT64(vp->v_un.vu_socket);
+		if (show_pointers)
+			kf->v_un = PTRTOINT64(vp->v_un.vu_socket);
 		kf->v_type = vp->v_type;
 		kf->v_tag = vp->v_tag;
 		kf->v_flag = vp->v_flag;
-		kf->v_data = PTRTOINT64(vp->v_data);
-		kf->v_mount = PTRTOINT64(vp->v_mount);
+		if (show_pointers)
+			kf->v_data = PTRTOINT64(vp->v_data);
+		if (show_pointers)
+			kf->v_mount = PTRTOINT64(vp->v_mount);
 		if (vp->v_mount)
 			strlcpy(kf->f_mntonname,
 			    vp->v_mount->mnt_stat.f_mntonname,
@@ -1128,11 +1135,13 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 
 		kf->so_type = so->so_type;
 		kf->so_state = so->so_state;
-		kf->so_pcb = PTRTOINT64(so->so_pcb);
+		if (show_pointers)
+			kf->so_pcb = PTRTOINT64(so->so_pcb);
 		kf->so_protocol = so->so_proto->pr_protocol;
 		kf->so_family = so->so_proto->pr_domain->dom_family;
 		if (so->so_splice) {
-			kf->so_splice = PTRTOINT64(so->so_splice);
+			if (show_pointers)
+				kf->so_splice = PTRTOINT64(so->so_splice);
 			kf->so_splicelen = so->so_splicelen;
 		} else if (so->so_spliceback)
 			kf->so_splicelen = -1;
@@ -1142,7 +1151,8 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		case AF_INET: {
 			struct inpcb *inpcb = so->so_pcb;
 
-			kf->inp_ppcb = PTRTOINT64(inpcb->inp_ppcb);
+			if (show_pointers)
+				kf->inp_ppcb = PTRTOINT64(inpcb->inp_ppcb);
 			kf->inp_lport = inpcb->inp_lport;
 			kf->inp_laddru[0] = inpcb->inp_laddr.s_addr;
 			kf->inp_fport = inpcb->inp_fport;
@@ -1170,7 +1180,8 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		case AF_UNIX: {
 			struct unpcb *unpcb = so->so_pcb;
 
-			kf->unp_conn = PTRTOINT64(unpcb->unp_conn);
+			if (show_pointers)
+				kf->unp_conn = PTRTOINT64(unpcb->unp_conn);
 			break;
 		    }
 		}
@@ -1180,7 +1191,8 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 	case DTYPE_PIPE: {
 		struct pipe *pipe = (struct pipe *)fp->f_data;
 
-		kf->pipe_peer = PTRTOINT64(pipe->pipe_peer);
+		if (show_pointers)
+			kf->pipe_peer = PTRTOINT64(pipe->pipe_peer);
 		kf->pipe_state = pipe->pipe_state;
 		break;
 	    }
@@ -1227,6 +1239,7 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 	char *dp = where;
 	int arg, i, error = 0, needed = 0;
 	u_int op;
+	int show_pointers;
 
 	if (namelen > 4)
 		return (ENOTDIR);
@@ -1243,11 +1256,13 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 	if (elem_size < 1)
 		return (EINVAL);
 
+	show_pointers = suser(curproc, 0) == 0;
+
 	kf = malloc(sizeof(*kf), M_TEMP, M_WAITOK);
 
 #define FILLIT(fp, fdp, i, vp, pp) do {				\
 	if (buflen >= elem_size && elem_count > 0) {		\
-		fill_file2(kf, fp, fdp, i, vp, pp, p);		\
+		fill_file2(kf, fp, fdp, i, vp, pp, p, show_pointers);	\
 		error = copyout(kf, dp, outsize);		\
 		if (error)					\
 			break;					\
@@ -1370,6 +1385,7 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 	int arg, buflen, doingzomb, elem_size, elem_count;
 	int error, needed, op;
 	int dothreads = 0;
+	int show_pointers;
 
 	dp = where;
 	buflen = where != NULL ? *sizep : 0;
@@ -1385,6 +1401,8 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 
 	dothreads = op & KERN_PROC_SHOW_THREADS;
 	op &= ~KERN_PROC_SHOW_THREADS;
+
+	show_pointers = suser(curproc, 0) == 0;
 
 	if (where != NULL)
 		kproc = malloc(sizeof(*kproc), M_TEMP, M_WAITOK);
@@ -1460,7 +1478,7 @@ again:
 
 		if ((p->p_flag & P_THREAD) == 0) {
 			if (buflen >= elem_size && elem_count > 0) {
-				fill_kproc(p, kproc, 0);
+				fill_kproc(p, kproc, 0, show_pointers);
 				/* Update %cpu for all threads */
 				if (!dothreads) {
 					TAILQ_FOREACH(pp, &pr->ps_threads,
@@ -1484,7 +1502,7 @@ again:
 			continue;
 
 		if (buflen >= elem_size && elem_count > 0) {
-			fill_kproc(p, kproc, 1);
+			fill_kproc(p, kproc, 1, show_pointers);
 			error = copyout(kproc, dp, elem_size);
 			if (error)
 				goto err;
@@ -1519,7 +1537,8 @@ err:
  * Fill in a kproc structure for the specified process.
  */
 void
-fill_kproc(struct proc *p, struct kinfo_proc *ki, int isthread)
+fill_kproc(struct proc *p, struct kinfo_proc *ki, int isthread,
+    int show_pointers)
 {
 	struct process *pr = p->p_p;
 	struct session *s = pr->ps_session;
@@ -1527,7 +1546,8 @@ fill_kproc(struct proc *p, struct kinfo_proc *ki, int isthread)
 	struct timeval ut, st;
 
 	FILL_KPROC(ki, strlcpy, p, pr, p->p_cred, p->p_ucred, pr->ps_pgrp,
-	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_sigacts, isthread);
+	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_sigacts, isthread,
+	    show_pointers);
 
 	/* stuff that's too painful to generalize into the macros */
 	ki->p_pid = pr->ps_pid;
@@ -1539,7 +1559,8 @@ fill_kproc(struct proc *p, struct kinfo_proc *ki, int isthread)
 	if ((pr->ps_flags & PS_CONTROLT) && (tp = s->s_ttyp)) {
 		ki->p_tdev = tp->t_dev;
 		ki->p_tpgid = tp->t_pgrp ? tp->t_pgrp->pg_id : -1;
-		ki->p_tsess = PTRTOINT64(tp->t_session);
+		if (show_pointers)
+			ki->p_tsess = PTRTOINT64(tp->t_session);
 	} else {
 		ki->p_tdev = NODEV;
 		ki->p_tpgid = -1;

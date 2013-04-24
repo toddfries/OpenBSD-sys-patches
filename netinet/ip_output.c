@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.235 2012/11/06 12:32:42 henning Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.238 2013/04/11 12:06:25 mpi Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -70,19 +70,7 @@
 #else
 #define DPRINTF(x)
 #endif
-
-extern u_int8_t get_sa_require(struct inpcb *);
-
-extern int ipsec_auth_default_level;
-extern int ipsec_esp_trans_default_level;
-extern int ipsec_esp_network_default_level;
-extern int ipsec_ipcomp_default_level;
-extern int ipforwarding;
 #endif /* IPSEC */
-
-#ifdef MROUTING
-extern int ipmforwarding;
-#endif
 
 struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
 void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
@@ -523,8 +511,6 @@ reroute:
 			 * above, will be forwarded by the ip_input() routine,
 			 * if necessary.
 			 */
-			extern struct socket *ip_mrouter;
-
 			if (ipmforwarding && ip_mrouter &&
 			    (flags & IP_FORWARDING) == 0) {
 				if (ip_mforward(m, ifp) != 0) {
@@ -1199,7 +1185,7 @@ ip_ctloutput(op, so, level, optname, mp)
 
 			switch (optname) {
 			case IP_AUTH_LEVEL:
-				if (optval < ipsec_auth_default_level &&
+				if (optval < IPSEC_AUTH_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1208,7 +1194,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 
 			case IP_ESP_TRANS_LEVEL:
-				if (optval < ipsec_esp_trans_default_level &&
+				if (optval < IPSEC_ESP_TRANS_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1217,7 +1203,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 
 			case IP_ESP_NETWORK_LEVEL:
-				if (optval < ipsec_esp_network_default_level &&
+				if (optval < IPSEC_ESP_NETWORK_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1225,7 +1211,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				inp->inp_seclevel[SL_ESP_NETWORK] = optval;
 				break;
 			case IP_IPCOMP_LEVEL:
-				if (optval < ipsec_ipcomp_default_level &&
+				if (optval < IPSEC_IPCOMP_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;

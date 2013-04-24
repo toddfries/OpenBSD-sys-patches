@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtwn.c,v 1.23 2012/09/17 15:14:14 yasuoka Exp $	*/
+/*	$OpenBSD: if_urtwn.c,v 1.25 2013/04/15 09:23:01 mglocker Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -187,9 +187,9 @@ void		urtwn_delete_key_cb(struct urtwn_softc *, void *);
 void		urtwn_update_avgrssi(struct urtwn_softc *, int, int8_t);
 int8_t		urtwn_get_rssi(struct urtwn_softc *, int, void *);
 void		urtwn_rx_frame(struct urtwn_softc *, uint8_t *, int);
-void		urtwn_rxeof(usbd_xfer_handle, usbd_private_handle,
+void		urtwn_rxeof(struct usbd_xfer *, void *,
 		    usbd_status);
-void		urtwn_txeof(usbd_xfer_handle, usbd_private_handle,
+void		urtwn_txeof(struct usbd_xfer *, void *,
 		    usbd_status);
 int		urtwn_tx(struct urtwn_softc *, struct mbuf *,
 		    struct ieee80211_node *);
@@ -1632,7 +1632,7 @@ urtwn_rx_frame(struct urtwn_softc *sc, uint8_t *buf, int pktlen)
 }
 
 void
-urtwn_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
+urtwn_rxeof(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct urtwn_rx_data *data = priv;
@@ -1698,7 +1698,7 @@ urtwn_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 }
 
 void
-urtwn_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
+urtwn_txeof(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct urtwn_tx_data *data = priv;
@@ -1737,7 +1737,7 @@ urtwn_tx(struct urtwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	struct ieee80211_key *k = NULL;
 	struct urtwn_tx_data *data;
 	struct r92c_tx_desc *txd;
-	usbd_pipe_handle pipe;
+	struct usbd_pipe *pipe;
 	uint16_t qos, sum;
 	uint8_t raid, type, tid, qid;
 	int i, hasqos, xferlen, error;
@@ -2790,7 +2790,6 @@ urtwn_set_chan(struct urtwn_softc *sc, struct ieee80211_channel *c,
     struct ieee80211_channel *extc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	uint32_t reg;
 	u_int chan;
 	int i;
 
@@ -2805,6 +2804,8 @@ urtwn_set_chan(struct urtwn_softc *sc, struct ieee80211_channel *c,
 	}
 #ifndef IEEE80211_NO_HT
 	if (extc != NULL) {
+		uint32_t reg;
+
 		/* Is secondary channel below or above primary? */
 		int prichlo = c->ic_freq < extc->ic_freq;
 

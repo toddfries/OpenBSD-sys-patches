@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_uath.c,v 1.52 2012/10/03 08:05:26 sthen Exp $	*/
+/*	$OpenBSD: if_uath.c,v 1.54 2013/04/15 09:23:01 mglocker Exp $	*/
 
 /*-
  * Copyright (c) 2006
@@ -159,9 +159,9 @@ int	uath_write_reg(struct uath_softc *, uint32_t, uint32_t);
 int	uath_write_multi(struct uath_softc *, uint32_t, const void *, int);
 int	uath_read_reg(struct uath_softc *, uint32_t, uint32_t *);
 int	uath_read_eeprom(struct uath_softc *, uint32_t, void *);
-void	uath_cmd_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void	uath_data_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void	uath_data_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void	uath_cmd_rxeof(struct usbd_xfer *, void *, usbd_status);
+void	uath_data_rxeof(struct usbd_xfer *, void *, usbd_status);
+void	uath_data_txeof(struct usbd_xfer *, void *, usbd_status);
 int	uath_tx_null(struct uath_softc *);
 int	uath_tx_data(struct uath_softc *, struct mbuf *,
 	    struct ieee80211_node *);
@@ -1108,7 +1108,7 @@ uath_read_eeprom(struct uath_softc *sc, uint32_t reg, void *odata)
 }
 
 void
-uath_cmd_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
+uath_cmd_rxeof(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct uath_rx_cmd *cmd = priv;
@@ -1170,7 +1170,7 @@ uath_cmd_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 }
 
 void
-uath_data_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
+uath_data_rxeof(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct uath_rx_data *data = priv;
@@ -1319,8 +1319,8 @@ uath_tx_null(struct uath_softc *sc)
 
 	usbd_setup_xfer(data->xfer, sc->data_tx_pipe, data, data->buf,
 	    sizeof (uint32_t) + sizeof (struct uath_tx_desc), USBD_NO_COPY |
-	    USBD_FORCE_SHORT_XFER, UATH_DATA_TIMEOUT, NULL);
-	if (usbd_sync_transfer(data->xfer) != 0)
+	    USBD_FORCE_SHORT_XFER | USBD_SYNCHRONOUS, UATH_DATA_TIMEOUT, NULL);
+	if (usbd_transfer(data->xfer) != 0)
 		return EIO;
 
 	sc->data_idx = (sc->data_idx + 1) % UATH_TX_DATA_LIST_COUNT;
@@ -1329,7 +1329,7 @@ uath_tx_null(struct uath_softc *sc)
 }
 
 void
-uath_data_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
+uath_data_txeof(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct uath_tx_data *data = priv;
@@ -2019,7 +2019,7 @@ uath_stop(struct ifnet *ifp, int disable)
 int
 uath_loadfirmware(struct uath_softc *sc, const u_char *fw, int len)
 {
-	usbd_xfer_handle ctlxfer, txxfer, rxxfer;
+	struct usbd_xfer *ctlxfer, *txxfer, *rxxfer;
 	struct uath_fwblock *txblock, *rxblock;
 	uint8_t *txdata;
 	int error = 0;
@@ -2081,9 +2081,10 @@ uath_loadfirmware(struct uath_softc *sc, const u_char *fw, int len)
 
 		/* send firmware block meta-data */
 		usbd_setup_xfer(ctlxfer, sc->cmd_tx_pipe, sc, txblock,
-		    sizeof (struct uath_fwblock), USBD_NO_COPY,
+		    sizeof (struct uath_fwblock),
+		    USBD_NO_COPY | USBD_SYNCHRONOUS,
 		    UATH_CMD_TIMEOUT, NULL);
-		if ((error = usbd_sync_transfer(ctlxfer)) != 0) {
+		if ((error = usbd_transfer(ctlxfer)) != 0) {
 			printf("%s: could not send firmware block info\n",
 			    sc->sc_dev.dv_xname);
 			break;
@@ -2092,8 +2093,8 @@ uath_loadfirmware(struct uath_softc *sc, const u_char *fw, int len)
 		/* send firmware block data */
 		bcopy(fw, txdata, mlen);
 		usbd_setup_xfer(txxfer, sc->data_tx_pipe, sc, txdata, mlen,
-		    USBD_NO_COPY, UATH_DATA_TIMEOUT, NULL);
-		if ((error = usbd_sync_transfer(txxfer)) != 0) {
+		    USBD_NO_COPY | USBD_SYNCHRONOUS, UATH_DATA_TIMEOUT, NULL);
+		if ((error = usbd_transfer(txxfer)) != 0) {
 			printf("%s: could not send firmware block data\n",
 			    sc->sc_dev.dv_xname);
 			break;
@@ -2102,8 +2103,8 @@ uath_loadfirmware(struct uath_softc *sc, const u_char *fw, int len)
 		/* wait for ack from firmware */
 		usbd_setup_xfer(rxxfer, sc->cmd_rx_pipe, sc, rxblock,
 		    sizeof (struct uath_fwblock), USBD_SHORT_XFER_OK |
-		    USBD_NO_COPY, UATH_CMD_TIMEOUT, NULL);
-		if ((error = usbd_sync_transfer(rxxfer)) != 0) {
+		    USBD_NO_COPY | USBD_SYNCHRONOUS, UATH_CMD_TIMEOUT, NULL);
+		if ((error = usbd_transfer(rxxfer)) != 0) {
 			printf("%s: could not read firmware answer\n",
 			    sc->sc_dev.dv_xname);
 			break;
