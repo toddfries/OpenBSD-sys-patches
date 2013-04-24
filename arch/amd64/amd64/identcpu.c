@@ -1,4 +1,4 @@
-/*	$OpenBSD: identcpu.c,v 1.43 2012/11/10 09:45:05 mglocker Exp $	*/
+/*	$OpenBSD: identcpu.c,v 1.46 2013/04/09 01:47:04 guenther Exp $	*/
 /*	$NetBSD: identcpu.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $	*/
 
 /*
@@ -497,8 +497,10 @@ identifycpu(struct cpu_info *ci)
 		if (cpu_ecxfeature & CPUIDECX_EST)
 			setperf_setup = est_init;
 
+#ifdef CRYPTO
 		if (cpu_ecxfeature & CPUIDECX_AES)
 			amd64_has_aesni = 1;
+#endif
 
 		if (cpu_ecxfeature & CPUIDECX_RDRAND)
 			has_rdrand = 1;
@@ -512,6 +514,9 @@ identifycpu(struct cpu_info *ci)
 		CPUID(0x01, dummy, cflushsz, dummy, dummy);
 		/* cflush cacheline size is equal to bits 15-8 of ebx * 8 */
 		ci->ci_cflushsz = ((cflushsz >> 8) & 0xff) * 8;
+	}
+
+	if (!strcmp(cpu_vendor, "GenuineIntel") && cpuid_level >= 0x06 ) {
 		CPUID(0x06, val, dummy, dummy, dummy);
 		if (val & 0x1) {
 			strlcpy(ci->ci_sensordev.xname, ci->ci_dev->dv_xname,

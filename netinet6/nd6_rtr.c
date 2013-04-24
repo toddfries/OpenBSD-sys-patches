@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_rtr.c,v 1.66 2013/03/04 14:42:25 bluhm Exp $	*/
+/*	$OpenBSD: nd6_rtr.c,v 1.69 2013/03/25 14:40:57 mpi Exp $	*/
 /*	$KAME: nd6_rtr.c,v 1.97 2001/02/07 11:09:13 itojun Exp $	*/
 
 /*
@@ -80,9 +80,6 @@ int rt6_deleteroute(struct radix_node *, void *, u_int);
 void nd6_addr_add(void *, void *);
 
 extern int nd6_recalc_reachtm_interval;
-
-static struct ifnet *nd6_defifp;
-int nd6_defifindex;
 
 /*
  * Receive Router Solicitation Message - just for routers.
@@ -1511,7 +1508,7 @@ pfxlist_onlink_check(void)
 	 * always be attached.
 	 * The precise detection logic is same as the one for prefixes.
 	 */
-	for (ifa = in6_ifaddr; ifa; ifa = ifa->ia_next) {
+	TAILQ_FOREACH(ifa, &in6_ifaddr, ia_list) {
 		if (!(ifa->ia6_flags & IN6_IFF_AUTOCONF))
 			continue;
 
@@ -1528,7 +1525,7 @@ pfxlist_onlink_check(void)
 			break;
 	}
 	if (ifa) {
-		for (ifa = in6_ifaddr; ifa; ifa = ifa->ia_next) {
+		TAILQ_FOREACH(ifa, &in6_ifaddr, ia_list) {
 			if ((ifa->ia6_flags & IN6_IFF_AUTOCONF) == 0)
 				continue;
 
@@ -1542,7 +1539,7 @@ pfxlist_onlink_check(void)
 		}
 	}
 	else {
-		for (ifa = in6_ifaddr; ifa; ifa = ifa->ia_next) {
+		TAILQ_FOREACH(ifa, &in6_ifaddr, ia_list) {
 			if ((ifa->ia6_flags & IN6_IFF_AUTOCONF) == 0)
 				continue;
 
@@ -1598,7 +1595,6 @@ nd6_prefix_onlink(struct nd_prefix *pr)
 	ifa = &in6ifa_ifpforlinklocal(ifp,
 	    IN6_IFF_NOTREADY | IN6_IFF_ANYCAST)->ia_ifa;
 	if (ifa == NULL) {
-		/* XXX: freebsd does not have ifa_ifwithaf */
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family == AF_INET6)
 				break;
@@ -2009,25 +2005,4 @@ rt6_deleteroute(struct radix_node *rn, void *arg, u_int id)
 	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 	return (rtrequest1(RTM_DELETE, &info, RTP_ANY, NULL, id));
 #undef SIN6
-}
-
-int
-nd6_setdefaultiface(int ifindex)
-{
-	int error = 0;
-
-	if (ifindex < 0 || if_indexlim <= ifindex)
-		return (EINVAL);
-	if (ifindex != 0 && !ifindex2ifnet[ifindex])
-		return (EINVAL);
-
-	if (nd6_defifindex != ifindex) {
-		nd6_defifindex = ifindex;
-		if (nd6_defifindex > 0) {
-			nd6_defifp = ifindex2ifnet[nd6_defifindex];
-		} else
-			nd6_defifp = NULL;
-	}
-
-	return (error);
 }

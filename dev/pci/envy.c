@@ -1,4 +1,4 @@
-/*	$OpenBSD: envy.c,v 1.52 2013/02/15 14:26:24 ratchov Exp $	*/
+/*	$OpenBSD: envy.c,v 1.54 2013/04/22 15:10:55 deraadt Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -428,7 +428,10 @@ delta_codec_write(struct envy_softc *sc, int dev, int addr, int data)
 #define AP192K_GPIO_CSMASK	0x30
 #define AP192K_GPIO_CS(dev)	((dev) << 4)
 #define AP192K_GPIO_ADC_PWR	0x800
+#define AP192K_GPIO_ADC_DFSMASK	(3 << 9)
+#define AP192K_GPIO_ADC_DFS(v)	((v) << 9)
 #define AP192K_GPIO_MUTE	0x400000
+
 void
 ap192k_init(struct envy_softc *sc)
 {
@@ -443,10 +446,11 @@ ap192k_init(struct envy_softc *sc)
 		sc->shadow[0][AK4358_ATT(i)] = 0xff;
 	}
 
-	/* ADC */
+	/* AK5385 */
 	delay(1);
 	reg = envy_gpio_getstate(sc);
-	reg &= ~AP192K_GPIO_ADC_PWR;
+	reg &= ~(AP192K_GPIO_ADC_PWR | AP192K_GPIO_ADC_DFSMASK);
+	reg |= AP192K_GPIO_ADC_DFS(0);
 	envy_gpio_setstate(sc, reg);
 	reg |= AP192K_GPIO_ADC_PWR;
 	envy_gpio_setstate(sc, reg);
@@ -1914,13 +1918,13 @@ envy_pintr(struct envy_softc *sc)
 	int i;
 
 	if (sc->spurious > 0 || envydebug >= 2) {
-		printf("%s: spurious = %u, start = %u.%ld\n", 
+		printf("%s: spurious = %u, start = %lld.%ld\n", 
 			DEVNAME(sc), sc->spurious,
-			sc->start_ts.tv_sec, sc->start_ts.tv_nsec);
+			(long long)sc->start_ts.tv_sec, sc->start_ts.tv_nsec);
 		for (i = 0; i < sc->nintr; i++) {
-			printf("%u.%09ld: "
+			printf("%lld.%09ld: "
 			    "active=%d/%d pos=%d/%d st=%x/%x, ctl=%x\n",
-			    sc->intrs[i].ts.tv_sec,
+			    (long long)sc->intrs[i].ts.tv_sec,
 			    sc->intrs[i].ts.tv_nsec,
 			    sc->intrs[i].iactive,
 			    sc->intrs[i].oactive,

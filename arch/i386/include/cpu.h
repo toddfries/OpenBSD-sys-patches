@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.127 2013/02/12 08:06:22 mpi Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.129 2013/03/31 17:07:03 deraadt Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -41,6 +41,7 @@
 /*
  * Definitions unique to i386 cpu support.
  */
+#ifdef _KERNEL
 #include <machine/frame.h>
 #include <machine/psl.h>
 #include <machine/segments.h>
@@ -50,6 +51,8 @@
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
 #endif
+
+#endif /* _KERNEL */
 
 /*
  * Arguments to hardclock, softclock and statclock
@@ -148,6 +151,9 @@ struct cpu_info {
 
 	struct ksensordev	ci_sensordev;
 	struct ksensor		ci_sensor;
+#ifdef GPROF
+	struct gmonparam	*ci_gmon;
+#endif
 };
 
 /*
