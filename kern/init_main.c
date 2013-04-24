@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.186 2013/01/01 19:39:50 jasper Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.188 2013/03/28 16:55:25 deraadt Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -83,7 +83,6 @@
 
 #include <ufs/ufs/quota.h>
 
-#include <machine/cpu.h>
 
 #include <uvm/uvm.h>
 
@@ -349,6 +348,8 @@ main(void *framep)
 
 	/* Configure the devices */
 	cpu_configure();
+
+	random_hostseed();
 
 	/* Configure virtual memory system, set vm rlimits. */
 	uvm_init_limits(p);

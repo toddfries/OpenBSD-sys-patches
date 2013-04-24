@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_page.c,v 1.117 2013/03/03 22:37:58 miod Exp $	*/
+/*	$OpenBSD: uvm_page.c,v 1.123 2013/03/27 02:02:23 tedu Exp $	*/
 /*	$NetBSD: uvm_page.c,v 1.44 2000/11/27 08:40:04 chs Exp $	*/
 
 /*
@@ -805,6 +805,8 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 
 	if (size == 0)
 		return (EINVAL);
+	size = atop(round_page(size));
+
 	/*
 	 * check to see if we need to generate some free pages waking
 	 * the pagedaemon.
@@ -823,10 +825,10 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 	 * recover in the page daemon.
 	 */
  again:
-	if ((uvmexp.free <= uvmexp.reserve_pagedaemon &&
+	if ((uvmexp.free <= uvmexp.reserve_pagedaemon + size &&
 	    !((curproc == uvm.pagedaemon_proc) ||
 		(curproc == syncerproc)))) {
-		if (UVM_PLA_WAITOK) {
+		if (flags & UVM_PLA_WAITOK) {
 			uvm_wait("uvm_pglistalloc");
 			goto again;
 		}
@@ -853,7 +855,6 @@ uvm_pglistalloc(psize_t size, paddr_t low, paddr_t high, paddr_t alignment,
 	 * low<high assert will fail.
 	 */
 	high = atop(high + 1);
-	size = atop(round_page(size));
 	alignment = atop(alignment);
 	if (boundary < PAGE_SIZE && boundary != 0)
 		boundary = PAGE_SIZE;
@@ -1052,6 +1053,7 @@ void
 uvm_pagefree(struct vm_page *pg)
 {
 	int saved_loan_count = pg->loan_count;
+	u_int flags_to_clear = 0;
 
 #ifdef DEBUG
 	if (pg->uobject == (void *)0xdeadbeef &&
@@ -1114,7 +1116,7 @@ uvm_pagefree(struct vm_page *pg)
 
 	if (pg->pg_flags & PQ_ACTIVE) {
 		TAILQ_REMOVE(&uvm.page_active, pg, pageq);
-		atomic_clearbits_int(&pg->pg_flags, PQ_ACTIVE);
+		flags_to_clear |= PQ_ACTIVE;
 		uvmexp.active--;
 	}
 	if (pg->pg_flags & PQ_INACTIVE) {
@@ -1122,7 +1124,7 @@ uvm_pagefree(struct vm_page *pg)
 			TAILQ_REMOVE(&uvm.page_inactive_swp, pg, pageq);
 		else
 			TAILQ_REMOVE(&uvm.page_inactive_obj, pg, pageq);
-		atomic_clearbits_int(&pg->pg_flags, PQ_INACTIVE);
+		flags_to_clear |= PQ_INACTIVE;
 		uvmexp.inactive--;
 	}
 
@@ -1137,15 +1139,16 @@ uvm_pagefree(struct vm_page *pg)
 	if (pg->uanon) {
 		pg->uanon->an_page = NULL;
 		pg->uanon = NULL;
-		atomic_clearbits_int(&pg->pg_flags, PQ_ANON);
+		flags_to_clear |= PQ_ANON;
 	}
 
 	/*
 	 * Clean page state bits.
 	 */
-	atomic_clearbits_int(&pg->pg_flags, PQ_AOBJ); /* XXX: find culprit */
-	atomic_clearbits_int(&pg->pg_flags, PQ_ENCRYPT|
-	    PG_ZERO|PG_FAKE|PG_BUSY|PG_RELEASED|PG_CLEAN|PG_CLEANCHK);
+	flags_to_clear |= PQ_AOBJ; /* XXX: find culprit */
+	flags_to_clear |= PQ_ENCRYPT|PG_ZERO|PG_FAKE|PG_BUSY|PG_RELEASED|
+	    PG_CLEAN|PG_CLEANCHK;
+	atomic_clearbits_int(&pg->pg_flags, flags_to_clear);
 
 	/*
 	 * and put on free queue

@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.71 2012/09/18 17:24:51 jasper Exp $ */
+/*	$OpenBSD: udl.c,v 1.74 2013/04/17 17:49:58 tedu Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -32,8 +32,9 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
-#include <uvm/uvm.h>
+#include <sys/systm.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 
@@ -135,8 +136,7 @@ void		udl_cmd_write_reg_1(struct udl_softc *, uint8_t, uint8_t);
 void		udl_cmd_write_reg_3(struct udl_softc *, uint8_t, uint32_t);
 usbd_status	udl_cmd_send(struct udl_softc *);
 usbd_status	udl_cmd_send_async(struct udl_softc *);
-void		udl_cmd_send_async_cb(usbd_xfer_handle, usbd_private_handle,
-		    usbd_status);
+void		udl_cmd_send_async_cb(struct usbd_xfer *, void *, usbd_status);
 
 usbd_status	udl_init_chip(struct udl_softc *);
 void		udl_init_fb_offsets(struct udl_softc *, uint32_t, uint32_t,
@@ -1853,8 +1853,7 @@ udl_cmd_send_async(struct udl_softc *sc)
 }
 
 void
-udl_cmd_send_async_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
-    usbd_status status)
+udl_cmd_send_async_cb(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct udl_cmd_xfer *cx = priv;
 	struct udl_softc *sc = cx->sc;
