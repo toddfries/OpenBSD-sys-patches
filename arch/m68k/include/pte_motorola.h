@@ -1,4 +1,4 @@
-/*	$OpenBSD: pte_motorola.h,v 1.6 2011/03/23 16:54:35 pirofti Exp $	*/
+/*	$OpenBSD: pte_motorola.h,v 1.8 2013/03/25 18:21:02 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -108,6 +108,25 @@ typedef int	pt_entry_t;	/* Mach page table entry */
  * Kernel virtual address to page table entry and to physical address.
  */
 #define	kvtopte(va) \
-	(&Sysmap[((unsigned)(va) - VM_MIN_KERNEL_ADDRESS) >> PGSHIFT])
+	(&Sysmap[((unsigned)(va) - VM_MIN_KERNEL_ADDRESS) >> PAGE_SHIFT])
+
+#define	SEGSHIFT020	(34 - PAGE_SHIFT)
+#define	SEGSHIFT040	(18)
+#ifndef	SEGSHIFT
+#if defined(M68040) || defined(M68060)
+#if defined(M68020) || defined(M68030)
+#define	SEGSHIFT	((mmutype <= MMU_68040) ? SEGSHIFT040 : SEGSHIFT020)
+#else
+#define	SEGSHIFT	SEGSHIFT040
+#endif
+#else
+#define	SEGSHIFT	SEGSHIFT020
+#endif
+#define	NBSEG		(1 << SEGSHIFT)
+#define	SEGOFSET	(NBSEG - 1)
+#endif
+
+#define	m68k_round_seg(x)	((((unsigned)(x)) + SEGOFSET) & ~SEGOFSET)
+#define	m68k_trunc_seg(x)	((unsigned)(x) & ~SEGOFSET)
 
 #endif /* !_M68K_M68K_M68K_PTE_MOTOROLA_H_ */

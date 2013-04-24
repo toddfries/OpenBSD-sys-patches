@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_rsu.c,v 1.15 2013/02/04 23:13:41 kettenis Exp $	*/
+/*	$OpenBSD: if_rsu.c,v 1.17 2013/04/15 09:23:01 mglocker Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -176,8 +176,8 @@ void		rsu_rx_multi_event(struct rsu_softc *, uint8_t *, int);
 int8_t		rsu_get_rssi(struct rsu_softc *, int, void *);
 void		rsu_rx_frame(struct rsu_softc *, uint8_t *, int);
 void		rsu_rx_multi_frame(struct rsu_softc *, uint8_t *, int);
-void		rsu_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void		rsu_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void		rsu_rxeof(struct usbd_xfer *, void *, usbd_status);
+void		rsu_txeof(struct usbd_xfer *, void *, usbd_status);
 int		rsu_tx(struct rsu_softc *, struct mbuf *,
 		    struct ieee80211_node *);
 int		rsu_send_mgmt(struct ieee80211com *, struct ieee80211_node *,
@@ -743,7 +743,7 @@ rsu_fw_cmd(struct rsu_softc *sc, uint8_t code, void *buf, int len)
 	struct rsu_tx_data *data;
 	struct r92s_tx_desc *txd;
 	struct r92s_fw_cmd_hdr *cmd;
-	usbd_pipe_handle pipe;
+	struct usbd_pipe *pipe;
 	int cmdsz, xferlen;
 
 	data = sc->fwcmd_data;
@@ -776,8 +776,9 @@ rsu_fw_cmd(struct rsu_softc *sc, uint8_t code, void *buf, int len)
 	DPRINTFN(2, ("Tx cmd code=%d len=%d\n", code, cmdsz));
 	pipe = sc->pipe[sc->qid2idx[RSU_QID_H2C]];
 	usbd_setup_xfer(data->xfer, pipe, NULL, data->buf, xferlen,
-	    USBD_SHORT_XFER_OK | USBD_NO_COPY, RSU_CMD_TIMEOUT, NULL);
-	return (usbd_sync_transfer(data->xfer));
+	    USBD_SHORT_XFER_OK | USBD_NO_COPY | USBD_SYNCHRONOUS,
+	    RSU_CMD_TIMEOUT, NULL);
+	return (usbd_transfer(data->xfer));
 }
 
 int
@@ -1444,7 +1445,7 @@ rsu_rx_multi_frame(struct rsu_softc *sc, uint8_t *buf, int len)
 }
 
 void
-rsu_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+rsu_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct rsu_rx_data *data = priv;
 	struct rsu_softc *sc = data->sc;
@@ -1480,7 +1481,7 @@ rsu_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 }
 
 void
-rsu_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+rsu_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct rsu_tx_data *data = priv;
 	struct rsu_softc *sc = data->sc;
@@ -1518,7 +1519,7 @@ rsu_tx(struct rsu_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	struct ieee80211_key *k = NULL;
 	struct rsu_tx_data *data;
 	struct r92s_tx_desc *txd;
-	usbd_pipe_handle pipe;
+	struct usbd_pipe *pipe;
 	uint16_t qos;
 	uint8_t type, qid, tid = 0;
 	int hasqos, xferlen, error;
@@ -1995,7 +1996,7 @@ rsu_fw_loadsection(struct rsu_softc *sc, uint8_t *buf, int len)
 {
 	struct rsu_tx_data *data;
 	struct r92s_tx_desc *txd;
-	usbd_pipe_handle pipe;
+	struct usbd_pipe *pipe;
 	int mlen, error;
 
 	data = sc->fwcmd_data;
@@ -2013,9 +2014,10 @@ rsu_fw_loadsection(struct rsu_softc *sc, uint8_t *buf, int len)
 		memcpy(&txd[1], buf, mlen);
 
 		usbd_setup_xfer(data->xfer, pipe, NULL, data->buf,
-		    sizeof(*txd) + mlen, USBD_SHORT_XFER_OK | USBD_NO_COPY,
+		    sizeof(*txd) + mlen,
+		    USBD_SHORT_XFER_OK | USBD_NO_COPY | USBD_SYNCHRONOUS,
 		    RSU_TX_TIMEOUT, NULL);
-		error = usbd_sync_transfer(data->xfer);
+		error = usbd_transfer(data->xfer);
 		if (error != 0)
 			return (error);
 		buf += mlen;

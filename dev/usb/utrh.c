@@ -1,4 +1,4 @@
-/*	$OpenBSD: utrh.c,v 1.8 2011/07/03 15:47:17 matthew Exp $   */
+/*	$OpenBSD: utrh.c,v 1.10 2013/04/15 09:23:02 mglocker Exp $   */
 
 /*
  * Copyright (c) 2009 Yojiro UO <yuo@nui.org>
@@ -19,7 +19,6 @@
 /* Driver for Strawberry linux USBRH Temerature/Humidity sensor */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
@@ -55,7 +54,7 @@ int	utrhdebug = 0;
 
 struct utrh_softc {
 	struct uhidev		 sc_hdev;
-	usbd_device_handle	 sc_udev;
+	struct usbd_device	*sc_udev;
 	u_char			 sc_dying;
 	uint16_t		 sc_flag;
 
@@ -117,7 +116,7 @@ utrh_attach(struct device *parent, struct device *self, void *aux)
 	struct utrh_softc *sc = (struct utrh_softc *)self;
 	struct usb_attach_arg *uaa = aux;
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
-	usbd_device_handle dev = uha->parent->sc_udev;
+	struct usbd_device *dev = uha->parent->sc_udev;
 	int size, repid, err;
 	void *desc;
 
