@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.41 2013/03/02 12:50:01 jsing Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.50 2013/04/21 13:00:21 jsing Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -48,11 +48,9 @@ int	sr_raid1_create(struct sr_discipline *, struct bioc_createraid *,
 	    int, int64_t);
 int	sr_raid1_assemble(struct sr_discipline *, struct bioc_createraid *,
 	    int, void *);
-int	sr_raid1_alloc_resources(struct sr_discipline *);
-int	sr_raid1_free_resources(struct sr_discipline *);
+int	sr_raid1_init(struct sr_discipline *sd);
 int	sr_raid1_rw(struct sr_workunit *);
-void	sr_raid1_intr(struct buf *);
-void	sr_raid1_recreate_wu(struct sr_workunit *);
+int	sr_raid1_wu_done(struct sr_workunit *);
 void	sr_raid1_set_chunk_state(struct sr_discipline *, int, int);
 void	sr_raid1_set_vol_state(struct sr_discipline *);
 
@@ -68,12 +66,10 @@ sr_raid1_discipline_init(struct sr_discipline *sd)
 	sd->sd_max_wu = SR_RAID1_NOWU;
 
 	/* Setup discipline specific function pointers. */
-	sd->sd_alloc_resources = sr_raid1_alloc_resources;
 	sd->sd_assemble = sr_raid1_assemble;
 	sd->sd_create = sr_raid1_create;
-	sd->sd_free_resources = sr_raid1_free_resources;
 	sd->sd_scsi_rw = sr_raid1_rw;
-	sd->sd_scsi_intr = sr_raid1_intr;
+	sd->sd_scsi_wu_done = sr_raid1_wu_done;
 	sd->sd_set_chunk_state = sr_raid1_set_chunk_state;
 	sd->sd_set_vol_state = sr_raid1_set_vol_state;
 }
@@ -82,60 +78,30 @@ int
 sr_raid1_create(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, int64_t coerced_size)
 {
-
 	if (no_chunk < 2) {
-		sr_error(sd->sd_sc, "RAID 1 requires two or more chunks");
+		sr_error(sd->sd_sc, "%s requires two or more chunks",
+		    sd->sd_name);
 		return EINVAL;
 	}
 
 	sd->sd_meta->ssdi.ssd_size = coerced_size;
 
-	sd->sd_max_ccb_per_wu = no_chunk;
-
-	return 0;
+	return sr_raid1_init(sd);
 }
 
 int
 sr_raid1_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, void *data)
 {
+	return sr_raid1_init(sd);
+}
 
+int
+sr_raid1_init(struct sr_discipline *sd)
+{
 	sd->sd_max_ccb_per_wu = sd->sd_meta->ssdi.ssd_chunk_no;
 
 	return 0;
-}
-
-int
-sr_raid1_alloc_resources(struct sr_discipline *sd)
-{
-	int			rv = EINVAL;
-
-	DNPRINTF(SR_D_DIS, "%s: sr_raid1_alloc_resources\n",
-	    DEVNAME(sd->sd_sc));
-
-	if (sr_wu_alloc(sd))
-		goto bad;
-	if (sr_ccb_alloc(sd))
-		goto bad;
-
-	rv = 0;
-bad:
-	return (rv);
-}
-
-int
-sr_raid1_free_resources(struct sr_discipline *sd)
-{
-	int			rv = EINVAL;
-
-	DNPRINTF(SR_D_DIS, "%s: sr_raid1_free_resources\n",
-	    DEVNAME(sd->sd_sc));
-
-	sr_wu_free(sd);
-	sr_ccb_free(sd);
-
-	rv = 0;
-	return (rv);
 }
 
 void
@@ -463,126 +429,36 @@ bad:
 	return (1);
 }
 
-void
-sr_raid1_intr(struct buf *bp)
+int
+sr_raid1_wu_done(struct sr_workunit *wu)
 {
-	struct sr_ccb		*ccb = (struct sr_ccb *)bp;
-	struct sr_workunit	*wu = ccb->ccb_wu, *wup;
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
-	struct sr_softc		*sc = sd->sd_sc;
-	int			s, pend;
 
-	DNPRINTF(SR_D_INTR, "%s: sr_intr bp %x xs %x\n",
-	    DEVNAME(sc), bp, xs);
-
-	s = splbio();
-
-	sr_ccb_done(ccb);
-
-	DNPRINTF(SR_D_INTR, "%s: sr_intr: comp: %d count: %d failed: %d\n",
-	    DEVNAME(sc), wu->swu_ios_complete, wu->swu_io_count,
-	    wu->swu_ios_failed);
-
-	if (wu->swu_ios_complete >= wu->swu_io_count) {
-		/* if all ios failed, retry reads and give up on writes */
-		if (wu->swu_ios_failed == wu->swu_ios_complete) {
-			if (xs->flags & SCSI_DATA_IN) {
-				printf("%s: retrying read on block %lld\n",
-				    DEVNAME(sc), ccb->ccb_buf.b_blkno);
-				sr_ccb_put(ccb);
-				if (wu->swu_cb_active == 1)
-					panic("%s: sr_raid1_intr_cb",
-					    DEVNAME(sd->sd_sc));
-				TAILQ_INIT(&wu->swu_ccb);
-				wu->swu_state = SR_WU_RESTART;
-				if (sd->sd_scsi_rw(wu))
-					goto bad;
-				else
-					goto retry;
-			} else {
-				printf("%s: permanently fail write on block "
-				    "%lld\n", DEVNAME(sc),
-				    ccb->ccb_buf.b_blkno);
-				xs->error = XS_DRIVER_STUFFUP;
-				goto bad;
-			}
-		}
-
+	/* If at least one I/O succeeded, we are okay. */
+	if (wu->swu_ios_succeeded > 0) {
 		xs->error = XS_NOERROR;
-
-		pend = 0;
-		TAILQ_FOREACH(wup, &sd->sd_wu_pendq, swu_link) {
-			if (wu == wup) {
-				/* wu on pendq, remove */
-				TAILQ_REMOVE(&sd->sd_wu_pendq, wu, swu_link);
-				pend = 1;
-
-				if (wu->swu_collider) {
-					if (wu->swu_ios_failed)
-						/* toss all ccbs and recreate */
-						sr_raid1_recreate_wu(wu->swu_collider);
-
-					/* restart deferred wu */
-					wu->swu_collider->swu_state =
-					    SR_WU_INPROGRESS;
-					TAILQ_REMOVE(&sd->sd_wu_defq,
-					    wu->swu_collider, swu_link);
-					sr_raid_startwu(wu->swu_collider);
-				}
-				break;
-			}
-		}
-
-		if (!pend)
-			printf("%s: wu: %p not on pending queue\n",
-			    DEVNAME(sc), wu);
-
-		if (wu->swu_flags & SR_WUF_REBUILD) {
-			if (wu->swu_xs->flags & SCSI_DATA_OUT) {
-				wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
-				wakeup(wu);
-			}
-		} else {
-			sr_scsi_done(sd, xs);
-		}
-
-		if (sd->sd_sync && sd->sd_wu_pending == 0)
-			wakeup(sd);
+		return SR_WU_OK;
 	}
 
-retry:
-	splx(s);
-	return;
-bad:
-	xs->error = XS_DRIVER_STUFFUP;
-	if (wu->swu_flags & SR_WUF_REBUILD) {
-		wu->swu_flags |= SR_WUF_REBUILDIOCOMP;
-		wakeup(wu);
+	/* If all I/O failed, retry reads and give up on writes. */
+	if (xs->flags & SCSI_DATA_IN) {
+		printf("%s: retrying read on block %lld\n",
+		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		if (wu->swu_cb_active == 1)
+			panic("%s: sr_raid1_intr_cb",
+			    DEVNAME(sd->sd_sc));
+		sr_wu_release_ccbs(wu);
+		wu->swu_state = SR_WU_RESTART;
+		if (sd->sd_scsi_rw(wu) == 0)
+			return SR_WU_RESTART;
 	} else {
-		sr_scsi_done(sd, xs);
+		printf("%s: permanently failing write on block %lld\n",
+		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
 	}
 
-	splx(s);
-}
+	wu->swu_state = SR_WU_FAILED;
+	xs->error = XS_DRIVER_STUFFUP;
 
-void
-sr_raid1_recreate_wu(struct sr_workunit *wu)
-{
-	struct sr_discipline	*sd = wu->swu_dis;
-	struct sr_workunit	*wup = wu;
-
-	do {
-		DNPRINTF(SR_D_INTR, "%s: sr_raid1_recreate_wu: %p\n", wup);
-
-		/* toss all ccbs */
-		sr_wu_release_ccbs(wup);
-
-		/* recreate ccbs */
-		wup->swu_state = SR_WU_REQUEUE;
-		if (sd->sd_scsi_rw(wup))
-			panic("could not requeue io");
-
-		wup = wup->swu_collider;
-	} while (wup);
+	return SR_WU_FAILED;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.200 2012/11/06 12:32:42 henning Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.210 2013/04/24 10:17:08 mpi Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -43,7 +43,6 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/syslog.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/pool.h>
 
@@ -113,29 +112,15 @@ int	ipprintfs = 0;
 
 struct rttimer_queue *ip_mtudisc_timeout_q = NULL;
 
-int	ipsec_auth_default_level = IPSEC_AUTH_LEVEL_DEFAULT;
-int	ipsec_esp_trans_default_level = IPSEC_ESP_TRANS_LEVEL_DEFAULT;
-int	ipsec_esp_network_default_level = IPSEC_ESP_NETWORK_LEVEL_DEFAULT;
-int	ipsec_ipcomp_default_level = IPSEC_IPCOMP_LEVEL_DEFAULT;
-
 /* Keep track of memory used for reassembly */
 int	ip_maxqueue = 300;
 int	ip_frags = 0;
 
 /* from in_pcb.c */
-extern int ipport_firstauto;
-extern int ipport_lastauto;
-extern int ipport_hifirstauto;
-extern int ipport_hilastauto;
 extern struct baddynamicports baddynamicports;
-extern int la_hold_total;
 
 int *ipctl_vars[IPCTL_MAXID] = IPCTL_VARS;
 
-extern	struct domain inetdomain;
-extern	struct protosw inetsw[];
-u_char	ip_protox[IPPROTO_MAX];
-int	ipqmaxlen = IFQ_MAXLEN;
 struct	in_ifaddrhead in_ifaddr;
 struct	ifqueue ipintrq;
 
@@ -206,7 +191,7 @@ ip_init(void)
 		    pr->pr_protocol < IPPROTO_MAX)
 			ip_protox[pr->pr_protocol] = pr - inetsw;
 	LIST_INIT(&ipq);
-	IFQ_SET_MAXLEN(&ipintrq, ipqmaxlen);
+	IFQ_SET_MAXLEN(&ipintrq, IFQ_MAXLEN);
 	TAILQ_INIT(&in_ifaddr);
 	if (ip_mtudisc != 0)
 		ip_mtudisc_timeout_q =
@@ -393,8 +378,6 @@ ipv4_input(struct mbuf *m)
 	if (IN_MULTICAST(ip->ip_dst.s_addr)) {
 		struct in_multi *inm;
 #ifdef MROUTING
-		extern struct socket *ip_mrouter;
-
 		if (ipmforwarding && ip_mrouter) {
 			if (m->m_flags & M_EXT) {
 				if ((m = m_pullup(m, hlen)) == NULL) {
@@ -674,7 +657,7 @@ in_ouraddr(struct in_addr ina, struct mbuf *m)
 	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED)
 		return (1);
 
-	key = (struct pf_state_key *)m->m_pkthdr.pf.statekey;
+	key = m->m_pkthdr.pf.statekey;
 	if (key != NULL) {
 		if (key->inp != NULL)
 			return (1);
@@ -689,8 +672,7 @@ in_ouraddr(struct in_addr ina, struct mbuf *m)
 	sin.sin_len = sizeof(sin);
 	sin.sin_family = AF_INET;
 	sin.sin_addr = ina;
-	ia = (struct in_ifaddr *)ifa_ifwithaddr(sintosa(&sin),
-	    m->m_pkthdr.rdomain);
+	ia = ifatoia(ifa_ifwithaddr(sintosa(&sin), m->m_pkthdr.rdomain));
 
 	if (ia == NULL) {
 		/*
@@ -746,7 +728,7 @@ in_iawithaddr(struct in_addr ina, u_int rdomain)
 	sin.sin_len = sizeof(sin);
 	sin.sin_family = AF_INET;
 	sin.sin_addr = ina;
-	ia = (struct in_ifaddr *)ifa_ifwithaddr(sintosa(&sin), rdomain);
+	ia = ifatoia(ifa_ifwithaddr(sintosa(&sin), rdomain));
 	if (ia == NULL || ina.s_addr == ia->ia_addr.sin_addr.s_addr)
 		return (ia);
 
@@ -814,8 +796,8 @@ ip_reass(struct ipqent *ipqe, struct ipq *fp)
 	/*
 	 * Find a segment which begins after this one does.
 	 */
-	for (p = NULL, q = LIST_FIRST(&fp->ipq_fragq);
-	    q != LIST_END(&fp->ipq_fragq); p = q, q = LIST_NEXT(q, ipqe_q))
+	for (p = NULL, q = LIST_FIRST(&fp->ipq_fragq); q != NULL;
+	    p = q, q = LIST_NEXT(q, ipqe_q))
 		if (ntohs(q->ipqe_ip->ip_off) > ntohs(ipqe->ipqe_ip->ip_off))
 			break;
 
@@ -873,8 +855,8 @@ insert:
 		LIST_INSERT_AFTER(p, ipqe, ipqe_q);
 	}
 	next = 0;
-	for (p = NULL, q = LIST_FIRST(&fp->ipq_fragq);
-	    q != LIST_END(&fp->ipq_fragq); p = q, q = LIST_NEXT(q, ipqe_q)) {
+	for (p = NULL, q = LIST_FIRST(&fp->ipq_fragq); q != NULL;
+	    p = q, q = LIST_NEXT(q, ipqe_q)) {
 		if (ntohs(q->ipqe_ip->ip_off) != next)
 			return (0);
 		next += ntohs(q->ipqe_ip->ip_len);
@@ -947,8 +929,7 @@ ip_freef(struct ipq *fp)
 {
 	struct ipqent *q, *p;
 
-	for (q = LIST_FIRST(&fp->ipq_fragq); q != LIST_END(&fp->ipq_fragq);
-	    q = p) {
+	for (q = LIST_FIRST(&fp->ipq_fragq); q != NULL; q = p) {
 		p = LIST_NEXT(q, ipqe_q);
 		m_freem(q->ipqe_m);
 		LIST_REMOVE(q, ipqe_q);
@@ -970,7 +951,7 @@ ip_slowtimo(void)
 	struct ipq *fp, *nfp;
 	int s = splsoftnet();
 
-	for (fp = LIST_FIRST(&ipq); fp != LIST_END(&ipq); fp = nfp) {
+	for (fp = LIST_FIRST(&ipq); fp != NULL; fp = nfp) {
 		nfp = LIST_NEXT(fp, ipq_q);
 		if (--fp->ipq_ttl == 0) {
 			ipstat.ips_fragtimeout++;
@@ -1106,12 +1087,10 @@ ip_dooptions(struct mbuf *m)
 			bcopy((caddr_t)(cp + off), (caddr_t)&ipaddr.sin_addr,
 			    sizeof(ipaddr.sin_addr));
 			if (opt == IPOPT_SSRR) {
-#define	INA	struct in_ifaddr *
-#define	SA	struct sockaddr *
-			    if ((ia = (INA)ifa_ifwithdstaddr((SA)&ipaddr,
-				m->m_pkthdr.rdomain)) == 0)
-				ia = (INA)ifa_ifwithnet((SA)&ipaddr,
-				    m->m_pkthdr.rdomain);
+			    if ((ia = ifatoia(ifa_ifwithdstaddr(sintosa(&ipaddr),
+				m->m_pkthdr.rdomain))) == NULL)
+				ia = ifatoia(ifa_ifwithnet(sintosa(&ipaddr),
+				    m->m_pkthdr.rdomain));
 			} else
 				/* keep packet in the virtual instance */
 				ia = ip_rtaddr(ipaddr.sin_addr,
@@ -1154,8 +1133,8 @@ ip_dooptions(struct mbuf *m)
 			 * use the incoming interface (should be same).
 			 * Again keep the packet inside the virtual instance.
 			 */
-			if ((ia = (INA)ifa_ifwithaddr((SA)&ipaddr,
-			    m->m_pkthdr.rdomain)) == 0 &&
+			if ((ia = ifatoia(ifa_ifwithaddr(sintosa(&ipaddr),
+			    m->m_pkthdr.rdomain))) == 0 &&
 			    (ia = ip_rtaddr(ipaddr.sin_addr,
 			    m->m_pkthdr.rdomain)) == 0) {
 				type = ICMP_UNREACH;
@@ -1190,8 +1169,8 @@ ip_dooptions(struct mbuf *m)
 				    sizeof(struct in_addr) > ipt.ipt_len)
 					goto bad;
 				ipaddr.sin_addr = dst;
-				ia = (INA)ifaof_ifpforaddr((SA)&ipaddr,
-							    m->m_pkthdr.rcvif);
+				ia = ifatoia(ifaof_ifpforaddr(sintosa(&ipaddr),
+				    m->m_pkthdr.rcvif));
 				if (ia == 0)
 					continue;
 				bcopy((caddr_t)&ia->ia_addr.sin_addr,
@@ -1205,7 +1184,7 @@ ip_dooptions(struct mbuf *m)
 					goto bad;
 				bcopy((caddr_t)&sin, (caddr_t)&ipaddr.sin_addr,
 				    sizeof(struct in_addr));
-				if (ifa_ifwithaddr((SA)&ipaddr,
+				if (ifa_ifwithaddr(sintosa(&ipaddr),
 				    m->m_pkthdr.rdomain) == 0)
 					continue;
 				ipt.ipt_ptr += sizeof(struct in_addr);
@@ -1258,7 +1237,7 @@ ip_rtaddr(struct in_addr dst, u_int rtableid)
 		    rtableid);
 	}
 	if (ipforward_rt.ro_rt == 0)
-		return ((struct in_ifaddr *)0);
+		return (NULL);
 	return (ifatoia(ipforward_rt.ro_rt->rt_ifa));
 }
 
@@ -1299,7 +1278,7 @@ ip_weadvertise(u_int32_t addr, u_int rtableid)
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = addr;
 	sin.sin_other = SIN_PROXY;
-	rt = rtalloc1(sintosa(&sin), 0, rtableid);
+	rt = rtalloc1((struct sockaddr *)&sin, 0, rtableid);
 	if (rt == 0)
 		return 0;
 
