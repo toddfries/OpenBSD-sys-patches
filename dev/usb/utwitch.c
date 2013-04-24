@@ -1,4 +1,4 @@
-/*	$OpenBSD: utwitch.c,v 1.5 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: utwitch.c,v 1.7 2013/04/15 09:23:02 mglocker Exp $ */
 
 /*
  * Copyright (c) 2010 Yojiro UO <yuo@nui.org>
@@ -20,7 +20,6 @@
 /* this driver was previously known as uyurex(4). */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
@@ -62,7 +61,7 @@ int	utwitchdebug = 0;
 
 struct utwitch_softc {
 	struct uhidev		 sc_hdev;
-	usbd_device_handle	 sc_udev;
+	struct usbd_device	*sc_udev;
 	u_char			 sc_dying;
 	uint16_t		 sc_flag;
 
@@ -132,7 +131,7 @@ utwitch_attach(struct device *parent, struct device *self, void *aux)
 	struct utwitch_softc *sc = (struct utwitch_softc *)self;
 	struct usb_attach_arg *uaa = aux;
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
-	usbd_device_handle dev = uha->parent->sc_udev;
+	struct usbd_device *dev = uha->parent->sc_udev;
 	int size, repid, err;
 	void *desc;
 
