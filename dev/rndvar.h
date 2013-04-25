@@ -59,6 +59,7 @@ struct rndstats {
 
 #ifdef _KERNEL
 extern struct rndstats rndstats;
+extern u_int8_t	random_bootseed[32];
 
 #define	add_true_randomness(d)	enqueue_randomness(RND_SRC_TRUE,  (int)(d))
 #define	add_timer_randomness(d)	enqueue_randomness(RND_SRC_TIMER, (int)(d))

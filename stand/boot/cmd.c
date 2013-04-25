@@ -85,6 +85,7 @@ static char *whatcmd(const struct cmd_table **ct, char *);
 static char *qualify(char *);
 
 char cmd_buf[CMD_BUFF_SIZE];
+u_int8_t rnd_buf[32];
 
 int
 getcmd(void)
@@ -95,6 +96,29 @@ getcmd(void)
 		cmd.cmd = cmd_table;
 
 	return docmd();
+}
+
+void
+read_randomseed(char *file)
+{
+	int fd, rc = 0;
+
+	if ((fd = open(qualify(file), 0)) < 0) {
+		if (errno != ENOENT && errno != ENXIO) {
+			printf("open(%s): %s\n", cmd.path, strerror(errno));
+			return;
+		}
+		return;
+	}
+
+	rc = read(fd, rnd_buf, 32);
+
+	close(fd);
+
+	if (rc != 32) {		/* Error from read() */
+		printf("%s: %s\n", cmd.path, strerror(errno));
+		return;
+	}
 }
 
 int

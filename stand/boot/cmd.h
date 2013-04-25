@@ -57,6 +57,7 @@ extern struct cmd_state cmd;
 
 int getcmd(void);
 int read_conf(void);
+void read_randomseed(char *);
 int bootparse(int);
 void boot(dev_t);
 

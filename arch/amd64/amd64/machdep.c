@@ -92,6 +92,7 @@
 #endif
 
 #include <dev/cons.h>
+#include <dev/rndvar.h>
 #include <stand/boot/bootarg.h>
 
 #include <net/if.h>
@@ -1771,6 +1772,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 	bios_ddb_t *bios_ddb;
 	bios_bootduid_t *bios_bootduid;
 	bios_bootsr_t *bios_bootsr;
+	bootrandom_buf_t *bios_bootrandom;
 
 #undef BOOTINFO_DEBUG
 #ifdef BOOTINFO_DEBUG
@@ -1880,6 +1882,12 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 			    sizeof(sr_bootkey));
 #endif
 			explicit_bzero(bios_bootsr, sizeof(bios_bootsr_t));
+			break;
+
+		case BOOTARG_BOOTRANDOM:
+			bios_bootrandom = (bootrandom_buf_t *)q->ba_arg;
+			bcopy(&bios_bootrandom->buf, &random_bootseed,
+			    sizeof(random_bootseed));
 			break;
 
 		default:

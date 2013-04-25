@@ -76,6 +76,7 @@ boot(dev_t bootdev)
 	if (!bootprompt)
 		snprintf(cmd.path, sizeof cmd.path, "%s:%s",
 		    cmd.bootdev, cmd.image);
+	read_randomseed("/.boot.randomseed");
 
 	while (1) {
 		/* no boot.conf, or no boot cmd in there */

@@ -229,6 +229,12 @@ typedef struct _bios_bootsr {
 	u_int8_t	maskkey[BOOTSR_CRYPTO_MAXKEYBYTES];
 } __packed bios_bootsr_t;
 
+#define BOOTARG_BOOTRANDOM 11
+#define BOOTRANDOM_BYTES	32
+typedef struct _bootrandom_buf {
+	u_int8_t	buf[BOOTRANDOM_BYTES];
+} __packed bootrandom_buf_t;
+
 #if defined(_KERNEL) || defined (_STANDALONE)
 
 #ifdef _LOCORE

@@ -68,6 +68,8 @@ run_loadfile(u_long *marks, int howto)
 	bios_bootsr_t bootsr;
 	struct sr_boot_volume *bv;
 #endif
+	extern u_int8_t rnd_buf[32];
+	bootrandom_buf_t	bootrandom;
 
 	if (sa_cleanup != NULL)
 		(*sa_cleanup)();
@@ -88,6 +90,9 @@ run_loadfile(u_long *marks, int howto)
 
 	bcopy(bootdev_dip->disklabel.d_uid, &bootduid.duid, sizeof(bootduid));
 	addbootarg(BOOTARG_BOOTDUID, sizeof(bootduid), &bootduid);
+
+	bcopy(rnd_buf, &bootrandom.buf, sizeof(rnd_buf));
+	addbootarg(BOOTARG_BOOTRANDOM, sizeof(bootrandom_buf_t), &bootrandom);
 
 #ifdef SOFTRAID
 	if (bootdev_dip->sr_vol != NULL) {

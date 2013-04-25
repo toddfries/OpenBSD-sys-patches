@@ -191,6 +191,7 @@
 #define	POOL_TAP4	411
 
 struct mutex entropylock = MUTEX_INITIALIZER(IPL_HIGH);
+u_int8_t	random_bootseed[32];
 
 /*
  * Raw entropy collection from device drivers; at interrupt context or not.
