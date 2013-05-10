@@ -1,4 +1,4 @@
-/* $OpenBSD: ampintc.c,v 1.9 2011/11/15 23:17:01 drahn Exp $ */
+/* $OpenBSD: ampintc.c,v 1.1 2013/05/01 00:16:26 patrick Exp $ */
 /*
  * Copyright (c) 2007,2009,2011 Dale Rahn <drahn@openbsd.org>
  *
@@ -28,7 +28,13 @@
 #include <sys/evcount.h>
 #include <arm/cpufunc.h>
 #include <machine/bus.h>
-#include <beagle/dev/omapvar.h>
+#include <arm/cortex/cortex.h>
+
+/* offset from periphbase */
+#define ICP_ADDR	0x100
+#define ICP_SIZE	0x100
+#define ICD_ADDR	0x1000
+#define ICD_SIZE	0x1000
 
 /* registers */
 #define	ICD_DCR			0x000
@@ -153,6 +159,7 @@ struct intrq {
 };
 
 
+int		 ampintc_match(struct device *, void *, void *);
 void		 ampintc_attach(struct device *, struct device *, void *);
 int		 ampintc_spllower(int);
 void		 ampintc_splx(int);
@@ -174,18 +181,24 @@ void		 ampintc_intr_disable(int);
 void		 ampintc_route(int, int , int);
 
 struct cfattach	ampintc_ca = {
-	sizeof (struct ampintc_softc), NULL, ampintc_attach
+	sizeof (struct ampintc_softc), ampintc_match, ampintc_attach
 };
 
 struct cfdriver ampintc_cd = {
 	NULL, "ampintc", DV_DULL
 };
 
+int
+ampintc_match(struct device *parent, void *cfdata, void *aux)
+{
+	return (1);
+}
+
 void
 ampintc_attach(struct device *parent, struct device *self, void *args)
 {
 	struct ampintc_softc *sc = (struct ampintc_softc *)self;
-	struct omap_attach_args *oa = args;
+	struct cortex_attach_args *ia = args;
 	int i, nintr;
 	bus_space_tag_t		iot;
 	bus_space_handle_t	d_ioh, p_ioh;
@@ -194,14 +207,14 @@ ampintc_attach(struct device *parent, struct device *self, void *args)
 
 	arm_init_smask();
 
-	iot = oa->oa_iot;
+	iot = ia->ca_iot;
 
-	if (bus_space_map(iot, oa->oa_dev->mem[0].addr,
-	    oa->oa_dev->mem[0].size, 0, &p_ioh))
+	if (bus_space_map(iot, ia->ca_periphbase + ICP_ADDR,
+	    ICP_SIZE, 0, &p_ioh))
 		panic("ampintc_attach: ICP bus_space_map failed!");
 
-	if (bus_space_map(iot, oa->oa_dev->mem[1].addr,
-	    oa->oa_dev->mem[1].size, 0, &d_ioh))
+	if (bus_space_map(iot, ia->ca_periphbase + ICD_ADDR,
+	    ICD_SIZE, 0, &d_ioh))
 		panic("ampintc_attach: ICD bus_space_map failed!");
 
 	sc->sc_iot = iot;
@@ -227,7 +240,7 @@ ampintc_attach(struct device *parent, struct device *self, void *args)
 	}
 	for (i = 2; i < nintr/16; i++) {
 		/* irq 32 - N */
-		bus_space_write_4(iot, d_ioh, ICD_ICRn(i*4), 0);
+		bus_space_write_4(iot, d_ioh, ICD_ICRn(i*16), 0);
 	}
 
 	/* software reset of the part? */
@@ -251,13 +264,16 @@ ampintc_attach(struct device *parent, struct device *self, void *args)
 	    ampintc_setipl, ampintc_intr_establish_ext,
 	    ampintc_intr_disestablish, ampintc_intr_string, ampintc_irq_handler);
 
+	/* enable interrupts */
+	bus_space_write_4(iot, d_ioh, ICD_DCR, 3);
+	bus_space_write_4(iot, p_ioh, ICPICR, 1);
 	enable_interrupts(I32_bit);
 }
 
 void
 ampintc_set_priority(int irq, int pri)
 {
-        struct ampintc_softc	*sc = ampintc;
+	struct ampintc_softc	*sc = ampintc;
 	uint32_t		 prival;
 
 	/*
@@ -290,7 +306,7 @@ ampintc_setipl(int new)
 void
 ampintc_intr_enable(int irq)
 {
-        struct ampintc_softc	*sc = ampintc;
+	struct ampintc_softc	*sc = ampintc;
 
 #ifdef DEBUG
 	printf("enable irq %d register %x bitmask %08x\n",
@@ -304,7 +320,7 @@ ampintc_intr_enable(int irq)
 void
 ampintc_intr_disable(int irq)
 {
-        struct ampintc_softc	*sc = ampintc;
+	struct ampintc_softc	*sc = ampintc;
 
 	bus_space_write_4(sc->sc_iot, sc->sc_d_ioh, ICD_ICERn(irq),
 	    1 << IRQ_TO_REG32BIT(irq));
@@ -366,7 +382,7 @@ ampintc_splx(int new)
 {
 	struct cpu_info *ci = curcpu();
 
-        if (ci->ci_ipending & arm_smask[new])
+	if (ci->ci_ipending & arm_smask[new])
 		arm_do_pending_intr(new);
 
 	ampintc_setipl(new);
@@ -399,7 +415,7 @@ ampintc_splraise(int new)
 		new = old;
 
 	ampintc_setipl(new);
-  
+
 	return (old);
 }
 

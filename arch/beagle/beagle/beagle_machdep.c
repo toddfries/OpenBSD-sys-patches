@@ -1,4 +1,4 @@
-/*	$OpenBSD: beagle_machdep.c,v 1.15 2012/08/30 15:51:13 deraadt Exp $ */
+/*	$OpenBSD: beagle_machdep.c,v 1.18 2013/05/10 10:17:27 patrick Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -144,6 +144,7 @@
 #include <arm/armv7/armv7reg.h>
 #include <arm/armv7/armv7var.h>
 
+#include <arm/cortex/smc.h>
 #include <machine/machine_reg.h>
 #include <beagle/dev/omapvar.h>
 
@@ -451,6 +452,7 @@ initarm(void *arg0, void *arg1, void *arg2)
 	pv_addr_t kernel_l1pt;
 	paddr_t memstart;
 	psize_t memsize;
+	extern void omap4_smc_call(uint32_t, uint32_t);
 
 #if 0
 	int led_data = 0;
@@ -467,6 +469,13 @@ initarm(void *arg0, void *arg1, void *arg2)
 	 */
 	if (set_cpufuncs())
 		panic("cpu not recognized!");
+
+	switch (board_id) {
+	case BOARD_ID_OMAP4_PANDA:
+		/* disable external L2 cache */
+		omap4_smc_call(0x102, 0);
+		break;
+	}
 
 #if 0
 	/* Calibrate the delay loop. */
@@ -714,7 +723,7 @@ initarm(void *arg0, void *arg1, void *arg2)
 
 		logical += pmap_map_chunk(l1pagetable, KERNEL_BASE + logical,
 		    physical_start + logical, textsize,
-		    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+		    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE, PTE_CACHE);
 		logical += pmap_map_chunk(l1pagetable, KERNEL_BASE + logical,
 		    physical_start + logical, totalsize - textsize,
 		    VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
@@ -750,10 +759,10 @@ initarm(void *arg0, void *arg1, void *arg2)
 	/* MULTI-ICE requires that page 0 is NC/NB so that it can download the
 	 * cache-clean code there.  */
 	pmap_map_entry(l1pagetable, vector_page, systempage.pv_pa,
-	    VM_PROT_READ|VM_PROT_WRITE, PTE_NOCACHE);
+	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE, PTE_NOCACHE);
 #else
 	pmap_map_entry(l1pagetable, vector_page, systempage.pv_pa,
-	    VM_PROT_EXECUTE|VM_PROT_READ|VM_PROT_WRITE, PTE_CACHE);
+	    VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE, PTE_CACHE);
 #endif
 
 	/*
@@ -1005,4 +1014,21 @@ board_startup(void)
 		printf("kernel does not support -c; continuing..\n");
 #endif
 	}
+}
+
+void
+platform_smc_write(bus_space_tag_t iot, bus_space_handle_t ioh, bus_size_t off,
+    uint32_t op, uint32_t val)
+{
+	extern void omap4_smc_call(uint32_t, uint32_t);
+
+	switch (op) {
+	case 0x100:	/* PL310 DEBUG */
+	case 0x102:	/* PL310 CTL */
+		break;
+	default:
+		panic("platform_smc_write: invalid operation %d", op);
+	}
+
+	omap4_smc_call(op, val);
 }
