@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.22 2013/04/21 14:41:26 kettenis Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.27 2013/05/05 13:55:36 kettenis Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -128,7 +128,6 @@ int	inteldrm_doioctl(struct drm_device *, u_long, caddr_t, struct drm_file *);
 
 int	inteldrm_gmch_match(struct pci_attach_args *);
 void	inteldrm_timeout(void *);
-void	inteldrm_quiesce(struct inteldrm_softc *);
 
 /* For reset and suspend */
 int	i8xx_do_reset(struct drm_device *);
@@ -764,10 +763,11 @@ inteldrm_copyrows(void *cookie, int src, int dst, int num)
 		struct inteldrm_softc *dev_priv = sc;
 		struct drm_fb_helper *helper = &dev_priv->fbdev->helper;
 		size_t size = dev_priv->fbdev->ifb.obj->base.size / 2;
+		int stride = ri->ri_font->fontheight * ri->ri_stride;
 		int i;
 
 		if (dst == 0) {
-			int delta = src * ri->ri_font->fontheight * ri->ri_stride;
+			int delta = src * stride;
 			bzero(ri->ri_bits, delta);
 
 			sc->sc_offset += delta;
@@ -779,7 +779,8 @@ inteldrm_copyrows(void *cookie, int src, int dst, int num)
 				ri->ri_origbits -= size;
 			}
 		} else {
-			int delta = dst * ri->ri_font->fontheight * ri->ri_stride;
+			int delta = dst * stride;
+			bzero(ri->ri_bits + num * stride, delta);
 
 			sc->sc_offset -= delta;
 			ri->ri_bits -= delta;
@@ -789,8 +790,6 @@ inteldrm_copyrows(void *cookie, int src, int dst, int num)
 				ri->ri_bits += size;
 				ri->ri_origbits += size;
 			}
-
-			bzero(ri->ri_bits, delta);
 		}
 
 		for (i = 0; i < helper->crtc_count; i++) {
@@ -1044,16 +1043,6 @@ inteldrm_detach(struct device *self, int flags)
 		dev_priv->drmdev = NULL;
 	}
 
-#if 0
-	if (!I915_NEED_GFX_HWS(dev) && dev_priv->hws_dmamem) {
-		drm_dmamem_free(dev_priv->dmat, dev_priv->hws_dmamem);
-		dev_priv->hws_dmamem = NULL;
-		/* Need to rewrite hardware status page */
-		I915_WRITE(HWS_PGA, 0x1ffff000);
-//		dev_priv->hw_status_page = NULL;
-	}
-#endif
-
 	if (IS_I9XX(dev) && dev_priv->ifp.i9xx.bsh != 0) {
 		bus_space_unmap(dev_priv->ifp.i9xx.bst, dev_priv->ifp.i9xx.bsh,
 		    PAGE_SIZE);
@@ -1080,17 +1069,11 @@ inteldrm_activate(struct device *arg, int act)
 
 	switch (act) {
 	case DVACT_QUIESCE:
-//		inteldrm_quiesce(dev_priv);
 		i915_drm_freeze(dev);
 		break;
 	case DVACT_SUSPEND:
-//		i915_save_state(dev);
 		break;
 	case DVACT_RESUME:
-//		i915_restore_state(dev);
-//		/* entrypoints can stop sleeping now */
-//		atomic_clearbits_int(&dev_priv->sc_flags, INTELDRM_QUIET);
-//		wakeup(&dev_priv->flags);
 		i915_drm_thaw(dev);
 		intel_fb_restore_mode(dev);
 		break;
@@ -1115,17 +1098,11 @@ inteldrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 	struct inteldrm_softc	*dev_priv = dev->dev_private;
 	int			 error = 0;
 
-	while ((dev_priv->sc_flags & INTELDRM_QUIET) && error == 0)
-		error = tsleep(&dev_priv->flags, PCATCH, "intelioc", 0);
-	if (error)
-		return (error);
 	dev_priv->entries++;
 
 	error = inteldrm_doioctl(dev, cmd, data, file_priv);
 
 	dev_priv->entries--;
-	if (dev_priv->sc_flags & INTELDRM_QUIET)
-		wakeup(&dev_priv->entries);
 	return (error);
 }
 
@@ -1226,9 +1203,11 @@ i915_alloc_ifp(struct inteldrm_softc *dev_priv, struct pci_attach_args *bpa)
 		    &dev_priv->ifp.i9xx.bsh) != 0)
 			goto nope;
 		return;
-	} else if (bpa->pa_memex == NULL || extent_alloc(bpa->pa_memex,
-	    PAGE_SIZE, PAGE_SIZE, 0, 0, 0, &addr) || bus_space_map(bpa->pa_memt,
-	    addr, PAGE_SIZE, 0, &dev_priv->ifp.i9xx.bsh))
+	} else if (bpa->pa_memex == NULL ||
+	    extent_alloc_subregion(bpa->pa_memex, 0x100000, 0xffffffff,
+	    PAGE_SIZE, PAGE_SIZE, 0, 0, 0, &addr) ||
+	    bus_space_map(bpa->pa_memt, addr, PAGE_SIZE, 0,
+	    &dev_priv->ifp.i9xx.bsh))
 		goto nope;
 
 	pci_conf_write(bpa->pa_pc, bpa->pa_tag, I915_IFPADDR, addr | 0x1);
@@ -1258,9 +1237,11 @@ i965_alloc_ifp(struct inteldrm_softc *dev_priv, struct pci_attach_args *bpa)
 		    &dev_priv->ifp.i9xx.bsh) != 0)
 			goto nope;
 		return;
-	} else if (bpa->pa_memex == NULL || extent_alloc(bpa->pa_memex,
-	    PAGE_SIZE, PAGE_SIZE, 0, 0, 0, &addr) || bus_space_map(bpa->pa_memt,
-	    addr, PAGE_SIZE, 0, &dev_priv->ifp.i9xx.bsh))
+	} else if (bpa->pa_memex == NULL ||
+	    extent_alloc_subregion(bpa->pa_memex, 0x100000, 0xffffffff,
+	    PAGE_SIZE, PAGE_SIZE, 0, 0, 0, &addr) ||
+	    bus_space_map(bpa->pa_memt, addr, PAGE_SIZE, 0,
+	    &dev_priv->ifp.i9xx.bsh))
 		goto nope;
 
 	pci_conf_write(bpa->pa_pc, bpa->pa_tag, I965_IFPADDR + 4,
@@ -1361,7 +1342,7 @@ i915_gem_object_pin_and_relocate(struct drm_obj *obj,
 
 	/* Choose the GTT offset for our buffer and put it there. */
 	ret = i915_gem_object_pin(obj_priv, (u_int32_t)entry->alignment,
-	    needs_fence);
+	    needs_fence, false);
 	if (ret)
 		return ret;
 
@@ -1562,33 +1543,6 @@ i915_gem_put_relocs_to_user(struct drm_i915_gem_exec_object2 *exec_list,
 	drm_free(relocs);
 
 	return (ret);
-}
-
-void
-inteldrm_quiesce(struct inteldrm_softc *dev_priv)
-{
-	/*
-	 * Right now we depend on X vt switching, so we should be
-	 * already suspended, but fallbacks may fault, etc.
-	 * Since we can't readback the gtt to reset what we have, make
-	 * sure that everything is unbound.
-	 */
-	KASSERT(dev_priv->mm.suspended);
-	KASSERT(dev_priv->ring[RCS].obj == NULL);
-	atomic_setbits_int(&dev_priv->sc_flags, INTELDRM_QUIET);
-	while (dev_priv->entries)
-		tsleep(&dev_priv->entries, 0, "intelquiet", 0);
-	/*
-	 * nothing should be dirty WRT the chip, only stuff that's bound
-	 * for gtt mapping. Nothing should be pinned over vt switch, if it
-	 * is then rendering corruption will occur due to api misuse, shame.
-	 */
-	KASSERT(list_empty(&dev_priv->mm.active_list));
-	/* Disabled because root could panic the kernel if this was enabled */
-	/* KASSERT(dev->pin_count == 0); */
-
-	/* can't fail since uninterruptible */
-	(void)i915_gem_evict_inactive(dev_priv);
 }
 
 void

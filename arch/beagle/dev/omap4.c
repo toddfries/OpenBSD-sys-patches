@@ -1,4 +1,4 @@
-/* $OpenBSD: omap4.c,v 1.5 2011/11/15 23:01:11 drahn Exp $ */
+/* $OpenBSD: omap4.c,v 1.9 2013/05/10 00:18:42 patrick Exp $ */
 
 /*
  * Copyright (c) 2011 Uwe Stuehler <uwe@openbsd.org>
@@ -24,13 +24,8 @@
 
 #include <beagle/dev/omapvar.h>
 
-#define ICP_ADDR	0x48240100
-#define ICP_SIZE	0x100
-#define ICD_ADDR	0x48241000
-#define ICD_SIZE	0x1000
-
-#define GTIMER_ADDR	0x48240000
-#define GTIMER_SIZE	0x300
+#define OMAPID_ADDR	0x4a002000
+#define OMAPID_SIZE	0x1000
 
 #define WD_ADDR		0x4a314000
 #define WD_SIZE		0x80
@@ -68,24 +63,12 @@
 struct omap_dev omap4_devs[] = {
 
 	/*
-	 * Cortex-A9 Interrupt Controller
+	 * OMAP identification registers/fuses
 	 */
 
-	{ .name = "ampintc",
+	{ .name = "omapid",
 	  .unit = 0,
-	  .mem = {
-	    { ICP_ADDR, ICD_SIZE },
-	    { ICD_ADDR, ICD_SIZE },
-	  },
-	},
-
-	/*
-	 * Cortex-A9 Global Timer
-	 */
-
-	{ .name = "amptimer",
-	  .unit = 0,
-	  .mem = { { GTIMER_ADDR, GTIMER_SIZE } },
+	  .mem = { { OMAPID_ADDR, OMAPID_SIZE } },
 	},
 
 	/*
@@ -155,8 +138,12 @@ struct omap_dev omap4_devs[] = {
 	  .unit = 0,
 	  .mem = { { HSMMC1_ADDR, HSMMCx_SIZE } },
 	  .irq = { HSMMC1_IRQ }
-	}
+	},
 
+	/* Terminator */
+	{ .name = NULL,
+	  .unit = 0,
+	}
 };
 
 void
