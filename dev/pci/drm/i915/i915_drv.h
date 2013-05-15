@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.h,v 1.15 2013/04/21 14:41:26 kettenis Exp $ */
+/* $OpenBSD: i915_drv.h,v 1.19 2013/05/09 15:00:41 kettenis Exp $ */
 /* i915_drv.h -- Private header for the I915 driver -*- linux-c -*-
  */
 /*
@@ -618,10 +618,6 @@ struct inteldrm_softc {
 	int			 fence_reg_start; /* 4 by default */
 	int			 num_fence_regs; /* 8 pre-965, 16 post */
 
-#define	INTELDRM_QUIET		0x01 /* suspend close, get off the hardware */
-#define	INTELDRM_WEDGED		0x02 /* chipset hung pending reset */
-#define	INTELDRM_SUSPENDED	0x04 /* in vt switch, no commands */
-	int			 sc_flags; /* quiet, suspended, hung */
 	/* number of ioctls + faults in flight */
 	int			 entries;
 
@@ -797,7 +793,8 @@ struct inteldrm_softc {
 
 	struct i915_suspend_saved_registers regfile;
 };
-typedef struct inteldrm_softc drm_i915_private_t;
+#define drm_i915_private inteldrm_softc
+typedef struct drm_i915_private drm_i915_private_t;
 
 /* Iterate over initialised rings */
 #define for_each_ring(ring__, dev_priv__, i__) \
@@ -1063,7 +1060,7 @@ int	i915_gem_set_caching_ioctl(struct drm_device *, void *,
 /* GEM memory manager functions */
 int	i915_gem_init_object(struct drm_obj *);
 void	i915_gem_free_object(struct drm_obj *);
-int	i915_gem_object_pin(struct drm_i915_gem_object *, uint32_t, bool);
+int	i915_gem_object_pin(struct drm_i915_gem_object *, uint32_t, bool, bool);
 void	i915_gem_object_unpin(struct drm_i915_gem_object *);
 void	i915_gem_retire_requests(struct drm_device *);
 void	i915_gem_retire_requests_ring(struct intel_ring_buffer *);
@@ -1075,7 +1072,6 @@ int	i915_gem_idle(struct drm_device *);
 void	i915_gem_object_move_to_active(struct drm_i915_gem_object *,
 	    struct intel_ring_buffer *);
 void	i915_gem_object_move_to_inactive(struct drm_i915_gem_object *);
-void	i915_gem_object_move_to_inactive_locked(struct drm_i915_gem_object *);
 int	i915_add_request(struct intel_ring_buffer *, struct drm_file *, u32 *);
 int	init_pipe_control(struct intel_ring_buffer *);
 void	cleanup_status_page(struct intel_ring_buffer *);
