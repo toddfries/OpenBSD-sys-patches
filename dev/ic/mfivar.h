@@ -1,4 +1,4 @@
-/* $OpenBSD: mfivar.h,v 1.50 2012/08/17 11:31:34 dlg Exp $ */
+/* $OpenBSD: mfivar.h,v 1.53 2013/05/03 02:46:28 dlg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -16,7 +16,7 @@
  */
 
 struct mfi_softc;
-#define DEVNAME(_s)     ((_s)->sc_dev.dv_xname)
+#define DEVNAME(_s)	((_s)->sc_dev.dv_xname)
 
 /* #define MFI_DEBUG */
 #ifdef MFI_DEBUG
@@ -186,8 +186,10 @@ struct mfi_softc {
 	struct rwlock		sc_lock;
 
 	/* sensors */
-	struct ksensor		*sc_sensors;
 	struct ksensordev	sc_sensordev;
+	struct ksensor		*sc_bbu;
+	struct ksensor		*sc_bbu_status;
+	struct ksensor		*sc_sensors;
 };
 
 int	mfi_attach(struct mfi_softc *sc, enum mfi_iop);

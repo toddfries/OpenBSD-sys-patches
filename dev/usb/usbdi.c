@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi.c,v 1.52 2013/04/19 08:58:53 mpi Exp $ */
+/*	$OpenBSD: usbdi.c,v 1.55 2013/04/26 14:19:25 mpi Exp $ */
 /*	$NetBSD: usbdi.c,v 1.103 2002/09/27 15:37:38 provos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.c,v 1.28 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -37,7 +37,6 @@
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
-#include <sys/rwlock.h>
 
 #include <machine/bus.h>
 
@@ -61,27 +60,6 @@ void usbd_do_request_async_cb(struct usbd_xfer *, void *,
 void usbd_start_next(struct usbd_pipe *pipe);
 usbd_status usbd_open_pipe_ival(struct usbd_interface *, u_int8_t, u_int8_t,
     struct usbd_pipe **, int);
-
-int usbd_nbuses = 0;
-
-struct rwlock usbpalock;
-
-void
-usbd_init(void)
-{
-	if (usbd_nbuses == 0) {
-		rw_init(&usbpalock, "usbpalock");
-		usb_begin_tasks();
-	}
-	usbd_nbuses++;
-}
-
-void
-usbd_finish(void)
-{
-	if (--usbd_nbuses == 0)
-		usb_end_tasks();
-}
 
 int
 usbd_is_dying(struct usbd_device *dev)
@@ -735,19 +713,6 @@ usbd_get_interface_altindex(struct usbd_interface *iface)
 	return (iface->altindex);
 }
 
-usbd_status
-usbd_get_interface(struct usbd_interface *iface, u_int8_t *aiface)
-{
-	usb_device_request_t req;
-
-	req.bmRequestType = UT_READ_INTERFACE;
-	req.bRequest = UR_GET_INTERFACE;
-	USETW(req.wValue, 0);
-	USETW(req.wIndex, iface->idesc->bInterfaceNumber);
-	USETW(req.wLength, 1);
-	return (usbd_do_request(iface->device, &req, aiface));
-}
-
 /*** Internal routines ***/
 
 /* Called at splusb() */
@@ -1108,7 +1073,7 @@ usbd_ratecheck(struct timeval *last)
  * given as an argument.
  */
 const struct usb_devno *
-usb_match_device(const struct usb_devno *tbl, u_int nentries, u_int sz,
+usbd_match_device(const struct usb_devno *tbl, u_int nentries, u_int sz,
     u_int16_t vendor, u_int16_t product)
 {
 	while (nentries-- > 0) {
@@ -1122,7 +1087,7 @@ usb_match_device(const struct usb_devno *tbl, u_int nentries, u_int sz,
 }
 
 void
-usb_desc_iter_init(struct usbd_device *dev, struct usbd_desc_iter *iter)
+usbd_desc_iter_init(struct usbd_device *dev, struct usbd_desc_iter *iter)
 {
 	const usb_config_descriptor_t *cd = usbd_get_config_descriptor(dev);
 
@@ -1131,23 +1096,23 @@ usb_desc_iter_init(struct usbd_device *dev, struct usbd_desc_iter *iter)
 }
 
 const usb_descriptor_t *
-usb_desc_iter_next(struct usbd_desc_iter *iter)
+usbd_desc_iter_next(struct usbd_desc_iter *iter)
 {
 	const usb_descriptor_t *desc;
 
 	if (iter->cur + sizeof(usb_descriptor_t) >= iter->end) {
 		if (iter->cur != iter->end)
-			printf("usb_desc_iter_next: bad descriptor\n");
+			printf("usbd_desc_iter_next: bad descriptor\n");
 		return NULL;
 	}
 	desc = (const usb_descriptor_t *)iter->cur;
 	if (desc->bLength == 0) {
-		printf("usb_desc_iter_next: descriptor length = 0\n");
+		printf("usbd_desc_iter_next: descriptor length = 0\n");
 		return NULL;
 	}
 	iter->cur += desc->bLength;
 	if (iter->cur > iter->end) {
-		printf("usb_desc_iter_next: descriptor length too large\n");
+		printf("usbd_desc_iter_next: descriptor length too large\n");
 		return NULL;
 	}
 	return desc;
