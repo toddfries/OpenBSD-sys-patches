@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.139 2013/04/07 02:32:03 dlg Exp $ */
+/* $OpenBSD: mfi.c,v 1.145 2013/05/08 03:00:32 jsg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -120,6 +120,7 @@ int		mfi_bio_hs(struct mfi_softc *, int, int, void *);
 #ifndef SMALL_KERNEL
 int		mfi_create_sensors(struct mfi_softc *);
 void		mfi_refresh_sensors(void *);
+int		mfi_bbu(struct mfi_softc *);
 #endif /* SMALL_KERNEL */
 #endif /* NBIO > 0 */
 
@@ -1468,9 +1469,11 @@ mfi_bio_getitall(struct mfi_softc *sc)
 	cfg = malloc(sizeof *cfg, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (cfg == NULL)
 		goto done;
-	if (mfi_mgmt(sc, MD_DCMD_CONF_GET, MFI_DATA_IN, sizeof *cfg, cfg,
-	    NULL))
+	if (mfi_mgmt(sc, MR_DCMD_CONF_GET, MFI_DATA_IN, sizeof *cfg, cfg,
+	    NULL)) {
+		free(cfg, M_DEVBUF);
 		goto done;
+	}
 
 	size = cfg->mfc_size;
 	free(cfg, M_DEVBUF);
@@ -1479,8 +1482,10 @@ mfi_bio_getitall(struct mfi_softc *sc)
 	cfg = malloc(size, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (cfg == NULL)
 		goto done;
-	if (mfi_mgmt(sc, MD_DCMD_CONF_GET, MFI_DATA_IN, size, cfg, NULL))
+	if (mfi_mgmt(sc, MR_DCMD_CONF_GET, MFI_DATA_IN, size, cfg, NULL)) {
+		free(cfg, M_DEVBUF);
 		goto done;
+	}
 
 	/* replace current pointer with enw one */
 	if (sc->sc_cfg)
@@ -1912,7 +1917,7 @@ mfi_ioctl_setstate(struct mfi_softc *sc, struct bioc_setstate *bs)
 	}
 
 
-	if (mfi_mgmt(sc, MD_DCMD_PD_SET_STATE, MFI_DATA_NONE, 0, NULL, mbox))
+	if (mfi_mgmt(sc, MR_DCMD_PD_SET_STATE, MFI_DATA_NONE, 0, NULL, mbox))
 		goto done;
 
 	rv = 0;
@@ -1944,7 +1949,7 @@ mfi_bio_hs(struct mfi_softc *sc, int volid, int type, void *bio_hs)
 
 	/* send single element command to retrieve size for full structure */
 	cfg = malloc(sizeof *cfg, M_DEVBUF, M_WAITOK);
-	if (mfi_mgmt(sc, MD_DCMD_CONF_GET, MFI_DATA_IN, sizeof *cfg, cfg, NULL))
+	if (mfi_mgmt(sc, MR_DCMD_CONF_GET, MFI_DATA_IN, sizeof *cfg, cfg, NULL))
 		goto freeme;
 
 	size = cfg->mfc_size;
@@ -1952,7 +1957,7 @@ mfi_bio_hs(struct mfi_softc *sc, int volid, int type, void *bio_hs)
 
 	/* memory for read config */
 	cfg = malloc(size, M_DEVBUF, M_WAITOK|M_ZERO);
-	if (mfi_mgmt(sc, MD_DCMD_CONF_GET, MFI_DATA_IN, size, cfg, NULL))
+	if (mfi_mgmt(sc, MR_DCMD_CONF_GET, MFI_DATA_IN, size, cfg, NULL))
 		goto freeme;
 
 	/* calculate offset to hs structure */
@@ -2020,37 +2025,141 @@ freeme:
 }
 
 #ifndef SMALL_KERNEL
+
+static const char *mfi_bbu_indicators[] = {
+	"pack missing",
+	"voltage low",
+	"temp high",
+	"charge active",
+	"discharge active",
+	"learn cycle req'd",
+	"learn cycle active",
+	"learn cycle failed",
+	"learn cycle timeout",
+	"I2C errors",
+	"replace pack",
+	"low capacity",
+	"periodic learn req'd"
+};
+
+#define MFI_BBU_SENSORS 4
+
+int
+mfi_bbu(struct mfi_softc *sc)
+{
+	struct mfi_bbu_status bbu;
+	u_int32_t status;
+	u_int32_t mask;
+	int i;
+
+	if (mfi_mgmt(sc, MR_DCMD_BBU_GET_STATUS, MFI_DATA_IN,
+	    sizeof(bbu), &bbu, NULL) != 0) {
+		for (i = 0; i < MFI_BBU_SENSORS; i++) {
+			sc->sc_bbu[i].value = 0;
+			sc->sc_bbu[i].status = SENSOR_S_UNKNOWN;
+		}
+		for (i = 0; i < nitems(mfi_bbu_indicators); i++) {
+			sc->sc_bbu_status[i].value = 0;
+			sc->sc_bbu_status[i].status = SENSOR_S_UNKNOWN;
+		}
+		return (-1);
+	}
+
+	switch (bbu.battery_type) {
+	case MFI_BBU_TYPE_IBBU:
+		mask = MFI_BBU_STATE_BAD_IBBU;
+		break;
+	case MFI_BBU_TYPE_BBU:
+		mask = MFI_BBU_STATE_BAD_BBU;
+		break;
+
+	case MFI_BBU_TYPE_NONE:
+	default:
+		sc->sc_bbu[0].value = 0;
+		sc->sc_bbu[0].status = SENSOR_S_CRIT;
+		for (i = 1; i < MFI_BBU_SENSORS; i++) {
+			sc->sc_bbu[i].value = 0;
+			sc->sc_bbu[i].status = SENSOR_S_UNKNOWN;
+		}
+		for (i = 0; i < nitems(mfi_bbu_indicators); i++) {
+			sc->sc_bbu_status[i].value = 0;
+			sc->sc_bbu_status[i].status = SENSOR_S_UNKNOWN;
+		}
+		return (0);
+	}
+
+	status = letoh32(bbu.fw_status);
+
+	sc->sc_bbu[0].value = (status & mask) ? 0 : 1;
+	sc->sc_bbu[0].status = (status & mask) ? SENSOR_S_CRIT : SENSOR_S_OK;
+
+	sc->sc_bbu[1].value = letoh16(bbu.voltage) * 1000;
+	sc->sc_bbu[2].value = (int16_t)letoh16(bbu.current) * 1000;
+	sc->sc_bbu[3].value = letoh16(bbu.temperature) * 1000000 + 273150000;
+	for (i = 1; i < MFI_BBU_SENSORS; i++)
+		sc->sc_bbu[i].status = SENSOR_S_UNSPEC;
+
+	for (i = 0; i < nitems(mfi_bbu_indicators); i++) {
+		sc->sc_bbu_status[i].value = (status & (1 << i)) ? 1 : 0;
+		sc->sc_bbu_status[i].status = SENSOR_S_UNSPEC;
+	}
+
+	return (0);
+}
+
 int
 mfi_create_sensors(struct mfi_softc *sc)
 {
 	struct device		*dev;
-	struct scsibus_softc	*ssc = NULL;
 	struct scsi_link	*link;
 	int			i;
 
-	TAILQ_FOREACH(dev, &alldevs, dv_list) {
-		if (dev->dv_parent != &sc->sc_dev)
-			continue;
+	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
+	    sizeof(sc->sc_sensordev.xname));
 
-		/* check if this is the scsibus for the logical disks */
-		ssc = (struct scsibus_softc *)dev;
-		if (ssc->adapter_link == &sc->sc_link)
-			break;
+	if (ISSET(letoh32(sc->sc_info.mci_adapter_ops ), MFI_INFO_AOPS_BBU)) {
+		sc->sc_bbu = malloc(sizeof(*sc->sc_bbu) * 4,
+		    M_DEVBUF, M_WAITOK | M_ZERO);
+
+		sc->sc_bbu[0].type = SENSOR_INDICATOR;
+		sc->sc_bbu[0].status = SENSOR_S_UNKNOWN;
+		strlcpy(sc->sc_bbu[0].desc, "bbu ok",
+		    sizeof(sc->sc_bbu[0].desc));
+		sensor_attach(&sc->sc_sensordev, &sc->sc_bbu[0]);
+
+		sc->sc_bbu[1].type = SENSOR_VOLTS_DC;
+		sc->sc_bbu[1].status = SENSOR_S_UNSPEC;
+		sc->sc_bbu[2].type = SENSOR_AMPS;
+		sc->sc_bbu[2].status = SENSOR_S_UNSPEC;
+		sc->sc_bbu[3].type = SENSOR_TEMP;
+		sc->sc_bbu[3].status = SENSOR_S_UNSPEC;
+		for (i = 1; i < MFI_BBU_SENSORS; i++) {
+			strlcpy(sc->sc_bbu[i].desc, "bbu",
+			    sizeof(sc->sc_bbu[i].desc));
+			sensor_attach(&sc->sc_sensordev, &sc->sc_bbu[i]);
+		}
+
+		sc->sc_bbu_status = malloc(sizeof(*sc->sc_bbu_status) *
+		    sizeof(mfi_bbu_indicators), M_DEVBUF, M_WAITOK | M_ZERO);
+
+		for (i = 0; i < nitems(mfi_bbu_indicators); i++) {
+			sc->sc_bbu_status[i].type = SENSOR_INDICATOR;
+			sc->sc_bbu_status[i].status = SENSOR_S_UNSPEC;
+			strlcpy(sc->sc_bbu_status[i].desc,
+			    mfi_bbu_indicators[i],
+			    sizeof(sc->sc_bbu_status[i].desc));
+
+			sensor_attach(&sc->sc_sensordev, &sc->sc_bbu_status[i]);
+		}
 	}
-
-	if (ssc == NULL)
-		return (1);
 
 	sc->sc_sensors = malloc(sizeof(struct ksensor) * sc->sc_ld_cnt,
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (sc->sc_sensors == NULL)
 		return (1);
 
-	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),
-	    sizeof(sc->sc_sensordev.xname));
-
 	for (i = 0; i < sc->sc_ld_cnt; i++) {
-		link = scsi_get_link(ssc, i, 0);
+		link = scsi_get_link(sc->sc_scsibus, i, 0);
 		if (link == NULL)
 			goto bad;
 
@@ -2085,6 +2194,8 @@ mfi_refresh_sensors(void *arg)
 	int			i;
 	struct bioc_vol		bv;
 
+	if (sc->sc_bbu != NULL && mfi_bbu(sc) != 0)
+		return;
 
 	for (i = 0; i < sc->sc_ld_cnt; i++) {
 		bzero(&bv, sizeof(bv));
@@ -2114,8 +2225,8 @@ mfi_refresh_sensors(void *arg)
 		default:
 			sc->sc_sensors[i].value = 0; /* unknown */
 			sc->sc_sensors[i].status = SENSOR_S_UNKNOWN;
+			break;
 		}
-
 	}
 }
 #endif /* SMALL_KERNEL */
