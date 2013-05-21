@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.27 2013/05/05 13:55:36 kettenis Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.30 2013/05/17 12:03:42 kettenis Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -314,6 +314,7 @@ static const struct intel_device_info intel_haswell_m_info = {
 const static struct drm_pcidev inteldrm_pciidlist[] = {
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830M_IGD,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82854_IGD,		0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82855GM_IGD,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82865G_IGD,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915G_IGD_1,	0 },
@@ -332,16 +333,19 @@ const static struct drm_pcidev inteldrm_pciidlist[] = {
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q35_IGD_1,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q33_IGD_1,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, 0x2E02,				0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_4SERIES_IGD,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_IGD_1,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_IGD_1,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G41_IGD_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82B43_IGD_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82B43_IGD_2,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PINEVIEW_IGC_1,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PINEVIEW_M_IGC_1,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CLARKDALE_IGD,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ARRANDALE_IGD,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT1,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_S_GT,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT2,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT2,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT2_PLUS,	0 },
@@ -364,6 +368,8 @@ static const struct intel_gfx_device_id {
 	    &intel_i830_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD,
 	    &intel_845g_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82854_IGD,
+	    &intel_i85x_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82855GM_IGD,
 	    &intel_i85x_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82865G_IGD,
@@ -400,13 +406,17 @@ static const struct intel_gfx_device_id {
 	    &intel_g33_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_IGD_1,
 	    &intel_gm45_info },
-	{PCI_VENDOR_INTEL, 0x2E02,
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_4SERIES_IGD,
 	    &intel_g45_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_IGD_1,
 	    &intel_g45_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_IGD_1,
 	    &intel_g45_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G41_IGD_1,
+	    &intel_g45_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82B43_IGD_1,
+	    &intel_g45_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82B43_IGD_2,
 	    &intel_g45_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PINEVIEW_IGC_1,
 	    &intel_pineview_info },
@@ -420,6 +430,8 @@ static const struct intel_gfx_device_id {
 	    &intel_sandybridge_d_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT1,
 	    &intel_sandybridge_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_S_GT,
+	    &intel_sandybridge_d_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT2,
 	    &intel_sandybridge_d_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT2,
@@ -619,6 +631,8 @@ void inteldrm_free_screen(void *, void *);
 int inteldrm_show_screen(void *, void *, int,
     void (*)(void *, int, int), void *);
 void inteldrm_doswitch(void *, void *);
+int inteldrm_getchar(void *, int, int, struct wsdisplay_charcell *);
+void inteldrm_burner(void *, u_int, u_int);
 
 struct wsscreen_descr inteldrm_stdscreen = {
 	"std",
@@ -642,7 +656,11 @@ struct wsdisplay_accessops inteldrm_accessops = {
 	inteldrm_wsmmap,
 	inteldrm_alloc_screen,
 	inteldrm_free_screen,
-	inteldrm_show_screen
+	inteldrm_show_screen,
+	NULL,
+	NULL,
+	inteldrm_getchar,
+	inteldrm_burner
 };
 
 extern int (*ws_get_param)(struct wsdisplay_param *);
@@ -744,6 +762,34 @@ inteldrm_doswitch(void *v, void *cookie)
 
 	if (dev_priv->switchcb)
 		(*dev_priv->switchcb)(dev_priv->switchcbarg, 0, 0);
+}
+
+int
+inteldrm_getchar(void *v, int row, int col, struct wsdisplay_charcell *cell)
+{
+	struct inteldrm_softc *dev_priv = v;
+	struct rasops_info *ri = &dev_priv->ro;
+
+	return rasops_getchar(ri, row, col, cell);
+}
+
+void
+inteldrm_burner(void *v, u_int on, u_int flags)
+{
+	struct inteldrm_softc *dev_priv = v;
+	struct drm_fb_helper *helper = &dev_priv->fbdev->helper;
+	int dpms_mode;
+
+	if (on)
+		dpms_mode = DRM_MODE_DPMS_ON;
+	else {
+		if (flags & WSDISPLAY_BURN_VBLANK)
+			dpms_mode = DRM_MODE_DPMS_OFF;
+		else
+			dpms_mode = DRM_MODE_DPMS_STANDBY;
+	}
+
+	drm_fb_helper_dpms(helper, dpms_mode);
 }
 
 /*
