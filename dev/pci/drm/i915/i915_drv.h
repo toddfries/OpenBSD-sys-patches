@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.h,v 1.19 2013/05/09 15:00:41 kettenis Exp $ */
+/* $OpenBSD: i915_drv.h,v 1.21 2013/05/18 21:43:42 kettenis Exp $ */
 /* i915_drv.h -- Private header for the I915 driver -*- linux-c -*-
  */
 /*
@@ -646,6 +646,11 @@ struct inteldrm_softc {
 		 */
 		struct list_head unbound_list;
 
+		/** Usable portion of the GTT for GEM */
+		unsigned long gtt_start;
+		unsigned long gtt_mappable_end;
+		unsigned long gtt_end;
+
 		/**
 		 * List of objects currently involved in rendering from the
 		 * ringbuffer.
@@ -714,6 +719,9 @@ struct inteldrm_softc {
 
 		/* storage for physical objects */
 		struct drm_i915_gem_phys_object *phys_objs[I915_MAX_PHYS_OBJECT];
+
+		/* accounting, useful for userland debugging */
+		size_t gtt_total;
 	} mm;
 
 	/* for hangcheck */
@@ -1572,20 +1580,6 @@ i915_gem_object_unpin_fence(struct drm_i915_gem_object *obj)
 		dev_priv->fence_regs[obj->fence_reg].pin_count--;
 	}
 }
-
-#if 0
-static __inline int
-i915_obj_purgeable(struct drm_i915_gem_object *obj_priv)
-{
-	return (obj_priv->base.do_flags & I915_DONTNEED);
-}
-
-static __inline int
-i915_obj_purged(struct drm_i915_gem_object *obj_priv)
-{
-	return (obj_priv->base.do_flags & I915_PURGED);
-}
-#endif
 
 static inline int
 i915_gem_object_is_purgeable(struct drm_i915_gem_object *obj)
