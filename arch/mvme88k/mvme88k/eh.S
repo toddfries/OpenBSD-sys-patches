@@ -1,4 +1,4 @@
-/*	$OpenBSD: eh.S,v 1.68 2013/01/05 11:20:56 miod Exp $	*/
+/*	$OpenBSD: eh.S,v 1.70 2013/05/17 22:51:59 miod Exp $	*/
 /*
  * Copyright (c) 2006, Miodrag Vallat
  *
@@ -39,14 +39,12 @@
 
 #include <m88k/m88k/eh_common.S>
 
-#ifdef MVME187
+#if defined(MVME181) || defined(MVME187)
 /*
- * Single-processor SBC version (MVME187, MVME8120)
+ * Single-processor with 2 CMMU version (MVME181, MVME187, MVME8120)
  */
 
-#include <machine/mvme187.h>
-
-ENTRY(pfsr_save_187)
+ENTRY(pfsr_save_single)
 	ld	TMP2, TMP,  CI_PFSR_I0
 	ld	TMP3, TMP2, %r0
 	st	TMP3, %r31, EF_IPFSR
