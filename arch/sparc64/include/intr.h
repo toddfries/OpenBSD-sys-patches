@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.14 2011/03/23 17:02:33 deraadt Exp $	*/
+/*	$OpenBSD: intr.h,v 1.16 2013/05/17 18:26:37 kettenis Exp $	*/
 /*	$NetBSD: intr.h,v 1.8 2001/01/14 23:50:30 thorpej Exp $ */
 
 /*-
@@ -49,6 +49,7 @@ struct intrhand {
 	short			ih_number;	/* interrupt number */
 						/* the H/W provides */
 	char			ih_pil;		/* interrupt priority */
+	char			ih_mpsafe;
 	struct intrhand		*ih_next;	/* global list */
 	struct intrhand		*ih_pending;	/* pending list */
 	volatile u_int64_t	*ih_map;	/* interrupt map reg */
@@ -78,8 +79,10 @@ void    intr_establish(int, struct intrhand *);
 #define	IPL_SERIAL	PIL_SER		/* serial */
 #define	IPL_SCHED	PIL_SCHED	/* scheduler */
 #define	IPL_LOCK	PIL_LOCK	/* locks */
-#define IPL_STATCLOCK	PIL_STATCLOCK	/* statclock */
+#define	IPL_STATCLOCK	PIL_STATCLOCK	/* statclock */
 #define	IPL_HIGH	PIL_HIGH	/* everything */
+
+#define	IPL_MPSAFE	0x100
 
 void	*softintr_establish(int, void (*)(void *), void *);
 void	 softintr_disestablish(void *);

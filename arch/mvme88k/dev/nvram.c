@@ -1,4 +1,4 @@
-/*	$OpenBSD: nvram.c,v 1.33 2010/12/26 15:40:59 miod Exp $ */
+/*	$OpenBSD: nvram.c,v 1.35 2013/05/18 10:21:50 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -32,22 +32,20 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/ioctl.h>
+#include <sys/time.h>
 #include <sys/uio.h>
-#include <sys/timetc.h>
 
 #include <machine/autoconf.h>
 #include <machine/bugio.h>
 #include <machine/conf.h>
 #include <machine/cpu.h>
 #include <machine/mioctl.h>
-#include <machine/psl.h>
-#include <machine/vmparam.h>
 
 #include <uvm/uvm_param.h>
 
+#include <mvme88k/mvme88k/clockvar.h>
 #include <mvme88k/dev/memdevs.h>
 #include <mvme88k/dev/nvramreg.h>
-#include <mvme88k/dev/pcctworeg.h>
 
 struct nvramsoftc {
 	struct device           sc_dev;
@@ -73,7 +71,11 @@ struct cfdriver nvram_cd = {
 	NULL, "nvram", DV_DULL
 };
 
-u_long	chiptotime(int, int, int, int, int, int);
+time_t	chiptotime(struct clock_ymdhms *);
+void	timetochip(struct clock_ymdhms *);
+time_t	nvram_inittodr(void);
+void	nvram_resettodr(void);
+
 int	nvram188read(struct nvramsoftc *, struct uio *, int);
 int	nvram188write(struct nvramsoftc *, struct uio *, int);
 
@@ -129,186 +131,88 @@ nvramattach(parent, self, args)
 
 	sc->sc_ioh = ioh;
 
-	printf(": MK48T0%d\n", sc->sc_len / 1024);
+	printf(": MK48T0%lu\n", sc->sc_len / 1024);
+
+	md_inittodr = nvram_inittodr;
+	md_resettodr = nvram_resettodr;
 }
 
-/*
- * BCD to decimal and decimal to BCD.
- */
-#define	FROMBCD(x)	(((x) >> 4) * 10 + ((x) & 0xf))
-#define	TOBCD(x)	(((x) / 10 * 16) + ((x) % 10))
-
-#define	SECYR		(SECDAY * 365)
-#define	LEAPYEAR(y)	(((y) & 3) == 0)
-
-/*
- * This code is defunct after 2068.
- * Will Unix still be here then??
- */
-const int dayyr[12] =
-{ 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
-
-u_long
-chiptotime(sec, min, hour, day, mon, year)
-	int sec, min, hour, day, mon, year;
+time_t
+chiptotime(struct clock_ymdhms *c)
 {
-	int days, yr;
+	c->dt_sec = FROMBCD(c->dt_sec);
+	c->dt_min = FROMBCD(c->dt_min);
+	c->dt_hour = FROMBCD(c->dt_hour);
+	c->dt_day = FROMBCD(c->dt_day);
+	c->dt_mon = FROMBCD(c->dt_mon);
+	c->dt_year = FROMBCD(c->dt_year) + YEAR0;
+	/* XXX 2-digit year => Y2070 problem */
+	if (c->dt_year < POSIX_BASE_YEAR)
+		c->dt_year += 100;
 
-	sec = FROMBCD(sec);
-	min = FROMBCD(min);
-	hour = FROMBCD(hour);
-	day = FROMBCD(day);
-	mon = FROMBCD(mon);
-	year = FROMBCD(year) + YEAR0;
-
-	/* simple sanity checks */
-	if (year>164 || mon<1 || mon>12 || day<1 || day>31)
-		return (0);
-	yr = 70;
-	days = 0;
-
-	if (year < 70) {		/* 2000 <= year */
-		for (; yr < 100; yr++)	/* deal with first 30 years */
-			days += LEAPYEAR(yr) ? 366 : 365;
-		yr = 0;
-	}
-
-	for (; yr < year; yr++)		/* deal with years left */
-		days += LEAPYEAR(yr) ? 366 : 365;
-
-	days += dayyr[mon - 1] + day - 1;
-
-	if (LEAPYEAR(yr) && mon > 2)
-		days++;
-
-	/* now have days since Jan 1, 1970; the rest is easy... */
-	return (days * SECDAY + hour * 3600 + min * 60 + sec);
+	return clock_ymdhms_to_secs(c);
 }
-
-struct chiptime {
-	int     sec;
-	int     min;
-	int     hour;
-	int     wday;
-	int     day;
-	int     mon;
-	int     year;
-};
-
-void timetochip(struct chiptime *c);
 
 void
-timetochip(c)
-	struct chiptime *c;
+timetochip(struct clock_ymdhms *c)
 {
-	time_t t, t2, t3, now = time_second;
+	clock_secs_to_ymdhms(time_second, c);
 
-	/* January 1 1970 was a Thursday (4 in unix wdays) */
-	/* compute the days since the epoch */
-	t2 = now / SECDAY;
-
-	t3 = (t2 + 4) % 7;	/* day of week */
-	c->wday = TOBCD(t3 + 1);
-
-	/* compute the year */
-	t = 69;
-	while (t2 >= 0) {	/* whittle off years */
-		t3 = t2;
-		t++;
-		t2 -= LEAPYEAR(t) ? 366 : 365;
-	}
-	c->year = t;
-
-	/* t3 = month + day; separate */
-	t = LEAPYEAR(t);
-	for (t2 = 1; t2 < 12; t2++)
-		if (t3 < (dayyr[t2] + ((t && (t2 > 1)) ? 1:0)))
-			break;
-
-	/* t2 is month */
-	c->mon = t2;
-	c->day = t3 - dayyr[t2 - 1] + 1;
-	if (t && t2 > 2)
-		c->day--;
-
-	/* the rest is easy */
-	t = now % SECDAY;
-	c->hour = t / 3600;
-	t %= 3600;
-	c->min = t / 60;
-	c->sec = t % 60;
-
-	c->sec = TOBCD(c->sec);
-	c->min = TOBCD(c->min);
-	c->hour = TOBCD(c->hour);
-	c->day = TOBCD(c->day);
-	c->mon = TOBCD(c->mon);
-	c->year = TOBCD((c->year - YEAR0) % 100);
+	c->dt_sec = TOBCD(c->dt_sec);
+	c->dt_min = TOBCD(c->dt_min);
+	c->dt_hour = TOBCD(c->dt_hour);
+	c->dt_day = TOBCD(c->dt_day);
+	c->dt_mon = TOBCD(c->dt_mon);
+	c->dt_year = TOBCD(c->dt_year % 100);
 }
 
-/*
- * Set up the system's time, given a `reasonable' time value.
- */
-
-void
-inittodr(time_t base)
+time_t
+nvram_inittodr()
 {
-	struct nvramsoftc *sc = (struct nvramsoftc *) nvram_cd.cd_devs[0];
-	int sec, min, hour, day, mon, year;
-	int badbase = 0, waszero = base == 0;
-	struct timespec ts;
+	struct nvramsoftc *sc = nvram_cd.cd_devs[0];
+	struct clock_ymdhms c;
 
-	ts.tv_sec = ts.tv_nsec = 0;
-
-	if (base < 35 * SECYR) {
-		/*
-		 * If base is 0, assume filesystem time is just unknown
-		 * in stead of preposterous. Don't bark.
-		 */
-		if (base != 0)
-			printf("WARNING: preposterous time in file system\n");
-		/* not going to use it anyway, if the chip is readable */
-		base = 39 * SECYR;
-		badbase = 1;
-	}
-
-	if (brdtyp == BRD_188) {
+	switch (brdtyp) {
+#ifdef MVME188
+	case BRD_188:
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + (CLK_CSR << 2), CLK_READ |
 		    bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 		      sc->sc_regs + (CLK_CSR << 2)));
-		sec = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+		c.dt_sec = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + (CLK_SEC << 2)) & 0xff;
-		min = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+		c.dt_min = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + (CLK_MIN << 2)) & 0xff;
-		hour = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+		c.dt_hour = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + (CLK_HOUR << 2)) & 0xff;
-		day = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+		c.dt_day = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + (CLK_DAY << 2)) & 0xff;
-		mon = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+		c.dt_mon = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + (CLK_MONTH << 2)) & 0xff;
-		year = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
+		c.dt_year = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + (CLK_YEAR << 2)) & 0xff;
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + (CLK_CSR << 2),
 		    bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 		      sc->sc_regs + (CLK_CSR << 2)) & ~CLK_READ);
-	} else {
+		break;
+#endif
+	default:
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + CLK_CSR, CLK_READ |
 		    bus_space_read_1(sc->sc_iot, sc->sc_ioh,
 		      sc->sc_regs + CLK_CSR));
-		sec = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
+		c.dt_sec = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + CLK_SEC);
-		min = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
+		c.dt_min = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + CLK_MIN);
-		hour = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
+		c.dt_hour = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + CLK_HOUR);
-		day = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
+		c.dt_day = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + CLK_DAY);
-		mon = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
+		c.dt_mon = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + CLK_MONTH);
-		year = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
+		c.dt_year = bus_space_read_1(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + CLK_YEAR);
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + CLK_CSR,
@@ -316,33 +220,7 @@ inittodr(time_t base)
 		      sc->sc_regs + CLK_CSR) & ~CLK_READ);
 	}
 
-	if ((ts.tv_sec = chiptotime(sec, min, hour, day, mon, year)) == 0) {
-		printf("WARNING: bad date in nvram");
-#ifdef DEBUG
-		printf("\nday = %d, mon = %d, year = %d, hour = %d, min = %d, sec = %d",
-		       FROMBCD(day), FROMBCD(mon), FROMBCD(year) + YEAR0,
-		       FROMBCD(hour), FROMBCD(min), FROMBCD(sec));
-#endif
-		/*
-		 * Believe the time in the file system for lack of
-		 * anything better, resetting the clock.
-		 */
-		ts.tv_sec = base;
-		if (!badbase)
-			resettodr();
-	} else {
-		int deltat = ts.tv_sec - base;
-
-		if (deltat < 0)
-			deltat = -deltat;
-		if (waszero || deltat < 2 * SECDAY)
-			goto done;
-		printf("WARNING: clock %s %d days",
-		       ts.tv_sec < base ? "lost" : "gained", deltat / SECDAY);
-	}
-	printf(" -- CHECK AND RESET THE DATE!\n");
-done:
-	tc_setclock(&ts);
+	return chiptotime(&c);
 }
 
 /*
@@ -352,61 +230,64 @@ done:
  * when crashing during autoconfig.
  */
 void
-resettodr()
+nvram_resettodr()
 {
-	struct nvramsoftc *sc = (struct nvramsoftc *) nvram_cd.cd_devs[0];
-	struct chiptime c;
+	struct nvramsoftc *sc = nvram_cd.cd_devs[0];
+	struct clock_ymdhms c;
 
-	if (time_second == 0 || sc == NULL)
-		return;
 	timetochip(&c);
 
-	if (brdtyp == BRD_188) {
+	switch (brdtyp) {
+#ifdef MVME188
+	case BRD_188:
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + (CLK_CSR << 2), CLK_WRITE |
 		    bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 		      sc->sc_regs + (CLK_CSR << 2)));
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + (CLK_SEC << 2), c.sec);
+		    sc->sc_regs + (CLK_SEC << 2), c.dt_sec);
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + (CLK_MIN << 2), c.min);
+		    sc->sc_regs + (CLK_MIN << 2), c.dt_min);
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + (CLK_HOUR << 2), c.hour);
+		    sc->sc_regs + (CLK_HOUR << 2), c.dt_hour);
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + (CLK_WDAY << 2), c.wday);
+		    sc->sc_regs + (CLK_WDAY << 2), c.dt_wday);
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + (CLK_DAY << 2), c.day);
+		    sc->sc_regs + (CLK_DAY << 2), c.dt_day);
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + (CLK_MONTH << 2), c.mon);
+		    sc->sc_regs + (CLK_MONTH << 2), c.dt_mon);
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + (CLK_YEAR << 2), c.year);
+		    sc->sc_regs + (CLK_YEAR << 2), c.dt_year);
 		bus_space_write_4(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + (CLK_CSR << 2),
 		    bus_space_read_4(sc->sc_iot, sc->sc_ioh,
 		      sc->sc_regs + (CLK_CSR << 2)) & ~CLK_WRITE);
-	} else {
+		break;
+#endif
+	default:
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + CLK_CSR, CLK_WRITE |
 		    bus_space_read_1(sc->sc_iot, sc->sc_ioh,
 		      sc->sc_regs + CLK_CSR));
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + CLK_SEC, c.sec);
+		    sc->sc_regs + CLK_SEC, c.dt_sec);
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + CLK_MIN, c.min);
+		    sc->sc_regs + CLK_MIN, c.dt_min);
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + CLK_HOUR, c.hour);
+		    sc->sc_regs + CLK_HOUR, c.dt_hour);
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + CLK_WDAY, c.wday);
+		    sc->sc_regs + CLK_WDAY, c.dt_wday);
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + CLK_DAY, c.day);
+		    sc->sc_regs + CLK_DAY, c.dt_day);
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + CLK_MONTH, c.mon);
+		    sc->sc_regs + CLK_MONTH, c.dt_mon);
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
-		    sc->sc_regs + CLK_YEAR, c.year);
+		    sc->sc_regs + CLK_YEAR, c.dt_year);
 		bus_space_write_1(sc->sc_iot, sc->sc_ioh,
 		    sc->sc_regs + CLK_CSR,
 		    bus_space_read_1(sc->sc_iot, sc->sc_ioh,
 		      sc->sc_regs + CLK_CSR) & ~CLK_WRITE);
+		break;
 	}
 }
 
@@ -527,7 +408,7 @@ int	read_nvram(struct nvramsoftc *);
 int
 read_nvram(struct nvramsoftc *sc)
 {
-	u_int cnt;
+	size_t cnt;
 	u_int8_t *dest;
 	u_int32_t *src;
 
@@ -572,7 +453,7 @@ nvram188read(struct nvramsoftc *sc, struct uio *uio, int flags)
 int
 nvram188write(struct nvramsoftc *sc, struct uio *uio, int flags)
 {
-	u_int cnt;
+	size_t cnt;
 	u_int8_t *src;
 	u_int32_t *dest;
 	int rc;
