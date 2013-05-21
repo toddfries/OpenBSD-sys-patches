@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem.c,v 1.12 2013/04/21 14:41:26 kettenis Exp $	*/
+/*	$OpenBSD: i915_gem.c,v 1.21 2013/05/18 21:43:42 kettenis Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -78,7 +78,8 @@ int i915_gem_object_flush_active(struct drm_i915_gem_object *);
 int i915_gem_check_olr(struct intel_ring_buffer *, u32);
 void i915_gem_object_truncate(struct drm_i915_gem_object *obj);
 int i915_gem_object_bind_to_gtt(struct drm_i915_gem_object *obj,
-				unsigned alignment, bool map_and_fenceable);
+				unsigned alignment, bool map_and_fenceable,
+				bool nonblocking);
 int i915_gem_wait_for_error(struct drm_device *);
 int __wait_seqno(struct intel_ring_buffer *, uint32_t, bool, struct timespec *);
 
@@ -103,7 +104,7 @@ i915_gem_object_fence_lost(struct drm_i915_gem_object *obj)
 int
 i915_gem_wait_for_error(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv= dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int ret;
 
 	if (!atomic_read(&dev_priv->mm.wedged))
@@ -347,10 +348,10 @@ i915_gem_pread_ioctl(struct drm_device *dev, void *data,
 		goto out;
 	}
 
-	ret = i915_gem_object_pin(obj, 0, 1);
-	if (ret) {
+	ret = i915_gem_object_pin(obj, 0, true, true);
+	if (ret)
 		goto out;
-	}
+
 	ret = i915_gem_object_set_to_gtt_domain(obj, false);
 	if (ret)
 		goto unpin;
@@ -417,10 +418,10 @@ i915_gem_pwrite_ioctl(struct drm_device *dev, void *data,
 		goto out;
 	}
 
-	ret = i915_gem_object_pin(obj, 0, 1);
-	if (ret) {
+	ret = i915_gem_object_pin(obj, 0, true, true);
+	if (ret)
 		goto out;
-	}
+
 	ret = i915_gem_object_set_to_gtt_domain(obj, true);
 	if (ret)
 		goto unpin;
@@ -456,7 +457,7 @@ out:
 }
 
 int
-i915_gem_check_wedge(struct inteldrm_softc *dev_priv,
+i915_gem_check_wedge(struct drm_i915_private *dev_priv,
 		     bool interruptible)
 {
 	if (atomic_read(&dev_priv->mm.wedged)) {
@@ -546,7 +547,7 @@ int
 i915_wait_seqno(struct intel_ring_buffer *ring, uint32_t seqno)
 {
 	struct drm_device *dev = ring->dev;
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	bool interruptible = dev_priv->mm.interruptible;
 	int ret;
 
@@ -749,29 +750,7 @@ i915_gem_fault(struct drm_obj *gem_obj, struct uvm_faultinfo *ufi,
 	vm_prot_t mapprot;
 	boolean_t locked = TRUE;
 
-	/* Are we about to suspend?, if so wait until we're done */
-	if (dev_priv->sc_flags & INTELDRM_QUIET) {
-		/* we're about to sleep, unlock the map etc */
-		uvmfault_unlockall(ufi, NULL, &obj->base.uobj, NULL);
-		while (dev_priv->sc_flags & INTELDRM_QUIET)
-			tsleep(&dev_priv->flags, 0, "intelflt", 0);
-		dev_priv->entries++;
-		/*
-		 * relock so we're in the same state we would be in if we
-		 * were not quiesced before
-		 */
-		locked = uvmfault_relock(ufi);
-		if (locked) {
-			drm_lock_obj(&obj->base);
-		} else {
-			dev_priv->entries--;
-			if (dev_priv->sc_flags & INTELDRM_QUIET)
-				wakeup(&dev_priv->entries);
-			return (VM_PAGER_REFAULT);
-		}
-	} else {
-		dev_priv->entries++;
-	}
+	dev_priv->entries++;
 
 	if (rw_enter(&dev->dev_lock, RW_NOSLEEP | RW_READ) != 0) {
 		uvmfault_unlockall(ufi, NULL, &obj->base.uobj, NULL);
@@ -784,8 +763,6 @@ i915_gem_fault(struct drm_obj *gem_obj, struct uvm_faultinfo *ufi,
 		drm_hold_object_locked(&obj->base);
 	else { /* obj already unlocked */
 		dev_priv->entries--;
-		if (dev_priv->sc_flags & INTELDRM_QUIET)
-			wakeup(&dev_priv->entries);
 		return (VM_PAGER_REFAULT);
 	}
 
@@ -802,7 +779,7 @@ i915_gem_fault(struct drm_obj *gem_obj, struct uvm_faultinfo *ufi,
 	}
 
 	if (obj->dmamap == NULL) {
-		ret = i915_gem_object_bind_to_gtt(obj, 0, true);
+		ret = i915_gem_object_bind_to_gtt(obj, 0, true, false);
 		if (ret)
 			goto error;
 
@@ -847,8 +824,6 @@ i915_gem_fault(struct drm_obj *gem_obj, struct uvm_faultinfo *ufi,
 			    NULL, NULL);
 			DRM_READUNLOCK();
 			dev_priv->entries--;
-			if (dev_priv->sc_flags & INTELDRM_QUIET)
-				wakeup(&dev_priv->entries);
 			uvm_wait("intelflt");
 			return (VM_PAGER_REFAULT);
 		}
@@ -858,8 +833,6 @@ error:
 	uvmfault_unlockall(ufi, ufi->entry->aref.ar_amap, NULL, NULL);
 	DRM_READUNLOCK();
 	dev_priv->entries--;
-	if (dev_priv->sc_flags & INTELDRM_QUIET)
-		wakeup(&dev_priv->entries);
 	pmap_update(ufi->orig_map->pmap);
 	if (ret == EIO) {
 		/*
@@ -1018,7 +991,7 @@ i915_gem_mmap_gtt(struct drm_file *file, struct drm_device *dev,
 		goto done;
 	}
 
-	ret = i915_gem_object_bind_to_gtt(obj, 0, true);
+	ret = i915_gem_object_bind_to_gtt(obj, 0, true, false);
 	if (ret) {
 		printf("%s: failed to bind\n", __func__);
 		goto done;
@@ -1041,17 +1014,28 @@ done:
 	return (ret);
 }
 
+/**
+ * i915_gem_mmap_gtt_ioctl - prepare an object for GTT mmap'ing
+ * @dev: DRM device
+ * @data: GTT mapping ioctl data
+ * @file: GEM object info
+ *
+ * Simply returns the fake offset to userspace so it can mmap it.
+ * The mmap call will end up in drm_gem_mmap(), which will set things
+ * up so we can get faults in the handler above.
+ *
+ * The fault handler will take care of binding the object into the GTT
+ * (since it may have been evicted to make room for something), allocating
+ * a fence register, and mapping the appropriate aperture address into
+ * userspace.
+ */
 int
 i915_gem_mmap_gtt_ioctl(struct drm_device *dev, void *data,
-    struct drm_file *file)
+			struct drm_file *file)
 {
-	struct inteldrm_softc *dev_priv;
-	struct drm_i915_gem_mmap_gtt *args;
+	struct drm_i915_gem_mmap_gtt *args = data;
 
-	dev_priv = dev->dev_private;
-	args = data;
-
-	return (i915_gem_mmap_gtt(file, dev, args->handle, &args->offset));
+	return i915_gem_mmap_gtt(file, dev, args->handle, &args->offset);
 }
 
 /* Immediately discard the backing storage */
@@ -1162,7 +1146,7 @@ i915_gem_object_move_to_active(struct drm_i915_gem_object *obj,
 			       struct intel_ring_buffer *ring)
 {
 	struct drm_device *dev = obj->base.dev;
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32 seqno = intel_ring_get_seqno(ring);
 
 	BUG_ON(ring == NULL);
@@ -1194,15 +1178,12 @@ i915_gem_object_move_to_active(struct drm_i915_gem_object *obj,
 	}
 }
 
-/* called locked */
 void
-i915_gem_object_move_to_inactive_locked(struct drm_i915_gem_object *obj)
+i915_gem_object_move_to_inactive(struct drm_i915_gem_object *obj)
 {
-	struct drm_device	*dev = obj->base.dev;
-	struct inteldrm_softc	*dev_priv = dev->dev_private;
+	struct drm_device *dev = obj->base.dev;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 
-	DRM_OBJ_ASSERT_LOCKED(&obj->base);
-	inteldrm_verify_inactive(dev_priv, __FILE__, __LINE__);
 	BUG_ON(obj->base.write_domain & ~I915_GEM_GPU_DOMAINS);
 	BUG_ON(!obj->active);
 
@@ -1224,24 +1205,13 @@ i915_gem_object_move_to_inactive_locked(struct drm_i915_gem_object *obj)
 	obj->active = 0;
 	drm_gem_object_unreference(&obj->base);
 
-	inteldrm_verify_inactive(dev_priv, __FILE__, __LINE__);
-}
-
-/* If you call this on an object that you have held, you must have your own
- * reference, not just the reference from the active list.
- */
-void
-i915_gem_object_move_to_inactive(struct drm_i915_gem_object *obj)
-{
-	drm_lock_obj(&obj->base);
-	/* unlocks object lock */
-	i915_gem_object_move_to_inactive_locked(obj);
+	WARN_ON(i915_verify_lists(dev));
 }
 
 int
 i915_gem_handle_seqno_wrap(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct intel_ring_buffer *ring;
 	int ret, i, j;
 
@@ -1273,7 +1243,7 @@ i915_gem_handle_seqno_wrap(struct drm_device *dev)
 int
 i915_gem_get_seqno(struct drm_device *dev, u32 *seqno)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	/* reserve 0 for non-seqno */
 	if (dev_priv->next_seqno == 0) {
@@ -1310,11 +1280,10 @@ i915_add_request(struct intel_ring_buffer *ring,
 	if (ret)
 		return ret;
 
-	request = drm_calloc(1, sizeof(*request));
-	if (request == NULL) {
-		printf("%s: failed to allocate request\n", __func__);
+	request = drm_alloc(sizeof(*request));
+	if (request == NULL)
 		return -ENOMEM;
-	}
+
 
 	/* Record the position of the start of the request so that
 	 * should we detect the updated seqno part-way through the
@@ -1335,6 +1304,7 @@ i915_add_request(struct intel_ring_buffer *ring,
 	request->emitted_ticks = ticks;
 	was_empty = list_empty(&ring->request_list);
 	list_add_tail(&request->list, &ring->request_list);
+	request->file_priv = NULL;
 
 	if (file) {
 		struct drm_i915_file_private *file_priv = file->driver_priv;
@@ -1410,7 +1380,7 @@ i915_gem_reset_ring_lists(drm_i915_private_t *dev_priv,
 void
 i915_gem_reset_fences(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int i;
 
 	for (i = 0; i < dev_priv->num_fence_regs; i++) {
@@ -1432,7 +1402,7 @@ i915_gem_reset_fences(struct drm_device *dev)
 void
 i915_gem_reset(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct drm_i915_gem_object *obj;
 	struct intel_ring_buffer *ring;
 	int i;
@@ -1521,7 +1491,7 @@ i915_gem_retire_requests(struct drm_device *dev)
 void
 i915_gem_retire_work_handler(void *arg1, void *unused)
 {
-	struct inteldrm_softc *dev_priv = arg1;
+	drm_i915_private_t *dev_priv = arg1;
 	struct drm_device *dev;
 	struct intel_ring_buffer *ring;
 	bool idle;
@@ -1547,6 +1517,7 @@ i915_gem_retire_work_handler(void *arg1, void *unused)
 
 		idle &= list_empty(&ring->request_list);
 	}
+
 	if (!dev_priv->mm.suspended && !idle)
 		timeout_add_sec(&dev_priv->mm.retire_timer, 1);
 	if (idle)
@@ -1896,7 +1867,7 @@ i915_gem_object_update_fence(struct drm_i915_gem_object *obj,
 					 struct drm_i915_fence_reg *fence,
 					 bool enable)
 {
-	drm_i915_private_t *dev_priv = obj->base.dev->dev_private;
+	struct drm_i915_private *dev_priv = obj->base.dev->dev_private;
 	int reg = fence_number(dev_priv, fence);
 
 	i915_gem_write_fence(obj->base.dev, reg, enable ? obj : NULL);
@@ -1936,7 +1907,7 @@ i915_gem_object_flush_fence(struct drm_i915_gem_object *obj)
 int
 i915_gem_object_put_fence(struct drm_i915_gem_object *obj)
 {
-	drm_i915_private_t *dev_priv = obj->base.dev->dev_private;
+	struct drm_i915_private *dev_priv = obj->base.dev->dev_private;
 	int ret;
 
 	ret = i915_gem_object_flush_fence(obj);
@@ -1957,7 +1928,7 @@ i915_gem_object_put_fence(struct drm_i915_gem_object *obj)
 struct drm_i915_fence_reg *
 i915_find_fence_reg(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct drm_i915_fence_reg *reg, *avail;
 	int i;
 
@@ -2004,7 +1975,7 @@ int
 i915_gem_object_get_fence(struct drm_i915_gem_object *obj)
 {
 	struct drm_device *dev = obj->base.dev;
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	bool enable = obj->tiling_mode != I915_TILING_NONE;
 	struct drm_i915_fence_reg *reg;
 	int ret;
@@ -2058,7 +2029,8 @@ i915_gem_object_get_fence(struct drm_i915_gem_object *obj)
 int
 i915_gem_object_bind_to_gtt(struct drm_i915_gem_object *obj,
 			    unsigned alignment,
-			    bool map_and_fenceable)
+			    bool map_and_fenceable,
+			    bool nonblocking)
 {
 	struct drm_device *dev = obj->base.dev;
 	drm_i915_private_t *dev_priv = dev->dev_private;
@@ -2095,7 +2067,6 @@ i915_gem_object_bind_to_gtt(struct drm_i915_gem_object *obj,
 
 	size = map_and_fenceable ? fence_size : obj->base.size;
 
-#ifdef notyet
 	/* If the object is bigger than the entire aperture, reject it early
 	 * before evicting everything in a vain attempt to find space.
 	 */
@@ -2104,7 +2075,6 @@ i915_gem_object_bind_to_gtt(struct drm_i915_gem_object *obj,
 		DRM_ERROR("Attempting to bind an object larger than the aperture\n");
 		return -E2BIG;
 	}
-#endif
 
 	if ((ret = bus_dmamap_create(dev_priv->agpdmat, size, 1,
 	    size, 0, BUS_DMA_WAITOK, &obj->dmamap)) != 0) {
@@ -2169,12 +2139,8 @@ i915_gem_object_bind_to_gtt(struct drm_i915_gem_object *obj,
 		obj->dmamap->dm_segs[0].ds_len == fence_size &&
 		(obj->dmamap->dm_segs[0].ds_addr & (fence_alignment - 1)) == 0;
 
-#ifdef notyet
 	mappable =
 		obj->gtt_offset + obj->base.size <= dev_priv->mm.gtt_mappable_end;
-#else
-	mappable = true;
-#endif
 
 	obj->map_and_fenceable = mappable && fenceable;
 
@@ -2492,7 +2458,7 @@ i915_gem_object_pin_to_display_plane(struct drm_i915_gem_object *obj,
 	 * (e.g. libkms for the bootup splash), we have to ensure that we
 	 * always use map_and_fenceable for all scanout buffers.
 	 */
-	ret = i915_gem_object_pin(obj, alignment, true);
+	ret = i915_gem_object_pin(obj, alignment, true, false);
 	if (ret)
 		return ret;
 
@@ -2597,7 +2563,7 @@ i915_gem_object_set_to_cpu_domain(struct drm_i915_gem_object *obj, bool write)
 int
 i915_gem_ring_throttle(struct drm_device *dev, struct drm_file *file)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct drm_i915_file_private *file_priv = file->driver_priv;
 	unsigned long recent_enough = ticks - msecs_to_jiffies(20);
 	struct drm_i915_gem_request *request;
@@ -2631,7 +2597,8 @@ i915_gem_ring_throttle(struct drm_device *dev, struct drm_file *file)
 int
 i915_gem_object_pin(struct drm_i915_gem_object *obj,
 		    uint32_t alignment,
-		    bool map_and_fenceable)
+		    bool map_and_fenceable,
+		    bool nonblocking)
 {
 	struct drm_device	*dev = obj->base.dev;
 	int ret;
@@ -2657,7 +2624,8 @@ i915_gem_object_pin(struct drm_i915_gem_object *obj,
 
 	if (obj->dmamap == NULL) {
 		ret = i915_gem_object_bind_to_gtt(obj, alignment,
-						  map_and_fenceable);
+						  map_and_fenceable,
+						  nonblocking);
 		if (ret)
 			return ret;
 	}
@@ -2723,7 +2691,7 @@ i915_gem_pin_ioctl(struct drm_device *dev, void *data,
 	}
 
 	if (obj->user_pin_count == 0) {
-		ret = i915_gem_object_pin(obj, args->alignment, 1);
+		ret = i915_gem_object_pin(obj, args->alignment, true, false);
 		if (ret)
 			goto out;
 		inteldrm_set_max_obj_size(dev_priv);
@@ -2952,10 +2920,6 @@ i915_gem_idle(struct drm_device *dev)
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	int ret;
 
-	/* If drm attach failed */
-	if (dev == NULL)
-		return (0);
-
 	DRM_LOCK();
 
 	if (dev_priv->mm.suspended) {
@@ -3122,6 +3086,11 @@ i915_gem_init(struct drm_device *dev)
 
 	dev->gtt_total = (uint32_t)(gtt_end - gtt_start);
 	inteldrm_set_max_obj_size(dev_priv);
+
+	dev_priv->mm.gtt_start = gtt_start;
+	dev_priv->mm.gtt_mappable_end = gtt_end;
+	dev_priv->mm.gtt_end = gtt_end;
+	dev_priv->mm.gtt_total = gtt_end - gtt_start;
 
 	ret = i915_gem_init_hw(dev);
 	if (ret != 0) {
