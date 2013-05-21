@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpufunc.c,v 1.20 2013/03/27 00:06:09 patrick Exp $	*/
+/*	$OpenBSD: cpufunc.c,v 1.23 2013/05/18 17:48:48 patrick Exp $	*/
 /*	$NetBSD: cpufunc.c,v 1.65 2003/11/05 12:53:15 scw Exp $	*/
 
 /*
@@ -417,7 +417,7 @@ struct cpu_functions armv7_cpufuncs = {
 
 	armv7_dcache_wbinv_all,		/* dcache_wbinv_all	*/
 	armv7_dcache_wbinv_range,	/* dcache_wbinv_range	*/
-/*XXX*/	armv7_dcache_wbinv_range,	/* dcache_inv_range	*/
+	armv7_dcache_inv_range,		/* dcache_inv_range	*/
 	armv7_dcache_wb_range,		/* dcache_wb_range	*/
 
 	armv7_idcache_wbinv_all,	/* idcache_wbinv_all	*/
@@ -808,6 +808,7 @@ arm_get_cachetype_cp15v7(void)
 	sel = 0;
 	__asm __volatile("mcr p15, 2, %0, c0, c0, 0"
 		:: "r" (sel));
+	cpu_drain_writebuf();
 	__asm __volatile("mrc p15, 1, %0, c0, c0, 0"
 		: "=r" (cachereg) :);
 	line_size = 1 << ((cachereg & 7)+4);
@@ -836,6 +837,7 @@ arm_get_cachetype_cp15v7(void)
 	sel = 1;
 	__asm __volatile("mcr p15, 2, %0, c0, c0, 0"
 		:: "r" (sel));
+	cpu_drain_writebuf();
 	__asm __volatile("mrc p15, 1, %0, c0, c0, 0"
 		: "=r" (cachereg) :);
 	line_size = 1 << ((cachereg & 7)+4);
@@ -854,6 +856,7 @@ arm_get_cachetype_cp15v7(void)
 	sel = 1;
 	__asm __volatile("mcr p15, 2, %0, c0, c0, 0"
 		:: "r" (sel));
+	cpu_drain_writebuf();
 	__asm __volatile("mrc p15, 1, %0, c0, c0, 0"
 		: "=r" (cachereg) :);
 	line_size = 1 << ((cachereg & 7)+4);
@@ -911,7 +914,7 @@ armv7_dcache_wbinv_all()
 		setval += setincr;
 	}
 	/* drain the write buffer */
-	__asm __volatile("mcr	p15, 0, %0, c7, c10, 4" : : "r" (0));
+	cpu_drain_writebuf();
 
 	/* L2 */
 	nsets = 1 << arm_dcache_l2_nsets;
@@ -941,7 +944,7 @@ armv7_dcache_wbinv_all()
 		setval += setincr;
 	}
 	/* drain the write buffer */
-	__asm __volatile("mcr	p15, 0, %0, c7, c10, 4" : : "r" (0));
+	cpu_drain_writebuf();
 
 }
 #endif /* CPU_ARMv7 */
@@ -1389,7 +1392,8 @@ armv7_setup()
 	    | CPU_CONTROL_ROM_ENABLE | CPU_CONTROL_BPRD_ENABLE
 	    | CPU_CONTROL_BEND_ENABLE | CPU_CONTROL_AFLT_ENABLE
 	    | CPU_CONTROL_ROUNDROBIN | CPU_CONTROL_CPCLK
-	    | CPU_CONTROL_VECRELOC | CPU_CONTROL_FI | CPU_CONTROL_VE;
+	    | CPU_CONTROL_VECRELOC | CPU_CONTROL_FI | CPU_CONTROL_VE
+	    | CPU_CONTROL_TRE | CPU_CONTROL_AFE;
 
 	if (vector_page == ARM_VECTORS_HIGH)
 		cpuctrl |= CPU_CONTROL_VECRELOC;
@@ -1405,7 +1409,7 @@ armv7_setup()
 
 	/* Set the control register */
 	curcpu()->ci_ctrl = cpuctrl;
-	cpu_control(0xffffffff, cpuctrl);
+	cpu_control(cpuctrlmask, cpuctrl);
 
 	/* And again. */
 	cpu_idcache_wbinv_all();
