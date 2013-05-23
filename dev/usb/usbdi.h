@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi.h,v 1.50 2013/04/19 08:54:50 mpi Exp $ */
+/*	$OpenBSD: usbdi.h,v 1.53 2013/04/26 14:19:25 mpi Exp $ */
 /*	$NetBSD: usbdi.h,v 1.62 2002/07/11 21:14:35 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.18 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -38,7 +38,7 @@ struct usbd_interface;
 struct usbd_pipe;
 struct usbd_xfer;
 
-typedef enum {		/* keep in sync with usbd_status_msgs */
+typedef enum {
 	USBD_NORMAL_COMPLETION = 0, /* must be 0 */
 	USBD_IN_PROGRESS,	/* 1 */
 	/* errors */
@@ -130,7 +130,6 @@ usb_config_descriptor_t *usbd_get_config_descriptor(struct usbd_device *dev);
 usb_device_descriptor_t *usbd_get_device_descriptor(struct usbd_device *dev);
 usbd_status usbd_set_interface(struct usbd_interface *, int);
 int usbd_get_no_alts(usb_config_descriptor_t *, int);
-usbd_status  usbd_get_interface(struct usbd_interface *iface, u_int8_t *aiface);
 void usbd_fill_deviceinfo(struct usbd_device *, struct usb_device_info *, int);
 usb_config_descriptor_t *usbd_get_cdesc(struct usbd_device *, int, int *);
 int usbd_get_interface_altindex(struct usbd_interface *iface);
@@ -169,8 +168,8 @@ struct usbd_desc_iter {
 	const uByte *cur;
 	const uByte *end;
 };
-void usb_desc_iter_init(struct usbd_device *, struct usbd_desc_iter *);
-const usb_descriptor_t *usb_desc_iter_next(struct usbd_desc_iter *);
+void usbd_desc_iter_init(struct usbd_device *, struct usbd_desc_iter *);
+const usb_descriptor_t *usbd_desc_iter_next(struct usbd_desc_iter *);
 
 /*
  * The usb_task structs form a queue of things to run in the USB task
@@ -208,13 +207,11 @@ struct usb_devno {
 	u_int16_t ud_vendor;
 	u_int16_t ud_product;
 };
-const struct usb_devno *usb_match_device(const struct usb_devno *tbl,
+const struct usb_devno *usbd_match_device(const struct usb_devno *tbl,
     u_int nentries, u_int sz, u_int16_t vendor, u_int16_t product);
 #define usb_lookup(tbl, vendor, product) \
-	usb_match_device((const struct usb_devno *)(tbl), sizeof (tbl) / sizeof ((tbl)[0]), sizeof ((tbl)[0]), (vendor), (product))
+	usbd_match_device((const struct usb_devno *)(tbl), sizeof (tbl) / sizeof ((tbl)[0]), sizeof ((tbl)[0]), (vendor), (product))
 #define	USB_PRODUCT_ANY		0xffff
-
-/* NetBSD attachment information */
 
 /* Attach data */
 struct usb_attach_arg {

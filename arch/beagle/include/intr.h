@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.6 2011/11/06 01:34:53 drahn Exp $	*/
+/*	$OpenBSD: intr.h,v 1.8 2013/05/17 19:38:51 kettenis Exp $	*/
 /*	$NetBSD: intr.h,v 1.12 2003/06/16 20:00:59 thorpej Exp $	*/
 
 /*
@@ -41,7 +41,6 @@
 
 #ifdef _KERNEL
 
-
 /* Interrupt priority "levels". */
 #define	IPL_NONE	0	/* nothing */
 #define	IPL_SOFT	1	/* generic software interrupts */
@@ -59,6 +58,9 @@
 #define	IPL_HIGH	12	/* everything */
 
 #define	NIPL		13
+
+/* Interrupt priority "flags". */
+#define	IPL_MPSAFE	0	/* no "mpsafe" interrupts */
 
 /* Interrupt sharing types. */
 #define	IST_NONE	0	/* none */
@@ -138,7 +140,8 @@ void arm_intr_disestablish(void *cookie);
 const char *arm_intr_string(void *cookie);
 
 /* XXX - this is probably the wrong location for this */
-void arm_clock_register(void (*)(void), void (*)(u_int), void (*)(int));
+void arm_clock_register(void (*)(void), void (*)(u_int), void (*)(int),
+    void (*)(void));
 
 #ifdef DIAGNOSTIC
 /*
