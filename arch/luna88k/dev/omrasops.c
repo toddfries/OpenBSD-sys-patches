@@ -1,4 +1,4 @@
-/* $OpenBSD: omrasops.c,v 1.6 2009/09/05 14:09:35 miod Exp $ */
+/* $OpenBSD: omrasops.c,v 1.9 2013/05/17 23:25:16 aoyama Exp $ */
 /* $NetBSD: omrasops.c,v 1.1 2000/01/05 08:48:56 nisimura Exp $ */
 
 /*-
@@ -31,11 +31,11 @@
  */
 
 /*
- * Designed speficically for 'm68k bitorder';
+ * Designed specifically for 'm68k bitorder';
  *	- most significant byte is stored at lower address,
  *	- most significant bit is displayed at left most on screen.
  * Implementation relies on;
- *	- every memory references is done in aligned 32bit chunk,
+ *	- every memory reference is done in aligned 32bit chunks,
  *	- font glyphs are stored in 32bit padded.
  */
 
@@ -62,7 +62,7 @@ int	om_eraserows(void *, int, int, long);
 #define	BYTESDONE	(4)
 
 #define	W(p) (*(u_int32_t *)(p))
-#define	R(p) (*(u_int32_t *)((caddr_t)(p) + 0x40000))
+#define	R(p) (*(u_int32_t *)((u_int8_t *)(p) + 0x40000))
 
 /*
  * Blit a character at the specified co-ordinates.
@@ -75,7 +75,7 @@ om_putchar(cookie, row, startcol, uc, attr)
 	long attr;
 {
 	struct rasops_info *ri = cookie;
-	caddr_t p;
+	u_int8_t *p;
 	int scanspan, startx, height, width, align, y;
 	u_int32_t lmask, rmask, glyph, inverse;
 	int i, fg, bg;
@@ -85,12 +85,12 @@ om_putchar(cookie, row, startcol, uc, attr)
 	y = ri->ri_font->fontheight * row;
 	startx = ri->ri_font->fontwidth * startcol;
 	height = ri->ri_font->fontheight;
-	fb = ri->ri_font->data +
+	fb = (u_int8_t *)ri->ri_font->data +
 	    (uc - ri->ri_font->firstchar) * ri->ri_fontscale;
 	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
 	inverse = (bg != 0) ? ALL1BITS : ALL0BITS;
 
-	p = (caddr_t)ri->ri_bits + y * scanspan + ((startx / 32) * 4);
+	p = (u_int8_t *)ri->ri_bits + y * scanspan + ((startx / 32) * 4);
 	align = startx & ALIGNMASK;
 	width = ri->ri_font->fontwidth + align;
 	lmask = ALL1BITS >> align;
@@ -109,7 +109,7 @@ om_putchar(cookie, row, startcol, uc, attr)
 		}
 	}
 	else {
-		caddr_t q = p;
+		u_int8_t *q = p;
 		u_int32_t lhalf, rhalf;
 
 		while (height > 0) {
@@ -138,8 +138,8 @@ om_erasecols(cookie, row, startcol, ncols, attr)
 	long attr;
 {
         struct rasops_info *ri = cookie;
-        caddr_t p;
-        int scanspan, startx, height, width, align, w, y;
+        u_int8_t *p;
+        int scanspan, startx, height, width, align, w, y, fg, bg;
         u_int32_t lmask, rmask, fill;
 
         scanspan = ri->ri_stride;
@@ -147,9 +147,10 @@ om_erasecols(cookie, row, startcol, ncols, attr)
         startx = ri->ri_font->fontwidth * startcol;
         height = ri->ri_font->fontheight;
         w = ri->ri_font->fontwidth * ncols;
-	fill = (attr != 0) ? ALL1BITS : ALL0BITS;
+	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
+	fill = (bg != 0) ? ALL1BITS : ALL0BITS;
 
-	p = (caddr_t)ri->ri_bits + y * scanspan + ((startx / 32) * 4);
+	p = (u_int8_t *)ri->ri_bits + y * scanspan + ((startx / 32) * 4);
 	align = startx & ALIGNMASK;
 	width = w + align;
 	lmask = ALL1BITS >> align;
@@ -164,7 +165,7 @@ om_erasecols(cookie, row, startcol, ncols, attr)
 		}
 	}
 	else {
-		caddr_t q = p;
+		u_int8_t *q = p;
 		while (height > 0) {
 			W(p) = (R(p) & ~lmask) | (fill & lmask);
 			width -= 2 * BLITWIDTH;
@@ -192,17 +193,18 @@ om_eraserows(cookie, startrow, nrows, attr)
 	long attr;
 {
 	struct rasops_info *ri = cookie;
-	caddr_t p, q;
-	int scanspan, starty, height, width, w;
+	u_int8_t *p, *q;
+	int scanspan, starty, height, width, w, fg, bg;
 	u_int32_t rmask, fill;
 
 	scanspan = ri->ri_stride;
 	starty = ri->ri_font->fontheight * startrow;
 	height = ri->ri_font->fontheight * nrows;
 	w = ri->ri_emuwidth;
-	fill = (attr == 1) ? ALL1BITS : ALL0BITS;
+	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);
+	fill = (bg != 0) ? ALL1BITS : ALL0BITS;
 
-	p = (caddr_t)ri->ri_bits + starty * scanspan;
+	p = (u_int8_t *)ri->ri_bits + starty * scanspan;
 	width = w;
         rmask = ALL1BITS << (-width & ALIGNMASK);
 	q = p;
@@ -230,7 +232,7 @@ om_copyrows(cookie, srcrow, dstrow, nrows)
 	int srcrow, dstrow, nrows;
 {
         struct rasops_info *ri = cookie;
-        caddr_t p, q;
+        u_int8_t *p, *q;
 	int scanspan, offset, srcy, height, width, w;
         u_int32_t rmask;
         
@@ -243,7 +245,7 @@ om_copyrows(cookie, srcrow, dstrow, nrows)
 		srcy += height;
 	}
 
-	p = (caddr_t)ri->ri_bits + srcy * ri->ri_stride;
+	p = (u_int8_t *)ri->ri_bits + srcy * ri->ri_stride;
 	w = ri->ri_emuwidth;
 	width = w;
 	rmask = ALL1BITS << (-width & ALIGNMASK);
@@ -273,7 +275,7 @@ om_copycols(cookie, startrow, srccol, dstcol, ncols)
 	int startrow, srccol, dstcol, ncols;
 {
 	struct rasops_info *ri = cookie;
-	caddr_t sp, dp, basep;
+	u_int8_t *sp, *dp, *basep;
 	int scanspan, height, width, align, shift, w, y, srcx, dstx;
 	u_int32_t lmask, rmask;
 
@@ -283,7 +285,7 @@ om_copycols(cookie, startrow, srccol, dstcol, ncols)
 	dstx = ri->ri_font->fontwidth * dstcol;
 	height = ri->ri_font->fontheight;
 	w = ri->ri_font->fontwidth * ncols;
-	basep = (caddr_t)ri->ri_bits + y * scanspan;
+	basep = (u_int8_t *)ri->ri_bits + y * scanspan;
 
 	align = shift = srcx & ALIGNMASK;
 	width = w + align;
@@ -309,7 +311,7 @@ om_copycols(cookie, startrow, srccol, dstcol, ncols)
 	}
 	/* copy forward (left-to-right) */
 	else if (dstcol < srccol || srccol + ncols < dstcol) {
-		caddr_t sq = sp, dq = dp;
+		u_int8_t *sq = sp, *dq = dp;
 
 		w = width;
 		while (height > 0) {
@@ -332,7 +334,7 @@ om_copycols(cookie, startrow, srccol, dstcol, ncols)
 	}
 	/* copy backward (right-to-left) */
 	else {
-		caddr_t sq, dq;
+		u_int8_t *sq, *dq;
 
 		sq = (sp += width / 32 * 4);
 		dq = (dp += width / 32 * 4);
@@ -373,7 +375,7 @@ om_cursor(cookie, on, row, col)
 	int on, row, col;
 {
 	struct rasops_info *ri = cookie;
-	caddr_t p;
+	u_int8_t *p;
 	int scanspan, startx, height, width, align, y;
 	u_int32_t lmask, rmask, image;
 
@@ -395,7 +397,7 @@ om_cursor(cookie, on, row, col)
 	startx = ri->ri_font->fontwidth * col;
 	height = ri->ri_font->fontheight;
 
-	p = (caddr_t)ri->ri_bits + y * scanspan + ((startx / 32) * 4);
+	p = (u_int8_t *)ri->ri_bits + y * scanspan + ((startx / 32) * 4);
 	align = startx & ALIGNMASK;
 	width = ri->ri_font->fontwidth + align;
 	lmask = ALL1BITS >> align;
@@ -410,7 +412,7 @@ om_cursor(cookie, on, row, col)
 		}
 	}
 	else {
-		caddr_t q = p;
+		u_int8_t *q = p;
 
 		while (height > 0) {
 			image = R(p);
