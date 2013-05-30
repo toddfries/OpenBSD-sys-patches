@@ -1,3 +1,4 @@
+/* $OpenBSD$ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -17,51 +18,49 @@
 #ifndef __FUSE_NODE_H__
 #define __FUSE_NODE_H__
 
+#include <ufs/ufs/quota.h>
+#include <ufs/ufs/inode.h>
+#include <ufs/ufs/ufs_extern.h>
+
 enum fufh_type {
-    FUFH_INVALID = -1,
-    FUFH_RDONLY  = 0,
-    FUFH_WRONLY  = 1,
-    FUFH_RDWR    = 2,
-    FUFH_MAXTYPE = 3,
+	FUFH_INVALID = -1,
+	FUFH_RDONLY  = 0,
+	FUFH_WRONLY  = 1,
+	FUFH_RDWR    = 2,
+	FUFH_MAXTYPE = 3,
 };
 
 struct fuse_filehandle {
-    uint64_t fh_id;
-    enum fufh_type fh_type;
+	uint64_t fh_id;
+	enum fufh_type fh_type;
 };
 
 struct fuse_node {
-    LIST_ENTRY(fuse_node) i_hash;    /* Hash chain */
-    struct vnode *i_vnode;        /* vnode associated with this inode */
-    struct lockf *i_lockf;        /* Head of byte-level lock list. */
-    struct lock i_lock;        /* node lock */
-    ino_t i_number;            /* the identity of the inode */
-    int i_fd;            /* fd of fuse session */
+	struct inode ufs_ino;
 
-    struct fuse_mnt *i_mnt;        /* fs associated with this inode */
-    uint64_t parent;
+	/* fd of fuse session and parent ino_t*/
+	uint64_t parent;
 
-    /** I/O **/
-    struct     fuse_filehandle fufh[FUFH_MAXTYPE];
+	/** I/O **/
+	struct     fuse_filehandle fufh[FUFH_MAXTYPE];
 
-    /** flags **/
-    uint32_t   flag;
-
-    /** meta **/
-    struct vattr      cached_attrs;
-    off_t             filesize;
-    uint64_t          nlookup;
-    enum vtype        vtype;
+	/** meta **/
+	struct vattr      cached_attrs;
+	off_t             filesize;
+	uint64_t          nlookup;
+	enum vtype        vtype;
 };
 
-extern struct fuse_node **fusehashtbl;
-extern u_long fusehash;
+#ifdef ITOV
+# undef ITOV
+#endif
+#define ITOV(ip) ((ip)->ufs_ino.i_vnode)
 
-void fusefs_ihashinit(void);
-struct vnode *fusefs_ihashget(int, ino_t);
-int fusefs_ihashins(struct fuse_node *);
-void fusefs_ihashrem(struct fuse_node *);
-#define ITOV(ip) ((ip)->i_vnode)
+#ifdef VTOI
+# undef VTOI
+#endif
 #define VTOI(vp) ((struct fuse_node *)(vp)->v_data)
+
+uint64_t fuse_fd_get(struct fuse_node *, enum fufh_type);
 
 #endif /* __FUSE_NODE_H__ */

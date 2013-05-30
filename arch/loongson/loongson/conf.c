@@ -130,6 +130,7 @@ cdev_decl(pci);
 #include "bthub.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -210,6 +211,7 @@ struct cdevsw	cdevsw[] =
 	cdev_disk_init(1,diskmap),	/* 70: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 71: pppx */
 	cdev_usbdev_init(NUSCANNER,uscanner),	/* 72: USB scanners */
+	cdev_fuse_init(NFUSE,fuse),	/* 73: fuse */
 };
 
 int	nchrdev = nitems(cdevsw);

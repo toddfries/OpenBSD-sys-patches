@@ -124,6 +124,7 @@ int	nblkdev = nitems(bdevsw);
 #include "vscsi.h"
 #include "pppx.h"
 #include "hotplug.h"
+#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -214,7 +215,7 @@ struct cdevsw	cdevsw[] =
 	cdev_mouse_init(NWSKBD, wskbd),	/* 79: keyboards */
 	cdev_mouse_init(NWSMOUSE, wsmouse), /* 80: mice */
 	cdev_mouse_init(NWSMUX, wsmux),	/* 81: ws multiplexer */
-	cdev_notdef(),			/* 82 */
+	cdev_fuse_init(NFUSE, fuse),	/* 82: fuse */
 	cdev_notdef(),			/* 83 */
 	cdev_notdef(),			/* 84 */
 	cdev_notdef(),			/* 85 */

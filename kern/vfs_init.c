@@ -86,6 +86,10 @@ extern  const struct vfsops ntfs_vfsops;
 extern  const struct vfsops udf_vfsops;
 #endif
 
+#ifdef FUSE
+extern const struct vfsops fusefs_vfsops;
+#endif
+
 /* Set up the filesystem operations for vnodes. */
 static struct vfsconf vfsconflist[] = {
 #ifdef FFS
@@ -122,6 +126,10 @@ static struct vfsconf vfsconflist[] = {
 
 #ifdef UDF
 	{ &udf_vfsops, MOUNT_UDF, 13, 0, MNT_LOCAL, NULL },
+#endif
+
+#ifdef FUSE
+	{ &fusefs_vfsops, MOUNT_FUSEFS, 18, 0, MNT_LOCAL, NULL },
 #endif
 };
 

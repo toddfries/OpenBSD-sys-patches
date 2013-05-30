@@ -1,3 +1,4 @@
+/* $OpenBSD$ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -22,118 +23,189 @@
 #include <sys/mount.h>
 #include <sys/malloc.h>
 #include <sys/vnode.h>
+#include <sys/pool.h>
 
 #include "fuse_kernel.h"
 #include "fuse_node.h"
 #include "fusefs.h"
 
-#ifdef    FUSE_DEBUG_MSG
-#define    DPRINTF(fmt, arg...)    printf("fuse ipc: " fmt, ##arg)
+#ifdef	FUSE_DEBUG_MSG
+#define	DPRINTF(fmt, arg...)	printf("fuse ipc: " fmt, ##arg)
 #else
-#define    DPRINTF(fmt, arg...)
+#define	DPRINTF(fmt, arg...)
 #endif
+
+struct fuse_msg *
+fuse_alloc_in(struct fuse_mnt *fmp, int data_in_len, int data_out_len,
+    fuse_cb cb, enum msg_type type)
+{
+	struct fuse_msg *msg;
+
+	msg = pool_get(&fusefs_msgin_pool, PR_WAITOK | PR_ZERO);
+	bzero(msg, sizeof(*msg));
+
+	if (data_in_len == 0)
+		msg->data = 0;
+	else
+		msg->data = malloc(data_in_len, M_FUSEFS, M_WAITOK | M_ZERO);
+	msg->len = data_in_len;
+	msg->cb = cb;
+	msg->fmp = fmp;
+	msg->type = type;
+
+	if (type != msg_intr) {
+		msg->buff.len = data_out_len;
+		msg->buff.data_rcv = NULL;
+	}
+
+	return (msg);
+}
 
 void
 fuse_make_in(struct mount *mp, struct fuse_in_header *hdr, int len,
     enum fuse_opcode op, ino_t ino, struct proc *p)
 {
-    struct fuse_mnt *fmp;
+	struct fuse_mnt *fmp;
 
-    fmp = VFSTOFUSEFS(mp);
-    fmp->unique++;
+	fmp = VFSTOFUSEFS(mp);
+	fmp->unique++;
 
-    hdr->len = sizeof(*hdr) + len;
-    hdr->opcode = op;
-    hdr->nodeid = ino;
-    hdr->unique = fmp->unique;
+	hdr->len = sizeof(*hdr) + len;
+	hdr->opcode = op;
+	hdr->nodeid = ino;
+	hdr->unique = fmp->unique;
 
-    DPRINTF("create unique %i\n", hdr->unique);
+	DPRINTF("create unique %i\n", hdr->unique);
 
-    if (!p) {
-        hdr->pid = curproc->p_pid;
-        hdr->uid = 0;
-        hdr->gid = 0;
-    } else {
-        hdr->pid = p->p_pid;
-        hdr->uid = p->p_cred->p_ruid;
-        hdr->gid = p->p_cred->p_rgid;
-    }
+	if (!p) {
+		hdr->pid = curproc->p_pid;
+		hdr->uid = 0;
+		hdr->gid = 0;
+	} else {
+		hdr->pid = p->p_pid;
+		hdr->uid = p->p_cred->p_ruid;
+		hdr->gid = p->p_cred->p_rgid;
+	}
+}
+
+int
+fuse_send_in(struct fuse_mnt *fmp, struct fuse_msg *msg)
+{
+	int error = 0;
+	struct fuse_msg *m;
+
+	SIMPLEQ_INSERT_TAIL(&fmq_in, msg, node);
+	wakeup(&fmq_in);
+	fuse_device_kqwakeup(fmp->dev);
+
+	if ((error = tsleep(msg, PWAIT, "fuse msg", TSLEEP_TIMEOUT * hz))) {
+		/* look for msg inFIFO IN*/
+		SIMPLEQ_FOREACH(m, &fmq_in, node) {
+			if (m == msg) {
+				DPRINTF("remove unread msg\n");
+				SIMPLEQ_REMOVE_HEAD(&fmq_in, node);
+				break;
+			}
+		}
+		SIMPLEQ_FOREACH(m, &fmq_wait, node) {
+			if (m == msg) {
+				DPRINTF("remove msg with no response\n");
+				SIMPLEQ_REMOVE_HEAD(&fmq_wait, node);
+				break;
+			}
+		}
+		return (error);
+	}
+
+	if (msg->error) {
+		error = msg->error;
+	}
+
+	return (error);
+}
+
+void
+fuse_clean_msg(struct fuse_msg *msg)
+{
+	if (msg->data) {
+		free(msg->data, M_FUSEFS);
+		msg->data = NULL;
+	}
+
+	if (msg->type != msg_intr && msg->buff.data_rcv) {
+		free(msg->buff.data_rcv, M_FUSEFS);
+		msg->buff.data_rcv = NULL;
+	}
+
+	pool_put(&fusefs_msgin_pool, msg);
 }
 
 void
 fuse_init_resp(struct fuse_msg *msg, struct fuse_out_header *hdr, void *data)
 {
-    struct fuse_init_out *out = data;
+	struct fuse_init_out *out = data;
 
-    DPRINTF("async init unique %i\n", msg->hdr->unique);
-    DPRINTF("init_out flags %i\n", out->flags);
-    DPRINTF("init_out major %i\n", out->major);
-    DPRINTF("init_out minor %i\n", out->minor);
-    DPRINTF("init_out max_readahead %i\n", out->max_readahead);
-    DPRINTF("init_out max_write %i\n", out->max_write);
-    DPRINTF("init_out unused %i\n", out->unused);
-
-    msg->fmp->sess_init = 1;
-    msg->fmp->max_write = out->max_readahead;
+	msg->fmp->sess_init = 1;
+	msg->fmp->max_write = out->max_readahead;
 }
 
 void
 fuse_sync_resp(struct fuse_msg *msg, struct fuse_out_header *hdr, void *data)
 {
-    size_t len;
+	size_t len;
 
-    DPRINTF("unique %i\n", msg->hdr->unique);
+	DPRINTF("unique %i\n", msg->hdr.unique);
 
-    if (msg->type != msg_buff)
-        DPRINTF("bad msg type\n");
+	if (msg->type != msg_buff)
+		DPRINTF("bad msg type\n");
 
-    if (data != NULL && msg->rep.buff.len != 0) {
-        len = hdr->len - sizeof(*hdr);
-        if (msg->rep.buff.len != len) {
-            DPRINTF("fusefs: packet size error on opcode %i\n",
-                msg->hdr->opcode);
-        }
+	if (data != NULL && msg->buff.len != 0) {
+		len = hdr->len - sizeof(*hdr);
+		if (msg->buff.len != len) {
+			printf("fusefs: packet size error on opcode %i\n",
+			    msg->hdr.opcode);
+		}
 
-        if (msg->rep.buff.len > len)
-            printf("unused byte : 0x%x\n", msg->rep.buff.len - len);
+		if (msg->buff.len > len)
+			printf("unused byte : 0x%x\n", msg->buff.len - len);
 
-        msg->rep.buff.data_rcv = malloc(msg->rep.buff.len, M_FUSEFS,
-            M_WAITOK | M_ZERO);
-        memcpy(msg->rep.buff.data_rcv, data, msg->rep.buff.len);
+		msg->buff.data_rcv = malloc(msg->buff.len,  M_FUSEFS,
+		    M_WAITOK | M_ZERO);
+		memcpy(msg->buff.data_rcv, data, msg->buff.len);
 
-        wakeup(msg);
+		wakeup(msg);
 
-    } else if (data != NULL) {
-        len = hdr->len - sizeof(*hdr);
-        msg->rep.buff.data_rcv = malloc(len,  M_FUSEFS,
-            M_WAITOK | M_ZERO);
-        memcpy(msg->rep.buff.data_rcv, data, len);
-        msg->rep.buff.len = len;
+	} else if (data != NULL) {
+		len = hdr->len - sizeof(*hdr);
+		msg->buff.data_rcv = malloc(len,  M_FUSEFS,
+		    M_WAITOK | M_ZERO);
+		memcpy(msg->buff.data_rcv, data, len);
+		msg->buff.len = len;
 
-        wakeup(msg);
-    } else if (hdr->error) {
-        msg->error = hdr->error;
-        DPRINTF("error %i\n", msg->error);
-        wakeup(msg);
-    } else {
-        msg->error = -1;
-        DPRINTF("ack for msg\n");
-        wakeup(msg);
-    }
+		wakeup(msg);
+	} else if (hdr->error) {
+		msg->error = hdr->error;
+		DPRINTF("error %i\n", msg->error);
+		wakeup(msg);
+	} else {
+		msg->error = 0;
+		DPRINTF("ack for msg\n");
+		wakeup(msg);
+	}
 }
 
 void
 fuse_sync_it(struct fuse_msg *msg, struct fuse_out_header *hdr, void *data)
 {
-    DPRINTF("unique %i\n", msg->hdr->unique);
+	DPRINTF("unique %i\n", msg->hdr.unique);
 
-    if (msg->type != msg_intr)
-        printf("bad msg type\n");
+	if (msg->type != msg_intr)
+		printf("bad msg type\n");
 
-    if (data != NULL)
-        printf("normally data should be Null\n");
+	if (data != NULL)
+		printf("normally data should be Null\n");
 
-    msg->rep.it_res = hdr->error;
-    DPRINTF("errno = %d\n", msg->rep.it_res);
-    wakeup(msg);
+	msg->error = hdr->error;
+	DPRINTF("errno = %d\n", msg->error);
+	wakeup(msg);
 }

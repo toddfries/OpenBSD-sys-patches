@@ -545,6 +545,14 @@ pseudo-device systrace
 pseudo-device ksyms
 file	dev/ksyms.c			ksyms needs-flag
 
+pseudo-device fuse
+file	miscfs/fuse/fuse_device.c	fuse	needs-flag
+file	miscfs/fuse/fuse_file.c		fuse
+file	miscfs/fuse/fuse_lookup.c	fuse
+file	miscfs/fuse/fuse_vfsops.c	fuse
+file	miscfs/fuse/fuse_vnops.c	fuse
+file	miscfs/fuse/fuse_subr.c		fuse
+
 pseudo-device pf: ifnet
 file	net/pf.c			pf	needs-flag
 file	net/pf_norm.c			pf
