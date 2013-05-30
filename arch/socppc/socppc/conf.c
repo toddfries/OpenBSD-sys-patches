@@ -213,7 +213,7 @@ struct cdevsw cdevsw[] = {
 	cdev_disk_init(1,diskmap),	/* 82: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 83: pppx */
 	cdev_hotplug_init(NHOTPLUG,hotplug),	/* 84: devices hot plugging */
-	cdev_fuse_init(NFUSE, fuse),	/* 85: fuse */
+	cdev_fuse_init(NFUSE,fuse),	/* 85: fuse */
 };
 int nchrdev = nitems(cdevsw);
 

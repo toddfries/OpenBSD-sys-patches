@@ -54,7 +54,6 @@ bdev_decl(fd);
 #include "rd.h"
 #include "bktr.h"
 #include "radio.h"
-#include "fuse.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -206,7 +205,7 @@ struct cdevsw	cdevsw[] =
 	cdev_pppx_init(NPPPX,pppx),	/* 64: pppx */
 	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
 	cdev_usbdev_init(NUSCANNER,uscanner),	/* 66: USB scanners */
-	cdev_fuse_init(NFUSE, fuse),	/* 67: fuse */
+	cdev_fuse_init(NFUSE,fuse),	/* 67: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 

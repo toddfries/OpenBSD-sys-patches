@@ -365,7 +365,7 @@ struct cdevsw cdevsw[] = {
 	cdev_bthub_init(NBTHUB,bthub),		/* 100: bthub */
 	cdev_disk_init(1,diskmap),		/* 101: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),		/* 102: pppx */
-	cdev_fuse_init(NFUSE, fuse),		/* 103: fuse */
+	cdev_fuse_init(NFUSE,fuse),		/* 103: fuse */
 };
 
 int nblkdev = nitems(bdevsw);

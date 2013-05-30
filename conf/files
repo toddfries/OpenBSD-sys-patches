@@ -549,7 +549,6 @@ pseudo-device fuse
 file	miscfs/fuse/fuse_device.c	fuse	needs-flag
 file	miscfs/fuse/fuse_file.c		fuse
 file	miscfs/fuse/fuse_lookup.c	fuse
-file	miscfs/fuse/fuse_node.c		fuse
 file	miscfs/fuse/fuse_vfsops.c	fuse
 file	miscfs/fuse/fuse_vnops.c	fuse
 file	miscfs/fuse/fuse_subr.c		fuse

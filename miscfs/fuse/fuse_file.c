@@ -1,3 +1,4 @@
+/* $OpenBSD$ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -15,101 +16,72 @@
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/malloc.h>
+#include <sys/pool.h>
+#include <sys/statvfs.h>
 #include <sys/vnode.h>
-#include <sys/proc.h>
-#include <sys/mount.h>
-#include <sys/stat.h>
-#include <sys/fcntl.h>
+#include <sys/fusebuf.h>
 
-#include "fuse_kernel.h"
-#include "fuse_node.h"
+#include "fusefs_node.h"
 #include "fusefs.h"
 
+#ifdef	FUSE_DEBUG_VNOP
+#define	DPRINTF(fmt, arg...)	printf("fuse vnop: " fmt, ##arg)
+#else
+#define	DPRINTF(fmt, arg...)
+#endif
+
 int
-fuse_file_open(struct fuse_mnt *fmp, struct fuse_node *ip,
-	       enum fufh_type fufh_type, int flags, int isdir)
+fusefs_file_open(struct fusefs_mnt *fmp, struct fusefs_node *ip,
+    enum fufh_type fufh_type, int flags, int isdir, struct proc *p)
 {
-	struct fuse_open_out *open_out;
-	struct fuse_open_in open_in;
-	struct fuse_in_header hdr;
-	struct fuse_msg msg;
-	int error;
+	struct fusebuf *fbuf;
+	int error = 0;
 
-	bzero(&msg, sizeof(msg));
-	msg.hdr = &hdr;
-	msg.data = &open_in;
-	msg.len = sizeof(open_in);
-	msg.cb = &fuse_sync_resp;
-	msg.fmp = fmp;
-	msg.type = msg_buff;
-	
-	open_in.flags = flags;
-	open_in.mode = 0;
-	msg.rep.buff.data_rcv = NULL;
-	msg.rep.buff.len = sizeof(*open_out);
+	fbuf = fb_setup(FUSEFDSIZE, ip->ufs_ino.i_number,
+	    ((isdir) ? FBT_OPENDIR : FBT_OPEN), p);
+	fbuf->fb_io_flags = flags;
 
-	fuse_make_in(fmp->mp, msg.hdr, msg.len, ((isdir)?FUSE_OPENDIR:FUSE_OPEN), 
-		     ip->i_number, curproc);
+	error = fb_queue(fmp->dev, fbuf);
+	if (error) {
+		pool_put(&fusefs_fbuf_pool, fbuf);
+		return (error);
+	}
 
-	TAILQ_INSERT_TAIL(&fmq_in, &msg, node);
-	wakeup(&fmq_in);
-
-	error = tsleep(&msg, PWAIT, "fuse open", 0);
-
-	if (error)
-		return error;
-
-	open_out = (struct fuse_open_out *)msg.rep.buff.data_rcv;
-
-	ip->fufh[fufh_type].fh_id = open_out->fh;
+	ip->fufh[fufh_type].fh_id = fbuf->fb_io_fd;
 	ip->fufh[fufh_type].fh_type = fufh_type;
 
-	free(open_out, M_FUSEFS);
-
-	return 0;
+	pool_put(&fusefs_fbuf_pool, fbuf);
+	return (0);
 }
 
 int
-fuse_file_close(struct fuse_mnt *fmp, struct fuse_node * ip,
-		enum fufh_type  fufh_type, int flags, int isdir)
+fusefs_file_close(struct fusefs_mnt *fmp, struct fusefs_node * ip,
+    enum fufh_type fufh_type, int flags, int isdir, struct proc *p)
 {
-	struct fuse_release_in rel;
-	struct fuse_in_header hdr;
-	struct fuse_msg msg;
-	int error;
+	struct fusebuf *fbuf;
+	int error = 0;
 
-	bzero(&msg, sizeof(msg));
-	bzero(&rel, sizeof(rel));
-	msg.hdr = &hdr;
-	msg.data = &rel;
-	msg.len = sizeof(rel);
-	msg.cb = &fuse_sync_it;
-	msg.fmp = fmp;
-	msg.type = msg_intr;
+	fbuf = fb_setup(FUSEFDSIZE, ip->ufs_ino.i_number,
+	    ((isdir) ? FBT_RELEASEDIR : FBT_RELEASE), p);
+	fbuf->fb_io_fd  = ip->fufh[fufh_type].fh_id;
+	fbuf->fb_io_flags = flags;
 
-	rel.fh  = ip->fufh[fufh_type].fh_id;
-	rel.flags = flags;
-
-	fuse_make_in(fmp->mp, msg.hdr, msg.len, ((isdir)?FUSE_RELEASEDIR:FUSE_RELEASE),
-		     ip->i_number, curproc);
-
-	TAILQ_INSERT_TAIL(&fmq_in, &msg, node);
-	wakeup(&fmq_in);
-
-	error = tsleep(&msg, PWAIT, "fuse close", 0);
-
+	error = fb_queue(fmp->dev, fbuf);
 	if (error)
-		return error;
-
-	error = msg.rep.it_res;
-	if (error)
-		printf("error %d\n", error);
+		printf("fuse file error %d\n", error);
 
 	ip->fufh[fufh_type].fh_id = (uint64_t)-1;
 	ip->fufh[fufh_type].fh_type = FUFH_INVALID;
 
+	pool_put(&fusefs_fbuf_pool, fbuf);
 	return (error);
+}
+
+uint64_t
+fusefs_fd_get(struct fusefs_node *ip, enum fufh_type type)
+{
+	if (ip->fufh[type].fh_type == FUFH_INVALID)
+		type = FUFH_RDWR;
+
+	return (ip->fufh[type].fh_id);
 }

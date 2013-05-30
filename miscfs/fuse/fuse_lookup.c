@@ -1,3 +1,4 @@
+/* $OpenBSD$ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -15,40 +16,40 @@
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/malloc.h>
-#include <sys/vnode.h>
-#include <sys/proc.h>
 #include <sys/mount.h>
-#include <sys/stat.h>
-#include <sys/fcntl.h>
-#include <sys/dirent.h>
+#include <sys/namei.h>
+#include <sys/pool.h>
+#include <sys/statvfs.h>
+#include <sys/vnode.h>
+#include <sys/fusebuf.h>
 
-#include "fuse_kernel.h"
-#include "fuse_node.h"
+#include "fusefs_node.h"
 #include "fusefs.h"
 
-extern int fusefs_lookup(void *);
+#ifdef	FUSE_DEBUG_VNOP
+#define	DPRINTF(fmt, arg...)	printf("fuse vnop: " fmt, ##arg)
+#else
+#define	DPRINTF(fmt, arg...)
+#endif
+
+int fusefs_lookup(void *);
 
 int
 fusefs_lookup(void *v)
 {
 	struct vop_lookup_args *ap = v;
 	struct vnode *vdp;	/* vnode for directory being searched */
-	struct fuse_node *dp;	/* inode for directory being searched */
-	struct fuse_mnt *fmp;	/* file system that directory is in */
+	struct fusefs_node *dp;	/* inode for directory being searched */
+	struct fusefs_mnt *fmp;	/* file system that directory is in */
 	int lockparent;		/* 1 => lockparent flag is set */
 	struct vnode *tdp;	/* returned by VOP_VGET */
-	struct fuse_in_header hdr;
-	struct fuse_msg msg;
+	struct fusebuf *fbuf = NULL;
 	struct vnode **vpp = ap->a_vpp;
 	struct componentname *cnp = ap->a_cnp;
+	struct proc *p = cnp->cn_proc;
 	struct ucred *cred = cnp->cn_cred;
-	struct fuse_entry_out *feo = NULL;
 	int flags;
 	int nameiop = cnp->cn_nameiop;
-	/*struct proc *p = cnp->cn_proc;*/
 	int error = 0;
 	uint64_t nid;
 
@@ -56,13 +57,11 @@ fusefs_lookup(void *v)
 	*vpp = NULL;
 	vdp = ap->a_dvp;
 	dp = VTOI(vdp);
-	fmp = dp->i_mnt;
+	fmp = (struct fusefs_mnt *)dp->ufs_ino.i_ump;
 	lockparent = flags & LOCKPARENT;
 
-#ifdef FUSE_DEBUG_VNOP
-	printf("lookup path %s\n", cnp->cn_pnbuf);
-	printf("lookup file %s\n", cnp->cn_nameptr);
-#endif
+	DPRINTF("lookup path %s\n", cnp->cn_pnbuf);
+	DPRINTF("lookup file %s\n", cnp->cn_nameptr);
 
 	if ((error = VOP_ACCESS(vdp, VEXEC, cred, cnp->cn_proc)) != 0)
 		return (error);
@@ -74,47 +73,37 @@ fusefs_lookup(void *v)
 	if ((error = cache_lookup(vdp, vpp, cnp)) >= 0)
 		return (error);
 
-	/* if we get ".." */
 	if (flags & ISDOTDOT) {
+		/* got ".." */
 		nid = dp->parent;
-		if (nid == 0) {
-			return ENOENT;
-		}
-	} else if (cnp->cn_namelen == 1 && *(cnp->cn_nameptr) == '.') {  /* if we get "." */
-		nid = dp->i_number;
-	} else { /* if we get a real entry */
-		bzero(&msg, sizeof(msg));
-		msg.hdr = &hdr;
-		msg.len = cnp->cn_namelen + 1;
+		if (nid == 0)
+			return (ENOENT);
+	} else if (cnp->cn_namelen == 1 && *(cnp->cn_nameptr) == '.') {
+		nid = dp->ufs_ino.i_number;
+	} else {
+		/* got a real entry */
+		fbuf = fb_setup(FUSEFDSIZE + cnp->cn_namelen + 1,
+		    dp->ufs_ino.i_number, FBT_LOOKUP, p);
 
-		msg.data = malloc(msg.len, M_FUSEFS, M_WAITOK | M_ZERO);
-		memcpy(msg.data, cnp->cn_nameptr, cnp->cn_namelen);
-		((char *)msg.data)[cnp->cn_namelen] = '\0';
+		memcpy(fbuf->fb_dat, cnp->cn_nameptr, cnp->cn_namelen);
+		fbuf->fb_dat[cnp->cn_namelen] = '\0';
 
-		msg.type = msg_buff;
-		msg.rep.buff.len = 0;
-		msg.rep.buff.data_rcv = NULL;
-		msg.cb = &fuse_sync_resp;
-	
-		fuse_make_in(fmp->mp, msg.hdr, msg.len, FUSE_LOOKUP, dp->i_number, curproc);
-	
-		TAILQ_INSERT_TAIL(&fmq_in, &msg, node);
-		wakeup(&fmq_in);
+		error = fb_queue(fmp->dev, fbuf);
 
-		error = tsleep(&msg, PWAIT, "fuse lookup", 0);
-	
-		if (error)
-			return (error);
+		/* tsleep return */
+		if (error == EWOULDBLOCK)
+			goto out;
 
-		if (msg.error) {
-			if ((nameiop == CREATE || nameiop == RENAME) && (flags & ISLASTCN) ) {
+		if (error) {
+			if ((nameiop == CREATE || nameiop == RENAME) &&
+			    (flags & ISLASTCN) ) {
 				if (vdp->v_mount->mnt_flag & MNT_RDONLY)
-					return EROFS;
+					return (EROFS);
 
 				cnp->cn_flags |= SAVENAME;
 
 				if (!lockparent) {
-					VOP_UNLOCK(vdp, 0, curproc);
+					VOP_UNLOCK(vdp, 0, p);
 					cnp->cn_flags |= PDIRUNLOCK;
 				}
 
@@ -126,36 +115,55 @@ fusefs_lookup(void *v)
 			goto out;
 		}
 
-		feo = (struct fuse_entry_out *)msg.rep.buff.data_rcv;
-		nid = feo->nodeid;
+		nid = fbuf->fb_vattr.va_fileid;
 	}
 
 	if (nameiop == DELETE && (flags & ISLASTCN)) {
 		/*
 		 * Write access to directory required to delete files.
 		 */
-		if ((error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc)) != 0)
+		error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc);
+		if (error != 0) {
+			if (fbuf)
+				pool_put(&fusefs_fbuf_pool, fbuf);
 			return (error);
+		}
 
 		cnp->cn_flags |= SAVENAME;
 	}
 
+	if (nameiop == RENAME && (flags & ISLASTCN)) {
+		/*
+		 * Write access to directory required to delete files.
+		 */
+		if ((error = VOP_ACCESS(vdp, VWRITE, cred, cnp->cn_proc)) != 0)
+			return (error);
+
+		if (nid == VTOI(vdp)->ufs_ino.i_number) {
+			error = EISDIR;
+			goto out;
+		}
+
+		cnp->cn_flags |= SAVENAME;
+
+		goto out;
+	}
+
 	if (flags & ISDOTDOT) {
-		printf("lookup for ..\n");
-		VOP_UNLOCK(vdp, 0, curproc);	/* race to get the inode */
+		VOP_UNLOCK(vdp, 0, p);	/* race to get the inode */
 		cnp->cn_flags |= PDIRUNLOCK;
 
 		error = VFS_VGET(fmp->mp, nid, &tdp);
 
 		if (error) {
-			if (vn_lock(vdp, LK_EXCLUSIVE | LK_RETRY, curproc) == 0)
+			if (vn_lock(vdp, LK_EXCLUSIVE | LK_RETRY, p) == 0)
 				cnp->cn_flags &= ~PDIRUNLOCK;
 
 			return (error);
 		}
 
 		if (lockparent && (flags & ISLASTCN)) {
-			if ((error = vn_lock(vdp, LK_EXCLUSIVE, curproc))) {
+			if ((error = vn_lock(vdp, LK_EXCLUSIVE, p))) {
 				vput(tdp);
 				return (error);
 			}
@@ -163,7 +171,7 @@ fusefs_lookup(void *v)
 		}
 		*vpp = tdp;
 
-	} else if (nid == dp->i_number) {
+	} else if (nid == dp->ufs_ino.i_number) {
 		vref(vdp);
 		*vpp = vdp;
 		error = 0;
@@ -171,21 +179,25 @@ fusefs_lookup(void *v)
 		error = VFS_VGET(fmp->mp, nid, &tdp);
 
 		if (!error) {
-			tdp->v_type = IFTOVT(feo->attr.mode);
+			tdp->v_type = IFTOVT(fbuf->fb_vattr.va_mode);
 			VTOI(tdp)->vtype = tdp->v_type;
 		}
 
-		fuse_internal_attr_fat2vat(fmp->mp, &feo->attr, &(VTOI(tdp)->cached_attrs));
-		free(feo, M_FUSEFS);
+		update_vattr(fmp->mp, &fbuf->fb_vattr);
+		memcpy(&(VTOI(tdp)->cached_attrs), &fbuf->fb_vattr,
+		    sizeof(struct vattr));
 
-		if (error)
+		if (error) {
+			if (fbuf)
+				pool_put(&fusefs_fbuf_pool, fbuf);
 			return (error);
-
-		if (vdp != NULL && vdp->v_type == VDIR) {
-			VTOI(tdp)->parent = dp->i_number;
 		}
+
+		if (vdp != NULL && vdp->v_type == VDIR)
+			VTOI(tdp)->parent = dp->ufs_ino.i_number;
+
 		if (!lockparent || !(flags & ISLASTCN)) {
-			VOP_UNLOCK(vdp, 0, curproc);
+			VOP_UNLOCK(vdp, 0, p);
 			cnp->cn_flags |= PDIRUNLOCK;
 		}
 
@@ -193,8 +205,11 @@ fusefs_lookup(void *v)
 	}
 
 out:
-	if ((cnp->cn_flags & MAKEENTRY) && nameiop != CREATE && nameiop != DELETE )
+	if ((cnp->cn_flags & MAKEENTRY) && nameiop != CREATE &&
+	    nameiop != DELETE )
 		cache_enter(vdp, *vpp, cnp);
 
+	if (fbuf)
+		pool_put(&fusefs_fbuf_pool, fbuf);
 	return (error);
 }

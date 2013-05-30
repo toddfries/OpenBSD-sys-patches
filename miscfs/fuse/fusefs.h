@@ -1,3 +1,4 @@
+/* $OpenBSD$ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -19,13 +20,12 @@
 
 struct fuse_msg;
 
-struct fuse_mnt {
+struct fusefs_mnt {
 	struct mount *mp;
 	uint32_t undef_op;
 	uint32_t max_write;
 	int sess_init;
-	int unique;
-	int fd;
+	dev_t dev;
 };
 
 #define	UNDEF_ACCESS	1<<0
@@ -35,83 +35,51 @@ struct fuse_mnt {
 #define UNDEF_READLINK	1<<4
 #define UNDEF_RMDIR	1<<5
 #define UNDEF_REMOVE	1<<6
-
-typedef void (*fuse_cb)(struct fuse_msg *msg,struct fuse_out_header *hdr, void *buf);
-
-struct rcv_buf {
-	void *data_rcv;
-	size_t len;      
-};
-
-enum msg_type {
-	msg_intr,
-	msg_buff,
-	msg_buff_async,
-};
-
-struct fuse_msg {
-	struct fuse_in_header *hdr;
-	struct fuse_mnt *fmp;
-	void *data;
-	int len;
-	int error;
-
-	enum msg_type type;
-	union {
-		struct rcv_buf buff;
-		uint32_t it_res;
-	} rep;
-
-	fuse_cb cb;
-	TAILQ_ENTRY(fuse_msg) node;
-};
+#define UNDEF_SETATTR	1<<7
+#define UNDEF_RENAME	1<<8
+#define UNDEF_SYMLINK	1<<9
 
 extern struct vops fusefs_vops;
+extern struct pool fusefs_fbuf_pool;
 
-/* 
- * In and Out fifo for fuse communication
- */
-TAILQ_HEAD(fuse_msg_head, fuse_msg);
+/* sysctl defines */
+#define FUSEFS_NB_OPENDEVS	1	/* # of fuse devices opened */
+#define FUSEFS_INFBUFS		2	/* # of in fbufs */
+#define FUSEFS_WAITFBUFS	3	/* # of fbufs waiting for a response */
+#define FUSEFS_POOL_NBPAGES	4	/* # total fusefs size */
+#define FUSEFS_MAXID		5	/* number of valid fusefs ids */
 
-extern struct fuse_msg_head fmq_in;
-extern struct fuse_msg_head fmq_wait;
+#define FUSEFS_NAMES { \
+	{ 0, 0}, \
+	{ "fusefs_open_devices", CTLTYPE_INT }, \
+	{ "fusefs_fbufs_in", CTLTYPE_INT }, \
+	{ "fusefs_fbufs_wait", CTLTYPE_INT }, \
+	{ "fusefs_pool_pages", CTLTYPE_INT }, \
+}
 
-/*
- * fuse helpers
- */
-void fuse_make_in(struct mount *, struct fuse_in_header *, int, 
-		  enum fuse_opcode, ino_t, struct proc *);
-void fuse_init_resp(struct fuse_msg *, struct fuse_out_header *, void *);
-void fuse_sync_resp(struct fuse_msg *, struct fuse_out_header *, void *);
-void fuse_sync_it(struct fuse_msg *msg, struct fuse_out_header *hdr, void *data);
+/* fuse helpers */
+#define TSLEEP_TIMEOUT 5
+void update_vattr(struct mount *mp, struct vattr *v);
 
-/*
- * files helpers.
- */
+/* files helpers. */
+int fusefs_file_open(struct fusefs_mnt *, struct fusefs_node *, enum fufh_type,
+    int, int, struct proc *);
+int fusefs_file_close(struct fusefs_mnt *, struct fusefs_node *,
+    enum fufh_type, int, int, struct proc *);
 
-int fuse_file_open(struct fuse_mnt *, struct fuse_node *, enum fufh_type, int, int);
-int fuse_file_close(struct fuse_mnt *, struct fuse_node *, enum fufh_type, int, int);
-
-void fuse_internal_attr_fat2vat(struct mount *, struct fuse_attr *, struct vattr *);
+/* device helpers. */
+void fuse_device_cleanup(dev_t, struct fusebuf *);
+void fuse_device_queue_fbuf(dev_t, struct fusebuf *);
+void fuse_device_set_fmp(struct fusefs_mnt *);
 
 /*
  * The root inode is the root of the file system.  Inode 0 can't be used for
- * normal purposes and bad blocks are normally linked to inode 1, thus
- * the root inode is 2.
+ * normal purposes.
  */
 #define	FUSE_ROOTINO ((ino_t)1)
-#define VFSTOFUSEFS(mp)	((struct fuse_mnt *)((mp)->mnt_data))
+#define VFSTOFUSEFS(mp)	((struct fusefs_mnt *)((mp)->mnt_data))
 
-#define MAX_FUSE_DEV 4
-/*
-#define FUSE_DEBUG_VNOP 42
-#define FUSE_DEBUG_VFS 42
-#define FUSE_DEBUG 42
-#define FUSE_DEV_DEBUG 42
-#define FUSE_DEBUG_MSG 42
-*/
-/*
- * Helpers
- */
+#define FUSE_DEBUG_VNOP
+#define FUSE_DEBUG
 
 #endif /* __FUSEFS_H__ */

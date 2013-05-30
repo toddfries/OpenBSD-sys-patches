@@ -211,7 +211,7 @@ struct cdevsw	cdevsw[] =
 	cdev_pppx_init(NPPPX,pppx),	/* 70: pppx */
 	cdev_notdef(),			/* 71: */
 	cdev_usbdev_init(NUSCANNER,uscanner),	/* 72: USB scanners */
-	cdev_fuse_init(NFUSE, fuse),	/* 73: fuse */
+	cdev_fuse_init(NFUSE,fuse),	/* 73: fuse */
 };
 
 int	nchrdev = nitems(cdevsw);

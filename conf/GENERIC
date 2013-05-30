@@ -80,7 +80,7 @@ scsibus*	at softraid?
 vscsi0		at root		# Userland backed Virtual SCSI
 scsibus*	at vscsi?
 
-pseudo-device	fuse		# filesystem in user land
+pseudo-device	fuse	10	# filesystem in user land
 
 pseudo-device	pf		# packet filter
 pseudo-device	pflog		# pf log if

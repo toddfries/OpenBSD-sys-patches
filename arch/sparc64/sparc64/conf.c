@@ -291,7 +291,7 @@ struct cdevsw	cdevsw[] =
 	cdev_pppx_init(NPPPX,pppx),	/* 131: pppx */
 	cdev_gen_init(NVLDCP,vldcp),	/* 132: vldcp */
 	cdev_vdsp_init(NVDSP,vdsp),	/* 133: vdsp */
-	cdev_fuse_init(NFUSE, fuse)	/* 134: fuse */
+	cdev_fuse_init(NFUSE,fuse),	/* 134: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 

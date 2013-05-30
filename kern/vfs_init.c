@@ -129,7 +129,7 @@ static struct vfsconf vfsconflist[] = {
 #endif
 
 #ifdef FUSE
-	{ &fusefs_vfsops, MOUNT_FUSEFS, 42, 0, MNT_LOCAL, NULL }, /* put 42 as type, I don't know witch number I can use*/
+	{ &fusefs_vfsops, MOUNT_FUSEFS, 18, 0, MNT_LOCAL, NULL },
 #endif
 };
 

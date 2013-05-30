@@ -187,7 +187,7 @@ struct cdevsw   cdevsw[] =
 	cdev_bthub_init(NBTHUB,bthub),	/* 55: bthub */
 	cdev_disk_init(1,diskmap),	/* 56: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 57: pppx */
-	cdev_fuse_init(NFUSE, fuse),	/* 58: fuse */
+	cdev_fuse_init(NFUSE,fuse),	/* 58: fuse */
 };
 int nchrdev = nitems(cdevsw);
 

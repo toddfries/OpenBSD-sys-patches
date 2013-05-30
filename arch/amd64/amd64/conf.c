@@ -287,7 +287,7 @@ struct cdevsw	cdevsw[] =
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 89: vscsi */
 	cdev_disk_init(1,diskmap),	/* 90: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),     /* 91: pppx */
-	cdev_fuse_init(NFUSE, fuse),	/* 92: fuse */
+	cdev_fuse_init(NFUSE,fuse),	/* 92: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 
