@@ -16,25 +16,16 @@
  */
 
 #include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/types.h>
-#include <sys/kernel.h>
-#include <sys/queue.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
-#include <sys/vnode.h>
-#include <sys/lock.h>
 #include <sys/pool.h>
+#include <sys/statvfs.h>
+#include <sys/sysctl.h>
+#include <sys/vnode.h>
+#include <sys/fusebuf.h>
 
-#include "fuse_kernel.h"
-#include "fuse_node.h"
+#include "fusefs_node.h"
 #include "fusefs.h"
-
-#ifdef	FUSE_DEBUG_VFS
-#define	DPRINTF(fmt, arg...)	printf("fuse vfsop: " fmt, ##arg)
-#else
-#define	DPRINTF(fmt, arg...)
-#endif
 
 int	fusefs_mount(struct mount *, const char *, void *, struct nameidata *,
 	    struct proc *);
@@ -69,20 +60,16 @@ const struct vfsops fusefs_vfsops = {
 	fusefs_checkexp
 };
 
-struct pool fusefs_msgin_pool;
-struct pool fusefs_msgout_pool;
+struct pool fusefs_fbuf_pool;
 
 int
 fusefs_mount(struct mount *mp, const char *path, void *data,
     struct nameidata *ndp, struct proc *p)
 {
-	struct fuse_mnt *fmp;
-	struct fuse_msg *msg;
-	struct fuse_init_in *init;
+	struct fusefs_mnt *fmp;
+	struct fusebuf *fbuf;
 	struct fusefs_args args;
 	int error;
-
-	DPRINTF("mount\n");
 
 	if (mp->mnt_flag & MNT_UPDATE)
 		return (EOPNOTSUPP);
@@ -94,9 +81,9 @@ fusefs_mount(struct mount *mp, const char *path, void *data,
 	fmp = malloc(sizeof(*fmp), M_FUSEFS, M_WAITOK | M_ZERO);
 	fmp->mp = mp;
 	fmp->sess_init = 0;
-	fmp->unique = 0;
-	fmp->dev = -1;
-	mp->mnt_data = (qaddr_t)fmp;
+	fmp->dev = args.dev;
+	printf("fusefs: mount dev %i\n", fmp->dev);
+	mp->mnt_data = fmp;
 
 	mp->mnt_flag |= MNT_LOCAL;
 	vfs_getnewfsid(mp);
@@ -106,20 +93,11 @@ fusefs_mount(struct mount *mp, const char *path, void *data,
 	bzero(mp->mnt_stat.f_mntfromname, MNAMELEN);
 	bcopy("fusefs", mp->mnt_stat.f_mntfromname, sizeof("fusefs"));
 
-	msg = fuse_alloc_in(fmp, sizeof(*init), 0, &fuse_init_resp,
-	    msg_buff_async);
+	fuse_device_set_fmp(fmp);
+	fbuf = fb_setup(0, 0, FBT_INIT, p);
 
-	init = (struct fuse_init_in *)msg->data;
-	init->major = FUSE_KERNEL_VERSION;
-	init->minor = FUSE_KERNEL_MINOR_VERSION;
-	init->max_readahead = 4096 * 16;
-	init->flags = 0;
-
-	fuse_make_in(mp, &msg->hdr, msg->len, FUSE_INIT, 0, p);
-
-	/*cannot use fuse_send_in because this call is asynchronous*/
-	SIMPLEQ_INSERT_TAIL(&fmq_in, msg, node);
-	wakeup(&fmq_in);
+	/* cannot tsleep on mount */
+	fuse_device_queue_fbuf(fmp->dev, fbuf);
 
 	return (0);
 }
@@ -127,66 +105,45 @@ fusefs_mount(struct mount *mp, const char *path, void *data,
 int
 fusefs_start(struct mount *mp, int flags, struct proc *p)
 {
-	DPRINTF("start\n");
 	return (0);
 }
 
 int
 fusefs_unmount(struct mount *mp, int mntflags, struct proc *p)
 {
-	struct fuse_mnt *fmp;
-	struct fuse_msg *msg;
+	struct fusefs_mnt *fmp;
+	struct fusebuf *fbuf;
 	extern int doforce;
-	struct fuse_msg *m;
 	int flags = 0;
 	int error;
 
 	fmp = VFSTOFUSEFS(mp);
 
-	DPRINTF("unmount\n");
 	if (fmp->sess_init) {
 
 		fmp->sess_init = 0;
-		msg = fuse_alloc_in(fmp, 0, 0, &fuse_sync_it, msg_intr);
+		fbuf = fb_setup(0, 0, FBT_DESTROY, p);
 
-		fuse_make_in(fmp->mp, &msg->hdr, msg->len, FUSE_DESTROY, 0, p);
-		error = fuse_send_in(fmp, msg);
-		fuse_clean_msg(msg);
+		error = fb_queue(fmp->dev, fbuf);
+		pool_put(&fusefs_fbuf_pool, fbuf);
 
 		if (error)
 			printf("error from fuse\n");
 
-	} else if (fmp->dev != -1) {
-		fuse_device_cleanup(fmp->dev);
-	}
-
-	/* clear FIFO IN*/
-	while ((m = SIMPLEQ_FIRST(&fmq_in))) {
-		DPRINTF("umount unprocessed msg in fmq_in\n");
-		SIMPLEQ_REMOVE_HEAD(&fmq_in, node);
-		fuse_clean_msg(m);
-	}
-
-	/* clear FIFO WAIT*/
-	while ((m = SIMPLEQ_FIRST(&fmq_wait))) {
-		DPRINTF("umount unprocessed msg in fmq_wait\n");
-		SIMPLEQ_REMOVE_HEAD(&fmq_wait, node);
-		fuse_clean_msg(m);
+	} else {
+		fuse_device_cleanup(fmp->dev, NULL);
 	}
 
 	if (mntflags & MNT_FORCE) {
 		/* fusefs can never be rootfs so don't check for it */
-		if (!doforce) {
-			DPRINTF("bad force close\n");
+		if (!doforce)
 			return (EINVAL);
-		}
+
 		flags |= FORCECLOSE;
 	}
 
-	if ((error = vflush(mp, 0, flags))) {
-		DPRINTF("vflush error\n");
+	if ((error = vflush(mp, 0, flags)))
 		return (error);
-	}
 
 	free(fmp, M_FUSEFS);
 
@@ -197,10 +154,8 @@ int
 fusefs_root(struct mount *mp, struct vnode **vpp)
 {
 	struct vnode *nvp;
-	struct fuse_node *ip;
+	struct fusefs_node *ip;
 	int error;
-
-	DPRINTF("root\n");
 
 	if ((error = VFS_VGET(mp, (ino_t)FUSE_ROOTINO, &nvp)) != 0)
 		return (error);
@@ -216,46 +171,35 @@ fusefs_root(struct mount *mp, struct vnode **vpp)
 int fusefs_quotactl(struct mount *mp, int cmds, uid_t uid, caddr_t arg,
     struct proc *p)
 {
-	DPRINTF("quotactl\n");
 	return (0);
 }
 
 int fusefs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 {
-	struct fuse_statfs_out *stat;
-	struct fuse_mnt *fmp;
-	struct fuse_msg *msg;
+	struct fusefs_mnt *fmp;
+	struct fusebuf *fbuf;
 	int error;
-
-	DPRINTF("statfs\n");
 
 	fmp = VFSTOFUSEFS(mp);
 
 	if (fmp->sess_init) {
-		msg = fuse_alloc_in(fmp, 0, sizeof(*stat), &fuse_sync_resp,
-		    msg_buff);
+		fbuf = fb_setup(0, FUSE_ROOT_ID, FBT_STATFS, p);
 
-		fuse_make_in(mp, &msg->hdr, msg->len, FUSE_STATFS, FUSE_ROOT_ID,
-		    NULL);
-
-		error = fuse_send_in(fmp, msg);
+		error = fb_queue(fmp->dev, fbuf);
 
 		if (error) {
-			fuse_clean_msg(msg);
+			pool_put(&fusefs_fbuf_pool, fbuf);
 			return (error);
 		}
 
-		stat = (struct fuse_statfs_out *)msg->buff.data_rcv;
-
-		sbp->f_bavail = stat->st.bavail;
-		sbp->f_bfree = stat->st.bfree;
-		sbp->f_blocks = stat->st.blocks;
-		sbp->f_ffree = stat->st.ffree;
-		sbp->f_files = stat->st.files;
-		sbp->f_bsize = stat->st.frsize;
-		sbp->f_namemax = stat->st.namelen;
-
-		fuse_clean_msg(msg);
+		sbp->f_bavail = fbuf->fb_stat.f_bavail;
+		sbp->f_bfree = fbuf->fb_stat.f_bfree;
+		sbp->f_blocks = fbuf->fb_stat.f_blocks;
+		sbp->f_files = fbuf->fb_stat.f_files;
+		sbp->f_ffree = fbuf->fb_stat.f_ffree;
+		sbp->f_bsize = fbuf->fb_stat.f_frsize;
+		sbp->f_namemax = fbuf->fb_stat.f_namemax;
+		pool_put(&fusefs_fbuf_pool, fbuf);
 	} else {
 		sbp->f_bavail = 0;
 		sbp->f_bfree = 0;
@@ -272,20 +216,16 @@ int fusefs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 int fusefs_sync(struct mount *mp, int waitfor, struct ucred *cred,
     struct proc *p)
 {
-	DPRINTF("sync\n");
 	return (0);
 }
 
 int fusefs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 {
-	struct fuse_mnt *fmp;
-	struct fuse_node *ip;
+	struct fusefs_mnt *fmp;
+	struct fusefs_node *ip;
 	struct vnode *nvp;
 	int i;
 	int error;
-
-	DPRINTF("vget\n");
-
 retry:
 	fmp = VFSTOFUSEFS(mp);
 	/*
@@ -336,41 +276,49 @@ retry:
 
 int fusefs_fhtovp(struct mount *mp, struct fid *fhp, struct vnode **vpp)
 {
-	DPRINTF("fhtovp\n");
 	return (0);
 }
 
 int fusefs_vptofh(struct vnode *vp, struct fid *fhp)
 {
-	DPRINTF("vptofh\n");
 	return (0);
 }
 
 int fusefs_init(struct vfsconf *vfc)
 {
-	DPRINTF("init\n");
-
-	SIMPLEQ_INIT(&fmq_in);
-	SIMPLEQ_INIT(&fmq_wait);
-
-	pool_init(&fusefs_msgin_pool, sizeof(struct fuse_in_header), 0, 0, 0,
-	    "fusemsgin", &pool_allocator_nointr);
-	pool_init(&fusefs_msgout_pool, sizeof(struct fuse_out_header), 0, 0, 0,
-	    "fusemsgout", &pool_allocator_nointr);
+	pool_init(&fusefs_fbuf_pool, sizeof(struct fusebuf), 0, 0, 0,
+	    "fmsg", &pool_allocator_nointr);
 
 	return (0);
 }
 
-int fusefs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldplen,
+int fusefs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
     void *newp, size_t newlen, struct proc *p)
 {
-	DPRINTF("sysctl\n");
-	return (0);
+	extern int stat_fbufs_in, stat_fbufs_wait, stat_opened_fusedev;
+
+	/* all sysctl names at this level are terminal */
+	if (namelen != 1)
+		return (ENOTDIR);		/* overloaded */
+
+	switch (name[0]) {
+	case FUSEFS_NB_OPENDEVS:
+		return (sysctl_rdint(oldp, oldlenp, newp,
+		    stat_opened_fusedev));
+	case FUSEFS_INFBUFS:
+		return (sysctl_rdint(oldp, oldlenp, newp, stat_fbufs_in));
+	case FUSEFS_WAITFBUFS:
+		return (sysctl_rdint(oldp, oldlenp, newp, stat_fbufs_wait));
+	case FUSEFS_POOL_NBPAGES:
+		return (sysctl_rdint(oldp, oldlenp, newp,
+		    fusefs_fbuf_pool.pr_npages));
+	default:
+		return (EOPNOTSUPP);
+	}
 }
 
 int fusefs_checkexp(struct mount *mp, struct mbuf *nam, int *extflagsp,
     struct ucred **credanonp)
 {
-	DPRINTF("checkexp\n");
 	return (0);
 }

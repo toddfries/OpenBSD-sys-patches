@@ -15,8 +15,8 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef __FUSE_NODE_H__
-#define __FUSE_NODE_H__
+#ifndef _FUSEFS_NODE_H_
+#define _FUSEFS_NODE_H_
 
 #include <ufs/ufs/quota.h>
 #include <ufs/ufs/inode.h>
@@ -30,19 +30,19 @@ enum fufh_type {
 	FUFH_MAXTYPE = 3,
 };
 
-struct fuse_filehandle {
+struct fusefs_filehandle {
 	uint64_t fh_id;
 	enum fufh_type fh_type;
 };
 
-struct fuse_node {
+struct fusefs_node {
 	struct inode ufs_ino;
 
 	/* fd of fuse session and parent ino_t*/
 	uint64_t parent;
 
 	/** I/O **/
-	struct     fuse_filehandle fufh[FUFH_MAXTYPE];
+	struct     fusefs_filehandle fufh[FUFH_MAXTYPE];
 
 	/** meta **/
 	struct vattr      cached_attrs;
@@ -59,8 +59,8 @@ struct fuse_node {
 #ifdef VTOI
 # undef VTOI
 #endif
-#define VTOI(vp) ((struct fuse_node *)(vp)->v_data)
+#define VTOI(vp) ((struct fusefs_node *)(vp)->v_data)
 
-uint64_t fuse_fd_get(struct fuse_node *, enum fufh_type);
+uint64_t fusefs_fd_get(struct fusefs_node *, enum fufh_type);
 
-#endif /* __FUSE_NODE_H__ */
+#endif /* _FUSEFS_NODE_H_ */
