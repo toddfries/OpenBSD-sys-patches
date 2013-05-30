@@ -235,17 +235,9 @@ ar5k_ar5212_attach(u_int16_t device, void *sc, bus_space_tag_t st,
 		hal->ah_phy_spending = AR5K_AR5212_PHY_SPENDING_AR5424;
 		hal->ah_radio_5ghz_revision = hal->ah_radio_2ghz_revision =
 		    AR5K_SREV_VER_AR5413;
-	} else if (hal->ah_mac_version == (AR5K_SREV_VER_AR2425 >> 4) ||
-		hal->ah_mac_version == (AR5K_SREV_VER_AR2417 >> 4) ||
-		hal->ah_phy_revision == (AR5K_SREV_PHY_2425)) {
+	} else if (srev == AR5K_SREV_VER_AR2425) {
 		hal->ah_radio = AR5K_AR2425;
-		hal->ah_single_chip = AH_TRUE;
-		hal->ah_radio_5ghz_revision= AR5K_SREV_RAD_2425;
-	} else if ((hal->ah_mac_version == (AR5K_SREV_VER_AR2424 >> 4)) ||
-		(hal->ah_phy_revision == AR5K_SREV_PHY_5413)) {
-		hal->ah_radio = AR5K_AR5413;
-		hal->ah_single_chip = AH_TRUE;
-		hal->ah_radio_5ghz_revision = AR5K_SREV_RAD_5413;
+		hal->ah_phy_spending = AR5K_AR5212_PHY_SPENDING_AR5112;
 	} else if (hal->ah_radio_5ghz_revision < AR5K_SREV_RAD_5112) {
 		hal->ah_radio = AR5K_AR5111;
 		hal->ah_phy_spending = AR5K_AR5212_PHY_SPENDING_AR5111;
@@ -270,12 +262,6 @@ ar5k_ar5212_attach(u_int16_t device, void *sc, bus_space_tag_t st,
 		hal->ah_phy_spending = AR5K_AR5212_PHY_SPENDING_AR5424;
 	}
 	hal->ah_phy = AR5K_AR5212_PHY(0);
-
-	/* Enable pci core retry fix on Hainan (5213A) and later chips */
-	if (srev >= AR5K_SREV_VER_AR5213A) {
-		AR5K_REG_ENABLE_BITS(AR5K_AR5212_PCICFG,
-			AR5K_AR5212_PCICFG_RETRY_FIX);
-	}
 
 	if (hal->ah_pci_express == AH_TRUE) {
 		/* PCI-Express based devices need some extra initialization */
@@ -327,7 +313,7 @@ ar5k_ar5212_nic_reset(struct ath_hal *hal, u_int32_t val)
 HAL_BOOL
 ar5k_ar5212_nic_wakeup(struct ath_hal *hal, u_int16_t flags)
 {
-	u_int32_t turbo, mode, clock, bus_flags;
+	u_int32_t turbo, mode, clock;
 
 	turbo = 0;
 	mode = 0;
@@ -350,10 +336,7 @@ ar5k_ar5212_nic_wakeup(struct ath_hal *hal, u_int16_t flags)
 		clock |= AR5K_AR5212_PHY_PLL_44MHZ;
 	} else if (flags & IEEE80211_CHAN_5GHZ) {
 		mode |= AR5K_AR5212_PHY_MODE_FREQ_5GHZ;
-		if (hal->ah_radio == AR5K_AR5413)
-			clock |= AR5K_AR5212_PHY_PLL_40MHZ_5413;
-		else
-			clock |= AR5K_AR5212_PHY_PLL_40MHZ;
+		clock |= AR5K_AR5212_PHY_PLL_40MHZ;
 	} else {
 		AR5K_PRINT("invalid radio frequency mode\n");
 		return (AH_FALSE);
@@ -379,30 +362,23 @@ ar5k_ar5212_nic_wakeup(struct ath_hal *hal, u_int16_t flags)
 	 * Reset and wakeup the device
 	 */
 
-	/* Wakeup the device */
-	if (ar5k_ar5212_set_power(hal,
-		HAL_PM_AWAKE, AH_TRUE, 0) == AH_FALSE) {
-		AR5K_PRINT("failed to wakeup the AR5212 chipset\n");
+	/* ...reset chipset and PCI device (if not PCI-E) */
+	if (hal->ah_pci_express == AH_FALSE &&
+	    ar5k_ar5212_nic_reset(hal, AR5K_AR5212_RC_CHIP) == AH_FALSE) {
+		AR5K_PRINT("failed to reset the AR5212 + PCI chipset\n");
 		return (AH_FALSE);
 	}
 
-	/* ...reset chipset and PCI device */
-	bus_flags = (hal->ah_pci_express != AH_FALSE) ? 0 : AR5K_AR5212_RC_PCI;
-	if (ar5k_ar5212_nic_reset(hal, bus_flags) == AH_FALSE) {
-		AR5K_PRINT("failed to reset the AR5212 chipset\n");
-		return (AH_FALSE);
-	}
-
-	/* ...wakeup again */
+	/* ...wakeup */
 	if (ar5k_ar5212_set_power(hal,
 		HAL_PM_AWAKE, AH_TRUE, 0) == AH_FALSE) {
-		AR5K_PRINT("failed to wakeup (again) the AR5212 chipset\n");
+		AR5K_PRINT("failed to resume the AR5212 (again)\n");
 		return (AH_FALSE);
 	}
 
 	/* ...final warm reset */
 	if (ar5k_ar5212_nic_reset(hal, 0) == AH_FALSE) {
-		AR5K_PRINT("failed to reset (again) the AR5212 chipset\n");
+		AR5K_PRINT("failed to warm reset the AR5212\n");
 		return (AH_FALSE);
 	}
 
@@ -510,12 +486,11 @@ ar5k_ar5212_reset(struct ath_hal *hal, HAL_OPMODE op_mode, HAL_CHANNEL *channel,
 	 */
 	if (chanchange == AH_TRUE) {
 		s_seq = AR5K_REG_READ(AR5K_AR5212_DCU_SEQNUM(0));
+		s_ant = AR5K_REG_READ(AR5K_AR5212_DEFAULT_ANTENNA);
 	} else {
 		s_seq = 0;
+		s_ant = 1;
 	}
-
-	/* Save default antenna */
-	s_ant = AR5K_REG_READ(AR5K_AR5212_DEFAULT_ANTENNA);
 
 	s_led[0] = AR5K_REG_READ(AR5K_AR5212_PCICFG) &
 	    AR5K_AR5212_PCICFG_LEDSTATE;
@@ -545,10 +520,6 @@ ar5k_ar5212_reset(struct ath_hal *hal, HAL_OPMODE op_mode, HAL_CHANNEL *channel,
 		ee_mode = AR5K_EEPROM_MODE_11B;
 		break;
 	case CHANNEL_G:
-		mode = AR5K_INI_VAL_11G_TURBO;
-		freq = AR5K_INI_RFGAIN_2GHZ;
-		ee_mode = AR5K_EEPROM_MODE_11G;
-		break;
 	case CHANNEL_PUREG:
 		mode = AR5K_INI_VAL_11G;
 		freq = AR5K_INI_RFGAIN_2GHZ;
@@ -573,8 +544,6 @@ ar5k_ar5212_reset(struct ath_hal *hal, HAL_OPMODE op_mode, HAL_CHANNEL *channel,
 		AR5K_PRINTF("invalid channel: %d\n", channel->c_channel);
 		return (AH_FALSE);
 	}
-
-	ar5k_ar5212_hw_set_sleep_clock(hal, AH_FALSE);
 
 	/* PHY access enable */
 	AR5K_REG_WRITE(AR5K_AR5212_PHY(0), AR5K_AR5212_PHY_SHIFT_5GHZ);
@@ -604,12 +573,11 @@ ar5k_ar5212_reset(struct ath_hal *hal, HAL_OPMODE op_mode, HAL_CHANNEL *channel,
 		    nitems(ar2413_mode), mode);
 		break;
 	case AR5K_AR2425:
+		AR5K_REG_WRITE(AR5K_AR5212_PHY(648), 0x018830c6);
 		if (mode == AR5K_INI_VAL_11B)
 			mode = AR5K_INI_VAL_11G;
 		ar5k_write_mode(hal, ar2425_mode,
 		    nitems(ar2425_mode), mode);
-		AR5K_REG_WRITE(AR5K_AR5212_PHY_AGC, 0x00004000);
-		AR5K_REG_WRITE(0xa274, 0x081b7caa);
 		break;
 	default:
 		AR5K_PRINTF("invalid radio: %d\n", hal->ah_radio);
@@ -1183,16 +1151,8 @@ ar5k_ar5212_reset_tx_queue(struct ath_hal *hal, u_int queue)
 	/*
 	 * Set misc registers
 	 */
-	/* Enable DCU early termination for this queue */
 	AR5K_REG_WRITE(AR5K_AR5212_QCU_MISC(queue),
 	    AR5K_AR5212_QCU_MISC_DCU_EARLY);
-
-	/* Enable DCU to wait for next fragment from QCU */
-	AR5K_REG_WRITE(AR5K_AR5212_DCU_MISC(queue),
-	    AR5K_AR5212_DCU_MISC_FRAG_WAIT);
-
-	AR5K_REG_WRITE(AR5K_AR5212_DCU_MISC(queue),
-	    AR5K_AR5212_DCU_MISC_SEQNUM_CTL);
 
 	if (tq->tqi_cbr_period) {
 		AR5K_REG_WRITE(AR5K_AR5212_QCU_CBRCFG(queue),
@@ -1248,27 +1208,26 @@ ar5k_ar5212_reset_tx_queue(struct ath_hal *hal, u_int queue)
 
 		AR5K_REG_ENABLE_BITS(AR5K_AR5212_DCU_MISC(queue),
 		    (AR5K_AR5212_DCU_MISC_ARBLOCK_CTL_GLOBAL <<
-		    AR5K_AR5212_DCU_MISC_ARBLOCK_CTL_S) |
-		    AR5K_AR5212_DCU_MISC_ARBLOCK_IGNORE |
+		    AR5K_AR5212_DCU_MISC_ARBLOCK_CTL_GLOBAL) |
 		    AR5K_AR5212_DCU_MISC_POST_FR_BKOFF_DIS |
 		    AR5K_AR5212_DCU_MISC_BCN_ENABLE);
-		break;
-
-	case HAL_TX_QUEUE_CAB:
-		AR5K_REG_ENABLE_BITS(AR5K_AR5212_QCU_MISC(queue),
-		    AR5K_AR5212_QCU_MISC_FRSHED_BCN_SENT_GT |
-		    AR5K_AR5212_QCU_MISC_CBREXP |
-		    AR5K_AR5212_QCU_MISC_CBREXP_BCN);
 
 		AR5K_REG_WRITE(AR5K_AR5212_QCU_RDYTIMECFG(queue),
 		    ((AR5K_TUNE_BEACON_INTERVAL -
 		    (AR5K_TUNE_SW_BEACON_RESP - AR5K_TUNE_DMA_BEACON_RESP) -
 		    AR5K_TUNE_ADDITIONAL_SWBA_BACKOFF) * 1024) |
 		    AR5K_AR5212_QCU_RDYTIMECFG_ENABLE);
+		break;
+
+	case HAL_TX_QUEUE_CAB:
+		AR5K_REG_ENABLE_BITS(AR5K_AR5212_QCU_MISC(queue),
+		    AR5K_AR5212_QCU_MISC_FRSHED_DBA_GT |
+		    AR5K_AR5212_QCU_MISC_CBREXP |
+		    AR5K_AR5212_QCU_MISC_CBREXP_BCN);
 
 		AR5K_REG_ENABLE_BITS(AR5K_AR5212_DCU_MISC(queue),
 		    (AR5K_AR5212_DCU_MISC_ARBLOCK_CTL_GLOBAL <<
-		    AR5K_AR5212_DCU_MISC_ARBLOCK_CTL_S));
+		    AR5K_AR5212_DCU_MISC_ARBLOCK_CTL_GLOBAL));
 		break;
 
 	case HAL_TX_QUEUE_PSPOLL:
@@ -2919,7 +2878,7 @@ ar5k_ar5212_get_capabilities(struct ath_hal *hal)
 
 		/* Set supported modes */
 		hal->ah_capabilities.cap_mode =
-		    HAL_MODE_11A | HAL_MODE_TURBO | HAL_MODE_11G;
+		    HAL_MODE_11A | HAL_MODE_TURBO | HAL_MODE_XR;
 	}
 
 	/* This chip will support 802.11b if the 2GHz radio is connected */
@@ -2929,8 +2888,10 @@ ar5k_ar5212_get_capabilities(struct ath_hal *hal)
 
 		if (b)
 			hal->ah_capabilities.cap_mode |= HAL_MODE_11B;
+#if 0
 		if (g)
-			hal->ah_capabilities.cap_mode |= HAL_MODE_PUREG;
+			hal->ah_capabilities.cap_mode |= HAL_MODE_11G;
+#endif
 	}
 
 	/* GPIO */
@@ -3101,75 +3062,3 @@ ar5k_ar5212_set_txpower_limit(struct ath_hal *hal, u_int power)
 	AR5K_PRINTF("changing txpower to %d\n", power);
 	return (ar5k_ar5212_txpower(hal, channel, power));
 }
-
-/*
- * If there is an external 32KHz crystal available, use it
- * as ref. clock instead of 32/40MHz clock and baseband clocks
- * to save power during sleep or restore normal 32/40MHz
- * operation.
- *
- * XXX: When operating on 32KHz certain PHY registers (27 - 31,
- *      123 - 127) require delay on access.
- */
-void
-ar5k_ar5212_hw_set_sleep_clock(struct ath_hal *hal, HAL_BOOL enable)
-{
-	struct ar5k_eeprom_info *ee = &hal->ah_capabilities.cap_eeprom;
-	u_int32_t scal, spending, usec32;
-
-	/* Only set 32KHz settings if we have an external
-	 * 32KHz crystal present */
-	if ((AR5K_EEPROM_HAS32KHZCRYSTAL(ee->ee_misc1) ||
-		AR5K_EEPROM_HAS32KHZCRYSTAL_OLD(ee->ee_misc1)) &&
-		enable) {
-		/* TODO */
-	} else {
-		/* Disable sleep clock operation and
-		 * restore default parameters */
-		AR5K_REG_DISABLE_BITS(AR5K_AR5212_PCICFG,
-			AR5K_AR5212_PCICFG_SLEEP_CLOCK_EN);
-
-		AR5K_REG_WRITE_BITS(AR5K_AR5212_PCICFG,
-			AR5K_AR5212_PCICFG_SLEEP_CLOCK_RATE, 0);
-
-		AR5K_REG_WRITE(AR5K_AR5212_PHY_SCR, 0x1f);
-		AR5K_REG_WRITE(AR5K_AR5212_PHY_SLMT,
-			AR5K_AR5212_PHY_SLMT_32MHZ);
-
-		if (hal->ah_mac_version == (AR5K_SREV_VER_AR2417 >> 4))
-			scal = AR5K_AR5212_PHY_SCAL_32MHZ_2417;
-		else if (ee->ee_is_hb63 == AH_TRUE)
-			scal = AR5K_AR5212_PHY_SCAL_32MHZ_HB63;
-		else
-			scal = AR5K_AR5212_PHY_SCAL_32MHZ;
-
-		AR5K_REG_WRITE(AR5K_AR5212_PHY_SCAL, scal);
-
-		AR5K_REG_WRITE(AR5K_AR5212_PHY_SCLOCK,
-			AR5K_AR5212_PHY_SCLOCK_32MHZ);
-		AR5K_REG_WRITE(AR5K_AR5212_PHY_SDELAY,
-			AR5K_AR5212_PHY_SCLOCK_32MHZ);
-
-		if ((hal->ah_radio == AR5K_AR5112) ||
-		    (hal->ah_radio == AR5K_AR5413) ||
-		    (hal->ah_mac_version == (AR5K_SREV_VER_AR2417 >> 4)))
-			spending = 0x14;
-		else
-			spending = 0x18;
-
-		AR5K_REG_WRITE(AR5K_AR5212_PHY_SPENDING, spending);
-
-		if ((hal->ah_radio == AR5K_AR5112) ||
-		    (hal->ah_radio == AR5K_AR5413))
-			usec32 = 39;
-		else
-			usec32 = 31;
-
-		AR5K_REG_WRITE_BITS(AR5K_AR5212_USEC,
-			AR5K_AR5212_USEC_32, usec32);
-
-		AR5K_REG_WRITE_BITS(AR5K_AR5212_TSF_PARM,
-			AR5K_AR5212_TSF_PARM_INC, 1);
-	}
-}
-

@@ -616,7 +616,7 @@ ath_chan2flags(struct ieee80211com *ic, struct ieee80211_channel *chan)
 	case IEEE80211_MODE_11B:
 		return CHANNEL_B;
 	case IEEE80211_MODE_11G:
-		return CHANNEL_PUREG;
+		return CHANNEL_G;
 	case IEEE80211_MODE_TURBO:
 		return CHANNEL_T;
 	default:
