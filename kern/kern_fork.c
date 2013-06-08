@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.146 2013/04/06 03:44:34 tedu Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.151 2013/06/06 13:09:37 haesbaert Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -72,7 +72,6 @@
 int	nprocesses = 1;		/* process 0 */
 int	nthreads = 1;		/* proc 0 */
 int	randompid;		/* when set to 1, pid's go random */
-pid_t	lastpid;
 struct	forkstat forkstat;
 
 void fork_return(void *);
@@ -323,7 +322,6 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	if (flags & FORK_THREAD) {
 		atomic_setbits_int(&p->p_flag, P_THREAD);
 		p->p_p = pr = curpr;
-		TAILQ_INSERT_TAIL(&pr->ps_threads, p, p_thr_link);
 		pr->ps_refcnt++;
 	} else {
 		process_new(p, curpr);
@@ -437,11 +435,7 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 		newstrp = systrace_getproc();
 #endif
 
-	/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
-	do {
-		lastpid = 1 + (randompid ? arc4random() : lastpid) % PID_MAX;
-	} while (pidtaken(lastpid));
-	p->p_pid = lastpid;
+	p->p_pid = allocpid();
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
 	LIST_INSERT_HEAD(PIDHASH(p->p_pid), p, p_hash);
@@ -466,6 +460,16 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 				pr->ps_ptstat->pe_other_pid = curpr->ps_pid;
 			}
 		}
+	} else {
+		TAILQ_INSERT_TAIL(&pr->ps_threads, p, p_thr_link);
+		/*
+		 * if somebody else wants to take us to single threaded mode,
+		 * count ourselves in.
+		 */
+		if (pr->ps_single) {
+			curpr->ps_singlecount++;
+			atomic_setbits_int(&p->p_flag, P_SUSPSINGLE);
+		}
 	}
 
 #if NSYSTRACE > 0
@@ -484,18 +488,21 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	 * For new processes, set accounting bits
 	 */
 	if ((flags & FORK_THREAD) == 0) {
-		getmicrotime(&pr->ps_start);
+		getnanotime(&pr->ps_start);
 		pr->ps_acflag = AFORK;
 	}
 
 	/*
 	 * Make child runnable and add to run queue.
 	 */
-	SCHED_LOCK(s);
-	p->p_stat = SRUN;
-	p->p_cpu = sched_choosecpu_fork(curp, flags);
-	setrunqueue(p);
-	SCHED_UNLOCK(s);
+	if ((flags & FORK_IDLE) == 0) {
+		SCHED_LOCK(s);
+		p->p_stat = SRUN;
+		p->p_cpu = sched_choosecpu_fork(curp, flags);
+		setrunqueue(p);
+		SCHED_UNLOCK(s);
+	} else
+		p->p_cpu = arg;
 
 	if (newptstat)
 		free(newptstat, M_SUBPROC);
@@ -553,20 +560,54 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 /*
  * Checks for current use of a pid, either as a pid or pgid.
  */
+pid_t oldpids[100];
 int
-pidtaken(pid_t pid)
+ispidtaken(pid_t pid)
 {
+	uint32_t i;
 	struct proc *p;
+
+	for (i = 0; i < nitems(oldpids); i++)
+		if (pid == oldpids[i])
+			return (1);
 
 	if (pfind(pid) != NULL)
 		return (1);
 	if (pgfind(pid) != NULL)
 		return (1);
 	LIST_FOREACH(p, &zombproc, p_list) {
-		if (p->p_pid == pid || (p->p_p->ps_pgrp && p->p_p->ps_pgrp->pg_id == pid))
+		if (p->p_pid == pid ||
+		    (p->p_p->ps_pgrp && p->p_p->ps_pgrp->pg_id == pid))
 			return (1);
 	}
 	return (0);
+}
+
+/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
+pid_t
+allocpid(void)
+{
+	static pid_t lastpid;
+	pid_t pid;
+
+	if (!randompid) {
+		/* only used early on for system processes */
+		pid = ++lastpid;
+	} else {
+		do {
+			pid = 1 + arc4random_uniform(PID_MAX - 1);
+		} while (ispidtaken(pid));
+	}
+
+	return pid;
+}
+
+void
+freepid(pid_t pid)
+{
+	static uint32_t idx;
+
+	oldpids[idx++ % nitems(oldpids)] = pid;
 }
 
 #if defined(MULTIPROCESSOR)

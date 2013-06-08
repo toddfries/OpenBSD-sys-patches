@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.243 2013/04/18 18:30:41 deraadt Exp $ */
+/* $OpenBSD: acpi.c,v 1.246 2013/06/01 23:00:16 mlarkin Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -60,6 +60,7 @@
 #define APMDEV_NORMAL	0
 #define APMDEV_CTL	8
 
+#include "wd.h"
 #include "wsdisplay.h"
 
 #ifdef ACPI_DEBUG
@@ -154,8 +155,7 @@ void	acpi_disable_allgpes(struct acpi_softc *);
 extern struct aml_node aml_root;
 
 struct cfattach acpi_ca = {
-	sizeof(struct acpi_softc), acpi_match, acpi_attach, NULL,
-	config_activate_children
+	sizeof(struct acpi_softc), acpi_match, acpi_attach
 };
 
 struct cfdriver acpi_cd = {
@@ -631,6 +631,7 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	struct acpi_dsdt *p_dsdt;
 	int idx;
 #ifndef SMALL_KERNEL
+	int wakeup_dev_ct;
 	struct acpi_wakeq *wentry;
 	struct device *dev;
 	struct acpi_ac *ac;
@@ -796,10 +797,15 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 
 #ifndef SMALL_KERNEL
 	/* Display wakeup devices and lowest S-state */
+	wakeup_dev_ct = 0;
 	printf("%s: wakeup devices", DEVNAME(sc));
 	SIMPLEQ_FOREACH(wentry, &sc->sc_wakedevs, q_next) {
-		printf(" %.4s(S%d)", wentry->q_node->name,
-		    wentry->q_state);
+		if (wakeup_dev_ct < 16)
+			printf(" %.4s(S%d)", wentry->q_node->name,
+			    wentry->q_state);
+		else if (wakeup_dev_ct == 16)
+			printf(" [...]");
+		wakeup_dev_ct ++;
 	}
 	printf("\n");
 
@@ -855,8 +861,10 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	/* attach battery, power supply and button devices */
 	aml_find_node(&aml_root, "_HID", acpi_foundhid, sc);
 
+#if NWD > 0
 	/* Attach IDE bay */
 	aml_walknodes(&aml_root, AML_WALK_PRE, acpi_foundide, sc);
+#endif
 
 	/* attach docks */
 	aml_find_node(&aml_root, "_DCK", acpi_founddock, sc);
@@ -1362,6 +1370,7 @@ is_ejectable_bay(struct aml_node *node)
 	return ((is_ata(node) || is_ata(node->parent)) && is_ejectable(node));
 }
 
+#if NWD > 0
 int
 acpiide_notify(struct aml_node *node, int ntype, void *arg)
 {
@@ -1448,6 +1457,7 @@ acpi_foundide(struct aml_node *node, void *arg)
 	aml_register_notify(node, "acpiide", acpiide_notify, ide, 0);
 	return (0);
 }
+#endif /* NWD > 0 */
 
 void
 acpi_reset(void)

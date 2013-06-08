@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.50 2013/04/21 13:00:21 jsing Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.52 2013/05/21 15:01:53 jsing Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -330,7 +330,7 @@ sr_raid1_rw(struct sr_workunit *wu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_ccb		*ccb;
 	struct sr_chunk		*scp;
-	int			ios, chunk, i, s, rt;
+	int			ios, chunk, i, rt;
 	daddr64_t		blk;
 
 	/* blk and scsi error will be handled by sr_validate_io */
@@ -402,28 +402,10 @@ ragain:
 		sr_wu_enqueue_ccb(wu, ccb);
 	}
 
-	s = splbio();
+	sr_schedule_wu(wu);
 
-	/* rebuild io, let rebuild routine deal with it */
-	if (wu->swu_flags & SR_WUF_REBUILD)
-		goto queued;
-
-	/* current io failed, restart */
-	if (wu->swu_state == SR_WU_RESTART)
-		goto start;
-
-	/* deferred io failed, don't restart */
-	if (wu->swu_state == SR_WU_REQUEUE)
-		goto queued;
-
-	if (sr_check_io_collision(wu))
-		goto queued;
-
-start:
-	sr_raid_startwu(wu);
-queued:
-	splx(s);
 	return (0);
+
 bad:
 	/* wu is unwound by sr_wu_put */
 	return (1);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_input.c,v 1.260 2013/04/10 08:50:59 mpi Exp $	*/
+/*	$OpenBSD: tcp_input.c,v 1.262 2013/06/03 16:57:05 bluhm Exp $	*/
 /*	$NetBSD: tcp_input.c,v 1.23 1996/02/13 23:43:44 christos Exp $	*/
 
 /*
@@ -68,6 +68,8 @@
  * Research Laboratory (NRL).
  */
 
+#include "pf.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -96,7 +98,6 @@
 #include <netinet/tcpip.h>
 #include <netinet/tcp_debug.h>
 
-#include "pf.h"
 #if NPF > 0
 #include <net/pfvar.h>
 #endif
@@ -468,23 +469,6 @@ tcp_input(struct mbuf *m, ...)
 		/* save ip_tos before clearing it for checksum */
 		iptos = ip->ip_tos;
 #endif
-		/*
-		 * Checksum extended TCP header and data.
-		 */
-		if ((m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_OK) == 0) {
-			if (m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_BAD) {
-				tcpstat.tcps_inhwcsum++;
-				tcpstat.tcps_rcvbadsum++;
-				goto drop;
-			}
-			if (in4_cksum(m, IPPROTO_TCP, iphlen, tlen) != 0) {
-				tcpstat.tcps_rcvbadsum++;
-				goto drop;
-			}
-		} else {
-			m->m_pkthdr.csum_flags &= ~M_TCP_CSUM_IN_OK;
-			tcpstat.tcps_inhwcsum++;
-		}
 		break;
 #ifdef INET6
 	case AF_INET6:
@@ -518,27 +502,39 @@ tcp_input(struct mbuf *m, ...)
 			/* XXX stat */
 			goto drop;
 		}
-
-		/*
-		 * Checksum extended TCP header and data.
-		 */
-		if ((m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_OK) == 0) {
-			if (m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_BAD) {
-				tcpstat.tcps_inhwcsum++;
-				tcpstat.tcps_rcvbadsum++;
-				goto drop;
-			}
-			if (in6_cksum(m, IPPROTO_TCP, sizeof(struct ip6_hdr),
-			    tlen)) {
-				tcpstat.tcps_rcvbadsum++;
-				goto drop;
-			}
-		} else {
-			m->m_pkthdr.csum_flags &= ~M_TCP_CSUM_IN_OK;
-			tcpstat.tcps_inhwcsum++;
-		}
 		break;
 #endif
+	}
+
+	/*
+	 * Checksum extended TCP header and data.
+	 */
+	if ((m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_OK) == 0) {
+		int sum;
+
+		if (m->m_pkthdr.csum_flags & M_TCP_CSUM_IN_BAD) {
+			tcpstat.tcps_inhwcsum++;
+			tcpstat.tcps_rcvbadsum++;
+			goto drop;
+		}
+		switch (af) {
+		case AF_INET:
+			sum = in4_cksum(m, IPPROTO_TCP, iphlen, tlen);
+			break;
+#ifdef INET6
+		case AF_INET6:
+			sum = in6_cksum(m, IPPROTO_TCP, sizeof(struct ip6_hdr),
+			    tlen);
+			break;
+#endif
+		}
+		if (sum != 0) {
+			tcpstat.tcps_rcvbadsum++;
+			goto drop;
+		}
+	} else {
+		m->m_pkthdr.csum_flags &= ~M_TCP_CSUM_IN_OK;
+		tcpstat.tcps_inhwcsum++;
 	}
 
 	/*
@@ -878,7 +874,8 @@ findpcb:
 #endif
 
 #if NPF > 0
-	if (m->m_pkthdr.pf.statekey) {
+	if (m->m_pkthdr.pf.statekey && !m->m_pkthdr.pf.statekey->inp &&
+	    !inp->inp_pf_sk) {
 		m->m_pkthdr.pf.statekey->inp = inp;
 		inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
 	}
@@ -1323,6 +1320,17 @@ trimthenstep6:
 		    ((opti.ts_present &&
 		    TSTMP_LT(tp->ts_recent, opti.ts_val)) ||
 		    SEQ_GT(th->th_seq, tp->rcv_nxt))) {
+#if NPF > 0
+			/*
+			 * The socket will be recreated but the new state
+			 * has already been linked to the socket.  Remove the
+			 * link between old socket and new state.
+			 */
+			if (inp->inp_pf_sk) {
+				inp->inp_pf_sk->inp = NULL;
+				inp->inp_pf_sk = NULL;
+			}
+#endif
 			/*
 			* Advance the iss by at least 32768, but
 			* clear the msb in order to make sure

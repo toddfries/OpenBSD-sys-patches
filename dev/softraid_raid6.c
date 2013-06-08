@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.49 2013/04/27 14:06:09 jsing Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.52 2013/05/21 15:01:53 jsing Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -405,6 +405,7 @@ sr_raid6_rw(struct sr_workunit *wu)
 			printf("%s: can't get wu_r", DEVNAME(sd->sd_sc));
 			goto bad;
 		}
+		wu_r->swu_state = SR_WU_INPROGRESS;
 		wu_r->swu_flags |= SR_WUF_DISCIPLINE;
 	}
 
@@ -629,26 +630,10 @@ sr_raid6_rw(struct sr_workunit *wu)
 
 		wu = wu_r;
 	}
-
-	/* rebuild io, let rebuild routine deal with it */
-	if (wu->swu_flags & SR_WUF_REBUILD)
-		goto queued;
-
-	/* current io failed, restart */
-	if (wu->swu_state == SR_WU_RESTART)
-		goto start;
-
-	/* deferred io failed, don't restart */
-	if (wu->swu_state == SR_WU_REQUEUE)
-		goto queued;
-
-	if (sr_check_io_collision(wu))
-		goto queued;
-
-start:
-	sr_raid_startwu(wu);
-queued:
 	splx(s);
+
+	sr_schedule_wu(wu);
+
 	return (0);
 bad:
 	/* XXX - can leak pbuf/qbuf on error. */

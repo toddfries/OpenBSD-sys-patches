@@ -1,3 +1,5 @@
+/*	$OpenBSD: hibernate.h,v 1.4 2013/06/04 01:20:23 pirofti Exp $	*/
+
 /*
  * Copyright (c) 2011 Mike Larkin <mlarkin@openbsd.org>
  *
@@ -27,3 +29,8 @@ int	hibernate_suspend(void);
 void	hibernate_switch_stack_machdep(void);
 void	hibernate_resume_machdep(void);
 void	hibernate_activate_resume_pt_machdep(void);
+void	hibernate_enable_intr_machdep(void);
+void	hibernate_disable_intr_machdep(void);
+#ifdef MULTIPROCESSOR
+void	hibernate_quiesce_cpus(void);
+#endif /* MULTIPROCESSOR */

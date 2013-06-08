@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched.h,v 1.30 2011/11/16 20:50:19 deraadt Exp $	*/
+/*	$OpenBSD: sched.h,v 1.33 2013/06/04 22:17:34 tedu Exp $	*/
 /* $NetBSD: sched.h,v 1.2 1999/02/28 18:14:58 ross Exp $ */
 
 /*-
@@ -94,7 +94,7 @@
  * XXX - expose to userland for now.
  */
 struct schedstate_percpu {
-	struct timeval spc_runtime;	/* time curproc started running */
+	struct timespec spc_runtime;	/* time curproc started running */
 	__volatile int spc_schedflags;	/* flags; see below */
 	u_int spc_schedticks;		/* ticks for schedclock() */
 	u_int64_t spc_cp_time[CPUSTATES]; /* CPU state statistics */
@@ -180,8 +180,8 @@ void remrunqueue(struct proc *);
 /*
  * XXX Instead of using struct lock for the kernel lock and thus requiring us
  * XXX to implement simplelocks, causing all sorts of fine-grained locks all
- * XXX over our tree getting activated consuming both time and potentially
- * XXX introducing locking protocol bugs.
+ * XXX over our tree to be activated, the sched_lock is a different kind of
+ * XXX lock to avoid introducing locking protocol bugs.
  */
 extern struct __mp_lock sched_lock;
 

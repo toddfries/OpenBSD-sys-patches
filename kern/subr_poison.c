@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_poison.c,v 1.3 2013/05/02 18:55:24 tedu Exp $ */
+/*	$OpenBSD: subr_poison.c,v 1.5 2013/05/31 18:29:32 deraadt Exp $ */
 /*
  * Copyright (c) 2013 Ted Unangst <tedu@openbsd.org>
  *
@@ -16,23 +16,34 @@
  */
 
 #include <sys/types.h>
+#include <sys/param.h>
 #include <sys/malloc.h>
+#include <uvm/uvm_extern.h>
 
 /*
  * The POISON is used as known text to copy into free objects so
  * that modifications after frees can be detected.
  */
 #ifdef DEADBEEF0
-#define POISON	((unsigned) DEADBEEF0)
+#define POISON0	((unsigned) DEADBEEF0)
 #else
-#define POISON	((unsigned) 0xdeadbeef)
+#define POISON0	((unsigned) 0xdeadbeef)
+#endif
+#ifdef DEADBEEF1
+#define POISON1	((unsigned) DEADBEEF1)
+#else
+#define POISON1	((unsigned) 0xdeafbead)
 #endif
 #define POISON_SIZE	64
 
 int32_t
 poison_value(void *v)
 {
-	return POISON;
+	ulong l = (u_long)v;
+
+	l = l >> PAGE_SHIFT;
+
+	return (l & 1) ? POISON0 : POISON1;
 }
 
 void

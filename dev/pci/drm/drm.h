@@ -1,4 +1,4 @@
-/* $OpenBSD: drm.h,v 1.9 2013/03/22 05:19:21 jsg Exp $ */
+/* $OpenBSD: drm.h,v 1.11 2013/06/07 20:46:14 kettenis Exp $ */
 /**
  * \file drm.h
  * Header for the Direct Rendering Manager
@@ -175,6 +175,7 @@ enum drm_map_type {
 	_DRM_AGP = 3,		  /**< AGP/GART */
 	_DRM_SCATTER_GATHER = 4,  /**< Scatter/gather memory for PCI DMA */
 	_DRM_CONSISTENT = 5,	  /**< Consistent memory for PCI DMA */
+	_DRM_GEM = 6,		  /**< GEM object */
 };
 
 /**
@@ -653,6 +654,10 @@ struct drm_event_vblank {
 #define DRM_CAP_VBLANK_HIGH_CRTC 0x2
 #define DRM_CAP_DUMB_PREFERRED_DEPTH 0x3
 #define DRM_CAP_DUMB_PREFER_SHADOW 0x4
+#define DRM_CAP_PRIME 0x5
+
+#define DRM_PRIME_CAP_IMPORT 0x1
+#define DRM_PRIME_CAP_EXPORT 0x2
 
 #include "drm_mode.h"
 

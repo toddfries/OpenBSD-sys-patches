@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.17 2013/05/09 15:16:53 patrick Exp $
+# $OpenBSD: GENERIC,v 1.20 2013/06/05 15:03:23 bmercer Exp $
 #
 # GENERIC machine description file
 #
@@ -40,7 +40,6 @@ maxusers	32
 
 # CPU options
 options	CPU_ARMv7	# Support the ARMv7
-makeoptions	CPUFLAGS="-mcpu=armv5"	# dont have gcc v7 support yet.
 
 #option WSDISPLAY_COMPAT_USL		# VT handling
 #option WSDISPLAY_COMPAT_RAWKBD		# can get raw scancodes
@@ -71,8 +70,10 @@ prcm*		at soc?			# power/clock controller
 omdog*		at soc?			# watchdog timer
 omgpio*		at soc?			# user-visible GPIO pins?
 gptimer*	at soc?			# general purpose timers
+dmtimer*	at soc?			# am335x dual mode timers
 ommmc*		at soc?			# SD/MMC card controller
 omusbtll*	at soc?
+cpsw*		at soc?
 
 #omkbd*		at soc?
 #wskbd*		at omkbd? mux 1

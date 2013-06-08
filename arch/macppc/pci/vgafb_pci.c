@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb_pci.c,v 1.27 2012/12/13 13:55:18 mpi Exp $	*/
+/*	$OpenBSD: vgafb_pci.c,v 1.31 2013/06/04 02:26:36 mpi Exp $	*/
 /*	$NetBSD: vga_pci.c,v 1.4 1996/12/05 01:39:38 cgd Exp $	*/
 
 /*
@@ -6,17 +6,17 @@
  * All rights reserved.
  *
  * Author: Chris G. Demetriou
- * 
+ *
  * Permission to use, copy, modify and distribute this software and
  * its documentation is hereby granted, provided that both the copyright
  * notice and this permission notice appear in all copies of the
  * software, derivative works or modified versions, and any portions
  * thereof, and that both notices appear in supporting documentation.
- * 
- * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS" 
- * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND 
+ *
+ * CARNEGIE MELLON ALLOWS FREE USE OF THIS SOFTWARE IN ITS "AS IS"
+ * CONDITION.  CARNEGIE MELLON DISCLAIMS ANY LIABILITY OF ANY KIND
  * FOR ANY DAMAGES WHATSOEVER RESULTING FROM THE USE OF THIS SOFTWARE.
- * 
+ *
  * Carnegie Mellon requests users of this software to return to
  *
  *  Software Distribution Coordinator  or  Software.Distribution@CS.CMU.EDU
@@ -30,14 +30,9 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/malloc.h>
 
-#include <machine/autoconf.h>
-#include <machine/pte.h>
-
-#include <dev/cons.h>
 #include <dev/pci/pcireg.h>
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcidevs.h>
@@ -45,7 +40,6 @@
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 #include <dev/rasops/rasops.h>
-#include <dev/wsfont/wsfont.h>
 
 #include "drm.h"
 
@@ -64,12 +58,12 @@ void	vgafb_pci_attach(struct device *, struct device *, void *);
 void	vgafb_pci_mem_init(struct vga_pci_softc *, uint32_t *, uint32_t *,
 	    uint32_t *, uint32_t *);
 
-struct cfattach vgafb_pci_ca = {
-	sizeof(struct vga_pci_softc), (cfmatch_t)vgafb_pci_match, vgafb_pci_attach,
+const struct cfattach vgafb_pci_ca = {
+	sizeof(struct vga_pci_softc), vgafb_pci_match, vgafb_pci_attach,
 };
 
 pcitag_t vgafb_pci_console_tag;
-struct vga_config vgafb_pci_console_vc;
+struct vga_config vgafbcn;
 
 void
 vgafb_pci_mem_init(struct vga_pci_softc *dev, uint32_t *memaddr,
@@ -193,16 +187,30 @@ vgafb_pci_attach(struct device *parent, struct device  *self, void *aux)
 
 
 	console = (!bcmp(&pa->pa_tag, &vgafb_pci_console_tag, sizeof(pa->pa_tag)));
-	if (console)
-		vc = sc->sc_vc = &vgafb_pci_console_vc;
-	else {
+	if (console) {
+		vc = sc->sc_vc = &vgafbcn;
+
+		/*
+		 * The previous size was not necessarily the real size
+		 * but what is needed for the glass console.
+		 */
+		vc->membase = memaddr;
+		vc->memsize = memsize;
+	} else {
 		vc = sc->sc_vc = (struct vga_config *)
 		    malloc(sizeof(struct vga_config), M_DEVBUF, M_WAITOK);
 
 		/* set up bus-independent VGA configuration */
-		vgafb_init(pa->pa_iot, pa->pa_memt, vc,
-		    memaddr, memsize, mmioaddr, mmiosize);
+		vgafb_init(pa->pa_iot, pa->pa_memt, vc, memaddr, memsize);
 	}
+
+	if (mmiosize != 0) {
+		vc->mmiobase = mmioaddr;
+		vc->mmiosize = mmiosize;
+
+		printf (", mmio");
+	}
+	printf("\n");
 
 	/*
 	 * Enable bus master; X might need this for accelerated graphics.
@@ -210,18 +218,6 @@ vgafb_pci_attach(struct device *parent, struct device  *self, void *aux)
 	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	reg |= PCI_COMMAND_MASTER_ENABLE;
 	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, reg);
-
-	vc->vc_mmap = vgafb_mmap;
-	vc->vc_ioctl = vgafb_ioctl;
-	vc->membase = memaddr;
-	vc->memsize = memsize;
-	vc->mmiobase = mmioaddr;
-	vc->mmiosize = mmiosize;
-
-	if (mmiosize != 0)
-		printf (", mmio");
-
-	printf("\n");
 
 	vgafb_wsdisplay_attach(self, vc, console);
 

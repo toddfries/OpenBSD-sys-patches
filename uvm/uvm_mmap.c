@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_mmap.c,v 1.91 2012/07/21 06:46:58 matthew Exp $	*/
+/*	$OpenBSD: uvm_mmap.c,v 1.93 2013/05/30 16:29:46 tedu Exp $	*/
 /*	$NetBSD: uvm_mmap.c,v 1.49 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -258,16 +258,12 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 		amap = entry->aref.ar_amap;	/* top layer */
 		uobj = entry->object.uvm_obj;	/* bottom layer */
 
-		if (uobj != NULL)
-			simple_lock(&uobj->vmobjlock);
-
 		for (/* nothing */; start < lim; start += PAGE_SIZE, pgi++) {
 			*pgi = 0;
 			if (amap != NULL) {
 				/* Check the top layer first. */
 				anon = amap_lookup(&entry->aref,
 				    start - entry->start);
-				/* Don't need to lock anon here. */
 				if (anon != NULL && anon->an_page != NULL) {
 					/*
 					 * Anon has the page for this entry
@@ -290,9 +286,6 @@ sys_mincore(struct proc *p, void *v, register_t *retval)
 				}
 			}
 		}
-
-		if (uobj != NULL)
-			simple_unlock(&uobj->vmobjlock);
 	}
 
  out:

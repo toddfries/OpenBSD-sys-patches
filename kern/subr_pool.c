@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.120 2013/05/03 18:26:07 tedu Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.122 2013/06/05 00:44:06 tedu Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -484,8 +484,11 @@ pool_get(struct pool *pp, int flags)
 	KASSERT(flags & (PR_WAITOK | PR_NOWAIT));
 
 #ifdef DIAGNOSTIC
-	if ((flags & PR_WAITOK) != 0)
+	if ((flags & PR_WAITOK) != 0) {
 		assertwaitok();
+		if (pool_debug == 2)
+			yield();
+	}
 #endif /* DIAGNOSTIC */
 
 	mtx_enter(&pp->pr_mtx);
@@ -777,6 +780,12 @@ pool_do_put(struct pool *pp, void *v)
 	 * Return to item list.
 	 */
 #ifdef DIAGNOSTIC
+	if (pool_debug) {
+		struct pool_item *qi;
+		XSIMPLEQ_FOREACH(qi, &ph->ph_itemlist, pi_list)
+			if (pi == qi)
+				panic("double pool_put: %p", pi);
+	}
 	pi->pi_magic = poison_value(pi);
 	if (ph->ph_magic) {
 		poison_mem(pi + 1, pp->pr_size - sizeof(*pi));

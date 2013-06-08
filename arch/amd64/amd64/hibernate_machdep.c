@@ -1,3 +1,5 @@
+/*	$OpenBSD: hibernate_machdep.c,v 1.13 2013/06/04 01:20:23 pirofti Exp $	*/
+
 /*
  * Copyright (c) 2012 Mike Larkin <mlarkin@openbsd.org>
  *
@@ -247,10 +249,10 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 
 	/* Identity map 3 pages for stack */
 	pmap_kenter_pa(HIBERNATE_STACK_PAGE, HIBERNATE_STACK_PAGE, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_STACK_PAGE + PAGE_SIZE,
-		HIBERNATE_STACK_PAGE + PAGE_SIZE, VM_PROT_ALL);
-	pmap_kenter_pa(HIBERNATE_STACK_PAGE + 2*PAGE_SIZE,
-		HIBERNATE_STACK_PAGE + 2*PAGE_SIZE, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_STACK_PAGE - PAGE_SIZE,
+		HIBERNATE_STACK_PAGE - PAGE_SIZE, VM_PROT_ALL);
+	pmap_kenter_pa(HIBERNATE_STACK_PAGE - 2*PAGE_SIZE,
+		HIBERNATE_STACK_PAGE - 2*PAGE_SIZE, VM_PROT_ALL);
 	pmap_activate(curproc);
 
 	bzero((caddr_t)HIBERNATE_PML4T, PAGE_SIZE);
@@ -263,7 +265,7 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	bzero((caddr_t)HIBERNATE_PT_LOW2, PAGE_SIZE);
 	bzero((caddr_t)HIBERNATE_PT_HI, PAGE_SIZE);
 	bzero((caddr_t)HIBERNATE_SELTABLE, PAGE_SIZE);
-	bzero((caddr_t)HIBERNATE_STACK_PAGE, PAGE_SIZE*3);
+	bzero((caddr_t)(HIBERNATE_STACK_PAGE - 3*PAGE_SIZE) , 3*PAGE_SIZE);
 
 	/* First 512GB PML4E */
 	pde = (pt_entry_t *)(HIBERNATE_PML4T +
@@ -296,7 +298,9 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	 */
 	kern_start_2m_va = (paddr_t)&start & ~(PAGE_MASK_2M);
 	kern_end_2m_va = (paddr_t)&end & ~(PAGE_MASK_2M);
-	phys_page_number = 0;
+
+	/* amd64 kernels load at 16MB phys (on the 8th 2mb page) */
+	phys_page_number = 8;
 
 	for (page = kern_start_2m_va; page <= kern_end_2m_va;
 	    page += NBPD_L2, phys_page_number++) {
@@ -371,3 +375,48 @@ hibernate_inflate_skip(union hibernate_info *hib_info, paddr_t dest)
 	return (0);
 }
 
+void
+hibernate_enable_intr_machdep(void)
+{
+	enable_intr();
+}
+
+void
+hibernate_disable_intr_machdep(void)
+{
+	disable_intr();
+}
+
+#ifdef MULTIPROCESSOR
+/*
+ * Quiesce CPUs in a multiprocessor machine before resuming. We need to do
+ * this since the APs will be hatched (but waiting for CPUF_GO), and we don't
+ * want the APs to be executing code and causing side effects during the
+ * unpack operation.
+ */
+void
+hibernate_quiesce_cpus(void)
+{
+	int i;
+
+	KASSERT(CPU_IS_PRIMARY(curcpu()));
+
+	/* Start the hatched (but idling) APs */
+	cpu_boot_secondary_processors();
+	sched_start_secondary_cpus();
+
+	/* 
+	 * Wait for cpus to halt so we know their FPU state has been
+	 * saved and their caches have been written back.
+	 */
+	x86_broadcast_ipi(X86_IPI_HALT_REALMODE);
+	for (i = 0; i < ncpus; i++) {
+		struct cpu_info *ci = cpu_info[i];
+
+		if (CPU_IS_PRIMARY(ci))
+			continue;
+		while (ci->ci_flags & CPUF_RUNNING)
+			;
+	}
+}
+#endif /* MULTIPROCESSOR */

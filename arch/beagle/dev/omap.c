@@ -1,4 +1,4 @@
-/* $OpenBSD: omap.c,v 1.6 2013/05/09 15:16:53 patrick Exp $ */
+/* $OpenBSD: omap.c,v 1.8 2013/06/05 15:03:23 bmercer Exp $ */
 /*
  * Copyright (c) 2005,2008 Dale Rahn <drahn@openbsd.com>
  *
@@ -63,6 +63,18 @@ struct board_dev beagleboard_devs[] = {
 	{ "omgpio",	5 },
 	{ "ommmc",	0 },		/* HSMMC1 */
 	{ "com",	2 },		/* UART3 */
+	{ NULL,		0 }
+};
+
+struct board_dev beaglebone_devs[] = {
+	{ "prcm",	0 },
+	{ "intc",	0 },
+	{ "dmtimer",	0 },
+	{ "dmtimer",	1 },
+	{ "omdog",	0 },
+	{ "ommmc",	0 },		/* HSMMC0 */
+	{ "com",	0 },		/* UART0 */
+	{ "cpsw",	0 },
 	{ NULL,		0 }
 };
 
@@ -133,6 +145,11 @@ omap_attach(struct device *parent, struct device *self, void *aux)
 		printf(": BeagleBoard\n");
 		omap3_init();
 		board_devs = beagleboard_devs;
+		break;
+	case BOARD_ID_AM335X_BEAGLEBONE:
+		printf(": BeagleBone\n");
+		am335x_init();
+		board_devs = beaglebone_devs;
 		break;
 	case BOARD_ID_OMAP3_OVERO:
 		printf(": Gumstix Overo\n");

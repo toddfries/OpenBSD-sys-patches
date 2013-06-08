@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vnops.c,v 1.46 2013/03/28 02:08:39 guenther Exp $	*/
+/*	$OpenBSD: udf_vnops.c,v 1.49 2013/06/02 15:38:26 guenther Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -72,15 +72,16 @@ struct vops udf_vops = {
 	.vop_strategy	= udf_strategy,
 	.vop_lock	= udf_lock,
 	.vop_unlock	= udf_unlock,
+	.vop_pathconf	= udf_pathconf,
 	.vop_islocked	= udf_islocked,
 	.vop_print	= udf_print
 };
 
 #define UDF_INVALID_BMAP	-1
 
-/* Look up a unode based on the ino_t passed in and return its vnode */
+/* Look up a unode based on the udfino_t passed in and return its vnode */
 int
-udf_hashlookup(struct umount *ump, ino_t id, int flags, struct vnode **vpp)
+udf_hashlookup(struct umount *ump, udfino_t id, int flags, struct vnode **vpp)
 {
 	struct unode *up;
 	struct udf_hash_lh *lh;
@@ -251,16 +252,17 @@ udf_timetotimespec(struct timestamp *time, struct timespec *t)
 		int16_t		s_tz_offset;
 	} tz;
 
-	t->tv_nsec = 0;
-
 	/* DirectCD seems to like using bogus year values */
 	year = letoh16(time->year);
 	if (year < 1970) {
 		t->tv_sec = 0;
+		t->tv_nsec = 0;
 		return;
 	}
 
 	/* Calculate the time and day */
+	t->tv_nsec = 1000 * time->usec + 100000 * time->hund_usec
+	    + 10000000 * time->centisec;
 	t->tv_sec = time->second;
 	t->tv_sec += time->minute * 60;
 	t->tv_sec += time->hour * 3600;
@@ -388,10 +390,10 @@ udf_ioctl(void *v)
  * I'm not sure that this has much value in a read-only filesystem, but
  * cd9660 has it too.
  */
-#if 0
-static int
-udf_pathconf(struct vop_pathconf_args *a)
+int
+udf_pathconf(void *v)
 {
+	struct vop_pathconf_args *ap = v;
 	int error = 0;
 
 	switch (ap->a_name) {
@@ -401,8 +403,14 @@ udf_pathconf(struct vop_pathconf_args *a)
 	case _PC_NAME_MAX:
 		*ap->a_retval = NAME_MAX;
 		break;
+	case _PC_CHOWN_RESTRICTED:
+		*ap->a_retval = 1;
+		break;
 	case _PC_NO_TRUNC:
 		*ap->a_retval = 1;
+		break;
+	case _PC_TIMESTAMP_RESOLUTION:
+		*ap->a_retval = 1000;		/* 1 microsecond */
 		break;
 	default:
 		error = EINVAL;
@@ -411,7 +419,6 @@ udf_pathconf(struct vop_pathconf_args *a)
 
 	return (error);
 }
-#endif
 
 int
 udf_read(void *v)
@@ -992,7 +999,7 @@ udf_lookup(void *v)
 	u_long flags;
 	char *nameptr;
 	long namelen;
-	ino_t id = 0;
+	udfino_t id = 0;
 	int offset, error = 0;
 	int numdirpasses, fsize;
 
