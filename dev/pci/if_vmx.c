@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vmx.c,v 1.5 2013/06/08 17:07:31 brad Exp $	*/
+/*	$OpenBSD: if_vmx.c,v 1.11 2013/06/22 00:28:10 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 2013 Tsubai Masanari
@@ -112,7 +112,7 @@ struct vmxnet3_softc {
 	struct vmxnet3_txqueue sc_txq[NTXQUEUE];
 	struct vmxnet3_rxqueue sc_rxq[NRXQUEUE];
 	struct vmxnet3_driver_shared *sc_ds;
-	void *sc_mcast;
+	u_int8_t *sc_mcast;
 };
 
 #define VMXNET3_STAT
@@ -154,21 +154,30 @@ void vmxnet3_rxinit(struct vmxnet3_softc *, struct vmxnet3_rxqueue *);
 void vmxnet3_txstop(struct vmxnet3_softc *, struct vmxnet3_txqueue *);
 void vmxnet3_rxstop(struct vmxnet3_softc *, struct vmxnet3_rxqueue *);
 void vmxnet3_link_state(struct vmxnet3_softc *);
+void vmxnet3_enable_all_intrs(struct vmxnet3_softc *);
+void vmxnet3_disable_all_intrs(struct vmxnet3_softc *);
 int vmxnet3_intr(void *);
 void vmxnet3_evintr(struct vmxnet3_softc *);
 void vmxnet3_txintr(struct vmxnet3_softc *, struct vmxnet3_txqueue *);
 void vmxnet3_rxintr(struct vmxnet3_softc *, struct vmxnet3_rxqueue *);
+void vmxnet3_iff(struct vmxnet3_softc *);
 void vmxnet3_rx_csum(struct vmxnet3_rxcompdesc *, struct mbuf *);
 int vmxnet3_getbuf(struct vmxnet3_softc *, struct vmxnet3_rxring *);
+void vmxnet3_stop(struct ifnet *);
 void vmxnet3_reset(struct ifnet *);
 int vmxnet3_init(struct vmxnet3_softc *);
 int vmxnet3_ioctl(struct ifnet *, u_long, caddr_t);
+int vmxnet3_change_mtu(struct vmxnet3_softc *, int);
 void vmxnet3_start(struct ifnet *);
 int vmxnet3_load_mbuf(struct vmxnet3_softc *, struct mbuf *);
 void vmxnet3_watchdog(struct ifnet *);
 void vmxnet3_media_status(struct ifnet *, struct ifmediareq *);
 int vmxnet3_media_change(struct ifnet *);
-static void *dma_allocmem(struct vmxnet3_softc *, u_int, u_int, bus_addr_t *);
+void *vmxnet3_dma_allocmem(struct vmxnet3_softc *, u_int, u_int, bus_addr_t *);
+
+const struct pci_matchid vmx_devices[] = {
+	{ PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_NET_3 }
+};
 
 struct cfattach vmx_ca = {
 	sizeof(struct vmxnet3_softc), vmxnet3_match, vmxnet3_attach
@@ -181,13 +190,7 @@ struct cfdriver vmx_cd = {
 int
 vmxnet3_match(struct device *parent, void *match, void *aux)
 {
-	struct pci_attach_args *pa = aux;
-
-	switch (pa->pa_id) {
-	case PCI_ID_CODE(PCI_VENDOR_VMWARE, PCI_PRODUCT_VMWARE_NET_3):
-		return 1;
-	}
-	return 0;
+	return (pci_matchbyid(aux, vmx_devices, nitems(vmx_devices)));
 }
 
 void
@@ -298,7 +301,7 @@ vmxnet3_dma_init(struct vmxnet3_softc *sc)
 	u_int major, minor, release_code, rev;
 
 	qs_len = NTXQUEUE * sizeof *ts + NRXQUEUE * sizeof *rs;
-	ts = dma_allocmem(sc, qs_len, 128, &qs_pa);
+	ts = vmxnet3_dma_allocmem(sc, qs_len, VMXNET3_DMADESC_ALIGN, &qs_pa);
 	if (ts == NULL)
 		return -1;
 	for (queue = 0; queue < NTXQUEUE; queue++)
@@ -314,11 +317,11 @@ vmxnet3_dma_init(struct vmxnet3_softc *sc)
 		if (vmxnet3_alloc_rxring(sc, queue))
 			return -1;
 
-	sc->sc_mcast = dma_allocmem(sc, 682 * ETHER_ADDR_LEN, 32, &mcast_pa);
+	sc->sc_mcast = vmxnet3_dma_allocmem(sc, 682 * ETHER_ADDR_LEN, 32, &mcast_pa);
 	if (sc->sc_mcast == NULL)
 		return -1;
 
-	ds = dma_allocmem(sc, sizeof *sc->sc_ds, 8, &ds_pa);
+	ds = vmxnet3_dma_allocmem(sc, sizeof *sc->sc_ds, 8, &ds_pa);
 	if (ds == NULL)
 		return -1;
 	sc->sc_ds = ds;
@@ -377,10 +380,10 @@ vmxnet3_alloc_txring(struct vmxnet3_softc *sc, int queue)
 	bus_addr_t pa, comp_pa;
 	int idx;
 
-	ring->txd = dma_allocmem(sc, NTXDESC * sizeof ring->txd[0], 512, &pa);
+	ring->txd = vmxnet3_dma_allocmem(sc, NTXDESC * sizeof ring->txd[0], 512, &pa);
 	if (ring->txd == NULL)
 		return -1;
-	comp_ring->txcd = dma_allocmem(sc,
+	comp_ring->txcd = vmxnet3_dma_allocmem(sc,
 	    NTXCOMPDESC * sizeof comp_ring->txcd[0], 512, &comp_pa);
 	if (comp_ring->txcd == NULL)
 		return -1;
@@ -419,13 +422,13 @@ vmxnet3_alloc_rxring(struct vmxnet3_softc *sc, int queue)
 
 	for (i = 0; i < 2; i++) {
 		ring = &rq->cmd_ring[i];
-		ring->rxd = dma_allocmem(sc, NRXDESC * sizeof ring->rxd[0],
+		ring->rxd = vmxnet3_dma_allocmem(sc, NRXDESC * sizeof ring->rxd[0],
 		    512, &pa[i]);
 		if (ring->rxd == NULL)
 			return -1;
 	}
 	comp_ring = &rq->comp_ring;
-	comp_ring->rxcd = dma_allocmem(sc,
+	comp_ring->rxcd = vmxnet3_dma_allocmem(sc,
 	    NRXCOMPDESC * sizeof comp_ring->rxcd[0], 512, &comp_pa);
 	if (comp_ring->rxcd == NULL)
 		return -1;
@@ -558,7 +561,7 @@ vmxnet3_disable_intr(struct vmxnet3_softc *sc, int irq)
 	WRITE_BAR0(sc, VMXNET3_BAR0_IMASK(irq), 1);
 }
 
-static void
+void
 vmxnet3_enable_all_intrs(struct vmxnet3_softc *sc)
 {
 	int i;
@@ -568,7 +571,7 @@ vmxnet3_enable_all_intrs(struct vmxnet3_softc *sc)
 		vmxnet3_enable_intr(sc, i);
 }
 
-static void
+void
 vmxnet3_disable_all_intrs(struct vmxnet3_softc *sc)
 {
 	int i;
@@ -730,7 +733,7 @@ vmxnet3_rxintr(struct vmxnet3_softc *sc, struct vmxnet3_rxqueue *rq)
 
 #if NBPFILTER > 0
 		if (ifp->if_bpf)
-			bpf_mtap(ifp->if_bpf, m, BPF_DIRECTION_IN);
+			bpf_mtap_ether(ifp->if_bpf, m, BPF_DIRECTION_IN);
 #endif
 		ether_input_mbuf(ifp, m);
 
@@ -762,55 +765,43 @@ skip_buffer:
 	}
 }
 
-static void
-vmxnet3_set_rx_filter(struct vmxnet3_softc *sc)
+void
+vmxnet3_iff(struct vmxnet3_softc *sc)
 {
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
-	struct vmxnet3_driver_shared *ds = sc->sc_ds;
-	u_int mode = VMXNET3_RXMODE_UCAST;
 	struct arpcom *ac = &sc->sc_arpcom;
+	struct vmxnet3_driver_shared *ds = sc->sc_ds;
 	struct ether_multi *enm;
 	struct ether_multistep step;
-	int n;
-	char *p;
+	u_int mode;
+	u_int8_t *p;
 
-	if (ifp->if_flags & IFF_MULTICAST)
-		mode |= VMXNET3_RXMODE_MCAST;
-	if (ifp->if_flags & IFF_ALLMULTI)
-		mode |= VMXNET3_RXMODE_ALLMULTI;
-	if (ifp->if_flags & IFF_BROADCAST)
-		mode |= VMXNET3_RXMODE_BCAST;
-	if (ifp->if_flags & IFF_PROMISC)
-		mode |= VMXNET3_RXMODE_PROMISC | VMXNET3_RXMODE_ALLMULTI;
+	mode = VMXNET3_RXMODE_UCAST;
+	if (ISSET(ifp->if_flags, IFF_BROADCAST))
+		SET(mode, VMXNET3_RXMODE_BCAST);
+	if (ISSET(ifp->if_flags, IFF_PROMISC))
+		SET(mode, VMXNET3_RXMODE_PROMISC);
 
-	if ((mode & (VMXNET3_RXMODE_ALLMULTI | VMXNET3_RXMODE_MCAST))
-	    != VMXNET3_RXMODE_MCAST) {
+	CLR(ifp->if_flags, IFF_ALLMULTI);
+	if (ISSET(ifp->if_flags, IFF_PROMISC) || ac->ac_multirangecnt > 0 ||
+	    ac->ac_multicnt > 682) {
+		SET(ifp->if_flags, IFF_ALLMULTI);
+		SET(mode, VMXNET3_RXMODE_MCAST | VMXNET3_RXMODE_ALLMULTI);
 		ds->mcast_tablelen = 0;
-		goto setit;
+	} else if (ISSET(ifp->if_flags, IFF_MULTICAST) &&
+	    ac->ac_multicnt > 0) {
+		p = sc->sc_mcast;
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			bcopy(enm->enm_addrlo, p, ETHER_ADDR_LEN);
+			p += ETHER_ADDR_LEN;
+			ETHER_NEXT_MULTI(step, enm);
+		}
+		ds->mcast_tablelen = p - sc->sc_mcast;
+
+		SET(mode, VMXNET3_RXMODE_MCAST);
 	}
 
-	n = sc->sc_arpcom.ac_multicnt;
-	if (n == 0) {
-		mode &= ~VMXNET3_RXMODE_MCAST;
-		ds->mcast_tablelen = 0;
-		goto setit;
-	}
-	if (n > 682) {
-		mode |= VMXNET3_RXMODE_ALLMULTI;
-		ds->mcast_tablelen = 0;
-		goto setit;
-	}
-
-	p = sc->sc_mcast;
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm) {
-		bcopy(enm->enm_addrlo, p, ETHER_ADDR_LEN);
-		p += ETHER_ADDR_LEN;
-		ETHER_NEXT_MULTI(step, enm);
-	}
-	ds->mcast_tablelen = n * ETHER_ADDR_LEN;
-
-setit:
 	WRITE_CMD(sc, VMXNET3_CMD_SET_FILTER);
 	ds->rxmode = mode;
 	WRITE_CMD(sc, VMXNET3_CMD_SET_RXMODE);
@@ -898,7 +889,7 @@ vmxnet3_getbuf(struct vmxnet3_softc *sc, struct vmxnet3_rxring *ring)
 	return 0;
 }
 
-static void
+void
 vmxnet3_stop(struct ifnet *ifp)
 {
 	struct vmxnet3_softc *sc = ifp->if_softc;
@@ -952,13 +943,13 @@ vmxnet3_init(struct vmxnet3_softc *sc)
 		WRITE_BAR0(sc, VMXNET3_BAR0_RXH2(queue), 0);
 	}
 
-	vmxnet3_set_rx_filter(sc);
+	vmxnet3_iff(sc);
 	vmxnet3_enable_all_intrs(sc);
 	vmxnet3_link_state(sc);
 	return 0;
 }
 
-static int
+int
 vmxnet3_change_mtu(struct vmxnet3_softc *sc, int mtu)
 {
 	struct vmxnet3_driver_shared *ds = sc->sc_ds;
@@ -988,8 +979,10 @@ vmxnet3_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		ifp->if_flags |= IFF_UP;
 		if ((ifp->if_flags & IFF_RUNNING) == 0)
 			error = vmxnet3_init(sc);
+#ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
+#endif
 		break;
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
@@ -1015,7 +1008,7 @@ vmxnet3_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			vmxnet3_set_rx_filter(sc);
+			vmxnet3_iff(sc);
 		error = 0;
 	}
 
@@ -1197,7 +1190,7 @@ vmxnet3_media_change(struct ifnet *ifp)
 }
 
 void *
-dma_allocmem(struct vmxnet3_softc *sc, u_int size, u_int align, bus_addr_t *pa)
+vmxnet3_dma_allocmem(struct vmxnet3_softc *sc, u_int size, u_int align, bus_addr_t *pa)
 {
 	bus_dma_tag_t t = sc->sc_dmat;
 	bus_dma_segment_t segs[1];

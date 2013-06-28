@@ -1,4 +1,4 @@
-/* $OpenBSD: omap.c,v 1.8 2013/06/05 15:03:23 bmercer Exp $ */
+/* $OpenBSD: omap.c,v 1.10 2013/06/14 23:13:54 patrick Exp $ */
 /*
  * Copyright (c) 2005,2008 Dale Rahn <drahn@openbsd.com>
  *
@@ -68,6 +68,7 @@ struct board_dev beagleboard_devs[] = {
 
 struct board_dev beaglebone_devs[] = {
 	{ "prcm",	0 },
+	{ "sitaracm",	0 },
 	{ "intc",	0 },
 	{ "dmtimer",	0 },
 	{ "dmtimer",	1 },
@@ -97,6 +98,7 @@ struct board_dev overo_devs[] = {
 
 struct board_dev pandaboard_devs[] = {
 	{ "omapid",	0 },
+	{ "prcm",	0 },
 	{ "omdog",	0 },
 	{ "omgpio",	0 },
 	{ "omgpio",	1 },
@@ -106,6 +108,7 @@ struct board_dev pandaboard_devs[] = {
 	{ "omgpio",	5 },
 	{ "ommmc",	0 },		/* HSMMC1 */
 	{ "com",	2 },		/* UART3 */
+	{ "ehci",	0 },
 	{ NULL,		0 }
 };
 

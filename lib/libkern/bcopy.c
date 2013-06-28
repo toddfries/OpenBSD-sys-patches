@@ -1,4 +1,5 @@
-/*	$OpenBSD: bcopy.c,v 1.7 2012/12/05 23:20:14 deraadt Exp $	*/
+/*	$OpenBSD: bcopy.c,v 1.1 2013/06/13 04:33:26 deraadt Exp $ */
+
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
  * All rights reserved.
@@ -31,7 +32,6 @@
  * SUCH DAMAGE.
  */
 
-
 #include <sys/types.h>
 #include <sys/systm.h>
 
@@ -39,7 +39,7 @@
  * sizeof(word) MUST BE A POWER OF TWO
  * SO THAT wmask BELOW IS ALL ONES
  */
-typedef	int word;		/* "word" used for optimal copy speed */
+typedef	long word;		/* "word" used for optimal copy speed */
 
 #define	wsize	sizeof(word)
 #define	wmask	(wsize - 1)
@@ -49,18 +49,8 @@ typedef	int word;		/* "word" used for optimal copy speed */
  * This is the routine that actually implements
  * (the portable versions of) bcopy, memcpy, and memmove.
  */
-#ifdef MEMCOPY
-void *
-memcpy(void *dst0, const void *src0, size_t length)
-#else
-#ifdef MEMMOVE
-void *
-memmove(void *dst0, const void *src0, size_t length)
-#else
 void
 bcopy(const void *src0, void *dst0, size_t length)
-#endif
-#endif
 {
 	char *dst = dst0;
 	const char *src = src0;
@@ -79,13 +69,13 @@ bcopy(const void *src0, void *dst0, size_t length)
 		/*
 		 * Copy forward.
 		 */
-		t = (int)src;	/* only need low bits */
-		if ((t | (int)dst) & wmask) {
+		t = (long)src;	/* only need low bits */
+		if ((t | (long)dst) & wmask) {
 			/*
 			 * Try to align operands.  This cannot be done
 			 * unless the low bits match.
 			 */
-			if ((t ^ (int)dst) & wmask || length < wsize)
+			if ((t ^ (long)dst) & wmask || length < wsize)
 				t = length;
 			else
 				t = wsize - (t & wmask);
@@ -107,9 +97,9 @@ bcopy(const void *src0, void *dst0, size_t length)
 		 */
 		src += length;
 		dst += length;
-		t = (int)src;
-		if ((t | (int)dst) & wmask) {
-			if ((t ^ (int)dst) & wmask || length <= wsize)
+		t = (long)src;
+		if ((t | (long)dst) & wmask) {
+			if ((t ^ (long)dst) & wmask || length <= wsize)
 				t = length;
 			else
 				t &= wmask;
@@ -122,9 +112,5 @@ bcopy(const void *src0, void *dst0, size_t length)
 		TLOOP(*--dst = *--src);
 	}
 done:
-#if defined(MEMCOPY) || defined(MEMMOVE)
-	return (dst0);
-#else
 	return;
-#endif
 }

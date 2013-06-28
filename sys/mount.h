@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.111 2013/06/03 15:56:01 tedu Exp $	*/
+/*	$OpenBSD: mount.h,v 1.113 2013/06/21 21:30:38 syl Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -264,7 +264,7 @@ struct procfs_args {
 struct fusefs_args {
 	char *name;
 	char *url;
-	dev_t dev;
+	int fd;
 	int flags;
 };
 
@@ -528,6 +528,7 @@ extern long buflowpages, bufhighpages, bufbackpages;
 #define BUFPAGES_INACT (((bcstats.numcleanpages - buflowpages) < 0) ? 0 \
     : bcstats.numcleanpages - buflowpages)
 extern int bufcachepercent;
+extern int bufhigh(int);
 extern void bufadjust(int);
 struct uvm_constraint_range;
 extern int bufbackoff(struct uvm_constraint_range*, long);

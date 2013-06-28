@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vops.c,v 1.5 2013/03/28 02:08:39 guenther Exp $	*/
+/*	$OpenBSD: vfs_vops.c,v 1.7 2013/06/11 19:01:20 beck Exp $	*/
 /*
  * Copyright (c) 2010 Thordur I. Bjornsson <thib@openbsd.org> 
  *
@@ -529,8 +529,8 @@ VOP_UNLOCK(struct vnode *vp, int flags, struct proc *p)
 }
 
 int
-VOP_BMAP(struct vnode *vp, daddr64_t bn, struct vnode **vpp, 
-    daddr64_t *bnp, int *runp)
+VOP_BMAP(struct vnode *vp, daddr_t bn, struct vnode **vpp, 
+    daddr_t *bnp, int *runp)
 {
 	struct vop_bmap_args a;
 	a.a_vp = vp;
@@ -633,6 +633,11 @@ VOP_STRATEGY(struct buf *bp)
 
 	if (bp->b_vp->v_op->vop_strategy == NULL)
 		return (EOPNOTSUPP);
+	/*
+	 * Flip buffer to dma reachable memory if necessary.
+	 */
+	if (ISSET(bp->b_flags, B_BC))
+		buf_dma(bp);
 
 	return ((bp->b_vp->v_op->vop_strategy)(&a));
 }
