@@ -1,4 +1,4 @@
-/* $OpenBSD: fuse_vfsops.c,v 1.2 2013/06/04 20:52:54 tedu Exp $ */
+/* $OpenBSD: fuse_vfsops.c,v 1.5 2013/06/21 21:30:38 syl Exp $ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -16,9 +16,13 @@
  */
 
 #include <sys/param.h>
+#include <sys/file.h>
+#include <sys/filedesc.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/pool.h>
+#include <sys/proc.h>
+#include <sys/specdev.h>
 #include <sys/statvfs.h>
 #include <sys/sysctl.h>
 #include <sys/vnode.h>
@@ -69,6 +73,8 @@ fusefs_mount(struct mount *mp, const char *path, void *data,
 	struct fusefs_mnt *fmp;
 	struct fusebuf *fbuf;
 	struct fusefs_args args;
+	struct vnode *vp;
+	struct file *fp;
 	int error;
 
 	if (mp->mnt_flag & MNT_UPDATE)
@@ -78,10 +84,20 @@ fusefs_mount(struct mount *mp, const char *path, void *data,
 	if (error)
 		return (error);
 
+	if ((fp = fd_getfile(p->p_fd, args.fd)) == NULL)
+		return (EBADF);
+
+	if (fp->f_type != DTYPE_VNODE)
+		return (EINVAL);
+
+	vp = fp->f_data;
+	if (vp->v_type != VCHR)
+		return (EBADF);
+
 	fmp = malloc(sizeof(*fmp), M_FUSEFS, M_WAITOK | M_ZERO);
 	fmp->mp = mp;
 	fmp->sess_init = 0;
-	fmp->dev = args.dev;
+	fmp->dev = vp->v_rdev;
 	mp->mnt_data = fmp;
 
 	mp->mnt_flag |= MNT_LOCAL;
@@ -119,7 +135,6 @@ fusefs_unmount(struct mount *mp, int mntflags, struct proc *p)
 	fmp = VFSTOFUSEFS(mp);
 
 	if (fmp->sess_init) {
-
 		fmp->sess_init = 0;
 		fbuf = fb_setup(0, 0, FBT_DESTROY, p);
 
@@ -128,7 +143,6 @@ fusefs_unmount(struct mount *mp, int mntflags, struct proc *p)
 
 		if (error)
 			printf("error from fuse\n");
-
 	} else {
 		fuse_device_cleanup(fmp->dev, NULL);
 	}
@@ -301,7 +315,7 @@ int fusefs_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (ENOTDIR);		/* overloaded */
 
 	switch (name[0]) {
-	case FUSEFS_NB_OPENDEVS:
+	case FUSEFS_OPENDEVS:
 		return (sysctl_rdint(oldp, oldlenp, newp,
 		    stat_opened_fusedev));
 	case FUSEFS_INFBUFS:

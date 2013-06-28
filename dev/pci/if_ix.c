@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ix.c,v 1.87 2012/12/20 17:34:54 mikeb Exp $	*/
+/*	$OpenBSD: if_ix.c,v 1.89 2013/06/14 16:25:54 mikeb Exp $	*/
 
 /******************************************************************************
 
@@ -66,7 +66,7 @@ const struct pci_matchid ixgbe_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_KX4 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_KX4_MEZZ },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_XAUI },
-	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_COMBO_BACKPLANE },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_COMBO_BP },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_BPLANE_FCOE },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_CX4 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82599_T3_LOM },
@@ -805,12 +805,9 @@ ixgbe_init(void *arg)
 	}
 
 	/* Setup interrupt moderation */
-	if (sc->hw.mac.type == ixgbe_mac_82598EB)
-		itr = (8000000 / IXGBE_INTS_PER_SEC) & 0xff8;
-	else {
-		itr = (4000000 / IXGBE_INTS_PER_SEC) & 0xff8;
+	itr = (4000000 / IXGBE_INTS_PER_SEC) & 0xff8;
+	if (sc->hw.mac.type != ixgbe_mac_82598EB)
 		itr |= IXGBE_EITR_LLI_MOD | IXGBE_EITR_CNT_WDIS;
-	}
 	IXGBE_WRITE_REG(&sc->hw, IXGBE_EITR(0), itr);
 
 	/* Config/Enable Link */
@@ -1428,7 +1425,7 @@ ixgbe_identify_hardware(struct ix_softc *sc)
 		sc->hw.phy.smart_speed = ixgbe_smart_speed;
 		break;
 	case PCI_PRODUCT_INTEL_82599_XAUI:
-	case PCI_PRODUCT_INTEL_82599_COMBO_BACKPLANE:
+	case PCI_PRODUCT_INTEL_82599_COMBO_BP:
 	case PCI_PRODUCT_INTEL_82599_BPLANE_FCOE:
 		sc->hw.mac.type = ixgbe_mac_82599EB;
 		sc->hw.phy.smart_speed = ixgbe_smart_speed;

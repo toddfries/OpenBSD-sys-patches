@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_art.c,v 1.18 2010/06/29 07:12:31 matthew Exp $ */
+/*	$OpenBSD: if_art.c,v 1.20 2013/06/20 12:03:40 mpi Exp $ */
 
 /*
  * Copyright (c) 2004,2005  Internet Business Solutions AG, Zurich, Switzerland
