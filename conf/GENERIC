@@ -106,6 +106,7 @@ pseudo-device	trunk		# Trunking support
 pseudo-device	tun		# network tunneling over tty
 pseudo-device	vether		# Virtual ethernet
 pseudo-device	vlan 		# IEEE 802.1Q VLAN 
+pseudo-device	fuse		# FuseFS
 
 pseudo-device	bio	1	# ioctl multiplexing device
 
