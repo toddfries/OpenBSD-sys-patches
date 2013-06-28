@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.302 2013/04/26 15:45:35 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.308 2013/05/21 15:21:16 jsing Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -138,7 +138,6 @@ void			sr_rebuild(void *);
 void			sr_rebuild_thread(void *);
 void			sr_roam_chunks(struct sr_discipline *);
 int			sr_chunk_in_use(struct sr_softc *, dev_t);
-void			sr_startwu_callback(void *, void *);
 int			sr_rw(struct sr_softc *, dev_t, char *, size_t,
 			    daddr64_t, long);
 void			sr_wu_done_callback(void *, void *);
@@ -1191,7 +1190,10 @@ sr_boot_assembly(struct sr_softc *sc)
 		}
 
 		/* native softraid uses partitions */
+		rw_enter_write(&sc->sc_lock);
+		bio_status_init(&sc->sc_status, &sc->sc_dev);
 		sr_meta_native_bootprobe(sc, dk->dk_devno, &bch);
+		rw_exit_write(&sc->sc_lock);
 
 		/* probe non-native disks if native failed. */
 
@@ -1225,7 +1227,8 @@ sr_boot_assembly(struct sr_softc *sc)
 			bv = malloc(sizeof(struct sr_boot_volume),
 			    M_DEVBUF, M_NOWAIT | M_CANFAIL | M_ZERO);
 			if (bv == NULL) {
-				sr_error(sc, "failed to allocate boot volume");
+				printf("%s: failed to allocate boot volume\n",
+				    DEVNAME(sc));
 				goto unwind;
 			}
 
@@ -2288,8 +2291,6 @@ sr_wu_done_callback(void *arg1, void *arg2)
 			sr_raid_recreate_wu(wu->swu_collider);
 
 		/* XXX Should the collider be failed if this xs failed? */
-		wu->swu_collider->swu_state = SR_WU_INPROGRESS;
-		TAILQ_REMOVE(&sd->sd_wu_defq, wu->swu_collider, swu_link);
 		sr_raid_startwu(wu->swu_collider);
 	}
 
@@ -2349,8 +2350,8 @@ sr_scsi_cmd(struct scsi_xfer *xs)
 	struct sr_workunit	*wu = xs->io;
 	struct sr_discipline	*sd;
 
-	DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd: target %d xs: %p "
-	    "flags: %#x\n", DEVNAME(sc), link->target, xs, xs->flags);
+	DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd target %d xs %p flags %#x\n",
+	    DEVNAME(sc), link->target, xs, xs->flags);
 
 	sd = sc->sc_targets[link->target];
 	if (sd == NULL) {
@@ -4145,14 +4146,77 @@ sr_raid_intr(struct buf *bp)
 }
 
 void
-sr_startwu_callback(void *arg1, void *arg2)
+sr_schedule_wu(struct sr_workunit *wu)
 {
-	struct sr_discipline	*sd = arg1;
-	struct sr_workunit	*wu = arg2;
-	struct sr_ccb		*ccb;
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct sr_workunit	*wup;
 	int			s;
 
+	DNPRINTF(SR_D_WU, "sr_schedule_wu: schedule wu %p state %i "
+	    "flags 0x%x\n", wu, wu->swu_state, wu->swu_flags);
+
 	s = splbio();
+
+	/* Construct the work unit, do not schedule it. */
+	if (wu->swu_state == SR_WU_CONSTRUCT)
+		goto queued;
+
+	/* Deferred work unit being reconstructed, do not start. */
+	if (wu->swu_state == SR_WU_REQUEUE)
+		goto queued;
+
+	/* Current work unit failed, restart. */
+	if (wu->swu_state == SR_WU_RESTART)
+		goto start;
+
+	if (wu->swu_state != SR_WU_INPROGRESS)
+		panic("sr_schedule_wu: work unit not in progress (state %i)\n",
+		    wu->swu_state);
+
+	/* Walk queue backwards and fill in collider if we have one. */
+	TAILQ_FOREACH_REVERSE(wup, &sd->sd_wu_pendq, sr_wu_list, swu_link) {
+		if (wu->swu_blk_end < wup->swu_blk_start ||
+		    wup->swu_blk_end < wu->swu_blk_start)
+			continue;
+
+		/* Defer work unit due to LBA collision. */
+		DNPRINTF(SR_D_WU, "sr_schedule_wu: deferring work unit %p\n",
+		    wu);
+		wu->swu_state = SR_WU_DEFERRED;
+		while (wup->swu_collider)
+			wup = wup->swu_collider;
+		wup->swu_collider = wu;
+		TAILQ_INSERT_TAIL(&sd->sd_wu_defq, wu, swu_link);
+		sd->sd_wu_collisions++;
+		goto queued;
+	}
+
+start:
+	sr_raid_startwu(wu);
+
+queued:
+	splx(s);
+}
+
+void
+sr_raid_startwu(struct sr_workunit *wu)
+{
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct sr_ccb		*ccb;
+
+	DNPRINTF(SR_D_WU, "sr_raid_startwu: start wu %p\n", wu);
+
+	splassert(IPL_BIO);
+
+	if (wu->swu_state == SR_WU_DEFERRED) {
+		TAILQ_REMOVE(&sd->sd_wu_defq, wu, swu_link);
+		wu->swu_state = SR_WU_INPROGRESS;
+	}
+
+	if (wu->swu_state != SR_WU_RESTART)
+		TAILQ_INSERT_TAIL(&sd->sd_wu_pendq, wu, swu_link);
+
+	/* Start all of the individual I/Os. */
 	if (wu->swu_cb_active == 1)
 		panic("%s: sr_startwu_callback", DEVNAME(sd->sd_sc));
 	wu->swu_cb_active = 1;
@@ -4161,29 +4225,6 @@ sr_startwu_callback(void *arg1, void *arg2)
 		VOP_STRATEGY(&ccb->ccb_buf);
 
 	wu->swu_cb_active = 0;
-	splx(s);
-}
-
-void
-sr_raid_startwu(struct sr_workunit *wu)
-{
-	struct sr_discipline	*sd = wu->swu_dis;
-
-	splassert(IPL_BIO);
-
-	if (wu->swu_state == SR_WU_RESTART)
-		/*
-		 * no need to put the wu on the pending queue since we
-		 * are restarting the io
-		 */
-		 ;
-	else
-		/* move wu to pending queue */
-		TAILQ_INSERT_TAIL(&sd->sd_wu_pendq, wu, swu_link);
-
-	/* start all individual ios */
-	workq_queue_task(sd->sd_workq, &wu->swu_wqt, 0, sr_startwu_callback,
-	    sd, wu);
 }
 
 void
@@ -4517,38 +4558,6 @@ bad:
 	return (rv);
 }
 
-int
-sr_check_io_collision(struct sr_workunit *wu)
-{
-	struct sr_discipline	*sd = wu->swu_dis;
-	struct sr_workunit	*wup;
-
-	splassert(IPL_BIO);
-
-	/* walk queue backwards and fill in collider if we have one */
-	TAILQ_FOREACH_REVERSE(wup, &sd->sd_wu_pendq, sr_wu_list, swu_link) {
-		if (wu->swu_blk_end < wup->swu_blk_start ||
-		    wup->swu_blk_end < wu->swu_blk_start)
-			continue;
-
-		/* we have an LBA collision, defer wu */
-		wu->swu_state = SR_WU_DEFERRED;
-		if (wup->swu_collider)
-			/* wu is on deferred queue, append to last wu */
-			while (wup->swu_collider)
-				wup = wup->swu_collider;
-
-		wup->swu_collider = wu;
-		TAILQ_INSERT_TAIL(&sd->sd_wu_defq, wu, swu_link);
-		sd->sd_wu_collisions++;
-		goto queued;
-	}
-
-	return (0);
-queued:
-	return (1);
-}
-
 void
 sr_rebuild(void *arg)
 {
@@ -4632,6 +4641,7 @@ sr_rebuild_thread(void *arg)
 		cr->opcode = READ_16;
 		_lto4b(sz, cr->length);
 		_lto8b(lba, cr->addr);
+		wu_r->swu_state = SR_WU_CONSTRUCT;
 		wu_r->swu_flags |= SR_WUF_REBUILD;
 		wu_r->swu_xs = &xs_r;
 		if (sd->sd_scsi_rw(wu_r)) {
@@ -4652,6 +4662,7 @@ sr_rebuild_thread(void *arg)
 		cw->opcode = WRITE_16;
 		_lto4b(sz, cw->length);
 		_lto8b(lba, cw->addr);
+		wu_w->swu_state = SR_WU_CONSTRUCT;
 		wu_w->swu_flags |= SR_WUF_REBUILD | SR_WUF_WAKEUP;
 		wu_w->swu_xs = &xs_w;
 		if (sd->sd_scsi_rw(wu_w)) {
@@ -4668,14 +4679,10 @@ sr_rebuild_thread(void *arg)
 		wu_r->swu_collider = wu_w;
 		s = splbio();
 		TAILQ_INSERT_TAIL(&sd->sd_wu_defq, wu_w, swu_link);
-
-		/* schedule io */
-		if (sr_check_io_collision(wu_r))
-			goto queued;
-
-		sr_raid_startwu(wu_r);
-queued:
 		splx(s);
+
+		wu_r->swu_state = SR_WU_INPROGRESS;
+		sr_schedule_wu(wu_r);
 
 		/* wait for read completion */
 		slept = 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bgereg.h,v 1.113 2013/02/22 01:26:55 dlg Exp $	*/
+/*	$OpenBSD: if_bgereg.h,v 1.115 2013/05/31 14:27:21 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -215,15 +215,6 @@
 #define	BGE_PCI_PRODID_ASICREV		0xBC
 #define	BGE_PCI_GEN2_PRODID_ASICREV	0xF4
 #define	BGE_PCI_GEN15_PRODID_ASICREV	0xFC
-
-/* XXX:
- * Used in PCI-Express code for 575x chips.
- * Should be replaced with checking for a PCI config-space
- * capability for PCI-Express, and PCI-Express standard 
- * offsets into that capability block.
- */
-#define	BGE_PCI_CONF_DEV_CTRL		0xD8
-#define	BGE_PCI_CONF_DEV_STUS		0xDA
 
 /* PCI Misc. Host control register */
 #define	BGE_PCIMISCCTL_CLEAR_INTA	0x00000001
@@ -963,6 +954,7 @@
 #define	BGE_MIMODE_CLKCNT		0x001F0000
 #define	BGE_MIMODE_500KHZ_CONST		0x00008000
 #define	BGE_MIMODE_BASE			0x000C0000
+#define	BGE_MIMODE_PHYADDR(x)		((x & 0x1F) << 5)
 
 /*
  * Send data initiator control registers.
@@ -2815,6 +2807,9 @@ struct bge_softc {
 	struct pci_attach_args	bge_pa;
 	struct mii_data		bge_mii;
 	struct ifmedia		bge_ifmedia;	/* media info */
+	u_int32_t		bge_expcap;
+	u_int32_t		bge_mps;
+	u_int32_t		bge_expmrq;
 	u_int32_t		bge_flags;
 #define	BGE_TXRING_VALID	0x00000001
 #define	BGE_RXRING_VALID	0x00000002

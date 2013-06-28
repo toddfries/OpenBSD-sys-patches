@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.99 2013/05/03 09:35:20 mpi Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.101 2013/06/05 15:22:32 bluhm Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -347,16 +347,12 @@ icmp_input(struct mbuf *m, ...)
 		return;
 	}
 	ip = mtod(m, struct ip *);
-	m->m_len -= hlen;
-	m->m_data += hlen;
-	icp = mtod(m, struct icmp *);
-	if (in_cksum(m, icmplen)) {
+	if (in4_cksum(m, 0, hlen, icmplen)) {
 		icmpstat.icps_checksum++;
 		goto freeit;
 	}
-	m->m_len += hlen;
-	m->m_data -= hlen;
 
+	icp = (struct icmp *)(mtod(m, caddr_t) + hlen);
 #ifdef ICMPPRINTFS
 	/*
 	 * Message type specific processing.
@@ -367,6 +363,29 @@ icmp_input(struct mbuf *m, ...)
 #endif
 	if (icp->icmp_type > ICMP_MAXTYPE)
 		goto raw;
+#if NPF > 0
+	if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
+		switch (icp->icmp_type) {
+		/*
+		 * These ICMP types map to other connections.  They must be
+		 * delivered to pr_ctlinput() also for diverted connections.
+		 */
+		case ICMP_UNREACH:
+		case ICMP_TIMXCEED:
+		case ICMP_PARAMPROB:
+		case ICMP_SOURCEQUENCH:
+			break;
+		 /*
+		  * Although pf_icmp_mapping() considers redirects belonging
+		  * to a diverted connection, we must process it here anyway.
+		  */
+		case ICMP_REDIRECT:
+			break;
+		default:
+			goto raw;
+		}
+	}
+#endif /* NPF */
 	icmpstat.icps_inhist[icp->icmp_type]++;
 	code = icp->icmp_code;
 	switch (icp->icmp_type) {
@@ -807,13 +826,9 @@ icmp_send(struct mbuf *m, struct mbuf *opts)
 	struct icmp *icp;
 
 	hlen = ip->ip_hl << 2;
-	m->m_data += hlen;
-	m->m_len -= hlen;
-	icp = mtod(m, struct icmp *);
+	icp = (struct icmp *)(mtod(m, caddr_t) + hlen);
 	icp->icmp_cksum = 0;
-	icp->icmp_cksum = in_cksum(m, ntohs(ip->ip_len) - hlen);
-	m->m_data -= hlen;
-	m->m_len += hlen;
+	icp->icmp_cksum = in4_cksum(m, 0, hlen, ntohs(ip->ip_len) - hlen);
 #ifdef ICMPPRINTFS
 	if (icmpprintfs) {
 		char buf[4 * sizeof("123")];

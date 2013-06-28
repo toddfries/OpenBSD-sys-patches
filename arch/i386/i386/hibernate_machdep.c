@@ -1,3 +1,5 @@
+/*	$OpenBSD: hibernate_machdep.c,v 1.25 2013/06/04 01:20:23 pirofti Exp $	*/
+
 /*
  * Copyright (c) 2011 Mike Larkin <mlarkin@openbsd.org>
  *
@@ -229,6 +231,8 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	 */
 	kern_start_4m_va = (paddr_t)&start & ~(PAGE_MASK_4M);
 	kern_end_4m_va = (paddr_t)&end & ~(PAGE_MASK_4M);
+
+	/* i386 kernels load at 2MB phys (on the 0th 4mb page) */
 	phys_page_number = 0;
 
 	for (page = kern_start_4m_va; page <= kern_end_4m_va;
@@ -314,3 +318,34 @@ hibernate_inflate_skip(union hibernate_info *hib_info, paddr_t dest)
 
 	return (0);
 }
+
+void
+hibernate_enable_intr_machdep(void)
+{
+	enable_intr();
+}
+
+void
+hibernate_disable_intr_machdep(void)
+{
+	disable_intr();
+}
+
+#ifdef MULTIPROCESSOR
+/*
+ * Quiesce CPUs in a multiprocessor machine before resuming. We need to do
+ * this since the APs will be hatched (but waiting for CPUF_GO), and we don't
+ * want the APs to be executing code and causing side effects during the
+ * unpack operation.
+ */
+void
+hibernate_quiesce_cpus(void)
+{
+	/* Start the hatched (but idling) APs */
+	cpu_boot_secondary_processors();
+	sched_start_secondary_cpus();
+
+	/* Now shut them down */
+	acpi_sleep_mp();
+}
+#endif /* MULTIPROCESSOR */

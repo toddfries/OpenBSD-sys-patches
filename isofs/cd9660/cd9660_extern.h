@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_extern.h,v 1.11 2010/12/21 20:14:43 thib Exp $	*/
+/*	$OpenBSD: cd9660_extern.h,v 1.13 2013/06/02 01:07:39 deraadt Exp $	*/
 /*	$NetBSD: cd9660_extern.h,v 1.1 1997/01/24 00:24:53 cgd Exp $	*/
 
 /*-
@@ -105,7 +105,7 @@ extern struct vops	cd9660_specvops;
 extern struct vops	cd9660_fifovops;
 #endif
 
-int isochar(const u_char *, const u_char *, int, u_char *);
-int isofncmp(const u_char *, int, const u_char *, int, int);
-void isofntrans(u_char *, int, u_char *, u_short *, int, int, int);
-ino_t isodirino(struct iso_directory_record *, struct iso_mnt *);
+int	isochar(const u_char *, const u_char *, int, u_char *);
+int	isofncmp(const u_char *, int, const u_char *, int, int);
+void	isofntrans(u_char *, int, u_char *, u_short *, int, int, int);
+cdino_t	isodirino(struct iso_directory_record *, struct iso_mnt *);

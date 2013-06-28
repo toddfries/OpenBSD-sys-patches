@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bge.c,v 1.327 2013/04/07 03:22:05 dlg Exp $	*/
+/*	$OpenBSD: if_bge.c,v 1.334 2013/06/06 00:05:30 dlg Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -1057,6 +1057,18 @@ bge_miibus_statchg(struct device *dev)
 		mii->mii_media_active &= ~IFM_ETH_FMASK;
 	}
 
+	if (!BGE_STS_BIT(sc, BGE_STS_LINK) &&
+	    mii->mii_media_status & IFM_ACTIVE &&
+	    IFM_SUBTYPE(mii->mii_media_active) != IFM_NONE)
+		BGE_STS_SETBIT(sc, BGE_STS_LINK);
+	else if (BGE_STS_BIT(sc, BGE_STS_LINK) &&
+	    (!(mii->mii_media_status & IFM_ACTIVE) ||
+	    IFM_SUBTYPE(mii->mii_media_active) == IFM_NONE))
+		BGE_STS_CLRBIT(sc, BGE_STS_LINK);
+
+	if (!BGE_STS_BIT(sc, BGE_STS_LINK))
+		return;
+
 	/* Set the port mode (MII/GMII) to match the link speed. */
 	mac_mode = CSR_READ_4(sc, BGE_MAC_MODE) &
 	    ~(BGE_MACMODE_PORTMODE | BGE_MACMODE_HALF_DUPLEX);
@@ -1226,7 +1238,7 @@ bge_init_rx_ring_std(struct bge_softc *sc)
 
 	for (i = 0; i < BGE_STD_RX_RING_CNT; i++) {
 		if (bus_dmamap_create(sc->bge_dmatag, MCLBYTES, 1, MCLBYTES, 0,
-		    BUS_DMA_WAITOK | BUS_DMA_ALLOCNOW,
+		    BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW,
 		    &sc->bge_cdata.bge_rx_std_map[i]) != 0) {
 			printf("%s: unable to create dmamap for slot %d\n",
 			    sc->bge_dev.dv_xname, i);
@@ -1336,7 +1348,7 @@ bge_init_rx_ring_jumbo(struct bge_softc *sc)
 
 	for (i = 0; i < BGE_JUMBO_RX_RING_CNT; i++) {
 		if (bus_dmamap_create(sc->bge_dmatag, BGE_JLEN, 4, BGE_JLEN, 0,
-		    BUS_DMA_WAITOK | BUS_DMA_ALLOCNOW,
+		    BUS_DMA_NOWAIT | BUS_DMA_ALLOCNOW,
 		    &sc->bge_cdata.bge_rx_jumbo_map[i]) != 0) {
 			printf("%s: unable to create dmamap for slot %d\n",
 			    sc->bge_dev.dv_xname, i);
@@ -1639,8 +1651,10 @@ bge_chipinit(struct bge_softc *sc)
 	    BGE_PCIDMARWCTL_WR_CMD_SHIFT(7);
 
 	if (sc->bge_flags & BGE_PCIE) {
-		/* Read watermark not used, 128 bytes for write. */
-		dma_rw_ctl |= BGE_PCIDMARWCTL_WR_WAT_SHIFT(3);
+		if (sc->bge_mps >= 256)
+			dma_rw_ctl |= BGE_PCIDMARWCTL_WR_WAT_SHIFT(7);
+		else
+			dma_rw_ctl |= BGE_PCIDMARWCTL_WR_WAT_SHIFT(3);
 	} else if (sc->bge_flags & BGE_PCIX) {
 		/* PCI-X bus */
 		if (BGE_IS_5714_FAMILY(sc)) {
@@ -1775,7 +1789,7 @@ bge_blockinit(struct bge_softc *sc)
 	volatile struct bge_rcb		*rcb;
 	vaddr_t			rcb_addr;
 	bge_hostaddr		taddr;
-	u_int32_t		dmactl, val;
+	u_int32_t		dmactl, mimode, val;
 	int			i, limit;
 
 	/*
@@ -2342,11 +2356,8 @@ bge_blockinit(struct bge_softc *sc)
 
 	/* Turn on send data completion state machine */
 	val = BGE_SDCMODE_ENABLE;
-
 	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5761)
 		val |= BGE_SDCMODE_CDELAY;
-
-	/* Turn on send data completion state machine */
 	CSR_WRITE_4(sc, BGE_SDC_MODE, val);
 
 	/* Turn on send data initiator state machine */
@@ -2371,9 +2382,19 @@ bge_blockinit(struct bge_softc *sc)
 	if (sc->bge_flags & BGE_PHY_FIBER_TBI) {
 		CSR_WRITE_4(sc, BGE_MI_STS, BGE_MISTS_LINK);
  	} else {
-		BGE_STS_SETBIT(sc, BGE_STS_AUTOPOLL);
-		BGE_SETBIT(sc, BGE_MI_MODE, BGE_MIMODE_AUTOPOLL|10<<16);
-		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700)
+		if ((sc->bge_flags & BGE_CPMU_PRESENT) != 0)
+			mimode = BGE_MIMODE_500KHZ_CONST;
+		else
+			mimode = BGE_MIMODE_BASE;
+		if (BGE_IS_5700_FAMILY(sc) ||
+		    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5705) {
+			mimode |= BGE_MIMODE_AUTOPOLL;
+			BGE_STS_SETBIT(sc, BGE_STS_AUTOPOLL);
+		}
+		mimode |= BGE_MIMODE_PHYADDR(sc->bge_phy_addr);
+		CSR_WRITE_4(sc, BGE_MI_MODE, mimode);
+		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5700 &&
+		    sc->bge_chipid != BGE_CHIPID_BCM5700_B2)
 			CSR_WRITE_4(sc, BGE_MAC_EVT_ENB,
 			    BGE_EVTENB_MI_INTERRUPT);
 	}
@@ -2439,7 +2460,7 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	const char		*intrstr = NULL;
 	bus_size_t		size, apesize;
 	bus_dma_segment_t	seg;
-	int			rseg, gotenaddr = 0, aspm_off;
+	int			rseg, gotenaddr = 0;
 	u_int32_t		hwcfg = 0;
 	u_int32_t		mac_addr = 0;
 	u_int32_t		misccfg;
@@ -2535,13 +2556,22 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	 * PCI Express or PCI-X controller check.
 	 */
 	if (pci_get_capability(pa->pa_pc, pa->pa_tag, PCI_CAP_PCIEXPRESS,
-	    &aspm_off, NULL) != 0) {
+	    &sc->bge_expcap, NULL) != 0) {
+		/* Extract supported maximum payload size. */
+		reg = pci_conf_read(pa->pa_pc, pa->pa_tag, sc->bge_expcap +
+		    PCI_PCIE_DCAP);
+		sc->bge_mps = 128 << (reg & 0x7);
+		if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5719 ||
+		    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5720)
+			sc->bge_expmrq = 0x4000; /* (fls(2048) - 8) << 12 */
+		else
+			sc->bge_expmrq = 0x5000; /* (fls(4096) - 8) << 12 */
 		/* Disable PCIe Active State Power Management (ASPM). */
 		reg = pci_conf_read(pa->pa_pc, pa->pa_tag,
-		    aspm_off + PCI_PCIE_LCSR);
+		    sc->bge_expcap + PCI_PCIE_LCSR);
 		reg &= ~(PCI_PCIE_LCSR_ASPM_L0S | PCI_PCIE_LCSR_ASPM_L1);
 		pci_conf_write(pa->pa_pc, pa->pa_tag,
-		    aspm_off + PCI_PCIE_LCSR, reg);
+		    sc->bge_expcap + PCI_PCIE_LCSR, reg);
 		sc->bge_flags |= BGE_PCIE;
 	} else {
 		if ((pci_conf_read(pa->pa_pc, pa->pa_tag, BGE_PCI_PCISTATE) &
@@ -2720,9 +2750,6 @@ bge_attach(struct device *parent, struct device *self, void *aux)
 	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5785 ||
 	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM57780)
 		sc->bge_flags |= BGE_CPMU_PRESENT;
-
-	if ((sc->bge_flags & BGE_CPMU_PRESENT) != 0)
-		BGE_SETBIT(sc, BGE_MI_MODE, BGE_MIMODE_500KHZ_CONST);
 
 	/* Try to reset the chip. */
 	DPRINTFN(5, ("bge_reset\n"));
@@ -3023,7 +3050,7 @@ void
 bge_reset(struct bge_softc *sc)
 {
 	struct pci_attach_args *pa = &sc->bge_pa;
-	pcireg_t cachesize, command;
+	pcireg_t cachesize, command, devctl;
 	u_int32_t reset, mac_mode, mac_mode_mask, val;
 	void (*write_op)(struct bge_softc *, int, int);
 	int i;
@@ -3123,12 +3150,17 @@ bge_reset(struct bge_softc *sc)
 			pci_conf_write(pa->pa_pc, pa->pa_tag, 0xc4, v | (1<<15));
 		}
 
-		/*
-		 * Set PCI Express max payload size to 128 bytes
-		 * and clear error status.
-		 */
-		pci_conf_write(pa->pa_pc, pa->pa_tag,
-		    BGE_PCI_CONF_DEV_CTRL, 0xf5000);
+		devctl = pci_conf_read(pa->pa_pc, pa->pa_tag, sc->bge_expcap +
+		    PCI_PCIE_DCSR);
+		/* Clear enable no snoop and disable relaxed ordering. */
+		devctl &= ~(PCI_PCIE_DCSR_ERO | PCI_PCIE_DCSR_ENS);
+		/* Set PCI Express max payload size. */
+		devctl = (devctl & ~PCI_PCIE_DCSR_MPS) | sc->bge_expmrq;
+		/* Clear error status. */
+		devctl |= PCI_PCIE_DCSR_CEE | PCI_PCIE_DCSR_NFE |
+		    PCI_PCIE_DCSR_FEE | PCI_PCIE_DCSR_URE;
+		pci_conf_write(pa->pa_pc, pa->pa_tag, sc->bge_expcap +
+		    PCI_PCIE_DCSR, devctl);
 	}
 
 	/* Reset some of the PCI state that got zapped by reset */
@@ -3203,22 +3235,18 @@ bge_reset(struct bge_softc *sc)
 	 */
 	if (sc->bge_flags & BGE_PHY_FIBER_TBI &&
 	    BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5704) {
-		u_int32_t serdescfg;
-
-		serdescfg = CSR_READ_4(sc, BGE_SERDES_CFG);
-		serdescfg = (serdescfg & ~0xFFF) | 0x880;
-		CSR_WRITE_4(sc, BGE_SERDES_CFG, serdescfg);
+		val = CSR_READ_4(sc, BGE_SERDES_CFG);
+		val = (val & ~0xFFF) | 0x880;
+		CSR_WRITE_4(sc, BGE_SERDES_CFG, val);
 	}
 
 	if (sc->bge_flags & BGE_PCIE &&
 	    !BGE_IS_5717_PLUS(sc) &&
 	    sc->bge_chipid != BGE_CHIPID_BCM5750_A0 &&
 	    BGE_ASICREV(sc->bge_chipid) != BGE_ASICREV_BCM5785) {
-		u_int32_t v;
-
-		/* Enable PCI Express bug fix */
-		v = CSR_READ_4(sc, 0x7c00);
-		CSR_WRITE_4(sc, 0x7c00, v | (1<<25));
+		/* Enable Data FIFO protection. */
+		val = CSR_READ_4(sc, 0x7c00);
+		CSR_WRITE_4(sc, 0x7c00, val | (1<<25));
 	}
 
 	if (BGE_ASICREV(sc->bge_chipid) == BGE_ASICREV_BCM5720)
@@ -3613,8 +3641,7 @@ bge_stats_update_regs(struct bge_softc *sc)
 	sc->bge_rx_inerrors += CSR_READ_4(sc, BGE_RXLP_LOCSTAT_IFIN_ERRORS);
 
 	ifp->if_collisions = sc->bge_tx_collisions;
-	ifp->if_ierrors = sc->bge_rx_discards + sc->bge_rx_inerrors +
-	    sc->bge_rx_overruns;
+	ifp->if_ierrors = sc->bge_rx_discards + sc->bge_rx_inerrors;
 }
 
 void
@@ -3632,7 +3659,6 @@ bge_stats_update(struct bge_softc *sc)
 	sc->bge_tx_collisions = cnt;
 
 	cnt = READ_STAT(sc, stats, nicNoMoreRxBDs.bge_addr_lo);
-	ifp->if_ierrors += (uint32_t)(cnt - sc->bge_rx_overruns);
 	sc->bge_rx_overruns = cnt;
 	cnt = READ_STAT(sc, stats, ifInErrors.bge_addr_lo);
 	ifp->if_ierrors += (uint32_t)(cnt - sc->bge_rx_inerrors);
@@ -4491,11 +4517,6 @@ bge_link_upd(struct bge_softc *sc)
 			if_link_state_change(ifp);
 			ifp->if_baudrate = 0;
 		}
-	/*
-	 * Discard link events for MII/GMII cards if MI auto-polling disabled.
-	 * This should not happen since mii callouts are locked now, but
-	 * we keep this check for debug.
-	 */
 	} else if (BGE_STS_BIT(sc, BGE_STS_AUTOPOLL)) {
 		/*
 		 * Some broken BCM chips have BGE_STATFLAG_LINKSTATE_CHANGED bit
@@ -4517,6 +4538,13 @@ bge_link_upd(struct bge_softc *sc)
 			    IFM_SUBTYPE(mii->mii_media_active) == IFM_NONE))
 				BGE_STS_CLRBIT(sc, BGE_STS_LINK);
 		}
+	} else {
+		/*
+		 * For controllers that call mii_tick, we have to poll
+		 * link status.
+		 */
+		mii_pollstat(mii);
+		bge_miibus_statchg(&sc->bge_dev);
 	}
 
 	/* Clear the attention */

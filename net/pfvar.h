@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfvar.h,v 1.379 2013/05/10 11:36:24 mikeb Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.383 2013/06/04 19:03:12 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1245,6 +1245,7 @@ struct pf_pdesc {
 			*eh;
 	struct pf_addr	*src;		/* src address */
 	struct pf_addr	*dst;		/* dst address */
+	u_int16_t	*pcksum;	/* proto cksum */
 	u_int16_t	*sport;
 	u_int16_t	*dport;
 	u_int16_t	 osport;
@@ -1969,12 +1970,6 @@ struct pf_os_fingerprint *
 
 #ifdef _KERNEL
 void			 pf_print_host(struct pf_addr *, u_int16_t, u_int8_t);
-
-void			 pf_step_into_anchor(int *, struct pf_ruleset **,
-			    struct pf_rule **, struct pf_rule **, int *);
-int			 pf_step_out_of_anchor(int *, struct pf_ruleset **,
-			     struct pf_rule **, struct pf_rule **,
-			     int *);
 
 int			 pf_get_transaddr(struct pf_rule *, struct pf_pdesc *,
 			    struct pf_src_node **, struct pf_rule **);

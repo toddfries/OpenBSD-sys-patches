@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.30 2013/05/17 12:03:42 kettenis Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.33 2013/06/06 16:14:26 jsg Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -356,6 +356,66 @@ const static struct drm_pcidev inteldrm_pciidlist[] = {
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_D_GT2,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_M_GT2,	0 },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_S_GT2,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_GT2_2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT1_1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT2_1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT3_1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT1_2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT2_2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT3_2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_SDV_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_SDV_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_SDV_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_SDV_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_SDV_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_SDV_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_SDV_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_SDV_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_SDV_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT1_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT2_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT3_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT1_2,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT2_2,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT3_2,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_ULT_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_ULT_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_ULT_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_ULT_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_ULT_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_ULT_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_ULT_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_ULT_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_ULT_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT1_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT2_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT3_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT1_2,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT2_2,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT3_2,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_CRW_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_CRW_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_CRW_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_CRW_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_CRW_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_CRW_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_CRW_GT1,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_CRW_GT2,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_CRW_GT3,		0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT1_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT2_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT3_1,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT1_2,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT2_2,	0 },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT3_2,	0 },
 	{0, 0, 0}
 };
 
@@ -452,6 +512,126 @@ static const struct intel_gfx_device_id {
 	    &intel_ivybridge_m_info },
 	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_S_GT2,
 	    &intel_ivybridge_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_GT1, /* GT1 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_GT2, /* GT2 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_GT3, /* GT3 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_GT1, /* GT1 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_GT2, /* GT2 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_GT3, /* GT3 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_GT1, /* GT1 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_GT2, /* GT2 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_GT2_2, /* GT2 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT1_1, /* GT1 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT2_1, /* GT2 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT3_1, /* GT3 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT1_2, /* GT1 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT2_2, /* GT2 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_GT3_2, /* GT3 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_SDV_GT1, /* SDV GT1 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_SDV_GT2, /* SDV GT2 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_SDV_GT3, /* SDV GT3 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_SDV_GT1, /* SDV GT1 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_SDV_GT2, /* SDV GT2 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_SDV_GT3, /* SDV GT3 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_SDV_GT1, /* SDV GT1 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_SDV_GT2, /* SDV GT2 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_SDV_GT3, /* SDV GT3 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT1_1, /* SDV GT1 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT2_1, /* SDV GT2 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT3_1, /* SDV GT3 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT1_2, /* SDV GT1 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT2_2, /* SDV GT2 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_SDV_GT3_2, /* SDV GT3 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_ULT_GT1, /* ULT GT1 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_ULT_GT2, /* ULT GT2 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_ULT_GT3, /* ULT GT3 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_ULT_GT1, /* ULT GT1 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_ULT_GT2, /* ULT GT2 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_ULT_GT3, /* ULT GT3 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_ULT_GT1, /* ULT GT1 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_ULT_GT2, /* ULT GT2 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_ULT_GT3, /* ULT GT3 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT1_1, /* ULT GT1 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT2_1, /* ULT GT2 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT3_1, /* ULT GT3 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT1_2, /* ULT GT1 reserved */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT2_2, /* ULT GT2 reserved */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_ULT_GT3_2, /* ULT GT3 reserved */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_CRW_GT1, /* CRW GT1 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_CRW_GT2, /* CRW GT2 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_CRW_GT3, /* CRW GT3 desktop */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_CRW_GT1, /* CRW GT1 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_CRW_GT2, /* CRW GT2 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_CRW_GT3, /* CRW GT3 server */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_CRW_GT1, /* CRW GT1 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_CRW_GT2, /* CRW GT2 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_CRW_GT3, /* CRW GT3 mobile */
+	    &intel_haswell_m_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT1_1, /* CRW GT1 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT2_1, /* CRW GT2 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT3_1, /* CRW GT3 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT1_2, /* CRW GT1 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT2_2, /* CRW GT2 reserved */
+	    &intel_haswell_d_info },
+	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_R_CRW_GT3_2, /* CRW GT3 reserved */
+	    &intel_haswell_d_info },
 	{0, 0, NULL}
 };
 
@@ -979,9 +1159,9 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	i915_gem_load(dev);
 
 	mtx_init(&dev_priv->irq_lock, IPL_TTY);
-	mtx_init(&dev_priv->rps.lock, IPL_NONE);
-	mtx_init(&dev_priv->dpio_lock, IPL_NONE);
-	mtx_init(&mchdev_lock, IPL_NONE);
+	mtx_init(&dev_priv->rps.lock, IPL_TTY);
+	mtx_init(&dev_priv->dpio_lock, IPL_TTY);
+	mtx_init(&mchdev_lock, IPL_TTY);
 	mtx_init(&dev_priv->error_completion_lock, IPL_NONE);
 
 	rw_init(&dev_priv->rps.hw_lock, "rpshw");
@@ -1344,25 +1524,6 @@ inteldrm_set_max_obj_size(struct inteldrm_softc *dev_priv)
 	dev_priv->max_gem_obj_size = (dev->gtt_total -
 	    atomic_read(&dev->pin_memory)) * 3 / 4 / 2;
 
-}
-
-void
-inteldrm_wipe_mappings(struct drm_obj *obj)
-{
-	struct drm_i915_gem_object *obj_priv = to_intel_bo(obj);
-	struct drm_device	*dev = obj->dev;
-	struct inteldrm_softc	*dev_priv = dev->dev_private;
-	struct vm_page		*pg;
-
-	DRM_ASSERT_HELD(obj);
-	/* make sure any writes hit the bus before we do whatever change
-	 * that prompted us to kill the mappings.
-	 */
-	DRM_MEMORYBARRIER();
-	/* nuke all our mappings. XXX optimise. */
-	for (pg = &dev_priv->pgs[atop(obj_priv->gtt_offset)]; pg !=
-	    &dev_priv->pgs[atop(obj_priv->gtt_offset + obj->size)]; pg++)
-		pmap_page_protect(pg, VM_PROT_NONE);
 }
 
 /**

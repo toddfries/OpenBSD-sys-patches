@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.48 2012/11/02 15:10:28 jsg Exp $	*/
+/*	$OpenBSD: cpu.c,v 1.50 2013/06/03 16:55:21 guenther Exp $	*/
 /* $NetBSD: cpu.c,v 1.1.2.7 2000/06/26 02:04:05 sommerfeld Exp $ */
 
 /*-
@@ -565,7 +565,7 @@ cpu_boot_secondary(struct cpu_info *ci)
 }
 
 /*
- * The CPU ends up here when its ready to run
+ * The CPU ends up here when it's ready to run
  * XXX should share some of this with init386 in machdep.c
  * for now it jumps into an infinite loop.
  */
@@ -597,7 +597,7 @@ cpu_hatch(void *v)
 	if (mp_verbose)
 		printf("%s: CPU at apid %ld running\n",
 		    ci->ci_dev.dv_xname, ci->ci_cpuid);
-	microuptime(&ci->ci_schedstate.spc_runtime);
+	nanouptime(&ci->ci_schedstate.spc_runtime);
 	splx(s);
 
 	SCHED_LOCK(s);

@@ -205,6 +205,9 @@ struct octeon_fau_map {
 #ifdef _KERNEL
 #define OCTEON_ARGV_MAX 64
 
+/* Maximum number of cores on <= CN52XX */
+#define OCTEON_MAXCPUS	4
+
 struct boot_desc {
 	uint32_t desc_ver;
 	uint32_t desc_size;
@@ -301,55 +304,6 @@ ffs64(uint64_t val)
 	return 64 - ret;
 }
 
-/* 
- * Prefetch
- *
- *	OCTEON_PREF		normal (L1 and L2)
- *	OCTEON_PREF_L1		L1 only
- *	OCTEON_PREF_L2		L2 only
- *	OCTEON_PREF_DWB		don't write back
- *	OCTEON_PREF_PFS		prepare for store
- */
-#define __OCTEON_PREF_N(n, base, offset)			\
-	__asm __volatile (					\
-		"	.set	push				\
-		"	.set	arch=octeon			\n" \
-		"	pref	"#n", "#offset"(%[base])	\n" \
-		"	.set	pop				\
-		: : [base] "d" (base)				\
-	)
-#define __OCTEON_PREF_0(base, offset)	__OCTEON_PREF_N(0, base, offset)
-#define __OCTEON_PREF_4(base, offset)	__OCTEON_PREF_N(4, base, offset)
-#define __OCTEON_PREF_28(base, offset)	__OCTEON_PREF_N(28, base, offset)
-#define __OCTEON_PREF_29(base, offset)	__OCTEON_PREF_N(29, base, offset)
-#define __OCTEON_PREF_30(base, offset)	__OCTEON_PREF_N(30, base, offset)
-#define OCTEON_PREF(base, offset)	__OCTEON_PREF_0(base, offset)
-#define OCTEON_PREF_L1(base, offset)	__OCTEON_PREF_4(base, offset)
-#define OCTEON_PREF_L2(base, offset)	__OCTEON_PREF_28(base, offset)
-#define OCTEON_PREF_DWB(base, offset)	__OCTEON_PREF_29(base, offset)
-#define OCTEON_PREF_PFS(base, offset)	__OCTEON_PREF_30(base, offset)
-
-/*
- * Sync
- */
-#define OCTEON_SYNCCOMMON(name) \
-	__asm __volatile ( \
-		_ASM_PROLOGUE_OCTEON			\
-		"	"#name"				\n" \
-		_ASM_EPILOGUE				\
-		::: "memory")
-#define OCTEON_SYNCIOBDMA	__asm __volatile (".word 0x8f" : : :"memory")
-#define OCTEON_SYNCW		__asm __volatile (".word  0x10f" : : )
-#define OCTEON_SYNC		OCTEON_SYNCCOMMON(sync)
-#define OCTEON_SYNCWS		__asm __volatile (".word  0x14f" : : )
-/* XXX backward compatibility */
-#if 1
-#define	OCT_SYNCIOBDMA		OCTEON_SYNCIOBDMA
-#define	OCT_SYNCW		OCTEON_SYNCW
-#define	OCT_SYNC		OCTEON_SYNC
-#define	OCT_SYNCWS		OCTEON_SYNCWS
-#endif
-
 static inline uint64_t
 octeon_xkphys_read_8(paddr_t address)
 {
@@ -363,14 +317,6 @@ octeon_xkphys_write_8(paddr_t address, uint64_t value)
 {
 	*(volatile uint64_t *)(PHYS_TO_XKPHYS(address, CCA_NC)) = value;
 }
-
-/* XXX backward compatibility */
-#if 1
-#define octeon_read_csr(address) \
-	octeon_xkphys_read_8(address)
-#define octeon_write_csr(address, value) \
-	octeon_xkphys_write_8(address, value)
-#endif
 
 static inline void
 octeon_iobdma_write_8(uint64_t value)
@@ -397,7 +343,7 @@ static inline uint32_t
 octeon_disable_interrupt(uint32_t *new)
 {
 	uint32_t s, tmp;
-        
+
 	__asm __volatile (
 		_ASM_PROLOGUE
 		"	mfc0	%[s], $12		\n"
@@ -423,23 +369,7 @@ octeon_restore_status(uint32_t s)
 
 static inline uint64_t
 octeon_get_cycles(void)
-{ 
-#if defined(__mips_o32)
-	uint32_t s, lo, hi;
-  
-	s = octeon_disable_interrupt((void *)0);
-	__asm __volatile (
-		_ASM_PROLOGUE_MIPS64
-		"	dmfc0	%[lo], $9, 6		\n"
-		"	add	%[hi], %[lo], $0	\n"
-		"	srl	%[hi], 32		\n"
-		"	sll	%[lo], 32		\n"
-		"	srl	%[lo], 32		\n"
-		_ASM_EPILOGUE
-		: [lo]"=&r"(lo), [hi]"=&r"(hi));
-	octeon_restore_status(s);
-	return ((uint64_t)hi << 32) + (uint64_t)lo;
-#else
+{
 	uint64_t tmp;
 
 	__asm __volatile (
@@ -448,7 +378,6 @@ octeon_get_cycles(void)
 		_ASM_EPILOGUE
 		: [tmp]"=&r"(tmp));
 	return tmp;
-#endif
 }
 
 /* -------------------------------------------------------------------------- */

@@ -1,5 +1,4 @@
-/*	$OpenBSD: octeon_pcibus.c,v 1.7 2013/03/21 09:25:48 jasper Exp $	*/
-/*	$OpenBSD: octeon_pcibus.c,v 1.7 2013/03/21 09:25:48 jasper Exp $	*/
+/*	$OpenBSD: octeon_pcibus.c,v 1.10 2013/06/02 19:47:01 jasper Exp $	*/
 /*	$NetBSD: bonito_mainbus.c,v 1.11 2008/04/28 20:23:10 martin Exp $	*/
 /*	$NetBSD: bonito_pci.c,v 1.5 2008/04/28 20:23:28 martin Exp $	*/
 
@@ -69,14 +68,10 @@
 
 #include <uvm/uvm_extern.h>
 
-#if 1
-#define	OCTEON_PCIBUS_DEBUG
-#endif
-
-#ifdef OCTEON_PCIBUS_DEBUG
-#define DEBUG_PRINT(p) printf p
+#ifdef DEBUG
+#define OCTEON_PCIDEBUG(p) printf p
 #else
-#define DEBUG_PRINT(p)
+#define OCTEON_PCIDEBUG(p)
 #endif
 
 #define REG_READ32(addr)	(*(volatile uint32_t *)(addr))
@@ -196,11 +191,10 @@ octeon_pcibus_match(struct device *parent, void *vcf, void *aux)
 	extern struct boot_info *octeon_boot_info;
 
 	if ((octeon_boot_info->config_flags & BOOTINFO_CFG_FLAG_PCI_HOST) == 0) {
-#ifdef OCTEON_PCIBUS_DEBUG
-		printf("%s, no PCI host function detected.\n", __func__);
-#endif
+		OCTEON_PCIDEBUG(("%s, no PCI host function detected.\n", __func__));
 		return 0;
 	}
+
 	if (strcmp(aa->aa_name, pcibus_cd.cd_name) == 0)
 		return 1;
 
@@ -294,8 +288,7 @@ octeon_pcibus_attach_hook(struct device *parent, struct device *self,
 int
 octeon_pcibus_bus_maxdevs(void *v, int busno)
 {
-	/* XXX */
-	return 32;
+	return (32);
 }
 
 pcitag_t
@@ -505,7 +498,7 @@ octeon_pcibus_get_resource_extent(pci_chipset_tag_t pc, int io)
 		ex = NULL;
 	}
 
-#ifdef OCTEON_PCIBUS_DEBUG
+#ifdef DEBUG
 	extent_print(ex);
 #endif
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip6.c,v 1.54 2013/05/02 11:54:10 mpi Exp $	*/
+/*	$OpenBSD: raw_ip6.c,v 1.58 2013/06/04 19:11:52 bluhm Exp $	*/
 /*	$KAME: raw_ip6.c,v 1.69 2001/03/04 15:55:44 itojun Exp $	*/
 
 /*
@@ -61,6 +61,8 @@
  *	@(#)raw_ip.c	8.2 (Berkeley) 1/4/94
  */
 
+#include "pf.h"
+
 #include <sys/param.h>
 #include <sys/malloc.h>
 #include <sys/mbuf.h>
@@ -74,6 +76,9 @@
 #include <net/if.h>
 #include <net/route.h>
 #include <net/if_types.h>
+#if NPF > 0
+#include <net/pfvar.h>
+#endif
 
 #include <netinet/in.h>
 #include <netinet/in_var.h>
@@ -169,6 +174,18 @@ rip6_input(struct mbuf **mp, int *offp, int proto)
 		if (in6p->in6p_ip6.ip6_nxt &&
 		    in6p->in6p_ip6.ip6_nxt != proto)
 			continue;
+#if NPF > 0
+		if (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
+			struct pf_divert *divert;
+
+			/* XXX rdomain support */
+			if ((divert = pf_find_divert(m)) == NULL)
+				continue;
+			if (!IN6_ARE_ADDR_EQUAL(&in6p->in6p_laddr,
+			    &divert->addr.v6))
+				continue;
+		} else
+#endif
 		if (!IN6_IS_ADDR_UNSPECIFIED(&in6p->in6p_laddr) &&
 		    !IN6_ARE_ADDR_EQUAL(&in6p->in6p_laddr, &ip6->ip6_dst))
 			continue;
@@ -191,7 +208,7 @@ rip6_input(struct mbuf **mp, int *offp, int proto)
 				/* strip intermediate headers */
 				m_adj(n, *offp);
 				if (sbappendaddr(&last->in6p_socket->so_rcv,
-				    (struct sockaddr *)&rip6src, n, opts) == 0) {
+				    sin6tosa(&rip6src), n, opts) == 0) {
 					/* should notify about lost packet */
 					m_freem(n);
 					if (opts)
@@ -210,7 +227,7 @@ rip6_input(struct mbuf **mp, int *offp, int proto)
 		/* strip intermediate headers */
 		m_adj(m, *offp);
 		if (sbappendaddr(&last->in6p_socket->so_rcv,
-		    (struct sockaddr *)&rip6src, m, opts) == 0) {
+		    sin6tosa(&rip6src), m, opts) == 0) {
 			m_freem(m);
 			if (opts)
 				m_freem(opts);
@@ -236,10 +253,11 @@ rip6_input(struct mbuf **mp, int *offp, int proto)
 }
 
 void
-rip6_ctlinput(int cmd, struct sockaddr *sa, void *d)
+rip6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 {
 	struct ip6_hdr *ip6;
 	struct ip6ctlparam *ip6cp = NULL;
+	struct sockaddr_in6 *sa6 = satosin6(sa);
 	const struct sockaddr_in6 *sa6_src = NULL;
 	void *cmdarg;
 	void (*notify)(struct in6pcb *, int) = in6_rtchange;
@@ -275,7 +293,6 @@ rip6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 	}
 
 	if (ip6 && cmd == PRC_MSGSIZE) {
-		struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)sa;
 		int valid = 0;
 		struct in6pcb *in6p;
 
@@ -288,7 +305,7 @@ rip6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 		 */
 		in6p = NULL;
 		in6p = in6_pcbhashlookup(&rawin6pcbtable, &sa6->sin6_addr, 0,
-		    (struct in6_addr *)&sa6_src->sin6_addr, 0);
+		    &sa6_src->sin6_addr, 0);
 #if 0
 		if (!in6p) {
 			/*
@@ -326,8 +343,8 @@ rip6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 		 */
 	}
 
-	(void) in6_pcbnotify(&rawin6pcbtable, sa, 0,
-	    (struct sockaddr *)sa6_src, 0, cmd, cmdarg, notify);
+	(void) in6_pcbnotify(&rawin6pcbtable, sa6, 0,
+	    sa6_src, 0, cmd, cmdarg, notify);
 }
 
 /*
@@ -691,7 +708,7 @@ rip6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		 */
 		if (!IN6_IS_ADDR_UNSPECIFIED(&addr->sin6_addr) &&
 		    !(so->so_options & SO_BINDANY) &&
-		    (ia = ifa_ifwithaddr((struct sockaddr *)addr,
+		    (ia = ifa_ifwithaddr(sin6tosa(addr),
 		    in6p->inp_rtableid)) == 0) {
 			error = EADDRNOTAVAIL;
 			break;

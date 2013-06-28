@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_time.c,v 1.77 2013/03/28 16:55:25 deraadt Exp $	*/
+/*	$OpenBSD: kern_time.c,v 1.79 2013/06/03 16:55:22 guenther Exp $	*/
 /*	$NetBSD: kern_time.c,v 1.20 1996/02/18 11:57:06 fvdl Exp $	*/
 
 /*
@@ -86,8 +86,8 @@ settime(struct timespec *ts)
 	 *	time_t is 32 bits even when atv.tv_sec is 64 bits.
 	 */
 	if (ts->tv_sec > INT_MAX - 365*24*60*60) {
-		printf("denied attempt to set clock forward to %ld\n",
-		    ts->tv_sec);
+		printf("denied attempt to set clock forward to %lld\n",
+		    (long long)ts->tv_sec);
 		return (EPERM);
 	}
 	/*
@@ -98,8 +98,8 @@ settime(struct timespec *ts)
 	 */
 	nanotime(&now);
 	if (securelevel > 1 && timespeccmp(ts, &now, <)) {
-		printf("denied attempt to set clock back %ld seconds\n",
-		    now.tv_sec - ts->tv_sec);
+		printf("denied attempt to set clock back %lld seconds\n",
+		    (long long)now.tv_sec - ts->tv_sec);
 		return (EPERM);
 	}
 
@@ -112,8 +112,6 @@ settime(struct timespec *ts)
 int
 clock_gettime(struct proc *p, clockid_t clock_id, struct timespec *tp)
 {
-	struct timeval tv;
-
 	switch (clock_id) {
 	case CLOCK_REALTIME:
 		nanotime(tp);
@@ -122,11 +120,9 @@ clock_gettime(struct proc *p, clockid_t clock_id, struct timespec *tp)
 		nanouptime(tp);
 		break;
 	case CLOCK_PROF:
-		microuptime(&tv);
-		timersub(&tv, &curcpu()->ci_schedstate.spc_runtime, &tv);
-		timeradd(&tv, &p->p_rtime, &tv);
-		tp->tv_sec = tv.tv_sec;
-		tp->tv_nsec = tv.tv_usec * 1000;
+		nanouptime(tp);
+		timespecsub(tp, &curcpu()->ci_schedstate.spc_runtime, tp);
+		timespecadd(tp, &p->p_rtime, tp);
 		break;
 	default:
 		return (EINVAL);

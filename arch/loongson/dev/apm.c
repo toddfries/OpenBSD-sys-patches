@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.13 2012/10/17 22:49:27 deraadt Exp $	*/
+/*	$OpenBSD: apm.c,v 1.16 2013/06/05 00:44:24 pirofti Exp $	*/
 
 /*-
  * Copyright (c) 2001 Alexander Guy.  All rights reserved.
@@ -44,6 +44,7 @@
 #include <sys/buf.h>
 #include <sys/event.h>
 #include <sys/reboot.h>
+#include <sys/hibernate.h>
 
 #include <machine/autoconf.h>
 #include <machine/conf.h>
@@ -87,7 +88,7 @@ int filt_apmread(struct knote *kn, long hint);
 int apmkqfilter(dev_t dev, struct knote *kn);
 int apm_getdefaultinfo(struct apm_power_info *);
 
-int apm_suspend(void);
+int apm_suspend(int state);
 
 struct filterops apmread_filtops =
 	{ 1, NULL, filt_apmrdetach, filt_apmread};
@@ -213,11 +214,6 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		/* some ioctl names from linux */
 	case APM_IOC_STANDBY:
 	case APM_IOC_STANDBY_REQ:
-		if ((flag & FWRITE) == 0)
-			error = EBADF;
-		else
-			error = EOPNOTSUPP; /* XXX */
-		break;
 	case APM_IOC_SUSPEND:
 	case APM_IOC_SUSPEND_REQ:
 		if ((flag & FWRITE) == 0)
@@ -226,8 +222,19 @@ apmioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		    sys_platform->resume == NULL)
 			error = EOPNOTSUPP;
 		else
-			error = apm_suspend();
+			error = apm_suspend(APM_IOC_SUSPEND);
 		break;
+#ifdef HIBERNATE
+	case APM_IOC_HIBERNATE:
+		if ((flag & FWRITE) == 0)
+			error = EBADF;
+		else if (sys_platform->suspend == NULL ||
+		    sys_platform->resume == NULL)
+			error = EOPNOTSUPP;
+		else
+			error = apm_suspend(APM_IOC_HIBERNATE);
+		break;
+#endif
 	case APM_IOC_PRN_CTL:
 		if ((flag & FWRITE) == 0)
 			error = EBADF;
@@ -351,7 +358,7 @@ apm_record_event(u_int event, const char *src, const char *msg)
 }
 
 int
-apm_suspend()
+apm_suspend(int state)
 {
 	int rv;
 	int s;
@@ -370,6 +377,18 @@ apm_suspend()
 	cold = 1;
 
 	rv = config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
+
+#ifdef HIBERNATE
+	if (state == APM_IOC_HIBERNATE) {
+		uvm_pmr_zero_everything();
+		if (hibernate_suspend()) {
+			printf("apm: hibernate_suspend failed");
+			hibernate_free();
+			uvm_pmr_dirty_everything();
+			return (ECANCELED);
+		}
+	}
+#endif
 
 	/* XXX
 	 * Flag to disk drivers that they should "power down" the disk

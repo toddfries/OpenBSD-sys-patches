@@ -1,4 +1,4 @@
-/*	$OpenBSD: amd64errata.c,v 1.3 2012/03/27 05:59:46 jsg Exp $	*/
+/*	$OpenBSD: amd64errata.c,v 1.5 2013/05/21 21:12:17 kettenis Exp $	*/
 /*	$NetBSD: errata.c,v 1.6 2007/02/05 21:05:45 ad Exp $	*/
 
 /*-
@@ -129,8 +129,8 @@ static const uint8_t amd64_errata_set9[] = {
 	DA_C3, HY_D0, HY_D1, HY_D1_G34R1,  PH_E0, LN_B0, OINK
 };
 
-static int amd64_errata_setmsr(struct cpu_info *, errata_t *);
-static int amd64_errata_testmsr(struct cpu_info *, errata_t *);
+int amd64_errata_setmsr(struct cpu_info *, errata_t *);
+int amd64_errata_testmsr(struct cpu_info *, errata_t *);
 
 static errata_t errata[] = {
 	/*
@@ -243,7 +243,7 @@ static errata_t errata[] = {
 	},
 };
 
-static int 
+int 
 amd64_errata_testmsr(struct cpu_info *ci, errata_t *e)
 {
 	uint64_t val;
@@ -258,7 +258,7 @@ amd64_errata_testmsr(struct cpu_info *ci, errata_t *e)
 	return 1;			/* found */
 }
 
-static int 
+int 
 amd64_errata_setmsr(struct cpu_info *ci, errata_t *e)
 {
 	uint64_t val;

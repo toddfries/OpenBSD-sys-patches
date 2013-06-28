@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.137 2013/04/09 08:35:38 mpi Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.139 2013/06/01 13:25:40 bluhm Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -480,7 +480,6 @@ in_pcbdetach(struct inpcb *inp)
 		ip_freemoptions(inp->inp_moptions);
 #ifdef IPSEC
 	/* IPsec cleanup here */
-	s = splsoftnet();
 	if (inp->inp_tdb_in)
 		TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in,
 			     inp, inp_tdb_in_next);
@@ -493,7 +492,6 @@ in_pcbdetach(struct inpcb *inp)
 		ipsp_reffree(inp->inp_ipsec_remoteauth);
 	if (inp->inp_ipo)
 		ipsec_delete_policy(inp->inp_ipo);
-	splx(s);
 #endif
 #if NPF > 0
 	if (inp->inp_pf_sk)
@@ -946,8 +944,8 @@ in_pcbhashlookup(struct inpcbtable *table, struct in_addr faddr,
 
 #ifdef INET6
 struct inpcb *
-in6_pcbhashlookup(struct inpcbtable *table, struct in6_addr *faddr,
-    u_int fport_arg, struct in6_addr *laddr, u_int lport_arg)
+in6_pcbhashlookup(struct inpcbtable *table, const struct in6_addr *faddr,
+    u_int fport_arg, const struct in6_addr *laddr, u_int lport_arg)
 {
 	struct inpcbhead *head;
 	struct inpcb *inp;
