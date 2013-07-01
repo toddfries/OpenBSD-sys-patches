@@ -107,6 +107,7 @@ pseudo-device	tun		# network tunneling over tty
 pseudo-device	vether		# Virtual ethernet
 pseudo-device	vlan 		# IEEE 802.1Q VLAN 
 pseudo-device	fuse		# FuseFS
+option FUSE
 
 pseudo-device	bio	1	# ioctl multiplexing device
 
