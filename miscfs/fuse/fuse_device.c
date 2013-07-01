@@ -380,7 +380,9 @@ fusewrite(dev_t dev, struct uio *uio, int ioflag)
 #endif
 
 	if (fbuf != NULL) {
-		memcpy(&fbuf->fb_hdr, &hdr, sizeof(fbuf->fb_hdr));
+		fbuf->fb_len = hdr.fh_len;
+		fbuf->fb_err = hdr.fh_err;
+		fbuf->fb_ino = hdr.fh_ino;
 
 		if (uio->uio_resid != hdr.fh_len ||
 		    (uio->uio_resid != 0 && hdr.fh_err) ||
