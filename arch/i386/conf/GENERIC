@@ -29,7 +29,7 @@ option		PROCFS		# /proc
 option		NTFS		# NTFS support
 option		HIBERNATE	# Hibernate support
 
-config		bsd	swap generic
+config		bsd	root on sd1a swap on sd0b
 
 mainbus0 at root
 
