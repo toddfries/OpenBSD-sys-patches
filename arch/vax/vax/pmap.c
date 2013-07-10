@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.56 2013/06/09 15:47:33 miod Exp $ */
+/*	$OpenBSD: pmap.c,v 1.59 2013/07/07 18:59:36 miod Exp $ */
 /*	$NetBSD: pmap.c,v 1.74 1999/11/13 21:32:25 matt Exp $	   */
 /*
  * Copyright (c) 1994, 1998, 1999 Ludd, University of Lule}, Sweden.
@@ -230,8 +230,8 @@ pmap_bootstrap()
 	pmap->ref_count = 1;
 
 	/* Activate the kernel pmap. */
-	mtpr(pcb->P1BR = pmap->pm_p1br, PR_P1BR);
-	mtpr(pcb->P0BR = pmap->pm_p0br, PR_P0BR);
+	mtpr((register_t)(pcb->P1BR = pmap->pm_p1br), PR_P1BR);
+	mtpr((register_t)(pcb->P0BR = pmap->pm_p0br), PR_P0BR);
 	mtpr(pcb->P1LR = pmap->pm_p1lr, PR_P1LR);
 	mtpr(pcb->P0LR = pmap->pm_p0lr, PR_P0LR);
 
@@ -350,8 +350,8 @@ pmap_decpteref(pmap, pte)
 #endif
 	if (pmap->pm_refcnt[index] == 0) {
 		paddr = (*kvtopte(pte) & PG_FRAME) << VAX_PGSHIFT;
-		uvm_pagefree(PHYS_TO_VM_PAGE(paddr));
 		bzero(kvtopte(pte), sizeof(pt_entry_t) * LTOHPN);
+		uvm_pagefree(PHYS_TO_VM_PAGE(paddr));
 	}
 }
 
@@ -869,7 +869,7 @@ if(startpmapdebug)printf("pmap_extract: pmap %p, va %lx\n",pmap, va);
 		pte = (int *)pmap->pm_p1br;
 	}
 
-	if ((*kvtopte(&pte[sva]) & PG_FRAME) != 0) {
+	if ((*kvtopte(&pte[sva]) & PG_V) && (pte[sva] & PG_V)) {
 		*pap = ((pte[sva] & PG_FRAME) << VAX_PGSHIFT) |
 		    (va & VAX_PGOFSET);
 		return (TRUE);
@@ -1251,9 +1251,9 @@ if(startpmapdebug) printf("pmap_activate: p %p\n", p);
 	pcb->P1LR = pmap->pm_p1lr;
 
 	if (p == curproc) {
-		mtpr(pmap->pm_p0br, PR_P0BR);
+		mtpr((register_t)pmap->pm_p0br, PR_P0BR);
 		mtpr(pmap->pm_p0lr, PR_P0LR);
-		mtpr(pmap->pm_p1br, PR_P1BR);
+		mtpr((register_t)pmap->pm_p1br, PR_P1BR);
 		mtpr(pmap->pm_p1lr, PR_P1LR);
 	}
 	mtpr(0, PR_TBIA);
