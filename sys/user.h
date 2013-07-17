@@ -32,6 +32,9 @@
  *	@(#)user.h	8.2 (Berkeley) 9/23/93
  */
 
+#ifndef _SYS_USER_H_
+#define _SYS_USER_H_
+
 #include <machine/pcb.h>
 #ifndef _KERNEL
 /* stuff that *used* to be included by user.h, or is now needed */
@@ -56,3 +59,4 @@
 struct	user {
 	struct	pcb u_pcb;
 };
+#endif /* _SYS_USER_H_ */

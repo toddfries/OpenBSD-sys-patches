@@ -32,6 +32,9 @@
  *	@(#)socketvar.h	8.1 (Berkeley) 6/2/93
  */
 
+#ifndef _SYS_SOCKETVAR_H_
+#define _SYS_SOCKETVAR_H_
+
 #include <sys/selinfo.h>			/* for struct selinfo */
 #include <sys/queue.h>
 #include <sys/timeout.h>
@@ -334,3 +337,4 @@ void	sbcheck(struct sockbuf *sb);
 #endif /* SOCKBUF_DEBUG */
 
 #endif /* _KERNEL */
+#endif /* _SYS_SOCKETVAR_H_ */

@@ -32,6 +32,10 @@
  *	@(#)filedesc.h	8.1 (Berkeley) 6/2/93
  */
 
+#ifndef _SYS_FILEDESC_H_
+#define _SYS_FILEDESC_H_
+
+
 #include <sys/rwlock.h>
 /*
  * This structure is used for the management of descriptors.  It may be
@@ -141,3 +145,4 @@ int	getsock(struct filedesc *, int, struct file **);
 #define	fdpunlock(fdp)	rw_exit_write(&(fdp)->fd_lock)
 #define	fdpassertlocked(fdp)	rw_assert_wrlock(&(fdp)->fd_lock)
 #endif
+#endif /* _SYS_FILEDESC_H_ */
