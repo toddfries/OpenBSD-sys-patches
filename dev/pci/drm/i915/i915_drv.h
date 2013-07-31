@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.h,v 1.22 2013/05/21 22:12:58 kettenis Exp $ */
+/* $OpenBSD: i915_drv.h,v 1.24 2013/07/05 07:20:27 jsg Exp $ */
 /* i915_drv.h -- Private header for the I915 driver -*- linux-c -*-
  */
 /*
@@ -587,6 +587,7 @@ struct inteldrm_softc {
 	unsigned int int_crt_support:1;
 	unsigned int lvds_use_ssc:1;
 	unsigned int display_clock_mode:1;
+	unsigned int fdi_rx_polarity_inverted:1;
 	int lvds_ssc_freq;
 	unsigned int bios_lvds_val; /* initial [PCH_]LVDS reg val in VBIOS */
 	unsigned int lvds_val; /* used for checking LVDS channel mode */
@@ -1564,7 +1565,7 @@ static inline bool
 i915_gem_object_pin_fence(struct drm_i915_gem_object *obj)
 {
 	if (obj->fence_reg != I915_FENCE_REG_NONE) {
-		drm_i915_private_t *dev_priv = obj->base.dev->dev_private;
+		struct drm_i915_private *dev_priv = obj->base.dev->dev_private;
 		dev_priv->fence_regs[obj->fence_reg].pin_count++;
 		return true;
 	} else
@@ -1575,7 +1576,7 @@ static inline void
 i915_gem_object_unpin_fence(struct drm_i915_gem_object *obj)
 {
 	if (obj->fence_reg != I915_FENCE_REG_NONE) {
-		drm_i915_private_t *dev_priv = obj->base.dev->dev_private;
+		struct drm_i915_private *dev_priv = obj->base.dev->dev_private;
 		dev_priv->fence_regs[obj->fence_reg].pin_count--;
 	}
 }

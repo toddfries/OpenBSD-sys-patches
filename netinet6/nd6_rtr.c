@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_rtr.c,v 1.70 2013/05/31 15:04:25 bluhm Exp $	*/
+/*	$OpenBSD: nd6_rtr.c,v 1.72 2013/07/01 14:22:20 bluhm Exp $	*/
 /*	$KAME: nd6_rtr.c,v 1.97 2001/02/07 11:09:13 itojun Exp $	*/
 
 /*
@@ -890,9 +890,7 @@ purge_detached(struct ifnet *ifp)
 	struct in6_ifaddr *ia;
 	struct ifaddr *ifa, *ifa_next;
 
-	for (pr = nd_prefix.lh_first; pr; pr = pr_next) {
-		pr_next = pr->ndpr_next;
-
+	LIST_FOREACH_SAFE(pr, &nd_prefix, ndpr_entry, pr_next) {
 		/*
 		 * This function is called when we need to make more room for
 		 * new prefixes rather than keeping old, possibly stale ones.
@@ -906,8 +904,7 @@ purge_detached(struct ifnet *ifp)
 		    !LIST_EMPTY(&pr->ndpr_advrtrs)))
 			continue;
 
-		for (ifa = ifp->if_addrlist.tqh_first; ifa; ifa = ifa_next) {
-			ifa_next = ifa->ifa_list.tqe_next;
+		TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrlist, ifa_list, ifa_next) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
 			ia = ifatoia6(ifa);
@@ -1011,11 +1008,8 @@ prelist_remove(struct nd_prefix *pr)
 	LIST_REMOVE(pr, ndpr_entry);
 
 	/* free list of routers that adversed the prefix */
-	for (pfr = LIST_FIRST(&pr->ndpr_advrtrs); pfr != NULL; pfr = next) {
-		next = LIST_NEXT(pfr, pfr_entry);
-
+	LIST_FOREACH_SAFE(pfr, &pr->ndpr_advrtrs, pfr_entry, next)
 		free(pfr, M_IP6NDP);
-	}
 
 	ext->nprefixes--;
 	if (ext->nprefixes < 0) {
@@ -1378,8 +1372,7 @@ find_pfxlist_reachable_router(struct nd_prefix *pr)
 	struct rtentry *rt;
 	struct llinfo_nd6 *ln;
 
-	for (pfxrtr = LIST_FIRST(&pr->ndpr_advrtrs); pfxrtr;
-	     pfxrtr = LIST_NEXT(pfxrtr, pfr_entry)) {
+	LIST_FOREACH(pfxrtr, &pr->ndpr_advrtrs, pfr_entry) {
 		if ((rt = nd6_lookup(&pfxrtr->router->rtaddr, 0,
 		    pfxrtr->router->ifp)) &&
 		    (ln = (struct llinfo_nd6 *)rt->rt_llinfo) &&
