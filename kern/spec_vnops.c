@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_vnops.c,v 1.73 2013/06/11 19:01:20 beck Exp $	*/
+/*	$OpenBSD: spec_vnops.c,v 1.75 2013/07/29 18:51:42 kettenis Exp $	*/
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -457,9 +457,7 @@ spec_strategy(void *v)
 	struct vop_strategy_args *ap = v;
 	struct buf *bp = ap->a_bp;
 	int maj = major(bp->b_dev);
-
-	if (!ISSET(bp->b_flags, B_DMA) && ISSET(bp->b_flags, B_BC))
-		panic("bogus buf %p passed to spec_strategy", bp);
+	
 	if (LIST_FIRST(&bp->b_dep) != NULL)
 		buf_start(bp);
 
@@ -703,8 +701,10 @@ spec_open_clone(struct vop_open_args *ap)
 		return (EBUSY); /* too many open instances */
 
 	error = cdevvp(makedev(major(vp->v_rdev), i), &cvp);
-	if (error)
+	if (error) {
+		clrbit(vp->v_specbitmap, i);
 		return (error); /* out of vnodes */
+	}
 
 	VOP_UNLOCK(vp, 0, ap->a_p);
 
@@ -714,8 +714,9 @@ spec_open_clone(struct vop_open_args *ap)
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, ap->a_p);
 
 	if (error) {
-		 clrbit(vp->v_specbitmap, i);
-		 return (error); /* device open failed */
+		vput(cvp);
+		clrbit(vp->v_specbitmap, i);
+		return (error); /* device open failed */
 	}
 
 	cvp->v_flag |= VCLONE;

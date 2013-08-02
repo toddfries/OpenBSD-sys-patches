@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_suspend.c,v 1.1 2013/03/18 12:36:52 jsg Exp $	*/
+/*	$OpenBSD: i915_suspend.c,v 1.3 2013/07/08 09:47:45 jsg Exp $	*/
 /*
  *
  * Copyright 2008 (c) Intel Corporation
@@ -50,7 +50,7 @@ void	i915_restore_modeset_reg(struct drm_device *);
 bool
 i915_pipe_enabled(struct drm_device *dev, enum pipe pipe)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32	dpll_reg;
 
 	/* On IVB, 3rd pipe shares PLL with another one */
@@ -68,7 +68,7 @@ i915_pipe_enabled(struct drm_device *dev, enum pipe pipe)
 void
 i915_save_palette(struct drm_device *dev, enum pipe pipe)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	unsigned long reg = (pipe == PIPE_A ? _PALETTE_A : _PALETTE_B);
 	u32 *array;
 	int i;
@@ -91,7 +91,7 @@ i915_save_palette(struct drm_device *dev, enum pipe pipe)
 void
 i915_restore_palette(struct drm_device *dev, enum pipe pipe)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	unsigned long reg = (pipe == PIPE_A ? _PALETTE_A : _PALETTE_B);
 	u32 *array;
 	int i;
@@ -115,7 +115,7 @@ u_int8_t
 i915_read_indexed(struct drm_device *dev, u_int16_t index_port,
     u_int16_t data_port, u_int8_t reg)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	I915_WRITE8(index_port, reg);
 	return I915_READ8(data_port);
@@ -125,7 +125,7 @@ u_int8_t
 i915_read_ar(struct drm_device *dev, u_int16_t st01,
     u_int8_t reg, u_int16_t palette_enable)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	I915_READ8(st01);
 	I915_WRITE8(VGA_AR_INDEX, palette_enable | reg);
@@ -136,7 +136,7 @@ void
 i915_write_ar(struct drm_device *dev, u_int16_t st01, u_int8_t reg,
     u_int8_t val, u_int16_t palette_enable)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	I915_READ8(st01);
 	I915_WRITE8(VGA_AR_INDEX, palette_enable | reg);
@@ -147,7 +147,7 @@ void
 i915_write_indexed(struct drm_device *dev, u_int16_t index_port,
     u_int16_t data_port, u_int8_t reg, u_int8_t val)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	I915_WRITE8(index_port, reg);
 	I915_WRITE8(data_port, val);
@@ -156,7 +156,7 @@ i915_write_indexed(struct drm_device *dev, u_int16_t index_port,
 void
 i915_save_vga(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int i;
 	u16 cr_index, cr_data, st01;
 
@@ -215,7 +215,7 @@ i915_save_vga(struct drm_device *dev)
 void
 i915_restore_vga(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int i;
 	u16 cr_index, cr_data, st01;
 
@@ -269,7 +269,7 @@ i915_restore_vga(struct drm_device *dev)
 void
 i915_save_modeset_reg(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int i;
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET))
@@ -438,7 +438,7 @@ i915_save_modeset_reg(struct drm_device *dev)
 void
 i915_restore_modeset_reg(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int dpll_a_reg, fpa0_reg, fpa1_reg;
 	int dpll_b_reg, fpb0_reg, fpb1_reg;
 	int i;
@@ -496,19 +496,19 @@ i915_restore_modeset_reg(struct drm_device *dev)
 		I915_WRITE(dpll_a_reg, dev_priv->regfile.saveDPLL_A &
 			   ~DPLL_VCO_ENABLE);
 		POSTING_READ(dpll_a_reg);
-		DRM_UDELAY(150);
+		udelay(150);
 	}
 	I915_WRITE(fpa0_reg, dev_priv->regfile.saveFPA0);
 	I915_WRITE(fpa1_reg, dev_priv->regfile.saveFPA1);
 	/* Actually enable it */
 	I915_WRITE(dpll_a_reg, dev_priv->regfile.saveDPLL_A);
 	POSTING_READ(dpll_a_reg);
-	DRM_UDELAY(150);
+	udelay(150);
 	if (INTEL_INFO(dev)->gen >= 4 && !HAS_PCH_SPLIT(dev)) {
 		I915_WRITE(_DPLL_A_MD, dev_priv->regfile.saveDPLL_A_MD);
 		POSTING_READ(_DPLL_A_MD);
 	}
-	DRM_UDELAY(150);
+	udelay(150);
 
 	/* Restore mode */
 	I915_WRITE(_HTOTAL_A, dev_priv->regfile.saveHTOTAL_A);
@@ -565,19 +565,19 @@ i915_restore_modeset_reg(struct drm_device *dev)
 		I915_WRITE(dpll_b_reg, dev_priv->regfile.saveDPLL_B &
 			   ~DPLL_VCO_ENABLE);
 		POSTING_READ(dpll_b_reg);
-		DRM_UDELAY(150);
+		udelay(150);
 	}
 	I915_WRITE(fpb0_reg, dev_priv->regfile.saveFPB0);
 	I915_WRITE(fpb1_reg, dev_priv->regfile.saveFPB1);
 	/* Actually enable it */
 	I915_WRITE(dpll_b_reg, dev_priv->regfile.saveDPLL_B);
 	POSTING_READ(dpll_b_reg);
-	DRM_UDELAY(150);
+	udelay(150);
 	if (INTEL_INFO(dev)->gen >= 4 && !HAS_PCH_SPLIT(dev)) {
 		I915_WRITE(_DPLL_B_MD, dev_priv->regfile.saveDPLL_B_MD);
 		POSTING_READ(_DPLL_B_MD);
 	}
-	DRM_UDELAY(150);
+	udelay(150);
 
 	/* Restore mode */
 	I915_WRITE(_HTOTAL_B, dev_priv->regfile.saveHTOTAL_B);
@@ -651,7 +651,7 @@ i915_restore_modeset_reg(struct drm_device *dev)
 void
 i915_save_display(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	/* Display arbitration control */
 	dev_priv->regfile.saveDSPARB = I915_READ(DSPARB);
@@ -739,7 +739,7 @@ i915_save_display(struct drm_device *dev)
 void
 i915_restore_display(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	/* Display arbitration */
 	I915_WRITE(DSPARB, dev_priv->regfile.saveDSPARB);
@@ -832,7 +832,7 @@ i915_restore_display(struct drm_device *dev)
 	I915_WRITE(VGA1, dev_priv->regfile.saveVGA1);
 	I915_WRITE(VGA_PD, dev_priv->regfile.saveVGA_PD);
 	POSTING_READ(VGA_PD);
-	DRM_UDELAY(150);
+	udelay(150);
 
 	i915_restore_vga(dev);
 }
@@ -840,7 +840,7 @@ i915_restore_display(struct drm_device *dev)
 int
 i915_save_state(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int i;
 
 	dev_priv->regfile.saveLBB = pci_conf_read(dev_priv->pc, dev_priv->tag, LBB);
@@ -891,7 +891,7 @@ i915_save_state(struct drm_device *dev)
 int
 i915_restore_state(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int i;
 
 	pci_conf_write(dev_priv->pc, dev_priv->tag, LBB, dev_priv->regfile.saveLBB);

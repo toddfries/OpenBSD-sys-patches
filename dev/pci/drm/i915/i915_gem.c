@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem.c,v 1.25 2013/06/12 14:28:40 kettenis Exp $	*/
+/*	$OpenBSD: i915_gem.c,v 1.29 2013/07/29 18:32:15 kettenis Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -70,7 +70,7 @@ void i915_gem_object_update_fence(struct drm_i915_gem_object *,
     struct drm_i915_fence_reg *, bool);
 int i915_gem_object_flush_fence(struct drm_i915_gem_object *);
 struct drm_i915_fence_reg *i915_find_fence_reg(struct drm_device *);
-void i915_gem_reset_ring_lists(drm_i915_private_t *,
+void i915_gem_reset_ring_lists(struct drm_i915_private *,
     struct intel_ring_buffer *);
 void i915_gem_object_flush_gtt_write_domain(struct drm_i915_gem_object *);
 void i915_gem_request_remove_from_client(struct drm_i915_gem_request *);
@@ -468,7 +468,7 @@ i915_gem_check_wedge(struct drm_i915_private *dev_priv,
 
 		/* Give the error handler a chance to run. */
 		mtx_enter(&dev_priv->error_completion_lock);
-		recovery_complete = (&dev_priv->error_completion) > 0;
+		recovery_complete = dev_priv->error_completion > 0;
 		mtx_leave(&dev_priv->error_completion_lock);
 		
 		/* Non-interruptible callers can't handle -EAGAIN, hence return
@@ -598,7 +598,51 @@ i915_gem_object_wait_rendering(struct drm_i915_gem_object *obj,
 	return 0;
 }
 
-// i915_gem_object_wait_rendering__nonblocking
+/* A nonblocking variant of the above wait. This is a highly dangerous routine
+ * as the object state may change during this call.
+ */
+static int
+i915_gem_object_wait_rendering__nonblocking(struct drm_i915_gem_object *obj,
+					    bool readonly)
+{
+	struct drm_device *dev = obj->base.dev;
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct intel_ring_buffer *ring = obj->ring;
+	u32 seqno;
+	int ret;
+
+	rw_assert_wrlock(&dev->dev_lock);
+	BUG_ON(!dev_priv->mm.interruptible);
+
+	seqno = readonly ? obj->last_write_seqno : obj->last_read_seqno;
+	if (seqno == 0)
+		return 0;
+
+	ret = i915_gem_check_wedge(dev_priv, true);
+	if (ret)
+		return ret;
+
+	ret = i915_gem_check_olr(ring, seqno);
+	if (ret)
+		return ret;
+
+	DRM_UNLOCK();
+	ret = __wait_seqno(ring, seqno, true, NULL);
+	DRM_LOCK();
+
+	i915_gem_retire_requests_ring(ring);
+
+	/* Manually manage the write flush as we may have not yet
+	 * retired the buffer.
+	 */
+	if (obj->last_write_seqno &&
+	    i915_seqno_passed(seqno, obj->last_write_seqno)) {
+		obj->last_write_seqno = 0;
+		obj->base.write_domain &= ~I915_GEM_GPU_DOMAINS;
+	}
+
+	return ret;
+}
 
 /**
  * Called when user space prepares to use an object with the CPU, either
@@ -637,7 +681,6 @@ i915_gem_set_domain_ioctl(struct drm_device *dev, void *data,
 		goto unlock;
 	}
 
-#if notyet
 	/* Try to flush the object off the GPU without holding the lock.
 	 * We will repeat the flush holding the lock in the normal manner
 	 * to catch cases where we are gazumped.
@@ -645,7 +688,6 @@ i915_gem_set_domain_ioctl(struct drm_device *dev, void *data,
 	ret = i915_gem_object_wait_rendering__nonblocking(obj, !write_domain);
 	if (ret)
 		goto unref;
-#endif
 
 	if (read_domains & I915_GEM_DOMAIN_GTT) {
 		ret = i915_gem_object_set_to_gtt_domain(obj, write_domain != 0);
@@ -660,9 +702,7 @@ i915_gem_set_domain_ioctl(struct drm_device *dev, void *data,
 		ret = i915_gem_object_set_to_cpu_domain(obj, write_domain != 0);
 	}
 
-#ifdef notyet
 unref:
-#endif
 	drm_gem_object_unreference(&obj->base);
 unlock:
 	DRM_UNLOCK();
@@ -1414,7 +1454,7 @@ i915_gem_request_remove_from_client(struct drm_i915_gem_request *request)
 }
 
 void
-i915_gem_reset_ring_lists(drm_i915_private_t *dev_priv,
+i915_gem_reset_ring_lists(struct drm_i915_private *dev_priv,
 				      struct intel_ring_buffer *ring)
 {
 	while (!list_empty(&ring->request_list)) {
@@ -1919,24 +1959,49 @@ i915_gem_write_fence(struct drm_device *dev, int reg,
 }
 
 static inline int
-fence_number(drm_i915_private_t *dev_priv,
+fence_number(struct drm_i915_private *dev_priv,
 			       struct drm_i915_fence_reg *fence)
 {
 	return fence - dev_priv->fence_regs;
 }
+
+#ifdef __linux__
+void
+i915_gem_write_fence__ipi(void *data)
+{
+	wbinvd();
+}
+#endif
 
 void
 i915_gem_object_update_fence(struct drm_i915_gem_object *obj,
 					 struct drm_i915_fence_reg *fence,
 					 bool enable)
 {
-	struct drm_i915_private *dev_priv = obj->base.dev->dev_private;
-	int reg = fence_number(dev_priv, fence);
+	struct drm_device *dev = obj->base.dev;
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	int fence_reg = fence_number(dev_priv, fence);
 
-	i915_gem_write_fence(obj->base.dev, reg, enable ? obj : NULL);
+	/* In order to fully serialize access to the fenced region and
+	 * the update to the fence register we need to take extreme
+	 * measures on SNB+. In theory, the write to the fence register
+	 * flushes all memory transactions before, and coupled with the
+	 * mb() placed around the register write we serialise all memory
+	 * operations with respect to the changes in the tiler. Yet, on
+	 * SNB+ we need to take a step further and emit an explicit wbinvd()
+	 * on each processor in order to manually flush all memory
+	 * transactions before updating the fence register.
+	 */
+	if (HAS_LLC(obj->base.dev))
+#ifdef __linux__
+		on_each_cpu(i915_gem_write_fence__ipi, NULL, 1);
+#else
+		wbinvd();
+#endif
+	i915_gem_write_fence(dev, fence_reg, enable ? obj : NULL);
 
 	if (enable) {
-		obj->fence_reg = reg;
+		obj->fence_reg = fence_reg;
 		fence->obj = obj;
 		list_move_tail(&fence->lru_list, &dev_priv->mm.fence_list);
 	} else {
@@ -3127,7 +3192,7 @@ cleanup_render_ring:
 int
 i915_gem_init(struct drm_device *dev)
 {
-	struct inteldrm_softc		*dev_priv = dev->dev_private;
+	struct drm_i915_private		*dev_priv = dev->dev_private;
 	uint64_t			 gtt_start, gtt_end;
 	struct agp_softc		*asc;
 	int				 ret;

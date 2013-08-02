@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.309 2013/06/11 16:42:13 deraadt Exp $ */
+/* $OpenBSD: softraid.c,v 1.311 2013/07/19 17:14:13 krw Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -1858,7 +1858,7 @@ sr_detach(struct device *self, int flags)
 		sc->sc_scsibus = NULL;
 	}
 
-	return (rv);
+	return (0);
 }
 
 void
@@ -2079,12 +2079,14 @@ sr_ccb_done(struct sr_ccb *ccb)
 	if (ccb->ccb_buf.b_flags & B_ERROR) {
 		DNPRINTF(SR_D_INTR, "%s: i/o error on block %lld target %d\n",
 		    DEVNAME(sc), ccb->ccb_buf.b_blkno, ccb->ccb_target);
-		if (!ISSET(sd->sd_capabilities, SR_CAP_REDUNDANT))
+		if (ISSET(sd->sd_capabilities, SR_CAP_REDUNDANT))
+			sd->sd_set_chunk_state(sd, ccb->ccb_target,
+			    BIOC_SDOFFLINE);
+		else
 			printf("%s: i/o error on block %lld target %d "
 			    "b_error %d\n", DEVNAME(sc), ccb->ccb_buf.b_blkno,
 			    ccb->ccb_target, ccb->ccb_buf.b_error);
 		ccb->ccb_state = SR_CCB_FAILED;
-		sd->sd_set_chunk_state(sd, ccb->ccb_target, BIOC_SDOFFLINE);
 		wu->swu_ios_failed++;
 	} else {
 		ccb->ccb_state = SR_CCB_OK;

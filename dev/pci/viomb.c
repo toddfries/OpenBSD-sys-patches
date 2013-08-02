@@ -1,4 +1,4 @@
-/* $OpenBSD: viomb.c,v 1.3 2013/03/28 04:12:12 deraadt Exp $	 */
+/* $OpenBSD: viomb.c,v 1.6 2013/07/02 15:46:14 sf Exp $	 */
 /* $NetBSD: viomb.c,v 1.1 2011/10/30 12:12:21 hannken Exp $	 */
 /*
  * Copyright (c) 2012 Talypov Dinar <dinar@i-nk.ru>
@@ -153,7 +153,7 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 	vsc->sc_vqs = &sc->sc_vq[VQ_INFLATE];
 	vsc->sc_nvqs = 0;
 	vsc->sc_child = self;
-	vsc->sc_ipl = IPL_VM;
+	vsc->sc_ipl = IPL_BIO;
 	vsc->sc_config_change = viomb_config_change;
 	vsc->sc_intrhand = virtio_vq_intr;
 
@@ -198,7 +198,7 @@ viomb_attach(struct device *parent, struct device *self, void *aux)
 		goto err_dmamap;
 	}
 
-	viomb_workq = workq_create("viomb", 1, IPL_VM);
+	viomb_workq = workq_create("viomb", 1, IPL_BIO);
 	if (viomb_workq == NULL)
 		goto err_dmamap;
 	printf("\n");
@@ -237,7 +237,7 @@ viomb_worker(void *arg1, void *arg2)
 	struct viomb_softc *sc = (struct viomb_softc *)arg1;
 	int s;
 
-	s = splvm();
+	s = splbio();
 	sc->sc_workq_queued = 0;
 	viomb_read_config(sc);
 	if (sc->sc_npages > sc->sc_actual){
@@ -272,7 +272,7 @@ viomb_inflate(struct viomb_softc *sc)
 				     dma_constraint.ucr_high,
 				     0, 0, &b->bl_pglist, nvpages,
 				     UVM_PLA_NOWAIT))) {
-		printf("%s unable to allocate %lu physmem pages,"
+		printf("%s unable to allocate %u physmem pages,"
 		    "error %d\n", DEVNAME(sc), nvpages, error);
 		return;
 	}
@@ -417,7 +417,7 @@ viomb_inflate_intr(struct virtqueue *vq)
 		TAILQ_REMOVE(&b->bl_pglist, p, pageq);
 		TAILQ_INSERT_TAIL(&sc->sc_balloon_pages, p, pageq);
 	}
-	VIOMBDEBUG(sc, "updating sc->sc_actual from %lu to %lu\n",
+	VIOMBDEBUG(sc, "updating sc->sc_actual from %u to %llu\n",
 		   sc->sc_actual, sc->sc_actual + nvpages);
 	virtio_write_device_config_4(vsc, VIRTIO_BALLOON_CONFIG_ACTUAL,
 				     sc->sc_actual + nvpages);
@@ -451,7 +451,7 @@ viomb_deflate_intr(struct virtqueue *vq)
 	if (vsc->sc_features & VIRTIO_BALLOON_F_MUST_TELL_HOST)
 		uvm_pglistfree(&b->bl_pglist);
 
-	VIOMBDEBUG(sc, "updating sc->sc_actual from %lu to %lu\n",
+	VIOMBDEBUG(sc, "updating sc->sc_actual from %u to %llu\n",
 		sc->sc_actual, sc->sc_actual - nvpages);
 	virtio_write_device_config_4(vsc, VIRTIO_BALLOON_CONFIG_ACTUAL,
 				     sc->sc_actual - nvpages);

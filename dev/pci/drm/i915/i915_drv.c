@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.33 2013/06/06 16:14:26 jsg Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.35 2013/07/05 07:20:27 jsg Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -705,7 +705,7 @@ i915_semaphore_is_enabled(struct drm_device *dev)
 int
 i915_drm_freeze(struct drm_device *dev)
 {
-	struct inteldrm_softc *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	drm_kms_helper_poll_disable(dev);
 
@@ -741,7 +741,7 @@ i915_drm_freeze(struct drm_device *dev)
 int
 __i915_drm_thaw(struct drm_device *dev)
 {
-	struct inteldrm_softc *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int error = 0;
 
 	i915_restore_state(dev);
@@ -1226,6 +1226,16 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	ri->ri_hw = dev_priv;
 	dev_priv->sc_copyrows = ri->ri_copyrows;
 	ri->ri_copyrows = inteldrm_copyrows;
+
+	/*
+	 * On older hardware the fast scrolling code causes page table
+	 * errors.  As a workaround, we set the "avoid framebuffer
+	 * reads" flag, which has the side-effect of disabling the
+	 * fast scrolling code, but still gives us a half-decent
+	 * scrolling speed.
+	 */
+	if (INTEL_INFO(dev)->gen < 3 || IS_I915G(dev) || IS_I915GM(dev))
+		ri->ri_flg |= RI_WRONLY;
 
 	inteldrm_stdscreen.capabilities = ri->ri_caps;
 	inteldrm_stdscreen.nrows = ri->ri_rows;
@@ -1849,7 +1859,7 @@ i965_do_reset(struct drm_device *dev)
 int
 ironlake_do_reset(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32 gdrst;
 	int retries;
 
@@ -1886,7 +1896,7 @@ ironlake_do_reset(struct drm_device *dev)
 int
 gen6_do_reset(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int ret = 0;
 	int retries;
 
@@ -1930,7 +1940,7 @@ gen6_do_reset(struct drm_device *dev)
 int
 intel_gpu_reset(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int ret = -ENODEV;
 
 	switch (INTEL_INFO(dev)->gen) {

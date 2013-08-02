@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.213 2013/06/26 09:12:40 henning Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.215 2013/07/31 15:41:51 mikeb Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -158,7 +158,6 @@ static	struct ip_srcrt {
 } ip_srcrt;
 
 void save_rte(u_char *, struct in_addr);
-int ip_weadvertise(u_int32_t, u_int);
 
 /*
  * IP initialization: fill in IP protocol switch table.
@@ -246,7 +245,7 @@ ipv4_input(struct mbuf *m)
 	int hlen, len;
 	in_addr_t pfrdr = 0;
 #ifdef IPSEC
-	int error, s;
+	int error;
 	struct tdb *tdb;
 	struct tdb_ident *tdbi;
 	struct m_tag *mtag;
@@ -455,7 +454,6 @@ ipv4_input(struct mbuf *m)
 		 * inner-most IPsec SA used.
 		 */
 		mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL);
-                s = splnet();
 		if (mtag != NULL) {
 			tdbi = (struct tdb_ident *)(mtag + 1);
 			tdb = gettdb(tdbi->rdomain, tdbi->spi,
@@ -464,7 +462,6 @@ ipv4_input(struct mbuf *m)
 			tdb = NULL;
 	        ipsp_spd_lookup(m, AF_INET, hlen, &error,
 		    IPSP_DIRECTION_IN, tdb, NULL, 0);
-                splx(s);
 
 		/* Error or otherwise drop-packet indication */
 		if (error) {
@@ -498,7 +495,7 @@ ip_ours(struct mbuf *m)
 	struct ipqent *ipqe;
 	int mff, hlen;
 #ifdef IPSEC
-	int error, s;
+	int error;
 	struct tdb *tdb;
 	struct tdb_ident *tdbi;
 	struct m_tag *mtag;
@@ -640,7 +637,6 @@ found:
 	 * that's needed in the real world (who uses bundles anyway ?).
 	 */
 	mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL);
-        s = splnet();
 	if (mtag) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
 	        tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst,
@@ -649,7 +645,6 @@ found:
 		tdb = NULL;
 	ipsp_spd_lookup(m, AF_INET, hlen, &error, IPSP_DIRECTION_IN,
 	    tdb, NULL, 0);
-        splx(s);
 
 	/* Error or otherwise drop-packet indication. */
 	if (error) {
@@ -1288,53 +1283,6 @@ save_rte(u_char *option, struct in_addr dst)
 }
 
 /*
- * Check whether we do proxy ARP for this address and we point to ourselves.
- * Code shamelessly copied from arplookup().
- */
-int
-ip_weadvertise(u_int32_t addr, u_int rtableid)
-{
-	struct rtentry *rt;
-	struct ifnet *ifp;
-	struct ifaddr *ifa;
-	struct sockaddr_inarp sin;
-
-	sin.sin_len = sizeof(sin);
-	sin.sin_family = AF_INET;
-	sin.sin_addr.s_addr = addr;
-	sin.sin_other = SIN_PROXY;
-	rt = rtalloc1((struct sockaddr *)&sin, 0, rtableid);
-	if (rt == 0)
-		return 0;
-
-	if ((rt->rt_flags & RTF_GATEWAY) || (rt->rt_flags & RTF_LLINFO) == 0 ||
-	    rt->rt_gateway->sa_family != AF_LINK) {
-		RTFREE(rt);
-		return 0;
-	}
-
-	rtableid = rtable_l2(rtableid);
-	TAILQ_FOREACH(ifp, &ifnet, if_list) {
-		if (ifp->if_rdomain != rtableid)
-			continue;
-		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-			if (ifa->ifa_addr->sa_family != rt->rt_gateway->sa_family)
-				continue;
-
-			if (!bcmp(LLADDR((struct sockaddr_dl *)ifa->ifa_addr),
-			    LLADDR((struct sockaddr_dl *)rt->rt_gateway),
-			    ETHER_ADDR_LEN)) {
-				RTFREE(rt);
-				return 1;
-			}
-		}
-	}
-
-	RTFREE(rt);
-	return 0;
-}
-
-/*
  * Retrieve incoming source route for use in replies,
  * in the same form used by setsockopt.
  * The first hop is placed before the options, will be removed later.
@@ -1534,8 +1482,7 @@ ip_forward(struct mbuf *m, int srcrt)
 	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0 &&
 	    satosin(rt_key(rt))->sin_addr.s_addr != 0 &&
 	    ipsendredirects && !srcrt &&
-	    !ip_weadvertise(satosin(rt_key(rt))->sin_addr.s_addr,
-	    m->m_pkthdr.rdomain)) {
+	    !arpproxy(satosin(rt_key(rt))->sin_addr, m->m_pkthdr.rdomain)) {
 		if (rt->rt_ifa &&
 		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_netmask) ==
 		    ifatoia(rt->rt_ifa)->ia_net) {

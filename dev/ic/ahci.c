@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.1 2013/01/21 11:17:48 patrick Exp $ */
+/*	$OpenBSD: ahci.c,v 1.3 2013/07/09 17:53:46 deraadt Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -30,9 +30,20 @@
 
 #include <machine/bus.h>
 
-
 #include <dev/ic/ahcivar.h>
 #include <dev/ic/ahcireg.h>
+
+#ifdef AHCI_DEBUG
+#define DPRINTF(m, f...) do { if ((ahcidebug & (m)) == (m)) printf(f); } \
+    while (0)
+#define AHCI_D_TIMEOUT		0x00
+#define AHCI_D_VERBOSE		0x01
+#define AHCI_D_INTR		0x02
+#define AHCI_D_XFER		0x08
+int ahcidebug = AHCI_D_VERBOSE;
+#else
+#define DPRINTF(m, f...)
+#endif
 
 #ifdef HIBERNATE
 #include <uvm/uvm.h>

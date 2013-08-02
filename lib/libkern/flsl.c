@@ -1,6 +1,6 @@
-/*	$OpenBSD: bzero.S,v 1.4 2013/07/05 21:11:57 miod Exp $ */
-/*
- * Copyright (c) 1983, 1993
+/*	$OpenBSD: flsl.c,v 1.1 2013/07/11 01:20:32 jsg Exp $	*/
+/*-
+ * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -28,19 +28,19 @@
  * SUCH DAMAGE.
  */
 
-/* bzero(base, length) */
+#include <lib/libkern/libkern.h>
 
-#include <machine/asm.h>
+/*
+ * Find Last Set bit
+ */
+int
+flsl(long mask)
+{
+	int bit;
 
-ENTRY(bzero, R2|R3|R4|R5)
-	movl	4(%ap),%r3
-	jbr	2f
-1:
-	subl2	%r0,8(%ap)
-	movc5	$0,(%r3),$0,%r0,(%r3)
-2:
-	movzwl	$65535,%r0
-	cmpl	8(%ap),%r0
-	jgtr	1b
-	movc5	$0,(%r3),$0,8(%ap),(%r3)
-	ret
+	if (mask == 0)
+		return (0);
+	for (bit = 1; mask != 1; bit++)
+		mask = (unsigned long)mask >> 1;
+	return (bit);
+}
