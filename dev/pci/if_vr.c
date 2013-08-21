@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vr.c,v 1.128 2013/03/07 11:20:26 sthen Exp $	*/
+/*	$OpenBSD: if_vr.c,v 1.130 2013/08/21 05:21:44 dlg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -77,7 +77,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif	/* INET */
@@ -903,7 +902,7 @@ vr_rxeof(struct vr_softc *sc)
 		{
 			struct mbuf *m0;
 			m0 = m_devget(mtod(m, caddr_t), total_len,
-			    ETHER_ALIGN, ifp, NULL);
+			    ETHER_ALIGN, ifp);
 			m_freem(m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;

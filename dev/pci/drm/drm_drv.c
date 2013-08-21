@@ -1,4 +1,4 @@
-/* $OpenBSD: drm_drv.c,v 1.108 2013/06/17 20:55:41 kettenis Exp $ */
+/* $OpenBSD: drm_drv.c,v 1.110 2013/08/12 04:11:52 jsg Exp $ */
 /*-
  * Copyright 2007-2009 Owain G. Ainsworth <oga@openbsd.org>
  * Copyright © 2008 Intel Corporation
@@ -42,6 +42,7 @@
 
 #include <sys/param.h>
 #include <sys/limits.h>
+#include <sys/specdev.h>
 #include <sys/systm.h>
 #include <uvm/uvm.h>
 #include <uvm/uvm_device.h>
@@ -56,6 +57,7 @@
 int drm_debug_flag = 1;
 #endif
 
+struct drm_device *drm_get_device_from_kdev(dev_t);
 int	 drm_firstopen(struct drm_device *);
 int	 drm_lastclose(struct drm_device *);
 void	 drm_attach(struct device *, struct device *, void *);
@@ -63,6 +65,7 @@ int	 drm_probe(struct device *, void *, void *);
 int	 drm_detach(struct device *, int);
 int	 drm_activate(struct device *, int);
 int	 drmprint(void *, const char *);
+int	 drmsubmatch(struct device *, void *, void *);
 int	 drm_dequeue_event(struct drm_device *, struct drm_file *, size_t,
 	     struct drm_pending_event **);
 
@@ -124,7 +127,7 @@ drm_attach_pci(struct drm_driver_info *driver, struct pci_attach_args *pa,
 	snprintf(arg.busid, arg.busid_len, "pci:%04x:%02x:%02x.%1x",
 	    pa->pa_domain, pa->pa_bus, pa->pa_device, pa->pa_function);
 
-	return (config_found(dev, &arg, drmprint));
+	return (config_found_sm(dev, &arg, drmprint, drmsubmatch));
 }
 
 int
@@ -133,6 +136,18 @@ drmprint(void *aux, const char *pnp)
 	if (pnp != NULL)
 		printf("drm at %s", pnp);
 	return (UNCONF);
+}
+
+int
+drmsubmatch(struct device *parent, void *match, void *aux)
+{
+	extern struct cfdriver drm_cd;
+	struct cfdata *cf = match;
+
+	/* only allow drm to attach */
+	if (cf->cf_driver == &drm_cd)
+		return ((*cf->cf_attach->ca_match)(parent, match, aux));
+	return (0);
 }
 
 int
@@ -240,6 +255,9 @@ drm_detach(struct device *self, int flags)
 
 	drm_lastclose(dev);
 
+	if (dev->driver->flags & DRIVER_GEM)
+		pool_destroy(&dev->objpl);
+
 	drm_ctxbitmap_cleanup(dev);
 
 	extent_destroy(dev->handle_ext);
@@ -311,6 +329,17 @@ drm_find_file_by_minor(struct drm_device *dev, int minor)
 
 	key.minor = minor;
 	return (SPLAY_FIND(drm_file_tree, &dev->files, &key));
+}
+
+struct drm_device *
+drm_get_device_from_kdev(dev_t kdev)
+{
+	int unit = minor(kdev) & ((1 << CLONE_SHIFT) - 1);
+
+	if (unit < drm_cd.cd_ndevs)
+		return drm_cd.cd_devs[unit];
+
+	return NULL;
 }
 
 int
@@ -987,9 +1016,11 @@ drmmmap(dev_t kdev, off_t offset, int prot)
 	DRM_UNLOCK();
 
 	switch (type) {
+#if __OS_HAS_AGP
 	case _DRM_AGP:
 		return agp_mmap(dev->agp->agpdev,
 		    offset + map->offset - dev->agp->base, prot);
+#endif
 	case _DRM_FRAME_BUFFER:
 	case _DRM_REGISTERS:
 		return (offset + map->offset);
@@ -1674,93 +1705,6 @@ drm_handle_unref(struct drm_obj *obj)
 	drm_unref(&obj->uobj);
 }
 
-/*
- * Helper function to load a uvm anonymous object into a dmamap, to be used
- * for binding to a translation-table style sg mechanism (e.g. agp, or intel
- * gtt).
- *
- * For now we ignore maxsegsz.
- */
-int
-drm_gem_load_uao(bus_dma_tag_t dmat, bus_dmamap_t map, struct uvm_object *uao,
-    bus_size_t size, int flags, bus_dma_segment_t **segp)
-{
-	bus_dma_segment_t	*segs;
-	struct vm_page		*pg;
-	struct pglist		 plist;
-	u_long			 npages = size >> PAGE_SHIFT, i = 0;
-	int			 ret;
-
-	TAILQ_INIT(&plist);
-
-	/*
-	 * This is really quite ugly, but nothing else would need
-	 * bus_dmamap_load_uao() yet.
-	 */
-	segs = malloc(npages * sizeof(*segs), M_DRM,
-	    M_WAITOK | M_CANFAIL | M_ZERO);
-	if (segs == NULL)
-		return (ENOMEM);
-
-	/* This may sleep, no choice in the matter */
-	if (uvm_objwire(uao, 0, size, &plist) != 0) {
-		ret = ENOMEM;
-		goto free;
-	}
-
-	TAILQ_FOREACH(pg, &plist, pageq) {
-		paddr_t pa = VM_PAGE_TO_PHYS(pg);
-
-		if (i > 0 && pa == (segs[i - 1].ds_addr +
-		    segs[i - 1].ds_len)) {
-			/* contiguous, yay */
-			segs[i - 1].ds_len += PAGE_SIZE;
-			continue;
-		}
-		segs[i].ds_addr = pa;
-		segs[i].ds_len = PAGE_SIZE;
-		if (i++ > npages)
-			break;
-	}
-	/* this should be impossible */
-	if (pg != TAILQ_END(&plist)) {
-		ret = EINVAL;
-		goto unwire;
-	}
-
-	if ((ret = bus_dmamap_load_raw(dmat, map, segs, i, size, flags)) != 0)
-		goto unwire;
-
-#if defined(__amd64__) || defined(__i386__)
-	/*
-	 * Create a mapping that wraps around once; the second half
-	 * maps to the same set of physical pages as the first half.
-	 * Used to implement fast vertical scrolling in inteldrm(4).
-	 *
-	 * XXX This is an ugly hack that wastes pages and abuses the
-	 * internals of the scatter gather DMA code.
-	 */
-	if (flags & BUS_DMA_GTT_WRAPAROUND) {
-		struct sg_page_map *spm = map->_dm_cookie;
-
-		for (i = spm->spm_pagecnt / 2; i < spm->spm_pagecnt; i++)
-			spm->spm_map[i].spe_pa =
-				spm->spm_map[i - spm->spm_pagecnt / 2].spe_pa;
-		agp_bus_dma_rebind(dmat, map, flags);
-	}
-#endif
-
-	*segp = segs;
-
-	return (0);
-
-unwire:
-	uvm_objunwire(uao, 0, size);
-free:
-	free(segs, M_DRM);
-	return (ret);
-}
-
 /**
  * drm_gem_free_mmap_offset - release a fake mmap offset for an object
  * @obj: obj in question
@@ -1833,7 +1777,7 @@ struct uvm_object *
 udv_attach_drm(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 {
 	dev_t device = *((dev_t *)arg);
-	struct drm_device *dev = drm_get_device_from_kdev(kdev);
+	struct drm_device *dev = drm_get_device_from_kdev(device);
 	struct drm_local_map *map;
 	struct drm_obj *obj;
 
@@ -1842,6 +1786,9 @@ udv_attach_drm(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 
 	if (dev == NULL)
 		return NULL;
+
+	if (dev->driver->mmap)
+		return dev->driver->mmap(dev, off, size);
 
 again:
 	DRM_LOCK();

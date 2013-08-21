@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sis.c,v 1.111 2013/06/28 03:24:18 brad Exp $ */
+/*	$OpenBSD: if_sis.c,v 1.113 2013/08/21 05:21:44 dlg Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -78,7 +78,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -1403,7 +1402,7 @@ sis_rxeof(struct sis_softc *sc)
 		{
 			struct mbuf *m0;
 			m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
-			    ifp, NULL);
+			    ifp);
 			m_freem(m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;

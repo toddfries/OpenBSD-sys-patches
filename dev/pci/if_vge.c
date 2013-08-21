@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vge.c,v 1.55 2013/03/15 01:33:23 brad Exp $	*/
+/*	$OpenBSD: if_vge.c,v 1.57 2013/08/21 05:21:44 dlg Exp $	*/
 /*	$FreeBSD: if_vge.c,v 1.3 2004/09/11 22:13:25 wpaul Exp $	*/
 /*
  * Copyright (c) 2004
@@ -102,7 +102,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -1082,7 +1081,7 @@ vge_rxeof(struct vge_softc *sc)
 			}
 
 			m0 = m_devget(mtod(m, char *),
-			    total_len - ETHER_CRC_LEN, ETHER_ALIGN, ifp, NULL);
+			    total_len - ETHER_CRC_LEN, ETHER_ALIGN, ifp);
 			vge_newbuf(sc, i, m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;

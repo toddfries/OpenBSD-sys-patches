@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.173 2013/06/11 13:29:50 dlg Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.175 2013/08/21 05:21:45 dlg Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -1168,8 +1168,7 @@ extpacket:
  * Routine to copy from device local memory into mbufs.
  */
 struct mbuf *
-m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
-    void (*copy)(const void *, void *, size_t))
+m_devget(char *buf, int totlen, int off, struct ifnet *ifp)
 {
 	struct mbuf	*m;
 	struct mbuf	*top, **mp;
@@ -1224,11 +1223,7 @@ m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
 		}
 
 		m->m_len = len = min(totlen, len);
-
-		if (copy)
-			copy(buf, mtod(m, caddr_t), (size_t)len);
-		else
-			bcopy(buf, mtod(m, caddr_t), (size_t)len);
+		memcpy(mtod(m, void *), buf, (size_t)len);
 
 		buf += len;
 		*mp = m;
@@ -1346,7 +1341,7 @@ m_dup_pkthdr(struct mbuf *to, struct mbuf *from, int wait)
 #ifdef DDB
 void
 m_print(void *v,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	struct mbuf *m = v;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ti.c,v 1.4 2011/06/21 16:52:45 tedu Exp $	*/
+/*	$OpenBSD: ti.c,v 1.6 2013/08/21 05:21:43 dlg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -91,7 +91,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -1743,7 +1742,7 @@ ti_rxeof(struct ti_softc *sc)
 			    == ENOBUFS) {
 				struct mbuf             *m0;
 				m0 = m_devget(mtod(m, char *), cur_rx->ti_len,
-				    ETHER_ALIGN, ifp, NULL);
+				    ETHER_ALIGN, ifp);
 				ti_newbuf_jumbo(sc, sc->ti_jumbo, m);
 				if (m0 == NULL) {
 					ifp->if_ierrors++;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb.c,v 1.48 2013/07/06 18:08:47 mpi Exp $	*/
+/*	$OpenBSD: vgafb.c,v 1.52 2013/08/17 10:59:38 mpi Exp $	*/
 /*	$NetBSD: vga.c,v 1.3 1996/12/02 22:24:54 cgd Exp $	*/
 
 /*
@@ -97,19 +97,6 @@ extern int allowaperture;
 #endif
 
 void
-vgafb_init(bus_space_tag_t iot, bus_space_tag_t memt, struct vga_config *vc,
-    u_int32_t  membase, size_t memsize)
-{
-	vc->vc_memt = memt;
-	vc->membase = membase;
-	vc->memsize = memsize;
-
-	if (bus_space_map(vc->vc_memt, membase, memsize,
-	    /* XXX */ppc_proc_is_64b ? 0 : 1, &vc->vc_memh))
-		panic("vgafb_init: can't map mem space");
-}
-
-void
 vgafb_restore_default_colors(struct vga_config *vc)
 {
 	int i;
@@ -123,25 +110,19 @@ vgafb_restore_default_colors(struct vga_config *vc)
 }
 
 void
-vgafb_wsdisplay_attach(struct device *parent, struct vga_config *vc,
-    int console)
+vgafb_wsdisplay_attach(struct device *parent, struct vga_config *vc)
 {
 	struct wsemuldisplaydev_attach_args aa;
+	struct rasops_info *ri = &vc->ri;
+	long defattr;
 
-	/* Setup virtual console now that we can allocate resources. */
-	if (console) {
-		struct rasops_info *ri = &vc->ri;
-		long defattr;
+	ri->ri_flg = RI_CENTER | RI_VCONS | RI_WRONLY;
+	rasops_init(ri, 160, 160);
 
-		ri->ri_flg |= RI_VCONS | RI_WRONLY;
-		rasops_init(ri, 160, 160);
+	ri->ri_ops.alloc_attr(ri->ri_active, 0, 0, 0, &defattr);
+	wsdisplay_cnattach(&vgafb_stdscreen, ri->ri_active, 0, 0, defattr);
 
-		ri->ri_ops.alloc_attr(ri->ri_active, 0, 0, 0, &defattr);
-		wsdisplay_cnattach(&vgafb_stdscreen, ri->ri_active,
-		    0, 0, defattr);
-	}
-
-	aa.console = console;
+	aa.console = 1;
 	aa.scrdata = &vgafb_screenlist;
 	aa.accessops = &vgafb_accessops;
 	aa.accesscookie = vc;
@@ -298,23 +279,29 @@ vgafb_mmap(void *v, off_t off, int prot)
 }
 
 int
+vgafb_is_console(int node)
+{
+	extern int fbnode;
+
+	return (fbnode == node);
+}
+
+int
 vgafb_cnattach(bus_space_tag_t iot, bus_space_tag_t memt, int type, int check)
 {
 	struct vga_config *vc = &vgafbcn;
 	struct rasops_info *ri = &vc->ri;
 	long defattr;
-	int i;
 
-	vgafb_init(iot, memt, vc, cons_addr, cons_linebytes * cons_height);
+	vc->vc_memt = memt;
+	vc->membase = cons_addr;
+	vc->memsize = cons_linebytes * cons_height;
+	vc->vc_memh = (bus_space_handle_t)mapiodev(vc->membase, vc->memsize);
 
 	if (cons_depth == 8)
 		vgafb_restore_default_colors(vc);
 
-	/* Clear the screen */
-	for (i = 0; i < cons_linebytes * cons_height; i++)
-		bus_space_write_1(memt,	vc->vc_memh, i, 0);
-
-	ri->ri_flg = RI_CENTER;
+	ri->ri_flg = RI_FULLCLEAR | RI_CLEAR;
 	ri->ri_depth = cons_depth;
 	ri->ri_bits = (void *)vc->vc_memh;
 	ri->ri_width = cons_width;

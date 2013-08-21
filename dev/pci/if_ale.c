@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ale.c,v 1.26 2013/04/08 06:16:18 brad Exp $	*/
+/*	$OpenBSD: if_ale.c,v 1.28 2013/08/21 05:21:43 dlg Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -55,7 +55,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -1549,7 +1548,7 @@ ale_rxeof(struct ale_softc *sc)
 		 * on these low-end consumer ethernet controller.
 		 */
 		m = m_devget((char *)(rs + 1), length - ETHER_CRC_LEN,
-		    ETHER_ALIGN, ifp, NULL);
+		    ETHER_ALIGN, ifp);
 		if (m == NULL) {
 			ifp->if_iqdrops++;
 			ale_rx_update_page(sc, &rx_page, length, &prod);

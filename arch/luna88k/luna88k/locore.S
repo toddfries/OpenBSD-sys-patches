@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.25 2013/01/05 11:20:55 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.27 2013/08/10 07:42:58 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -96,14 +96,6 @@ ASLOCAL(main_start)
 	stcr	%r0,  VBR	/* set Vector Base Register to 0, ALWAYS! */
 	FLUSH_PIPELINE
 
-	/* clear BSS. PROM might have already done this... */
-	or.u	%r2, %r0, %hi16(_C_LABEL(edata))
-	or	%r2, %r2, %lo16(_C_LABEL(edata))
-	or.u	%r4, %r0, %hi16(_C_LABEL(end))
-	or	%r4, %r4, %lo16(_C_LABEL(end))
-	bsr.n	_C_LABEL(bzero)		/* bzero(edata, end-edata) */
-	 subu	%r3, %r4, %r2
-
 	/*
 	 * Now we will compete with the other processors to see which one
 	 * will be elected as the main one.
@@ -148,6 +140,20 @@ ASLOCAL(main_start)
 	 * cpu_hatch_mutex held).
 	 */
 ASLOCAL(main_init)
+	/* clear BSS. PROM might have already done this... */
+	or.u	%r2, %r0, %hi16(_C_LABEL(edata))
+	or	%r2, %r2, %lo16(_C_LABEL(edata))
+	or.u	%r4, %r0, %hi16(_C_LABEL(end))
+	or	%r4, %r4, %lo16(_C_LABEL(end))
+	bsr.n	_C_LABEL(bzero)		/* bzero(edata, end-edata) */
+	 subu	%r3, %r4, %r2
+
+	/* figure out the end of the kernel image. */
+	or.u	%r4, %r0, %hi16(_C_LABEL(end))
+	or	%r4, %r4, %lo16(_C_LABEL(end))
+	or.u	%r5, %r0, %hi16(_C_LABEL(first_addr))
+	st	%r4, %r5, %lo16(_C_LABEL(first_addr))	/* no symbols yet */
+
 	/*
 	 * Have curcpu() point to the dummy cpuinfo structure,
 	 * and initialize cr17.

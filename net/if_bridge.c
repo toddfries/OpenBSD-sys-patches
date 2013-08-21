@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.212 2013/07/31 15:41:51 mikeb Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.214 2013/08/21 13:53:48 mpi Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -87,8 +87,6 @@
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
-
-#include <net/if_vlan_var.h>
 
 #if NCARP > 0
 #include <netinet/ip_carp.h>
@@ -1484,8 +1482,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 
 /*
  * Send a frame to all interfaces that are members of the bridge
- * (except the one it came in on).  This code assumes that it is
- * running at splnet or higher.
+ * (except the one it came in on).
  */
 void
 bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,

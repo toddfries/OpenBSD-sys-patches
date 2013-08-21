@@ -1,4 +1,4 @@
-/*	$OpenBSD: ums.c,v 1.35 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: ums.c,v 1.37 2013/08/15 15:01:48 edd Exp $ */
 /*	$NetBSD: ums.c,v 1.60 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -100,11 +100,20 @@ ums_match(struct device *parent, void *match, void *aux)
 	void *desc;
 
 	uhidev_get_report_desc(uha->parent, &desc, &size);
-	if (!hid_is_collection(desc, size, uha->reportid,
-			       HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_MOUSE)))
-		return (UMATCH_NONE);
 
-	return (UMATCH_IFACECLASS);
+	if (hid_is_collection(desc, size, uha->reportid,
+	    HID_USAGE2(HUP_GENERIC_DESKTOP, HUG_MOUSE)))
+		return (UMATCH_IFACECLASS);
+
+	if (hid_is_collection(desc, size, uha->reportid,
+	    HID_USAGE2(HUP_DIGITIZERS, HUD_TOUCHSCREEN)))
+		return (UMATCH_IFACECLASS);
+
+	if (hid_is_collection(desc, size, uha->reportid,
+	    HID_USAGE2(HUP_DIGITIZERS, HUD_PEN)))
+		return (UMATCH_IFACECLASS);
+
+	return (UMATCH_NONE);
 }
 
 void

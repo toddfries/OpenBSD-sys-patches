@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.549 2013/07/11 01:20:31 jsg Exp $
+#	$OpenBSD: files,v 1.552 2013/08/20 09:14:15 mpi Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -63,7 +63,6 @@ define	onewire_bitbang
 
 # net device attributes - we have generic code for ether(net),
 # and fddi.
-define	atm
 define	crypto
 define	systrace
 define	ether
@@ -107,7 +106,6 @@ define agpint {}
 
 # DRM - Direct Rendering Manager: /dev/drm
 define drmdev {}
-include "dev/pci/drm/files.drm"
 
 # VGA graphics
 device	vga: wsemuldisplaydev, pcdisplayops, drmdev, agpint
@@ -759,7 +757,6 @@ file ntfs/ntfs_vnops.c			ntfs
 file net/bpf.c				bpfilter		needs-count
 file net/bpf_filter.c			bpfilter
 file net/if.c
-file net/if_atmsubr.c			atm			needs-flag
 file net/if_ethersubr.c			ether | inet | fddi	needs-flag
 file net/if_fddisubr.c			fddi
 file net/if_spppsubr.c			sppp
@@ -807,7 +804,6 @@ file net80211/ieee80211_pae_output.c	wlan
 file net80211/ieee80211_proto.c		wlan
 file net80211/ieee80211_rssadapt.c	wlan
 file net80211/ieee80211_regdomain.c	wlan
-file netinet/if_atm.c			atm
 file netinet/if_ether.c			ether | inet
 file netinet/igmp.c			inet
 file netinet/in.c			inet
@@ -886,9 +882,6 @@ file netmpls/mpls_output.c		mpls
 file netmpls/mpls_proto.c		mpls
 file netmpls/mpls_raw.c			mpls
 file netmpls/mpls_shim.c		mpls
-file netnatm/natm_pcb.c			natm
-file netnatm/natm_proto.c		natm
-file netnatm/natm.c			natm
 file nfs/krpc_subr.c			nfsclient
 #file nfs/nfs_aiod.c			nfsclient
 file nfs/nfs_bio.c			nfsclient
@@ -994,7 +987,7 @@ file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
 
 # COMPAT_* support code (base and other shared code)
 file compat/common/compat_util.c	!small_kernel
-file compat/common/compat_dir.c		!small_kernel
+file compat/common/compat_dir.c		!small_kernel & compat_linux
 file compat/common/tty_43.c		compat_43
 
 # libx86emu

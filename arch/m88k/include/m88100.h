@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88100.h,v 1.6 2011/03/23 16:54:35 pirofti Exp $ */
+/*	$OpenBSD: m88100.h,v 1.8 2013/08/18 22:17:26 miod Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1993-1992 Carnegie Mellon University
@@ -34,12 +34,7 @@
 
 /*
  * DMT0, DMT1, DMT2 layout
- *
- * The DMT_SKIP bit is never set by the cpu.  It is used to mark 'known'
- * transactions so that they don't get processed a second time by
- * data_access_emulation().
  */
-#define DMT_SKIP	0x00010000	/* skip this dmt */
 #define DMT_BO		0x00008000	/* Byte-Ordering */
 #define DMT_DAS		0x00004000	/* Data Access Space */
 #define DMT_DOUB1	0x00002000	/* Double Word */
@@ -62,8 +57,8 @@ void	dae_print(u_int *);
 void	data_access_emulation(u_int *);
 
 u_int32_t do_load_word(vaddr_t, int);
-u_int16_t do_load_half(vaddr_t, int);
-u_int8_t  do_load_byte(vaddr_t, int);
+u_int32_t do_load_half(vaddr_t, int);
+u_int32_t do_load_byte(vaddr_t, int);
 void      do_store_word(vaddr_t, u_int32_t, int);
 void      do_store_half(vaddr_t, u_int16_t, int);
 void      do_store_byte(vaddr_t, u_int8_t, int);

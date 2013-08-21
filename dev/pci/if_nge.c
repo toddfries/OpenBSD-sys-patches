@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nge.c,v 1.73 2012/11/29 21:10:32 brad Exp $	*/
+/*	$OpenBSD: if_nge.c,v 1.75 2013/08/21 05:21:44 dlg Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -107,7 +107,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -1296,7 +1295,7 @@ nge_rxeof(sc)
 		if (nge_newbuf(sc, cur_rx, NULL) == ENOBUFS) {
 #endif
 			m0 = m_devget(mtod(m, char *), total_len,
-			    ETHER_ALIGN, ifp, NULL);
+			    ETHER_ALIGN, ifp);
 			nge_newbuf(sc, cur_rx, m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;

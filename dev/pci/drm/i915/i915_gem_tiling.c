@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem_tiling.c,v 1.5 2013/05/18 21:43:42 kettenis Exp $	*/
+/*	$OpenBSD: i915_gem_tiling.c,v 1.7 2013/08/13 10:23:49 jsg Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -221,7 +221,7 @@ i915_gem_detect_bit_6_swizzle(struct drm_device *dev)
 }
 
 /* Check pitch constriants for all chips & tiling formats */
-bool
+static bool
 i915_tiling_ok(struct drm_device *dev, int stride, int size, int tiling_mode)
 {
 	int tile_width;
@@ -272,7 +272,8 @@ i915_tiling_ok(struct drm_device *dev, int stride, int size, int tiling_mode)
 	return true;
 }
 
-bool
+/* Is the current GTT allocation valid for the change in tiling? */
+static bool
 i915_gem_object_fence_ok(struct drm_i915_gem_object *obj, int tiling_mode)
 {
 	u32 size;
@@ -473,7 +474,7 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
  * bit 17 of its physical address and therefore being interpreted differently
  * by the GPU.
  */
-int
+static int
 i915_gem_swizzle_page(struct vm_page *pg)
 {
 	char temp[64];
@@ -519,7 +520,7 @@ i915_gem_object_do_bit_17_swizzle(struct drm_i915_gem_object *obj)
 	if (obj->bit_17 == NULL)
 		return;
 
-	segp = &obj->dma_segs[0];
+	segp = &obj->pages[0];
 	n = 0;
 	for (i = 0; i < page_count; i++) {
 		char new_bit_17 = (segp->ds_addr + n) >> 17;
@@ -565,7 +566,7 @@ i915_gem_object_save_bit_17_swizzle(struct drm_i915_gem_object *obj)
 		}
 	}
 
-	segp = &obj->dma_segs[0];
+	segp = &obj->pages[0];
 	n = 0;
 	for (i = 0; i < page_count; i++) {
 		if ((segp->ds_addr + n) & (1 << 17))

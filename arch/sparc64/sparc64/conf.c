@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.67 2013/06/03 15:54:47 tedu Exp $	*/
+/*	$OpenBSD: conf.c,v 1.69 2013/08/20 14:27:31 ajacoutot Exp $	*/
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -86,6 +86,9 @@
 
 #include "fdc.h"		/* has NFDC and NFD; see files.sparc */
 
+#include "drm.h"
+cdev_decl(drm);
+
 #include "wsdisplay.h"
 #include "wskbd.h"
 #include "wsmouse.h"
@@ -104,7 +107,6 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
-#include "uscanner.h"
 
 #include "bthub.h"
 
@@ -244,7 +246,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 84 */
 	cdev_notdef(),			/* 85 */
 	cdev_notdef(),			/* 86 */
-	cdev_notdef(),			/* 87 */
+	cdev_drm_init(NDRM,drm),	/* 87: drm */
 	cdev_notdef(),			/* 88 */
 	cdev_notdef(),			/* 89 */
 	cdev_usb_init(NUSB,usb),	/* 90: USB controller */
@@ -253,7 +255,7 @@ struct cdevsw	cdevsw[] =
 	cdev_ulpt_init(NULPT,ulpt),	/* 93: USB printers */
 	cdev_urio_init(NURIO,urio),	/* 94: USB Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),	/* 95: USB tty */
-	cdev_usbdev_init(NUSCANNER,uscanner), /* 96: USB scanners */
+	cdev_notdef(),			/* 96: was USB scanners */
 	cdev_notdef(),			/* 97 */
 	cdev_notdef(),			/* 98 */
 	cdev_notdef(),			/* 99 */

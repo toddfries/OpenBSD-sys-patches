@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.112 2013/05/17 09:04:30 mpi Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.114 2013/08/12 21:57:16 bluhm Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -498,9 +498,6 @@ tcp_ctloutput(op, so, level, optname, mp)
 			(void) m_free(*mp);
 		return (ECONNRESET);
 	}
-#ifdef INET6
-	tp = intotcpcb(inp);
-#endif /* INET6 */
 	if (level != IPPROTO_TCP) {
 		switch (so->so_proto->pr_domain->dom_family) {
 #ifdef INET6
@@ -518,9 +515,7 @@ tcp_ctloutput(op, so, level, optname, mp)
 		splx(s);
 		return (error);
 	}
-#ifndef INET6
 	tp = intotcpcb(inp);
-#endif /* !INET6 */
 
 	switch (op) {
 
@@ -535,6 +530,18 @@ tcp_ctloutput(op, so, level, optname, mp)
 				tp->t_flags |= TF_NODELAY;
 			else
 				tp->t_flags &= ~TF_NODELAY;
+			break;
+
+		case TCP_NOPUSH:
+			if (m == NULL || m->m_len < sizeof (int))
+				error = EINVAL;
+			else if (*mtod(m, int *))
+				tp->t_flags |= TF_NOPUSH;
+			else if (tp->t_flags & TF_NOPUSH) {
+				tp->t_flags &= ~TF_NOPUSH;
+				if (TCPS_HAVEESTABLISHED(tp->t_state))
+					error = tcp_output(tp);
+			}
 			break;
 
 		case TCP_MAXSEG:
@@ -609,6 +616,9 @@ tcp_ctloutput(op, so, level, optname, mp)
 		switch (optname) {
 		case TCP_NODELAY:
 			*mtod(m, int *) = tp->t_flags & TF_NODELAY;
+			break;
+		case TCP_NOPUSH:
+			*mtod(m, int *) = tp->t_flags & TF_NOPUSH;
 			break;
 		case TCP_MAXSEG:
 			*mtod(m, int *) = tp->t_maxseg;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.125 2012/11/29 21:10:31 brad Exp $	*/
+/*	$OpenBSD: dc.c,v 1.127 2013/08/21 05:21:43 dlg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -110,7 +110,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -2186,8 +2185,7 @@ dc_rxeof(struct dc_softc *sc)
 		total_len -= ETHER_CRC_LEN;
 
 		m->m_pkthdr.rcvif = ifp;
-		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
-		    ifp, NULL);
+		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN, ifp);
 		dc_newbuf(sc, i, m);
 		DC_INC(i, DC_RX_LIST_CNT);
 		if (m0 == NULL) {

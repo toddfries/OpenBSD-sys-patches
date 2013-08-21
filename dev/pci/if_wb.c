@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wb.c,v 1.51 2012/11/29 21:10:32 brad Exp $	*/
+/*	$OpenBSD: if_wb.c,v 1.53 2013/08/21 05:21:45 dlg Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -105,7 +105,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -977,7 +976,7 @@ void wb_rxeof(sc)
 		total_len -= ETHER_CRC_LEN;
 
 		m = m_devget(cur_rx->wb_buf + sizeof(u_int64_t), total_len,
-		    ETHER_ALIGN, ifp, NULL);
+		    ETHER_ALIGN, ifp);
 		wb_newbuf(sc, cur_rx);
 		if (m == NULL) {
 			ifp->if_ierrors++;

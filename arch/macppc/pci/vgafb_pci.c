@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb_pci.c,v 1.31 2013/06/04 02:26:36 mpi Exp $	*/
+/*	$OpenBSD: vgafb_pci.c,v 1.35 2013/08/17 10:59:38 mpi Exp $	*/
 /*	$NetBSD: vga_pci.c,v 1.4 1996/12/05 01:39:38 cgd Exp $	*/
 
 /*
@@ -41,8 +41,6 @@
 #include <dev/wscons/wsdisplayvar.h>
 #include <dev/rasops/rasops.h>
 
-#include "drm.h"
-
 #include <arch/macppc/pci/vgafbvar.h>
 #include <dev/pci/vga_pcivar.h>
 
@@ -62,7 +60,6 @@ const struct cfattach vgafb_pci_ca = {
 	sizeof(struct vga_pci_softc), vgafb_pci_match, vgafb_pci_attach,
 };
 
-pcitag_t vgafb_pci_console_tag;
 struct vga_config vgafbcn;
 
 void
@@ -140,6 +137,7 @@ int
 vgafb_pci_match(struct device *parent, void *match, void *aux)
 {
 	struct pci_attach_args *pa = aux;
+	int node;
 
 	if (DEVICE_IS_VGA_PCI(pa->pa_class) == 0) {
 		/*
@@ -151,23 +149,15 @@ vgafb_pci_match(struct device *parent, void *match, void *aux)
 			return (0);
 	}
 
-	/* If it's the console, we have a winner! */
-	if (!bcmp(&pa->pa_tag, &vgafb_pci_console_tag, sizeof(pa->pa_tag))) {
-		return (1);
-	}
+	/*
+	 * XXX Non-console devices do not get configured by the PROM,
+	 * XXX so do not attach them yet.
+	 */
+	node = PCITAG_NODE(pa->pa_tag);
+	if (!vgafb_is_console(node))
+		return (0);
 
-#ifdef DEBUG_VGAFB
-	{
-	int i;
-		pci_chipset_tag_t pc = pa->pa_pc;
-		for (i = 0x10; i < 0x24; i+=4) {
-			printf("vgafb confread %x %x\n",
-				i, pci_conf_read(pc, pa->pa_tag, i));
-		}
-	}
-#endif
-
-	return (0);
+	return (1);
 }
 
 void
@@ -178,31 +168,18 @@ vgafb_pci_attach(struct device *parent, struct device  *self, void *aux)
 	struct vga_config *vc;
 	u_int32_t memaddr, memsize;
 	u_int32_t mmioaddr, mmiosize;
-	int console;
-	pcireg_t reg;
-
 
  	vga_pci_bar_init(sc, pa);
 	vgafb_pci_mem_init(sc, &memaddr, &memsize, &mmioaddr, &mmiosize);
 
+	vc = sc->sc_vc = &vgafbcn;
 
-	console = (!bcmp(&pa->pa_tag, &vgafb_pci_console_tag, sizeof(pa->pa_tag)));
-	if (console) {
-		vc = sc->sc_vc = &vgafbcn;
-
-		/*
-		 * The previous size was not necessarily the real size
-		 * but what is needed for the glass console.
-		 */
-		vc->membase = memaddr;
-		vc->memsize = memsize;
-	} else {
-		vc = sc->sc_vc = (struct vga_config *)
-		    malloc(sizeof(struct vga_config), M_DEVBUF, M_WAITOK);
-
-		/* set up bus-independent VGA configuration */
-		vgafb_init(pa->pa_iot, pa->pa_memt, vc, memaddr, memsize);
-	}
+	/*
+	 * The previous size was not necessarily the real size
+	 * but what is needed for the glass console.
+	 */
+	vc->membase = memaddr;
+	vc->memsize = memsize;
 
 	if (mmiosize != 0) {
 		vc->mmiobase = mmioaddr;
@@ -212,16 +189,5 @@ vgafb_pci_attach(struct device *parent, struct device  *self, void *aux)
 	}
 	printf("\n");
 
-	/*
-	 * Enable bus master; X might need this for accelerated graphics.
-	 */
-	reg = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
-	reg |= PCI_COMMAND_MASTER_ENABLE;
-	pci_conf_write(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG, reg);
-
-	vgafb_wsdisplay_attach(self, vc, console);
-
-#if NDRM > 0
-	config_found_sm(self, aux, NULL, drmsubmatch);
-#endif
+	vgafb_wsdisplay_attach(self, vc);
 }

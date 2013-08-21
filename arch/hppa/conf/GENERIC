@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.149 2012/09/27 14:01:35 jsg Exp $
+#	$OpenBSD: GENERIC,v 1.151 2013/08/20 14:27:26 ajacoutot Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -115,6 +115,7 @@ wskbd*	at ukbd? mux 1
 uhid*	at uhidev?		# USB generic HID support
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
+rsu*	at uhub?		# Realtek RTL8188SU/RTL8191SU/RTL8192SU
 
 # untested USB devices
 umodem*	at uhub?		# USB Modems/Serial
@@ -153,7 +154,6 @@ udav*	at uhub?		# Davicom DM9601 based Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
-uscanner* at uhub? disable	# USB Scanners
 uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio

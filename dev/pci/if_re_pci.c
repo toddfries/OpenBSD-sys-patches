@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.37 2013/01/16 04:42:44 brad Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.39 2013/08/07 01:06:36 bluhm Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -38,7 +38,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -136,6 +135,11 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 	pci_intr_handle_t	ih;
 	const char		*intrstr = NULL;
 
+	/* Only enable MSI on RT810xE for now. */
+	if (PCI_VENDOR(pa->pa_id) != PCI_VENDOR_REALTEK ||
+	    PCI_PRODUCT(pa->pa_id) != PCI_PRODUCT_REALTEK_RT8101E)
+		pa->pa_flags &= ~PCI_FLAGS_MSI_ENABLED;
+
 	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 #ifndef SMALL_KERNEL
@@ -156,7 +160,7 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Allocate interrupt */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) != 0 && pci_intr_map(pa, &ih) != 0) {
 		printf(": couldn't map interrupt\n");
 		return;
 	}

@@ -1,4 +1,4 @@
-# $OpenBSD: GENERIC,v 1.37 2012/09/27 14:01:35 jsg Exp $
+# $OpenBSD: GENERIC,v 1.39 2013/08/20 14:27:28 ajacoutot Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -139,7 +139,6 @@ udav*	at uhub?		# Davicom DM9601 based Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
-#uscanner* at uhub?		# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -152,8 +151,6 @@ run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 rsu*	at uhub?		# Realtek RTL8188SU/RTL8191SU/RTL8192SU
 urtwn*	at uhub?		# Realtek RTL8188CU/RTL8192CU
 zyd*	at uhub?		# Zydas ZD1211
-#option	NATM
-#ueagle* at uhub?		# Analog Devices Eagle ADSL
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 uthum*	at uhidev?		# TEMPerHUM sensor
 utwitch* at uhidev?		# YUREX BBU sensor
