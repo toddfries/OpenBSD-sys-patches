@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath_emc.c,v 1.8 2011/07/11 01:02:48 dlg Exp $ */
+/*	$OpenBSD: mpath_emc.c,v 1.11 2013/08/26 10:13:17 dlg Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -91,14 +91,12 @@ struct cfdriver emc_cd = {
 
 void		emc_mpath_start(struct scsi_xfer *);
 int		emc_mpath_checksense(struct scsi_xfer *);
-int		emc_mpath_online(struct scsi_link *);
-int		emc_mpath_offline(struct scsi_link *);
+void		emc_mpath_status(struct scsi_link *);
 
 const struct mpath_ops emc_mpath_ops = {
 	"emc",
 	emc_mpath_checksense,
-	emc_mpath_online,
-	emc_mpath_offline,
+	emc_mpath_status,
 	MPATH_ROUNDROBIN
 };
 
@@ -171,10 +169,13 @@ emc_attach(struct device *parent, struct device *self, void *aux)
 	printf("%s: %s %s SP-%c port %d\n", DEVNAME(sc), model, serial,
 	    sc->sc_sp + 'A', sc->sc_port);
 
-	if (sc->sc_lun_state == EMC_SP_INFO_LUN_STATE_OWNED) {
-		if (mpath_path_attach(&sc->sc_path, &emc_mpath_ops) != 0)
-			printf("%s: unable to attach path\n", DEVNAME(sc));
+	if (sc->sc_lun_state != EMC_SP_INFO_LUN_STATE_OWNED) {
+		/* XXX add failover support */
+		return;
 	}
+
+	if (mpath_path_attach(&sc->sc_path, sc->sc_sp, &emc_mpath_ops) != 0)
+		printf("%s: unable to attach path\n", DEVNAME(sc));
 }
 
 int
@@ -212,19 +213,15 @@ emc_mpath_start(struct scsi_xfer *xs)
 int
 emc_mpath_checksense(struct scsi_xfer *xs)
 {
-	return (0);
+	return (MPATH_SENSE_DECLINED);
 }
 
-int
-emc_mpath_online(struct scsi_link *link)
+void
+emc_mpath_status(struct scsi_link *link)
 {
-	return (0);
-}
+	struct emc_softc *sc = link->device_softc;
 
-int
-emc_mpath_offline(struct scsi_link *link)
-{
-	return (0);
+	mpath_path_status(&sc->sc_path, MPATH_S_UNKNOWN);
 }
 
 int

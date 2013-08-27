@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath_sym.c,v 1.9 2013/06/10 03:56:43 dlg Exp $ */
+/*	$OpenBSD: mpath_sym.c,v 1.15 2013/08/26 12:20:12 dlg Exp $ */
 
 /*
  * Copyright (c) 2010 David Gwynne <dlg@openbsd.org>
@@ -62,22 +62,19 @@ struct cfdriver sym_cd = {
 
 void		sym_mpath_start(struct scsi_xfer *);
 int		sym_mpath_checksense(struct scsi_xfer *);
-int		sym_mpath_online(struct scsi_link *);
-int		sym_mpath_offline(struct scsi_link *);
+void		sym_mpath_status(struct scsi_link *);
 
 const struct mpath_ops sym_mpath_sym_ops = {
 	"sym",
 	sym_mpath_checksense,
-	sym_mpath_online,
-	sym_mpath_offline,
+	sym_mpath_status,
 	MPATH_ROUNDROBIN
 };
 
 const struct mpath_ops sym_mpath_asym_ops = {
 	"sym",
 	sym_mpath_checksense,
-	sym_mpath_online,
-	sym_mpath_offline,
+	sym_mpath_status,
 	MPATH_MRU
 };
 
@@ -92,7 +89,7 @@ struct sym_device sym_devices[] = {
 	{ "TOSHIBA ", "MBF" },
 	{ "SEAGATE ", "ST" },
 	{ "FUJITSU ", "MBD" },
-	{ "FUJITSU ", "MAP" }
+	{ "FUJITSU ", "MA" }
 };
 
 struct sym_device asym_devices[] = {
@@ -142,6 +139,7 @@ sym_attach(struct device *parent, struct device *self, void *aux)
 	struct scsi_inquiry_data *inq = sa->sa_inqbuf;
 	const struct mpath_ops *ops = &sym_mpath_sym_ops;
 	struct sym_device *s;
+	u_int id = 0;
 	int i;
 
 	printf("\n");
@@ -153,6 +151,7 @@ sym_attach(struct device *parent, struct device *self, void *aux)
 		if (bcmp(s->vendor, inq->vendor, strlen(s->vendor)) == 0 &&
 		    bcmp(s->product, inq->product, strlen(s->product)) == 0) {
 			ops = &sym_mpath_asym_ops;
+			id = sc->sc_dev.dv_unit;
 			break;
 		}
 	}
@@ -164,7 +163,7 @@ sym_attach(struct device *parent, struct device *self, void *aux)
 	scsi_xsh_set(&sc->sc_path.p_xsh, link, sym_mpath_start);
 	sc->sc_path.p_link = link;
 
-	if (mpath_path_attach(&sc->sc_path, ops) != 0)
+	if (mpath_path_attach(&sc->sc_path, id, ops) != 0)
 		printf("%s: unable to attach path\n", DEVNAME(sc));
 }
 
@@ -185,7 +184,7 @@ sym_activate(struct device *self, int act)
 	case DVACT_RESUME:
 		break;
 	case DVACT_DEACTIVATE:
-		if (sc->sc_path.p_dev != NULL)
+		if (sc->sc_path.p_group != NULL)
 			mpath_path_detach(&sc->sc_path);
 		break;
 	}
@@ -203,17 +202,13 @@ sym_mpath_start(struct scsi_xfer *xs)
 int
 sym_mpath_checksense(struct scsi_xfer *xs)
 {
-	return (0);
+	return (MPATH_SENSE_DECLINED);
 }
 
-int
-sym_mpath_online(struct scsi_link *link)
+void
+sym_mpath_status(struct scsi_link *link)
 {
-	return (0);
-}
+	struct sym_softc *sc = link->device_softc;
 
-int
-sym_mpath_offline(struct scsi_link *link)
-{
-	return (0);
+	mpath_path_status(&sc->sc_path, MPATH_S_ACTIVE);
 }

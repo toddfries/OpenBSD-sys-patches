@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath.c,v 1.26 2013/06/10 04:12:57 dlg Exp $ */
+/*	$OpenBSD: mpath.c,v 1.31 2013/08/26 12:20:12 dlg Exp $ */
 
 /*
  * Copyright (c) 2009 David Gwynne <dlg@openbsd.org>
@@ -42,14 +42,25 @@ void		mpath_shutdown(void *);
 
 TAILQ_HEAD(mpath_paths, mpath_path);
 
+struct mpath_group {
+	TAILQ_ENTRY(mpath_group) g_entry;
+	struct mpath_paths	 g_paths;
+	struct mpath_dev	*g_dev;
+	u_int			 g_id;
+};
+TAILQ_HEAD(mpath_groups, mpath_group);
+
 struct mpath_dev {
 	struct mutex		 d_mtx;
 
 	struct scsi_xfer_list	 d_xfers;
-	struct mpath_paths	 d_paths;
 	struct mpath_path	*d_next_path;
 
-	u_int			 d_path_count;
+	struct mpath_groups	 d_groups;
+
+	struct mpath_group	*d_failover_iter;
+	struct timeout		 d_failover_tmo;
+	u_int			 d_failover;
 
 	const struct mpath_ops	*d_ops;
 	struct devid		*d_id;
@@ -59,11 +70,11 @@ struct mpath_softc {
 	struct device		sc_dev;
 	struct scsi_link	sc_link;
 	struct scsibus_softc	*sc_scsibus;
+	struct mpath_dev	*sc_devs[MPATH_BUSWIDTH];
 };
 #define DEVNAME(_s) ((_s)->sc_dev.dv_xname)
 
 struct mpath_softc	*mpath;
-struct mpath_dev	*mpath_devs[MPATH_BUSWIDTH];
 
 struct cfattach mpath_ca = {
 	sizeof(struct mpath_softc),
@@ -83,6 +94,10 @@ int		mpath_probe(struct scsi_link *);
 
 struct mpath_path *mpath_next_path(struct mpath_dev *, int);
 void		mpath_done(struct scsi_xfer *);
+
+void		mpath_failover(struct mpath_dev *);
+void		mpath_failover_start(void *);
+void		mpath_failover_check(struct mpath_dev *);
 
 struct scsi_adapter mpath_switch = {
 	mpath_cmd,
@@ -132,7 +147,8 @@ mpath_xs_stuffup(struct scsi_xfer *xs)
 int
 mpath_probe(struct scsi_link *link)
 {
-	struct mpath_dev *d = mpath_devs[link->target];
+	struct mpath_softc *sc = link->adapter_softc;
+	struct mpath_dev *d = sc->sc_devs[link->target];
 
 	if (link->lun != 0 || d == NULL)
 		return (ENXIO);
@@ -145,6 +161,7 @@ mpath_probe(struct scsi_link *link)
 struct mpath_path *
 mpath_next_path(struct mpath_dev *d, int next)
 {
+	struct mpath_group *g;
 	struct mpath_path *p;
 
 	if (d == NULL)
@@ -153,8 +170,10 @@ mpath_next_path(struct mpath_dev *d, int next)
 	p = d->d_next_path;
 	if (p != NULL && next == MPATH_NEXT) {
 		d->d_next_path = TAILQ_NEXT(p, p_entry);
-		if (d->d_next_path == NULL)
-			d->d_next_path = TAILQ_FIRST(&d->d_paths);
+		if (d->d_next_path == NULL) {
+			g = TAILQ_FIRST(&d->d_groups);
+			d->d_next_path = TAILQ_FIRST(&g->g_paths);
+		}
 	}
 
 	return (p);
@@ -164,7 +183,8 @@ void
 mpath_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_link *link = xs->sc_link;
-	struct mpath_dev *d = mpath_devs[link->target];
+	struct mpath_softc *sc = link->adapter_softc;
+	struct mpath_dev *d = sc->sc_devs[link->target];
 	struct mpath_path *p;
 	struct scsi_xfer *mxs;
 
@@ -221,7 +241,7 @@ mpath_cmd(struct scsi_xfer *xs)
 void
 mpath_start(struct mpath_path *p, struct scsi_xfer *mxs)
 {
-	struct mpath_dev *d = p->p_dev;
+	struct mpath_dev *d = p->p_group->g_dev;
 	struct scsi_xfer *xs;
 	int addxsh = 0;
 
@@ -267,7 +287,8 @@ mpath_done(struct scsi_xfer *mxs)
 {
 	struct scsi_xfer *xs = mxs->cookie;
 	struct scsi_link *link = xs->sc_link;
-	struct mpath_dev *d = mpath_devs[link->target];
+	struct mpath_softc *sc = link->adapter_softc;
+	struct mpath_dev *d = sc->sc_devs[link->target];
 	struct mpath_path *p;
 	int next = d->d_ops->op_schedule;
 
@@ -284,8 +305,27 @@ mpath_done(struct scsi_xfer *mxs)
 
 		if (p != NULL)
 			scsi_xsh_add(&p->p_xsh);
-
 		return;
+	case XS_SENSE:
+		switch (d->d_ops->op_checksense(mxs)) {
+		case MPATH_SENSE_FAILOVER:
+			mtx_enter(&d->d_mtx);
+			SIMPLEQ_INSERT_HEAD(&d->d_xfers, xs, xfer_list);
+			p = mpath_next_path(d, next);
+			mtx_leave(&d->d_mtx);
+
+			scsi_xs_put(mxs);
+
+			mpath_failover(d);
+			return;
+		case MPATH_SENSE_DECLINED:
+			break;
+#ifdef DIAGNOSTIC
+		default:
+			panic("unexpected return from checksense");
+#endif
+		}
+		break;
 	}
 
 	xs->error = mxs->error;
@@ -300,9 +340,69 @@ mpath_done(struct scsi_xfer *mxs)
 }
 
 void
+mpath_failover(struct mpath_dev *d)
+{
+	if (!scsi_sem_enter(&d->d_mtx, &d->d_failover))
+		return;
+
+	mpath_failover_start(d);
+}
+
+void
+mpath_failover_start(void *xd)
+{
+	struct mpath_dev *d = xd;
+
+	mtx_enter(&d->d_mtx);
+	d->d_failover_iter = TAILQ_FIRST(&d->d_groups);
+	mtx_leave(&d->d_mtx);
+
+	mpath_failover_check(d);
+}
+
+void
+mpath_failover_check(struct mpath_dev *d)
+{
+	struct mpath_group *g = d->d_failover_iter;
+	struct mpath_path *p;
+
+	if (g == NULL)
+		timeout_add_sec(&d->d_failover_tmo, 1);
+	else {
+		p = TAILQ_FIRST(&g->g_paths);
+		d->d_ops->op_status(p->p_link);
+	}
+}
+
+void
+mpath_path_status(struct mpath_path *p, int status)
+{
+	struct mpath_group *g = p->p_group;
+	struct mpath_dev *d = g->g_dev;
+
+	mtx_enter(&d->d_mtx);
+	if (status == MPATH_S_ACTIVE) {
+		TAILQ_REMOVE(&d->d_groups, g, g_entry);
+		TAILQ_INSERT_HEAD(&d->d_groups, g, g_entry);
+		d->d_next_path = p;
+	} else
+		d->d_failover_iter = TAILQ_NEXT(d->d_failover_iter, g_entry);
+	mtx_leave(&d->d_mtx);
+
+	if (status == MPATH_S_ACTIVE) {
+		scsi_xsh_add(&p->p_xsh);
+		if (!scsi_sem_leave(&d->d_mtx, &d->d_failover))
+			mpath_failover_start(d);
+	} else
+		mpath_failover_check(d);
+}
+
+void
 mpath_minphys(struct buf *bp, struct scsi_link *link)
 {
-	struct mpath_dev *d = mpath_devs[link->target];
+	struct mpath_softc *sc = link->adapter_softc;
+	struct mpath_dev *d = sc->sc_devs[link->target];
+	struct mpath_group *g;
 	struct mpath_path *p;
 
 #ifdef DIAGNOSTIC
@@ -310,54 +410,50 @@ mpath_minphys(struct buf *bp, struct scsi_link *link)
 		panic("mpath_minphys against nonexistant device");
 #endif
 
-	TAILQ_FOREACH(p, &d->d_paths, p_entry)
-		p->p_link->adapter->scsi_minphys(bp, p->p_link);
+	mtx_enter(&d->d_mtx);
+	TAILQ_FOREACH(g, &d->d_groups, g_entry) {
+		TAILQ_FOREACH(p, &g->g_paths, p_entry) {
+			/* XXX crossing layers with mutex held */
+			p->p_link->adapter->scsi_minphys(bp, p->p_link);
+		}
+	}
+	mtx_leave(&d->d_mtx);
 }
 
 int
 mpath_path_probe(struct scsi_link *link)
 {
-	static struct cfdata *cf = NULL;
-
-	if (cf == NULL) {
-		for (cf = cfdata; cf->cf_attach != (struct cfattach *)-1;
-		    cf++) {
-			if (cf->cf_attach == NULL)
-				continue;
-			if (cf->cf_driver == &mpath_cd)
-				break;
-		}
-	}
-
-	if (cf->cf_fstate == FSTATE_DNOTFOUND || cf->cf_fstate == FSTATE_DSTAR)
+	if (mpath == NULL)
 		return (ENXIO);
 
 	if (link->id == NULL)
 		return (EINVAL);
 
-	if (mpath != NULL && mpath == link->adapter_softc)
+	if (mpath == link->adapter_softc)
 		return (ENXIO);
 
 	return (0);
 }
 
 int
-mpath_path_attach(struct mpath_path *p, const struct mpath_ops *ops)
+mpath_path_attach(struct mpath_path *p, u_int g_id, const struct mpath_ops *ops)
 {
+	struct mpath_softc *sc = mpath;
 	struct scsi_link *link = p->p_link;
 	struct mpath_dev *d = NULL;
+	struct mpath_group *g;
 	int newdev = 0, addxsh = 0;
 	int target;
 
 #ifdef DIAGNOSTIC
 	if (p->p_link == NULL)
 		panic("mpath_path_attach: NULL link");
-	if (p->p_dev != NULL)
-		panic("mpath_path_attach: dev is not NULL");
+	if (p->p_group != NULL)
+		panic("mpath_path_attach: group is not NULL");
 #endif
 
 	for (target = 0; target < MPATH_BUSWIDTH; target++) {
-		if ((d = mpath_devs[target]) == NULL)
+		if ((d = sc->sc_devs[target]) == NULL)
 			continue;
 
 		if (DEVID_CMP(d->d_id, link->id) && d->d_ops == ops)
@@ -368,24 +464,25 @@ mpath_path_attach(struct mpath_path *p, const struct mpath_ops *ops)
 
 	if (d == NULL) {
 		for (target = 0; target < MPATH_BUSWIDTH; target++) {
-			if (mpath_devs[target] == NULL)
+			if (sc->sc_devs[target] == NULL)
 				break;
 		}
 		if (target >= MPATH_BUSWIDTH)
 			return (ENXIO);
 
-		d = malloc(sizeof(*d), M_DEVBUF,
-		    M_WAITOK | M_CANFAIL | M_ZERO);
+		d = malloc(sizeof(*d), M_DEVBUF, M_WAITOK | M_CANFAIL | M_ZERO);
 		if (d == NULL)
 			return (ENOMEM);
 
 		mtx_init(&d->d_mtx, IPL_BIO);
-		TAILQ_INIT(&d->d_paths);
+		TAILQ_INIT(&d->d_groups);
 		SIMPLEQ_INIT(&d->d_xfers);
 		d->d_id = devid_copy(link->id);
 		d->d_ops = ops;
 
-		mpath_devs[target] = d;
+		timeout_set(&d->d_failover_tmo, mpath_failover_start, d);
+
+		sc->sc_devs[target] = d;
 		newdev = 1;
 	} else {
 		/*
@@ -397,17 +494,44 @@ mpath_path_attach(struct mpath_path *p, const struct mpath_ops *ops)
 		link->id = devid_copy(d->d_id);
 	}
 
-	p->p_dev = d;
+	TAILQ_FOREACH(g, &d->d_groups, g_entry) {
+		if (g->g_id == g_id)
+			break;
+	}
+
+	if (g == NULL) {
+		g = malloc(sizeof(*g),  M_DEVBUF,
+		    M_WAITOK | M_CANFAIL | M_ZERO);
+		if (g == NULL) {
+			if (newdev) {
+				free(d, M_DEVBUF);
+				sc->sc_devs[target] = NULL;
+			}
+
+			return (ENOMEM);
+		}
+
+		TAILQ_INIT(&g->g_paths);
+		g->g_dev = d;
+		g->g_id = g_id;
+
+		mtx_enter(&d->d_mtx);
+		TAILQ_INSERT_TAIL(&d->d_groups, g, g_entry);
+		mtx_leave(&d->d_mtx);
+	}
+
+	p->p_group = g;
+
 	mtx_enter(&d->d_mtx);
-	if (TAILQ_EMPTY(&d->d_paths))
-		d->d_next_path = p;
-	TAILQ_INSERT_TAIL(&d->d_paths, p, p_entry);
-	d->d_path_count++;
+	TAILQ_INSERT_TAIL(&g->g_paths, p, p_entry);
 	if (!SIMPLEQ_EMPTY(&d->d_xfers))
 		addxsh = 1;
+
+	if (d->d_next_path == NULL)
+		d->d_next_path = p;
 	mtx_leave(&d->d_mtx);
 
-	if (newdev && mpath != NULL)
+	if (newdev)
 		scsi_probe_target(mpath->sc_scsibus, target);
 	else if (addxsh)
 		scsi_xsh_add(&p->p_xsh);
@@ -418,28 +542,38 @@ mpath_path_attach(struct mpath_path *p, const struct mpath_ops *ops)
 int
 mpath_path_detach(struct mpath_path *p)
 {
-	struct mpath_dev *d = p->p_dev;
+	struct mpath_group *g = p->p_group;
+	struct mpath_dev *d = g->g_dev;
 	struct mpath_path *np = NULL;
 
 #ifdef DIAGNOSTIC
-	if (d == NULL)
+	if (g == NULL)
 		panic("mpath: detaching a path from a nonexistant bus");
 #endif
-	p->p_dev = NULL;
+	p->p_group = NULL;
 
 	mtx_enter(&d->d_mtx);
-	TAILQ_REMOVE(&d->d_paths, p, p_entry);
+	TAILQ_REMOVE(&g->g_paths, p, p_entry);
 	if (d->d_next_path == p)
-		d->d_next_path = TAILQ_FIRST(&d->d_paths);
+		d->d_next_path = TAILQ_FIRST(&g->g_paths);
 
-	d->d_path_count--;
+	if (TAILQ_EMPTY(&g->g_paths))
+		TAILQ_REMOVE(&d->d_groups, g, g_entry);
+	else
+		g = NULL;
+
 	if (!SIMPLEQ_EMPTY(&d->d_xfers))
 		np = d->d_next_path;
 	mtx_leave(&d->d_mtx);
 
+	if (g != NULL)
+		free(g, M_DEVBUF);
+
 	scsi_xsh_del(&p->p_xsh);
 
-	if (np != NULL)
+	if (np == NULL)
+		mpath_failover(d);
+	else
 		scsi_xsh_add(&np->p_xsh);
 
 	return (0);
@@ -448,21 +582,25 @@ mpath_path_detach(struct mpath_path *p)
 struct device *
 mpath_bootdv(struct device *dev)
 {
+	struct mpath_softc *sc = mpath;
 	struct mpath_dev *d;
+	struct mpath_group *g;
 	struct mpath_path *p;
 	int target;
 
-	if (mpath == NULL)
+	if (sc == NULL)
 		return (dev);
 
 	for (target = 0; target < MPATH_BUSWIDTH; target++) {
-		if ((d = mpath_devs[target]) == NULL)
+		if ((d = sc->sc_devs[target]) == NULL)
 			continue;
 
-		TAILQ_FOREACH(p, &d->d_paths, p_entry) {
-			if (p->p_link->device_softc == dev) {
-				return (scsi_get_link(mpath->sc_scsibus,
-				    target, 0)->device_softc);
+		TAILQ_FOREACH(g, &d->d_groups, g_entry) {
+			TAILQ_FOREACH(p, &g->g_paths, p_entry) {
+				if (p->p_link->device_softc == dev) {
+					return (scsi_get_link(mpath->sc_scsibus,
+					    target, 0)->device_softc);
+				}
 			}
 		}
 	}

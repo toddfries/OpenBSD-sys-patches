@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath_hds.c,v 1.6 2011/07/11 01:02:48 dlg Exp $ */
+/*	$OpenBSD: mpath_hds.c,v 1.9 2013/08/26 10:13:17 dlg Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -86,14 +86,12 @@ struct cfdriver hds_cd = {
 
 void		hds_mpath_start(struct scsi_xfer *);
 int		hds_mpath_checksense(struct scsi_xfer *);
-int		hds_mpath_online(struct scsi_link *);
-int		hds_mpath_offline(struct scsi_link *);
+void		hds_mpath_status(struct scsi_link *);
 
 const struct mpath_ops hds_mpath_ops = {
 	"hds",
 	hds_mpath_checksense,
-	hds_mpath_online,
-	hds_mpath_offline,
+	hds_mpath_status,
 	MPATH_ROUNDROBIN
 };
 
@@ -172,7 +170,8 @@ hds_attach(struct device *parent, struct device *self, void *aux)
 	if (!preferred)
 		return;
 
-	if (mpath_path_attach(&sc->sc_path, &hds_mpath_ops) != 0)
+	/* XXX id isnt real, needs to come from hds_info */
+	if (mpath_path_attach(&sc->sc_path, 0, &hds_mpath_ops) != 0)
 		printf("%s: unable to attach path\n", DEVNAME(sc));
 }
 
@@ -211,19 +210,15 @@ hds_mpath_start(struct scsi_xfer *xs)
 int
 hds_mpath_checksense(struct scsi_xfer *xs)
 {
-	return (0);
+	return (MPATH_SENSE_DECLINED);
 }
 
-int
-hds_mpath_online(struct scsi_link *link)
+void
+hds_mpath_status(struct scsi_link *link)
 {
-	return (0);
-}
+	struct hds_softc *sc = link->device_softc;
 
-int
-hds_mpath_offline(struct scsi_link *link)
-{
-	return (0);
+	mpath_path_status(&sc->sc_path, MPATH_S_UNKNOWN);
 }
 
 int
