@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath_hds.c,v 1.9 2013/08/26 10:13:17 dlg Exp $ */
+/*	$OpenBSD: mpath_hds.c,v 1.12 2013/08/27 00:57:44 dlg Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -91,8 +91,7 @@ void		hds_mpath_status(struct scsi_link *);
 const struct mpath_ops hds_mpath_ops = {
 	"hds",
 	hds_mpath_checksense,
-	hds_mpath_status,
-	MPATH_ROUNDROBIN
+	hds_mpath_status
 };
 
 struct hds_device {
@@ -129,7 +128,7 @@ hds_match(struct device *parent, void *match, void *aux)
 		if (bcmp(s->vendor, inq->vendor, strlen(s->vendor)) == 0 &&
 		    bcmp(s->product, inq->product, strlen(s->product)) == 0 &&
 		    hds_inquiry(link, &mode) == 0)
-			return (3);
+			return (8);
 	}
 
 	return (0);
@@ -192,7 +191,7 @@ hds_activate(struct device *self, int act)
 	case DVACT_RESUME:
 		break;
 	case DVACT_DEACTIVATE:
-		if (sc->sc_path.p_dev != NULL)
+		if (sc->sc_path.p_group != NULL)
 			mpath_path_detach(&sc->sc_path);
 		break;
 	}

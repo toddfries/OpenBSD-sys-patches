@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.40 2013/08/23 08:52:24 mpi Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.42 2013/08/28 07:03:02 mpi Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.1 1996/09/30 16:34:50 ws Exp $	*/
 
 /*
@@ -184,8 +184,6 @@ save_ofw_mapping()
 	return 0;
 }
 
-#include <arch/macppc/pci/vgafb_pcivar.h>
-
 struct ppc_bus_space ppc_membus;
 bus_space_tag_t cons_membus = &ppc_membus;
 bus_space_handle_t cons_display_mem_h;
@@ -196,7 +194,7 @@ int cons_brightness;
 int cons_backlight_available;
 int fbnode;
 
-#include "vgafb_pci.h"
+#include "vgafb.h"
 
 struct usb_kbd_ihandles {
         struct usb_kbd_ihandles *next;
@@ -414,7 +412,7 @@ of_display_console()
 #endif
 
 	cons_membus->bus_base = 0x80000000;
-#if NVGAFB_PCI > 0
+#if NVGAFB > 0
 	vgafb_cnattach(cons_membus, cons_membus, -1, 0);
 #endif
 

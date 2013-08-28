@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath_emc.c,v 1.11 2013/08/26 10:13:17 dlg Exp $ */
+/*	$OpenBSD: mpath_emc.c,v 1.14 2013/08/27 00:57:43 dlg Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -96,8 +96,7 @@ void		emc_mpath_status(struct scsi_link *);
 const struct mpath_ops emc_mpath_ops = {
 	"emc",
 	emc_mpath_checksense,
-	emc_mpath_status,
-	MPATH_ROUNDROBIN
+	emc_mpath_status
 };
 
 struct emc_device {
@@ -133,7 +132,7 @@ emc_match(struct device *parent, void *match, void *aux)
 
 		if (bcmp(s->vendor, inq->vendor, strlen(s->vendor)) == 0 &&
 		    bcmp(s->product, inq->product, strlen(s->product)) == 0)
-			return (3);
+			return (8);
 	}
 
 	return (0);
@@ -195,7 +194,7 @@ emc_activate(struct device *self, int act)
 	case DVACT_RESUME:
 		break;
 	case DVACT_DEACTIVATE:
-		if (sc->sc_path.p_dev != NULL)
+		if (sc->sc_path.p_group != NULL)
 			mpath_path_detach(&sc->sc_path);
 		break;
 	}
