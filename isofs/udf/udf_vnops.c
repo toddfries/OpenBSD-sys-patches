@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vnops.c,v 1.51 2013/08/13 05:52:22 guenther Exp $	*/
+/*	$OpenBSD: udf_vnops.c,v 1.53 2013/09/22 15:42:53 guenther Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -679,12 +679,12 @@ udf_getfid(struct udf_dirstream *ds)
 	 * Update the offset. Align on a 4 byte boundary because the
 	 * UDF spec says so.
 	 */
-	ds->this_off = ds->off;
 	if (!ds->fid_fragment) {
 		ds->off += (total_fid_size + 3) & ~0x03;
 	} else {
 		ds->off = (total_fid_size - frag_size + 3) & ~0x03;
 	}
+	ds->this_off = ds->offset + ds->off;
 
 	return (fid);
 }
@@ -704,6 +704,9 @@ udf_closedir(struct udf_dirstream *ds)
 	pool_put(&udf_ds_pool, ds);
 }
 
+#define SELF_OFFSET	1
+#define PARENT_OFFSET	2
+
 int
 udf_readdir(void *v)
 {
@@ -716,6 +719,8 @@ udf_readdir(void *v)
 	struct fileid_desc *fid;
 	struct udf_uiodir uiodir;
 	struct udf_dirstream *ds;
+	off_t last_off;
+	enum { MODE_NORMAL, MODE_SELF, MODE_PARENT } mode;
 	int error = 0;
 
 	vp = ap->a_vp;
@@ -724,6 +729,19 @@ udf_readdir(void *v)
 	ump = up->u_ump;
 	uiodir.eofflag = 1;
 	uiodir.dirent = &dir;
+
+	/*
+	 * if asked to start at SELF_OFFSET or PARENT_OFFSET, search
+	 * for the parent ref
+	 */
+	if (uio->uio_offset == SELF_OFFSET) {
+		mode = MODE_SELF;
+		uio->uio_offset = 0;
+	} else if (uio->uio_offset == PARENT_OFFSET) {
+		mode = MODE_PARENT;
+		uio->uio_offset = 0;
+	} else
+		mode = MODE_NORMAL;
 
 	/*
 	 * Iterate through the file id descriptors.  Give the parent dir
@@ -736,6 +754,7 @@ udf_readdir(void *v)
 	ds = udf_opendir(up, uio->uio_offset,
 	    letoh64(up->u_fentry->inf_len), up->u_ump);
 
+	last_off = ds->offset + ds->off;
 	while ((fid = udf_getfid(ds)) != NULL) {
 
 		/* Should we return an error on a bad fid? */
@@ -754,22 +773,28 @@ udf_readdir(void *v)
 			 * used for the offset since the offset here is
 			 * usually zero, and NFS doesn't like that value
 			 */
-			dir.d_fileno = up->u_ino;
-			dir.d_type = DT_DIR;
-			dir.d_name[0] = '.';
-			dir.d_name[1] = '\0';
-			dir.d_namlen = 1;
-			error = udf_uiodir(&uiodir, uio, 1);
-			if (error)
-				break;
-
-			dir.d_fileno = udf_getid(&fid->icb);
-			dir.d_type = DT_DIR;
-			dir.d_name[0] = '.';
-			dir.d_name[1] = '.';
-			dir.d_name[2] = '\0';
-			dir.d_namlen = 2;
-			error = udf_uiodir(&uiodir, uio, 2);
+			if (mode == MODE_NORMAL) {
+				dir.d_fileno = up->u_ino;
+				dir.d_type = DT_DIR;
+				dir.d_name[0] = '.';
+				dir.d_name[1] = '\0';
+				dir.d_namlen = 1;
+				error = udf_uiodir(&uiodir, uio, SELF_OFFSET);
+				if (error)
+					break;
+			}
+			if (mode != MODE_PARENT) {
+				dir.d_fileno = udf_getid(&fid->icb);
+				dir.d_type = DT_DIR;
+				dir.d_name[0] = '.';
+				dir.d_name[1] = '.';
+				dir.d_name[2] = '\0';
+				dir.d_namlen = 2;
+				error = udf_uiodir(&uiodir, uio, PARENT_OFFSET);
+			}
+			mode = MODE_NORMAL;
+		} else if (mode != MODE_NORMAL) {
+			continue;
 		} else {
 			dir.d_namlen = udf_transname(&fid->data[fid->l_iu],
 			    &dir.d_name[0], fid->l_fi, ump);
@@ -779,15 +804,20 @@ udf_readdir(void *v)
 			error = udf_uiodir(&uiodir, uio, ds->this_off);
 		}
 		if (error) {
-			printf("uiomove returned %d\n", error);
+			/*
+			 * udf_uiodir() indicates there isn't space for
+			 * another entry by returning -1
+			 */
+			if (error == -1)
+				error = 0;
 			break;
 		}
-
+		last_off = ds->this_off;
 	}
 
 	/* tell the calling layer whether we need to be called again */
 	*ap->a_eofflag = uiodir.eofflag;
-	uio->uio_offset = ds->offset + ds->off;
+	uio->uio_offset = last_off;
 
 	if (!error)
 		error = ds->error;

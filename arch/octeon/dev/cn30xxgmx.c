@@ -1,4 +1,4 @@
-/*	$OpenBSD: cn30xxgmx.c,v 1.5 2012/12/05 23:20:14 deraadt Exp $	*/
+/*	$OpenBSD: cn30xxgmx.c,v 1.7 2013/09/19 00:15:59 jmatthew Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -41,6 +41,7 @@
 
 #include <machine/bus.h>
 #include <machine/octeon_model.h>
+#include <machine/octeonvar.h>
 
 #include <octeon/dev/iobusvar.h>
 #include <octeon/dev/cn30xxciureg.h>
@@ -146,6 +147,15 @@ struct cn30xxgmx_port_ops *cn30xxgmx_port_ops[] = {
 	[GMX_SPI42_PORT] = &cn30xxgmx_port_ops_spi42
 };
 
+int octeon_eth_phy_table[] = {
+#if defined __seil5__
+	0x04, 0x01, 0x02
+#else
+	/* portwell cam-0100 */
+	0x02, 0x03, 0x22
+#endif
+};
+
 #ifdef OCTEON_ETH_DEBUG
 static void		*cn30xxgmx_intr_drop_ih;
 struct evcnt		cn30xxgmx_intr_drop_evcnt =
@@ -176,6 +186,24 @@ cn30xxgmx_match(struct device *parent, void *match, void *aux)
 	if (cf->cf_unit != aa->aa_unitno)
 		return 0;
 	return 1;
+}
+
+static int
+cn30xxgmx_port_phy_addr(int port)
+{
+	extern struct boot_info *octeon_boot_info;
+
+	switch (octeon_boot_info->board_type) {
+	case BOARD_TYPE_UBIQUITI_E100:
+		if (port > 2)
+			return -1;
+		return 7 - port;
+
+	default:
+		if (port >= nitems(octeon_eth_phy_table))
+			return -1;
+		return octeon_eth_phy_table[port];
+	}
 }
 
 static void
@@ -223,6 +251,9 @@ cn30xxgmx_attach(struct device *parent, struct device *self, void *aux)
 		gmx_aa.ga_port_type = sc->sc_port_types[i];
 		gmx_aa.ga_gmx = sc;
 		gmx_aa.ga_gmx_port = port_sc;
+		gmx_aa.ga_phy_addr = cn30xxgmx_port_phy_addr(i);
+		if (gmx_aa.ga_phy_addr == -1)
+			panic(": don't know phy address for port %d", i);
 
 		config_found_sm(self, &gmx_aa,
 		    cn30xxgmx_print, cn30xxgmx_submatch);
@@ -957,7 +988,9 @@ cn30xxgmx_rgmii_speed_speed(struct cn30xxgmx_port_softc *sc)
 static int
 cn30xxgmx_rgmii_timing(struct cn30xxgmx_port_softc *sc)
 {
-	int clk_set_setting;
+	extern struct boot_info *octeon_boot_info;
+	int clk_tx_setting;
+	int clk_rx_setting;
 	uint64_t rx_frm_ctl;
 
 	/* RGMII TX Threshold Registers, CN30XX-HM-1.0;
@@ -1002,15 +1035,25 @@ cn30xxgmx_rgmii_timing(struct cn30xxgmx_port_softc *sc)
 		/*
 		 * Table.4-6, Summary of ASX Registers, SEIL_HS_v03;
 		 */
-		clk_set_setting = 0;
+		clk_tx_setting = 0;
+		clk_rx_setting = 0;
 		break;
 	default:
 		/* Default parameter of CN30XX */
-		clk_set_setting = 24;
+		clk_tx_setting = 24;
+		clk_rx_setting = 24;
+		break;
+	}
+	
+	/* board specific overrides */
+	switch (octeon_boot_info->board_type) {
+	case BOARD_TYPE_UBIQUITI_E100:
+		clk_tx_setting = 16;
+		clk_rx_setting = 0;
 		break;
 	}
 
-	cn30xxasx_clk_set(sc->sc_port_asx, clk_set_setting);
+	cn30xxasx_clk_set(sc->sc_port_asx, clk_tx_setting, clk_rx_setting);
 
 	return 0;
 }

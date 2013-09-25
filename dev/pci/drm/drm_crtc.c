@@ -1,4 +1,4 @@
-/*	$OpenBSD: drm_crtc.c,v 1.1 2013/03/18 12:36:51 jsg Exp $	*/
+/*	$OpenBSD: drm_crtc.c,v 1.3 2013/09/02 10:18:26 jsg Exp $	*/
 /*
  * Copyright (c) 2006-2008 Intel Corporation
  * Copyright (c) 2007 Dave Airlie <airlied@linux.ie>
@@ -34,6 +34,7 @@
 #include "drm_crtc.h"
 #include "drm_edid.h"
 #include "drm_fourcc.h"
+#include "refcount.h"
 
 /* Avoid boilerplate.  I'm tired of typing. */
 #define DRM_ENUM_NAME_FN(fnname, list)				\
@@ -51,34 +52,7 @@
 
 char	*drm_get_connector_status_name(enum drm_connector_status);
 int	 drm_mode_group_init(struct drm_device *, struct drm_mode_group *);
-void	 drm_crtc_convert_to_umode(struct drm_mode_modeinfo *,
-	     const struct drm_display_mode *);
-int	 drm_mode_handle_cmp(struct drm_mode_handle *,
-	     struct drm_mode_handle *);
-int	 drm_crtc_convert_umode(struct drm_display_mode *,
-	     const struct drm_mode_modeinfo *);
-int	 drm_mode_object_get(struct drm_device *, struct drm_mode_object *,
-	     uint32_t);
-void	 drm_mode_object_put(struct drm_device *, struct drm_mode_object *);
-int	 drm_mode_create_standard_connector_properties(struct drm_device *);
-void	 drm_mode_attachmode(struct drm_device *, struct drm_connector *,
-	     struct drm_display_mode *);
-int	 drm_mode_detachmode(struct drm_device *, struct drm_connector *,
-	     struct drm_display_mode *);
-struct drm_property_blob	*drm_property_create_blob(struct drm_device *,
-				     int, void *);
-void	 drm_property_destroy_blob(struct drm_device *,
-	     struct drm_property_blob *);
-int	 format_check(const struct drm_mode_fb_cmd2 *);
-int	 framebuffer_check(const struct drm_mode_fb_cmd2 *);
-bool	 drm_property_change_is_valid(struct drm_property *, uint64_t);
-int	 drm_mode_connector_set_obj_prop(struct drm_mode_object *,
-	     struct drm_property *, uint64_t);
-int	 drm_mode_crtc_set_obj_prop(struct drm_mode_object *,
-	     struct drm_property *, uint64_t);
-int	 drm_mode_plane_set_obj_prop(struct drm_mode_object *,
-	     struct drm_property *, uint64_t);
-void	 drm_framebuffer_free(struct drm_framebuffer *);
+int	 drm_mode_handle_cmp(struct drm_mode_handle *, struct drm_mode_handle *);
 
 SPLAY_PROTOTYPE(drm_mode_tree, drm_mode_handle, entry, drm_mode_handle_cmp);
 
@@ -250,8 +224,7 @@ char *drm_get_connector_status_name(enum drm_connector_status status)
  * New unique (relative to other objects in @dev) integer identifier for the
  * object.
  */
-int
-drm_mode_object_get(struct drm_device *dev,
+static int drm_mode_object_get(struct drm_device *dev,
 			       struct drm_mode_object *obj, uint32_t obj_type)
 {
 	struct drm_mode_handle *han;
@@ -287,8 +260,7 @@ again:
  *
  * Free @id from @dev's unique identifier pool.
  */
-void
-drm_mode_object_put(struct drm_device *dev,
+static void drm_mode_object_put(struct drm_device *dev,
 				struct drm_mode_object *object)
 {
 	struct drm_mode_handle han;
@@ -300,8 +272,7 @@ drm_mode_object_put(struct drm_device *dev,
 	rw_exit_write(&dev->mode_config.idr_rwl);
 }
 
-struct drm_mode_object *
-drm_mode_object_find(struct drm_device *dev,
+struct drm_mode_object *drm_mode_object_find(struct drm_device *dev,
 		uint32_t id, uint32_t type)
 {
 	struct drm_mode_object *obj = NULL;
@@ -338,13 +309,12 @@ EXPORT_SYMBOL(drm_mode_object_find);
  * RETURNS:
  * Zero on success, error code on failure.
  */
-int
-drm_framebuffer_init(struct drm_device *dev, struct drm_framebuffer *fb,
+int drm_framebuffer_init(struct drm_device *dev, struct drm_framebuffer *fb,
 			 const struct drm_framebuffer_funcs *funcs)
 {
 	int ret;
 
-	fb->refcount = 0;
+	refcount_init(&fb->refcount, 1);
 
 	ret = drm_mode_object_get(dev, &fb->base, DRM_MODE_OBJECT_FB);
 	if (ret)
@@ -359,8 +329,7 @@ drm_framebuffer_init(struct drm_device *dev, struct drm_framebuffer *fb,
 }
 EXPORT_SYMBOL(drm_framebuffer_init);
 
-void
-drm_framebuffer_free(struct drm_framebuffer *fb)
+static void drm_framebuffer_free(struct drm_framebuffer *fb)
 {
 	fb->funcs->destroy(fb);
 }
@@ -371,15 +340,14 @@ drm_framebuffer_free(struct drm_framebuffer *fb)
  * LOCKING:
  * Caller must hold mode config lock.
  */
-void
-drm_framebuffer_unreference(struct drm_framebuffer *fb)
+void drm_framebuffer_unreference(struct drm_framebuffer *fb)
 {
 //	struct drm_device *dev = fb->dev;
 	DRM_DEBUG("FB ID: %d\n", fb->base.id);
 #ifdef notyet
 	WARN_ON(!mutex_is_locked(&dev->mode_config.mutex));
 #endif
-	if (--fb->refcount == 0)
+	if (refcount_release(&fb->refcount))
 		drm_framebuffer_free(fb);
 }
 EXPORT_SYMBOL(drm_framebuffer_unreference);
@@ -387,11 +355,10 @@ EXPORT_SYMBOL(drm_framebuffer_unreference);
 /**
  * drm_framebuffer_reference - incr the fb refcnt
  */
-void
-drm_framebuffer_reference(struct drm_framebuffer *fb)
+void drm_framebuffer_reference(struct drm_framebuffer *fb)
 {
 	DRM_DEBUG("FB ID: %d\n", fb->base.id);
-	fb->refcount++;
+	refcount_acquire(&fb->refcount);
 }
 EXPORT_SYMBOL(drm_framebuffer_reference);
 
@@ -405,8 +372,7 @@ EXPORT_SYMBOL(drm_framebuffer_reference);
  * Scans all the CRTCs in @dev's mode_config.  If they're using @fb, removes
  * it, setting it to NULL.
  */
-void
-drm_framebuffer_cleanup(struct drm_framebuffer *fb)
+void drm_framebuffer_cleanup(struct drm_framebuffer *fb)
 {
 	struct drm_device *dev = fb->dev;
 	/*
@@ -432,8 +398,7 @@ EXPORT_SYMBOL(drm_framebuffer_cleanup);
  * Scans all the CRTCs and planes in @dev's mode_config.  If they're
  * using @fb, removes it, setting it to NULL.
  */
-void
-drm_framebuffer_remove(struct drm_framebuffer *fb)
+void drm_framebuffer_remove(struct drm_framebuffer *fb)
 {
 	struct drm_device *dev = fb->dev;
 	struct drm_crtc *crtc;
@@ -486,8 +451,7 @@ EXPORT_SYMBOL(drm_framebuffer_remove);
  * RETURNS:
  * Zero on success, error code on failure.
  */
-int
-drm_crtc_init(struct drm_device *dev, struct drm_crtc *crtc,
+int drm_crtc_init(struct drm_device *dev, struct drm_crtc *crtc,
 		   const struct drm_crtc_funcs *funcs)
 {
 	int ret;
@@ -524,8 +488,7 @@ EXPORT_SYMBOL(drm_crtc_init);
  * Cleanup @crtc. Removes from drm modesetting space
  * does NOT free object, caller does that.
  */
-void
-drm_crtc_cleanup(struct drm_crtc *crtc)
+void drm_crtc_cleanup(struct drm_crtc *crtc)
 {
 	struct drm_device *dev = crtc->dev;
 
@@ -550,8 +513,7 @@ EXPORT_SYMBOL(drm_crtc_cleanup);
  *
  * Add @mode to @connector's mode list for later use.
  */
-void
-drm_mode_probed_add(struct drm_connector *connector,
+void drm_mode_probed_add(struct drm_connector *connector,
 			 struct drm_display_mode *mode)
 {
 	list_add(&mode->head, &connector->probed_modes);
@@ -568,8 +530,7 @@ EXPORT_SYMBOL(drm_mode_probed_add);
  *
  * Remove @mode from @connector's mode list, then free it.
  */
-void
-drm_mode_remove(struct drm_connector *connector,
+void drm_mode_remove(struct drm_connector *connector,
 		     struct drm_display_mode *mode)
 {
 	list_del(&mode->head);
@@ -593,8 +554,7 @@ EXPORT_SYMBOL(drm_mode_remove);
  * RETURNS:
  * Zero on success, error code on failure.
  */
-int
-drm_connector_init(struct drm_device *dev,
+int drm_connector_init(struct drm_device *dev,
 		       struct drm_connector *connector,
 		       const struct drm_connector_funcs *funcs,
 		       int connector_type)
@@ -646,8 +606,7 @@ EXPORT_SYMBOL(drm_connector_init);
  *
  * Cleans up the connector but doesn't free the object.
  */
-void
-drm_connector_cleanup(struct drm_connector *connector)
+void drm_connector_cleanup(struct drm_connector *connector)
 {
 	struct drm_device *dev = connector->dev;
 	struct drm_display_mode *mode, *t;
@@ -669,8 +628,7 @@ drm_connector_cleanup(struct drm_connector *connector)
 }
 EXPORT_SYMBOL(drm_connector_cleanup);
 
-void
-drm_connector_unplug_all(struct drm_device *dev)
+void drm_connector_unplug_all(struct drm_device *dev)
 {
 #ifdef notyet
 	struct drm_connector *connector;
@@ -682,8 +640,7 @@ drm_connector_unplug_all(struct drm_device *dev)
 }
 EXPORT_SYMBOL(drm_connector_unplug_all);
 
-int
-drm_encoder_init(struct drm_device *dev,
+int drm_encoder_init(struct drm_device *dev,
 		      struct drm_encoder *encoder,
 		      const struct drm_encoder_funcs *funcs,
 		      int encoder_type)
@@ -710,8 +667,7 @@ drm_encoder_init(struct drm_device *dev,
 }
 EXPORT_SYMBOL(drm_encoder_init);
 
-void
-drm_encoder_cleanup(struct drm_encoder *encoder)
+void drm_encoder_cleanup(struct drm_encoder *encoder)
 {
 	struct drm_device *dev = encoder->dev;
 	rw_enter_write(&dev->mode_config.rwl);
@@ -722,8 +678,7 @@ drm_encoder_cleanup(struct drm_encoder *encoder)
 }
 EXPORT_SYMBOL(drm_encoder_cleanup);
 
-int
-drm_plane_init(struct drm_device *dev, struct drm_plane *plane,
+int drm_plane_init(struct drm_device *dev, struct drm_plane *plane,
 		   unsigned long possible_crtcs,
 		   const struct drm_plane_funcs *funcs,
 		   const uint32_t *formats, uint32_t format_count,
@@ -772,8 +727,7 @@ drm_plane_init(struct drm_device *dev, struct drm_plane *plane,
 }
 EXPORT_SYMBOL(drm_plane_init);
 
-void
-drm_plane_cleanup(struct drm_plane *plane)
+void drm_plane_cleanup(struct drm_plane *plane)
 {
 	struct drm_device *dev = plane->dev;
 
@@ -801,8 +755,7 @@ EXPORT_SYMBOL(drm_plane_cleanup);
  * RETURNS:
  * Pointer to new mode on success, NULL on error.
  */
-struct drm_display_mode *
-drm_mode_create(struct drm_device *dev)
+struct drm_display_mode *drm_mode_create(struct drm_device *dev)
 {
 	struct drm_display_mode *nmode;
 
@@ -829,8 +782,7 @@ EXPORT_SYMBOL(drm_mode_create);
  *
  * Free @mode's unique identifier, then free it.
  */
-void
-drm_mode_destroy(struct drm_device *dev, struct drm_display_mode *mode)
+void drm_mode_destroy(struct drm_device *dev, struct drm_display_mode *mode)
 {
 	if (!mode)
 		return;
@@ -841,8 +793,7 @@ drm_mode_destroy(struct drm_device *dev, struct drm_display_mode *mode)
 }
 EXPORT_SYMBOL(drm_mode_destroy);
 
-int
-drm_mode_create_standard_connector_properties(struct drm_device *dev)
+static int drm_mode_create_standard_connector_properties(struct drm_device *dev)
 {
 	struct drm_property *edid;
 	struct drm_property *dpms;
@@ -869,8 +820,7 @@ drm_mode_create_standard_connector_properties(struct drm_device *dev)
  *
  * Called by a driver the first time a DVI-I connector is made.
  */
-int
-drm_mode_create_dvi_i_properties(struct drm_device *dev)
+int drm_mode_create_dvi_i_properties(struct drm_device *dev)
 {
 	struct drm_property *dvi_i_selector;
 	struct drm_property *dvi_i_subconnector;
@@ -906,8 +856,7 @@ EXPORT_SYMBOL(drm_mode_create_dvi_i_properties);
  * responsible for allocating a list of format names and passing them to
  * this routine.
  */
-int
-drm_mode_create_tv_properties(struct drm_device *dev, int num_modes,
+int drm_mode_create_tv_properties(struct drm_device *dev, int num_modes,
 				  char *modes[])
 {
 	struct drm_property *tv_selector;
@@ -984,8 +933,7 @@ EXPORT_SYMBOL(drm_mode_create_tv_properties);
  * Called by a driver the first time it's needed, must be attached to desired
  * connectors.
  */
-int
-drm_mode_create_scaling_mode_property(struct drm_device *dev)
+int drm_mode_create_scaling_mode_property(struct drm_device *dev)
 {
 	struct drm_property *scaling_mode;
 
@@ -1010,8 +958,7 @@ EXPORT_SYMBOL(drm_mode_create_scaling_mode_property);
  * Called by a driver the first time it's needed, must be attached to desired
  * connectors.
  */
-int
-drm_mode_create_dithering_property(struct drm_device *dev)
+int drm_mode_create_dithering_property(struct drm_device *dev)
 {
 	struct drm_property *dithering_mode;
 
@@ -1035,8 +982,7 @@ EXPORT_SYMBOL(drm_mode_create_dithering_property);
  * Called by a driver the first time it's needed, must be attached to desired
  * connectors.
  */
-int
-drm_mode_create_dirty_info_property(struct drm_device *dev)
+int drm_mode_create_dirty_info_property(struct drm_device *dev)
 {
 	struct drm_property *dirty_info;
 
@@ -1064,8 +1010,7 @@ EXPORT_SYMBOL(drm_mode_create_dirty_info_property);
  * Initialize @dev's mode_config structure, used for tracking the graphics
  * configuration of @dev.
  */
-void
-drm_mode_config_init(struct drm_device *dev)
+void drm_mode_config_init(struct drm_device *dev)
 {
 	rw_init(&dev->mode_config.rwl, "mcrwl");
 	rw_init(&dev->mode_config.idr_rwl, "idrwl");
@@ -1090,8 +1035,7 @@ drm_mode_config_init(struct drm_device *dev)
 }
 EXPORT_SYMBOL(drm_mode_config_init);
 
-int
-drm_mode_group_init(struct drm_device *dev, struct drm_mode_group *group)
+int drm_mode_group_init(struct drm_device *dev, struct drm_mode_group *group)
 {
 	uint32_t total_objects = 0;
 
@@ -1110,8 +1054,7 @@ drm_mode_group_init(struct drm_device *dev, struct drm_mode_group *group)
 	return 0;
 }
 
-int
-drm_mode_group_init_legacy_group(struct drm_device *dev,
+int drm_mode_group_init_legacy_group(struct drm_device *dev,
 				     struct drm_mode_group *group)
 {
 	struct drm_crtc *crtc;
@@ -1149,8 +1092,7 @@ EXPORT_SYMBOL(drm_mode_group_init_legacy_group);
  *
  * FIXME: cleanup any dangling user buffer objects too
  */
-void
-drm_mode_config_cleanup(struct drm_device *dev)
+void drm_mode_config_cleanup(struct drm_device *dev)
 {
 	struct drm_connector *connector, *ot;
 	struct drm_crtc *crtc, *ct;
@@ -1202,8 +1144,7 @@ EXPORT_SYMBOL(drm_mode_config_cleanup);
  * Convert a drm_display_mode into a drm_mode_modeinfo structure to return to
  * the user.
  */
-void
-drm_crtc_convert_to_umode(struct drm_mode_modeinfo *out,
+static void drm_crtc_convert_to_umode(struct drm_mode_modeinfo *out,
 				      const struct drm_display_mode *in)
 {
 #ifdef notyet
@@ -1247,8 +1188,7 @@ drm_crtc_convert_to_umode(struct drm_mode_modeinfo *out,
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_crtc_convert_umode(struct drm_display_mode *out,
+static int drm_crtc_convert_umode(struct drm_display_mode *out,
 				  const struct drm_mode_modeinfo *in)
 {
 	if (in->clock > INT_MAX || in->vrefresh > INT_MAX)
@@ -1292,8 +1232,7 @@ drm_crtc_convert_umode(struct drm_display_mode *out,
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_mode_getresources(struct drm_device *dev, void *data,
+int drm_mode_getresources(struct drm_device *dev, void *data,
 			  struct drm_file *file_priv)
 {
 	struct drm_mode_card_res *card_res = data;
@@ -1502,8 +1441,7 @@ out:
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_mode_getcrtc(struct drm_device *dev,
+int drm_mode_getcrtc(struct drm_device *dev,
 		     void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_crtc *crtc_resp = data;
@@ -1563,8 +1501,7 @@ out:
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_mode_getconnector(struct drm_device *dev, void *data,
+int drm_mode_getconnector(struct drm_device *dev, void *data,
 			  struct drm_file *file_priv)
 {
 	struct drm_mode_get_connector *out_resp = data;
@@ -1694,8 +1631,7 @@ out:
 	return ret;
 }
 
-int
-drm_mode_getencoder(struct drm_device *dev, void *data,
+int drm_mode_getencoder(struct drm_device *dev, void *data,
 			struct drm_file *file_priv)
 {
 	struct drm_mode_get_encoder *enc_resp = data;
@@ -1740,8 +1676,7 @@ out:
  *
  * Return an plane count and set of IDs.
  */
-int
-drm_mode_getplane_res(struct drm_device *dev, void *data,
+int drm_mode_getplane_res(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv)
 {
 	struct drm_mode_get_plane_res *plane_resp = data;
@@ -1792,8 +1727,7 @@ out:
  * Return plane info, including formats supported, gamma size, any
  * current fb, etc.
  */
-int
-drm_mode_getplane(struct drm_device *dev, void *data,
+int drm_mode_getplane(struct drm_device *dev, void *data,
 			struct drm_file *file_priv)
 {
 	struct drm_mode_get_plane *plane_resp = data;
@@ -1861,8 +1795,7 @@ out:
  * Set plane info, including placement, fb, scaling, and other factors.
  * Or pass a NULL fb to disable.
  */
-int
-drm_mode_setplane(struct drm_device *dev, void *data,
+int drm_mode_setplane(struct drm_device *dev, void *data,
 			struct drm_file *file_priv)
 {
 	struct drm_mode_set_plane *plane_req = data;
@@ -1998,8 +1931,7 @@ out:
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_mode_setcrtc(struct drm_device *dev, void *data,
+int drm_mode_setcrtc(struct drm_device *dev, void *data,
 		     struct drm_file *file_priv)
 {
 	struct drm_mode_config *config = &dev->mode_config;
@@ -2163,8 +2095,7 @@ out:
 	return ret;
 }
 
-int
-drm_mode_cursor_ioctl(struct drm_device *dev,
+int drm_mode_cursor_ioctl(struct drm_device *dev,
 			void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_cursor *req = data;
@@ -2211,8 +2142,7 @@ out:
 }
 
 /* Original addfb only supported RGB formats, so figure out which one */
-uint32_t
-drm_mode_legacy_fb_format(uint32_t bpp, uint32_t depth)
+uint32_t drm_mode_legacy_fb_format(uint32_t bpp, uint32_t depth)
 {
 	uint32_t fmt;
 
@@ -2264,8 +2194,7 @@ EXPORT_SYMBOL(drm_mode_legacy_fb_format);
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_mode_addfb(struct drm_device *dev,
+int drm_mode_addfb(struct drm_device *dev,
 		   void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_fb_cmd *or = data;
@@ -2311,8 +2240,7 @@ out:
 	return ret;
 }
 
-int
-format_check(const struct drm_mode_fb_cmd2 *r)
+static int format_check(const struct drm_mode_fb_cmd2 *r)
 {
 	uint32_t format = r->pixel_format & ~DRM_FORMAT_BIG_ENDIAN;
 
@@ -2383,8 +2311,7 @@ format_check(const struct drm_mode_fb_cmd2 *r)
 	}
 }
 
-int
-framebuffer_check(const struct drm_mode_fb_cmd2 *r)
+static int framebuffer_check(const struct drm_mode_fb_cmd2 *r)
 {
 	int ret, hsub, vsub, num_planes, i;
 
@@ -2450,8 +2377,7 @@ framebuffer_check(const struct drm_mode_fb_cmd2 *r)
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_mode_addfb2(struct drm_device *dev,
+int drm_mode_addfb2(struct drm_device *dev,
 		    void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_fb_cmd2 *r = data;
@@ -2516,8 +2442,7 @@ out:
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_mode_rmfb(struct drm_device *dev,
+int drm_mode_rmfb(struct drm_device *dev,
 		   void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_object *obj;
@@ -2572,8 +2497,7 @@ out:
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_mode_getfb(struct drm_device *dev,
+int drm_mode_getfb(struct drm_device *dev,
 		   void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_fb_cmd *r = data;
@@ -2604,8 +2528,7 @@ out:
 	return ret;
 }
 
-int
-drm_mode_dirtyfb_ioctl(struct drm_device *dev,
+int drm_mode_dirtyfb_ioctl(struct drm_device *dev,
 			   void *data, struct drm_file *file_priv)
 {
 	struct drm_clip_rect __user *clips_ptr;
@@ -2695,8 +2618,7 @@ out_err1:
  * RETURNS:
  * Zero on success, errno on failure.
  */
-void
-drm_fb_release(struct drm_device *dev, struct drm_file *priv)
+void drm_fb_release(struct drm_device *dev, struct drm_file *priv)
 {
 	struct drm_framebuffer *fb, *tfb;
 
@@ -2715,16 +2637,14 @@ drm_fb_release(struct drm_device *dev, struct drm_file *priv)
  *
  * Add @mode to @connector's user mode list.
  */
-void
-drm_mode_attachmode(struct drm_device *dev,
+static void drm_mode_attachmode(struct drm_device *dev,
 				struct drm_connector *connector,
 				struct drm_display_mode *mode)
 {
 	list_add_tail(&mode->head, &connector->user_modes);
 }
 
-int
-drm_mode_attachmode_crtc(struct drm_device *dev, struct drm_crtc *crtc,
+int drm_mode_attachmode_crtc(struct drm_device *dev, struct drm_crtc *crtc,
 			     const struct drm_display_mode *mode)
 {
 	struct drm_connector *connector;
@@ -2762,8 +2682,7 @@ drm_mode_attachmode_crtc(struct drm_device *dev, struct drm_crtc *crtc,
 }
 EXPORT_SYMBOL(drm_mode_attachmode_crtc);
 
-int
-drm_mode_detachmode(struct drm_device *dev,
+static int drm_mode_detachmode(struct drm_device *dev,
 			       struct drm_connector *connector,
 			       struct drm_display_mode *mode)
 {
@@ -2786,8 +2705,7 @@ drm_mode_detachmode(struct drm_device *dev,
 	return ret;
 }
 
-int
-drm_mode_detachmode_crtc(struct drm_device *dev, struct drm_display_mode *mode)
+int drm_mode_detachmode_crtc(struct drm_device *dev, struct drm_display_mode *mode)
 {
 	struct drm_connector *connector;
 
@@ -2811,8 +2729,7 @@ EXPORT_SYMBOL(drm_mode_detachmode_crtc);
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_mode_attachmode_ioctl(struct drm_device *dev,
+int drm_mode_attachmode_ioctl(struct drm_device *dev,
 			      void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_mode_cmd *mode_cmd = data;
@@ -2866,8 +2783,7 @@ out:
  * RETURNS:
  * Zero on success, errno on failure.
  */
-int
-drm_mode_detachmode_ioctl(struct drm_device *dev,
+int drm_mode_detachmode_ioctl(struct drm_device *dev,
 			      void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_object *obj;
@@ -2901,8 +2817,7 @@ out:
 	return ret;
 }
 
-struct drm_property *
-drm_property_create(struct drm_device *dev, int flags,
+struct drm_property *drm_property_create(struct drm_device *dev, int flags,
 					 const char *name, int num_values)
 {
 	struct drm_property *property = NULL;
@@ -2941,8 +2856,7 @@ fail:
 }
 EXPORT_SYMBOL(drm_property_create);
 
-struct drm_property *
-drm_property_create_enum(struct drm_device *dev, int flags,
+struct drm_property *drm_property_create_enum(struct drm_device *dev, int flags,
 					 const char *name,
 					 const struct drm_prop_enum_list *props,
 					 int num_values)
@@ -2970,8 +2884,7 @@ drm_property_create_enum(struct drm_device *dev, int flags,
 }
 EXPORT_SYMBOL(drm_property_create_enum);
 
-struct drm_property *
-drm_property_create_bitmask(struct drm_device *dev,
+struct drm_property *drm_property_create_bitmask(struct drm_device *dev,
 					 int flags, const char *name,
 					 const struct drm_prop_enum_list *props,
 					 int num_values)
@@ -2999,8 +2912,7 @@ drm_property_create_bitmask(struct drm_device *dev,
 }
 EXPORT_SYMBOL(drm_property_create_bitmask);
 
-struct drm_property *
-drm_property_create_range(struct drm_device *dev, int flags,
+struct drm_property *drm_property_create_range(struct drm_device *dev, int flags,
 					 const char *name,
 					 uint64_t min, uint64_t max)
 {
@@ -3019,8 +2931,7 @@ drm_property_create_range(struct drm_device *dev, int flags,
 }
 EXPORT_SYMBOL(drm_property_create_range);
 
-int
-drm_property_add_enum(struct drm_property *property, int index,
+int drm_property_add_enum(struct drm_property *property, int index,
 			  uint64_t value, const char *name)
 {
 	struct drm_property_enum *prop_enum;
@@ -3060,8 +2971,7 @@ drm_property_add_enum(struct drm_property *property, int index,
 }
 EXPORT_SYMBOL(drm_property_add_enum);
 
-void
-drm_property_destroy(struct drm_device *dev, struct drm_property *property)
+void drm_property_destroy(struct drm_device *dev, struct drm_property *property)
 {
 	struct drm_property_enum *prop_enum, *pt;
 
@@ -3078,8 +2988,7 @@ drm_property_destroy(struct drm_device *dev, struct drm_property *property)
 }
 EXPORT_SYMBOL(drm_property_destroy);
 
-void
-drm_object_attach_property(struct drm_mode_object *obj,
+void drm_object_attach_property(struct drm_mode_object *obj,
 				struct drm_property *property,
 				uint64_t init_val)
 {
@@ -3099,8 +3008,7 @@ drm_object_attach_property(struct drm_mode_object *obj,
 }
 EXPORT_SYMBOL(drm_object_attach_property);
 
-int
-drm_object_property_set_value(struct drm_mode_object *obj,
+int drm_object_property_set_value(struct drm_mode_object *obj,
 				  struct drm_property *property, uint64_t val)
 {
 	int i;
@@ -3116,8 +3024,7 @@ drm_object_property_set_value(struct drm_mode_object *obj,
 }
 EXPORT_SYMBOL(drm_object_property_set_value);
 
-int
-drm_object_property_get_value(struct drm_mode_object *obj,
+int drm_object_property_get_value(struct drm_mode_object *obj,
 				  struct drm_property *property, uint64_t *val)
 {
 	int i;
@@ -3133,8 +3040,7 @@ drm_object_property_get_value(struct drm_mode_object *obj,
 }
 EXPORT_SYMBOL(drm_object_property_get_value);
 
-int
-drm_mode_getproperty_ioctl(struct drm_device *dev,
+int drm_mode_getproperty_ioctl(struct drm_device *dev,
 			       void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_object *obj;
@@ -3244,8 +3150,7 @@ done:
 	return ret;
 }
 
-struct drm_property_blob *
-drm_property_create_blob(struct drm_device *dev, int length,
+static struct drm_property_blob *drm_property_create_blob(struct drm_device *dev, int length,
 							  void *data)
 {
 	struct drm_property_blob *blob;
@@ -3273,8 +3178,7 @@ drm_property_create_blob(struct drm_device *dev, int length,
 	return blob;
 }
 
-void
-drm_property_destroy_blob(struct drm_device *dev,
+static void drm_property_destroy_blob(struct drm_device *dev,
 			       struct drm_property_blob *blob)
 {
 	drm_mode_object_put(dev, &blob->base);
@@ -3282,8 +3186,7 @@ drm_property_destroy_blob(struct drm_device *dev,
 	free(blob, M_DRM);
 }
 
-int
-drm_mode_getblob_ioctl(struct drm_device *dev,
+int drm_mode_getblob_ioctl(struct drm_device *dev,
 			   void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_object *obj;
@@ -3317,8 +3220,7 @@ done:
 	return ret;
 }
 
-int
-drm_mode_connector_update_edid_property(struct drm_connector *connector,
+int drm_mode_connector_update_edid_property(struct drm_connector *connector,
 					    struct edid *edid)
 {
 	struct drm_device *dev = connector->dev;
@@ -3348,8 +3250,7 @@ drm_mode_connector_update_edid_property(struct drm_connector *connector,
 }
 EXPORT_SYMBOL(drm_mode_connector_update_edid_property);
 
-bool
-drm_property_change_is_valid(struct drm_property *property,
+static bool drm_property_change_is_valid(struct drm_property *property,
 					 uint64_t value)
 {
 	if (property->flags & DRM_MODE_PROP_IMMUTABLE)
@@ -3376,8 +3277,7 @@ drm_property_change_is_valid(struct drm_property *property,
 	}
 }
 
-int
-drm_mode_connector_property_set_ioctl(struct drm_device *dev,
+int drm_mode_connector_property_set_ioctl(struct drm_device *dev,
 				       void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_connector_set_property *conn_set_prop = data;
@@ -3392,8 +3292,7 @@ drm_mode_connector_property_set_ioctl(struct drm_device *dev,
 	return drm_mode_obj_set_property_ioctl(dev, &obj_set_prop, file_priv);
 }
 
-int
-drm_mode_connector_set_obj_prop(struct drm_mode_object *obj,
+static int drm_mode_connector_set_obj_prop(struct drm_mode_object *obj,
 					   struct drm_property *property,
 					   uint64_t value)
 {
@@ -3414,8 +3313,7 @@ drm_mode_connector_set_obj_prop(struct drm_mode_object *obj,
 	return ret;
 }
 
-int
-drm_mode_crtc_set_obj_prop(struct drm_mode_object *obj,
+static int drm_mode_crtc_set_obj_prop(struct drm_mode_object *obj,
 				      struct drm_property *property,
 				      uint64_t value)
 {
@@ -3430,8 +3328,7 @@ drm_mode_crtc_set_obj_prop(struct drm_mode_object *obj,
 	return ret;
 }
 
-int
-drm_mode_plane_set_obj_prop(struct drm_mode_object *obj,
+static int drm_mode_plane_set_obj_prop(struct drm_mode_object *obj,
 				      struct drm_property *property,
 				      uint64_t value)
 {
@@ -3446,8 +3343,7 @@ drm_mode_plane_set_obj_prop(struct drm_mode_object *obj,
 	return ret;
 }
 
-int
-drm_mode_obj_get_properties_ioctl(struct drm_device *dev, void *data,
+int drm_mode_obj_get_properties_ioctl(struct drm_device *dev, void *data,
 				      struct drm_file *file_priv)
 {
 	struct drm_mode_obj_get_properties *arg = data;
@@ -3505,8 +3401,7 @@ out:
 	return ret;
 }
 
-int
-drm_mode_obj_set_property_ioctl(struct drm_device *dev, void *data,
+int drm_mode_obj_set_property_ioctl(struct drm_device *dev, void *data,
 				    struct drm_file *file_priv)
 {
 	struct drm_mode_obj_set_property *arg = data;
@@ -3561,8 +3456,7 @@ out:
 	return ret;
 }
 
-int
-drm_mode_connector_attach_encoder(struct drm_connector *connector,
+int drm_mode_connector_attach_encoder(struct drm_connector *connector,
 				      struct drm_encoder *encoder)
 {
 	int i;
@@ -3577,8 +3471,7 @@ drm_mode_connector_attach_encoder(struct drm_connector *connector,
 }
 EXPORT_SYMBOL(drm_mode_connector_attach_encoder);
 
-void
-drm_mode_connector_detach_encoder(struct drm_connector *connector,
+void drm_mode_connector_detach_encoder(struct drm_connector *connector,
 				    struct drm_encoder *encoder)
 {
 	int i;
@@ -3593,8 +3486,7 @@ drm_mode_connector_detach_encoder(struct drm_connector *connector,
 }
 EXPORT_SYMBOL(drm_mode_connector_detach_encoder);
 
-int
-drm_mode_crtc_set_gamma_size(struct drm_crtc *crtc,
+int drm_mode_crtc_set_gamma_size(struct drm_crtc *crtc,
 				  int gamma_size)
 {
 	crtc->gamma_size = gamma_size;
@@ -3610,8 +3502,7 @@ drm_mode_crtc_set_gamma_size(struct drm_crtc *crtc,
 }
 EXPORT_SYMBOL(drm_mode_crtc_set_gamma_size);
 
-int
-drm_mode_gamma_set_ioctl(struct drm_device *dev,
+int drm_mode_gamma_set_ioctl(struct drm_device *dev,
 			     void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_crtc_lut *crtc_lut = data;
@@ -3673,8 +3564,7 @@ out:
 
 }
 
-int
-drm_mode_gamma_get_ioctl(struct drm_device *dev,
+int drm_mode_gamma_get_ioctl(struct drm_device *dev,
 			     void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_crtc_lut *crtc_lut = data;
@@ -3727,8 +3617,7 @@ out:
 	return ret;
 }
 
-int
-drm_mode_page_flip_ioctl(struct drm_device *dev,
+int drm_mode_page_flip_ioctl(struct drm_device *dev,
 			     void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_crtc_page_flip *page_flip = data;
@@ -3828,8 +3717,7 @@ out:
 	return ret;
 }
 
-void
-drm_mode_config_reset(struct drm_device *dev)
+void drm_mode_config_reset(struct drm_device *dev)
 {
 	struct drm_crtc *crtc;
 	struct drm_encoder *encoder;
@@ -3852,8 +3740,7 @@ drm_mode_config_reset(struct drm_device *dev)
 }
 EXPORT_SYMBOL(drm_mode_config_reset);
 
-int
-drm_mode_create_dumb_ioctl(struct drm_device *dev,
+int drm_mode_create_dumb_ioctl(struct drm_device *dev,
 			       void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_create_dumb *args = data;
@@ -3863,8 +3750,7 @@ drm_mode_create_dumb_ioctl(struct drm_device *dev,
 	return dev->driver->dumb_create(file_priv, dev, args);
 }
 
-int
-drm_mode_mmap_dumb_ioctl(struct drm_device *dev,
+int drm_mode_mmap_dumb_ioctl(struct drm_device *dev,
 			     void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_map_dumb *args = data;
@@ -3876,8 +3762,7 @@ drm_mode_mmap_dumb_ioctl(struct drm_device *dev,
 	return dev->driver->dumb_map_offset(file_priv, dev, args->handle, &args->offset);
 }
 
-int
-drm_mode_destroy_dumb_ioctl(struct drm_device *dev,
+int drm_mode_destroy_dumb_ioctl(struct drm_device *dev,
 				void *data, struct drm_file *file_priv)
 {
 	struct drm_mode_destroy_dumb *args = data;
@@ -3892,8 +3777,7 @@ drm_mode_destroy_dumb_ioctl(struct drm_device *dev,
  * Just need to support RGB formats here for compat with code that doesn't
  * use pixel formats directly yet.
  */
-void
-drm_fb_get_bpp_depth(uint32_t format, unsigned int *depth,
+void drm_fb_get_bpp_depth(uint32_t format, unsigned int *depth,
 			  int *bpp)
 {
 	switch (format) {
@@ -3965,8 +3849,7 @@ EXPORT_SYMBOL(drm_fb_get_bpp_depth);
  * RETURNS:
  * The number of planes used by the specified pixel format.
  */
-int
-drm_format_num_planes(uint32_t format)
+int drm_format_num_planes(uint32_t format)
 {
 	switch (format) {
 	case DRM_FORMAT_YUV410:
@@ -4001,8 +3884,7 @@ EXPORT_SYMBOL(drm_format_num_planes);
  * RETURNS:
  * The bytes per pixel value for the specified plane.
  */
-int
-drm_format_plane_cpp(uint32_t format, int plane)
+int drm_format_plane_cpp(uint32_t format, int plane)
 {
 	unsigned int depth;
 	int bpp;
@@ -4049,8 +3931,7 @@ EXPORT_SYMBOL(drm_format_plane_cpp);
  * The horizontal chroma subsampling factor for the
  * specified pixel format.
  */
-int 
-drm_format_horz_chroma_subsampling(uint32_t format)
+int drm_format_horz_chroma_subsampling(uint32_t format)
 {
 	switch (format) {
 	case DRM_FORMAT_YUV411:
@@ -4085,8 +3966,7 @@ EXPORT_SYMBOL(drm_format_horz_chroma_subsampling);
  * The vertical chroma subsampling factor for the
  * specified pixel format.
  */
-int
-drm_format_vert_chroma_subsampling(uint32_t format)
+int drm_format_vert_chroma_subsampling(uint32_t format)
 {
 	switch (format) {
 	case DRM_FORMAT_YUV410:

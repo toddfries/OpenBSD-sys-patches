@@ -1,4 +1,4 @@
-/* $OpenBSD: drmP.h,v 1.146 2013/08/27 03:06:02 jsg Exp $ */
+/* $OpenBSD: drmP.h,v 1.149 2013/09/08 11:59:44 jsg Exp $ */
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -235,6 +235,11 @@ IS_ERR_OR_NULL(const void *ptr)
 #define DRM_MEMORYBARRIER()		membar(Sync)
 #endif
 
+#define smp_mb__before_atomic_dec()	DRM_MEMORYBARRIER()
+#define smp_mb__after_atomic_dec()	DRM_MEMORYBARRIER()
+#define smp_mb__before_atomic_inc()	DRM_MEMORYBARRIER()
+#define smp_mb__after_atomic_inc()	DRM_MEMORYBARRIER()
+
 #define	DRM_COPY_TO_USER(user, kern, size)	copyout(kern, user, size)
 #define	DRM_COPY_FROM_USER(kern, user, size)	copyin(user, kern, size)
 
@@ -366,10 +371,16 @@ do {									\
 	printf("%s: " fmt, dev.dv_xname, ## arg);			\
 } while(0)
 
+#define PCI_ANY_ID (uint16_t) (~0U)
+
 struct drm_pcidev {
-	int vendor;
-	int device;
-	long driver_private;
+	uint16_t vendor;
+	uint16_t device;
+	uint16_t subvendor;
+	uint16_t subdevice;
+	uint32_t class;
+	uint32_t class_mask;
+	unsigned long driver_data;
 };
 
 struct drm_file;
@@ -893,6 +904,8 @@ void	drm_reclaim_buffers(struct drm_device *, struct drm_file *);
 int	drm_irq_install(struct drm_device *);
 int	drm_irq_uninstall(struct drm_device *);
 void	drm_vblank_cleanup(struct drm_device *);
+u32	drm_get_last_vbltimestamp(struct drm_device *, int ,
+				  struct timeval *, unsigned);
 int	drm_vblank_init(struct drm_device *, int);
 u_int32_t drm_vblank_count(struct drm_device *, int);
 u_int32_t drm_vblank_count_and_time(struct drm_device *, int, struct timeval *);
@@ -906,6 +919,8 @@ bool	drm_handle_vblank(struct drm_device *, int);
 void	drm_calc_timestamping_constants(struct drm_crtc *);
 int	drm_calc_vbltimestamp_from_scanoutpos(struct drm_device *,
 	    int, int *, struct timeval *, unsigned, struct drm_crtc *);
+bool	drm_mode_parse_command_line_for_connector(const char *,
+	    struct drm_connector *, struct drm_cmdline_mode *);
 struct drm_display_mode *
 	 drm_mode_create_from_cmdline_mode(struct drm_device *,
 	     struct drm_cmdline_mode *);

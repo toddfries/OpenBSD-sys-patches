@@ -1,4 +1,4 @@
-/*	$OpenBSD: tmpfs_vnops.c,v 1.6 2013/06/05 14:20:19 espie Exp $	*/
+/*	$OpenBSD: tmpfs_vnops.c,v 1.8 2013/09/22 03:34:31 guenther Exp $	*/
 /*	$NetBSD: tmpfs_vnops.c,v 1.100 2012/11/05 17:27:39 dholland Exp $	*/
 
 /*
@@ -959,15 +959,10 @@ tmpfs_readdir(void *v)
 		struct uio	*a_uio;
 		kauth_cred_t	a_cred;
 		int		*a_eofflag;
-		off_t		**a_cookies;
-		int		*ncookies;
 	} */ *ap = v;
 	struct vnode *vp = ap->a_vp;
 	struct uio *uio = ap->a_uio;
 	int *eofflag = ap->a_eofflag;
-	u_long **cookies = ap->a_cookies;
-	int *ncookies = ap->a_ncookies;
-	off_t startoff, cnt;
 	tmpfs_node_t *node;
 	int error;
 
@@ -978,8 +973,6 @@ tmpfs_readdir(void *v)
 		return ENOTDIR;
 	}
 	node = VP_TO_TMPFS_DIR(vp);
-	startoff = uio->uio_offset;
-	cnt = 0;
 	if (node->tn_links == 0) {
 		error = 0;
 		goto out;
@@ -992,7 +985,6 @@ tmpfs_readdir(void *v)
 				error = 0;
 			goto out;
 		}
-		cnt++;
 	}
 	if (uio->uio_offset == TMPFS_DIRCOOKIE_DOTDOT) {
 		error = tmpfs_dir_getdotdotdent(node, uio);
@@ -1001,9 +993,8 @@ tmpfs_readdir(void *v)
 				error = 0;
 			goto out;
 		}
-		cnt++;
 	}
-	error = tmpfs_dir_getdents(node, uio, &cnt);
+	error = tmpfs_dir_getdents(node, uio);
 	if (error == -1) {
 		error = 0;
 	}
@@ -1012,40 +1003,6 @@ out:
 	if (eofflag != NULL) {
 		*eofflag = (!error && uio->uio_offset == TMPFS_DIRCOOKIE_EOF);
 	}
-	if (error || cookies == NULL || ncookies == NULL) {
-		return error;
-	}
-
-	/* Update NFS-related variables, if any. */
-	off_t i, off = startoff;
-	tmpfs_dirent_t *de = NULL;
-
-	*cookies = malloc(cnt * sizeof(off_t), M_TEMP, M_WAITOK);
-	*ncookies = cnt;
-
-	for (i = 0; i < cnt; i++) {
-		KASSERT(off != TMPFS_DIRCOOKIE_EOF);
-		if (off != TMPFS_DIRCOOKIE_DOT) {
-			if (off == TMPFS_DIRCOOKIE_DOTDOT) {
-				de = TAILQ_FIRST(&node->tn_spec.tn_dir.tn_dir);
-			} else if (de != NULL) {
-				de = TAILQ_NEXT(de, td_entries);
-			} else {
-				de = tmpfs_dir_lookupbycookie(node, off);
-				KASSERT(de != NULL);
-				de = TAILQ_NEXT(de, td_entries);
-			}
-			if (de == NULL) {
-				off = TMPFS_DIRCOOKIE_EOF;
-			} else {
-				off = tmpfs_dircookie(de);
-			}
-		} else {
-			off = TMPFS_DIRCOOKIE_DOTDOT;
-		}
-		(*cookies)[i] = off;
-	}
-	KASSERT(uio->uio_offset == off);
 	return error;
 }
 

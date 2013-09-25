@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd.c,v 1.208 2013/06/11 16:42:17 deraadt Exp $	*/
+/*	$OpenBSD: cd.c,v 1.210 2013/09/15 16:54:52 krw Exp $	*/
 /*	$NetBSD: cd.c,v 1.100 1997/04/02 02:29:30 mycroft Exp $	*/
 
 /*
@@ -518,7 +518,7 @@ cdstart(struct scsi_xfer *xs)
 	struct buf *bp;
 	struct scsi_rw_big *cmd_big;
 	struct scsi_rw *cmd_small;
-	int secno, nsecs;
+	u_int64_t secno, nsecs;
 	struct partition *p;
 	int read;
 
@@ -552,8 +552,7 @@ cdstart(struct scsi_xfer *xs)
 	 * First, translate the block to absolute and put it in terms
 	 * of the logical blocksize of the device.
 	 */
-	secno =
-	    bp->b_blkno / (sc->sc_dk.dk_label->d_secsize / DEV_BSIZE);
+	secno = DL_BLKTOSEC(sc->sc_dk.dk_label, bp->b_blkno);
 	p = &sc->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)];
 	secno += DL_GETPOFFSET(p);
 	nsecs = howmany(bp->b_bcount, sc->sc_dk.dk_label->d_secsize);
@@ -1640,7 +1639,7 @@ cdsize(dev_t dev)
 }
 
 int
-cddump(dev_t dev, daddr_t secno, caddr_t va, size_t size)
+cddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 {
 	/* Not implemented. */
 	return ENXIO;
