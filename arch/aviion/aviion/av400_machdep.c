@@ -1,4 +1,4 @@
-/*	$OpenBSD: av400_machdep.c,v 1.21 2013/02/17 18:07:36 miod Exp $	*/
+/*	$OpenBSD: av400_machdep.c,v 1.23 2013/10/07 19:11:39 miod Exp $	*/
 /*
  * Copyright (c) 2006, 2007, Miodrag Vallat.
  *
@@ -203,6 +203,7 @@ const struct board board_av400 = {
 	m88100_smp_setup,
 #endif
 	av400_intsrc,
+	av400_exintsrc,
 	av400_get_vme_ranges,
 
 	av400_ptable
@@ -259,7 +260,7 @@ av400_startup()
 {
 }
 
-void
+u_int
 av400_bootstrap()
 {
 	extern const struct cmmu_p cmmu8820x;
@@ -286,6 +287,25 @@ av400_bootstrap()
 	 * we can still use it.
 	 */
 	scm_getenaddr(hostaddr);
+
+	/*
+	 * Return the delay const value to use (which matches the CPU speed).
+	 */
+	switch (cputyp) {
+	case AVIION_300_310:
+	case AVIION_400_4000:
+	case AVIION_300C_310C:
+	case AVIION_300CD_310CD:
+	case AVIION_300D_310D:
+	case AVIION_4300_16:
+		return 16;
+	case AVIION_410_4100:
+	case AVIION_4300_20:
+		return 20;
+	default:
+	case AVIION_4300_25:
+		return 25;
+	}
 }
 
 /*
@@ -462,7 +482,7 @@ av400_clock_ipi_handler(struct trapframe *eframe)
 /*
  * Provide the interrupt masks for a given logical interrupt source.
  */
-u_int64_t
+u_int32_t
 av400_intsrc(int i)
 {
 	static const u_int32_t intsrc[] = {
@@ -486,7 +506,13 @@ av400_intsrc(int i)
 		AV400_IRQ_VME7
 	};
 
-	return ((u_int64_t)intsrc[i]);
+	return intsrc[i];
+}
+
+u_int32_t
+av400_exintsrc(int i)
+{
+	return 0;
 }
 
 /*

@@ -1,4 +1,4 @@
-/* $OpenBSD: fuse_vnops.c,v 1.5 2013/09/17 19:07:11 syl Exp $ */
+/* $OpenBSD: fuse_vnops.c,v 1.9 2013/10/07 18:25:32 syl Exp $ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -23,7 +23,6 @@
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/poll.h>
-#include <sys/pool.h>
 #include <sys/specdev.h>
 #include <sys/statvfs.h>
 #include <sys/vnode.h>
@@ -33,6 +32,7 @@
 #include "fusefs.h"
 
 /* Prototypes for fusefs vnode ops */
+int	fusefs_kqfilter(void *);
 int	fusefs_lookup(void *);
 int	fusefs_open(void *);
 int	fusefs_close(void *);
@@ -62,6 +62,11 @@ int	fusefs_unlock(void *);
 int	fusefs_islocked(void *);
 int	fusefs_advlock(void *);
 
+/* Prototypes for fusefs kqfilter */
+int	filt_fusefsreadwrite(struct knote *, long);
+int	filt_fusefsvnode(struct knote *, long);
+void	filt_fusefsdetach(struct knote *);
+
 struct vops fusefs_vops = {
 	.vop_lookup	= fusefs_lookup,
 	.vop_create	= fusefs_create,
@@ -75,6 +80,7 @@ struct vops fusefs_vops = {
 	.vop_write	= fusefs_write,
 	.vop_ioctl	= fusefs_ioctl,
 	.vop_poll	= fusefs_poll,
+	.vop_kqfilter	= fusefs_kqfilter,
 	.vop_fsync	= nullop,
 	.vop_remove	= fusefs_remove,
 	.vop_link	= fusefs_link,
@@ -96,6 +102,74 @@ struct vops fusefs_vops = {
 	.vop_pathconf	= spec_pathconf,
 	.vop_advlock	= fusefs_advlock,
 };
+
+struct filterops fusefsreadwrite_filtops =
+	{ 1, NULL, filt_fusefsdetach, filt_fusefsreadwrite };
+struct filterops fusefsvnode_filtops =
+	{ 1, NULL, filt_fusefsdetach, filt_fusefsvnode };
+
+int
+fusefs_kqfilter(void *v)
+{
+	struct vop_kqfilter_args *ap = v;
+	struct vnode *vp = ap->a_vp;
+	struct knote *kn = ap->a_kn;
+
+	switch (kn->kn_filter) {
+	case EVFILT_READ:
+		kn->kn_fop = &fusefsreadwrite_filtops;
+		break;
+	case EVFILT_WRITE:
+		kn->kn_fop = &fusefsreadwrite_filtops;
+		break;
+	case EVFILT_VNODE:
+		kn->kn_fop = &fusefsvnode_filtops;
+		break;
+	default:
+		return (EINVAL);
+	}
+
+	kn->kn_hook = (caddr_t)vp;
+
+	SLIST_INSERT_HEAD(&vp->v_selectinfo.si_note, kn, kn_selnext);
+
+	return (0);
+}
+
+void
+filt_fusefsdetach(struct knote *kn)
+{
+	struct vnode *vp = (struct vnode *)kn->kn_hook;
+
+	SLIST_REMOVE(&vp->v_selectinfo.si_note, kn, knote, kn_selnext);
+}
+
+int
+filt_fusefsreadwrite(struct knote *kn, long hint)
+{
+	/*
+	 * filesystem is gone, so set the EOF flag and schedule
+	 * the knote for deletion
+	 */
+	if (hint == NOTE_REVOKE) {
+		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
+		return (1);
+	}
+
+	return (kn->kn_data != 0);
+}
+
+int
+filt_fusefsvnode(struct knote *kn, long int hint)
+{
+	if (kn->kn_sfflags & hint)
+		kn->kn_fflags |= hint;
+	if (hint == NOTE_REVOKE) {
+		kn->kn_flags |= EV_EOF;
+		return (1);
+	}
+	return (kn->kn_fflags != 0);
+}
 
 void
 update_vattr(struct mount *mp, struct vattr *v)
@@ -235,23 +309,23 @@ fusefs_access(void *v)
 	if ((ap->a_mode & VEXEC) != 0)
 		mask |= 0x1;
 
-	fbuf = fb_setup(FUSEFDSIZE, ip->ufs_ino.i_number, FBT_ACCESS, p);
+	fbuf = fb_setup(0, ip->ufs_ino.i_number, FBT_ACCESS, p);
 	fbuf->fb_io_mode = mask;
 
 	error = fb_queue(fmp->dev, fbuf);
 	if (error) {
 		if (error == ENOSYS) {
 			fmp->undef_op |= UNDEF_ACCESS;
-			pool_put(&fusefs_fbuf_pool, fbuf);
+			fb_delete(fbuf);
 			goto system_check;
 		}
 
 		printf("fusefs: access error %i\n", error);
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		return (error);
 	}
 
-	pool_put(&fusefs_fbuf_pool, fbuf);
+	fb_delete(fbuf);
 	return (error);
 
 system_check:
@@ -282,20 +356,14 @@ fusefs_getattr(void *v)
 
 	error = fb_queue(fmp->dev, fbuf);
 	if (error) {
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		return (error);
-	}
-
-	/* check if we got a response */
-	if (fbuf->fb_len == 0) {
-		pool_put(&fusefs_fbuf_pool, fbuf);
-		goto fake;
 	}
 
 	update_vattr(fmp->mp, &fbuf->fb_vattr);
 	memcpy(vap, &fbuf->fb_vattr, sizeof(*vap));
 	memcpy(&ip->cached_attrs, vap, sizeof(*vap));
-	pool_put(&fusefs_fbuf_pool, fbuf);
+	fb_delete(fbuf);
 	return (error);
 fake:
 	bzero(vap, sizeof(*vap));
@@ -329,8 +397,7 @@ fusefs_setattr(void *v)
 	if (!fmp->sess_init || (fmp->undef_op & UNDEF_SETATTR))
 		return (ENXIO);
 
-	fbuf = fb_setup(FUSEFDSIZE + sizeof(*io), ip->ufs_ino.i_number,
-	    FBT_SETATTR, p);
+	fbuf = fb_setup(sizeof(*io), ip->ufs_ino.i_number, FBT_SETATTR, p);
 	io = fbtod(fbuf, struct fb_io *);
 	io->fi_flags = 0;
 
@@ -418,9 +485,10 @@ fusefs_setattr(void *v)
 
 	update_vattr(fmp->mp, &fbuf->fb_vattr);
 	memcpy(vap, &fbuf->fb_vattr, sizeof(*vap));
+	VN_KNOTE(ap->a_vp, NOTE_ATTRIB);
 
 out:
-	pool_put(&fusefs_fbuf_pool, fbuf);
+	fb_delete(fbuf);
 	return (error);
 }
 
@@ -466,8 +534,8 @@ fusefs_link(void *v)
 	if (!fmp->sess_init || (fmp->undef_op & UNDEF_LINK))
 		goto out1;
 
-	fbuf = fb_setup(FUSEFDSIZE + cnp->cn_namelen + 1,
-	    dip->ufs_ino.i_number, FBT_LINK, p);
+	fbuf = fb_setup(cnp->cn_namelen + 1, dip->ufs_ino.i_number,
+	    FBT_LINK, p);
 
 	fbuf->fb_io_ino = ip->ufs_ino.i_number;
 	memcpy(fbuf->fb_dat, cnp->cn_nameptr, cnp->cn_namelen);
@@ -479,11 +547,13 @@ fusefs_link(void *v)
 		if (error == ENOSYS)
 			fmp->undef_op |= UNDEF_LINK;
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		goto out1;
 	}
 
-	pool_put(&fusefs_fbuf_pool, fbuf);
+	fb_delete(fbuf);
+	VN_KNOTE(vp, NOTE_LINK);
+	VN_KNOTE(dvp, NOTE_WRITE);
 
 out1:
 	if (dvp != vp)
@@ -519,8 +589,8 @@ fusefs_symlink(void *v)
 
 	len = strlen(target) + 1;
 
-	fbuf = fb_setup(FUSEFDSIZE + len + cnp->cn_namelen + 1,
-	    dp->ufs_ino.i_number, FBT_SYMLINK, p);
+	fbuf = fb_setup(len + cnp->cn_namelen + 1, dp->ufs_ino.i_number,
+	    FBT_SYMLINK, p);
 
 	memcpy(fbuf->fb_dat, cnp->cn_nameptr, cnp->cn_namelen);
 	fbuf->fb_dat[cnp->cn_namelen] = '\0';
@@ -531,21 +601,22 @@ fusefs_symlink(void *v)
 		if (error == ENOSYS)
 			fmp->undef_op |= UNDEF_SYMLINK;
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		goto bad;
 	}
 
 	if ((error = VFS_VGET(fmp->mp, fbuf->fb_ino, &tdp))) {
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		goto bad;
 	}
 
 	tdp->v_type = VLNK;
 	VTOI(tdp)->vtype = tdp->v_type;
 	VTOI(tdp)->parent = dp->ufs_ino.i_number;
+	VN_KNOTE(ap->a_dvp, NOTE_WRITE);
 
 	*vpp = tdp;
-	pool_put(&fusefs_fbuf_pool, fbuf);
+	fb_delete(fbuf);
 	vput(tdp);
 bad:
 	vput(dvp);
@@ -578,37 +649,36 @@ fusefs_readdir(void *v)
 		return (EINVAL);
 
 	while (uio->uio_resid > 0) {
-		fbuf = fb_setup(FUSEFDSIZE, ip->ufs_ino.i_number, FBT_READDIR,
-		    p);
+		fbuf = fb_setup(0, ip->ufs_ino.i_number, FBT_READDIR, p);
 
 		if (ip->fufh[FUFH_RDONLY].fh_type == FUFH_INVALID) {
 			/* TODO open the file */
-			pool_put(&fusefs_fbuf_pool, fbuf);
+			fb_delete(fbuf);
 			return (error);
 		}
 		fbuf->fb_io_fd = ip->fufh[FUFH_RDONLY].fh_id;
 		fbuf->fb_io_off = uio->uio_offset;
-		fbuf->fb_io_len = MIN(uio->uio_resid, FUSELEN);
+		fbuf->fb_io_len = MIN(uio->uio_resid, FUSEBUFMAXSIZE);
 
 		error = fb_queue(fmp->dev, fbuf);
 
 		if (error) {
-			pool_put(&fusefs_fbuf_pool, fbuf);
+			fb_delete(fbuf);
 			break;
 		}
 
 		/*ack end of readdir */
-		if (fbdatsize(fbuf) == 0) {
-			pool_put(&fusefs_fbuf_pool, fbuf);
+		if (fbuf->fb_len == 0) {
+			fb_delete(fbuf);
 			break;
 		}
 
-		if ((error = uiomove(fbuf->fb_dat, fbdatsize(fbuf), uio))) {
-			pool_put(&fusefs_fbuf_pool, fbuf);
+		if ((error = uiomove(fbuf->fb_dat, fbuf->fb_len, uio))) {
+			fb_delete(fbuf);
 			break;
 		}
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 	}
 
 	return (error);
@@ -674,12 +744,12 @@ fusefs_readlink(void *v)
 		if (error == ENOSYS)
 			fmp->undef_op |= UNDEF_READLINK;
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		goto out;
 	}
 
-	error = uiomove(fbuf->fb_dat, fbdatsize(fbuf), uio);
-	pool_put(&fusefs_fbuf_pool, fbuf);
+	error = uiomove(fbuf->fb_dat, fbuf->fb_len, uio);
+	fb_delete(fbuf);
 out:
 	return (error);
 }
@@ -700,7 +770,7 @@ fusefs_reclaim(void *v)
 	for (type = 0; type < FUFH_MAXTYPE; type++) {
 		fufh = &(ip->fufh[type]);
 		if (fufh->fh_type != FUFH_INVALID) {
-			printf("FUSE: vnode being reclaimed is valid\n");
+			printf("fusefs: vnode being reclaimed is valid\n");
 			fusefs_file_close(fmp, ip, fufh->fh_type, type,
 			    (ip->vtype == VDIR), ap->a_p);
 		}
@@ -760,8 +830,8 @@ fusefs_create(void *v)
 		goto out;
 	}
 
-	fbuf = fb_setup(FUSEFDSIZE + cnp->cn_namelen + 1,
-	    ip->ufs_ino.i_number, FBT_CREATE, p);
+	fbuf = fb_setup(cnp->cn_namelen + 1, ip->ufs_ino.i_number,
+	    FBT_CREATE, p);
 
 	fbuf->fb_io_mode = mode;
 	fbuf->fb_io_flags = O_CREAT | O_RDWR;
@@ -774,12 +844,12 @@ fusefs_create(void *v)
 		if (error == ENOSYS)
 			fmp->undef_op |= UNDEF_CREATE;
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		goto out;
 	}
 
 	if ((error = VFS_VGET(fmp->mp, fbuf->fb_ino, &tdp))) {
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		goto out;
 	}
 
@@ -791,8 +861,7 @@ fusefs_create(void *v)
 
 	*vpp = tdp;
 	VN_KNOTE(ap->a_dvp, NOTE_WRITE);
-	pool_put(&fusefs_fbuf_pool, fbuf);
-
+	fb_delete(fbuf);
 out:
 	vput(ap->a_dvp);
 	return (error);
@@ -830,9 +899,9 @@ fusefs_read(void *v)
 		return (EINVAL);
 
 	while (uio->uio_resid > 0) {
-		fbuf = fb_setup(FUSEFDSIZE, ip->ufs_ino.i_number, FBT_READ, p);
+		fbuf = fb_setup(0, ip->ufs_ino.i_number, FBT_READ, p);
 
-		size = MIN(uio->uio_resid, FUSELEN);
+		size = MIN(uio->uio_resid, FUSEBUFMAXSIZE);
 		fbuf->fb_io_fd = fusefs_fd_get(ip, FUFH_RDONLY);
 		fbuf->fb_io_off = uio->uio_offset;
 		fbuf->fb_io_len = size;
@@ -842,20 +911,18 @@ fusefs_read(void *v)
 		if (error)
 			break;
 
-		error = uiomove(fbuf->fb_dat, MIN(size, fbdatsize(fbuf)), uio);
+		error = uiomove(fbuf->fb_dat, MIN(size, fbuf->fb_len), uio);
 		if (error)
 			break;
 
-		if (fbdatsize(fbuf) < size)
+		if (fbuf->fb_len < size)
 			break;
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		fbuf = NULL;
 	}
 
-	if (fbuf)
-		pool_put(&fusefs_fbuf_pool, fbuf);
-
+	fb_delete(fbuf);
 	return (error);
 }
 
@@ -879,9 +946,8 @@ fusefs_write(void *v)
 		return (error);
 
 	while (uio->uio_resid > 0) {
-		len = MIN(uio->uio_resid, FUSELEN);
-		fbuf = fb_setup(FUSEFDSIZE + len, ip->ufs_ino.i_number,
-		    FBT_WRITE, p);
+		len = MIN(uio->uio_resid, FUSEBUFMAXSIZE);
+		fbuf = fb_setup(len, ip->ufs_ino.i_number, FBT_WRITE, p);
 
 		fbuf->fb_io_fd = fusefs_fd_get(ip, FUFH_WRONLY);
 		fbuf->fb_io_off = uio->uio_offset;
@@ -906,12 +972,11 @@ fusefs_write(void *v)
 		uio->uio_resid += diff;
 		uio->uio_offset -= diff;
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		fbuf = NULL;
 	}
 
-	if (fbuf)
-		pool_put(&fusefs_fbuf_pool, fbuf);
+	fb_delete(fbuf);
 	return (error);
 }
 
@@ -1008,7 +1073,7 @@ abortit:
 		goto abortit;
 	}
 
-	fbuf = fb_setup(FUSEFDSIZE + fcnp->cn_namelen + tcnp->cn_namelen + 2,
+	fbuf = fb_setup(fcnp->cn_namelen + tcnp->cn_namelen + 2,
 	    dp->ufs_ino.i_number, FBT_RENAME, p);
 
 	memcpy(fbuf->fb_dat, fcnp->cn_nameptr, fcnp->cn_namelen);
@@ -1025,11 +1090,12 @@ abortit:
 			fmp->undef_op |= UNDEF_RENAME;
 		}
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		VOP_UNLOCK(fvp, 0, p);
 		goto abortit;
 	}
 
+	fb_delete(fbuf);
 	VN_KNOTE(fvp, NOTE_RENAME);
 
 	VOP_UNLOCK(fvp, 0, p);
@@ -1067,7 +1133,7 @@ fusefs_mkdir(void *v)
 		goto out;
 	}
 
-	fbuf = fb_setup(FUSEFDSIZE + cnp->cn_namelen + 1, ip->ufs_ino.i_number,
+	fbuf = fb_setup(cnp->cn_namelen + 1, ip->ufs_ino.i_number,
 	    FBT_MKDIR, p);
 
 	fbuf->fb_io_mode = MAKEIMODE(vap->va_type, vap->va_mode);
@@ -1079,12 +1145,12 @@ fusefs_mkdir(void *v)
 		if (error == ENOSYS)
 			fmp->undef_op |= UNDEF_MKDIR;
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		goto out;
 	}
 
 	if ((error = VFS_VGET(fmp->mp, fbuf->fb_ino, &tdp))) {
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		goto out;
 	}
 
@@ -1096,7 +1162,7 @@ fusefs_mkdir(void *v)
 
 	*vpp = tdp;
 	VN_KNOTE(ap->a_dvp, NOTE_WRITE | NOTE_LINK);
-	pool_put(&fusefs_fbuf_pool, fbuf);
+	fb_delete(fbuf);
 out:
 	vput(dvp);
 	return (error);
@@ -1135,7 +1201,7 @@ fusefs_rmdir(void *v)
 
 	VN_KNOTE(dvp, NOTE_WRITE | NOTE_LINK);
 
-	fbuf = fb_setup(FUSEFDSIZE + cnp->cn_namelen + 1, dp->ufs_ino.i_number,
+	fbuf = fb_setup(cnp->cn_namelen + 1, dp->ufs_ino.i_number,
 	    FBT_RMDIR, p);
 	memcpy(fbuf->fb_dat, cnp->cn_nameptr, cnp->cn_namelen);
 	fbuf->fb_dat[cnp->cn_namelen] = '\0';
@@ -1148,18 +1214,16 @@ fusefs_rmdir(void *v)
 		if (error != ENOTEMPTY)
 			VN_KNOTE(dvp, NOTE_WRITE | NOTE_LINK);
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		goto out;
 	}
-
-	VN_KNOTE(dvp, NOTE_WRITE | NOTE_LINK);
 
 	cache_purge(dvp);
 	vput(dvp);
 	dvp = NULL;
 
 	cache_purge(ITOV(ip));
-	pool_put(&fusefs_fbuf_pool, fbuf);
+	fb_delete(fbuf);
 out:
 	if (dvp)
 		vput(dvp);
@@ -1191,7 +1255,7 @@ fusefs_remove(void *v)
 		goto out;
 	}
 
-	fbuf = fb_setup(FUSEFDSIZE + cnp->cn_namelen + 1, dp->ufs_ino.i_number,
+	fbuf = fb_setup(cnp->cn_namelen + 1, dp->ufs_ino.i_number,
 	    FBT_UNLINK, p);
 	memcpy(fbuf->fb_dat, cnp->cn_nameptr, cnp->cn_namelen);
 	fbuf->fb_dat[cnp->cn_namelen] = '\0';
@@ -1201,13 +1265,13 @@ fusefs_remove(void *v)
 		if (error == ENOSYS)
 			fmp->undef_op |= UNDEF_REMOVE;
 
-		pool_put(&fusefs_fbuf_pool, fbuf);
+		fb_delete(fbuf);
 		goto out;
 	}
 
 	VN_KNOTE(vp, NOTE_DELETE);
 	VN_KNOTE(dvp, NOTE_WRITE);
-	pool_put(&fusefs_fbuf_pool, fbuf);
+	fb_delete(fbuf);
 out:
 	if (dvp == vp)
 		vrele(vp);

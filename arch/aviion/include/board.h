@@ -1,4 +1,4 @@
-/*	$OpenBSD: board.h,v 1.9 2011/01/02 13:40:07 miod Exp $	*/
+/*	$OpenBSD: board.h,v 1.11 2013/10/07 19:11:42 miod Exp $	*/
 /*
  * Copyright (c) 2006, 2007, Miodrag Vallat
  *
@@ -75,7 +75,7 @@ struct pmap_table;
 struct vme_range;
 
 struct board {
-	void		(*bootstrap)(void);
+	u_int		(*bootstrap)(void);
 	vaddr_t		(*memsize)(void);
 	void		(*startup)(void);
 
@@ -89,7 +89,8 @@ struct board {
 	void		(*smp_setup)(struct cpu_info *);
 #endif
 
-	u_int64_t	(*intsrc)(int);
+	u_int32_t	(*intsrc)(int);
+	u_int32_t	(*exintsrc)(int);
 	const struct vme_range *(*get_vme_ranges)(void);
 
 	const struct pmap_table *ptable;
@@ -99,7 +100,7 @@ struct board {
 
 #define	DECLARE_BOARD(b) \
 extern const struct board board_av##b; \
-void	av##b##_bootstrap(void); \
+u_int	av##b##_bootstrap(void); \
 vaddr_t	av##b##_memsize(void); \
 void	av##b##_startup(void); \
 void	av##b##_intr(struct trapframe *); \
@@ -109,7 +110,8 @@ u_int	av##b##_setipl(u_int); \
 u_int	av##b##_raiseipl(u_int); \
 void	av##b##_send_ipi(int, cpuid_t); \
 void	av##b##_smp_setup(struct cpu_info *); \
-u_int64_t av##b##_intsrc(int); \
+u_int32_t av##b##_intsrc(int); \
+u_int32_t av##b##_exintsrc(int); \
 const struct vme_range *av##b##_get_vme_ranges(void);
 
 DECLARE_BOARD(400);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.248 2013/09/19 19:26:16 krw Exp $	*/
+/*	$OpenBSD: sd.c,v 1.250 2013/10/03 14:07:42 krw Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -105,10 +105,10 @@ void	viscpy(u_char *, u_char *, int);
 int	sd_ioctl_inquiry(struct sd_softc *, struct dk_inquiry *);
 int	sd_ioctl_cache(struct sd_softc *, long, struct dk_cache *);
 
-void	sd_cmd_rw6(struct scsi_xfer *, int, daddr_t, u_int);
-void	sd_cmd_rw10(struct scsi_xfer *, int, daddr_t, u_int);
-void	sd_cmd_rw12(struct scsi_xfer *, int, daddr_t, u_int);
-void	sd_cmd_rw16(struct scsi_xfer *, int, daddr_t, u_int);
+void	sd_cmd_rw6(struct scsi_xfer *, int, u_int64_t, u_int);
+void	sd_cmd_rw10(struct scsi_xfer *, int, u_int64_t, u_int);
+void	sd_cmd_rw12(struct scsi_xfer *, int, u_int64_t, u_int);
+void	sd_cmd_rw16(struct scsi_xfer *, int, u_int64_t, u_int);
 
 void	sd_buf_done(struct scsi_xfer *);
 
@@ -225,7 +225,7 @@ sdattach(struct device *parent, struct device *self, void *aux)
 
 	switch (result) {
 	case SDGP_RESULT_OK:
-		printf("%s: %lldMB, %lu bytes/sector, %lld sectors",
+		printf("%s: %lluMB, %lu bytes/sector, %llu sectors",
 		    sc->sc_dev.dv_xname,
 		    dp->disksize / (1048576 / dp->secsize), dp->secsize,
 		    dp->disksize);
@@ -531,7 +531,7 @@ sdstrategy(struct buf *bp)
 		goto bad;
 	}
 
-	SC_DEBUG(sc->sc_link, SDEV_DB2, ("sdstrategy: %ld bytes @ blk %d\n",
+	SC_DEBUG(sc->sc_link, SDEV_DB2, ("sdstrategy: %ld bytes @ blk %lld\n",
 	    bp->b_bcount, bp->b_blkno));
 	/*
 	 * If the device has been made invalid, error out
@@ -572,7 +572,7 @@ sdstrategy(struct buf *bp)
 }
 
 void
-sd_cmd_rw6(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
+sd_cmd_rw6(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw *cmd = (struct scsi_rw *)xs->cmd;
 
@@ -584,7 +584,7 @@ sd_cmd_rw6(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
 }
 
 void
-sd_cmd_rw10(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
+sd_cmd_rw10(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw_big *cmd = (struct scsi_rw_big *)xs->cmd;
 
@@ -596,7 +596,7 @@ sd_cmd_rw10(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
 }
 
 void
-sd_cmd_rw12(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
+sd_cmd_rw12(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw_12 *cmd = (struct scsi_rw_12 *)xs->cmd;
 
@@ -608,7 +608,7 @@ sd_cmd_rw12(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
 }
 
 void
-sd_cmd_rw16(struct scsi_xfer *xs, int read, daddr_t secno, u_int nsecs)
+sd_cmd_rw16(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw_16 *cmd = (struct scsi_rw_16 *)xs->cmd;
 
@@ -638,7 +638,7 @@ sdstart(struct scsi_xfer *xs)
 	struct scsi_link *link = xs->sc_link;
 	struct sd_softc *sc = link->device_softc;
 	struct buf *bp;
-	daddr_t secno;
+	u_int64_t secno;
 	int nsecs;
 	int read;
 	struct partition *p;
@@ -1325,7 +1325,7 @@ sddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 			return (ENXIO);
 #else	/* SD_DUMP_NOT_TRUSTED */
 		/* Let's just talk about this first... */
-		printf("sd%d: dump addr 0x%x, blk %d\n", unit, va, blkno);
+		printf("sd%d: dump addr 0x%x, blk %lld\n", unit, va, blkno);
 		delay(500 * 1000);	/* half a second */
 #endif	/* SD_DUMP_NOT_TRUSTED */
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.53 2013/09/28 19:56:47 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.56 2013/10/07 19:11:39 miod Exp $	*/
 /*
  * Copyright (c) 2007 Miodrag Vallat.
  *
@@ -156,7 +156,7 @@ u_int bootdev, bootunit, bootpart;		/* set in locore.S */
 int32_t cpuid;
 
 int cputyp;					/* set in locore.S */
-int avtyp;
+register_t kernel_vbr;				/* set in locore.S */
 const struct board *platform;
 
 /* multiplication factor for delay() */
@@ -700,7 +700,7 @@ aviion_bootstrap()
 	aviion_identify();
 
 	cn_tab = &bootcons;
-	platform->bootstrap();
+	aviion_delay_const = platform->bootstrap();
 	/* we can use printf() from here. */
 
 	/* Parse the commandline */
@@ -771,9 +771,7 @@ aviion_bootstrap()
 	    MSGBUFSIZE);
 
 	/* ROM work area is on top of physical memory */
-	/* but we need to make VBR page readable */
-	/* XXX relocate VBR as done on mvme88k */
-	pmap_bootstrap(0, PAGE_SIZE);
+	pmap_bootstrap(0, 0);
 
 	/* Initialize the "u-area" pages. */
 	bzero((caddr_t)curpcb, USPACE);
@@ -929,15 +927,16 @@ void
 intsrc_enable(u_int intsrc, int ipl)
 {
 	u_int32_t psr;
-	u_int64_t intmask = platform->intsrc(intsrc);
+	u_int32_t intmask = platform->intsrc(intsrc);
+	u_int32_t exintmask = platform->exintsrc(intsrc);
 	int i;
 
 	psr = get_psr();
 	set_psr(psr | PSR_IND);
 
 	for (i = IPL_NONE; i < ipl; i++) {
-		int_mask_val[i] |= (u_int32_t)intmask;
-		ext_int_mask_val[i] |= (u_int32_t)(intmask >> 32);
+		int_mask_val[i] |= intmask;
+		ext_int_mask_val[i] |= exintmask;
 	}
 	setipl(getipl());
 
@@ -948,15 +947,16 @@ void
 intsrc_disable(u_int intsrc)
 {
 	u_int32_t psr;
-	u_int64_t intmask = platform->intsrc(intsrc);
+	u_int32_t intmask = platform->intsrc(intsrc);
+	u_int32_t exintmask = platform->exintsrc(intsrc);
 	int i;
 
 	psr = get_psr();
 	set_psr(psr | PSR_IND);
 
 	for (i = 0; i < NIPLS; i++) {
-		int_mask_val[i] &= ~((u_int32_t)intmask);
-		ext_int_mask_val[i] &= ~((u_int32_t)(intmask >> 32));
+		int_mask_val[i] &= ~intmask;
+		ext_int_mask_val[i] &= ~exintmask;
 	}
 	setipl(getipl());
 
