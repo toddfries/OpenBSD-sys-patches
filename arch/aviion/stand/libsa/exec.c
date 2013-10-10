@@ -1,8 +1,8 @@
-/*	$OpenBSD: resourcevar.h,v 1.17 2013/10/08 03:50:07 guenther Exp $	*/
-/*	$NetBSD: resourcevar.h,v 1.12 1995/11/22 23:01:53 cgd Exp $	*/
+/*	$OpenBSD: exec.c,v 1.1 2013/10/08 21:55:21 miod Exp $	*/
 
-/*
- * Copyright (c) 1991, 1993
+
+/*-
+ * Copyright (c) 1982, 1986, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,44 +29,36 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)resourcevar.h	8.3 (Berkeley) 2/22/94
+ * 	@(#)boot.c	8.1 (Berkeley) 6/10/93
  */
 
-#ifndef	_SYS_RESOURCEVAR_H_
-#define	_SYS_RESOURCEVAR_H_
+#include <sys/param.h>
+#include <sys/reboot.h>
+#include <machine/prom.h>
 
-#include <sys/timeout.h>
+#include "stand.h"
+#include "libsa.h"
 
-/*
- * Kernel shareable process resource limits.  Because this structure
- * is moderately large but changes infrequently, it is shared
- * copy-on-write after forks.
- */
-struct plimit {
-	struct	rlimit pl_rlimit[RLIM_NLIMITS];
-	int	p_refcnt;		/* number of references */
-};
+#include <lib/libsa/loadfile.h>
 
-/* add user profiling from AST */
-#define	ADDUPROF(p)							\
-do {									\
-	atomic_clearbits_int(&(p)->p_flag, P_OWEUPC);			\
-	addupc_task((p), (p)->p_prof_addr, (p)->p_prof_ticks);		\
-	(p)->p_prof_ticks = 0;						\
-} while (0)
+#define	SYM_MAGIC	0x6274ef2e
 
-#ifdef _KERNEL
-void	 addupc_intr(struct proc *, u_long);
-void	 addupc_task(struct proc *, u_long, u_int);
-void	 tuagg_unlocked(struct process *, struct proc *);
-struct tusage;
-void	 calctsru(struct tusage *, struct timespec *, struct timespec *,
-	    struct timespec *);
-void	 calcru(struct tusage *, struct timeval *, struct timeval *,
-	    struct timeval *);
-struct plimit *limcopy(struct plimit *);
-void	limfree(struct plimit *);
+/*ARGSUSED*/
+void
+exec(char *file, const char *args, int bootdev, int bootunit, int bootpart)
+{
+	u_long marks[MARK_MAX];
+	int rc;
+	void (*entry)(const char *, int, int, int, int, int);
 
-void	 ruadd(struct rusage *, struct rusage *);
-#endif
-#endif	/* !_SYS_RESOURCEVAR_H_ */
+	marks[MARK_START] = 0;
+	rc = loadfile(file, marks, LOAD_KERNEL | COUNT_KERNEL);
+	if (rc != 0)
+		return;
+
+	entry =
+	    (void(*)(const char *, int, int, int, int, int))marks[MARK_START];
+	(*entry)(args, bootdev, bootunit, bootpart, SYM_MAGIC, marks[MARK_END]);
+
+	printf("exec: kernel returned!\n");
+}
