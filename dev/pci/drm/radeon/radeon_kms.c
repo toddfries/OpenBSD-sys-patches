@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_kms.c,v 1.5 2013/09/08 11:59:45 jsg Exp $	*/
+/*	$OpenBSD: radeon_kms.c,v 1.10 2013/10/21 10:36:24 miod Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -297,6 +297,8 @@ void radeondrm_free_screen(void *, void *);
 int radeondrm_show_screen(void *, void *, int,
     void (*)(void *, int, int), void *);
 void radeondrm_doswitch(void *, void *);
+int radeondrm_load_font(void *, void *, struct wsdisplay_font *);
+int radeondrm_list_font(void *, struct wsdisplay_font *);
 int radeondrm_getchar(void *, int, int, struct wsdisplay_charcell *);
 
 struct wsscreen_descr radeondrm_stdscreen = {
@@ -317,21 +319,27 @@ struct wsscreen_list radeondrm_screenlist = {
 };
 
 struct wsdisplay_accessops radeondrm_accessops = {
-	radeondrm_wsioctl,
-	radeondrm_wsmmap,
-	radeondrm_alloc_screen,
-	radeondrm_free_screen,
-	radeondrm_show_screen,
-	NULL,
-	NULL,
-	radeondrm_getchar,
-	radeondrm_burner
+	.ioctl = radeondrm_wsioctl,
+	.mmap = radeondrm_wsmmap,
+	.alloc_screen = radeondrm_alloc_screen,
+	.free_screen = radeondrm_free_screen,
+	.show_screen = radeondrm_show_screen,
+	.getchar = radeondrm_getchar,
+	.load_font = radeondrm_load_font,
+	.list_font = radeondrm_list_font,
+	.burn_screen = radeondrm_burner
 };
 
 int
 radeondrm_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
-	return (-1);
+	switch (cmd) {
+	case WSDISPLAYIO_GTYPE:
+		*(int *)data = WSDISPLAY_TYPE_KMS;
+		return 0;
+	default:
+		return -1;
+	}
 }
 
 paddr_t
@@ -403,6 +411,24 @@ radeondrm_doswitch(void *v, void *cookie)
 
 	if (rdev->switchcb)
 		(rdev->switchcb)(rdev->switchcbarg, 0, 0);
+}
+
+int
+radeondrm_load_font(void *v, void *cookie, struct wsdisplay_font *font)
+{
+	struct radeon_device *rdev = v;
+	struct rasops_info *ri = &rdev->ro;
+
+	return rasops_load_font(ri, cookie, font);
+}
+
+int
+radeondrm_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct radeon_device *rdev = v;
+	struct rasops_info *ri = &rdev->ro;
+
+	return rasops_list_font(ri, font);
 }
 
 int
@@ -592,6 +618,7 @@ radeondrm_attach_kms(struct device *parent, struct device *self, void *aux)
 }
 #endif
 
+	rdev->shutdown = true;
 	if (rootvp == NULL)
 		mountroothook_establish(radeondrm_attachhook, rdev);
 	else
@@ -711,8 +738,10 @@ radeondrm_activate_kms(struct device *arg, int act)
 	struct radeon_device *rdev = (struct radeon_device *)arg;
 
 	switch (act) {
-	case DVACT_SUSPEND:
+	case DVACT_QUIESCE:
 		radeon_suspend_kms(rdev->ddev);
+		break;
+	case DVACT_SUSPEND:
 		break;
 	case DVACT_RESUME:
 		radeon_resume_kms(rdev->ddev);

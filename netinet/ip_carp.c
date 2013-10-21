@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.210 2013/08/12 06:24:28 bluhm Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.214 2013/10/20 11:03:01 phessler Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -78,6 +78,7 @@
 #endif
 
 #ifdef INET6
+#include <netinet6/in6_var.h>
 #include <netinet/icmp6.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
@@ -1240,7 +1241,7 @@ carp_send_ad(void *v)
 		m->m_pkthdr.len = len;
 		m->m_pkthdr.rcvif = NULL;
 		m->m_pkthdr.pf.prio = CARP_IFQ_PRIO;
-		/* XXX m->m_pkthdr.rdomain = sc->sc_if.if_rdomain; */
+		m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
 		m->m_len = len;
 		MH_ALIGN(m, m->m_len);
 		m->m_flags |= M_MCAST;
@@ -2017,7 +2018,7 @@ int
 carp_set_addr(struct carp_softc *sc, struct sockaddr_in *sin)
 {
 	struct ifnet *ifp = sc->sc_carpdev;
-	struct in_ifaddr *ia, *ia_if;
+	struct in_ifaddr *ia;
 	int error = 0;
 
 	/* XXX is this necessary? */
@@ -2031,21 +2032,17 @@ carp_set_addr(struct carp_softc *sc, struct sockaddr_in *sin)
 	}
 
 	/* we have to do this by hand to ensure we don't match on ourselves */
-	ia_if = NULL;
 	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
 		/* and, yeah, we need a multicast-capable iface too */
 		if (ia->ia_ifp != &sc->sc_if &&
 		    ia->ia_ifp->if_type != IFT_CARP &&
 		    (ia->ia_ifp->if_flags & IFF_MULTICAST) &&
 		    ia->ia_ifp->if_rdomain == sc->sc_if.if_rdomain &&
-		    (sin->sin_addr.s_addr & ia->ia_netmask) == ia->ia_net) {
-			ia_if = ia;
+		    (sin->sin_addr.s_addr & ia->ia_netmask) == ia->ia_net)
 			break;
-		}
 	}
 
-	if (ia_if) {
-		ia = ia_if;
+	if (ia) {
 		if (ifp) {
 			if (ifp != ia->ia_ifp)
 				return (EADDRNOTAVAIL);
@@ -2099,7 +2096,7 @@ int
 carp_set_addr6(struct carp_softc *sc, struct sockaddr_in6 *sin6)
 {
 	struct ifnet *ifp = sc->sc_carpdev;
-	struct in6_ifaddr *ia, *ia_if;
+	struct in6_ifaddr *ia;
 	int error = 0;
 
 	if (IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr)) {
@@ -2112,7 +2109,6 @@ carp_set_addr6(struct carp_softc *sc, struct sockaddr_in6 *sin6)
 	}
 
 	/* we have to do this by hand to ensure we don't match on ourselves */
-	ia_if = NULL;
 	TAILQ_FOREACH(ia, &in6_ifaddr, ia_list) {
 		int i;
 
@@ -2127,14 +2123,12 @@ carp_set_addr6(struct carp_softc *sc, struct sockaddr_in6 *sin6)
 		if (ia->ia_ifp != &sc->sc_if &&
 		    ia->ia_ifp->if_type != IFT_CARP &&
 		    (ia->ia_ifp->if_flags & IFF_MULTICAST) &&
-		    (i == 4)) {
-			if (!ia_if)
-				ia_if = ia;
-		}
+		    ia->ia_ifp->if_rdomain == sc->sc_if.if_rdomain &&
+		    (i == 4))
+			break;
 	}
 
-	if (ia_if) {
-		ia = ia_if;
+	if (ia) {
 		if (sc->sc_carpdev) {
 			if (sc->sc_carpdev != ia->ia_ifp)
 				return (EADDRNOTAVAIL);

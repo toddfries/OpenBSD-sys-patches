@@ -1,4 +1,4 @@
-/*	$OpenBSD: frag6.c,v 1.48 2013/08/27 08:20:32 mpi Exp $	*/
+/*	$OpenBSD: frag6.c,v 1.50 2013/10/20 11:03:02 phessler Exp $	*/
 /*	$KAME: frag6.c,v 1.40 2002/05/27 21:40:31 itojun Exp $	*/
 
 /*
@@ -46,7 +46,7 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
@@ -189,6 +189,7 @@ frag6_input(struct mbuf **mp, int *offp, int proto)
 #ifdef IN6_IFSTAT_STRICT
 	/* find the destination interface of the packet. */
 	bzero(&ro, sizeof(ro));
+	ro.ro_tableid = m->m_pkthdr.rdomain;
 	dst = &ro.ro_dst;
 	dst->sin6_family = AF_INET6;
 	dst->sin6_len = sizeof(struct sockaddr_in6);

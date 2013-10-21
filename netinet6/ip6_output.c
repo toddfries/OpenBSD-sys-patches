@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.143 2013/07/31 15:41:52 mikeb Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.147 2013/10/21 12:40:39 deraadt Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -70,6 +70,7 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/systm.h>
 
 #include <net/if.h>
@@ -77,13 +78,13 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
 
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet/icmp6.h>
 #include <netinet6/ip6_var.h>
@@ -539,6 +540,7 @@ reroute:
 	dstsock.sin6_family = AF_INET6;
 	dstsock.sin6_addr = ip6->ip6_dst;
 	dstsock.sin6_len = sizeof(dstsock);
+	ro->ro_tableid = m->m_pkthdr.rdomain;
 	if ((error = in6_selectroute(&dstsock, opt, im6o, ro, &ifp,
 	    &rt, m->m_pkthdr.rdomain)) != 0) {
 		switch (error) {
@@ -1216,6 +1218,7 @@ ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro,
 		}
 		if (ro_pmtu->ro_rt == 0) {
 			bzero(ro_pmtu, sizeof(*ro_pmtu));
+			ro_pmtu->ro_tableid = ifp->if_rdomain;
 			sa6_dst->sin6_family = AF_INET6;
 			sa6_dst->sin6_len = sizeof(struct sockaddr_in6);
 			sa6_dst->sin6_addr = *dst;
@@ -1279,12 +1282,13 @@ ip6_ctloutput(int op, struct socket *so, int level, int optname,
 	struct inpcb *inp = sotoinpcb(so);
 	struct mbuf *m = *mp;
 	int error, optval;
+	struct proc *p = curproc; /* For IPSec and rdomain */
 #ifdef IPSEC
-	struct proc *p = curproc; /* XXX */
 	struct tdb *tdb;
 	struct tdb_ident *tdbip, tdbi;
 	int s;
 #endif
+	u_int rtid = 0;
 
 	error = optval = 0;
 
@@ -1296,11 +1300,9 @@ ip6_ctloutput(int op, struct socket *so, int level, int optname,
 		case PRCO_SETOPT:
 			switch (optname) {
 			case IPV6_2292PKTOPTIONS:
-			{
 				error = ip6_pcbopts(&inp->inp_outputopts6,
-						    m, so);
+				    m, so);
 				break;
-			}
 
 			/*
 			 * Use of some Hop-by-Hop options or some
@@ -1697,6 +1699,26 @@ do { \
 					inp->inp_secrequire = get_sa_require(inp);
 #endif
 				break;
+			case SO_RTABLE:
+				if (m == NULL || m->m_len < sizeof(u_int)) {
+					error = EINVAL;
+					break;
+				}
+				rtid = *mtod(m, u_int *);
+				if (inp->inp_rtableid == rtid)
+					break;
+				/* needs privileges to switch when already set */
+				if (p->p_p->ps_rtableid != rtid &&
+				    p->p_p->ps_rtableid != 0 &&
+				    (error = suser(p, 0)) != 0)
+					break;
+				/* table must exist */
+				if (!rtable_exists(rtid)) {
+					error = EINVAL;
+					break;
+				}
+				inp->inp_rtableid = rtid;
+				break;
 			case IPV6_PIPEX:
 				if (m != NULL && m->m_len == sizeof(int))
 					inp->inp_pipex = *mtod(m, int *);
@@ -1947,6 +1969,11 @@ do { \
 				}
 				*mtod(m, int *) = optval;
 #endif
+				break;
+			case SO_RTABLE:
+				*mp = m = m_get(M_WAIT, MT_SOOPTS);
+				m->m_len = sizeof(u_int);
+				*mtod(m, u_int *) = optval;
 				break;
 			case IPV6_PIPEX:
 				*mp = m = m_get(M_WAIT, MT_SOOPTS);
@@ -2444,6 +2471,7 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 			 *   XXX: is it a good approach?
 			 */
 			bzero(&ro, sizeof(ro));
+			ro.ro_tableid = m->m_pkthdr.rdomain;
 			dst = &ro.ro_dst;
 			dst->sin6_len = sizeof(struct sockaddr_in6);
 			dst->sin6_family = AF_INET6;
@@ -3182,13 +3210,6 @@ in6_delayed_cksum(struct mbuf *m, u_int8_t nxt)
 	if (offset <= 0 || nxtp != nxt)
 		/* If the desired next protocol isn't found, punt. */
 		return;
-
-	if (nxt == IPPROTO_ICMPV6) {
-		struct icmp6_hdr *icmp6;
-		icmp6 = (struct icmp6_hdr *)(mtod(m, caddr_t) + offset);
-		icmp6->icmp6_cksum = 0;
-	}
-
 	csum = (u_int16_t)(in6_cksum(m, nxt, offset, m->m_pkthdr.len - offset));
 
 	switch (nxt) {

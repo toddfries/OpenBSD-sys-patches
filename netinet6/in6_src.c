@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_src.c,v 1.32 2013/05/31 15:04:24 bluhm Exp $	*/
+/*	$OpenBSD: in6_src.c,v 1.34 2013/10/21 08:42:25 phessler Exp $	*/
 /*	$KAME: in6_src.c,v 1.36 2001/02/06 04:08:17 itojun Exp $	*/
 
 /*
@@ -76,7 +76,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
@@ -260,6 +259,7 @@ in6_selectsrc(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 
 			/* No route yet, so try to acquire one */
 			bzero(&ro->ro_dst, sizeof(struct sockaddr_in6));
+			ro->ro_tableid = rtableid;
 			sa6 = &ro->ro_dst;
 			sa6->sin6_family = AF_INET6;
 			sa6->sin6_len = sizeof(struct sockaddr_in6);
@@ -446,6 +446,7 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 
 			/* No route yet, so try to acquire one */
 			bzero(&ro->ro_dst, sizeof(struct sockaddr_in6));
+			ro->ro_tableid = rtableid;
 			sa6 = &ro->ro_dst;
 			*sa6 = *dstsock;
 			sa6->sin6_scope_id = 0;

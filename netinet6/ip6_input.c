@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_input.c,v 1.114 2013/06/26 09:12:40 henning Exp $	*/
+/*	$OpenBSD: ip6_input.c,v 1.117 2013/10/21 12:27:16 deraadt Exp $	*/
 /*	$KAME: ip6_input.c,v 1.188 2001/03/29 05:34:31 itojun Exp $	*/
 
 /*
@@ -113,7 +113,6 @@
 #endif
 
 #if NCARP > 0
-#include <netinet/in_var.h>
 #include <netinet/ip_carp.h>
 #endif
 
@@ -123,7 +122,6 @@ struct ifqueue ip6intrq;
 struct ip6stat ip6stat;
 
 void ip6_init2(void *);
-int ip6_check_rh0hdr(struct mbuf *, int *);
 
 int ip6_hopopts_input(u_int32_t *, u_int32_t *, struct mbuf **, int *);
 struct mbuf *ip6_pullexthdr(struct mbuf *, size_t, int);
@@ -318,15 +316,6 @@ ip6_input(struct mbuf *m)
 		goto bad;
 	}
 #endif
-
-	if (ip6_check_rh0hdr(m, &off)) {
-		ip6stat.ip6s_badoptions++;
-		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_discard);
-		in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_hdrerr);
-		icmp6_error(m, ICMP6_PARAM_PROB, ICMP6_PARAMPROB_HEADER, off);
-		/* m is already freed */
-		return;
-	}
 
 #if NPF > 0
         /*
@@ -706,74 +695,6 @@ ip6_input(struct mbuf *m)
 	return;
  bad:
 	m_freem(m);
-}
-
-/* scan packet for RH0 routing header. Mostly stolen from pf.c:pf_test() */
-int
-ip6_check_rh0hdr(struct mbuf *m, int *offp)
-{
-	struct ip6_hdr *ip6 = mtod(m, struct ip6_hdr *);
-	struct ip6_rthdr rthdr;
-	struct ip6_ext opt6;
-	u_int8_t proto = ip6->ip6_nxt;
-	int done = 0, lim, off, rh_cnt = 0;
-
-	off = ((caddr_t)ip6 - m->m_data) + sizeof(struct ip6_hdr);
-	lim = min(m->m_pkthdr.len, ntohs(ip6->ip6_plen) + sizeof(*ip6));
-	do {
-		switch (proto) {
-		case IPPROTO_ROUTING:
-			*offp = off;
-			if (rh_cnt++) {
-				/* more then one rh header present */
-				return (1);
-			}
-
-			if (off + sizeof(rthdr) > lim) {
-				/* packet to short to make sense */
-				return (1);
-			}
-
-			m_copydata(m, off, sizeof(rthdr), (caddr_t)&rthdr);
-
-			if (rthdr.ip6r_type == IPV6_RTHDR_TYPE_0) {
-				*offp += offsetof(struct ip6_rthdr, ip6r_type);
-				return (1);
-			}
-
-			off += (rthdr.ip6r_len + 1) * 8;
-			proto = rthdr.ip6r_nxt;
-			break;
-		case IPPROTO_AH:
-		case IPPROTO_HOPOPTS:
-		case IPPROTO_DSTOPTS:
-			/* get next header and header length */
-			if (off + sizeof(opt6) > lim) {
-				/*
-				 * Packet to short to make sense, we could
-				 * reject the packet but as a router we 
-				 * should not do that so forward it.
-				 */
-				return (0);
-			}
-
-			m_copydata(m, off, sizeof(opt6), (caddr_t)&opt6);
-
-			if (proto == IPPROTO_AH)
-				off += (opt6.ip6e_len + 2) * 4;
-			else
-				off += (opt6.ip6e_len + 1) * 8;
-			proto = opt6.ip6e_nxt;
-			break;
-		case IPPROTO_FRAGMENT:
-		default:
-			/* end of header stack */
-			done = 1;
-			break;
-		}
-	} while (!done);
-
-	return (0);
 }
 
 /*
@@ -1437,6 +1358,7 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	extern int ip6_mrtproto;
 	extern struct mrt6stat mrt6stat;
 #endif
+	int error, s;
 
 	/* All sysctl names at this level are terminal. */
 	if (namelen != 1)
@@ -1469,6 +1391,16 @@ ip6_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 #else
 		return (EOPNOTSUPP);
 #endif
+	case IPV6CTL_MTUDISCTIMEOUT:
+		error = sysctl_int(oldp, oldlenp, newp, newlen,
+		   &ip6_mtudisc_timeout);
+		if (icmp6_mtudisc_timeout_q != NULL) {
+			s = splsoftnet();
+			rt_timer_queue_change(icmp6_mtudisc_timeout_q,
+					      ip6_mtudisc_timeout);
+			splx(s);
+		}
+		return (error);
 	default:
 		if (name[0] < IPV6CTL_MAXID)
 			return (sysctl_int_arr(ipv6ctl_vars, name, namelen,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.167 2013/10/13 10:10:04 reyk Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.170 2013/10/20 11:03:01 phessler Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -100,6 +100,7 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
+#include <netinet6/in6_var.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/ip6protosw.h>
 #endif /* INET6 */
@@ -564,7 +565,8 @@ udp_input(struct mbuf *m, ...)
 #ifdef INET6
 		if (ip6)
 			inp = in6_pcbhashlookup(&udbtable, &ip6->ip6_src,
-			    uh->uh_sport, &ip6->ip6_dst, uh->uh_dport);
+			    uh->uh_sport, &ip6->ip6_dst, uh->uh_dport,
+			    m->m_pkthdr.rdomain);
 		else
 #endif /* INET6 */
 		inp = in_pcbhashlookup(&udbtable, ip->ip_src, uh->uh_sport,
@@ -584,7 +586,8 @@ udp_input(struct mbuf *m, ...)
 #ifdef INET6
 		if (ip6) {
 			inp = in6_pcblookup_listen(&udbtable,
-			    &ip6->ip6_dst, uh->uh_dport, inpl_reverse, m);
+			    &ip6->ip6_dst, uh->uh_dport, inpl_reverse, m,
+			    m->m_pkthdr.rdomain);
 		} else
 #endif /* INET6 */
 		inp = in_pcblookup_listen(&udbtable,
@@ -869,7 +872,8 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 			 * payload.
 			 */
 			if (in6_pcbhashlookup(&udbtable, &sa6.sin6_addr,
-			    uh.uh_dport, &sa6_src.sin6_addr, uh.uh_sport))
+			    uh.uh_dport, &sa6_src.sin6_addr, uh.uh_sport,
+			    rdomain))
 				valid = 1;
 #if 0
 			/*
@@ -880,7 +884,8 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 			 * is really ours.
 			 */
 			else if (in6_pcblookup_listen(&udbtable,
-			    &sa6_src.sin6_addr, uh.uh_sport, 0);
+			    &sa6_src.sin6_addr, uh.uh_sport, 0,
+			    rdomain))
 				valid = 1;
 #endif
 
@@ -903,10 +908,10 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 		}
 
 		(void) in6_pcbnotify(&udbtable, &sa6, uh.uh_dport,
-		    &sa6_src, uh.uh_sport, cmd, cmdarg, notify);
+		    &sa6_src, uh.uh_sport, rdomain, cmd, cmdarg, notify);
 	} else {
 		(void) in6_pcbnotify(&udbtable, &sa6, 0,
-		    &sa6_any, 0, cmd, cmdarg, notify);
+		    &sa6_any, 0, rdomain, cmd, cmdarg, notify);
 	}
 }
 #endif
@@ -1076,21 +1081,11 @@ udp_output(struct mbuf *m, ...)
 	ui->ui_sport = inp->inp_lport;
 	ui->ui_dport = inp->inp_fport;
 	ui->ui_ulen = ui->ui_len;
-
-	/*
-	 * Compute the pseudo-header checksum; defer further checksumming
-	 * until ip_output() or hardware (if it exists).
-	 */
-	if (udpcksum) {
-		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
-		ui->ui_sum = in_cksum_phdr(ui->ui_src.s_addr,
-		    ui->ui_dst.s_addr, htons((u_int16_t)len +
-		    sizeof (struct udphdr) + IPPROTO_UDP));
-	} else
-		ui->ui_sum = 0;
 	((struct ip *)ui)->ip_len = htons(sizeof (struct udpiphdr) + len);
 	((struct ip *)ui)->ip_ttl = inp->inp_ip.ip_ttl;
 	((struct ip *)ui)->ip_tos = inp->inp_ip.ip_tos;
+	if (udpcksum)
+		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
 
 	udpstat.udps_opackets++;
 

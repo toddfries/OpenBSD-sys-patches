@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_hibernate.c,v 1.61 2013/10/03 03:51:16 mlarkin Exp $	*/
+/*	$OpenBSD: subr_hibernate.c,v 1.66 2013/10/20 17:16:47 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -45,7 +45,7 @@
  * ----------------------------------------------------------------------------
  * 0				I/O page used during resume
  * 1*PAGE_SIZE		 	I/O page used during hibernate suspend
- * 2*PAGE_SIZE			unused
+ * 2*PAGE_SIZE		 	I/O page used during hibernate suspend
  * 3*PAGE_SIZE			copy page used during hibernate suspend
  * 4*PAGE_SIZE			final chunk ordering list (8 pages)
  * 12*PAGE_SIZE			piglet chunk ordering list (8 pages)
@@ -1120,7 +1120,8 @@ hibernate_block_io(union hibernate_info *hib_info, daddr_t blkctr,
 
 	error = biowait(bp);
 	if (error) {
-		printf("hibernate_block_io biowait failed %d\n", error);
+		printf("hib block_io biowait error %d blk %lld size %zu\n",
+			error, (long long)blkctr, xfer_size);
 		error = (*bdsw->d_close)(hib_info->device, 0, S_IFCHR,
 		    curproc);
 		if (error)
@@ -1156,8 +1157,10 @@ hibernate_resume(void)
 
 	/* Get current running machine's hibernate info */
 	bzero(&hiber_info, sizeof(hiber_info));
-	if (get_hibernate_info(&hiber_info, 0))
+	if (get_hibernate_info(&hiber_info, 0)) {
+		DPRINTF("couldn't retrieve machine's hibernate info\n");
 		return;
+	}
 
 	/* Read hibernate info from disk */
 	s = splbio();
@@ -1167,11 +1170,16 @@ hibernate_resume(void)
 
 	if (hibernate_block_io(&hiber_info,
 	    hiber_info.sig_offset - hiber_info.swap_offset,
-	    hiber_info.secsize, (vaddr_t)&disk_hiber_info, 0))
-		panic("error in hibernate read");
+	    hiber_info.secsize, (vaddr_t)&disk_hiber_info, 0)) {
+		DPRINTF("error in hibernate read");
+		splx(s);
+		return;
+	}
 
 	/* Check magic number */
 	if (disk_hiber_info.magic != HIBERNATE_MAGIC) {
+		DPRINTF("wrong magic number in hibernate signature: %x\n",
+			disk_hiber_info.magic);
 		splx(s);
 		return;
 	}
@@ -1181,6 +1189,7 @@ hibernate_resume(void)
 	 * to prevent accidental resume or endless resume cycles later.
 	 */
 	if (hibernate_clear_signature()) {
+		DPRINTF("error clearing hibernate signature block\n");
 		splx(s);
 		return;
 	}
@@ -1190,6 +1199,7 @@ hibernate_resume(void)
 	 * this means we should do a resume from hibernate.
 	 */
 	if (hibernate_compare_signature(&hiber_info, &disk_hiber_info)) {
+		DPRINTF("mismatched hibernate signature block\n");
 		splx(s);
 		return;
 	}
@@ -1220,6 +1230,8 @@ hibernate_resume(void)
 	pmap_kenter_pa(HIBERNATE_HIBALLOC_PAGE, HIBERNATE_HIBALLOC_PAGE,
 	    VM_PROT_ALL);
 	pmap_activate(curproc);
+
+	printf("Unpacking image...\n");
 
 	/* Switch stacks */
 	hibernate_switch_stack_machdep();
@@ -1316,6 +1328,7 @@ hibernate_copy_chunk_to_piglet(paddr_t img_cur, vaddr_t piglet, size_t size)
 		src += ct;
 		dest += ct;
 	}
+	wbinvd();
 
 	/* Copy remaining pages */	
 	while (src < size + img_cur) {
@@ -1327,6 +1340,9 @@ hibernate_copy_chunk_to_piglet(paddr_t img_cur, vaddr_t piglet, size_t size)
 		src += ct;
 		dest += ct;
 	}
+
+	hibernate_flush();
+	wbinvd();
 }
 
 /*
@@ -1518,7 +1534,10 @@ hibernate_write_chunks(union hibernate_info *hiber_info)
 		hibernate_state->hib_stream.avail_in = 0;
 		hibernate_state->hib_stream.next_out =
 		    (caddr_t)hibernate_io_page + (PAGE_SIZE - out_remaining);
-		hibernate_state->hib_stream.avail_out = out_remaining;
+
+		/* We have an extra output page available for finalize */
+		hibernate_state->hib_stream.avail_out =
+			out_remaining + PAGE_SIZE;
 
 		if ((err = deflate(&hibernate_state->hib_stream, Z_FINISH)) !=
 		    Z_STREAM_END) {
@@ -1528,7 +1547,7 @@ hibernate_write_chunks(union hibernate_info *hiber_info)
 
 		out_remaining = hibernate_state->hib_stream.avail_out;
 
-		used = PAGE_SIZE - out_remaining;
+		used = 2*PAGE_SIZE - out_remaining;
 		nblocks = used / hiber_info->secsize;
 
 		/* Round up to next block if needed */
@@ -1877,7 +1896,6 @@ hibernate_read_chunks(union hibernate_info *hib_info, paddr_t pig_start,
 
 			blkctr += (read_size / hib_info->secsize);
 
-			hibernate_flush();
 			pmap_kremove(tempva, PAGE_SIZE);
 			pmap_kremove(tempva + PAGE_SIZE, PAGE_SIZE);
 			processed += read_size;
@@ -1936,16 +1954,19 @@ hibernate_suspend(void)
 	/* Stash the piglet VA so we can free it in the resuming kernel */
 	global_piglet_va = hib_info.piglet_va;
 
+	DPRINTF("hibernate: writing chunks\n");
 	if (hibernate_write_chunks(&hib_info)) {
 		DPRINTF("hibernate_write_chunks failed\n");
 		return (1);
 	}
 
+	DPRINTF("hibernate: writing chunktable\n");
 	if (hibernate_write_chunktable(&hib_info)) {
 		DPRINTF("hibernate_write_chunktable failed\n");
 		return (1);
 	}
 
+	DPRINTF("hibernate: writing signature\n");
 	if (hibernate_write_signature(&hib_info)) {
 		DPRINTF("hibernate_write_signature failed\n");
 		return (1);

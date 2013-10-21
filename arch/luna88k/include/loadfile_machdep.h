@@ -1,4 +1,4 @@
-/*	$OpenBSD: loadfile_machdep.h,v 1.3 2013/10/17 11:54:01 miod Exp $	*/
+/*	$OpenBSD: loadfile_machdep.h,v 1.1 2013/10/18 10:55:33 miod Exp $	*/
 
 /*-
  * Copyright (c) 1999 The NetBSD Foundation, Inc.

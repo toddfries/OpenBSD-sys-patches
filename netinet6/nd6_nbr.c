@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_nbr.c,v 1.67 2013/05/31 15:04:24 bluhm Exp $	*/
+/*	$OpenBSD: nd6_nbr.c,v 1.69 2013/10/20 11:03:02 phessler Exp $	*/
 /*	$KAME: nd6_nbr.c,v 1.61 2001/02/10 16:06:14 jinmei Exp $	*/
 
 /*
@@ -50,7 +50,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
@@ -350,6 +349,7 @@ nd6_ns_output(struct ifnet *ifp, struct in6_addr *daddr6,
 	struct route_in6 ro;
 
 	bzero(&ro, sizeof(ro));
+	ro.ro_tableid = ifp->if_rdomain;
 
 	if (IN6_IS_ADDR_MULTICAST(taddr6))
 		return;
@@ -884,6 +884,7 @@ nd6_na_output(struct ifnet *ifp, struct in6_addr *daddr6,
 
 	mac = NULL;
 	bzero(&ro, sizeof(ro));
+	ro.ro_tableid = ifp->if_rdomain;
 
 	/* estimate the size of message */
 	maxlen = sizeof(*ip6) + sizeof(*nd_na);

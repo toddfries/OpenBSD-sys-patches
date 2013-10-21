@@ -100,9 +100,9 @@
 #include <net/raw_cb.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/icmp6.h>
 
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/ip6_mroute.h>
@@ -872,7 +872,7 @@ collate(struct timeval *t)
 	struct timeval tp;
 	u_long delta;
 
-	GET_TIME(tp);
+	microtime(&tp);
 
 	if (TV_LT(*t, tp))
 	{
@@ -1033,7 +1033,7 @@ ip6_mforward(struct ip6_hdr *ip6, struct ifnet *ifp, struct mbuf *m)
 #ifdef UPCALL_TIMING
 		struct timeval tp;
 
-		GET_TIME(tp);
+		microtime(&tp);
 #endif /* UPCALL_TIMING */
 
 		mrt6stat.mrt6s_no_route++;

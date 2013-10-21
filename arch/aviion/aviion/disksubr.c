@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.56 2013/10/15 11:03:30 miod Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.58 2013/10/19 09:32:13 krw Exp $	*/
 
 /*
  * Copyright (c) 2013 Miodrag Vallat.
@@ -55,9 +55,9 @@
 char	*extract_vdit_portion(char *, const char *, unsigned int, unsigned int,
 	    int);
 int	 readvditlabel(struct buf *, void (*)(struct buf *), struct disklabel *,
-	    int *, int, struct vdm_boot_info *);
+	    daddr_t *, int, struct vdm_boot_info *);
 int	 readvdmlabel(struct buf *, void (*)(struct buf *), struct disklabel *,
-	    int *, int);
+	    daddr_t *, int);
 
 /*
  * Attempt to read a disk label from a device
@@ -124,7 +124,8 @@ done:
 int
 writedisklabel(dev_t dev, void (*strat)(struct buf *), struct disklabel *lp)
 {
-	int error, partoff = -1;
+	daddr_t partoff = -1;
+	int error = EIO;
 	int offset;
 	struct disklabel *dlp;
 	struct buf *bp = NULL;
@@ -177,7 +178,7 @@ done:
  */
 int
 readvdmlabel(struct buf *bp, void (*strat)(struct buf *), struct disklabel *lp,
-    int *partoffp, int spoofonly)
+    daddr_t *partoffp, int spoofonly)
 {
 	struct vdm_label *vdl;
 	struct vdm_boot_info *vbi;
@@ -229,6 +230,13 @@ readvdmlabel(struct buf *bp, void (*strat)(struct buf *), struct disklabel *lp,
 	if (error == ENOENT)
 		return error;
 
+	if (partoffp != NULL)
+		*partoffp = 0;
+
+	/* don't read the on-disk label if we are in spoofed-only mode */
+	if (spoofonly != 0)
+		return 0;
+
 	bp->b_blkno = LABELSECTOR;
 	bp->b_bcount = lp->d_secsize;
 	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
@@ -237,8 +245,6 @@ readvdmlabel(struct buf *bp, void (*strat)(struct buf *), struct disklabel *lp,
 	if ((error = biowait(bp)) != 0)
 		return error;
 
-	if (partoffp != NULL)
-		*partoffp = 0;
 	return checkdisklabel(bp->b_data + LABELOFFSET, lp, 
 	    DL_GETBSTART(lp), DL_GETBEND(lp));
 }
@@ -251,7 +257,7 @@ readvdmlabel(struct buf *bp, void (*strat)(struct buf *), struct disklabel *lp,
  */
 int
 readvditlabel(struct buf *bp, void (*strat)(struct buf *), struct disklabel *lp,
-    int *partoffp, int spoofonly, struct vdm_boot_info *vbi)
+    daddr_t *partoffp, int spoofonly, struct vdm_boot_info *vbi)
 {
 	struct buf *sbp = NULL;
 	struct vdit_block_header *vbh;

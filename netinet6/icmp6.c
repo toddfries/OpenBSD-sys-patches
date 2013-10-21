@@ -1,4 +1,4 @@
-/*	$OpenBSD: icmp6.c,v 1.130 2013/06/05 15:22:32 bluhm Exp $	*/
+/*	$OpenBSD: icmp6.c,v 1.133 2013/10/21 12:27:14 deraadt Exp $	*/
 /*	$KAME: icmp6.c,v 1.217 2001/06/20 15:03:29 jinmei Exp $	*/
 
 /*
@@ -82,9 +82,9 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
@@ -142,14 +142,13 @@ extern int icmp6_nodeinfo;
  */
 struct icmp6_mtudisc_callback {
 	LIST_ENTRY(icmp6_mtudisc_callback) mc_list;
-	void (*mc_func)(struct in6_addr *);
+	void (*mc_func)(struct sockaddr_in6 *, u_int);
 };
 
 LIST_HEAD(, icmp6_mtudisc_callback) icmp6_mtudisc_callbacks =
     LIST_HEAD_INITIALIZER(icmp6_mtudisc_callbacks);
 
-static struct rttimer_queue *icmp6_mtudisc_timeout_q = NULL;
-extern int pmtu_expire;
+struct rttimer_queue *icmp6_mtudisc_timeout_q = NULL;
 
 /* XXX do these values make any sense? */
 static int icmp6_mtudisc_hiwat = 1280;
@@ -184,7 +183,7 @@ void
 icmp6_init(void)
 {
 	mld6_init();
-	icmp6_mtudisc_timeout_q = rt_timer_queue_create(pmtu_expire);
+	icmp6_mtudisc_timeout_q = rt_timer_queue_create(ip6_mtudisc_timeout);
 	icmp6_redirect_timeout_q = rt_timer_queue_create(icmp6_redirtimeout);
 }
 
@@ -248,7 +247,7 @@ icmp6_errcount(struct icmp6errstat *stat, int type, int code)
  * Register a Path MTU Discovery callback.
  */
 void
-icmp6_mtudisc_callback_register(void (*func)(struct in6_addr *))
+icmp6_mtudisc_callback_register(void (*func)(struct sockaddr_in6 *, u_int))
 {
 	struct icmp6_mtudisc_callback *mc;
 
@@ -1142,7 +1141,9 @@ icmp6_mtudisc_update(struct ip6ctlparam *ip6cp, int validated)
 		sin6.sin6_addr.s6_addr16[1] =
 		    htons(m->m_pkthdr.rcvif->if_index);
 	}
-	/* sin6.sin6_scope_id = XXX: should be set if DST is a scoped addr */
+	sin6.sin6_scope_id = in6_addr2scopeid(m->m_pkthdr.rcvif,
+	    &sin6.sin6_addr);
+
 	rt = icmp6_mtudisc_clone(sin6tosa(&sin6), m->m_pkthdr.rdomain);
 
 	if (rt && (rt->rt_flags & RTF_HOST) &&
@@ -1163,7 +1164,7 @@ icmp6_mtudisc_update(struct ip6ctlparam *ip6cp, int validated)
 	 */
 	for (mc = LIST_FIRST(&icmp6_mtudisc_callbacks); mc != NULL;
 	     mc = LIST_NEXT(mc, mc_list))
-		(*mc->mc_func)(&sin6.sin6_addr);
+		(*mc->mc_func)(&sin6, m->m_pkthdr.rdomain);
 }
 
 /*
@@ -2349,11 +2350,11 @@ icmp6_redirect_input(struct mbuf *m, int off)
 		bcopy(&src6, &ssrc.sin6_addr, sizeof(struct in6_addr));
 		rtredirect(sin6tosa(&sdst), sin6tosa(&sgw), NULL,
 		    RTF_GATEWAY | RTF_HOST, sin6tosa(&ssrc),
-		    &newrt, /* XXX */ 0);
+		    &newrt, m->m_pkthdr.rdomain);
 
 		if (newrt) {
 			(void)rt_timer_add(newrt, icmp6_redirect_timeout,
-			    icmp6_redirect_timeout_q, /* XXX */ 0);
+			    icmp6_redirect_timeout_q, m->m_pkthdr.rdomain);
 			rtfree(newrt);
 		}
 	}
@@ -2742,18 +2743,11 @@ icmp6_ctloutput(int op, struct socket *so, int level, int optname,
 int
 icmp6_ratelimit(const struct in6_addr *dst, const int type, const int code)
 {
-	int ret;
-
-	ret = 0;	/* okay to send */
-
 	/* PPS limit */
 	if (!ppsratecheck(&icmp6errppslim_last, &icmp6errpps_count,
-	    icmp6errppslim)) {
-		/* The packet is subject to rate limit */
-		ret++;
-	}
-
-	return ret;
+	    icmp6errppslim))
+		return 1;	/* The packet is subject to rate limit */
+	return 0;		/* okay to send */
 }
 
 struct rtentry *
@@ -2786,7 +2780,7 @@ icmp6_mtudisc_clone(struct sockaddr *dst, u_int rdomain)
 		rt = nrt;
 	}
 	error = rt_timer_add(rt, icmp6_mtudisc_timeout,
-			icmp6_mtudisc_timeout_q, /* XXX */ 0);
+			icmp6_mtudisc_timeout_q, rdomain);
 	if (error) {
 		rtfree(rt);
 		return NULL;

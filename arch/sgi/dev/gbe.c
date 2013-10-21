@@ -1,4 +1,4 @@
-/*	$OpenBSD: gbe.c,v 1.19 2013/05/30 16:15:01 deraadt Exp $ */
+/*	$OpenBSD: gbe.c,v 1.21 2013/10/21 10:36:16 miod Exp $ */
 
 /*
  * Copyright (c) 2007, 2008, 2009 Joel Sing <jsing@openbsd.org>
@@ -128,7 +128,8 @@ int	gbe_alloc_screen(void *, const struct wsscreen_descr *, void **,
 void	gbe_free_screen(void *, void *);
 int	gbe_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
-void	gbe_burner(void *, u_int, u_int);
+int	gbe_load_font(void *, void *, struct wsdisplay_font *);
+int	gbe_list_font(void *, struct wsdisplay_font *);
 
 /*
  * Hardware acceleration for rasops.
@@ -151,16 +152,13 @@ struct wsscreen_descr gbe_stdscreen = {
 };
 
 struct wsdisplay_accessops gbe_accessops = {
-	gbe_ioctl,
-	gbe_mmap,
-	gbe_alloc_screen,
-	gbe_free_screen,
-	gbe_show_screen,
-	NULL,		/* load_font */
-	NULL,		/* scrollback */
-	NULL,		/* getchar */
-	gbe_burner,
-	NULL		/* pollc */
+	.ioctl = gbe_ioctl,
+	.mmap = gbe_mmap,
+	.alloc_screen = gbe_alloc_screen,
+	.free_screen = gbe_free_screen,
+	.show_screen = gbe_show_screen,
+	.load_font = gbe_load_font,
+	.list_font = gbe_list_font
 };
 
 const struct wsscreen_descr *gbe_scrlist[] = {
@@ -985,9 +983,20 @@ gbe_show_screen(void *v, void *cookie, int waitok, void (*cb)(void *, int, int),
 	return (0);
 }
 
-void
-gbe_burner(void *v, u_int on, u_int flags)
+int
+gbe_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
 {
+	struct gbe_screen *screen = (struct gbe_screen *)v;
+
+	return rasops_load_font(&screen->ri, emulcookie, font);
+}
+
+int
+gbe_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct gbe_screen *screen = (struct gbe_screen *)v;
+
+	return rasops_list_font(&screen->ri, font);
 }
 
 /*

@@ -1,4 +1,4 @@
-/* $OpenBSD: omdisplay.c,v 1.1 2013/09/04 14:38:31 patrick Exp $ */
+/* $OpenBSD: omdisplay.c,v 1.3 2013/10/21 10:36:11 miod Exp $ */
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
  *
@@ -448,6 +448,8 @@ int omdisplay_alloc_screen(void *v, const struct wsscreen_descr *_type,
 int omdisplay_new_screen(struct omdisplay_softc *sc,
     struct omdisplay_screen *scr, int depth);
 paddr_t omdisplay_mmap(void *v, off_t offset, int prot);
+int omdisplay_load_font(void *, void *, struct wsdisplay_font *);
+int omdisplay_list_font(void *, struct wsdisplay_font *);
 void omdisplay_free_screen(void *v, void *cookie);
 void omdisplay_start(struct omdisplay_softc *sc);
 void omdisplay_stop(struct omdisplay_softc *sc);
@@ -464,15 +466,14 @@ struct cfdriver omdisplay_cd = {
 };
 
 struct wsdisplay_accessops omdisplay_accessops = {
-	omdisplay_ioctl,
-	omdisplay_mmap,
-	omdisplay_alloc_screen,
-	omdisplay_free_screen,
-	omdisplay_show_screen,
-	NULL,	/* load font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	omdisplay_burner
+	.ioctl = omdisplay_ioctl,
+	.mmap = omdisplay_mmap,
+	.alloc_screen = omdisplay_alloc_screen,
+	.free_screen = omdisplay_free_screen,
+	.show_screen = omdisplay_show_screen,
+	.load_font = omdisplay_load_font,
+	.list_font = omdisplay_list_font,
+	.burn_screen = omdisplay_burner
 
 };
 
@@ -1338,6 +1339,30 @@ omdisplay_free_screen(void *v, void *cookie)
 		bus_dmamem_free(sc->sc_dma_tag, scr->segs, scr->nsegs);
 
 	free(scr, M_DEVBUF);
+}
+
+int
+omdisplay_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct omdisplay_softc *sc = v;
+	struct omdisplay_screen *scr = sc->sc_active;
+
+	if (scr == NULL)
+		return ENXIO;
+
+	return rasops_load_font(scr->rinfo, emulcookie, font);
+}
+
+int
+omdisplay_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct omdisplay_softc *sc = v;
+	struct omdisplay_screen *scr = sc->sc_active;
+
+	if (scr == NULL)
+		return ENXIO;
+
+	return rasops_list_font(scr->rinfo, font);
 }
 
 void

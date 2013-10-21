@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.843 2013/10/12 12:13:10 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.849 2013/10/21 09:39:23 henning Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -88,6 +88,7 @@
 #endif /* NPFSYNC > 0 */
 
 #ifdef INET6
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
@@ -2874,10 +2875,10 @@ pf_socket_lookup(struct pf_pdesc *pd)
 #ifdef INET6
 	case AF_INET6:
 		inp = in6_pcbhashlookup(tb, &saddr->v6, sport, &daddr->v6,
-		    dport);
+		    dport, pd->rdomain);
 		if (inp == NULL) {
 			inp = in6_pcblookup_listen(tb, &daddr->v6, dport, 0,
-			    NULL);
+			    NULL, pd->rdomain);
 			if (inp == NULL)
 				return (-1);
 		}
@@ -3755,6 +3756,10 @@ pf_translate(struct pf_pdesc *pd, struct pf_addr *saddr, u_int16_t sport,
 			u_int16_t icmpid = (icmp_dir == PF_IN) ? sport : dport;
 
 			if (icmpid != pd->hdr.icmp->icmp_id) {
+				if (pd->csum_status == PF_CSUM_UNKNOWN)
+					pf_check_proto_cksum(pd, pd->off,
+					    pd->tot_len - pd->off, pd->proto,
+					    pd->af);
 				pd->hdr.icmp->icmp_id = icmpid;
 				rewrite = 1;
 			}
@@ -4596,8 +4601,13 @@ pf_test_state_icmp(struct pf_pdesc *pd, struct pf_state **state,
 					pd->destchg = 1;
 				}
 
-				if (nk->port[iidx] !=  pd->hdr.icmp->icmp_id)
+				if (nk->port[iidx] !=  pd->hdr.icmp->icmp_id) {
+					if (pd->csum_status == PF_CSUM_UNKNOWN)
+						pf_check_proto_cksum(pd,
+						    pd->off, pd->tot_len -
+						    pd->off, pd->proto, pd->af);
 					pd->hdr.icmp->icmp_id = nk->port[iidx];
+				}
 
 				m_copyback(pd->m, pd->off, ICMP_MINLEN,
 				    pd->hdr.icmp, M_NOWAIT);
@@ -4626,9 +4636,14 @@ pf_test_state_icmp(struct pf_pdesc *pd, struct pf_state **state,
 					pd->destchg = 1;
 				}
 
-				if (nk->port[iidx] != pd->hdr.icmp6->icmp6_id)
+				if (nk->port[iidx] != pd->hdr.icmp6->icmp6_id) {
+					if (pd->csum_status == PF_CSUM_UNKNOWN)
+						pf_check_proto_cksum(pd,
+						    pd->off, pd->tot_len -
+						    pd->off, pd->proto, pd->af);
 					pd->hdr.icmp6->icmp6_id =
 					    nk->port[iidx];
+				}
 
 				m_copyback(pd->m, pd->off,
 				    sizeof(struct icmp6_hdr), pd->hdr.icmp6,
@@ -5442,7 +5457,7 @@ pf_routable(struct pf_addr *addr, sa_family_t af, struct pfi_kif *kif,
 
 			if (kif->pfik_ifp == ifp)
 				ret = 1;
-			rt = rt_mpath_next(rt, 0);
+			rt = rt_mpath_next(rt);
 		} while (check_mpath == 1 && rt != NULL && ret == 0);
 	} else
 		ret = 0;
@@ -5727,6 +5742,7 @@ pf_route6(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 	dst->sin6_family = AF_INET6;
 	dst->sin6_len = sizeof(*dst);
 	dst->sin6_addr = ip6->ip6_dst;
+	ro->ro_tableid = m0->m_pkthdr.rdomain;
 
 	if (!r->rt) {
 		m0->m_pkthdr.pf.flags |= PF_TAG_GENERATED;
@@ -6129,6 +6145,7 @@ pf_setup_pdesc(struct pf_pdesc *pd, void *pdhdrs, sa_family_t af, int dir,
 	pd->sidx = (dir == PF_IN) ? 0 : 1;
 	pd->didx = (dir == PF_IN) ? 1 : 0;
 	pd->af = pd->naf = af;
+	pd->rdomain = rtable_l2(pd->m->m_pkthdr.rdomain);
 
 	switch (pd->af) {
 #ifdef INET
@@ -6156,7 +6173,6 @@ pf_setup_pdesc(struct pf_pdesc *pd, void *pdhdrs, sa_family_t af, int dir,
 		pd->virtual_proto = pd->proto = h->ip_p;
 		pd->tot_len = ntohs(h->ip_len);
 		pd->tos = h->ip_tos & ~IPTOS_ECN_MASK;
-		pd->rdomain = rtable_l2(pd->m->m_pkthdr.rdomain);
 		pd->ttl = h->ip_ttl;
 		if (h->ip_hl > 5)	/* has options */
 			pd->badopts++;
@@ -6206,7 +6222,6 @@ pf_setup_pdesc(struct pf_pdesc *pd, void *pdhdrs, sa_family_t af, int dir,
 		pd->tot_len = ntohs(h->ip6_plen) + sizeof(struct ip6_hdr);
 		pd->tos = 0;
 		pd->ttl = h->ip6_hlim;
-		pd->rdomain = 0;
 
 		if (pd->fragoff != 0)
 			pd->virtual_proto = PF_VPROTO_FRAGMENT;
@@ -6741,24 +6756,18 @@ pf_cksum(struct pf_pdesc *pd, struct mbuf *m)
 	switch (pd->proto) {
 	case IPPROTO_TCP:
 		pd->hdr.tcp->th_sum = 0;
-		if (pd->af == AF_INET) {
-			pd->hdr.tcp->th_sum = in_cksum_phdr(pd->src->v4.s_addr,
-			    pd->dst->v4.s_addr, htons(pd->tot_len -
-			    pd->off + IPPROTO_TCP));
-		}
 		m->m_pkthdr.csum_flags |= M_TCP_CSUM_OUT;
 		break;
 	case IPPROTO_UDP:
 		pd->hdr.udp->uh_sum = 0;
-		if (pd->af == AF_INET) {
-			pd->hdr.udp->uh_sum = in_cksum_phdr(pd->src->v4.s_addr,
-			    pd->dst->v4.s_addr, htons(pd->tot_len -
-			    pd->off + IPPROTO_UDP));
-		}
 		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
 		break;
 	case IPPROTO_ICMP:
+		pd->hdr.icmp->icmp_cksum = 0;
+		m->m_pkthdr.csum_flags |= M_ICMP_CSUM_OUT;
+		break;
 	case IPPROTO_ICMPV6:
+		pd->hdr.icmp6->icmp6_cksum = 0;
 		m->m_pkthdr.csum_flags |= M_ICMP_CSUM_OUT;
 		break;
 	default:

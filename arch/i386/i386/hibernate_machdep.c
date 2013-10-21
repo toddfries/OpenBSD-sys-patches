@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate_machdep.c,v 1.26 2013/08/24 23:43:36 mlarkin Exp $	*/
+/*	$OpenBSD: hibernate_machdep.c,v 1.29 2013/10/20 20:03:03 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Mike Larkin <mlarkin@openbsd.org>
@@ -45,11 +45,6 @@
 #include "ahci.h"
 #include "sd.h"
 
-#if NWD > 0
-#include <dev/ata/atavar.h>
-#include <dev/ata/wdvar.h>
-#endif
-
 /* Hibernate support */
 void    hibernate_enter_resume_4k_pte(vaddr_t, paddr_t);
 void    hibernate_enter_resume_4k_pde(vaddr_t);
@@ -79,8 +74,11 @@ get_hibernate_io_function(void)
 	if (blkname == NULL)
 		return NULL;
 #if NWD > 0
-	if (strcmp(blkname, "wd") == 0)
+	if (strcmp(blkname, "wd") == 0) {
+		extern int wd_hibernate_io(dev_t dev, daddr_t blkno,
+		    vaddr_t addr, size_t size, int op, void *page);
 		return wd_hibernate_io;
+	}
 #endif
 #if NAHCI > 0 && NSD > 0
 	if (strcmp(blkname, "sd") == 0) {
@@ -161,7 +159,7 @@ hibernate_enter_resume_4m_pde(vaddr_t va, paddr_t pa)
 	pt_entry_t *pde, npde;
 
 	pde = s4pde_4m(va);
-	npde = (pa & PMAP_PA_MASK_4M) | PG_RW | PG_V | PG_u | PG_M | PG_PS;
+	npde = (pa & PMAP_PA_MASK_4M) | PG_RW | PG_V | PG_M | PG_PS;
 	*pde = npde;
 }
 
@@ -174,7 +172,7 @@ hibernate_enter_resume_4k_pte(vaddr_t va, paddr_t pa)
 	pt_entry_t *pte, npte;
 
 	pte = s4pte_4k(va);
-	npte = (pa & PMAP_PA_MASK) | PG_RW | PG_V | PG_u | PG_M;
+	npte = (pa & PMAP_PA_MASK) | PG_RW | PG_V | PG_M;
 	*pte = npte;
 }
 
@@ -187,7 +185,7 @@ hibernate_enter_resume_4k_pde(vaddr_t va)
 	pt_entry_t *pde, npde;
 
 	pde = s4pde_4k(va);
-	npde = (HIBERNATE_PT_PAGE & PMAP_PA_MASK) | PG_RW | PG_V | PG_u | PG_M;
+	npde = (HIBERNATE_PT_PAGE & PMAP_PA_MASK) | PG_RW | PG_V | PG_M;
 	*pde = npde;
 }
 
@@ -341,6 +339,8 @@ hibernate_disable_intr_machdep(void)
 void
 hibernate_quiesce_cpus(void)
 {
+        KASSERT(CPU_IS_PRIMARY(curcpu()));
+
 	/* Start the hatched (but idling) APs */
 	cpu_boot_secondary_processors();
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: topcat.c,v 1.16 2013/09/28 21:10:58 miod Exp $	*/
+/*	$OpenBSD: topcat.c,v 1.18 2013/10/21 10:36:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat.
@@ -129,15 +129,14 @@ int	topcat_ioctl(void *, u_long, caddr_t, int, struct proc *);
 void	topcat_burner(void *, u_int, u_int);
 
 struct	wsdisplay_accessops	topcat_accessops = {
-	topcat_ioctl,
-	diofb_mmap,
-	diofb_alloc_screen,
-	diofb_free_screen,
-	diofb_show_screen,
-	NULL,	/* load_font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	topcat_burner
+	.ioctl = topcat_ioctl,
+	.mmap = diofb_mmap,
+	.alloc_screen = diofb_alloc_screen,
+	.free_screen = diofb_free_screen,
+	.show_screen = diofb_show_screen,
+	.load_font = diofb_load_font,
+	.list_font = diofb_list_font,
+	.burn_screen = topcat_burner
 };
 
 /*

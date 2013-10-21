@@ -1,4 +1,4 @@
-/*	$OpenBSD: odyssey.c,v 1.7 2012/04/16 22:17:16 miod Exp $ */
+/*	$OpenBSD: odyssey.c,v 1.9 2013/10/21 10:36:18 miod Exp $ */
 /*
  * Copyright (c) 2009, 2010 Joel Sing <jsing@openbsd.org>
  *
@@ -129,7 +129,8 @@ int	odyssey_alloc_screen(void *, const struct wsscreen_descr *, void **,
 void	odyssey_free_screen(void *, void *);
 int	odyssey_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
-void	odyssey_burner(void *, u_int, u_int);
+int	odyssey_load_font(void *, void *, struct wsdisplay_font *);
+int	odyssey_list_font(void *, struct wsdisplay_font *);
 
 static struct odyssey_screen odyssey_consdata;
 static struct odyssey_softc odyssey_cons_sc;
@@ -139,16 +140,13 @@ struct wsscreen_descr odyssey_stdscreen = {
 };
 
 struct wsdisplay_accessops odyssey_accessops = {
-	odyssey_ioctl,
-	odyssey_mmap,
-	odyssey_alloc_screen,
-	odyssey_free_screen,
-	odyssey_show_screen,
-	NULL,			/* load_font */
-	NULL,			/* scrollback */
-	NULL,			/* getchar */
-	odyssey_burner,
-	NULL			/* pollc */
+	.ioctl = odyssey_ioctl,
+	.mmap = odyssey_mmap,
+	.alloc_screen = odyssey_alloc_screen,
+	.free_screen = odyssey_free_screen,
+	.show_screen = odyssey_show_screen,
+	.load_font = odyssey_load_font,
+	.list_font = odyssey_list_font
 };
 
 const struct wsscreen_descr *odyssey_scrlist[] = {
@@ -696,9 +694,20 @@ odyssey_show_screen(void *v, void *cookie, int waitok,
 	return (0);
 }
 
-void
-odyssey_burner(void *v, u_int on, u_int flags)
+int
+odyssey_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
 {
+	struct odyssey_screen *screen = (struct odyssey_screen *)v;
+
+	return rasops_load_font(&screen->ri, emulcookie, font);
+}
+
+int
+odyssey_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct odyssey_screen *screen = (struct odyssey_screen *)v;
+
+	return rasops_list_font(&screen->ri, font);
 }
 
 /*

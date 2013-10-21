@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.114 2013/08/12 21:57:16 bluhm Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.116 2013/10/20 11:03:01 phessler Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -99,6 +99,10 @@
 #include <netinet/tcp_var.h>
 #include <netinet/tcpip.h>
 #include <netinet/tcp_debug.h>
+
+#ifdef INET6
+#include <netinet6/in6_var.h>
+#endif
 
 #ifndef TCP_SENDSPACE
 #define	TCP_SENDSPACE	1024*16
@@ -826,12 +830,12 @@ tcp_ident(void *oldp, size_t *oldlenp, void *newp, size_t newlen, int dodrop)
 #ifdef INET6
 	case AF_INET6:
 		inp = in6_pcbhashlookup(&tcbtable, &f6,
-		    fin6->sin6_port, &l6, lin6->sin6_port);
+		    fin6->sin6_port, &l6, lin6->sin6_port, tir.rdomain);
 		break;
 #endif
 	case AF_INET:
-		inp = in_pcbhashlookup(&tcbtable,  fin->sin_addr,
-		    fin->sin_port, lin->sin_addr, lin->sin_port , tir.rdomain);
+		inp = in_pcbhashlookup(&tcbtable, fin->sin_addr,
+		    fin->sin_port, lin->sin_addr, lin->sin_port, tir.rdomain);
 		break;
 	}
 
@@ -851,7 +855,7 @@ tcp_ident(void *oldp, size_t *oldlenp, void *newp, size_t newlen, int dodrop)
 #ifdef INET6
 		case AF_INET6:
 			inp = in6_pcblookup_listen(&tcbtable,
-			    &l6, lin6->sin6_port, 0, NULL);
+			    &l6, lin6->sin6_port, 0, NULL, tir.rdomain);
 			break;
 #endif
 		case AF_INET:

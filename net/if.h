@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.148 2013/10/13 10:10:02 reyk Exp $	*/
+/*	$OpenBSD: if.h,v 1.150 2013/10/21 15:10:29 benno Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -89,7 +89,7 @@ __END_DECLS
  * routing and gateway routines maintaining information used to locate
  * interfaces.  These routines live in the files if.c and route.c
  */
-/*  XXX fast fix for SNMP, going away soon */
+
 #include <sys/time.h>
 
 struct mbuf;
@@ -101,7 +101,6 @@ struct arpcom;
 struct rt_addrinfo;
 struct ifnet;
 struct hfsc_if;
-struct ifvlan;
 
 /*
  * Structure describing a `cloning' interface.
@@ -264,12 +263,12 @@ struct ifnet {				/* and the entries */
 	TAILQ_HEAD(, ifg_list) if_groups; /* linked list of groups per if */
 	struct hook_desc_head *if_addrhooks; /* address change callbacks */
 	struct hook_desc_head *if_linkstatehooks; /* link change callbacks */
+	struct hook_desc_head *if_detachhooks; /* detach callbacks */
 	char	if_xname[IFNAMSIZ];	/* external name (name + unit) */
 	int	if_pcount;		/* number of promiscuous listeners */
 	caddr_t	if_bpf;			/* packet filter structure */
 	caddr_t if_bridgeport;		/* used by bridge ports */
 	caddr_t	if_tp;			/* used by trunk ports */
-	LIST_HEAD(, ifvlan) if_vlist;	/* list of vlans on this interface */
 	caddr_t	if_pf_kif;		/* pf interface abstraction */
 	union {
 		caddr_t	carp_s;		/* carp structure (used by !carp ifs) */

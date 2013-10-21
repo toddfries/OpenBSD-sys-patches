@@ -1,4 +1,4 @@
-/* $OpenBSD: wsemulvar.h,v 1.13 2010/07/01 02:33:06 maja Exp $ */
+/* $OpenBSD: wsemulvar.h,v 1.15 2013/10/18 22:06:41 miod Exp $ */
 /* $NetBSD: wsemulvar.h,v 1.6 1999/01/17 15:46:15 drochner Exp $ */
 
 /*
@@ -48,6 +48,8 @@
 
 #ifdef	_KERNEL
 
+#include <dev/wscons/wscons_features.h>
+
 struct device;
 struct wsdisplay_emulops;
 
@@ -66,9 +68,18 @@ struct wsemul_ops {
 	void	*(*attach)(int, const struct wsscreen_descr *, void *,
 				int, int, void *, long);
 	u_int	(*output)(void *, const u_char *, u_int, int);
-	int	(*translate)(void *, keysym_t, const char **);
+	int	(*translate)(void *, kbd_t, keysym_t, const u_char **);
 	void	(*detach)(void *, u_int *, u_int *);
 	void    (*reset)(void *, enum wsemul_resetops);
+};
+
+/*
+ * Structure carrying the state of multi-byte character sequences
+ * decoding.
+ */
+struct wsemul_inputstate {
+	u_int32_t	inchar;	/* character being reconstructed */
+	u_int		mbleft;	/* multibyte bytes left until char complete */
 };
 
 extern const struct wsemul_ops wsemul_dumb_ops;
@@ -83,6 +94,19 @@ const char *wsemul_getname(int);
  */
 void	wsdisplay_emulbell(void *v);
 void	wsdisplay_emulinput(void *v, const u_char *, u_int);
+
+/*
+ * Get characters from an input stream and update the input state.
+ * Processing stops when the stream is empty, or a complete character
+ * sequence has been recognized, in which case it returns zero.
+ */
+int	wsemul_getchar(const u_char **, u_int *, struct wsemul_inputstate *,
+	    int);
+
+/*
+ * Keysym to UTF-8 sequence translation function.
+ */
+int	wsemul_utf8_translate(u_int32_t, kbd_t, u_char *, int);
 
 /*
  * emulops failure abort/recovery state
@@ -165,6 +189,7 @@ wsemul_reset_abortstate(struct wsemul_abortstate *was)
  * Wrapper macro to handle failing emulops calls consistently.
  */
 
+#ifdef HAVE_RESTARTABLE_EMULOPS
 #define	WSEMULOP(rc, edp, was, rutin, args) \
 do { \
 	if ((was)->skip != 0) { \
@@ -176,5 +201,12 @@ do { \
 	if ((rc) == 0) \
 		(was)->done++; \
 } while (0)
+#else
+#define	WSEMULOP(rc, edp, was, rutin, args) \
+do { \
+	(void)(*(edp)->emulops->rutin) args ; \
+	(rc) = 0; \
+} while(0)
+#endif
 
 #endif	/* _KERNEL */

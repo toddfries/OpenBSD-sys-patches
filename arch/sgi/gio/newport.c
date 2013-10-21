@@ -1,4 +1,4 @@
-/*	$OpenBSD: newport.c,v 1.6 2013/04/20 20:26:26 miod Exp $	*/
+/*	$OpenBSD: newport.c,v 1.8 2013/10/21 10:36:17 miod Exp $	*/
 /*	$NetBSD: newport.c,v 1.15 2009/05/12 23:51:25 macallan Exp $	*/
 
 /*
@@ -117,18 +117,17 @@ int	newport_alloc_screen(void *, const struct wsscreen_descr *, void **,
 void	newport_free_screen(void *, void *);
 int	newport_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
+int	newport_load_font(void *, void *, struct wsdisplay_font *);
+int	newport_list_font(void *, struct wsdisplay_font *);
 
 struct wsdisplay_accessops newport_accessops = {
-	newport_ioctl,
-	newport_mmap,
-	newport_alloc_screen,
-	newport_free_screen,
-	newport_show_screen,
-	NULL,		/* load_font */
-	NULL,		/* scrollback */
-	NULL,		/* getchar */
-	NULL,		/* burner */
-	NULL		/* pollc */
+	.ioctl = newport_ioctl,
+	.mmap = newport_mmap,
+	.alloc_screen = newport_alloc_screen,
+	.free_screen = newport_free_screen,
+	.show_screen = newport_show_screen,
+	.load_font = newport_load_font,
+	.list_font = newport_list_font
 };
 
 int	newport_do_cursor(struct rasops_info *);
@@ -891,4 +890,22 @@ paddr_t
 newport_mmap(void *v, off_t offset, int prot)
 {
 	return -1;
+}
+
+int
+newport_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct newport_devconfig *dc = v;
+	struct rasops_info *ri = &dc->dc_ri;
+
+	return rasops_load_font(ri, emulcookie, font);
+}
+
+int
+newport_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct newport_devconfig *dc = v;
+	struct rasops_info *ri = &dc->dc_ri;
+
+	return rasops_list_font(ri, font);
 }

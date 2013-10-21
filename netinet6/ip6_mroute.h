@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_mroute.h,v 1.9 2013/05/02 11:54:10 mpi Exp $	*/
+/*	$OpenBSD: ip6_mroute.h,v 1.11 2013/10/21 12:36:14 deraadt Exp $	*/
 /*	$KAME: ip6_mroute.h,v 1.17 2001/02/10 02:05:52 itojun Exp $	*/
 
 /*
@@ -30,8 +30,6 @@
  * SUCH DAMAGE.
  */
 
-/*	BSDI ip_mroute.h,v 2.5 1996/10/11 16:01:48 pjd Exp	*/
-
 /*
  * Definitions for IP multicast forwarding.
  *
@@ -60,14 +58,6 @@
 #define MRT6_DEL_MFC		105	/* delete forwarding cache entry */
 #define MRT6_PIM                107     /* enable pim code */
 #define MRT6_INIT		108	/* initialize forwarder (mrt6msg) */
-
-#if BSD >= 199103
-#define GET_TIME(t)	microtime(&t)
-#elif defined(sun)
-#define GET_TIME(t)	uniqtime(&t)
-#else
-#define GET_TIME(t)	((t) = time)
-#endif
 
 /*
  * Types and macros for handling bitmaps with one bit per multicast interface.
@@ -202,7 +192,7 @@ struct sioc_mif_req6 {
 	u_int64_t obytes;	/* Output byte count on mif		*/
 };
 
-#if defined(_KERNEL) || defined(KERNEL)
+#if defined(_KERNEL)
 /*
  * The kernel's multicast-interface structure.
  */

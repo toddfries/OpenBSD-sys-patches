@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.246 2013/08/08 14:29:29 mpi Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.249 2013/10/20 13:44:23 henning Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -1835,7 +1835,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		 * membership slots are full.
 		 */
 		for (i = 0; i < imo->imo_num_memberships; ++i) {
-			if (imo->imo_membership[i]->inm_ia->ia_ifp == ifp &&
+			if (imo->imo_membership[i]->inm_ifp == ifp &&
 			    imo->imo_membership[i]->inm_addr.s_addr
 						== mreq->imr_multiaddr.s_addr)
 				break;
@@ -1917,7 +1917,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		 */
 		for (i = 0; i < imo->imo_num_memberships; ++i) {
 			if ((ifp == NULL ||
-			     imo->imo_membership[i]->inm_ia->ia_ifp == ifp) &&
+			     imo->imo_membership[i]->inm_ifp == ifp) &&
 			     imo->imo_membership[i]->inm_addr.s_addr ==
 			     mreq->imr_multiaddr.s_addr)
 				break;
@@ -2083,6 +2083,25 @@ in_delayed_cksum(struct mbuf *m)
 void
 in_proto_cksum_out(struct mbuf *m, struct ifnet *ifp)
 {
+	/* some hw and in_delayed_cksum need the pseudo header cksum */
+	if (m->m_pkthdr.csum_flags & (M_TCP_CSUM_OUT|M_UDP_CSUM_OUT)) {
+		struct ip *ip;
+		u_int16_t csum, offset;
+
+		ip  = mtod(m, struct ip *);
+		offset = ip->ip_hl << 2;
+		csum = in_cksum_phdr(ip->ip_src.s_addr, ip->ip_dst.s_addr,
+		    htonl(ntohs(ip->ip_len) - offset + ip->ip_p));
+		if (ip->ip_p == IPPROTO_TCP)
+			offset += offsetof(struct tcphdr, th_sum);
+		else if (ip->ip_p == IPPROTO_UDP)
+			offset += offsetof(struct udphdr, uh_sum);
+		if ((offset + sizeof(u_int16_t)) > m->m_len)
+			m_copyback(m, offset, sizeof(csum), &csum, M_NOWAIT);
+		else
+			*(u_int16_t *)(mtod(m, caddr_t) + offset) = csum;
+	}
+
 	if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT) {
 		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_TCPv4) ||
 		    ifp->if_bridgeport != NULL) {
@@ -2102,7 +2121,6 @@ in_proto_cksum_out(struct mbuf *m, struct ifnet *ifp)
 
 		hlen = ip->ip_hl << 2;
 		icp = (struct icmp *)(mtod(m, caddr_t) + hlen);
-		icp->icmp_cksum = 0;
 		icp->icmp_cksum = in4_cksum(m, 0, hlen,
 		    ntohs(ip->ip_len) - hlen);
 		m->m_pkthdr.csum_flags &= ~M_ICMP_CSUM_OUT; /* Clear */

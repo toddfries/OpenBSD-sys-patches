@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti.c,v 1.65 2012/05/06 13:23:54 mikeb Exp $	*/
+/*	$OpenBSD: sti.c,v 1.67 2013/10/20 20:07:29 miod Exp $	*/
 
 /*
  * Copyright (c) 2000-2003 Michael Shalayeff
@@ -84,12 +84,11 @@ int	sti_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
 
 const struct wsdisplay_accessops sti_accessops = {
-	sti_ioctl,
-	sti_mmap,
-	sti_alloc_screen,
-	sti_free_screen,
-	sti_show_screen,
-	NULL			/* load_font */
+	.ioctl = sti_ioctl,
+	.mmap = sti_mmap,
+	.alloc_screen = sti_alloc_screen,
+	.free_screen = sti_free_screen,
+	.show_screen = sti_show_screen
 };
 
 enum sti_bmove_funcs {
@@ -1181,7 +1180,7 @@ sti_mapchar(void *v, int uni, u_int *index)
 	}
 
 	if (c == -1 || c < fp->first || c > fp->last) {
-		*index = ' ';
+		*index = '?';
 		return (0);
 	}
 

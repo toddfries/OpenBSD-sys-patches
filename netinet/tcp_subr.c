@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.120 2013/06/01 16:22:05 bluhm Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.123 2013/10/21 08:42:24 phessler Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -257,9 +257,6 @@ tcp_template(tp)
 
 			th = (struct tcphdr *)(mtod(m, caddr_t) +
 				sizeof(struct ip));
-			th->th_sum = in_cksum_phdr(ipovly->ih_src.s_addr,
-			    ipovly->ih_dst.s_addr,
-			    htons(sizeof (struct tcphdr) + IPPROTO_TCP));
 		}
 		break;
 #endif /* INET */
@@ -281,7 +278,6 @@ tcp_template(tp)
 
 			th = (struct tcphdr *)(mtod(m, caddr_t) +
 				sizeof(struct ip6_hdr));
-			th->th_sum = 0;
 		}
 		break;
 #endif /* INET6 */
@@ -296,6 +292,7 @@ tcp_template(tp)
 	th->th_flags = 0;
 	th->th_win = 0;
 	th->th_urp = 0;
+	th->th_sum = 0;
 	return (m);
 }
 
@@ -731,7 +728,7 @@ tcp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 		 */
 		inp = in6_pcbhashlookup(&tcbtable, &sa6->sin6_addr,
 		    th.th_dport, (struct in6_addr *)&sa6_src->sin6_addr,
-		    th.th_sport);
+		    th.th_sport, rdomain);
 		if (cmd == PRC_MSGSIZE) {
 			/*
 			 * Depending on the value of "valid" and routing table
@@ -755,10 +752,10 @@ tcp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 		     inet6ctlerrmap[cmd] == ENETUNREACH ||
 		     inet6ctlerrmap[cmd] == EHOSTDOWN))
 			syn_cache_unreach((struct sockaddr *)sa6_src,
-			    sa, &th, /* XXX */ 0);
+			    sa, &th, rdomain);
 	} else {
 		(void) in6_pcbnotify(&tcbtable, sa6, 0,
-		    sa6_src, 0, cmd, NULL, notify);
+		    sa6_src, 0, rdomain, cmd, NULL, notify);
 	}
 }
 #endif
@@ -894,17 +891,12 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
  * Path MTU Discovery handlers.
  */
 void
-tcp6_mtudisc_callback(faddr)
-	struct in6_addr *faddr;
+tcp6_mtudisc_callback(sin6, rdomain)
+	struct sockaddr_in6 *sin6;
+	u_int rdomain;
 {
-	struct sockaddr_in6 sin6;
-
-	bzero(&sin6, sizeof(sin6));
-	sin6.sin6_family = AF_INET6;
-	sin6.sin6_len = sizeof(struct sockaddr_in6);
-	sin6.sin6_addr = *faddr;
-	(void) in6_pcbnotify(&tcbtable, &sin6, 0,
-	    &sa6_any, 0, PRC_MSGSIZE, NULL, tcp_mtudisc);
+	(void) in6_pcbnotify(&tcbtable, sin6, 0,
+	    &sa6_any, 0, rdomain, PRC_MSGSIZE, NULL, tcp_mtudisc);
 }
 #endif /* INET6 */
 
