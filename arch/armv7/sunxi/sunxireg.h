@@ -1,4 +1,4 @@
-/*	$OpenBSD: allwinnerreg.h,v 1.1 2013/10/22 13:22:18 jasper Exp $	*/
+/*	$OpenBSD: sunxireg.h,v 1.3 2013/10/23 22:57:59 jasper Exp $	*/
 /*
  * Copyright (c) 2013 Artturi Alm
  *
@@ -59,14 +59,14 @@
 #define	PIO_IRQ			28
 
 #define	UARTx_SIZE		0x400
-#define	UART0_ADDR		0x01c28000 
-#define	UART1_ADDR		0x01c28400 
-#define	UART2_ADDR		0x01c28800 
-#define	UART3_ADDR		0x01c28c00 
-#define	UART4_ADDR		0x01c29000 
-#define	UART5_ADDR		0x01c29400 
-#define	UART6_ADDR		0x01c29800 
-#define	UART7_ADDR		0x01c29c00 
+#define	UART0_ADDR		0x01c28000
+#define	UART1_ADDR		0x01c28400
+#define	UART2_ADDR		0x01c28800
+#define	UART3_ADDR		0x01c28c00
+#define	UART4_ADDR		0x01c29000
+#define	UART5_ADDR		0x01c29400
+#define	UART6_ADDR		0x01c29800
+#define	UART7_ADDR		0x01c29c00
 #define	UART0_IRQ		1
 #define	UART1_IRQ		2
 #define	UART2_IRQ		3
@@ -88,8 +88,8 @@
 #define	EMAC_ADDR		0x01c0b000
 #define	EMAC_SIZE		0x1000
 #define	EMAC_IRQ		55
-#define	AWESRAM_ADDR		0x00008000 /* combined area for EMAC fifos */
-#define	AWESRAM_SIZE		0x4000
+#define	SXIESRAM_ADDR		0x00008000 /* combined area for EMAC fifos */
+#define	SXIESRAM_SIZE		0x4000
 
 /* Security System */
 #define	SS_ADDR			0x01c15000 /* not in use */
@@ -105,5 +105,5 @@
 #define	GIC_SIZE		0x8000
 #define	CPUCONFG_ADDR		0x01c25c00 /* not in use */
 #define	CPUCONFG_SIZE		0x200
-#define	CPUCNTRS_ADDR		0x01c25200 /* used by awtimer */
+#define	CPUCNTRS_ADDR		0x01c25200 /* used by sxitimer */
 #define	CPUCNTRS_SIZE		0x200

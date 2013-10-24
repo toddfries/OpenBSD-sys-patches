@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.850 2013/10/22 15:35:57 lteo Exp $ */
+/*	$OpenBSD: pf.c,v 1.853 2013/10/23 16:13:54 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -62,7 +62,6 @@
 #include <net/radix_mpath.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -2157,7 +2156,8 @@ pf_translate_icmp_af(int af, void *arg)
 		/* aligns well with a icmpv4 nextmtu */
 		icmp6->icmp6_mtu = htonl(mtu);
 		/* icmpv4 pptr is a one most significant byte */
-		icmp6->icmp6_pptr = htonl(ptr << 24);
+		if (ptr >= 0)
+			icmp6->icmp6_pptr = htonl(ptr << 24);
 		break;
 	case AF_INET6:
 		icmp4 = arg;
@@ -2249,7 +2249,8 @@ pf_translate_icmp_af(int af, void *arg)
 		icmp4->icmp_type = type;
 		icmp4->icmp_code = code;
 		icmp4->icmp_nextmtu = htons(mtu);
-		icmp4->icmp_void = htonl(ptr);
+		if (ptr >= 0)
+			icmp4->icmp_void = htonl(ptr);
 		break;
 	}
 
@@ -4979,6 +4980,8 @@ pf_test_state_icmp(struct pf_pdesc *pd, struct pf_state **state,
 					pf_change_ap(pd, pd2.dst,
 					    &uh.uh_sum, &nk->addr[pd2.didx],
 					    nk->port[didx], nk->af);
+					uh.uh_sport = nk->port[sidx];
+					uh.uh_dport = nk->port[didx];
 					m_copyback(pd2.m, pd2.off, sizeof(uh),
 					    &uh, M_NOWAIT);
 					pd->m->m_pkthdr.rdomain = nk->rdomain;

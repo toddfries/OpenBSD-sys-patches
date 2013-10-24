@@ -1,6 +1,6 @@
-/*	$OpenBSD: awccmuvar.h,v 1.1 2013/10/22 13:22:19 jasper Exp $	*/
+/*	$OpenBSD: sxipiovar.h,v 1.2 2013/10/23 18:01:52 jasper Exp $	*/
 /*
- * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
+ * Copyright (c) 2013 Artturi Alm
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -15,25 +15,27 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-void awccmu_enablemodule(int);
+#include <sys/gpio.h>
 
-enum CCMU_MODULES {
-	CCMU_EHCI0,
-	CCMU_EHCI1,
-	CCMU_OHCI,
-	CCMU_AHCI,
-	CCMU_EMAC,
-	CCMU_DMA,
-	CCMU_UART0,
-	CCMU_UART1,
-	CCMU_UART2,
-	CCMU_UART3,
-	CCMU_UART4,
-	CCMU_UART5,
-	CCMU_UART6,
-	CCMU_UART7,
-	CCMU_TWI0,
-	CCMU_TWI1,
-	CCMU_TWI2,
-	CCMU_TWI3
-};
+/*
+ * XXX To keep things simple for now, functions below work as if there
+ * is 32pins per port, this needs to be taken into account when writing
+ * these pin defines.
+ */
+
+#define	SXIPIO_INPUT		0
+#define	SXIPIO_OUTPUT		1
+
+#define SXIPIO_USB1_PWR		230
+#define SXIPIO_USB2_PWR		227
+#define SXIPIO_LED_GREEN		244
+#define SXIPIO_LED_BLUE		245
+#define SXIPIO_SATA_PWR		40
+#define	SXIPIO_EMAC_NPINS	18	/* PORTA 0-17 */
+
+int sxipio_getcfg(int);
+void sxipio_setcfg(int, int);
+int sxipio_getpin(int);
+void sxipio_setpin(int);
+void sxipio_clrpin(int);
+int sxipio_togglepin(int);
