@@ -1,4 +1,4 @@
-/*	$OpenBSD: r100.c,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: r100.c,v 1.3 2013/10/30 02:11:33 dlg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -814,8 +814,7 @@ int r100_irq_process(struct radeon_device *rdev)
 		status = r100_irq_ack(rdev);
 	}
 	if (queue_hotplug)
-		workq_queue_task(NULL, &rdev->hotplug_task, 0,
-		    radeon_hotplug_work_func, rdev, NULL);
+		task_add(systq, &rdev->hotplug_task);
 	if (rdev->msi_enabled) {
 		switch (rdev->family) {
 		case CHIP_RS400:

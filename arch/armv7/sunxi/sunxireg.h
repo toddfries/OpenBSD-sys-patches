@@ -1,4 +1,4 @@
-/*	$OpenBSD: sunxireg.h,v 1.3 2013/10/23 22:57:59 jasper Exp $	*/
+/*	$OpenBSD: sunxireg.h,v 1.5 2013/10/27 12:58:53 jasper Exp $	*/
 /*
  * Copyright (c) 2013 Artturi Alm
  *
@@ -58,6 +58,10 @@
 #define	PIOx_SIZE		0x400
 #define	PIO_IRQ			28
 
+/* Secure ID */
+#define SID_ADDR		0x01c23800
+#define SID_SIZE		0x400
+
 #define	UARTx_SIZE		0x400
 #define	UART0_ADDR		0x01c28000
 #define	UART1_ADDR		0x01c28400
@@ -92,9 +96,14 @@
 #define	SXIESRAM_SIZE		0x4000
 
 /* Security System */
-#define	SS_ADDR			0x01c15000 /* not in use */
+#define	SS_ADDR			0x01c15000
 #define	SS_SIZE			0x1000
 #define	SS_IRQ			54
+
+/* GMAC */
+#define	GMAC_ADDR		0x01c50000
+#define	GMAC_SIZE		0x10000
+#define	GMAC_IRQ		85
 
 /* A1x / Cortex-A8 */
 #define	INTC_ADDR		0x01c20400
@@ -105,5 +114,5 @@
 #define	GIC_SIZE		0x8000
 #define	CPUCONFG_ADDR		0x01c25c00 /* not in use */
 #define	CPUCONFG_SIZE		0x200
-#define	CPUCNTRS_ADDR		0x01c25200 /* used by sxitimer */
+#define	CPUCNTRS_ADDR		0x01c25e00 /* used by sxitimer */
 #define	CPUCNTRS_SIZE		0x200

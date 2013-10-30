@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.853 2013/10/23 16:13:54 mikeb Exp $ */
+/*	$OpenBSD: pf.c,v 1.857 2013/10/30 11:35:10 mpi Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -831,10 +831,10 @@ pf_state_key_addr_setup(struct pf_pdesc *pd, void *arg, int sidx,
 		break;
 	default:
 		if (multi == PF_ICMP_MULTI_LINK) {
-			key->addr[sidx].addr32[0] = IPV6_ADDR_INT32_MLL;
+			key->addr[sidx].addr32[0] = __IPV6_ADDR_INT32_MLL;
 			key->addr[sidx].addr32[1] = 0;
 			key->addr[sidx].addr32[2] = 0;
-			key->addr[sidx].addr32[3] = IPV6_ADDR_INT32_ONE;
+			key->addr[sidx].addr32[3] = __IPV6_ADDR_INT32_ONE;
 			saddr = NULL; /* overwritten */
 		}
 	}
@@ -3792,6 +3792,18 @@ pf_translate(struct pf_pdesc *pd, struct pf_addr *saddr, u_int16_t sport,
 				rewrite = 1;
 			}
 		}
+		if (virtual_type == htons(ICMP6_ECHO_REQUEST)) {
+			u_int16_t icmpid = (icmp_dir == PF_IN) ? sport : dport;
+
+			if (icmpid != pd->hdr.icmp6->icmp6_id) {
+				if (pd->csum_status == PF_CSUM_UNKNOWN)
+					pf_check_proto_cksum(pd, pd->off,
+					    pd->tot_len - pd->off, pd->proto,
+					    pd->af);
+				pd->hdr.icmp6->icmp6_id = icmpid;
+				rewrite = 1;
+			}
+		}
 		break;
 #endif /* INET6 */
 
@@ -4862,8 +4874,12 @@ pf_test_state_icmp(struct pf_pdesc *pd, struct pf_state **state,
 						pd->proto = IPPROTO_ICMP;
 					else
 						pd->proto = IPPROTO_ICMPV6;
-					th.th_sport = nk->port[sidx];
-					th.th_dport = nk->port[didx];
+					pf_change_ap(pd, pd2.src, &th.th_sport,
+					    &nk->addr[pd2.sidx], nk->port[sidx],
+					    nk->af);
+					pf_change_ap(pd, pd2.dst, &th.th_dport,
+					    &nk->addr[pd2.didx], nk->port[didx],
+					    nk->af);
 					m_copyback(pd2.m, pd2.off, 8, &th,
 					    M_NOWAIT);
 					pd->m->m_pkthdr.rdomain = nk->rdomain;
@@ -4974,14 +4990,12 @@ pf_test_state_icmp(struct pf_pdesc *pd, struct pf_state **state,
 						pd->proto = IPPROTO_ICMP;
 					else
 						pd->proto = IPPROTO_ICMPV6;
-					pf_change_ap(pd, pd2.src,
-					    &uh.uh_sum, &nk->addr[pd2.sidx],
-					    nk->port[sidx], nk->af);
-					pf_change_ap(pd, pd2.dst,
-					    &uh.uh_sum, &nk->addr[pd2.didx],
-					    nk->port[didx], nk->af);
-					uh.uh_sport = nk->port[sidx];
-					uh.uh_dport = nk->port[didx];
+					pf_change_ap(pd, pd2.src, &uh.uh_sport,
+					    &nk->addr[pd2.sidx], nk->port[sidx],
+					    nk->af);
+					pf_change_ap(pd, pd2.dst, &uh.uh_dport,
+					    &nk->addr[pd2.didx], nk->port[didx],
+					    nk->af);
 					m_copyback(pd2.m, pd2.off, sizeof(uh),
 					    &uh, M_NOWAIT);
 					pd->m->m_pkthdr.rdomain = nk->rdomain;
@@ -6771,10 +6785,12 @@ pf_cksum(struct pf_pdesc *pd, struct mbuf *m)
 		pd->hdr.icmp->icmp_cksum = 0;
 		m->m_pkthdr.csum_flags |= M_ICMP_CSUM_OUT;
 		break;
+#ifdef INET6
 	case IPPROTO_ICMPV6:
 		pd->hdr.icmp6->icmp6_cksum = 0;
 		m->m_pkthdr.csum_flags |= M_ICMP_CSUM_OUT;
 		break;
+#endif /* INET6 */
 	default:
 		/* nothing */
 		break;

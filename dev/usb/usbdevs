@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.607 2013/09/30 05:16:24 jsg Exp $
+$OpenBSD: usbdevs,v 1.610 2013/10/30 12:28:19 aoyama Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -2861,6 +2861,7 @@ product MICROSOFT WLINTELLIMOUSE 0x008c	Wireless Optical IntelliMouse
 product MICROSOFT WLNOTEBOOK	0x00b9	Wireless Optical Mouse (Model 1023)
 product MICROSOFT WLNOTEBOOK3	0x00d2	Wireless Optical Mouse 3000 (Model 1049)
 product MICROSOFT WLNOTEBOOK2	0x00e1	Wireless Optical Mouse 3000 (Model 1056)
+product MICROSOFT XBOX360_CONTROLLER 0x028e XBOX 360 Controller
 product MICROSOFT XBOX360	0x0292	XBOX 360 WLAN
 product MICROSOFT LIFECAM	0x074a	Microsoft LifeCam
 
@@ -3084,6 +3085,7 @@ product OMNIVISION OV511PLUS	0xa511	OV511+
 /* OMRON products */
 product OMRON BX50F		0x0057	BX50F UPS
 product OMRON BX35F		0x0058	BX35F UPS
+product OMRON BY35S		0x0080	BY35S UPS
 
 /* OnSpec Electronic, Inc. */
 product ONSPEC MD2		0x0103	disk
@@ -3781,6 +3783,7 @@ product SMC 2202USB		0x0200	10/100 Ethernet
 product SMC 2206USB		0x0201	EZ Connect Ethernet
 product SMC2 2020HUB		0x2020	Hub
 product SMC2 2504HUB		0x2504	Hub
+product SMC2 2513HUB		0x2513	Hub
 product SMC2 SMSC9500		0x9500	SMSC9500
 product SMC2 SMSC9505		0x9505	SMSC9505
 product SMC2 SMSC9500A		0x9e00	SMSC9500A

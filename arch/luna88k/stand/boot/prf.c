@@ -1,8 +1,8 @@
-/*	$OpenBSD: if_fddi.h,v 1.6 2003/06/02 23:28:12 millert Exp $	*/
-/*	$NetBSD: if_fddi.h,v 1.2 1995/08/19 04:35:28 cgd Exp $	*/
+/*	$OpenBSD: prf.c,v 1.1 2013/10/28 22:13:13 miod Exp $	*/
+/*	$NetBSD: prf.c,v 1.3 2013/01/22 15:48:40 tsutsui Exp $	*/
 
 /*
- * Copyright (c) 1982, 1986, 1993
+ * Copyright (c) 1982, 1986, 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -29,53 +29,48 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)if_fddi.h	8.1 (Berkeley) 6/10/93
+ *	@(#)prf.c	8.1 (Berkeley) 6/10/93
  */
 
-#ifndef _NETINET_IF_FDDI_H_
-#define _NETINET_IF_FDDI_H_
+#include <luna88k/stand/boot/samachdep.h>
 
-/*
- * Structure of an 100Mb/s FDDI header.
- */
-struct	fddi_header {
-	u_char	fddi_fc;
-	u_char	fddi_dhost[6];
-	u_char	fddi_shost[6];
-};
+int
+getchar(void)
+{
+	int c;
 
-#define	FDDIMTU			4470
-#define	FDDIIPMTU		4352
-#define	FDDIMIN			3
+	while ((c = cngetc()) == 0)
+		;
+	if (c == '\r')
+		c = '\n';
+	else if (c == ('c'&037)) {
+		panic("^C");
+		/* NOTREACHED */
+	}
+	return c;
+}
 
-#define	FDDIFC_C		0x80	/* 0b10000000 */
-#define	FDDIFC_L		0x40	/* 0b01000000 */
-#define	FDDIFC_F		0x30	/* 0b00110000 */
-#define	FDDIFC_Z		0x0F	/* 0b00001111 */
+int
+tgetchar(void)
+{
+	int c;
 
-#define	FDDIFC_LLC_ASYNC	0x50
-#define	FDDIFC_LLC_PRIO0	0
-#define	FDDIFC_LLC_PRIO1	1
-#define	FDDIFC_LLC_PRIO2	2
-#define	FDDIFC_LLC_PRIO3	3
-#define	FDDIFC_LLC_PRIO4	4
-#define	FDDIFC_LLC_PRIO5	5
-#define	FDDIFC_LLC_PRIO6	6
-#define	FDDIFC_LLC_PRIO7	7
-#define FDDIFC_LLC_SYNC         0xd0
-#define	FDDIFC_SMT		0x40
+	if ((c = cngetc()) == 0)
+		return 0;
 
-#if defined(_KERNEL)
-#define	fddibroadcastaddr	etherbroadcastaddr
-#define	fddi_ipmulticast_min	ether_ipmulticast_min
-#define	fddi_ipmulticast_max	ether_ipmulticast_max
-#define	fddi_addmulti		ether_addmulti
-#define	fddi_delmulti		ether_delmulti
-#define	fddi_sprintf		ether_sprintf
+	if (c == '\r')
+		c = '\n';
+	else if (c == ('c'&037)) {
+		panic("^C");
+		/* NOTREACHED */
+	}
+	return c;
+}
 
-void    fddi_ifattach(struct ifnet *);
-void    fddi_input(struct ifnet *, struct fddi_header *, struct mbuf *);
-int     fddi_output(struct ifnet *,
-           struct mbuf *, struct sockaddr *, struct rtentry *); 
-#endif /* _KERNEL */
-#endif /* _NET_IF_FDDI_H_ */
+void
+putchar(int c)
+{
+	cnputc(c);
+	if (c == '\n')
+		cnputc('\r');
+}

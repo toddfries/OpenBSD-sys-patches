@@ -1,4 +1,4 @@
-/* $OpenBSD: prcmvar.h,v 1.2 2013/10/10 19:40:03 syl Exp $ */
+/* $OpenBSD: prcmvar.h,v 1.4 2013/10/28 11:11:50 rapha Exp $ */
 /*
  * Copyright (c) 2007,2009 Dale Rahn <drahn@openbsd.org>
  *
@@ -27,11 +27,19 @@ enum PRCM_MODULES {
 	PRCM_TIMER1,
 	PRCM_TIMER2,
 	PRCM_TIMER3,
+	PRCM_GPIO0,
+	PRCM_GPIO1,
+	PRCM_GPIO2,
+	PRCM_GPIO3,
+	PRCM_GPIO4,
+	PRCM_GPIO5,
 	PRCM_TPCC,
 	PRCM_TPTC0,
 	PRCM_TPTC1,
 	PRCM_TPTC2,
-	PRCM_MMC,
+	PRCM_MMC0,
+	PRCM_MMC1,
+	PRCM_MMC2,
 	PRCM_USB,
 	PRCM_USBTLL,
 	PRCM_USBP1_PHY,
