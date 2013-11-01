@@ -1,7 +1,6 @@
-/*	$OpenBSD: ld.script,v 1.1 2013/01/05 11:20:55 miod Exp $	*/
-
+/*	$OpenBSD: armv7_machdep.h,v 1.1 2013/10/30 20:20:23 syl Exp $	*/
 /*
- * Copyright (c) 2012 Miodrag Vallat.
+ * Copyright (c) 2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -16,36 +15,15 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/*
- * This linker script is used to merge .rodata into .text and pad .text to
- * a page size. This allows objcopy to correctly be able to convert it to
- * an OMAGIC binary, suitable to be booted from the PROM.
- */
-OUTPUT_FORMAT("elf32-m88k")
-OUTPUT_ARCH(m88k)
-ENTRY(__start)
-SECTIONS
-{
-	.text :
-	{
-		*(.text)
-		*(.rodata*)
-		PROVIDE(etext = ABSOLUTE(.));
-		FILL(0xf4005800)
-		. = ALIGN(0x1000);
-	}
-	.data :
-	{
-		*(.data)
-		PROVIDE(edata = ABSOLUTE(.));
-	}
-	.bss :
-	{
-		*(.bss)
-	}
-	PROVIDE(end = ABSOLUTE(.));
-	/DISCARD/ :
-	{
-		*(.comment)
-	}
-}
+#ifndef __PLATFORMVAR_H__
+#define __PLATFORMVAR_H__
+
+void platform_powerdown(void);
+void platform_watchdog_reset(void);
+void platform_init_cons(void);
+void platform_print_board_type(void);
+void platform_bootconfig_dram(BootConfig *, psize_t *, psize_t *);
+void platform_disable_l2_if_needed(void);
+extern const char *platform_boot_name;
+
+#endif /* __PLATFORMVAR_H__ */

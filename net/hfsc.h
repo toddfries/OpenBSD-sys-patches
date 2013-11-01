@@ -1,4 +1,4 @@
-/*	$OpenBSD: hfsc.h,v 1.1 2013/10/12 11:39:17 henning Exp $	*/
+/*	$OpenBSD: hfsc.h,v 1.3 2013/10/31 13:19:17 pelikan Exp $	*/
 
 /*
  * Copyright (c) 2012-2013 Henning Brauer <henning@openbsd.org>
