@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem_context.c,v 1.2 2013/10/05 07:30:06 jsg Exp $	*/
+/*	$OpenBSD: i915_gem_context.c,v 1.4 2013/11/11 02:43:20 jsg Exp $	*/
 /*
  * Copyright © 2011-2012 Intel Corporation
  *
@@ -117,7 +117,7 @@ static int get_context_size(struct drm_device *dev)
 	case 7:
 		reg = I915_READ(GEN7_CXT_SIZE);
 		if (IS_HASWELL(dev))
-			ret = HSW_CXT_TOTAL_SIZE(reg) * 64;
+			ret = HSW_CXT_TOTAL_SIZE;
 		else
 			ret = GEN7_CXT_TOTAL_SIZE(reg) * 64;
 		break;
@@ -422,7 +422,7 @@ static int do_switch(struct i915_hw_context *to)
 
 	if (!to->is_initialized || is_default_context(to))
 		hw_flags |= MI_RESTORE_INHIBIT;
-	else if (/*WARN_ON_ONCE*/(from_obj == to->obj)) /* not yet expected */
+	else if (WARN_ON_ONCE(from_obj == to->obj)) /* not yet expected */
 		hw_flags |= MI_FORCE_RESTORE;
 
 	ret = mi_set_context(ring, to, hw_flags);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_disksubr.c,v 1.2 2013/10/29 21:49:07 miod Exp $	*/
+/*	$OpenBSD: ufs_disksubr.c,v 1.4 2013/11/05 00:51:58 krw Exp $	*/
 /*	$NetBSD: ufs_disksubr.c,v 1.2 2013/01/14 01:37:57 tsutsui Exp $	*/
 
 /*
@@ -126,12 +126,12 @@ readdisklabel(struct scsi_softc *sc, uint tgt, struct disklabel *lp)
 		{ CMD_READ, 0, 0, 0, 1, 0 }
 	};
 
-	if (lp->d_secperunit == 0)
-		lp->d_secperunit = 0x1fffffff;
+	if (DL_GETDSIZE(lp) == 0)
+		DL_SETDSIZE(lp, 0x1fffffff);
 	lp->d_npartitions = 1;
-	if (lp->d_partitions[0].p_size == 0)
-		lp->d_partitions[0].p_size = 0x1fffffff;
-	lp->d_partitions[0].p_offset = 0;
+	if (DL_GETPSIZE(&lp->d_partitions[0]) == 0)
+		DL_SETPSIZE(&lp->d_partitions[0], 0x1fffffff);
+	DL_SETPSIZE(&lp->d_partitions[0], 0);
 
 	if (scsi_immed_command(sc, tgt, 0, &cdb, bp, DEV_BSIZE) != 0)
 		return "I/O error";
@@ -158,7 +158,7 @@ readdisklabel(struct scsi_softc *sc, uint tgt, struct disklabel *lp)
 	secpercyl = slp->sl_nsectors * slp->sl_ntracks;
 	lp->d_secpercyl = secpercyl;
 	if (DL_GETDSIZE(lp) == 0)
-		DL_SETDSIZE(lp, (daddr_t)secpercyl * slp->sl_ncylinders);
+		DL_SETDSIZE(lp, (u_int64_t)secpercyl * slp->sl_ncylinders);
 	lp->d_version = 1;
 
 	memcpy(&lp->d_uid, &slp->sl_uid, sizeof(slp->sl_uid));

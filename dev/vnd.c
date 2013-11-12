@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnd.c,v 1.150 2013/06/11 16:42:14 deraadt Exp $	*/
+/*	$OpenBSD: vnd.c,v 1.152 2013/11/12 14:11:07 krw Exp $	*/
 /*	$NetBSD: vnd.c,v 1.26 1996/03/30 23:06:11 christos Exp $	*/
 
 /*
@@ -310,7 +310,8 @@ vndstrategy(struct buf *bp)
 			printf("%s: sloppy %s from proc %d (%s): "
 			    "blkno %lld bcount %ld\n", sc->sc_dev.dv_xname,
 			    (bp->b_flags & B_READ) ? "read" : "write",
-			    pr->p_pid, pr->p_comm, bp->b_blkno, origbcount);
+			    pr->p_pid, pr->p_comm, (long long)bp->b_blkno,
+			    origbcount);
 		}
 #endif
 	}
@@ -382,9 +383,9 @@ vndbdevsize(struct vnode *vp, struct proc *p)
 		return (0);
 	if (bsw->d_ioctl(dev, DIOCGPART, (caddr_t)&pi, FREAD, p))
 		return (0);
-	DNPRINTF(VDB_INIT, "vndbdevsize: size %li secsize %li\n",
-	    (long)pi.part->p_size,(long)pi.disklab->d_secsize);
-	return (pi.part->p_size);
+	DNPRINTF(VDB_INIT, "vndbdevsize: size %llu secsize %u\n",
+	    DL_GETPSIZE(pi.part), pi.disklab->d_secsize);
+	return (DL_GETPSIZE(pi.part));
 }
 
 /* ARGSUSED */

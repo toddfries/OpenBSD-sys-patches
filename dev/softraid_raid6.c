@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.53 2013/06/11 16:42:13 deraadt Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.55 2013/11/05 08:55:58 reyk Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -130,8 +130,8 @@ sr_raid6_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 	 */
 	sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
 	sd->sd_meta->ssdi.ssd_size = (coerced_size &
-	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) *
-	    (no_chunk - 2);
+	    ~(((u_int64_t)sd->sd_meta->ssdi.ssd_strip_size >>
+	    DEV_BSHIFT) - 1)) * (no_chunk - 2);
 
 	return sr_raid6_init(sd);
 }
@@ -717,14 +717,14 @@ sr_raid6_wu_done(struct sr_workunit *wu)
 
 	if (xs->flags & SCSI_DATA_IN) {
 		printf("%s: retrying read on block %lld\n",
-		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 		sr_wu_release_ccbs(wu);
 		wu->swu_state = SR_WU_RESTART;
 		if (sd->sd_scsi_rw(wu) == 0)
 			return SR_WU_RESTART;
 	} else {
 		printf("%s: permanently fail write on block %lld\n",
-		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 	}
 
 	wu->swu_state = SR_WU_FAILED;

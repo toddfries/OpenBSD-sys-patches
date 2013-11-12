@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_swap.c,v 1.115 2013/06/11 16:42:19 deraadt Exp $	*/
+/*	$OpenBSD: uvm_swap.c,v 1.121 2013/11/06 07:46:31 dlg Exp $	*/
 /*	$NetBSD: uvm_swap.c,v 1.40 2000/11/17 11:39:39 mrg Exp $	*/
 
 /*
@@ -50,6 +50,7 @@
 #include <sys/syscallargs.h>
 #include <sys/swap.h>
 #include <sys/disk.h>
+#include <sys/task.h>
 #if defined(NFSCLIENT)
 #include <sys/socket.h>
 #include <sys/domain.h>
@@ -129,8 +130,8 @@ struct swapdev {
 #define	swd_dev		swd_se.se_dev		/* device id */
 #define	swd_flags	swd_se.se_flags		/* flags:inuse/enable/fake */
 #define	swd_priority	swd_se.se_priority	/* our priority */
-#define	swd_inuse	swd_se.se_inuse		/* our priority */
-#define	swd_nblks	swd_se.se_nblks		/* our priority */
+#define	swd_inuse	swd_se.se_inuse		/* blocks used */
+#define	swd_nblks	swd_se.se_nblks		/* total blocks */
 	char			*swd_path;	/* saved pathname of device */
 	int			swd_pathlen;	/* length of pathname */
 	int			swd_npages;	/* #pages we can use */
@@ -192,7 +193,7 @@ struct vndxfer {
 
 struct vndbuf {
 	struct buf	vb_buf;
-	struct vndxfer	*vb_xfer;
+	struct task	vb_task;
 };
 
 
@@ -982,8 +983,21 @@ swap_on(struct proc *p, struct swapdev *sdp)
 	/* allocate the `saved' region from the extent so it won't be used */
 	if (addr) {
 		if (extent_alloc_region(sdp->swd_ex, 0, addr, EX_WAITOK))
-			panic("disklabel region");
+			panic("disklabel reserve");
+		/* XXX: is extent synchronized with swd_npginuse? */
 	}
+#ifdef HIBERNATE
+	/*
+	 * Lock down the last region of primary disk swap, in case
+	 * hibernate needs to place a signature there.
+	 */
+	if (dev == swdevt[0].sw_dev && vp->v_type == VBLK && size > 3 ) {
+		if (extent_alloc_region(sdp->swd_ex,
+		    npages - 1 - 1, 1, EX_WAITOK))
+			panic("hibernate reserve");
+		/* XXX: is extent synchronized with swd_npginuse? */
+	}
+#endif
 
 	/*
 	 * add a ref to vp to reflect usage as a swap device.
@@ -1196,7 +1210,7 @@ sw_reg_strategy(struct swapdev *sdp, struct buf *bp, int bn)
 		error = VOP_BMAP(sdp->swd_vp, byteoff / sdp->swd_bsize,
 				 	&vp, &nbn, &nra);
 
-		if (error == 0 && nbn == (daddr_t)-1) {
+		if (error == 0 && nbn == -1) {
 			/*
 			 * this used to just set error, but that doesn't
 			 * do the right thing.  Instead, it causes random
@@ -1277,7 +1291,8 @@ sw_reg_strategy(struct swapdev *sdp, struct buf *bp, int bn)
 				max(0, bp->b_validend - (bp->b_bcount-resid)));
 		}
 
-		nbp->vb_xfer = vnx;	/* patch it back in to vnx */
+		/* patch it back to the vnx */
+		task_set(&nbp->vb_task, sw_reg_iodone_internal, nbp, vnx);
 
 		/* XXX: In case the underlying bufq is disksort: */
 		nbp->vb_buf.b_cylinder = nbp->vb_buf.b_blkno;
@@ -1352,26 +1367,22 @@ sw_reg_start(struct swapdev *sdp)
  * => note that we can recover the vndbuf struct by casting the buf ptr
  *
  * XXX:
- * We only put this onto a workq here, because of the maxactive game since
+ * We only put this onto a taskq here, because of the maxactive game since
  * it basically requires us to call back into VOP_STRATEGY() (where we must
  * be able to sleep) via sw_reg_start().
  */
 void
 sw_reg_iodone(struct buf *bp)
 {
-	struct bufq_swapreg	*bq;
-
-	bq = (struct bufq_swapreg *)&bp->b_bufq;
-
-	workq_queue_task(NULL, &bq->bqf_wqtask, 0,
-	    (workq_fn)sw_reg_iodone_internal, bp, NULL);
+	struct vndbuf *vbp = (struct vndbuf *)bp;
+	task_add(systq, &vbp->vb_task);
 }
 
 void
-sw_reg_iodone_internal(void *arg0, void *unused)
+sw_reg_iodone_internal(void *xvbp, void *xvnx)
 {
-	struct vndbuf *vbp = (struct vndbuf *)arg0;
-	struct vndxfer *vnx = vbp->vb_xfer;
+	struct vndbuf *vbp = xvbp;
+	struct vndxfer *vnx = xvnx;
 	struct buf *pbp = vnx->vx_bp;		/* parent buffer */
 	struct swapdev	*sdp = vnx->vx_sdp;
 	int resid, s;
@@ -2011,21 +2022,16 @@ gotit:
 }
 
 #ifdef HIBERNATE
-/*
- * Check if free swap available at end of swap dev swdev.
- * Used by hibernate to check for usable swap area before writing the image
- */
 int
-uvm_swap_check_range(dev_t swdev, size_t size)
+uvm_hibswap(dev_t dev, u_long *sp, u_long *ep)
 {
 	struct swapdev *sdp, *swd = NULL;
 	struct swappri *spp;
-	struct extent *ex;
-	struct extent_region *exr;
-	int r = 0, start,  npages = size / PAGE_SIZE;
+	struct extent_region *exr, *exrn;
+	u_long start = 0, end = 0, size = 0;
 
 	/* no swap devices configured yet? */
-	if (uvmexp.nswapdev < 1)
+	if (uvmexp.nswapdev < 1 || dev != swdevt[0].sw_dev)
 		return (1);
 
 	for (spp = LIST_FIRST(&swap_priority); spp != NULL;
@@ -2033,28 +2039,34 @@ uvm_swap_check_range(dev_t swdev, size_t size)
 		for (sdp = CIRCLEQ_FIRST(&spp->spi_swapdev);
 		     sdp != (void *)&spp->spi_swapdev;
 		     sdp = CIRCLEQ_NEXT(sdp,swd_next)) {
-			if (sdp->swd_dev == swdev)
+			if (sdp->swd_dev == dev)
 				swd = sdp;
 		}
 
-	if (swd == NULL)
+	if (swd == NULL || (swd->swd_flags & SWF_ENABLE) == 0)
 		return (1);
 
-	if ((swd->swd_flags & SWF_ENABLE) == 0)
-		return (1);
-
-	ex = swd->swd_ex;
-	start = swd->swd_drumsize-npages;
-
-	if (npages > swd->swd_drumsize)
-		return (1); 
-
-	LIST_FOREACH(exr, &ex->ex_regions, er_link)
-		{
-			if (exr->er_end >= start)
-				r = 1;
+	LIST_FOREACH(exr, &swd->swd_ex->ex_regions, er_link) {
+		u_long gapstart, gapend, gapsize;
+	
+		gapstart = exr->er_end + 1;
+		exrn = LIST_NEXT(exr, er_link);
+		if (!exrn)
+			break;
+		gapend = exrn->er_start - 1;
+		gapsize = gapend - gapstart;
+		if (gapsize > size) {
+			start = gapstart;
+			end = gapend;
+			size = gapsize;
 		}
+	}
 
-	return (r);
+	if (size) {
+		*sp = start;
+		*ep = end;
+		return (0);
+	}
+	return (1);
 }
 #endif /* HIBERNATE */

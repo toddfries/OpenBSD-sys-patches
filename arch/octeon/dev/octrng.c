@@ -1,4 +1,4 @@
-/*	$OpenBSD: octrng.c,v 1.1 2013/10/24 20:45:03 pirofti Exp $	*/
+/*	$OpenBSD: octrng.c,v 1.4 2013/11/05 16:37:06 pirofti Exp $	*/
 /*
  * Copyright (c) 2013 Paul Irofti <pirofti@openbsd.org>
  *
@@ -30,7 +30,6 @@ int	octrng_match(struct device *, void *, void *);
 void	octrng_attach(struct device *, struct device *, void *);
 void	octrng_rnd(void *arg);
 
-#define OCTRNG_DEBUG
 #ifdef OCTRNG_DEBUG
 #define DPRINTF(x)	printf x
 #else
@@ -47,9 +46,9 @@ void	octrng_rnd(void *arg);
 
 #define OCTRNG_CONTROL_ADDR 0x0001180040000000ULL
 
-#define OCTRNG_RESET (1ULL << 60)
-#define OCTRNG_ENABLE_OUTPUT (1ULL << 62)
-#define OCTRNG_ENABLE_ENTROPY (1ULL << 63)
+#define OCTRNG_RESET (1ULL << 3)
+#define OCTRNG_ENABLE_OUTPUT (1ULL << 1)
+#define OCTRNG_ENABLE_ENTROPY (1ULL << 0)
 
 struct octrng_softc {
 	struct device sc_dev;
@@ -68,10 +67,20 @@ struct cfdriver octrng_cd = {
 	NULL, "octrng", DV_DULL
 };
 
+
 int
 octrng_match(struct device *parent, void *match, void *aux)
 {
+	struct iobus_attach_args *aa = aux;
+	struct cfdata *cf = match;
+	
 	/* XXX: check for board type */
+
+	if (aa->aa_name == NULL ||
+	    strcmp(aa->aa_name, cf->cf_driver->cd_name) != 0)
+		return (0);
+
+
 	return (1);
 }
 

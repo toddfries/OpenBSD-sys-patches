@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid0.c,v 1.41 2013/06/11 16:42:13 deraadt Exp $ */
+/* $OpenBSD: softraid_raid0.c,v 1.43 2013/11/05 08:55:58 reyk Exp $ */
 /*
  * Copyright (c) 2008 Marco Peereboom <marco@peereboom.us>
  *
@@ -84,7 +84,8 @@ sr_raid0_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 	 */
 	sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
 	sd->sd_meta->ssdi.ssd_size = (coerced_size &
-	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) * no_chunk;
+	    ~(((u_int64_t)sd->sd_meta->ssdi.ssd_strip_size >>
+	    DEV_BSHIFT) - 1)) * no_chunk;
 
 	return sr_raid0_init(sd);
 }
@@ -135,7 +136,7 @@ sr_raid0_rw(struct sr_workunit *wu)
 
 	DNPRINTF(SR_D_DIS, "%s: %s: front end io: lba %lld size %d\n",
 	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
-	    blk, xs->datalen);
+	    (long long)blk, xs->datalen);
 
 	/* all offs are in bytes */
 	lbaoffs = blk << DEV_BSHIFT;
@@ -159,8 +160,10 @@ sr_raid0_rw(struct sr_workunit *wu)
 		    "chunkoffs %lld physoffs %lld length %lld "
 		    "leftover %lld data %p\n",
 		    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, sd->sd_name,
-		    lbaoffs, strip_no, chunk, stripoffs, chunkoffs, physoffs,
-		    length, leftover, data);
+		    (long long)lbaoffs, (long long)strip_no, (long long)chunk,
+		    (long long)stripoffs, (long long)chunkoffs,
+		    (long long)physoffs, (long long)length, (long long)leftover,
+		    data);
 
 		blk = physoffs >> DEV_BSHIFT;
 		ccb = sr_ccb_rw(sd, chunk, blk, length, data, xs->flags, 0);

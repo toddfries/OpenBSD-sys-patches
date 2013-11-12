@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.84 2013/06/11 16:42:11 deraadt Exp $	*/
+/*	$OpenBSD: fd.c,v 1.86 2013/11/12 16:04:09 krw Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -727,8 +727,9 @@ fdstrategy(bp)
 
 #ifdef FD_DEBUG
 	if (fdc_debug > 1)
-	    printf("fdstrategy: b_blkno %d b_bcount %ld blkno %lld cylin %ld\n",
-		    bp->b_blkno, bp->b_bcount, fd->sc_blkno, bp->b_cylinder);
+	    printf("fdstrategy: b_blkno %lld b_bcount %ld blkno %lld "
+		"cylin %ld\n", (long long)bp->b_blkno, bp->b_bcount,
+		(long long)fd->sc_blkno, bp->b_cylinder);
 #endif
 
 	/* Queue transfer on drive, activate drive and controller if idle. */
@@ -1379,14 +1380,19 @@ loop:
 		head = sec / type->sectrac;
 		sec -= head * type->sectrac;
 #ifdef DIAGNOSTIC
-		{int block;
-		 block = (fd->sc_cylin * type->heads + head) * type->sectrac + sec;
-		 if (block != fd->sc_blkno) {
-			 printf("fdcintr: block %d != blkno %lld\n", block, fd->sc_blkno);
+		{
+			daddr_t block;
+
+			block = (fd->sc_cylin * type->heads + head) *
+			    type->sectrac + sec;
+			if (block != fd->sc_blkno) {
+				printf("fdcintr: block %lld != blkno %lld\n",
+				    (long long)block, (long long)fd->sc_blkno);
 #if defined(FD_DEBUG) && defined(DDB)
-			 Debugger();
+				Debugger();
 #endif
-		 }}
+			}
+		}
 #endif
 		read = bp->b_flags & B_READ;
 
@@ -1510,7 +1516,7 @@ loop:
 					bp->b_flags & B_READ
 					? "read failed" : "write failed");
 				printf("blkno %lld nblks %d nstat %d tc %d\n",
-				       fd->sc_blkno, fd->sc_nblks,
+				       (long long)fd->sc_blkno, fd->sc_nblks,
 				       fdc->sc_nstat, fdc->sc_tc);
 			}
 #endif

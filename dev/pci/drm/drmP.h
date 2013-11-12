@@ -1,4 +1,4 @@
-/* $OpenBSD: drmP.h,v 1.150 2013/10/26 20:31:48 kettenis Exp $ */
+/* $OpenBSD: drmP.h,v 1.152 2013/11/07 05:33:05 jsg Exp $ */
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -173,6 +173,10 @@ do {									\
 	if (condition)							\
 		printf("WARNING %s failed at %s:%d\n",			\
 		    _WARN_STR(condition), __FILE__, __LINE__);		\
+	(condition);							\
+})
+
+#define WARN_ON_ONCE(condition) ({					\
 	(condition);							\
 })
 
@@ -989,14 +993,15 @@ void	drm_unhold_object_locked(struct drm_obj *);
 void	drm_unhold_object(struct drm_obj *);
 int	drm_try_hold_object(struct drm_obj *);
 void	drm_unhold_and_unref(struct drm_obj *);
-int	drm_handle_create(struct drm_file *, struct drm_obj *, int *);
-int	drm_handle_delete(struct drm_file *, int);
+
+int	drm_gem_handle_create(struct drm_file *, struct drm_obj *, u32 *);
+int	drm_gem_handle_delete(struct drm_file *, u32);
 
 void drm_gem_free_mmap_offset(struct drm_obj *obj);
 int drm_gem_create_mmap_offset(struct drm_obj *obj);
 
 struct drm_obj *drm_gem_object_lookup(struct drm_device *,
-			    struct drm_file *, int );
+			    struct drm_file *, u32);
 int	drm_gem_close_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_gem_flink_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_gem_open_ioctl(struct drm_device *, void *, struct drm_file *);

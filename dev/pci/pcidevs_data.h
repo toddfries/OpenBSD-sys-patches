@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1693 2013/10/22 09:25:59 dlg Exp 
+ *	OpenBSD: pcidevs,v 1.1696 2013/11/09 03:59:20 jsg Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -2006,6 +2006,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1210,
 	    "ARC-1210",
+	},
+	{
+	    PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1214,
+	    "ARC-1214",
 	},
 	{
 	    PCI_VENDOR_ARECA, PCI_PRODUCT_ARECA_ARC1220,
@@ -8600,6 +8604,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "HD Graphics 2500",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_XEONE3_1200V2_HB,
+	    "Xeon E3-1200 v2 Host",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_PCIE_3,
 	    "Core 3G PCIE",
 	},
@@ -8904,12 +8912,24 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Core 4G Host",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_PCIE_1,
+	    "Core 4G PCIE",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_SDV_GT1,
 	    "HD Graphics",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_PCIE_2,
+	    "Core 4G PCIE",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_SDV_GT1,
 	    "HD Graphics",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_PCIE_3,
+	    "Core 4G PCIE",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_S_SDV_GT1,
@@ -14108,6 +14128,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "IT8892E PCIE-PCI",
 	},
 	{
+	    PCI_VENDOR_ITEXPRESS, PCI_PRODUCT_ITEXPRESS_IT8893E,
+	    "IT8893E PCIE-PCI",
+	},
+	{
 	    PCI_VENDOR_JMICRON, PCI_PRODUCT_JMICRON_JMC250,
 	    "JMC250",
 	},
@@ -19218,6 +19242,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTS5209,
 	    "RTS5209 Card Reader",
+	},
+	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTS5229,
+	    "RTS5229 Card Reader",
 	},
 	{
 	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8029,
