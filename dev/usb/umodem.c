@@ -1,4 +1,4 @@
-/*	$OpenBSD: umodem.c,v 1.51 2013/11/07 12:53:14 pirofti Exp $ */
+/*	$OpenBSD: umodem.c,v 1.53 2013/11/15 10:17:39 pirofti Exp $ */
 /*	$NetBSD: umodem.c,v 1.45 2002/09/23 05:51:23 simonb Exp $	*/
 
 /*
@@ -437,10 +437,7 @@ umodem_close(void *addr, int portno)
 	DPRINTF(("umodem_close: sc=%p\n", sc));
 
 	if (sc->sc_notify_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_notify_pipe);
-		if (err)
-			printf("%s: abort notify pipe failed: %s\n",
-			    sc->sc_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_notify_pipe);
 		err = usbd_close_pipe(sc->sc_notify_pipe);
 		if (err)
 			printf("%s: close notify pipe failed: %s\n",
@@ -745,16 +742,13 @@ int
 umodem_activate(struct device *self, int act)
 {
 	struct umodem_softc *sc = (struct umodem_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
 		usbd_deactivate(sc->sc_udev);
-		if (sc->sc_subdev)
-			rv = config_deactivate(sc->sc_subdev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 int

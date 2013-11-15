@@ -1,4 +1,4 @@
-/*	$OpenBSD: umct.c,v 1.37 2013/11/07 07:32:07 pirofti Exp $	*/
+/*	$OpenBSD: umct.c,v 1.39 2013/11/15 10:17:39 pirofti Exp $	*/
 /*	$NetBSD: umct.c,v 1.10 2003/02/23 04:20:07 simonb Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -331,16 +331,13 @@ int
 umct_activate(struct device *self, int act)
 {
 	struct umct_softc *sc = (struct umct_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
 		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 void
@@ -568,10 +565,7 @@ umct_close(void *addr, int portno)
 	DPRINTF(("umct_close: close\n"));
 
 	if (sc->sc_intr_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_intr_pipe);
-		if (err)
-			printf("%s: abort interrupt pipe failed: %s\n",
-				sc->sc_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_intr_pipe);
 		err = usbd_close_pipe(sc->sc_intr_pipe);
 		if (err)
 			printf("%s: close interrupt pipe failed: %s\n",

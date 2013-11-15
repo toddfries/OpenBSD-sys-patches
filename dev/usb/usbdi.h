@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi.h,v 1.57 2013/11/06 15:55:15 jeremy Exp $ */
+/*	$OpenBSD: usbdi.h,v 1.59 2013/11/15 10:17:39 pirofti Exp $ */
 /*	$NetBSD: usbdi.h,v 1.62 2002/07/11 21:14:35 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.18 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -102,14 +102,12 @@ void usbd_get_xfer_status(struct usbd_xfer *xfer, void **priv,
     void **buffer, u_int32_t *count, usbd_status *status);
 usb_endpoint_descriptor_t *usbd_interface2endpoint_descriptor(
     struct usbd_interface *iface, u_int8_t address);
-usbd_status usbd_abort_pipe(struct usbd_pipe *pipe);
+void usbd_abort_pipe(struct usbd_pipe *pipe);
 usbd_status usbd_clear_endpoint_stall(struct usbd_pipe *pipe);
 usbd_status usbd_clear_endpoint_stall_async(struct usbd_pipe *pipe);
 void usbd_clear_endpoint_toggle(struct usbd_pipe *pipe);
 int usbd_endpoint_count(struct usbd_interface *dev, u_int8_t *count);
 int usbd_interface_count(struct usbd_device *dev, u_int8_t *count);
-void usbd_interface2device_handle(struct usbd_interface *iface,
-    struct usbd_device **dev);
 usbd_status usbd_device2interface_handle(struct usbd_device *dev,
     u_int8_t ifaceno, struct usbd_interface **iface);
 
@@ -139,7 +137,7 @@ usb_interface_descriptor_t *usbd_find_idesc(usb_config_descriptor_t *cd,
 usb_endpoint_descriptor_t *usbd_find_edesc(usb_config_descriptor_t *cd,
     int ifaceidx, int altidx, int endptidx);
 
-void usbd_dopoll(struct usbd_interface *);
+void usbd_dopoll(struct usbd_device *);
 void usbd_set_polling(struct usbd_device *iface, int on);
 
 const char *usbd_errstr(usbd_status err);

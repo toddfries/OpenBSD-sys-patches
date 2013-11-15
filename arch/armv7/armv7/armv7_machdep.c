@@ -1,4 +1,4 @@
-/*	$OpenBSD: armv7_machdep.c,v 1.2 2013/11/08 00:08:13 aalm Exp $ */
+/*	$OpenBSD: armv7_machdep.c,v 1.4 2013/11/13 17:30:44 syl Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -117,7 +117,7 @@
 #include <sys/proc.h>
 #include <sys/reboot.h>
 #include <sys/termios.h>
-
+#include <sys/socket.h>
 
 #include <machine/db_machdep.h>
 #include <machine/bootconfig.h>
@@ -130,6 +130,8 @@
 #include <armv7/armv7/armv7_machdep.h>
 
 #include <dev/cons.h>
+
+#include <net/if.h>
 
 #include <ddb/db_extern.h>
 
@@ -281,6 +283,10 @@ boot(int howto)
 	 */
 	if (!(howto & RB_NOSYNC))
 		bootsync(howto);
+
+	if_downall();
+
+	uvm_shutdown();
 
 	/* Say NO to interrupts */
 	splhigh();

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.857 2013/10/30 11:35:10 mpi Exp $ */
+/*	$OpenBSD: pf.c,v 1.859 2013/11/15 16:15:41 bluhm Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -6490,6 +6490,7 @@ pf_test(sa_family_t af, int fwdir, struct ifnet *ifp, struct mbuf **m0,
 		}
 	}
 	pd.eh = eh;
+	pd.m->m_pkthdr.pf.flags |= PF_TAG_PROCESSED;
 
 	switch (pd.virtual_proto) {
 
@@ -6805,4 +6806,8 @@ void
 pf_pkt_addr_changed(struct mbuf *m)
 {
 	m->m_pkthdr.pf.statekey = NULL;
+	if (m->m_pkthdr.pf.inp) {
+		m->m_pkthdr.pf.inp->inp_pf_sk = NULL;
+		m->m_pkthdr.pf.inp = NULL;
+	}
 }

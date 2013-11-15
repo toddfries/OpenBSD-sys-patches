@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvscom.c,v 1.28 2013/11/07 10:33:09 pirofti Exp $ */
+/*	$OpenBSD: uvscom.c,v 1.30 2013/11/15 10:17:39 pirofti Exp $ */
 /*	$NetBSD: uvscom.c,v 1.9 2003/02/12 15:36:20 ichiro Exp $	*/
 /*-
  * Copyright (c) 2001-2002, Shunsuke Akiyama <akiyama@jp.FreeBSD.org>.
@@ -388,16 +388,13 @@ int
 uvscom_activate(struct device *self, int act)
 {
 	struct uvscom_softc *sc = (struct uvscom_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
 		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 usbd_status
@@ -776,11 +773,7 @@ uvscom_close(void *addr, int portno)
 	uvscom_shutdown(sc);
 
 	if (sc->sc_intr_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_intr_pipe);
-		if (err)
-			printf("%s: abort interrupt pipe failed: %s\n",
-				sc->sc_dev.dv_xname,
-					   usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_intr_pipe);
 		err = usbd_close_pipe(sc->sc_intr_pipe);
 		if (err)
 			printf("%s: close interrupt pipe failed: %s\n",

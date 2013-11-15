@@ -1,4 +1,4 @@
-/*	$OpenBSD: armish_machdep.c,v 1.19 2013/09/28 14:16:41 miod Exp $ */
+/*	$OpenBSD: armish_machdep.c,v 1.21 2013/11/13 18:30:48 jasper Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -98,10 +98,13 @@
 #include <sys/device.h>
 #include <dev/cons.h>
 #include <dev/ic/smc91cxxreg.h>
+#include <sys/socket.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
+
+#include <net/if.h>
 
 #include <machine/bootconfig.h>
 #include <machine/bus.h>
@@ -265,6 +268,10 @@ boot(int howto)
 	 */
 	if (!(howto & RB_NOSYNC))
 		bootsync(howto);
+
+	if_downall();
+
+	uvm_shutdown();
 
 	/* Say NO to interrupts */
 	splhigh();
