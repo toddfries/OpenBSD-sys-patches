@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_ringbuffer.c,v 1.5 2013/08/13 10:23:52 jsg Exp $	*/
+/*	$OpenBSD: intel_ringbuffer.c,v 1.9 2013/11/20 22:10:19 kettenis Exp $	*/
 /*
  * Copyright © 2008-2010 Intel Corporation
  *
@@ -466,13 +466,6 @@ init_pipe_control(struct intel_ring_buffer *ring)
 	}
 
 	i915_gem_object_set_cache_level(obj, I915_CACHE_LLC);
-
-	/*
-	 * snooped gtt mapping please .
-	 * Normally this flag is only to dmamem_map, but it's been overloaded
-	 * for the agp mapping
-	 */
-        obj->dma_flags = BUS_DMA_COHERENT | BUS_DMA_READ;
 
 	ret = i915_gem_object_pin(obj, 4096, true, false);
 	if (ret)
@@ -1106,13 +1099,6 @@ static int init_status_page(struct intel_ring_buffer *ring)
 
 	i915_gem_object_set_cache_level(obj, I915_CACHE_LLC);
 
-	/*
-	 * snooped gtt mapping please .
-	 * Normally this flag is only to dmamem_map, but it's been overloaded
-	 * for the agp mapping
-	 */
-	obj->dma_flags = BUS_DMA_COHERENT | BUS_DMA_READ;
-
 	ret = i915_gem_object_pin(obj, 4096, true, false);
 	if (ret != 0) {
 		goto err_unref;
@@ -1174,25 +1160,9 @@ static int init_phys_hws_pga(struct intel_ring_buffer *ring)
 u32
 intel_read_status_page(struct intel_ring_buffer *ring, int reg)
 {
-	struct inteldrm_softc	*dev_priv = ring->dev->dev_private;
-	struct drm_device	*dev = ring->dev;
-	struct drm_i915_gem_object *obj_priv;
-	bus_dma_tag_t		 tag;
-	bus_dmamap_t		 map;
 	u32			 val;
 
-	if (I915_NEED_GFX_HWS(dev)) {
-		obj_priv = ring->status_page.obj;
-		map = obj_priv->dmamap;
-		tag = dev_priv->agpdmat;
-	} else {
-		map = dev_priv->status_page_dmah->map;
-		tag = dev->dmat;
-	}
-	/* Ensure that the compiler doesn't optimize away the load. */
-	bus_dmamap_sync(tag, map, 0, PAGE_SIZE, BUS_DMASYNC_POSTREAD);
 	val = ((volatile u_int32_t *)(ring->status_page.page_addr))[reg];
-	bus_dmamap_sync(tag, map, 0, PAGE_SIZE, BUS_DMASYNC_PREREAD);
 
 	return (val);
 }
@@ -1452,19 +1422,20 @@ int intel_ring_idle(struct intel_ring_buffer *ring)
 	u32 seqno;
 	int ret;
 
+	/* We need to add any requests required to flush the objects and ring */
 	if (ring->outstanding_lazy_request) {
 		ret = i915_add_request(ring, NULL, NULL);
 		if (ret)
 			return ret;
 	}
 
+	/* Wait upon the last request to be completed */
 	if (list_empty(&ring->request_list))
 		return 0;
 
 	seqno = list_entry(ring->request_list.prev,
 			   struct drm_i915_gem_request,
 			   list)->seqno;
-	
 
 	return i915_wait_seqno(ring, seqno);
 }
@@ -1519,6 +1490,7 @@ void intel_ring_advance(struct intel_ring_buffer *ring)
 		return;
 	ring->write_tail(ring, ring->tail);
 }
+
 
 static void gen6_bsd_ring_write_tail(struct intel_ring_buffer *ring,
 				     u32 value)
@@ -1630,7 +1602,8 @@ gen6_ring_dispatch_execbuffer(struct intel_ring_buffer *ring,
 
 /* Blitter support (SandyBridge+) */
 
-static int blt_ring_flush(struct intel_ring_buffer *ring, u32 invalidate, u32 flush)
+static int blt_ring_flush(struct intel_ring_buffer *ring,
+			  u32 invalidate, u32 flush)
 {
 	uint32_t cmd;
 	int ret;

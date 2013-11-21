@@ -1,4 +1,4 @@
-/*	$OpenBSD: fd.c,v 1.86 2013/11/12 16:04:09 krw Exp $	*/
+/*	$OpenBSD: fd.c,v 1.88 2013/11/21 00:13:33 dlg Exp $	*/
 /*	$NetBSD: fd.c,v 1.51 1997/05/24 20:16:19 pk Exp $	*/
 
 /*-
@@ -217,7 +217,8 @@ struct fd_softc {
 
 	TAILQ_ENTRY(fd_softc) sc_drivechain;
 	int sc_ops;		/* I/O ops since last switch */
-	struct buf sc_q;	/* head of buf chain */
+	struct bufq sc_bufq;	/* pending I/O requests */
+	struct buf *sc_bp;	/* current I/O */
 
 	struct timeout fd_motor_on_to;
 	struct timeout fd_motor_off_to;
@@ -642,6 +643,7 @@ fdattach(parent, self, aux)
 	 */
 	fd->sc_dk.dk_flags = DKF_NOLABELREAD;
 	fd->sc_dk.dk_name = fd->sc_dv.dv_xname;
+	bufq_init(&fd->sc_bufq, BUFQ_DEFAULT);
 	disk_attach(&fd->sc_dv, &fd->sc_dk);
 
 	/*
@@ -703,6 +705,7 @@ fdstrategy(bp)
 	if (bp->b_bcount == 0)
 		goto done;
 
+	bp->b_resid = bp->b_count;
 	sz = howmany(bp->b_bcount, DEV_BSIZE);
 
 	if (bp->b_blkno + sz > (fd->sc_type->size * DEV_BSIZE) / FD_BSIZE(fd)) {
@@ -710,7 +713,6 @@ fdstrategy(bp)
 		    - bp->b_blkno;
 		if (sz == 0) {
 			/* If exactly at end of disk, return EOF. */
-			bp->b_resid = bp->b_bcount;
 			goto done;
 		}
 		if (sz < 0) {
@@ -722,21 +724,20 @@ fdstrategy(bp)
 		bp->b_bcount = sz << DEV_BSHIFT;
 	}
 
- 	bp->b_cylinder = (bp->b_blkno * DEV_BSIZE) /
-	    (FD_BSIZE(fd) * fd->sc_type->seccyl);
-
 #ifdef FD_DEBUG
 	if (fdc_debug > 1)
-	    printf("fdstrategy: b_blkno %lld b_bcount %ld blkno %lld "
-		"cylin %ld\n", (long long)bp->b_blkno, bp->b_bcount,
-		(long long)fd->sc_blkno, bp->b_cylinder);
+	    printf("fdstrategy: b_blkno %lld b_bcount %ld blkno %lld\n",
+		(long long)bp->b_blkno, bp->b_bcount,
+		(long long)fd->sc_blkno);
 #endif
+
+	/* Queue transfer */
+	bufq_queue(&fd->sc_bufq, bp);
 
 	/* Queue transfer on drive, activate drive and controller if idle. */
 	s = splbio();
-	disksort(&fd->sc_q, bp);
 	timeout_del(&fd->fd_motor_off_to); /* a good idea */
-	if (!fd->sc_q.b_active)
+	if (fd->sc_bp == NULL)
 		fdstart(fd);
 #ifdef DIAGNOSTIC
 	else {
@@ -767,7 +768,7 @@ fdstart(fd)
 	int active = !TAILQ_EMPTY(&fdc->sc_drives);
 
 	/* Link into controller queue. */
-	fd->sc_q.b_active = 1;
+	fd->sc_bp = bufq_dequeue(&fd->sc_bufq);
 	TAILQ_INSERT_TAIL(&fdc->sc_drives, fd, sc_drivechain);
 
 	/* If controller not already active, start it. */
@@ -782,6 +783,9 @@ fdfinish(fd, bp)
 {
 	struct fdc_softc *fdc = (void *)fd->sc_dv.dv_parent;
 
+	fd->sc_skip = 0;
+	fd->sc_bp = bufq_dequeue(&fd->sc_bufq);
+
 	/*
 	 * Move this drive to the end of the queue to give others a `fair'
 	 * chance.  We only force a switch if N operations are completed while
@@ -791,14 +795,9 @@ fdfinish(fd, bp)
 	if (TAILQ_NEXT(fd, sc_drivechain) != NULL && ++fd->sc_ops >= 8) {
 		fd->sc_ops = 0;
 		TAILQ_REMOVE(&fdc->sc_drives, fd, sc_drivechain);
-		if (bp->b_actf) {
+		if (fd->sc_bp != NULL)
 			TAILQ_INSERT_TAIL(&fdc->sc_drives, fd, sc_drivechain);
-		} else
-			fd->sc_q.b_active = 0;
 	}
-	bp->b_resid = fd->sc_bcount;
-	fd->sc_skip = 0;
-	fd->sc_q.b_actf = bp->b_actf;
 
 	biodone(bp);
 	/* turn off motor 5s from now */
@@ -1117,7 +1116,7 @@ fdctimeout(arg)
 		goto out;
 	}
 
-	if (fd->sc_q.b_actf)
+	if (fd->sc_bp != NULL)
 		fdc->sc_state++;
 	else
 		fdc->sc_state = DEVIDLE;
@@ -1259,10 +1258,9 @@ fdcstate(fdc)
 
 	struct fd_softc *fd;
 	struct buf *bp;
-	int read, head, sec, nblks;
+	int read, head, sec, nblks, cylin;
 	struct fd_type *type;
 	struct fd_formb *finfo = NULL;
-
 
 	if (fdc->sc_istatus == FDC_ISTATUS_ERROR) {
 		/* Prevent loop if the reset sequence produces errors */
@@ -1285,13 +1283,15 @@ loop:
 	}
 
 	/* Is there a transfer to this drive?  If not, deactivate drive. */
-	bp = fd->sc_q.b_actf;
+	bp = fd->sc_bp;
 	if (bp == NULL) {
 		fd->sc_ops = 0;
 		TAILQ_REMOVE(&fdc->sc_drives, fd, sc_drivechain);
-		fd->sc_q.b_active = 0;
 		goto loop;
 	}
+
+	cylin = ((bp->b_blkno * DEV_BSIZE) + (bp->b_bcount - bp->b_resid)) /
+	    (FD_BSIZE(fd) * fd->sc_type->seccyl);
 
 	if (bp->b_flags & B_FORMAT)
 		finfo = (struct fd_formb *)bp->b_data;
@@ -1334,12 +1334,12 @@ loop:
 	doseek:
 		if ((fdc->sc_flags & FDC_EIS) &&
 		    (bp->b_flags & B_FORMAT) == 0) {
-			fd->sc_cylin = bp->b_cylinder;
+			fd->sc_cylin = cylin;
 			/* We use implied seek */
 			goto doio;
 		}
 
-		if (fd->sc_cylin == bp->b_cylinder)
+		if (fd->sc_cylin == cylin)
 			goto doio;
 
 		fd->sc_cylin = -1;
@@ -1361,7 +1361,7 @@ loop:
 		/* seek function */
 		FDC_WRFIFO(fdc, NE7CMD_SEEK);
 		FDC_WRFIFO(fdc, fd->sc_drive); /* drive number */
-		FDC_WRFIFO(fdc, bp->b_cylinder * fd->sc_type->step);
+		FDC_WRFIFO(fdc, cylin * fd->sc_type->step);
 
 		return (1);
 
@@ -1457,7 +1457,7 @@ loop:
 
 		/* Make sure seek really happened. */
 		if (fdc->sc_nstat != 2 || (st0 & 0xf8) != 0x20 ||
-		    cyl != bp->b_cylinder * fd->sc_type->step) {
+		    cyl != cylin * fd->sc_type->step) {
 #ifdef FD_DEBUG
 			if (fdc_debug)
 				fdcstatus(fdc, "seek failed");
@@ -1465,7 +1465,7 @@ loop:
 			fdcretry(fdc);
 			goto loop;
 		}
-		fd->sc_cylin = bp->b_cylinder;
+		fd->sc_cylin = cylin;
 		goto doio;
 
 	case IOTIMEDOUT:
@@ -1572,8 +1572,9 @@ loop:
 		fd->sc_blkno += fd->sc_nblks;
 		fd->sc_skip += fd->sc_nbytes;
 		fd->sc_bcount -= fd->sc_nbytes;
+		bp->b_resid -= fd->sc_nbytes;
 		if (finfo == NULL && fd->sc_bcount > 0) {
-			bp->b_cylinder = fd->sc_blkno / fd->sc_type->seccyl;
+			cylin = fd->sc_blkno / fd->sc_type->seccyl;
 			goto doseek;
 		}
 		fdfinish(fd, bp);
@@ -1663,7 +1664,7 @@ fdcretry(fdc)
 	int error = EIO;
 
 	fd = TAILQ_FIRST(&fdc->sc_drives);
-	bp = fd->sc_q.b_actf;
+	bp = fd->sc_bp;
 
 	fdc->sc_overruns = 0;
 	if (fd->sc_opts & FDOPT_NORETRY)
@@ -1721,6 +1722,7 @@ fdcretry(fdc)
 	failsilent:
 		bp->b_flags |= B_ERROR;
 		bp->b_error = error;
+		bp->b_resid = bp->b_bcount;
 		fdfinish(fd, bp);
 	}
 	fdc->sc_errors++;

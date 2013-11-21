@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem_tiling.c,v 1.8 2013/10/29 06:30:57 jsg Exp $	*/
+/*	$OpenBSD: i915_gem_tiling.c,v 1.10 2013/11/20 21:55:23 kettenis Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -304,7 +304,7 @@ i915_gem_object_fence_ok(struct drm_i915_gem_object *obj, int tiling_mode)
 	while (size < obj->base.size)
 		size <<= 1;
 
-	if (obj->dmamap->dm_segs[0].ds_len != size)
+	if (obj->gtt_space->size != size)
 		return false;
 
 	if (obj->gtt_offset & (size - 1))
@@ -328,17 +328,17 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
 	if (&obj->base == NULL)
-		return ENOENT;
+		return -ENOENT;
 	drm_hold_object(&obj->base);
 
 	if (!i915_tiling_ok(dev,
 			    args->stride, obj->base.size, args->tiling_mode)) {
-		ret = EINVAL;
+		ret = -EINVAL;
 		goto out;
 	}
 
 	if (obj->pin_count) {
-		ret = EBUSY;
+		ret = -EBUSY;
 		goto out;
 	}
 
@@ -388,7 +388,7 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 		 */
 
 		obj->map_and_fenceable =
-			obj->dmamap == NULL ||
+			obj->gtt_space == NULL ||
 			(obj->gtt_offset + obj->base.size <= dev_priv->mm.gtt_mappable_end &&
 			 i915_gem_object_fence_ok(obj, args->tiling_mode));
 
@@ -437,7 +437,7 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
 
 	obj = to_intel_bo(drm_gem_object_lookup(dev, file, args->handle));
 	if (&obj->base == NULL)
-		return ENOENT;
+		return -ENOENT;
 	drm_hold_object(&obj->base);
 
 	DRM_LOCK();

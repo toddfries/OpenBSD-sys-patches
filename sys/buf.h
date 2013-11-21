@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.90 2013/11/06 07:46:31 dlg Exp $	*/
+/*	$OpenBSD: buf.h,v 1.93 2013/11/21 01:16:52 dlg Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -63,11 +63,10 @@ LIST_HEAD(workhead, worklist);
  * Buffer queues
  */
 #define BUFQ_NSCAN_N	128
-#define BUFQ_DISKSORT	0
-#define BUFQ_FIFO	1
-#define BUFQ_NSCAN	2
+#define BUFQ_FIFO	0
+#define BUFQ_NSCAN	1
 #define BUFQ_DEFAULT	BUFQ_NSCAN
-#define BUFQ_HOWMANY	3
+#define BUFQ_HOWMANY	2
 
 /*
  * Write limits for bufq - defines high and low water marks for how
@@ -188,15 +187,8 @@ struct buf {
  	struct	workhead b_dep;		/* List of filesystem dependencies. */
 };
 
-/*
- * For portability with historic industry practice, the cylinder number has
- * to be maintained in the `b_resid' field.
- */
-#define	b_cylinder b_resid		/* Cylinder number for disksort(). */
-
 /* Device driver compatibility definitions. */
 #define	b_active b_bcount		/* Driver queue head: drive active. */
-#define	b_errcnt b_resid		/* Retry count while I/O in progress. */
 
 /*
  * These flags are kept in b_flags.
