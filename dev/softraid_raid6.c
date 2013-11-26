@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.55 2013/11/05 08:55:58 reyk Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.57 2013/11/21 17:06:45 krw Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -382,9 +382,11 @@ sr_raid6_rw(struct sr_workunit *wu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_chunk		*scp;
 	int			s, fail, i, gxinv, pxinv;
-	daddr_t			blk, lbaoffs, strip_no, chunk, qchunk, pchunk, fchunk;
-	daddr_t			strip_size, no_chunk, lba, chunk_offs, phys_offs;
-	daddr_t			strip_bits, length, strip_offs, datalen, row_size;
+	daddr_t			blk, lba;
+	int64_t			chunk_offs, lbaoffs, phys_offs, strip_offs;
+	int64_t			strip_no, strip_size, strip_bits;
+	int64_t			fchunk, no_chunk, chunk, qchunk, pchunk;
+	int64_t			length, datalen, row_size;
 	void			*pbuf, *data, *qbuf;
 
 	/* blk and scsi error will be handled by sr_validate_io */
@@ -743,7 +745,8 @@ sr_raid6_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
 	struct sr_raid6_opaque  *pqbuf;
 
 	DNPRINTF(SR_D_DIS, "sr_raid6_addio: %s %d.%llx %llx %p:%p\n",
-	    (xsflags & SCSI_DATA_IN) ? "read" : "write", chunk, blkno, len,
+	    (xsflags & SCSI_DATA_IN) ? "read" : "write", chunk,
+	    (long long)blkno, (long long)len,
 	    pbuf, qbuf);
 
 	/* Allocate temporary buffer. */
