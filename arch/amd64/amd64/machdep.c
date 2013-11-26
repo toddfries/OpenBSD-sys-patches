@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.162 2013/03/21 15:50:27 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.171 2013/11/19 04:12:17 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -101,7 +101,6 @@
 
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
-#include <machine/gdt.h>
 #include <machine/pio.h>
 #include <machine/psl.h>
 #include <machine/reg.h>
@@ -686,6 +685,31 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	return (EJUSTRETURN);
 }
 
+#ifdef MULTIPROCESSOR
+/* force a CPU into the kernel, whether or not it's idle */
+void
+cpu_kick(struct cpu_info *ci)
+{
+	/* only need to kick other CPUs */
+	if (ci != curcpu()) {
+		if (ci->ci_mwait != NULL) {
+			/*
+			 * If not idling, then send an IPI, else
+			 * just clear the "keep idling" bit.
+			 */
+			if ((ci->ci_mwait[0] & MWAIT_IN_IDLE) == 0)
+				x86_send_ipi(ci, X86_IPI_NOP);
+			else
+				atomic_clearbits_int(&ci->ci_mwait[0],
+				    MWAIT_KEEP_IDLING);
+		} else {
+			/* no mwait, so need an IPI */
+			x86_send_ipi(ci, X86_IPI_NOP);
+		}
+	}
+}
+#endif
+
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
@@ -694,13 +718,22 @@ void
 signotify(struct proc *p)
 {
 	aston(p);
-	cpu_unidle(p->p_cpu);
+	cpu_kick(p->p_cpu);
 }
 
 #ifdef MULTIPROCESSOR
 void
 cpu_unidle(struct cpu_info *ci)
 {
+	if (ci->ci_mwait != NULL) {
+		/*
+		 * Just clear the "keep idling" bit; if it wasn't
+		 * idling then we didn't need to do anything anyway.
+		 */
+		atomic_clearbits_int(&ci->ci_mwait[0], MWAIT_KEEP_IDLING);
+		return;
+	}
+
 	if (ci != curcpu())
 		x86_send_ipi(ci, X86_IPI_NOP);
 }
@@ -755,7 +788,8 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	x86_broadcast_ipi(X86_IPI_HALT);
@@ -800,7 +834,7 @@ long	dumplo = 0; 		/* blocks */
 int
 cpu_dump(void)
 {
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	char buf[dbtob(1)];
 	kcore_seg_t *segp;
 	cpu_kcore_hdr_t *cpuhdrp;
@@ -895,9 +929,9 @@ dumpsys(void)
 {
 	u_long totalbytesleft, bytes, i, n, memseg;
 	u_long maddr;
-	daddr64_t blkno;
+	daddr_t blkno;
 	void *va;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error;
 
 	/* Save registers. */
@@ -1160,7 +1194,7 @@ cpu_init_extents(void)
 		if (extent_alloc_region(iomem_ex, mem_clusters[i].start,
 		    mem_clusters[i].size, EX_NOWAIT)) {
 			/* XXX What should we do? */
-			printf("WARNING: CAN'T ALLOCATE RAM (%lx-%lx)"
+			printf("WARNING: CAN'T ALLOCATE RAM (%llx-%llx)"
 			    " FROM IOMEM EXTENT MAP!\n", mem_clusters[i].start,
 			    mem_clusters[i].start + mem_clusters[i].size - 1);
 		}
@@ -1676,7 +1710,7 @@ amd64_pa_used(paddr_t addr)
 		return 1;
 
 	/* Low memory used for various bootstrap things */
-	if (addr >= 0 && addr < avail_start)
+	if (addr < avail_start)
 		return 1;
 
 	/*
@@ -1702,7 +1736,7 @@ need_resched(struct cpu_info *ci)
 	/* There's a risk we'll be called before the idle threads start */
 	if (ci->ci_curproc) {
 		aston(ci->ci_curproc);
-		cpu_unidle(ci);
+		cpu_kick(ci);
 	}
 }
 
@@ -1822,7 +1856,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 #endif
 #endif
 		case BOOTARG_CONSDEV:
-			if (q->ba_size >= sizeof(bios_oconsdev_t) +
+			if (q->ba_size >= sizeof(bios_consdev_t) +
 			    offsetof(struct _boot_args32, ba_arg)) {
 				bios_consdev_t *cdp =
 				    (bios_consdev_t*)q->ba_arg;
@@ -1830,10 +1864,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 				static const int ports[] =
 				    { 0x3f8, 0x2f8, 0x3e8, 0x2e8 };
 				int unit = minor(cdp->consdev);
-				int consaddr = -1;
-				if (q->ba_size >= sizeof(bios_consdev_t) +
-				    offsetof(struct _boot_args32, ba_arg))
-					consaddr = cdp->consaddr;
+				int consaddr = cdp->consaddr;
 				if (consaddr == -1 && unit >= 0 &&
 				    unit < (sizeof(ports)/sizeof(ports[0])))
 					consaddr = ports[unit];
@@ -1852,7 +1883,6 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 				printf(" console 0x%x:%d",
 				    cdp->consdev, cdp->conspeed);
 #endif
-				cnset(cdp->consdev);
 			}
 			break;
 		case BOOTARG_BOOTMAC:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcg.c,v 1.19 2011/09/19 21:53:02 miod Exp $	*/
+/*	$OpenBSD: lcg.c,v 1.21 2013/10/21 10:36:21 miod Exp $	*/
 /*
  * Copyright (c) 2006 Miodrag Vallat.
  *
@@ -125,18 +125,19 @@ int	lcg_alloc_screen(void *, const struct wsscreen_descr *,
 void	lcg_free_screen(void *, void *);
 int	lcg_show_screen(void *, void *, int,
 	    void (*) (void *, int, int), void *);
+int	lcg_load_font(void *, void *, struct wsdisplay_font *);
+int	lcg_list_font(void *, struct wsdisplay_font *);
 void	lcg_burner(void *, u_int, u_int);
 
 const struct wsdisplay_accessops lcg_accessops = {
-	lcg_ioctl,
-	lcg_mmap,
-	lcg_alloc_screen,
-	lcg_free_screen,
-	lcg_show_screen,
-	NULL,	/* load_font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	lcg_burner
+	.ioctl = lcg_ioctl,
+	.mmap = lcg_mmap,
+	.alloc_screen = lcg_alloc_screen,
+	.free_screen = lcg_free_screen,
+	.show_screen = lcg_show_screen,
+	.load_font = lcg_load_font,
+	.list_font = lcg_list_font,
+	.burn_screen = lcg_burner
 };
 
 int	lcg_alloc_attr(void *, int, int, int, long *);
@@ -528,6 +529,26 @@ lcg_show_screen(void *v, void *cookie, int waitok,
     void (*cb)(void *, int, int), void *cbarg)
 {
 	return (0);
+}
+
+int
+lcg_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct lcg_softc *sc = v;
+	struct lcg_screen *ss = sc->sc_scr;
+	struct rasops_info *ri = &ss->ss_ri;
+
+	return rasops_load_font(ri, emulcookie, font);
+}
+
+int
+lcg_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct lcg_softc *sc = v;
+	struct lcg_screen *ss = sc->sc_scr;
+	struct rasops_info *ri = &ss->ss_ri;
+
+	return rasops_list_font(ri, font);
 }
 
 void

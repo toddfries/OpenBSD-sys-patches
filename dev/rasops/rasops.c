@@ -1,4 +1,4 @@
-/*	$OpenBSD: rasops.c,v 1.24 2013/05/17 12:03:11 kettenis Exp $	*/
+/*	$OpenBSD: rasops.c,v 1.30 2013/10/20 21:24:00 miod Exp $	*/
 /*	$NetBSD: rasops.c,v 1.35 2001/02/02 06:01:01 marcus Exp $	*/
 
 /*-
@@ -175,6 +175,10 @@ int	rasops_vcons_copyrows(void *, int, int, int);
 int	rasops_vcons_eraserows(void *, int, int, long);
 int	rasops_vcons_alloc_attr(void *, int, int, int, long *);
 void	rasops_vcons_unpack_attr(void *, long, int *, int *, int *);
+
+int	rasops_add_font(struct rasops_info *, struct wsdisplay_font *);
+int	rasops_use_font(struct rasops_info *, struct wsdisplay_font *);
+int	rasops_list_font_cb(void *, struct wsdisplay_font *);
 
 /*
  * Initialize a 'rasops_info' descriptor.
@@ -473,7 +477,7 @@ rasops_mapchar(void *cookie, int c, u_int *cp)
 
 		if ( (c = wsfont_map_unichar(ri->ri_font, c)) < 0) {
 
-			*cp = ' ';
+			*cp = '?';
 			return (0);
 
 		}
@@ -481,12 +485,12 @@ rasops_mapchar(void *cookie, int c, u_int *cp)
 
 
 	if (c < ri->ri_font->firstchar) {
-		*cp = ' ';
+		*cp = '?';
 		return (0);
 	}
 
 	if (c - ri->ri_font->firstchar >= ri->ri_font->numchars) {
-		*cp = ' ';
+		*cp = '?';
 		return (0);
 	}
 
@@ -510,8 +514,8 @@ rasops_alloc_cattr(void *cookie, int fg, int bg, int flg, long *attr)
 		return (EINVAL);
 
 	if ((flg & WSATTR_WSCOLORS) == 0) {
-		fg = WSCOL_WHITE;
-		bg = WSCOL_BLACK;
+		fg = WS_DEFAULT_FG;
+		bg = WS_DEFAULT_BG;
 	}
 
 	if ((flg & WSATTR_REVERSE) != 0) {
@@ -698,7 +702,7 @@ rasops_copycols(void *cookie, int row, int src, int dst, int num)
 #endif
 	{
 		while (height--) {
-			ovbcopy(sp, dp, num);
+			memmove(dp, sp, num);
 			dp += ri->ri_stride;
 			sp += ri->ri_stride;
 		}
@@ -1205,7 +1209,7 @@ rasops_copychar(void *cookie, int srcrow, int dstrow, int srccol, int dstcol)
 #endif
 	{
 		while (height--) {
-			ovbcopy(sp, dp, ri->ri_xscale);
+			memmove(dp, sp, ri->ri_xscale);
 			dp += ri->ri_stride;
 			sp += ri->ri_stride;
 		}
@@ -1515,15 +1519,29 @@ int
 rasops_vcons_copycols(void *cookie, int row, int src, int dst, int num)
 {
 	struct rasops_screen *scr = cookie;
+	struct rasops_info *ri = scr->rs_ri;
 	int cols = scr->rs_ri->ri_cols;
+	int col, rc;
 
-	ovbcopy(&scr->rs_bs[row * cols + src], &scr->rs_bs[row * cols + dst],
+	memmove(&scr->rs_bs[row * cols + dst], &scr->rs_bs[row * cols + src],
 	    num * sizeof(struct wsdisplay_charcell));
 
 	if (!scr->rs_visible)
 		return 0;
 
-	return scr->rs_ri->ri_copycols(scr->rs_ri, row, src, dst, num);
+	if ((ri->ri_flg & RI_WRONLY) == 0)
+		return ri->ri_copycols(ri, row, src, dst, num);
+
+	for (col = dst; col < dst + num; col++) {
+		int off = row * cols + col;
+
+		rc = ri->ri_putchar(ri, row, col,
+		    scr->rs_bs[off].uc, scr->rs_bs[off].attr);
+		if (rc != 0)
+			return rc;
+	}
+
+	return 0;
 }
 
 int
@@ -1548,15 +1566,31 @@ int
 rasops_vcons_copyrows(void *cookie, int src, int dst, int num)
 {
 	struct rasops_screen *scr = cookie;
-	int cols = scr->rs_ri->ri_cols;
+	struct rasops_info *ri = scr->rs_ri;
+	int cols = ri->ri_cols;
+	int row, col, rc;
 
-	ovbcopy(&scr->rs_bs[src * cols], &scr->rs_bs[dst * cols],
+	memmove(&scr->rs_bs[dst * cols], &scr->rs_bs[src * cols],
 	    num * cols * sizeof(struct wsdisplay_charcell));
 
 	if (!scr->rs_visible)
 		return 0;
 
-	return scr->rs_ri->ri_copyrows(scr->rs_ri, src, dst, num);
+	if ((ri->ri_flg & RI_WRONLY) == 0)
+		return ri->ri_copyrows(ri, src, dst, num);
+
+	for (row = dst; row < dst + num; row++) {
+		for (col = 0; col < cols; col++) {
+			int off = row * cols + col;
+
+			rc = ri->ri_putchar(ri, row, col,
+			    scr->rs_bs[off].uc, scr->rs_bs[off].attr);
+			if (rc != 0)
+				return rc;
+		}
+	}
+
+	return 0;
 }
 
 int
@@ -1592,4 +1626,136 @@ rasops_vcons_unpack_attr(void *cookie, long attr, int *fg, int *bg,
 	struct rasops_screen *scr = cookie;
 
 	rasops_unpack_attr(scr->rs_ri, attr, fg, bg, underline);
+}
+
+/*
+ * Font management.
+ *
+ * Fonts usable on raster frame buffers are managed by wsfont, and are not
+ * tied to any particular display.
+ */
+
+int
+rasops_add_font(struct rasops_info *ri, struct wsdisplay_font *font)
+{
+	/* only accept matching metrics */
+	if (font->fontwidth != ri->ri_font->fontwidth ||
+	    font->fontheight != ri->ri_font->fontheight)
+		return EINVAL;
+
+	/* for raster consoles, only accept ISO Latin-1 or Unicode encoding */
+	if (font->encoding != WSDISPLAY_FONTENC_ISO)
+		return EINVAL;
+
+	if (wsfont_add(font, 1) != 0)
+		return EEXIST;	/* name collision */
+
+	font->index = -1;	/* do not store in wsdisplay_softc */
+
+	return 0;
+}
+
+int
+rasops_use_font(struct rasops_info *ri, struct wsdisplay_font *font)
+{
+	int wsfcookie;
+	struct wsdisplay_font *wsf;
+	const char *name;
+
+	/* allow an empty font name to revert to the initial font choice */
+	name = font->name;
+	if (*name == '\0')
+		name = NULL;
+
+	wsfcookie = wsfont_find(name, ri->ri_font->fontwidth,
+	    ri->ri_font->fontheight, 0);
+	if (wsfcookie < 0) {
+		wsfcookie = wsfont_find(name, 0, 0, 0);
+		if (wsfcookie < 0)
+			return ENOENT;	/* font exist, but different metrics */
+		else
+			return EINVAL;
+	}
+	if (wsfont_lock(wsfcookie, &wsf, WSDISPLAY_FONTORDER_KNOWN,
+	    WSDISPLAY_FONTORDER_KNOWN) < 0)
+		return EINVAL;
+
+	/* if (ri->ri_wsfcookie >= 0) */
+		wsfont_unlock(ri->ri_wsfcookie);
+	ri->ri_wsfcookie = wsfcookie;
+	ri->ri_font = wsf;
+	ri->ri_fontscale = ri->ri_font->fontheight * ri->ri_font->stride;
+
+	return 0;
+}
+
+int
+rasops_load_font(void *v, void *cookie, struct wsdisplay_font *font)
+{
+	struct rasops_info *ri = v;
+
+	/*
+	 * For now, we want to only allow loading fonts of the same
+	 * metrics as the currently in-use font. This requires the
+	 * rasops struct to have been correctly configured, and a
+	 * font to have been selected.
+	 */
+	if ((ri->ri_flg & RI_CFGDONE) == 0 || ri->ri_font == NULL)
+		return EINVAL;
+
+	if (font->data != NULL)
+		return rasops_add_font(ri, font);
+	else
+		return rasops_use_font(ri, font);
+}
+
+struct rasops_list_font_ctx {
+	struct rasops_info *ri;
+	int cnt;
+	struct wsdisplay_font *font;
+};
+
+int
+rasops_list_font_cb(void *cbarg, struct wsdisplay_font *font)
+{
+	struct rasops_list_font_ctx *ctx = cbarg;
+
+	if (font->fontheight != ctx->ri->ri_font->fontheight ||
+	    font->fontwidth != ctx->ri->ri_font->fontwidth)
+		return 0;
+
+	if (ctx->cnt-- == 0) {
+		ctx->font = font;
+		return 1;
+	}
+
+	return 0;
+}
+
+int
+rasops_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct rasops_info *ri = v;
+	struct rasops_list_font_ctx ctx;
+	int idx;
+
+	if ((ri->ri_flg & RI_CFGDONE) == 0 || ri->ri_font == NULL)
+		return EINVAL;
+
+	if (font->index < 0)
+		return EINVAL;
+
+	ctx.ri = ri;
+	ctx.cnt = font->index;
+	ctx.font = NULL;
+	wsfont_enum(rasops_list_font_cb, &ctx);
+
+	if (ctx.font == NULL)
+		return EINVAL;
+
+	idx = font->index;
+	*font = *ctx.font;	/* struct copy */
+	font->index = idx;
+	font->cookie = font->data = NULL;	/* don't leak kernel pointers */
+	return 0;
 }

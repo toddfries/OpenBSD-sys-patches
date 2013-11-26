@@ -1,4 +1,4 @@
-/* $OpenBSD: wsdisplayvar.h,v 1.24 2010/03/30 17:40:55 oga Exp $ */
+/* $OpenBSD: wsdisplayvar.h,v 1.29 2013/11/04 05:45:04 miod Exp $ */
 /* $NetBSD: wsdisplayvar.h,v 1.30 2005/02/04 02:10:49 perry Exp $ */
 
 /*
@@ -31,6 +31,25 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*
+ * Default to white on black except on Sun hardware, where we default
+ * to black on white to match the firmware console.
+ */
+#ifndef WS_DEFAULT_FG
+#if defined(__sparc__) || defined(__sparc64__)
+#define WS_DEFAULT_FG WSCOL_BLACK
+#else
+#define WS_DEFAULT_FG WSCOL_WHITE
+#endif
+#endif
+#ifndef WS_DEFAULT_BG
+#if defined(__sparc__) || defined(__sparc64__)
+#define WS_DEFAULT_BG WSCOL_WHITE
+#else
+#define WS_DEFAULT_BG WSCOL_BLACK
+#endif
+#endif
+
 struct device;
 
 /*
@@ -38,7 +57,6 @@ struct device;
  */
 
 #define WSDISPLAY_MAXSCREEN	12
-#define WSDISPLAY_MAXFONT	8
 
 /*
  * Emulation functions, for displays that can support glass-tty terminal
@@ -122,6 +140,7 @@ struct wsdisplay_accessops {
 	int	(*show_screen)(void *, void *, int,
 			       void (*) (void *, int, int), void *);
 	int	(*load_font)(void *, void *, struct wsdisplay_font *);
+	int	(*list_font)(void *, struct wsdisplay_font *);
 	void	(*scrollback)(void *, void *, int);
 	int	(*getchar)(void *, int, int, struct wsdisplay_charcell *);
 	void	(*burn_screen)(void *, u_int, u_int);
@@ -167,6 +186,7 @@ struct wscons_syncops {
 void	wsdisplay_cnattach(const struct wsscreen_descr *, void *,
 				int, int, long);
 int	wsemuldisplaydevprint(void *, const char *);
+int	wsemuldisplaydevsubmatch(struct device *, void *, void *);
 
 /*
  * Console interface.
@@ -227,6 +247,6 @@ void wsscrollback(void *v, int op);
 /*
  * screen burner
  */
-#define	WSDISPLAY_DEFBURNOUT	600000	/* ms */
+#define	WSDISPLAY_DEFBURNOUT	0	/* disabled */
 #define	WSDISPLAY_DEFBURNIN	250	/* ms */
 

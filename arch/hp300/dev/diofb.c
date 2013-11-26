@@ -1,4 +1,4 @@
-/*	$OpenBSD: diofb.c,v 1.18 2010/12/26 15:40:59 miod Exp $	*/
+/*	$OpenBSD: diofb.c,v 1.20 2013/10/21 10:36:11 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -144,6 +144,14 @@ diofb_fbinquire(struct diofb *fb, int scode, struct diofbreg *fbr)
 		fb->dwidth = fb->fbwidth;
 	if (fb->dheight > fb->fbheight)
 		fb->dheight = fb->fbheight;
+
+	/*
+	 * Some monochrome displays, such as the HP332 internal video
+	 * appear to return a display width of 1024 instead of 512.
+	 */
+	if (fbr->num_planes == 1 && fb->dheight == 400)
+		if (fb->dwidth == 1024)
+			fb->dwidth = 512;
 
 	fb->planes = fbr->num_planes;
 	if (fb->planes > 8)
@@ -477,7 +485,7 @@ diofb_show_screen(void *v, void *cookie, int waitok,
 }
 
 paddr_t
-diofb_mmap(void * v, off_t offset, int prot)
+diofb_mmap(void *v, off_t offset, int prot)
 {
 	struct diofb *fb = v;
 
@@ -517,4 +525,22 @@ diofb_getcmap(struct diofb *fb, struct wsdisplay_cmap *cm)
 		return (error);
 
 	return (0);
+}
+
+int
+diofb_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct diofb *fb = v;
+	struct rasops_info *ri = &fb->ri;
+
+	return rasops_load_font(ri, emulcookie, font);
+}
+
+int
+diofb_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct diofb *fb = v;
+	struct rasops_info *ri = &fb->ri;
+
+	return rasops_list_font(ri, font);
 }

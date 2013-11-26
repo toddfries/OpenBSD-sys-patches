@@ -1,8 +1,8 @@
-/*	$OpenBSD: pfvar.h,v 1.379 2013/05/10 11:36:24 mikeb Exp $ */
+/*	$OpenBSD: pfvar.h,v 1.392 2013/11/19 17:30:08 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
- * Copyright (c) 2002 - 2010 Henning Brauer
+ * Copyright (c) 2002 - 2013 Henning Brauer <henning@openbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -99,7 +99,7 @@ enum	{ PFTM_TCP_FIRST_PACKET, PFTM_TCP_OPENING, PFTM_TCP_ESTABLISHED,
 #define PFTM_OTHER_FIRST_PACKET_VAL	60	/* First packet */
 #define PFTM_OTHER_SINGLE_VAL		30	/* Unidirectional */
 #define PFTM_OTHER_MULTIPLE_VAL		60	/* Bidirectional */
-#define PFTM_FRAG_VAL			30	/* Fragment expire */
+#define PFTM_FRAG_VAL			60	/* Fragment expire */
 #define PFTM_INTERVAL_VAL		10	/* Expire interval */
 #define PFTM_SRC_NODE_VAL		0	/* Source tracking */
 #define PFTM_TS_DIFF_VAL		30	/* Allowed TS diff */
@@ -1053,14 +1053,14 @@ struct pfr_addr {
 #define	pfra_ip6addr	pfra_u._pfra_ip6addr
 
 enum { PFR_DIR_IN, PFR_DIR_OUT, PFR_DIR_MAX };
-enum { PFR_OP_BLOCK, PFR_OP_PASS, PFR_OP_ADDR_MAX, PFR_OP_TABLE_MAX };
+enum { PFR_OP_BLOCK, PFR_OP_MATCH, PFR_OP_PASS, PFR_OP_ADDR_MAX, PFR_OP_TABLE_MAX };
 #define PFR_OP_XPASS	PFR_OP_ADDR_MAX
 
 struct pfr_astats {
 	struct pfr_addr	 pfras_a;
 	u_int64_t	 pfras_packets[PFR_DIR_MAX][PFR_OP_ADDR_MAX];
 	u_int64_t	 pfras_bytes[PFR_DIR_MAX][PFR_OP_ADDR_MAX];
-	long		 pfras_tzero;
+	time_t		 pfras_tzero;
 };
 
 enum { PFR_REFCNT_RULE, PFR_REFCNT_ANCHOR, PFR_REFCNT_MAX };
@@ -1071,7 +1071,7 @@ struct pfr_tstats {
 	u_int64_t	 pfrts_bytes[PFR_DIR_MAX][PFR_OP_TABLE_MAX];
 	u_int64_t	 pfrts_match;
 	u_int64_t	 pfrts_nomatch;
-	long		 pfrts_tzero;
+	time_t		 pfrts_tzero;
 	int		 pfrts_cnt;
 	int		 pfrts_refcnt[PFR_REFCNT_MAX];
 };
@@ -1090,7 +1090,7 @@ struct _pfr_kentry {
 	union sockaddr_union	 _pfrke_sa;
 	SLIST_ENTRY(pfr_kentry)	 _pfrke_workq;
 	struct pfr_kcounters	*_pfrke_counters;
-	long			 _pfrke_tzero;
+	time_t			 _pfrke_tzero;
 	u_int8_t		 _pfrke_af;
 	u_int8_t		 _pfrke_net;
 	u_int8_t		 _pfrke_flags;
@@ -1192,12 +1192,15 @@ struct pfi_kif_cmp {
 	char				 pfik_name[IFNAMSIZ];
 };
 
+struct ifnet;
+struct ifg_group;
+
 struct pfi_kif {
 	char				 pfik_name[IFNAMSIZ];
 	RB_ENTRY(pfi_kif)		 pfik_tree;
 	u_int64_t			 pfik_packets[2][2][2];
 	u_int64_t			 pfik_bytes[2][2][2];
-	u_int32_t			 pfik_tzero;
+	time_t				 pfik_tzero;
 	int				 pfik_flags;
 	int				 pfik_flags_new;
 	void				*pfik_ah_cookie;
@@ -1245,6 +1248,7 @@ struct pf_pdesc {
 			*eh;
 	struct pf_addr	*src;		/* src address */
 	struct pf_addr	*dst;		/* dst address */
+	u_int16_t	*pcksum;	/* proto cksum */
 	u_int16_t	*sport;
 	u_int16_t	*dport;
 	u_int16_t	 osport;
@@ -1273,7 +1277,12 @@ struct pf_pdesc {
 	u_int8_t	 didx;		/* key index for destination */
 	u_int8_t	 destchg;	/* flag set when destination changed */
 	u_int8_t	 pflog;		/* flags for packet logging */
+	u_int8_t	 csum_status;	/* proto cksum ok/bad/unchecked */
+#define	PF_CSUM_UNKNOWN	0
+#define	PF_CSUM_BAD	1
+#define	PF_CSUM_OK	2
 };
+
 
 /* flags for RDR options */
 #define PF_DPORT_RANGE	0x01		/* Dest port uses range */
@@ -1399,10 +1408,10 @@ struct pf_status {
 	u_int64_t	pcounters[2][2][3];
 	u_int64_t	bcounters[2][2];
 	u_int64_t	stateid;
+	time_t		since;
 	u_int32_t	running;
 	u_int32_t	states;
 	u_int32_t	src_nodes;
-	u_int32_t	since;
 	u_int32_t	debug;
 	u_int32_t	hostid;
 	u_int32_t	reass;			/* reassembly */
@@ -1412,6 +1421,32 @@ struct pf_status {
 
 #define PF_REASS_ENABLED	0x01
 #define PF_REASS_NODF		0x02
+
+struct pf_queue_bwspec {
+	u_int		absolute;
+	u_int		percent;
+};
+
+struct pf_queue_scspec {
+	struct pf_queue_bwspec	m1;
+	struct pf_queue_bwspec	m2;
+	u_int			d;
+};
+
+struct pf_queuespec {
+	TAILQ_ENTRY(pf_queuespec)	 entries;
+	char				 qname[PF_QNAME_SIZE];
+	char				 parent[PF_QNAME_SIZE];
+	char				 ifname[IFNAMSIZ];
+	struct pf_queue_scspec		 realtime;
+	struct pf_queue_scspec		 linkshare;
+	struct pf_queue_scspec		 upperlimit;
+	struct pfi_kif			*kif;
+	u_int				 flags;
+	u_int				 qlimit;
+	u_int32_t			 qid;
+	u_int32_t			 parent_qid;
+};
 
 struct cbq_opts {
 	u_int		minburst;
@@ -1583,7 +1618,7 @@ struct pfioc_altq {
 	struct pf_altq	 altq;
 };
 
-struct pfioc_qstats {
+struct pfioc_altqstats {
 	u_int32_t	 ticket;
 	u_int32_t	 nr;
 	void		*buf;
@@ -1605,6 +1640,20 @@ struct pfioc_trans {
 		char		anchor[MAXPATHLEN];
 		u_int32_t	ticket;
 	}		*array;
+};
+
+struct pfioc_queue {
+	u_int32_t		ticket;
+	u_int			nr;
+	struct pf_queuespec	queue;
+};
+
+struct pfioc_qstats {
+	u_int32_t		 ticket;
+	u_int32_t		 nr;
+	struct pf_queuespec	 queue;
+	void			*buf;
+	int			 nbytes;
 };
 
 #define PFR_FLAG_DUMMY		0x00000002
@@ -1680,7 +1729,7 @@ struct pfioc_iface {
 #define DIOCGETALTQS	_IOWR('D', 47, struct pfioc_altq)
 #define DIOCGETALTQ	_IOWR('D', 48, struct pfioc_altq)
 #define DIOCCHANGEALTQ	_IOWR('D', 49, struct pfioc_altq)
-#define DIOCGETQSTATS	_IOWR('D', 50, struct pfioc_qstats)
+#define DIOCGETALTQSTATS	_IOWR('D', 50, struct pfioc_altqstats)
 /* XXX cut 51 - 57 */
 #define	DIOCGETRULESETS	_IOWR('D', 58, struct pfioc_ruleset)
 #define	DIOCGETRULESET	_IOWR('D', 59, struct pfioc_ruleset)
@@ -1714,6 +1763,10 @@ struct pfioc_iface {
 #define DIOCCLRIFFLAG	_IOWR('D', 90, struct pfioc_iface)
 #define DIOCKILLSRCNODES	_IOWR('D', 91, struct pfioc_src_node_kill)
 #define DIOCSETREASS	_IOWR('D', 92, u_int32_t)
+#define DIOCADDQUEUE	_IOWR('D', 93, struct pfioc_queue)
+#define DIOCGETQUEUES	_IOWR('D', 94, struct pfioc_queue)
+#define DIOCGETQUEUE	_IOWR('D', 95, struct pfioc_queue)
+#define DIOCGETQSTATS	_IOWR('D', 96, struct pfioc_qstats)
 
 #ifdef _KERNEL
 RB_HEAD(pf_src_tree, pf_src_node);
@@ -1725,6 +1778,10 @@ RB_PROTOTYPE(pf_state_tree_id, pf_state,
     entry_id, pf_state_compare_id);
 extern struct pf_state_tree_id tree_id;
 extern struct pf_state_queue state_list;
+
+TAILQ_HEAD(pf_queuehead, pf_queuespec);
+extern struct pf_queuehead		  pf_queues[2];
+extern struct pf_queuehead		 *pf_queues_active, *pf_queues_inactive;
 
 TAILQ_HEAD(pf_altqqueue, pf_altq);
 extern struct pf_altqqueue		  pf_altqs[2];
@@ -1742,7 +1799,7 @@ extern void			 pf_tbladdr_copyout(struct pf_addr_wrap *);
 extern void			 pf_calc_skip_steps(struct pf_rulequeue *);
 extern struct pool		 pf_src_tree_pl, pf_sn_item_pl, pf_rule_pl;
 extern struct pool		 pf_state_pl, pf_state_key_pl, pf_state_item_pl,
-				    pf_altq_pl, pf_rule_item_pl;
+				    pf_altq_pl, pf_rule_item_pl, pf_queue_pl;
 extern struct pool		 pf_state_scrub_pl;
 extern void			 pf_purge_thread(void *);
 extern void			 pf_purge_expired_src_nodes(int);
@@ -1771,8 +1828,6 @@ extern void			 pf_state_export(struct pfsync_state *,
 				    struct pf_state *);
 extern void			 pf_print_state(struct pf_state *);
 extern void			 pf_print_flags(u_int8_t);
-extern u_int16_t		 pf_cksum_fixup(u_int16_t, u_int16_t, u_int16_t,
-				    u_int8_t);
 
 extern struct ifnet		*sync_ifp;
 extern struct pf_rule		 pf_default_rule;
@@ -1796,7 +1851,9 @@ void	pf_addr_inc(struct pf_addr *, sa_family_t);
 
 void   *pf_pull_hdr(struct mbuf *, int, void *, int, u_short *, u_short *,
 	    sa_family_t);
-void	pf_change_a(void *, u_int16_t *, u_int32_t, u_int8_t);
+void	pf_change_a(struct pf_pdesc *, void *, u_int32_t);
+int	pf_check_proto_cksum(struct pf_pdesc *, int, int, u_int8_t,
+	    sa_family_t);
 int	pflog_packet(struct pf_pdesc *, u_int8_t, struct pf_rule *,
 	    struct pf_rule *, struct pf_ruleset *);
 void	pf_send_deferred_syn(struct pf_state *);
@@ -1833,7 +1890,7 @@ struct pf_state_key *pf_alloc_state_key(int);
 void	pf_pkt_addr_changed(struct mbuf *);
 int	pf_state_key_attach(struct pf_state_key *, struct pf_state *, int);
 int	pf_translate(struct pf_pdesc *, struct pf_addr *, u_int16_t,
-	    struct pf_addr *, u_int16_t, u_int16_t, int);
+	    struct pf_addr *, u_int16_t, u_int16_t, int, struct mbuf *);
 int	pf_translate_af(struct pf_pdesc *);
 void	pf_route(struct mbuf **, struct pf_rule *, int,
 	    struct ifnet *, struct pf_state *);
@@ -1842,8 +1899,8 @@ void	pf_route6(struct mbuf **, struct pf_rule *, int,
 
 void	pfr_initialize(void);
 int	pfr_match_addr(struct pfr_ktable *, struct pf_addr *, sa_family_t);
-void	pfr_update_stats(struct pfr_ktable *, struct pf_addr *, sa_family_t,
-	    u_int64_t, int, int, int);
+void	pfr_update_stats(struct pfr_ktable *, struct pf_addr *,
+	    struct pf_pdesc *, int, int);
 int	pfr_pool_get(struct pf_pool *, struct pf_addr **,
 	    struct pf_addr **, sa_family_t);
 int	pfr_states_increase(struct pfr_ktable *, struct pf_addr *, int);
@@ -1863,7 +1920,7 @@ int	pfr_get_tstats(struct pfr_table *, struct pfr_tstats *, int *, int);
 int	pfr_clr_tstats(struct pfr_table *, int, int *, int);
 int	pfr_set_tflags(struct pfr_table *, int, int, int, int *, int *, int);
 int	pfr_clr_addrs(struct pfr_table *, int *, int);
-int	pfr_insert_kentry(struct pfr_ktable *, struct pfr_addr *, long);
+int	pfr_insert_kentry(struct pfr_ktable *, struct pfr_addr *, time_t);
 int	pfr_add_addrs(struct pfr_table *, struct pfr_addr *, int, int *,
 	    int);
 int	pfr_del_addrs(struct pfr_table *, struct pfr_addr *, int, int *,
@@ -1906,7 +1963,7 @@ int		 pfi_clear_flags(const char *, int);
 void		 pfi_xcommit(void);
 
 int		 pf_match_tag(struct mbuf *, struct pf_rule *, int *);
-u_int16_t	 pf_tagname2tag(char *);
+u_int16_t	 pf_tagname2tag(char *, int);
 void		 pf_tag2tagname(u_int16_t, char *);
 void		 pf_tag_ref(u_int16_t);
 void		 pf_tag_unref(u_int16_t);
@@ -1970,12 +2027,6 @@ struct pf_os_fingerprint *
 #ifdef _KERNEL
 void			 pf_print_host(struct pf_addr *, u_int16_t, u_int8_t);
 
-void			 pf_step_into_anchor(int *, struct pf_ruleset **,
-			    struct pf_rule **, struct pf_rule **, int *);
-int			 pf_step_out_of_anchor(int *, struct pf_ruleset **,
-			     struct pf_rule **, struct pf_rule **,
-			     int *);
-
 int			 pf_get_transaddr(struct pf_rule *, struct pf_pdesc *,
 			    struct pf_src_node **, struct pf_rule **);
 
@@ -1985,6 +2036,8 @@ int			 pf_map_addr(sa_family_t, struct pf_rule *,
 			    struct pf_pool *, enum pf_sn_types);
 
 int			 pf_postprocess_addr(struct pf_state *);
+
+void			 pf_cksum(struct pf_pdesc *, struct mbuf *);
 
 #endif /* _KERNEL */
 

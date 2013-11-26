@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_time.c,v 1.77 2013/03/28 16:55:25 deraadt Exp $	*/
+/*	$OpenBSD: kern_time.c,v 1.85 2013/10/25 04:42:48 guenther Exp $	*/
 /*	$NetBSD: kern_time.c,v 1.20 1996/02/18 11:57:06 fvdl Exp $	*/
 
 /*
@@ -48,8 +48,6 @@
 
 struct timeval adjtimedelta;		/* unapplied time correction */
 
-void	itimerround(struct timeval *);
-
 /* 
  * Time of day and interval timer support.
  *
@@ -81,13 +79,12 @@ settime(struct timespec *ts)
 	 * the time past the cutoff, it will take a very long time
 	 * to get to the wrap point.
 	 *
-	 * XXX: we check against INT_MAX since on 64-bit
-	 *	platforms, sizeof(int) != sizeof(long) and
-	 *	time_t is 32 bits even when atv.tv_sec is 64 bits.
+	 * XXX: we check against UINT_MAX until we can figure out
+	 *	how to deal with the hardware RTCs.
 	 */
-	if (ts->tv_sec > INT_MAX - 365*24*60*60) {
-		printf("denied attempt to set clock forward to %ld\n",
-		    ts->tv_sec);
+	if (ts->tv_sec > UINT_MAX - 365*24*60*60) {
+		printf("denied attempt to set clock forward to %lld\n",
+		    (long long)ts->tv_sec);
 		return (EPERM);
 	}
 	/*
@@ -98,8 +95,8 @@ settime(struct timespec *ts)
 	 */
 	nanotime(&now);
 	if (securelevel > 1 && timespeccmp(ts, &now, <)) {
-		printf("denied attempt to set clock back %ld seconds\n",
-		    now.tv_sec - ts->tv_sec);
+		printf("denied attempt to set clock back %lld seconds\n",
+		    (long long)now.tv_sec - ts->tv_sec);
 		return (EPERM);
 	}
 
@@ -112,24 +109,42 @@ settime(struct timespec *ts)
 int
 clock_gettime(struct proc *p, clockid_t clock_id, struct timespec *tp)
 {
-	struct timeval tv;
+	struct bintime bt;
+	struct proc *q;
 
 	switch (clock_id) {
 	case CLOCK_REALTIME:
 		nanotime(tp);
 		break;
+	case CLOCK_UPTIME:
+		binuptime(&bt);
+		bintime_sub(&bt, &naptime);
+		bintime2timespec(&bt, tp);
+		break;
 	case CLOCK_MONOTONIC:
 		nanouptime(tp);
 		break;
-	case CLOCK_PROF:
-		microuptime(&tv);
-		timersub(&tv, &curcpu()->ci_schedstate.spc_runtime, &tv);
-		timeradd(&tv, &p->p_rtime, &tv);
-		tp->tv_sec = tv.tv_sec;
-		tp->tv_nsec = tv.tv_usec * 1000;
+	case CLOCK_PROCESS_CPUTIME_ID:
+		nanouptime(tp);
+		timespecsub(tp, &curcpu()->ci_schedstate.spc_runtime, tp);
+		timespecadd(tp, &p->p_p->ps_tu.tu_runtime, tp);
+		timespecadd(tp, &p->p_rtime, tp);
+		break;
+	case CLOCK_THREAD_CPUTIME_ID:
+		nanouptime(tp);
+		timespecsub(tp, &curcpu()->ci_schedstate.spc_runtime, tp);
+		timespecadd(tp, &p->p_tu.tu_runtime, tp);
+		timespecadd(tp, &p->p_rtime, tp);
 		break;
 	default:
-		return (EINVAL);
+		/* check for clock from pthread_getcpuclockid() */
+		if (__CLOCK_TYPE(clock_id) == CLOCK_THREAD_CPUTIME_ID) {
+			q = pfind(__CLOCK_PTID(clock_id) - THREAD_PID_OFFSET);
+			if (q == NULL || q->p_p != p->p_p)
+				return (ESRCH);
+			*tp = q->p_tu.tu_runtime;
+		} else
+			return (EINVAL);
 	}
 	return (0);
 }
@@ -199,17 +214,29 @@ sys_clock_getres(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	clockid_t clock_id;
 	struct timespec ts;
+	struct proc *q;
 	int error = 0;
 
 	clock_id = SCARG(uap, clock_id);
 	switch (clock_id) {
 	case CLOCK_REALTIME:
 	case CLOCK_MONOTONIC:
+	case CLOCK_UPTIME:
+	case CLOCK_PROCESS_CPUTIME_ID:
+	case CLOCK_THREAD_CPUTIME_ID:
 		ts.tv_sec = 0;
 		ts.tv_nsec = 1000000000 / hz;
 		break;
 	default:
-		return (EINVAL);
+		/* check for clock from pthread_getcpuclockid() */
+		if (__CLOCK_TYPE(clock_id) == CLOCK_THREAD_CPUTIME_ID) {
+			q = pfind(__CLOCK_PTID(clock_id) - THREAD_PID_OFFSET);
+			if (q == NULL || q->p_p != p->p_p)
+				return (ESRCH);
+			ts.tv_sec = 0;
+			ts.tv_nsec = 1000000000 / hz;
+		} else
+			return (EINVAL);
 	}
 
 	if (SCARG(uap, tp)) {
@@ -542,10 +569,6 @@ sys_setitimer(struct proc *p, void *v, register_t *retval)
 		itimerround(&aitv.it_interval);
 		s = splclock();
 		pr->ps_timer[which] = aitv;
-		if (which == ITIMER_VIRTUAL)
-			timeout_del(&pr->ps_virt_to);
-		if (which == ITIMER_PROF)
-			timeout_del(&pr->ps_prof_to);
 		splx(s);
 	}
 
@@ -751,3 +774,4 @@ ppsratecheck(struct timeval *lasttime, int *curpps, int maxpps)
 
 	return (rv);
 }
+

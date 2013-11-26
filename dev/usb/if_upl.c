@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upl.c,v 1.51 2013/04/15 09:23:01 mglocker Exp $ */
+/*	$OpenBSD: if_upl.c,v 1.55 2013/11/15 10:17:39 pirofti Exp $ */
 /*	$NetBSD: if_upl.c,v 1.19 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -57,7 +57,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
@@ -139,8 +138,6 @@ struct upl_softc {
 
 	uByte			sc_ibuf;
 
-	char			sc_dying;
-	char			sc_attached;
 	u_int			sc_rx_errs;
 	struct timeval		sc_rx_notice;
 	u_int			sc_intr_errs;
@@ -298,7 +295,6 @@ upl_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	if_alloc_sadl(ifp);
 
-	sc->sc_attached = 1;
 	splx(s);
 }
 
@@ -310,10 +306,6 @@ upl_detach(struct device *self, int flags)
 	int			s;
 
 	DPRINTFN(2,("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
-
-	/* Detached before attached finished, so just bail out. */
-	if (!sc->sc_attached)
-		return (0);
 
 	s = splusb();
 
@@ -331,7 +323,6 @@ upl_detach(struct device *self, int flags)
 		       sc->sc_dev.dv_xname);
 #endif
 
-	sc->sc_attached = 0;
 	splx(s);
 
 	return (0);
@@ -346,7 +337,7 @@ upl_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 	return (0);
@@ -464,7 +455,7 @@ upl_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	int			total_len = 0;
 	int			s;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (!(ifp->if_flags & IFF_RUNNING))
@@ -551,7 +542,7 @@ upl_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	struct ifnet		*ifp = &sc->sc_if;
 	int			s;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	s = splnet();
@@ -632,7 +623,7 @@ upl_start(struct ifnet *ifp)
 	struct upl_softc	*sc = ifp->if_softc;
 	struct mbuf		*m_head = NULL;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	DPRINTFN(10,("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
@@ -675,7 +666,7 @@ upl_init(void *xsc)
 	struct ifnet		*ifp = &sc->sc_if;
 	int			s;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	DPRINTFN(10,("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
@@ -769,7 +760,7 @@ upl_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 
 	DPRINTFN(15,("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (!(ifp->if_flags & IFF_RUNNING))
@@ -809,7 +800,7 @@ upl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	struct ifreq		*ifr = (struct ifreq *)data;
 	int			s, error = 0;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	DPRINTFN(5,("%s: %s: cmd=0x%08lx\n",
@@ -863,7 +854,7 @@ upl_watchdog(struct ifnet *ifp)
 
 	DPRINTFN(5,("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	ifp->if_oerrors++;
@@ -895,11 +886,7 @@ upl_stop(struct upl_softc *sc)
 
 	/* Stop transfers. */
 	if (sc->sc_ep[UPL_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_RX]);
-		if (err) {
-			printf("%s: abort rx pipe failed: %s\n",
-			sc->sc_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_RX]);
 		err = usbd_close_pipe(sc->sc_ep[UPL_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
@@ -909,11 +896,7 @@ upl_stop(struct upl_softc *sc)
 	}
 
 	if (sc->sc_ep[UPL_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_TX]);
-		if (err) {
-			printf("%s: abort tx pipe failed: %s\n",
-			sc->sc_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_TX]);
 		err = usbd_close_pipe(sc->sc_ep[UPL_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
@@ -923,11 +906,7 @@ upl_stop(struct upl_softc *sc)
 	}
 
 	if (sc->sc_ep[UPL_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_INTR]);
-		if (err) {
-			printf("%s: abort intr pipe failed: %s\n",
-			sc->sc_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->sc_ep[UPL_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",

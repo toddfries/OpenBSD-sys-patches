@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflog.c,v 1.53 2013/03/26 13:19:25 mpi Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.58 2013/11/16 00:36:01 chl Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -51,7 +51,6 @@
 
 #ifdef	INET
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
@@ -64,7 +63,6 @@
 #include <netinet/in.h>
 #endif
 #include <netinet/ip6.h>
-#include <netinet6/nd6.h>
 #include <netinet/icmp6.h>
 #endif /* INET6 */
 
@@ -312,7 +310,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	struct mbuf		*m, *mp, *mhdr, *mptr;
 	struct pfloghdr		*pfloghdr;
 	u_int			 count;
-	u_char			*dst, *mdst, *cp;
+	u_char			*dst, *mdst;
 	u_short			 reason;
 	int			 afto, hlen, mlen, off;
 	union pf_headers {
@@ -419,7 +417,6 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	mp = m_getptr(m, hlen, &off);
 	if (mp != NULL) {
 		bcopy(mp, mptr, sizeof(*mptr));
-		cp = mtod(mp, char *);
 		mptr->m_data += off;
 		mptr->m_len -= off;
 		mptr->m_flags &= ~M_PKTHDR;
@@ -443,7 +440,7 @@ pflog_bpfcopy(const void *src_arg, void *dst_arg, size_t len)
 	if (pd.virtual_proto != PF_VPROTO_FRAGMENT &&
 	    (pfloghdr->rewritten = pf_translate(&pd, &pfloghdr->saddr,
 	    pfloghdr->sport, &pfloghdr->daddr, pfloghdr->dport, 0,
-	    pfloghdr->dir))) {
+	    pfloghdr->dir, pd.m))) {
 		m_copyback(pd.m, pd.off, min(pd.m->m_len - pd.off, pd.hdrlen),
 		    pd.hdr.any, M_NOWAIT);
 #if INET && INET6

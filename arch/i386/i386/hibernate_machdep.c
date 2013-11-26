@@ -1,3 +1,5 @@
+/*	$OpenBSD: hibernate_machdep.c,v 1.29 2013/10/20 20:03:03 mlarkin Exp $	*/
+
 /*
  * Copyright (c) 2011 Mike Larkin <mlarkin@openbsd.org>
  *
@@ -43,11 +45,6 @@
 #include "ahci.h"
 #include "sd.h"
 
-#if NWD > 0
-#include <dev/ata/atavar.h>
-#include <dev/ata/wdvar.h>
-#endif
-
 /* Hibernate support */
 void    hibernate_enter_resume_4k_pte(vaddr_t, paddr_t);
 void    hibernate_enter_resume_4k_pde(vaddr_t);
@@ -77,8 +74,11 @@ get_hibernate_io_function(void)
 	if (blkname == NULL)
 		return NULL;
 #if NWD > 0
-	if (strcmp(blkname, "wd") == 0)
+	if (strcmp(blkname, "wd") == 0) {
+		extern int wd_hibernate_io(dev_t dev, daddr_t blkno,
+		    vaddr_t addr, size_t size, int op, void *page);
 		return wd_hibernate_io;
+	}
 #endif
 #if NAHCI > 0 && NSD > 0
 	if (strcmp(blkname, "sd") == 0) {
@@ -159,7 +159,7 @@ hibernate_enter_resume_4m_pde(vaddr_t va, paddr_t pa)
 	pt_entry_t *pde, npde;
 
 	pde = s4pde_4m(va);
-	npde = (pa & PMAP_PA_MASK_4M) | PG_RW | PG_V | PG_u | PG_M | PG_PS;
+	npde = (pa & PMAP_PA_MASK_4M) | PG_RW | PG_V | PG_M | PG_PS;
 	*pde = npde;
 }
 
@@ -172,7 +172,7 @@ hibernate_enter_resume_4k_pte(vaddr_t va, paddr_t pa)
 	pt_entry_t *pte, npte;
 
 	pte = s4pte_4k(va);
-	npte = (pa & PMAP_PA_MASK) | PG_RW | PG_V | PG_u | PG_M;
+	npte = (pa & PMAP_PA_MASK) | PG_RW | PG_V | PG_M;
 	*pte = npte;
 }
 
@@ -185,7 +185,7 @@ hibernate_enter_resume_4k_pde(vaddr_t va)
 	pt_entry_t *pde, npde;
 
 	pde = s4pde_4k(va);
-	npde = (HIBERNATE_PT_PAGE & PMAP_PA_MASK) | PG_RW | PG_V | PG_u | PG_M;
+	npde = (HIBERNATE_PT_PAGE & PMAP_PA_MASK) | PG_RW | PG_V | PG_M;
 	*pde = npde;
 }
 
@@ -229,6 +229,8 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	 */
 	kern_start_4m_va = (paddr_t)&start & ~(PAGE_MASK_4M);
 	kern_end_4m_va = (paddr_t)&end & ~(PAGE_MASK_4M);
+
+	/* i386 kernels load at 2MB phys (on the 0th 4mb page) */
 	phys_page_number = 0;
 
 	for (page = kern_start_4m_va; page <= kern_end_4m_va;
@@ -314,3 +316,35 @@ hibernate_inflate_skip(union hibernate_info *hib_info, paddr_t dest)
 
 	return (0);
 }
+
+void
+hibernate_enable_intr_machdep(void)
+{
+	enable_intr();
+}
+
+void
+hibernate_disable_intr_machdep(void)
+{
+	disable_intr();
+}
+
+#ifdef MULTIPROCESSOR
+/*
+ * Quiesce CPUs in a multiprocessor machine before resuming. We need to do
+ * this since the APs will be hatched (but waiting for CPUF_GO), and we don't
+ * want the APs to be executing code and causing side effects during the
+ * unpack operation.
+ */
+void
+hibernate_quiesce_cpus(void)
+{
+        KASSERT(CPU_IS_PRIMARY(curcpu()));
+
+	/* Start the hatched (but idling) APs */
+	cpu_boot_secondary_processors();
+
+	/* Now shut them down */
+	acpi_sleep_mp();
+}
+#endif /* MULTIPROCESSOR */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.97 2012/12/31 10:07:51 miod Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.99 2013/11/14 12:10:04 dlg Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -44,7 +44,7 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
@@ -1673,7 +1673,7 @@ bwi_fwimage_is_valid(struct bwi_softc *sc, uint8_t *fw, size_t fw_len,
 	const struct bwi_fwhdr *hdr;
 
 	if (fw_len < sizeof(*hdr)) {
-		printf("%s: invalid firmware (%s): invalid size %u\n",
+		printf("%s: invalid firmware (%s): invalid size %zu\n",
 		    sc->sc_dev.dv_xname, fw_name, fw_len);
 		return (1);
 	}
@@ -1686,7 +1686,7 @@ bwi_fwimage_is_valid(struct bwi_softc *sc, uint8_t *fw, size_t fw_len,
 		 */
 		if (betoh32(hdr->fw_size) != fw_len - sizeof(*hdr)) {
 			printf("%s: invalid firmware (%s): size mismatch, "
-			    "fw %u, real %u\n",
+			    "fw %u, real %zu\n",
 			    sc->sc_dev.dv_xname,
 			    fw_name,
 			    betoh32(hdr->fw_size),

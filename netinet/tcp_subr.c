@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_subr.c,v 1.118 2013/04/10 08:50:59 mpi Exp $	*/
+/*	$OpenBSD: tcp_subr.c,v 1.125 2013/10/24 11:31:43 mpi Exp $	*/
 /*	$NetBSD: tcp_subr.c,v 1.22 1996/02/13 23:44:00 christos Exp $	*/
 
 /*
@@ -84,7 +84,6 @@
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
-#include <netinet/in_var.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
 #include <netinet/ip_icmp.h>
@@ -97,8 +96,6 @@
 #include <dev/rndvar.h>
 
 #ifdef INET6
-#include <netinet6/in6_var.h>
-#include <netinet6/ip6_var.h>
 #include <netinet6/ip6protosw.h>
 #endif /* INET6 */
 
@@ -257,9 +254,6 @@ tcp_template(tp)
 
 			th = (struct tcphdr *)(mtod(m, caddr_t) +
 				sizeof(struct ip));
-			th->th_sum = in_cksum_phdr(ipovly->ih_src.s_addr,
-			    ipovly->ih_dst.s_addr,
-			    htons(sizeof (struct tcphdr) + IPPROTO_TCP));
 		}
 		break;
 #endif /* INET */
@@ -281,7 +275,6 @@ tcp_template(tp)
 
 			th = (struct tcphdr *)(mtod(m, caddr_t) +
 				sizeof(struct ip6_hdr));
-			th->th_sum = 0;
 		}
 		break;
 #endif /* INET6 */
@@ -296,6 +289,7 @@ tcp_template(tp)
 	th->th_flags = 0;
 	th->th_win = 0;
 	th->th_urp = 0;
+	th->th_sum = 0;
 	return (m);
 }
 
@@ -653,17 +647,14 @@ tcp_notify(inp, error)
 
 #ifdef INET6
 void
-tcp6_ctlinput(cmd, sa, d)
-	int cmd;
-	struct sockaddr *sa;
-	void *d;
+tcp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 {
 	struct tcphdr th;
 	struct tcpcb *tp;
 	void (*notify)(struct inpcb *, int) = tcp_notify;
 	struct ip6_hdr *ip6;
 	const struct sockaddr_in6 *sa6_src = NULL;
-	struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)sa;
+	struct sockaddr_in6 *sa6 = satosin6(sa);
 	struct inpcb *inp;
 	struct mbuf *m;
 	tcp_seq seq;
@@ -734,7 +725,7 @@ tcp6_ctlinput(cmd, sa, d)
 		 */
 		inp = in6_pcbhashlookup(&tcbtable, &sa6->sin6_addr,
 		    th.th_dport, (struct in6_addr *)&sa6_src->sin6_addr,
-		    th.th_sport);
+		    th.th_sport, rdomain);
 		if (cmd == PRC_MSGSIZE) {
 			/*
 			 * Depending on the value of "valid" and routing table
@@ -758,10 +749,10 @@ tcp6_ctlinput(cmd, sa, d)
 		     inet6ctlerrmap[cmd] == ENETUNREACH ||
 		     inet6ctlerrmap[cmd] == EHOSTDOWN))
 			syn_cache_unreach((struct sockaddr *)sa6_src,
-			    sa, &th, /* XXX */ 0);
+			    sa, &th, rdomain);
 	} else {
-		(void) in6_pcbnotify(&tcbtable, sa, 0,
-		    (struct sockaddr *)sa6_src, 0, cmd, NULL, notify);
+		(void) in6_pcbnotify(&tcbtable, sa6, 0,
+		    sa6_src, 0, rdomain, cmd, NULL, notify);
 	}
 }
 #endif
@@ -897,17 +888,12 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
  * Path MTU Discovery handlers.
  */
 void
-tcp6_mtudisc_callback(faddr)
-	struct in6_addr *faddr;
+tcp6_mtudisc_callback(sin6, rdomain)
+	struct sockaddr_in6 *sin6;
+	u_int rdomain;
 {
-	struct sockaddr_in6 sin6;
-
-	bzero(&sin6, sizeof(sin6));
-	sin6.sin6_family = AF_INET6;
-	sin6.sin6_len = sizeof(struct sockaddr_in6);
-	sin6.sin6_addr = *faddr;
-	(void) in6_pcbnotify(&tcbtable, (struct sockaddr *)&sin6, 0,
-	    (struct sockaddr *)&sa6_any, 0, PRC_MSGSIZE, NULL, tcp_mtudisc);
+	(void) in6_pcbnotify(&tcbtable, sin6, 0,
+	    &sa6_any, 0, rdomain, PRC_MSGSIZE, NULL, tcp_mtudisc);
 }
 #endif /* INET6 */
 

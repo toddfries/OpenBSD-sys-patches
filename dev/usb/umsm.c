@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.90 2013/04/15 09:23:02 mglocker Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.95 2013/11/15 10:17:39 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2008 Yojiro UO <yuo@nui.org>
@@ -71,7 +71,6 @@ struct umsm_softc {
 	struct usbd_interface	*sc_iface;
 	int			 sc_iface_no;
 	struct device		*sc_subdev;
-	u_char			 sc_dying;
 	uint16_t		 sc_flag;
 
 	/* interrupt ep */
@@ -245,6 +244,7 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_C01SW }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_USB305}, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_TRUINSTALL }, DEV_TRUINSTALL},
+	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_MC8355}, 0},
 
 	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMASS }, DEV_UMASS3},
 	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMSM }, 0},
@@ -369,7 +369,7 @@ umsm_attach(struct device *parent, struct device *self, void *aux)
 		if (ed == NULL) {
 			printf("%s: no endpoint descriptor found for %d\n",
 			    sc->sc_dev.dv_xname, i);
-			sc->sc_dying = 1;
+			usbd_deactivate(sc->sc_udev);
 			return;
 		}
 
@@ -388,7 +388,7 @@ umsm_attach(struct device *parent, struct device *self, void *aux)
 	}
 	if (uca.bulkin == -1 || uca.bulkout == -1) {
 		printf("%s: missing endpoint\n", sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -423,7 +423,7 @@ umsm_detach(struct device *self, int flags)
 		sc->sc_intr_pipe = NULL;
 	}
 
-	sc->sc_dying = 1;
+	usbd_deactivate(sc->sc_udev);
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
@@ -436,16 +436,13 @@ int
 umsm_activate(struct device *self, int act)
 {
 	struct umsm_softc *sc = (struct umsm_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 int
@@ -454,7 +451,7 @@ umsm_open(void *addr, int portno)
 	struct umsm_softc *sc = addr;
 	int err;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (ENXIO);
 
 	if (sc->sc_intr_number != -1 && sc->sc_intr_pipe == NULL) {
@@ -485,15 +482,11 @@ umsm_close(void *addr, int portno)
 	struct umsm_softc *sc = addr;
 	int err;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (sc->sc_intr_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_intr_pipe);
-       		if (err)
-			printf("%s: abort interrupt pipe failed: %s\n",
-			    sc->sc_dev.dv_xname,
-			    usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_intr_pipe);
 		err = usbd_close_pipe(sc->sc_intr_pipe);
 		if (err)
 			printf("%s: close interrupt pipe failed: %s\n",
@@ -513,7 +506,7 @@ umsm_intr(struct usbd_xfer *xfer, void *priv,
 	u_char mstatus;
 
 	buf = (struct usb_cdc_notification *)sc->sc_intr_buf;
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -767,11 +760,14 @@ umsm_umass_changemode(struct umsm_softc *sc)
 		else {
 			n = UMASS_BBB_CBW_SIZE;
 			memcpy(bufp, &cbw, UMASS_BBB_CBW_SIZE);
-			err = usbd_bulk_transfer(xfer, cmdpipe, USBD_NO_COPY,
-			    USBD_NO_TIMEOUT, bufp, &n, "umsm");
-			if (err)
+			usbd_setup_xfer(xfer, cmdpipe, 0, bufp, n,
+			    USBD_NO_COPY | USBD_SYNCHRONOUS, 0, NULL);
+			err = usbd_transfer(xfer);
+			if (err) {
+				usbd_clear_endpoint_stall(cmdpipe);
 				DPRINTF(("%s: send error:%s", __func__,
 				    usbd_errstr(err)));
+			}
 		}
 		usbd_close_pipe(cmdpipe);
 		usbd_free_buffer(xfer);

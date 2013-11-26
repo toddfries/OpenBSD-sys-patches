@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sched.c,v 1.28 2013/04/19 21:44:08 tedu Exp $	*/
+/*	$OpenBSD: kern_sched.c,v 1.30 2013/06/06 13:09:37 haesbaert Exp $	*/
 /*
  * Copyright (c) 2007, 2008 Artur Grabowski <art@openbsd.org>
  *
@@ -105,8 +105,19 @@ sched_kthreads_create(void *v)
 	struct schedstate_percpu *spc = &ci->ci_schedstate;
 	static int num;
 
-	if (kthread_create(sched_idle, ci, &spc->spc_idleproc, "idle%d", num))
+	if (fork1(&proc0, 0, FORK_SHAREVM|FORK_SHAREFILES|FORK_NOZOMBIE|
+	    FORK_SIGHAND|FORK_IDLE, NULL, 0, sched_idle, ci, NULL,
+	    &spc->spc_idleproc))
 		panic("fork idle");
+
+	/*
+	 * Mark it as a system process.
+	 */
+	atomic_setbits_int(&spc->spc_idleproc->p_flag, P_SYSTEM);
+
+	/* Name it as specified. */
+	snprintf(spc->spc_idleproc->p_comm, sizeof(spc->spc_idleproc->p_comm),
+	    "idle%d", num);
 
 	num++;
 }
@@ -190,13 +201,13 @@ void
 sched_exit(struct proc *p)
 {
 	struct schedstate_percpu *spc = &curcpu()->ci_schedstate;
-	struct timeval tv;
+	struct timespec ts;
 	struct proc *idle;
 	int s;
 
-	microuptime(&tv);
-	timersub(&tv, &spc->spc_runtime, &tv);
-	timeradd(&p->p_rtime, &tv, &p->p_rtime);
+	nanouptime(&ts);
+	timespecsub(&ts, &spc->spc_runtime, &ts);
+	timespecadd(&p->p_rtime, &ts, &p->p_rtime);
 
 	LIST_INSERT_HEAD(&spc->spc_deadproc, p, p_hash);
 

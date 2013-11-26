@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6protosw.h,v 1.8 2013/04/24 10:17:08 mpi Exp $	*/
+/*	$OpenBSD: ip6protosw.h,v 1.10 2013/10/21 12:40:50 deraadt Exp $	*/
 /*	$KAME: ip6protosw.h,v 1.22 2001/02/08 18:02:08 itojun Exp $	*/
 
 /*
@@ -30,8 +30,6 @@
  * SUCH DAMAGE.
  *
  */
-
-/*	BSDI protosw.h,v 2.3 1996/10/11 16:02:40 pjd Exp	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1993
@@ -123,7 +121,7 @@ struct ip6protosw {
 					/* output to protocol (from above) */
 	int	(*pr_output)(struct mbuf *, ...);
 					/* control input (from below) */
-	void	(*pr_ctlinput)(int, struct sockaddr *, void *);
+	void	(*pr_ctlinput)(int, struct sockaddr *, u_int, void *);
 					/* control output (from above) */
 	int	(*pr_ctloutput)(int, struct socket *, int, int, struct mbuf **);
 

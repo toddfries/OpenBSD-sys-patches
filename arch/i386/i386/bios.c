@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.99 2013/04/24 08:23:45 blambert Exp $	*/
+/*	$OpenBSD: bios.c,v 1.103 2013/11/02 15:02:27 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -169,7 +169,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	struct smbtable bios;
 	volatile u_int8_t *va;
 	char scratch[64], *str;
-	int flags, smbiosrev = 0, ncpu = 0;
+	int flags, smbiosrev = 0, ncpu = 0, usingacpi = 0;
 
 	/* remember flags */
 	flags = sc->sc_dev.dv_cfdata->cf_flags;
@@ -238,7 +238,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 
 			bios32_entry.segment = GSEL(GCODE_SEL, SEL_KPL);
 			bios32_entry.offset = (u_int32_t)ISA_HOLE_VADDR(h->entry);
-			printf(", BIOS32 rev. %d @ 0x%lx", h->rev, h->entry);
+			printf(", BIOS32 rev. %d @ 0x%x", h->rev, h->entry);
 			break;
 		}
 	}
@@ -285,7 +285,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 			for (; pa < end; pa+= NBPG, eva+= NBPG)
 				pmap_kenter_pa(eva, pa, VM_PROT_READ);
 
-			printf(", SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
+			printf(", SMBIOS rev. %d.%d @ 0x%x (%hd entries)",
 			    sh->majrev, sh->minrev, sh->addr, sh->count);
 			/*
 			 * Unbelievably the SMBIOS version number
@@ -374,8 +374,27 @@ biosattach(struct device *parent, struct device *self, void *aux)
 			}
 	}
 
+#if NACPI > 0
+#if NPCI > 0
+	if (smbiosrev >= 210 && pci_mode_detect() != 0)
+#endif
+	{
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "acpi";
+		ba.ba_func = 0x00;		/* XXX ? */
+		ba.ba_iot = I386_BUS_SPACE_IO;
+		ba.ba_memt = I386_BUS_SPACE_MEM;
+		if (config_found(self, &ba, bios_print)) {
+			flags |= BIOSF_PCIBIOS;
+			usingacpi = 1;
+		}
+	}
+#endif
+
 #if NAPM > 0
-	if (apm && ncpu < 2 && smbiosrev < 240) {
+	if (usingacpi == 0 && apm && ncpu < 2 && smbiosrev < 240) {
 		struct bios_attach_args ba;
 
 #if defined(DEBUG) || defined(APMDEBUG)
@@ -394,22 +413,6 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	}
 #endif
 
-#if NACPI > 0
-#if NPCI > 0
-	if (smbiosrev && pci_mode_detect() != 0)
-#endif
-	{
-		struct bios_attach_args ba;
-
-		memset(&ba, 0, sizeof(ba));
-		ba.ba_name = "acpi";
-		ba.ba_func = 0x00;		/* XXX ? */
-		ba.ba_iot = I386_BUS_SPACE_IO;
-		ba.ba_memt = I386_BUS_SPACE_MEM;
-		if (config_found(self, &ba, bios_print))
-			flags |= BIOSF_PCIBIOS;
-	}
-#endif
 
 #if NMPBIOS > 0
 	if (mpbios_probe(self)) {
@@ -544,7 +547,7 @@ bios_getopt()
 			break;
 #endif
 		case BOOTARG_CONSDEV:
-			if (q->ba_size >= sizeof(bios_oconsdev_t) +
+			if (q->ba_size >= sizeof(bios_consdev_t) +
 			    offsetof(bootarg_t, ba_arg)) {
 				bios_consdev_t *cdp =
 				    (bios_consdev_t*)q->ba_arg;
@@ -552,10 +555,7 @@ bios_getopt()
 				static const int ports[] =
 				    { 0x3f8, 0x2f8, 0x3e8, 0x2e8 };
 				int unit = minor(cdp->consdev);
-				int consaddr = -1;
-				if (q->ba_size >= sizeof(bios_consdev_t) +
-				    offsetof(bootarg_t, ba_arg))
-					consaddr = cdp->consaddr;
+				int consaddr = cdp->consaddr;
 				if (consaddr == -1 && unit >=0 &&
 				    unit < (sizeof(ports)/sizeof(ports[0])))
 					consaddr = ports[unit];
@@ -573,7 +573,6 @@ bios_getopt()
 				printf(" console 0x%x:%d",
 				    cdp->consdev, cdp->conspeed);
 #endif
-				cnset(cdp->consdev);
 			}
 			break;
 #ifdef MULTIPROCESSOR

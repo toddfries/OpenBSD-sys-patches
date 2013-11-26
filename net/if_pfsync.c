@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.c,v 1.198 2013/05/10 11:36:24 mikeb Exp $	*/
+/*	$OpenBSD: if_pfsync.c,v 1.204 2013/11/18 21:16:55 chl Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff
@@ -73,6 +73,7 @@
 #endif
 
 #ifdef INET6
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet/in_pcb.h>
 #include <netinet/icmp6.h>
@@ -421,7 +422,7 @@ pfsync_syncdev_state(void *arg)
 {
 	struct pfsync_softc *sc = arg;
 
-	if (!sc->sc_sync_if && !(sc->sc_if.if_flags & IFF_UP))
+	if (!sc->sc_sync_if || !(sc->sc_if.if_flags & IFF_UP))
 		return;
 
 	if (sc->sc_sync_if->if_link_state == LINK_STATE_DOWN) {
@@ -916,7 +917,7 @@ pfsync_in_upd(caddr_t buf, int len, int count, int flags)
 		st = pf_find_state_byid(&id_key);
 		if (st == NULL) {
 			/* insert the update */
-			if (pfsync_state_import(sp, 0))
+			if (pfsync_state_import(sp, flags))
 				pfsyncstats.pfsyncs_badstate++;
 			continue;
 		}
@@ -1681,6 +1682,8 @@ pfsync_sendout(void)
 
 	sc->sc_if.if_opackets++;
 	sc->sc_if.if_obytes += m->m_pkthdr.len;
+
+	m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
 
 	if (ip_output(m, NULL, NULL, IP_RAWOUTPUT, &sc->sc_imo, NULL) == 0)
 		pfsyncstats.pfsyncs_opackets++;

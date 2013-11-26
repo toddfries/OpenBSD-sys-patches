@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.86 2013/02/17 18:07:36 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.93 2013/11/02 23:10:29 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -118,6 +118,7 @@ void	luna88k_bootstrap(void);
 #ifdef MULTIPROCESSOR
 void	luna88k_ipi_handler(struct trapframe *);
 #endif
+void	luna88k_vector_init(uint32_t *, uint32_t *);
 char	*nvram_by_symbol(char *);
 void	powerdown(void);
 void	savectx(struct pcb *);
@@ -193,6 +194,7 @@ struct nvram_t {
 	char value[NVVALLEN];
 } nvram[NNVSYM];
 
+register_t kernel_vbr;
 int physmem;	  /* available physical memory, in pages */
 
 struct vm_map *exec_map = NULL;
@@ -292,9 +294,6 @@ size_memory()
 {
 	unsigned int *volatile look;
 	unsigned int *max;
-#if 0
-	extern char *end;
-#endif
 #define PATTERN   0x5a5a5a5a
 #define STRIDE    (4*1024) 	/* 4k at a time */
 #define Roundup(value, stride) (((unsigned)(value) + (stride) - 1) & ~((stride)-1))
@@ -505,7 +504,8 @@ boot(howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	/* Luna88k supports automatic powerdown */
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
@@ -579,9 +579,9 @@ dumpsys()
 {
 	int maj;
 	int psize;
-	daddr64_t blkno;	/* current block to write */
+	daddr_t blkno;	/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -777,7 +777,7 @@ secondary_main()
 	ncpus++;
 
 	sched_init_cpu(ci);
-	microuptime(&ci->ci_schedstate.spc_runtime);
+	nanouptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
 	ci->ci_randseed = random();
 
@@ -791,6 +791,8 @@ secondary_main()
 	/* wait for cpu_boot_secondary_processors() */
 	__cpu_simple_lock(&cpu_boot_mutex);
 	__cpu_simple_unlock(&cpu_boot_mutex);
+
+	set_vbr(kernel_vbr);
 
 	spl0();
 	SCHED_LOCK(s);
@@ -919,15 +921,6 @@ out:
 }
 
 int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-
-	return (ENOEXEC);
-}
-
-int
 sys_sysarch(p, v, retval)
 	struct proc *p;
 	void *v;
@@ -979,6 +972,26 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	/*NOTREACHED*/
 }
 
+void
+luna88k_vector_init(uint32_t *bootvbr, uint32_t *vectors)
+{
+	extern vaddr_t vector_init(uint32_t *, uint32_t *, int); /* gross */
+	extern int kernelstart;
+
+	/*
+	 * Set up bootstrap vectors, overwriting the existing PROM vbr
+	 * page.
+	 */
+	vector_init(bootvbr, vectors, 1);
+
+	/*
+	 * Set up final vectors. These will be used by all processors,
+	 * once autoconf is over.
+	 */
+	kernel_vbr = trunc_page((vaddr_t)&kernelstart);
+	vector_init((uint32_t *)kernel_vbr, vectors, 0);
+}
+
 /*
  * Called from locore.S during boot,
  * this is the first C code that's run.
@@ -987,8 +1000,7 @@ void
 luna88k_bootstrap()
 {
 	extern const struct cmmu_p cmmu8820x;
-	extern char *end;
-	vaddr_t avail_start;
+	extern vaddr_t avail_start;
 	extern vaddr_t avail_end;
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;
@@ -1001,13 +1013,15 @@ luna88k_bootstrap()
 	*int_mask_reg[2] = *int_mask_reg[3] = 0;
 
 	/* clear software interrupts; just read registers */
-	*swi_reg[0]; *swi_reg[1];
-	*swi_reg[2]; *swi_reg[3];
+	*(volatile uint32_t *)swi_reg[0];
+	*(volatile uint32_t *)swi_reg[1];
+	*(volatile uint32_t *)swi_reg[2];
+	*(volatile uint32_t *)swi_reg[3];
 
 	uvmexp.pagesize = PAGE_SIZE;
 	uvm_setpagesize();
 
-	first_addr = round_page((vaddr_t)&end);	/* XXX temp until symbols */
+	first_addr = round_page(first_addr);
 	last_addr = size_memory();
 	physmem = atop(last_addr);
 

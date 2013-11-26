@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.87 2013/04/21 20:46:28 deraadt Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.90 2013/11/09 04:05:58 jsg Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -64,6 +64,13 @@ const struct puc_device_description puc_devs[] = {
 	},
 	{   /* Intel 7 Series KT */
 	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7SERIES_KT, 0x0000, 0x0000 },
+	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{   /* Intel 8 Series KT */
+	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_8SERIES_KT, 0x0000, 0x0000 },
 	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
 	    {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
@@ -966,6 +973,15 @@ const struct puc_device_description puc_devs[] = {
 	    },
 	},
 
+	/* Oxford Semiconductor OXPCIE952 PCIE Parallel port */
+	{   /* "Oxford Semiconductor OXPCIE952 PCIE Parallel port", */
+	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OXPCIE952,	0, 0 },
+	    {   0xffff, 0xffff,						0, 0 },
+	    {
+		{ PUC_LPT, 0x10, 0x0000 },
+	    },
+	},
+
 	/* SIIG 2050 (uses Oxford 16PCI954 and a 10x clock) */
 	{   /* "Oxford Semiconductor OX16PCI954 UARTs", */
 	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OX16PCI954,
@@ -1031,6 +1047,15 @@ const struct puc_device_description puc_devs[] = {
 	    {   0xffff, 0xffff,						0, 0 },
 	    {
 		{ PUC_LPT, 0x10, 0x0000 },
+	    },
+	},
+
+	/* Oxford Semiconductor PCIE `950 UARTs - 128 byte FIFOs */
+	{   /* "Oxford Semiconductor PCIE UARTs", */
+	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OXPCIE952S,	0, 0 },
+	    {   0xffff, 0xffff,						0, 0 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
 	    },
 	},
 

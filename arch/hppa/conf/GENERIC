@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.149 2012/09/27 14:01:35 jsg Exp $
+#	$OpenBSD: GENERIC,v 1.154 2013/11/15 19:42:20 sasano Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -115,6 +115,7 @@ wskbd*	at ukbd? mux 1
 uhid*	at uhidev?		# USB generic HID support
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
+rsu*	at uhub?		# Realtek RTL8188SU/RTL8191SU/RTL8192SU
 
 # untested USB devices
 umodem*	at uhub?		# USB Modems/Serial
@@ -151,9 +152,9 @@ cdce*	at uhub?		# CDC Ethernet
 urndis*	at uhub?		# Remote NDIS Ethernet
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
-uscanner* at uhub? disable	# USB Scanners
 uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -163,6 +164,7 @@ rum*	at uhub?		# Ralink RT2501USB/RT2601USB
 run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 zyd*	at uhub?		# Zydas ZD1211
 uthum*	at uhidev?		# TEMPerHUM sensor
+ugold*	at uhidev?		# gold TEMPer sensor
 utwitch* at uhidev?		# YUREX BBU sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
@@ -263,7 +265,6 @@ em*	at pci?			# Intel Pro/1000 ethernet
 ti*	at pci?			# Alteon Tigon 1Gb ethernet
 #txp*	at pci?			# 3com 3CR990
 #epic*	at pci?			# SMC EPIC/100 ethernet
-#fpa*	at pci?			# DEC DEFPA FDDI
 #de*	at pci?			# 21x4[012]-based Ethernet
 #de*	at eisa?
 dc*	at pci?			# 21143, "tulip" clone ethernet

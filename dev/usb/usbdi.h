@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi.h,v 1.53 2013/04/26 14:19:25 mpi Exp $ */
+/*	$OpenBSD: usbdi.h,v 1.60 2013/11/19 14:04:07 pirofti Exp $ */
 /*	$NetBSD: usbdi.h,v 1.62 2002/07/11 21:14:35 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.18 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -76,6 +76,7 @@ typedef void (*usbd_callback)(struct usbd_xfer *, void *, usbd_status);
 #define USBD_SYNCHRONOUS	0x02	/* wait for completion */
 /* in usb.h #define USBD_SHORT_XFER_OK	0x04*/	/* allow short reads */
 #define USBD_FORCE_SHORT_XFER	0x08	/* force last short packet on write */
+#define USBD_CATCH		0x10	/* catch signals while sleeping */
 
 #define USBD_NO_TIMEOUT 0
 #define USBD_DEFAULT_TIMEOUT 5000 /* ms = 5 s */
@@ -87,7 +88,7 @@ usbd_status usbd_open_pipe(struct usbd_interface *iface, u_int8_t address,
 usbd_status usbd_close_pipe(struct usbd_pipe *pipe);
 usbd_status usbd_transfer(struct usbd_xfer *req);
 struct usbd_xfer *usbd_alloc_xfer(struct usbd_device *);
-usbd_status usbd_free_xfer(struct usbd_xfer *xfer);
+void usbd_free_xfer(struct usbd_xfer *xfer);
 void usbd_setup_xfer(struct usbd_xfer *xfer, struct usbd_pipe *pipe,
     void *priv, void *buffer, u_int32_t length, u_int16_t flags,
     u_int32_t timeout, usbd_callback);
@@ -101,18 +102,15 @@ void usbd_get_xfer_status(struct usbd_xfer *xfer, void **priv,
     void **buffer, u_int32_t *count, usbd_status *status);
 usb_endpoint_descriptor_t *usbd_interface2endpoint_descriptor(
     struct usbd_interface *iface, u_int8_t address);
-usbd_status usbd_abort_pipe(struct usbd_pipe *pipe);
+void usbd_abort_pipe(struct usbd_pipe *pipe);
 usbd_status usbd_clear_endpoint_stall(struct usbd_pipe *pipe);
 usbd_status usbd_clear_endpoint_stall_async(struct usbd_pipe *pipe);
 void usbd_clear_endpoint_toggle(struct usbd_pipe *pipe);
-usbd_status usbd_endpoint_count(struct usbd_interface *dev, u_int8_t *count);
-usbd_status usbd_interface_count(struct usbd_device *dev, u_int8_t *count);
-void usbd_interface2device_handle(struct usbd_interface *iface,
-    struct usbd_device **dev);
+int usbd_endpoint_count(struct usbd_interface *dev, u_int8_t *count);
+int usbd_interface_count(struct usbd_device *dev, u_int8_t *count);
 usbd_status usbd_device2interface_handle(struct usbd_device *dev,
     u_int8_t ifaceno, struct usbd_interface **iface);
 
-struct usbd_device *usbd_pipe2device_handle(struct usbd_pipe *);
 void *usbd_alloc_buffer(struct usbd_xfer *xfer, u_int32_t size);
 void usbd_free_buffer(struct usbd_xfer *xfer);
 usbd_status usbd_open_pipe_intr(struct usbd_interface *iface, u_int8_t address,
@@ -139,7 +137,7 @@ usb_interface_descriptor_t *usbd_find_idesc(usb_config_descriptor_t *cd,
 usb_endpoint_descriptor_t *usbd_find_edesc(usb_config_descriptor_t *cd,
     int ifaceidx, int altidx, int endptidx);
 
-void usbd_dopoll(struct usbd_interface *);
+void usbd_dopoll(struct usbd_device *);
 void usbd_set_polling(struct usbd_device *iface, int on);
 
 const char *usbd_errstr(usbd_status err);
@@ -221,7 +219,6 @@ struct usb_attach_arg {
 	int			vendor;
 	int			product;
 	int			release;
-	int			matchlvl;
 	struct usbd_device	*device;	/* current device */
 	struct usbd_interface	*iface; /* current interface */
 	int			usegeneric;

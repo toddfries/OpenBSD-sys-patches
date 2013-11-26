@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid1.c,v 1.50 2013/04/21 13:00:21 jsing Exp $ */
+/* $OpenBSD: softraid_raid1.c,v 1.54 2013/11/01 17:36:19 krw Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  *
@@ -330,8 +330,8 @@ sr_raid1_rw(struct sr_workunit *wu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_ccb		*ccb;
 	struct sr_chunk		*scp;
-	int			ios, chunk, i, s, rt;
-	daddr64_t		blk;
+	int			ios, chunk, i, rt;
+	daddr_t			blk;
 
 	/* blk and scsi error will be handled by sr_validate_io */
 	if (sr_validate_io(wu, &blk, "sr_raid1_rw"))
@@ -402,28 +402,10 @@ ragain:
 		sr_wu_enqueue_ccb(wu, ccb);
 	}
 
-	s = splbio();
+	sr_schedule_wu(wu);
 
-	/* rebuild io, let rebuild routine deal with it */
-	if (wu->swu_flags & SR_WUF_REBUILD)
-		goto queued;
-
-	/* current io failed, restart */
-	if (wu->swu_state == SR_WU_RESTART)
-		goto start;
-
-	/* deferred io failed, don't restart */
-	if (wu->swu_state == SR_WU_REQUEUE)
-		goto queued;
-
-	if (sr_check_io_collision(wu))
-		goto queued;
-
-start:
-	sr_raid_startwu(wu);
-queued:
-	splx(s);
 	return (0);
+
 bad:
 	/* wu is unwound by sr_wu_put */
 	return (1);
@@ -444,7 +426,7 @@ sr_raid1_wu_done(struct sr_workunit *wu)
 	/* If all I/O failed, retry reads and give up on writes. */
 	if (xs->flags & SCSI_DATA_IN) {
 		printf("%s: retrying read on block %lld\n",
-		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 		if (wu->swu_cb_active == 1)
 			panic("%s: sr_raid1_intr_cb",
 			    DEVNAME(sd->sd_sc));
@@ -454,7 +436,7 @@ sr_raid1_wu_done(struct sr_workunit *wu)
 			return SR_WU_RESTART;
 	} else {
 		printf("%s: permanently failing write on block %lld\n",
-		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 	}
 
 	wu->swu_state = SR_WU_FAILED;

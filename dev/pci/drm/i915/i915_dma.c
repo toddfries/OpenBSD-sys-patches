@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_dma.c,v 1.7 2013/04/17 20:04:04 kettenis Exp $	*/
+/*	$OpenBSD: i915_dma.c,v 1.12 2013/11/26 03:48:52 jsg Exp $	*/
 /* i915_dma.c -- DMA support for the I915 -*- linux-c -*-
  */
 /*
@@ -68,11 +68,16 @@ i915_kernel_lost_context(struct drm_device * dev)
 
 
 int
-i915_getparam(struct inteldrm_softc *dev_priv, void *data)
+i915_getparam(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_i915_getparam_t	*param = data;
-	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
-	int			 value;
+	drm_i915_private_t *dev_priv = dev->dev_private;
+	drm_i915_getparam_t *param = data;
+	int value;
+
+	if (!dev_priv) {
+		DRM_ERROR("called with no initialization\n");
+		return -EINVAL;
+	}
 
 	switch (param->param) {
 	case I915_PARAM_CHIPSET_ID:
@@ -100,11 +105,7 @@ i915_getparam(struct inteldrm_softc *dev_priv, void *data)
 		value = intel_ring_initialized(&dev_priv->ring[BCS]);
 		break;
 	case I915_PARAM_HAS_RELAXED_FENCING:
-#ifdef notyet
 		value = 1;
-#else
-		return EINVAL;
-#endif
 		break;
 	case I915_PARAM_HAS_COHERENT_RINGS:
 		value = 1;
@@ -131,28 +132,37 @@ i915_getparam(struct inteldrm_softc *dev_priv, void *data)
 		value = 1;
 		break;
 	default:
-		DRM_DEBUG("Unknown parameter %d\n", param->param);
-		return (EINVAL);
+		DRM_DEBUG_DRIVER("Unknown parameter %d\n",
+				 param->param);
+		return -EINVAL;
 	}
-	return (copyout(&value, param->value, sizeof(int)));
+
+	return -copyout(&value, param->value, sizeof(int));
 }
 
 int
-i915_setparam(struct inteldrm_softc *dev_priv, void *data)
+i915_setparam(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_i915_setparam_t	*param = data;
+	drm_i915_private_t *dev_priv = dev->dev_private;
+	drm_i915_setparam_t *param = data;
+
+	if (!dev_priv) {
+		DRM_ERROR("called with no initialization\n");
+		return -EINVAL;
+	}
 
 	switch (param->param) {
 	case I915_SETPARAM_NUM_USED_FENCES:
 		if (param->value > dev_priv->num_fence_regs ||
 		    param->value < 0)
-			return EINVAL;
+			return -EINVAL;
 		/* Userspace can use first N regs */
 		dev_priv->fence_reg_start = param->value;
 		break;
 	default:
-		DRM_DEBUG("unknown parameter %d\n", param->param);
-		return (EINVAL);
+		DRM_DEBUG_DRIVER("unknown parameter %d\n",
+					param->param);
+		return -EINVAL;
 	}
 
 	return 0;
@@ -286,7 +296,7 @@ intel_teardown_mchbar(struct inteldrm_softc *dev_priv,
 int
 i915_load_modeset_init(struct drm_device *dev)
 {
-	struct inteldrm_softc *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int ret;
 
 	ret = intel_parse_bios(dev);
@@ -357,8 +367,6 @@ cleanup_gem_stolen:
 void
 i915_driver_lastclose(struct drm_device *dev)
 {
-	struct inteldrm_softc	*dev_priv = dev->dev_private;
-	struct vm_page		*p;
 	int			 ret;
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
@@ -369,21 +377,6 @@ i915_driver_lastclose(struct drm_device *dev)
 	ret = i915_gem_idle(dev);
 	if (ret)
 		DRM_ERROR("failed to idle hardware: %d\n", ret);
-
-	if (dev_priv->agpdmat != NULL) {
-		/*
-		 * make sure we nuke everything, we may have mappings that we've
-		 * unrefed, but uvm has a reference to them for maps. Make sure
-		 * they get unbound and any accesses will segfault.
-		 * XXX only do ones in GEM.
-		 */
-		for (p = dev_priv->pgs; p < dev_priv->pgs +
-		    (dev->agp->info.ai_aperture_size / PAGE_SIZE); p++)
-			pmap_page_protect(p, VM_PROT_NONE);
-		agp_bus_dma_destroy((struct agp_softc *)dev->agp->agpdev,
-		    dev_priv->agpdmat);
-	}
-	dev_priv->agpdmat = NULL;
 }
 
 int
@@ -400,6 +393,8 @@ i915_driver_open(struct drm_device *dev, struct drm_file *file)
 	mtx_init(&file_priv->mm.lock, IPL_NONE);
 	INIT_LIST_HEAD(&file_priv->mm.request_list);
 
+	SPLAY_INIT(&file_priv->ctx_tree);
+
 	return 0;
 }
 
@@ -408,6 +403,7 @@ i915_driver_close(struct drm_device *dev, struct drm_file *file)
 {
 	struct drm_i915_file_private *file_priv = file->driver_priv;
 
+	i915_gem_context_close(dev, file);
 	i915_gem_release(dev, file);
 	free(file_priv, M_DRM);
 }

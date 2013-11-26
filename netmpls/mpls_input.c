@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpls_input.c,v 1.34 2013/04/24 10:20:15 mpi Exp $	*/
+/*	$OpenBSD: mpls_input.c,v 1.37 2013/10/24 11:31:43 mpi Exp $	*/
 
 /*
  * Copyright (c) 2008 Claudio Jeker <claudio@openbsd.org>
@@ -30,7 +30,6 @@
 
 #ifdef  INET
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -487,13 +486,10 @@ mpls_do_error(struct mbuf *m, int type, int code, int destmtu)
 		ip->ip_sum = in_cksum(m, sizeof(*ip));
 
 		/* stolen from icmp_send() */
-		m->m_data += sizeof(*ip);
-		m->m_len -= sizeof(*ip);
-		icp = mtod(m, struct icmp *);
+		icp = (struct icmp *)(mtod(m, caddr_t) + sizeof(*ip));
 		icp->icmp_cksum = 0;
-		icp->icmp_cksum = in_cksum(m, ntohs(ip->ip_len) - sizeof(*ip));
-		m->m_data -= sizeof(*ip);
-		m->m_len += sizeof(*ip);
+		icp->icmp_cksum = in4_cksum(m, 0, sizeof(*ip),
+		    ntohs(ip->ip_len) - sizeof(*ip));
 
 		break;
 #ifdef INET6

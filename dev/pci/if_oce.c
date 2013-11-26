@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_oce.c,v 1.69 2013/01/17 00:48:04 henning Exp $	*/
+/*	$OpenBSD: if_oce.c,v 1.71 2013/08/23 19:16:17 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2012 Mike Belopuhov
@@ -76,7 +76,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -947,12 +946,10 @@ oce_link_status(struct oce_softc *sc)
 	struct ifnet *ifp = &sc->sc_ac.ac_if;
 	int link_state = LINK_STATE_DOWN;
 
-	if (sc->sc_link_up)
-		link_state = LINK_STATE_FULL_DUPLEX;
-	if (ifp->if_link_state == link_state)
-		return;
 	ifp->if_baudrate = 0;
-	if (link_state != LINK_STATE_DOWN) {
+	if (sc->sc_link_up) {
+		link_state = LINK_STATE_FULL_DUPLEX;
+
 		switch (sc->sc_link_speed) {
 		case 1:
 			ifp->if_baudrate = IF_Mbps(10);
@@ -968,8 +965,10 @@ oce_link_status(struct oce_softc *sc)
 			break;
 		}
 	}
-	ifp->if_link_state = link_state;
-	if_link_state_change(ifp);
+	if (ifp->if_link_state != link_state) {
+		ifp->if_link_state = link_state;
+		if_link_state_change(ifp);
+	}
 }
 
 void

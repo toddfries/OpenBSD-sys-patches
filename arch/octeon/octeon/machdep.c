@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.33 2013/04/08 09:42:26 jasper Exp $ */
+/*	$OpenBSD: machdep.c,v 1.41 2013/09/28 12:40:31 miod Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -79,7 +79,7 @@
 #include <dev/cons.h>
 
 #include <octeon/dev/iobusvar.h>
-#include <octeon/dev/octeonreg.h>
+#include <machine/octeonreg.h>
 #include <machine/octeonvar.h>
 
 /* The following is used externally (sysctl_hw) */
@@ -118,15 +118,16 @@ caddr_t	ekern;
 
 struct phys_mem_desc mem_layout[MAXMEMSEGS];
 
-void	dumpsys(void);
-void	dumpconf(void);
-vaddr_t	mips_init(__register_t, __register_t, __register_t, __register_t);
-boolean_t is_memory_range(paddr_t, psize_t, psize_t);
-void	octeon_memory_init(struct boot_info *);
-int	octeon_cpuspeed(int *);
+void		dumpsys(void);
+void		dumpconf(void);
+vaddr_t		mips_init(__register_t, __register_t, __register_t, __register_t);
+boolean_t 	is_memory_range(paddr_t, psize_t, psize_t);
+void		octeon_memory_init(struct boot_info *);
+int		octeon_cpuspeed(int *);
 static void	process_bootargs(void);
+static uint64_t	get_ncpusfound(void);
 
-extern void parse_uboot_root(void);
+extern void 	parse_uboot_root(void);
 
 cons_decl(cn30xxuart);
 struct consdev uartcons = cons_init(cn30xxuart);
@@ -155,24 +156,25 @@ octeon_memory_init(struct boot_info *boot_info)
 	/* Simulator we limit to 96 meg */
 	if (boot_info->board_type == BOARD_TYPE_SIM) {
 		realmem_bytes = (96 << 20);
-	}else{
+	} else {
 		realmem_bytes = ((boot_info->dram_size << 20) - PAGE_SIZE);
 		realmem_bytes &= ~(PAGE_SIZE - 1);
 	}
 	/* phys_avail regions are in bytes */
-	phys_avail[0] = (CKSEG0_TO_PHYS((uint64_t)&end) + 
-			 PAGE_SIZE ) & ~(PAGE_SIZE - 1);
+	phys_avail[0] =
+	    (CKSEG0_TO_PHYS((uint64_t)&end) + PAGE_SIZE) & ~(PAGE_SIZE - 1);
 
 	/* Simulator gets 96Meg period. */
 	if (boot_info->board_type == BOARD_TYPE_SIM) {
 		phys_avail[1] = (96 << 20);
-	}else{
-		if (realmem_bytes > OCTEON_DRAM_FIRST_256_END)
+	} else {
+		if (realmem_bytes > OCTEON_DRAM_FIRST_256_END) {
 			phys_avail[1] = OCTEON_DRAM_FIRST_256_END;
-		else
+			realmem_bytes -= OCTEON_DRAM_FIRST_256_END;
+			realmem_bytes &= ~(PAGE_SIZE - 1);
+		} else
 			phys_avail[1] = realmem_bytes;
-		realmem_bytes -= OCTEON_DRAM_FIRST_256_END;
-		realmem_bytes &= ~(PAGE_SIZE - 1);
+
 		mem_layout[0].mem_last_page = atop(phys_avail[1]);
 	}
 
@@ -189,15 +191,15 @@ octeon_memory_init(struct boot_info *boot_info)
 	physmem = atop(phys_avail[1] - phys_avail[0]);
 
 	if (boot_info->board_type != BOARD_TYPE_SIM) {
-		if(realmem_bytes > OCTEON_DRAM_FIRST_256_END){
+		if (realmem_bytes > OCTEON_DRAM_FIRST_256_END) {
 #if 0 /* XXX: need fix on mips64 pmap code */
 			/* take out the upper non-cached 1/2 */
 			phys_avail[2] = 0x410000000ULL;
-			phys_avail[3] = (0x410000000ULL 
-					 + OCTEON_DRAM_FIRST_256_END);
+			phys_avail[3] =
+			    (0x410000000ULL + OCTEON_DRAM_FIRST_256_END);
 			physmem += btoc(phys_avail[3] - phys_avail[2]);
 			mem_layout[2].mem_first_page = atop(phys_avail[2]);
-			mem_layout[2].mem_last_page = atop(phys_avail[3]-1);
+			mem_layout[2].mem_last_page = atop(phys_avail[3] - 1);
 #endif
 			realmem_bytes -= OCTEON_DRAM_FIRST_256_END;
 
@@ -206,33 +208,33 @@ octeon_memory_init(struct boot_info *boot_info)
 			phys_avail[5] = (0x20000000ULL + realmem_bytes);
 			physmem += btoc(phys_avail[5] - phys_avail[4]);
 			mem_layout[1].mem_first_page = atop(phys_avail[4]);
-			mem_layout[1].mem_last_page = atop(phys_avail[5]-1);
-			realmem_bytes=0;
-		}else{
+			mem_layout[1].mem_last_page = atop(phys_avail[5] - 1);
+			realmem_bytes = 0;
+		} else {
 #if 0 /* XXX: need fix on mips64 pmap code */
 			/* Now map the rest of the memory */
 			phys_avail[2] = 0x410000000ULL;
 			phys_avail[3] = (0x410000000ULL + realmem_bytes);
 			physmem += btoc(phys_avail[3] - phys_avail[2]);
 			mem_layout[1].mem_first_page = atop(phys_avail[2]);
-			mem_layout[1].mem_last_page = atop(phys_avail[3]-1);
-			realmem_bytes=0;
+			mem_layout[1].mem_last_page = atop(phys_avail[3] - 1);
+			realmem_bytes = 0;
 #endif
 		}
  	}
 
  	realmem = physmem;
 
-	printf("Total DRAM Size 0x%016X\n", (uint32_t) (boot_info->dram_size << 20));
+	printf("Total DRAM Size 0x%016X\n",
+	    (uint32_t)(boot_info->dram_size << 20));
 
-	for(i=0;phys_avail[i];i+=2){
-		printf("Bank %d = 0x%016lX   ->  0x%016lX\n",i>>1, 
-		       (long)phys_avail[i], (long)phys_avail[i+1]);
+	for (i = 0; phys_avail[i]; i += 2) {
+		printf("Bank %d = 0x%016lX   ->  0x%016lX\n", i >> 1,
+		    (long)phys_avail[i], (long)phys_avail[i + 1]);
 	}
-	for( i=0;mem_layout[i].mem_last_page;i++){
-		printf("mem_layout[%d] page 0x%016lX -> 0x%016lX\n",i,
-		       mem_layout[i].mem_first_page,
-		       mem_layout[i].mem_last_page);
+	for (i = 0; mem_layout[i].mem_last_page; i++) {
+		printf("mem_layout[%d] page 0x%016lX -> 0x%016lX\n", i,
+		    mem_layout[i].mem_first_page, mem_layout[i].mem_last_page);
 	}
 }
 
@@ -379,6 +381,8 @@ mips_init(__register_t a0, __register_t a1, __register_t a2 __unused,
 		 bootcpu_hwinfo.clock / 1000000);
 
 	cpu_cpuspeed = octeon_cpuspeed;
+
+	ncpusfound = get_ncpusfound();
 
 	process_bootargs();
 
@@ -562,6 +566,19 @@ octeon_cpuspeed(int *freq)
 	return (0);
 }
 
+static u_int64_t
+get_ncpusfound(void)
+{
+	extern struct boot_desc *octeon_boot_desc;
+	uint64_t core_mask = octeon_boot_desc->core_mask;
+	uint64_t i, m, ncpus = 1;
+
+	for (i = 0, m = 1 ; i < OCTEON_MAXCPUS; i++, m <<= 1)
+		if (core_mask & m)
+			ncpus++;
+
+	return ncpus;
+}
 
 static void
 process_bootargs(void)
@@ -676,7 +693,8 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		if (howto & RB_POWERDOWN)
@@ -689,7 +707,7 @@ haltsys:
 		(void)disableintr();
 		tlb_set_wired(0);
 		tlb_flush(bootcpu_hwinfo.tlbsize);
-		octeon_write_csr(OCTEON_CIU_BASE + CIU_SOFT_RST, 1);
+		octeon_xkphys_write_8(OCTEON_CIU_BASE + CIU_SOFT_RST, 1);
 	}
 
 	for (;;) ;
@@ -782,7 +800,7 @@ void
 hw_cpu_hatch(struct cpu_info *ci)
 {
 	int s;
-	
+
 	/*
 	 * Set curcpu address on this processor.
 	 */

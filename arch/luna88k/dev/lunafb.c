@@ -1,4 +1,4 @@
-/* $OpenBSD: lunafb.c,v 1.14 2013/05/16 13:59:10 aoyama Exp $ */
+/* $OpenBSD: lunafb.c,v 1.17 2013/10/21 10:36:15 miod Exp $ */
 /* $NetBSD: lunafb.c,v 1.7.6.1 2002/08/07 01:48:34 lukem Exp $ */
 
 /*-
@@ -71,6 +71,7 @@ struct bt458 {
 #define	OMFB_PLANEMASK	0xB1040000	/* planemask register */
 #define	OMFB_FB_WADDR	0xB1080008	/* common plane */
 #define	OMFB_FB_RADDR	0xB10C0008	/* plane #0 */
+#define OMFB_FB_PLANESIZE  0x40000	/* size of 1 plane, 2048 / 8 * 1024 */
 #define	OMFB_ROPFUNC	0xB12C0000	/* ROP function code */
 #define	OMFB_RAMDAC	0xC1100000	/* Bt454/Bt458 RAMDAC */
 #define	OMFB_SIZE	(0xB1300000 - 0xB1080000 + PAGE_SIZE)
@@ -125,24 +126,24 @@ const struct wsscreen_list omfb_screenlist = {
 	sizeof(_omfb_scrlist) / sizeof(struct wsscreen_descr *), _omfb_scrlist
 };
 
-int   omfbioctl(void *, u_long, caddr_t, int, struct proc *);
-paddr_t omfbmmap(void *, off_t, int);
-int   omfb_alloc_screen(void *, const struct wsscreen_descr *,
-				      void **, int *, int *, long *);
-void  omfb_free_screen(void *, void *);
-int   omfb_show_screen(void *, void *, int,
-				void (*) (void *, int, int), void *);
+int	omfbioctl(void *, u_long, caddr_t, int, struct proc *);
+paddr_t	omfbmmap(void *, off_t, int);
+int	omfb_alloc_screen(void *, const struct wsscreen_descr *,
+	    void **, int *, int *, long *);
+void	omfb_free_screen(void *, void *);
+int	omfb_show_screen(void *, void *, int, void (*) (void *, int, int),
+	    void *);
+int	omfb_load_font(void *, void *, struct wsdisplay_font *);
+int	omfb_list_font(void *, struct wsdisplay_font *);
 
 const struct wsdisplay_accessops omfb_accessops = {
-	omfbioctl,
-	omfbmmap,
-	omfb_alloc_screen,
-	omfb_free_screen,
-	omfb_show_screen,
-	NULL,	/* load_font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	NULL	/* burner */
+	.ioctl = omfbioctl,
+	.mmap = omfbmmap,
+	.alloc_screen = omfb_alloc_screen,
+	.free_screen = omfb_free_screen,
+	.show_screen = omfb_show_screen,
+	.load_font = omfb_load_font,
+	.list_font = omfb_list_font
 };
 
 int  omfbmatch(struct device *, void *, void *);
@@ -156,7 +157,8 @@ struct cfdriver fb_cd = {
         NULL, "fb", DV_DULL
 };
 
-extern int hwplanebits;	/* hardware plane bits; retrieved at boot */
+/* hardware plane bits; retrieved at boot, will be updated in omfbmatch() */
+extern int hwplanebits;
 
 int omfb_console;
 int omfb_cnattach(void);
@@ -177,6 +179,26 @@ omfbmatch(parent, cf, aux)
 	if (hwplanebits == 0)
 		return (0);
 #endif
+
+	/*
+	 * Check how many planes we have.  This is for 1, 4, and 8 bpp
+	 * boards, must be checked different way for 24 bpp board...
+	 */
+	if (hwplanebits > 0) {
+		int i;
+		u_int32_t *max, save;
+
+		for (i = 0; i < 8; i++) {
+			max = (u_int32_t *)trunc_page(OMFB_FB_RADDR
+				+ OMFB_FB_PLANESIZE * i);
+			save = *max;
+			*(volatile uint32_t *)max = 0x5a5a5a5a;
+			if (*max != 0x5a5a5a5a)
+				break;
+			*max = save;
+		}
+		hwplanebits = i;	/* should be 1, 4, or 8 */
+	}
 	return (1);
 }
 
@@ -198,7 +220,7 @@ omfbattach(parent, self, args)
 		omfb_getdevconfig(OMFB_FB_WADDR, sc->sc_dc);
 	}
 	printf(": %d x %d, %dbpp\n", sc->sc_dc->dc_wid, sc->sc_dc->dc_ht,
-	    sc->sc_dc->dc_depth);
+		hwplanebits);
 
 	/* WHITE on BLACK */
 	memset(&sc->sc_cmap, 255, sizeof(struct hwcmap));
@@ -426,9 +448,10 @@ omfb_getdevconfig(paddr, dc)
 	dc->dc_videobase = paddr;
 
 	/* WHITE on BLACK */
-	if (hwplanebits == 4) {
-		/* XXX Need Bt454 more initialization */
+
+	if ((hwplanebits == 1) || (hwplanebits == 4)) {
 		struct bt454 *odac = (struct bt454 *)OMFB_RAMDAC;
+
 		odac->bt_addr = 0;
 		odac->bt_cmap = 0;
 		odac->bt_cmap = 0;
@@ -539,4 +562,22 @@ omfb_show_screen(v, cookie, waitok, cb, cbarg)
 	void *cbarg;
 {
 	return 0;
+}
+
+int
+omfb_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct omfb_softc *sc = v;
+	struct rasops_info *ri = &sc->sc_dc->dc_ri;
+
+	return rasops_load_font(ri, emulcookie, font);
+}
+
+int
+omfb_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct omfb_softc *sc = v;
+	struct rasops_info *ri = &sc->sc_dc->dc_ri;
+
+	return rasops_list_font(ri, font);
 }

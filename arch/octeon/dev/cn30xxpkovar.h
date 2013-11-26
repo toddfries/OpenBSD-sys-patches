@@ -1,4 +1,4 @@
-/*	$OpenBSD: cn30xxpkovar.h,v 1.2 2011/06/24 02:13:23 yasuoka Exp $	*/
+/*	$OpenBSD: cn30xxpkovar.h,v 1.4 2013/06/01 22:20:35 jasper Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -148,8 +148,8 @@ cn30xxpko_op_store(uint64_t args, uint64_t value)
 	    ((uint64_t)(CN30XXPKO_SUBDID & 0x7) << 40) |
 	    ((uint64_t)args);
 	/* XXX */
-	OCTEON_SYNCW;
-	octeon_write_csr(addr, value);
+	mips_sync();
+	octeon_xkphys_write_8(addr, value);
 }
 
 static inline void

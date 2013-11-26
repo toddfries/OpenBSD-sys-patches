@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.132 2013/05/20 08:19:47 yasuoka Exp $ */
+/*	$OpenBSD: ehci.c,v 1.138 2013/11/09 08:46:05 mpi Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -86,8 +86,6 @@ int ehcidebug = 0;
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
 #endif
-
-#define mstohz(ms) ((ms) * hz / 1000)
 
 struct ehci_pipe {
 	struct usbd_pipe pipe;
@@ -353,22 +351,10 @@ ehci_init(struct ehci_softc *sc)
 
 	sc->sc_bus.usbrev = USBREV_2_0;
 
-	/* Reset the controller */
 	DPRINTF(("%s: resetting\n", sc->sc_bus.bdev.dv_xname));
-	EOWRITE4(sc, EHCI_USBCMD, 0);	/* Halt controller */
-	usb_delay_ms(&sc->sc_bus, 1);
-	EOWRITE4(sc, EHCI_USBCMD, EHCI_CMD_HCRESET);
-	for (i = 0; i < 100; i++) {
-		usb_delay_ms(&sc->sc_bus, 1);
-		hcr = EOREAD4(sc, EHCI_USBCMD) & EHCI_CMD_HCRESET;
-		if (!hcr)
-			break;
-	}
-	if (hcr) {
-		printf("%s: reset timeout\n",
-		    sc->sc_bus.bdev.dv_xname);
-		return (USBD_IOERROR);
-	}
+	err = ehci_reset(sc);
+	if (err)
+		return (err);
 
 	/* frame list size at default, read back what we got and use that */
 	switch (EHCI_CMD_FLS(EOREAD4(sc, EHCI_USBCMD))) {
@@ -752,7 +738,7 @@ ehci_check_qh_intr(struct ehci_softc *sc, struct ehci_xfer *ex)
  done:
 	DPRINTFN(12, ("ehci_check_intr: ex=%p done\n", ex));
 	timeout_del(&ex->xfer.timeout_handle);
-	usb_rem_task(ex->xfer.pipe->device, &ex->abort_task);
+	usb_rem_task(ex->xfer.pipe->device, &ex->xfer.abort_task);
 	ehci_idone(ex);
 }
 
@@ -800,7 +786,7 @@ ehci_check_itd_intr(struct ehci_softc *sc, struct ehci_xfer *ex) {
 done:
 	DPRINTFN(12, ("ehci_check_itd_intr: ex=%p done\n", ex));
 	timeout_del(&ex->xfer.timeout_handle);
-	usb_rem_task(ex->xfer.pipe->device, &ex->abort_task);
+	usb_rem_task(ex->xfer.pipe->device, &ex->xfer.abort_task);
 	ehci_idone(ex);
 }
 
@@ -1033,6 +1019,8 @@ ehci_detach(struct ehci_softc *sc, int flags)
 
 	timeout_del(&sc->sc_tmo_intrlist);
 
+	ehci_reset(sc);
+
 	usb_delay_ms(&sc->sc_bus, 300); /* XXX let stray task complete */
 
 	/* XXX free other data structures XXX */
@@ -1045,7 +1033,7 @@ int
 ehci_activate(struct device *self, int act)
 {
 	struct ehci_softc *sc = (struct ehci_softc *)self;
-	u_int32_t cmd, hcr;
+	u_int32_t cmd, hcr, cparams;
 	int i, rv = 0;
 
 	switch (act) {
@@ -1053,96 +1041,77 @@ ehci_activate(struct device *self, int act)
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
 		sc->sc_bus.use_polling++;
 
-		for (i = 1; i <= sc->sc_noport; i++) {
-			cmd = EOREAD4(sc, EHCI_PORTSC(i));
-			if ((cmd & (EHCI_PS_PO|EHCI_PS_PE)) == EHCI_PS_PE)
-				EOWRITE4(sc, EHCI_PORTSC(i),
-				    cmd | EHCI_PS_SUSP);
-		}
-
-		sc->sc_cmd = EOREAD4(sc, EHCI_USBCMD);
-		cmd = sc->sc_cmd & ~(EHCI_CMD_ASE | EHCI_CMD_PSE);
+		/*
+		 * First tell the host to stop processing Asynchronous
+		 * and Periodic schedules.
+		 */
+		cmd = EOREAD4(sc, EHCI_USBCMD) & ~(EHCI_CMD_ASE | EHCI_CMD_PSE);
 		EOWRITE4(sc, EHCI_USBCMD, cmd);
-
 		for (i = 0; i < 100; i++) {
+			usb_delay_ms(&sc->sc_bus, 1);
 			hcr = EOREAD4(sc, EHCI_USBSTS) &
 			    (EHCI_STS_ASS | EHCI_STS_PSS);
 			if (hcr == 0)
 				break;
-
-			usb_delay_ms(&sc->sc_bus, 1);
 		}
 		if (hcr != 0)
-			printf("%s: reset timeout\n",
+			printf("%s: disable schedules timeout\n",
 			    sc->sc_bus.bdev.dv_xname);
 
-		cmd &= ~EHCI_CMD_RS;
-		EOWRITE4(sc, EHCI_USBCMD, cmd);
-
-		for (i = 0; i < 100; i++) {
-			hcr = EOREAD4(sc, EHCI_USBSTS) & EHCI_STS_HCH;
-			if (hcr == EHCI_STS_HCH)
-				break;
-
-			usb_delay_ms(&sc->sc_bus, 1);
-		}
-		if (hcr != EHCI_STS_HCH)
-			printf("%s: config timeout\n",
-			    sc->sc_bus.bdev.dv_xname);
+		/*
+		 * Then reset the host as if it was a shutdown.
+		 *
+		 * All USB devices are disconnected/reconnected during
+		 * a suspend/resume cycle so keep it simple.
+		 */
+		ehci_reset(sc);
 
 		sc->sc_bus.use_polling--;
 		break;
 	case DVACT_POWERDOWN:
-		ehci_shutdown(sc);
+		rv = config_activate_children(self, act);
+		ehci_reset(sc);
 		break;
 	case DVACT_RESUME:
 		sc->sc_bus.use_polling++;
 
-		/* restore things in case the bios sucks */
-		EOWRITE4(sc, EHCI_CTRLDSSEGMENT, 0);
+		ehci_reset(sc);
+
+		cparams = EREAD4(sc, EHCI_HCCPARAMS);
+		/* MUST clear segment register if 64 bit capable. */
+		if (EHCI_HCC_64BIT(cparams))
+			EWRITE4(sc, EHCI_CTRLDSSEGMENT, 0);
+
 		EOWRITE4(sc, EHCI_PERIODICLISTBASE, DMAADDR(&sc->sc_fldma, 0));
 		EOWRITE4(sc, EHCI_ASYNCLISTADDR,
 		    sc->sc_async_head->physaddr | EHCI_LINK_QH);
-		EOWRITE4(sc, EHCI_USBINTR, sc->sc_eintrs);
 
-		hcr = 0;
-		for (i = 1; i <= sc->sc_noport; i++) {
-			cmd = EOREAD4(sc, EHCI_PORTSC(i));
-			if ((cmd & (EHCI_PS_PO|EHCI_PS_SUSP)) == EHCI_PS_SUSP) {
-				EOWRITE4(sc, EHCI_PORTSC(i),
-				    cmd | EHCI_PS_FPR);
-				hcr = 1;
-			}
-		}
-
-		if (hcr) {
-			usb_delay_ms(&sc->sc_bus, USB_RESUME_WAIT);
-			for (i = 1; i <= sc->sc_noport; i++) {
-				cmd = EOREAD4(sc, EHCI_PORTSC(i));
-				if ((cmd & (EHCI_PS_PO|EHCI_PS_SUSP)) ==
-				    EHCI_PS_SUSP)
-					EOWRITE4(sc, EHCI_PORTSC(i),
-					    cmd & ~EHCI_PS_FPR);
-			}
-		}
-
-		EOWRITE4(sc, EHCI_USBCMD, sc->sc_cmd);
+		/* Turn on controller */
+		EOWRITE4(sc, EHCI_USBCMD,
+		    EHCI_CMD_ITC_2 | /* 2 microframes interrupt delay */
+		    (EOREAD4(sc, EHCI_USBCMD) & EHCI_CMD_FLS_M) |
+		    EHCI_CMD_ASE |
+		    EHCI_CMD_PSE |
+		    EHCI_CMD_RS);
 
 		/* Take over port ownership */
 		EOWRITE4(sc, EHCI_CONFIGFLAG, EHCI_CONF_CF);
-
 		for (i = 0; i < 100; i++) {
-			hcr = EOREAD4(sc, EHCI_USBSTS) & EHCI_STS_HCH;
-			if (hcr != EHCI_STS_HCH)
-				break;
-
 			usb_delay_ms(&sc->sc_bus, 1);
+			hcr = EOREAD4(sc, EHCI_USBSTS) & EHCI_STS_HCH;
+			if (!hcr)
+				break;
 		}
-		if (hcr == EHCI_STS_HCH)
-			printf("%s: config timeout\n",
-			    sc->sc_bus.bdev.dv_xname);
+
+		if (hcr) {
+			printf("%s: run timeout\n", sc->sc_bus.bdev.dv_xname);
+			/* XXX should we bail here? */
+		}
+
+		EOWRITE4(sc, EHCI_USBINTR, sc->sc_eintrs);
 
 		usb_delay_ms(&sc->sc_bus, USB_RESUME_WAIT);
 
@@ -1158,17 +1127,38 @@ ehci_activate(struct device *self, int act)
 	return (rv);
 }
 
-/*
- * Shut down the controller when the system is going down.
- */
-void
-ehci_shutdown(void *v)
+usbd_status
+ehci_reset(struct ehci_softc *sc)
 {
-	struct ehci_softc *sc = v;
+	u_int32_t hcr;
+	int i;
 
-	DPRINTF(("ehci_shutdown: stopping the HC\n"));
+	DPRINTF(("%s: stopping the HC\n", __func__));
 	EOWRITE4(sc, EHCI_USBCMD, 0);	/* Halt controller */
+	for (i = 0; i < 100; i++) {
+		usb_delay_ms(&sc->sc_bus, 1);
+		hcr = EOREAD4(sc, EHCI_USBSTS) & EHCI_STS_HCH;
+		if (hcr)
+			break;
+	}
+
+	if (!hcr)
+		printf("%s: halt timeout\n", sc->sc_bus.bdev.dv_xname);
+
 	EOWRITE4(sc, EHCI_USBCMD, EHCI_CMD_HCRESET);
+	for (i = 0; i < 100; i++) {
+		usb_delay_ms(&sc->sc_bus, 1);
+		hcr = EOREAD4(sc, EHCI_USBCMD) & EHCI_CMD_HCRESET;
+		if (!hcr)
+			break;
+	}
+
+	if (hcr) {
+		printf("%s: reset timeout\n", sc->sc_bus.bdev.dv_xname);
+		return (USBD_IOERROR);
+	}
+
+	return (USBD_NORMAL_COMPLETION);
 }
 
 struct usbd_xfer *
@@ -1190,8 +1180,6 @@ ehci_allocx(struct usbd_bus *bus)
 
 	if (xfer != NULL) {
 		memset(xfer, 0, sizeof(struct ehci_xfer));
-		usb_init_task(&EXFER(xfer)->abort_task, ehci_timeout_task,
-		    xfer, USB_TASK_TYPE_ABORT);
 		EXFER(xfer)->ehci_xfer_flags = 0;
 #ifdef DIAGNOSTIC
 		EXFER(xfer)->isdone = 1;
@@ -2750,7 +2738,7 @@ ehci_abort_xfer(struct usbd_xfer *xfer, usbd_status status)
 		s = splusb();
 		xfer->status = status;	/* make software ignore it */
 		timeout_del(&xfer->timeout_handle);
-		usb_rem_task(epipe->pipe.device, &exfer->abort_task);
+		usb_rem_task(epipe->pipe.device, &xfer->abort_task);
 		usb_transfer_complete(xfer);
 		splx(s);
 		return;
@@ -2784,7 +2772,7 @@ ehci_abort_xfer(struct usbd_xfer *xfer, usbd_status status)
 	exfer->ehci_xfer_flags |= EHCI_XFER_ABORTING;
 	xfer->status = status;	/* make software ignore it */
 	timeout_del(&xfer->timeout_handle);
-	usb_rem_task(epipe->pipe.device, &exfer->abort_task);
+	usb_rem_task(epipe->pipe.device, &xfer->abort_task);
 	splx(s);
 
 	/*
@@ -2860,7 +2848,7 @@ ehci_abort_isoc_xfer(struct usbd_xfer *xfer, usbd_status status)
 		s = splusb();
 		xfer->status = status;
 		timeout_del(&xfer->timeout_handle);
-		usb_rem_task(epipe->pipe.device, &exfer->abort_task);
+		usb_rem_task(epipe->pipe.device, &xfer->abort_task);
 		usb_transfer_complete(xfer);
 		splx(s);
 		return;
@@ -2885,7 +2873,7 @@ ehci_abort_isoc_xfer(struct usbd_xfer *xfer, usbd_status status)
 
 	xfer->status = status;
 	timeout_del(&xfer->timeout_handle);
-	usb_rem_task(epipe->pipe.device, &exfer->abort_task);
+	usb_rem_task(epipe->pipe.device, &xfer->abort_task);
 
 	s = splusb();
 	for (itd = exfer->itdstart; itd != NULL; itd = itd->xfer_next) {
@@ -2923,10 +2911,6 @@ ehci_timeout(void *addr)
 	struct ehci_softc *sc = (struct ehci_softc *)epipe->pipe.device->bus;
 
 	DPRINTF(("ehci_timeout: exfer=%p\n", exfer));
-#if defined(EHCI_DEBUG) && defined(USB_DEBUG)
-	if (ehcidebug > 1)
-		usbd_dump_pipe(exfer->xfer.pipe);
-#endif
 
 	if (sc->sc_bus.dying) {
 		ehci_abort_xfer(&exfer->xfer, USBD_TIMEOUT);
@@ -2934,7 +2918,9 @@ ehci_timeout(void *addr)
 	}
 
 	/* Execute the abort in a process context. */
-	usb_add_task(exfer->xfer.pipe->device, &exfer->abort_task);
+	usb_init_task(&exfer->xfer.abort_task, ehci_timeout_task, addr,
+	    USB_TASK_TYPE_ABORT);
+	usb_add_task(exfer->xfer.pipe->device, &exfer->xfer.abort_task);
 }
 
 void
@@ -3603,14 +3589,13 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 	struct ehci_soft_itd *itd, *prev, *start, *stop;
 	struct usb_dma *dma_buf;
 	int i, j, k, frames, uframes, ufrperframe;
-	int s, trans_count, offs, total_length;
+	int s, trans_count, offs;
 	int frindex;
 
 	start = NULL;
 	prev = NULL;
 	itd = NULL;
 	trans_count = 0;
-	total_length = 0;
 	exfer = (struct ehci_xfer *) xfer;
 	sc = (struct ehci_softc *)xfer->pipe->device->bus;
 	epipe = (struct ehci_pipe *)xfer->pipe;
@@ -3724,7 +3709,6 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 			    EHCI_ITD_SET_OFFS(EHCI_PAGE_OFFSET(DMAADDR(dma_buf,
 			    offs))));
 
-			total_length += xfer->frlengths[trans_count];
 			offs += xfer->frlengths[trans_count];
 			trans_count++;
 
@@ -3732,7 +3716,7 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 				itd->itd.itd_ctl[j] |= htole32(EHCI_ITD_IOC);
 				break;
 			}
-		}       
+		}
 
 		/* Step 1.75, set buffer pointers. To simplify matters, all
 		 * pointers are filled out for the next 7 hardware pages in
@@ -3782,7 +3766,6 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 
 	stop = itd;
 	stop->xfer_next = NULL;
-	exfer->isoc_len = total_length;
 
 	/*
 	 * Part 2: Transfer descriptors have now been set up, now they must

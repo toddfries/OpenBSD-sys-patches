@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.sgi,v 1.60 2013/04/01 19:12:14 miod Exp $
+#	$OpenBSD: Makefile.sgi,v 1.62 2013/10/15 19:23:29 guenther Exp $
 
 # For instructions on building kernels consult the config(8) and options(4)
 # manual pages.
@@ -44,7 +44,7 @@ CMACHFLAGS+=	-fno-stack-protector
 
 COPTS?=		-O2
 CFLAGS=		${DEBUG} ${CWARNFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
-AFLAGS=		-D_LOCORE -x assembler-with-cpp ${CMACHFLAGS}
+AFLAGS=		-D_LOCORE -x assembler-with-cpp ${CWARNFLAGS} ${CMACHFLAGS}
 LINKFLAGS=	-e start -T ${_machdir}/conf/ld.script -Ttext=${LINK_ADDRESS} \
 		--warn-common -nopie
 
@@ -144,9 +144,9 @@ depend:
 tags:
 	@echo "see $S/kern/Makefile for tags"
 
-db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.awk
+db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.pl
 	${CC} ${CFLAGS} ${CPPFLAGS} -MT $@ -gstabs -c $S/ddb/db_structinfo.c
-	objdump -g db_structinfo.o | awk -f $S/ddb/parse_structinfo.awk > $@
+	objdump -g db_structinfo.o | perl $S/ddb/parse_structinfo.pl > $@
 	rm -f db_structinfo.o
 
 locore.o: ${_machdir}/${_mach}/locore.S assym.h

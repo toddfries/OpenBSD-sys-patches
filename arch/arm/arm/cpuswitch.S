@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpuswitch.S,v 1.12 2011/09/20 22:02:10 miod Exp $	*/
+/*	$OpenBSD: cpuswitch.S,v 1.14 2013/09/12 11:43:51 patrick Exp $	*/
 /*	$NetBSD: cpuswitch.S,v 1.41 2003/11/15 08:44:18 scw Exp $	*/
 
 /*
@@ -105,26 +105,15 @@
 
 	.text
 
-.Lcpu_info_store:
-	.word	_C_LABEL(cpu_info_store)
+.Lcpu_info_primary:
+	.word	_C_LABEL(cpu_info_primary)
 .Lcurproc:
-	.word	_C_LABEL(cpu_info_store) + CI_CURPROC
+	.word	_C_LABEL(cpu_info_primary) + CI_CURPROC
+.Lcurpcb:
+	.word	_C_LABEL(cpu_info_primary) + CI_CURPCB
 
-.Lcpufuncs:	
+.Lcpufuncs:
 	.word	_C_LABEL(cpufuncs)
-	
-#ifndef MULTIPROCESSOR
-.Lcurpcb:
-	.word   _C_LABEL(curpcb)
-	.data
-	.global	_C_LABEL(curpcb)
-_C_LABEL(curpcb):
-	.word	0x00000000
-	.text
-#else
-.Lcurpcb:
-	.word	_C_LABEL(cpu_info_store) + CI_CURPCB
-#endif
 
 .Lcpu_do_powersave:
 	.word	_C_LABEL(cpu_do_powersave)
@@ -185,7 +174,7 @@ ENTRY(cpu_switchto)
 
 #ifdef MULTIPROCESSOR
 	/* XXX use curcpu() */
-	ldr	r2, .Lcpu_info_store
+	ldr	r2, .Lcpu_info_primary
 	str	r2, [r1, #(P_CPU)]
 #else
 	/* p->p_cpu initialized in fork1() for single-processor */

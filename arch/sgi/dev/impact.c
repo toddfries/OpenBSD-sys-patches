@@ -1,4 +1,4 @@
-/*	$OpenBSD: impact.c,v 1.2 2012/04/19 21:02:27 miod Exp $	*/
+/*	$OpenBSD: impact.c,v 1.5 2013/10/21 10:36:16 miod Exp $	*/
 
 /*
  * Copyright (c) 2010, 2012 Miodrag Vallat.
@@ -118,20 +118,19 @@ int	impact_alloc_screen(void *, const struct wsscreen_descr *, void **,
 void	impact_free_screen(void *, void *);
 int	impact_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
+int	impact_load_font(void *, void *, struct wsdisplay_font *);
+int	impact_list_font(void *, struct wsdisplay_font *);
 
 static struct impact_screen impact_cons;
 
 struct wsdisplay_accessops impact_accessops = {
-	impact_ioctl,
-	impact_mmap,
-	impact_alloc_screen,
-	impact_free_screen,
-	impact_show_screen,
-	NULL,			/* load_font */
-	NULL,			/* scrollback */
-	NULL,			/* getchar */
-	NULL,			/* burner */
-	NULL			/* pollc */
+	.ioctl = impact_ioctl,
+	.mmap = impact_mmap,
+	.alloc_screen = impact_alloc_screen,
+	.free_screen = impact_free_screen,
+	.show_screen = impact_show_screen,
+	.load_font = impact_load_font,
+	.list_font = impact_list_font
 };
 
 int
@@ -471,6 +470,24 @@ impact_show_screen(void *v, void *cookie, int waitok,
 	return 0;
 }
 
+int
+impact_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct impact_screen *scr = (struct impact_screen *)v;
+	struct rasops_info *ri = &scr->ri;
+
+	return rasops_load_font(ri, emulcookie, font);
+}
+
+int
+impact_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct impact_screen *scr = (struct impact_screen *)v;
+	struct rasops_info *ri = &scr->ri;
+
+	return rasops_list_font(ri, font);
+}
+
 /*
  * Hardware accelerated functions.
  */
@@ -633,7 +650,7 @@ impact_copycols(void *cookie, int row, int src, int dst, int num)
 
 	/* Copy columns in backing store. */
 	cell = scr->bs + row * ri->ri_cols;
-	ovbcopy(cell + src, cell + dst,
+	memmove(cell + dst, cell + src,
 	    num * sizeof(struct wsdisplay_charcell));
 
 	/* Repaint affected area */
@@ -681,7 +698,7 @@ impact_copyrows(void *cookie, int src, int dst, int num)
 
 	/* Copy rows in backing store. */
 	cell = scr->bs + dst * ri->ri_cols;
-	ovbcopy(scr->bs + src * ri->ri_cols, cell,
+	memmove(cell, scr->bs + src * ri->ri_cols,
 	    num * ri->ri_cols * sizeof(struct wsdisplay_charcell));
 
 	/* Repaint affected area */
@@ -708,8 +725,8 @@ impact_eraserows(void *cookie, int row, int num, long attr)
 		cell->attr = attr;
 	}
 	for (y = 1; y < num; y++)
-		ovbcopy(scr->bs + row * ri->ri_cols,
-		    scr->bs + (row + y) * ri->ri_cols,
+		memmove(scr->bs + (row + y) * ri->ri_cols,
+		    scr->bs + row * ri->ri_cols,
 		    ri->ri_cols * sizeof(struct wsdisplay_charcell));
 
 	ri->ri_ops.unpack_attr(cookie, attr, &fg, &bg, NULL);

@@ -1,4 +1,4 @@
-/* $OpenBSD: acpiasus.c,v 1.12 2011/06/06 06:13:46 deraadt Exp $ */
+/* $OpenBSD: acpiasus.c,v 1.14 2013/11/04 11:57:26 mpi Exp $ */
 /* $NetBSD: asus_acpi.c,v 1.2.2.2 2008/04/03 12:42:37 mjf Exp $ */
 /*
  * Copyright (c) 2007, 2008 Jared D. McNeill <jmcneill@invisible.ca>
@@ -12,12 +12,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *        This product includes software developed by Jared D. McNeill.
- * 4. Neither the name of The NetBSD Foundation nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE NETBSD FOUNDATION, INC. AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
@@ -39,7 +33,6 @@
 #include <sys/param.h>
 #include <sys/device.h>
 #include <sys/systm.h>
-#include <sys/workq.h>
 
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
@@ -90,7 +83,7 @@ int	acpiasus_notify(struct aml_node *, int, void *);
 int	acpiasus_activate(struct device *, int);
 
 #if NAUDIO > 0 && NWSKBD > 0
-extern int wskbd_set_mixervolume(long dir, int out);
+extern int wskbd_set_mixervolume(long, long);
 #endif
 
 struct cfattach acpiasus_ca = {
@@ -172,16 +165,13 @@ acpiasus_notify(struct aml_node *node, int notify, void *arg)
 		break;
 #if NAUDIO > 0 && NWSKBD > 0
 	case ASUS_NOTIFY_VOLUMEMUTE:
-		workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-		    (void *)(long)0, (void *)(int)1);
+		wskbd_set_mixervolume(0, 1);
 		break;
 	case ASUS_NOTIFY_VOLUMEDOWN:
-		workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-		    (void *)(long)-1, (void *)(int)1);
+		wskbd_set_mixervolume(-1, 1);
 		break;
 	case ASUS_NOTIFY_VOLUMEUP:
-		workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-		    (void *)(long)1, (void *)(int)1);
+		wskbd_set_mixervolume(1, 1);
 		break;
 #else
 	case ASUS_NOTIFY_VOLUMEMUTE:

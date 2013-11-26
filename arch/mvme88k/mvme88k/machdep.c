@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.253 2013/05/17 22:51:59 miod Exp $	*/
+/* $OpenBSD: machdep.c,v 1.258 2013/11/02 23:10:29 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -379,7 +379,8 @@ boot(howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		printf("System halted. Press any key to reboot...\n\n");
@@ -449,9 +450,9 @@ dumpsys()
 {
 	int maj;
 	int psize;
-	daddr64_t blkno;	/* current block to write */
+	daddr_t blkno;	/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -620,7 +621,7 @@ secondary_main()
 	ncpus++;
 
 	sched_init_cpu(ci);
-	microuptime(&ci->ci_schedstate.spc_runtime);
+	nanouptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
 	ci->ci_randseed = random();
 
@@ -711,15 +712,6 @@ nmihand(void *frame)
 		m88k_db_trap(T_KDB_ENTRY, (struct trapframe *)frame);
 	}
 #endif
-}
-
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-
-	return (ENOEXEC);
 }
 
 int
@@ -819,7 +811,7 @@ mvme_bootstrap()
 {
 	extern struct consdev *cn_tab;
 	struct mvmeprom_brdid brdid;
-	vaddr_t avail_start;
+	extern vaddr_t avail_start;
 	extern vaddr_t avail_end;
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;
@@ -924,6 +916,8 @@ mvme_bootstrap()
 	initmsgbuf((caddr_t)pmap_steal_memory(MSGBUFSIZE, NULL, NULL),
 	    MSGBUFSIZE);
 
+	pmap_bootstrap(0, 0x10000);	/* BUG needs 64KB */
+
 #if defined (MVME187) || defined (MVME197)
 	/*
 	 * Get ethernet buffer - need ETHERPAGES pages physically contiguous.
@@ -932,15 +926,10 @@ mvme_bootstrap()
 	if (brdtyp == BRD_187 || brdtyp == BRD_8120 || brdtyp == BRD_197) {
 		etherlen = ETHERPAGES * PAGE_SIZE;
 		etherbuf = (void *)uvm_pageboot_alloc(etherlen);
+		pmap_cache_ctrl((paddr_t)etherbuf, (paddr_t)etherbuf + etherlen,
+		    CACHE_INH);
 	}
 #endif /* defined (MVME187) || defined (MVME197) */
-
-	pmap_bootstrap(0, 0x10000);	/* BUG needs 64KB */
-
-#if defined (MVME187) || defined (MVME197)
-	if (etherlen != 0)
-		pmap_cache_ctrl((paddr_t)etherbuf, (paddr_t)etherbuf + etherlen,		    CACHE_INH);
-#endif
 
 	/* Initialize the "u-area" pages. */
 	bzero((caddr_t)curpcb, USPACE);

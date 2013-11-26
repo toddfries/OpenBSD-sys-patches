@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.522 2013/05/16 19:26:04 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.528 2013/11/01 17:36:19 krw Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -2506,6 +2506,31 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	return (EJUSTRETURN);
 }
 
+#ifdef MULTIPROCESSOR
+/* force a CPU into the kernel, whether or not it's idle */
+void
+cpu_kick(struct cpu_info *ci)
+{
+	/* only need to kick other CPUs */
+	if (ci != curcpu()) {
+		if (ci->ci_mwait != NULL) {
+			/*
+			 * If not idling, then send an IPI, else
+			 * just clear the "keep idling" bit.
+			 */
+			if ((ci->ci_mwait[0] & MWAIT_IN_IDLE) == 0)
+				i386_send_ipi(ci, I386_IPI_NOP);
+			else
+				atomic_clearbits_int(&ci->ci_mwait[0],
+				    MWAIT_KEEP_IDLING);
+		} else {
+			/* no mwait, so need an IPI */
+			i386_send_ipi(ci, I386_IPI_NOP);
+		}
+	}
+}
+#endif
+
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
@@ -2514,13 +2539,22 @@ void
 signotify(struct proc *p)
 {
 	aston(p);
-	cpu_unidle(p->p_cpu);
+	cpu_kick(p->p_cpu);
 }
 
 #ifdef MULTIPROCESSOR
 void
 cpu_unidle(struct cpu_info *ci)
 {
+	if (ci->ci_mwait != NULL) {
+		/*
+		 * Just clear the "keep idling" bit; if it wasn't
+		 * idling then we didn't need to do anything anyway.
+		 */
+		atomic_clearbits_int(&ci->ci_mwait[0], MWAIT_KEEP_IDLING);
+		return;
+	}
+
 	if (ci != curcpu())
 		i386_send_ipi(ci, I386_IPI_NOP);
 }
@@ -2578,7 +2612,8 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	i386_broadcast_ipi(I386_IPI_HALT);
@@ -2683,7 +2718,7 @@ dumpconf(void)
 int
 cpu_dump()
 {
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	long buf[dbtob(1) / sizeof (long)];
 	kcore_seg_t	*segp;
 
@@ -2720,8 +2755,8 @@ dumpsys()
 {
 	u_int i, j, npg;
 	int maddr;
-	daddr64_t blkno;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error;
 	char *str;
 	extern int msgbufmapped;
@@ -2768,16 +2803,16 @@ dumpsys()
 		maddr = ptoa(dumpmem[i].start);
 		blkno = dumplo + btodb(maddr) + 1;
 #if 0
-		printf("(%d %lld %d) ", maddr, blkno, npg);
+		printf("(%d %lld %d) ", maddr, (long long)blkno, npg);
 #endif
 		for (j = npg; j--; maddr += NBPG, blkno += btodb(NBPG)) {
 
 			/* Print out how many MBs we have more to go. */
 			if (dbtob(blkno - dumplo) % (1024 * 1024) < NBPG)
-				printf("%d ",
+				printf("%ld ",
 				    (ptoa(dumpsize) - maddr) / (1024 * 1024));
 #if 0
-			printf("(%x %lld) ", maddr, blkno);
+			printf("(%x %lld) ", maddr, (long long)blkno);
 #endif
 			pmap_enter(pmap_kernel(), dumpspace, maddr,
 			    VM_PROT_READ, PMAP_WIRED);
@@ -3224,7 +3259,7 @@ init386(paddr_t first_avail)
 
 			if (extent_alloc_region(iomem_ex, a, e - a, EX_NOWAIT))
 				/* XXX What should we do? */
-				printf("\nWARNING: CAN'T ALLOCATE RAM (%x-%x)"
+				printf("\nWARNING: CAN'T ALLOCATE RAM (%lx-%lx)"
 				    " FROM IOMEM EXTENT MAP!\n", a, e);
 
 			physmem += atop(e - a);
@@ -3339,19 +3374,6 @@ init386(paddr_t first_avail)
 }
 
 /*
- * cpu_exec_aout_makecmds():
- *	cpu-dependent a.out format hook for execve().
- *
- * Determine of the given exec package refers to something which we
- * understand and, if so, set up the vmcmds for it.
- */
-int
-cpu_exec_aout_makecmds(struct proc *p, struct exec_package *epp)
-{
-	return ENOEXEC;
-}
-
-/*
  * consinit:
  * initialize the system console.
  */
@@ -3431,7 +3453,7 @@ need_resched(struct cpu_info *ci)
 	/* There's a risk we'll be called before the idle threads start */
 	if (ci->ci_curproc) {
 		aston(ci->ci_curproc);
-		cpu_unidle(ci);
+		cpu_kick(ci);
 	}
 }
 

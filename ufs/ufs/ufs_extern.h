@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_extern.h,v 1.32 2010/12/21 20:14:44 thib Exp $	*/
+/*	$OpenBSD: ufs_extern.h,v 1.34 2013/06/11 16:42:19 deraadt Exp $	*/
 /*	$NetBSD: ufs_extern.h,v 1.5 1996/02/09 22:36:03 christos Exp $	*/
 
 /*-
@@ -93,14 +93,14 @@ int	ufsfifo_close(void *);
 #endif
 
 /* ufs_bmap.c */
-int ufs_bmaparray(struct vnode *, daddr64_t, daddr64_t *, struct indir *,
+int ufs_bmaparray(struct vnode *, daddr_t, daddr_t *, struct indir *,
 		       int *, int *);
-int ufs_getlbns(struct vnode *, daddr64_t, struct indir *, int *);
+int ufs_getlbns(struct vnode *, daddr_t, struct indir *, int *);
 
 /* ufs_ihash.c */
 void ufs_ihashinit(void);
-struct vnode *ufs_ihashlookup(dev_t, ino_t);
-struct vnode *ufs_ihashget(dev_t, ino_t);
+struct vnode *ufs_ihashlookup(dev_t, ufsino_t);
+struct vnode *ufs_ihashget(dev_t, ufsino_t);
 int ufs_ihashins(struct inode *);
 void ufs_ihashrem(struct inode *);
 
@@ -117,8 +117,8 @@ int ufs_direnter(struct vnode *, struct vnode *, struct direct *,
 		      struct componentname *, struct buf *);
 int ufs_dirremove(struct vnode *, struct inode *, int, int);
 int ufs_dirrewrite(struct inode *, struct inode *,
-		        ino_t, int, int);
-int ufs_dirempty(struct inode *, ino_t, struct ucred *);
+		        ufsino_t, int, int);
+int ufs_dirempty(struct inode *, ufsino_t, struct ucred *);
 int ufs_checkpath(struct inode *, struct inode *, struct ucred *);
 
 /* ufs_vfsops.c */

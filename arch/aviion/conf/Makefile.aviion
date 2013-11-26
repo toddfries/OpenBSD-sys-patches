@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.aviion,v 1.40 2013/03/30 07:25:20 tedu Exp $
+#	$OpenBSD: Makefile.aviion,v 1.44 2013/11/02 23:42:12 miod Exp $
 
 # For instructions on building kernels consult the config(8) and options(4)
 # manual pages.
@@ -37,8 +37,9 @@ CMACHFLAGS+=	-fno-stack-protector
 
 COPTS?=		-O2
 CFLAGS=		${DEBUG} ${CWARNFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
-AFLAGS=		-D_LOCORE -x assembler-with-cpp -traditional-cpp ${CMACHFLAGS}
-LINKFLAGS=	-Ttext 0x1000 -e __start -X -N --warn-common -nopie
+AFLAGS=		-D_LOCORE -x assembler-with-cpp ${CWARNFLAGS} ${CMACHFLAGS}
+LINKFLAGS=	-T ${_machdir}/conf/ld.script \
+		-Ttext 0x80000 -e __start -X -N --warn-common -nopie
 
 .if ${IDENT:M-DDDB_STRUCT}
 DB_STRUCTINFO=	db_structinfo.h
@@ -136,9 +137,9 @@ depend:
 tags:
 	@echo "see $S/kern/Makefile for tags"
 
-db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.awk
+db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.pl
 	${CC} ${CFLAGS} ${CPPFLAGS} -MT $@ -gstabs -c $S/ddb/db_structinfo.c
-	objdump -g db_structinfo.o | awk -f $S/ddb/parse_structinfo.awk > $@
+	objdump -g db_structinfo.o | perl $S/ddb/parse_structinfo.pl > $@
 	rm -f db_structinfo.o
 
 locore.o: ${_machdir}/${_mach}/locore.S assym.h

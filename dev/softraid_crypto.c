@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_crypto.c,v 1.93 2013/04/01 15:17:32 jsing Exp $ */
+/* $OpenBSD: softraid_crypto.c,v 1.97 2013/11/19 15:12:13 krw Exp $ */
 /*
  * Copyright (c) 2007 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Hans-Joerg Hoexer <hshoexer@openbsd.org>
@@ -34,6 +34,7 @@
 #include <sys/queue.h>
 #include <sys/fcntl.h>
 #include <sys/disklabel.h>
+#include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/sensors.h>
 #include <sys/stat.h>
@@ -255,7 +256,7 @@ sr_crypto_wu_get(struct sr_workunit *wu, int encrypt)
 	struct sr_crypto_wu	*crwu;
 	struct cryptodesc	*crd;
 	int			flags, i, n;
-	daddr64_t		blk;
+	daddr_t			blk;
 	u_int			keyndx;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_wu_get wu %p encrypt %d\n",
@@ -418,7 +419,7 @@ sr_crypto_encrypt(u_char *p, u_char *c, u_char *key, size_t size, int alg)
 		rv = 0;
 		break;
 	default:
-		DNPRINTF(SR_D_DIS, "%s: unsupported encryption algorithm %u\n",
+		DNPRINTF(SR_D_DIS, "%s: unsupported encryption algorithm %d\n",
 		    "softraid", alg);
 		rv = -1;
 		goto out;
@@ -444,7 +445,7 @@ sr_crypto_decrypt(u_char *c, u_char *p, u_char *key, size_t size, int alg)
 		rv = 0;
 		break;
 	default:
-		DNPRINTF(SR_D_DIS, "%s: unsupported encryption algorithm %u\n",
+		DNPRINTF(SR_D_DIS, "%s: unsupported encryption algorithm %d\n",
 		    "softraid", alg);
 		rv = -1;
 		goto out;
@@ -1159,7 +1160,7 @@ int
 sr_crypto_rw(struct sr_workunit *wu)
 {
 	struct sr_crypto_wu	*crwu;
-	daddr64_t		blk;
+	daddr_t			blk;
 	int			s, rv = 0;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_crypto_rw wu %p\n",
@@ -1213,8 +1214,7 @@ sr_crypto_dev_rw(struct sr_workunit *wu, struct sr_crypto_wu *crwu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_ccb		*ccb;
 	struct uio		*uio;
-	daddr64_t		blk;
-	int			s;
+	daddr_t			blk;
 
 	blk = wu->swu_blk_start;
 	blk += sd->sd_meta->ssd_data_offset;
@@ -1232,17 +1232,10 @@ sr_crypto_dev_rw(struct sr_workunit *wu, struct sr_crypto_wu *crwu)
 		ccb->ccb_opaque = crwu;
 	}
 	sr_wu_enqueue_ccb(wu, ccb);
+	sr_schedule_wu(wu);
 
-	s = splbio();
-
-	if (sr_check_io_collision(wu))
-		goto queued;
-
-	sr_raid_startwu(wu);
-
-queued:
-	splx(s);
 	return (0);
+
 bad:
 	/* wu is unwound by sr_wu_put */
 	if (crwu)

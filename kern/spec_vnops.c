@@ -1,4 +1,4 @@
-/*	$OpenBSD: spec_vnops.c,v 1.71 2013/03/28 03:29:44 guenther Exp $	*/
+/*	$OpenBSD: spec_vnops.c,v 1.78 2013/10/30 03:16:49 guenther Exp $	*/
 /*	$NetBSD: spec_vnops.c,v 1.29 1996/04/22 01:42:38 christos Exp $	*/
 
 /*
@@ -151,7 +151,7 @@ spec_open(void *v)
 		if (cdevsw[maj].d_flags & D_CLONE)
 			return (spec_open_clone(ap));
 		VOP_UNLOCK(vp, 0, p);
-		error = (*cdevsw[maj].d_open)(dev, ap->a_mode, S_IFCHR, ap->a_p);
+		error = (*cdevsw[maj].d_open)(dev, ap->a_mode, S_IFCHR, p);
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
 		return (error);
 
@@ -171,7 +171,7 @@ spec_open(void *v)
 		 */
 		if ((error = vfs_mountedon(vp)) != 0)
 			return (error);
-		return ((*bdevsw[maj].d_open)(dev, ap->a_mode, S_IFBLK, ap->a_p));
+		return ((*bdevsw[maj].d_open)(dev, ap->a_mode, S_IFBLK, p));
 	case VNON:
 	case VLNK:
 	case VDIR:
@@ -195,7 +195,7 @@ spec_read(void *v)
 	struct uio *uio = ap->a_uio;
  	struct proc *p = uio->uio_procp;
 	struct buf *bp;
-	daddr64_t bn, nextbn, bscale;
+	daddr_t bn, nextbn, bscale;
 	int bsize;
 	struct partinfo dpart;
 	int n, on, majordev;
@@ -283,7 +283,7 @@ spec_write(void *v)
 	struct uio *uio = ap->a_uio;
 	struct proc *p = uio->uio_procp;
 	struct buf *bp;
-	daddr64_t bn, bscale;
+	daddr_t bn, bscale;
 	int bsize;
 	struct partinfo dpart;
 	int n, on, majordev;
@@ -472,10 +472,11 @@ int
 spec_close(void *v)
 {
 	struct vop_close_args *ap = v;
+	struct proc *p = ap->a_p;
 	struct vnode *vp = ap->a_vp;
 	dev_t dev = vp->v_rdev;
 	int (*devclose)(dev_t, int, int, struct proc *);
-	int mode, error;
+	int mode, relock, error;
 
 	switch (vp->v_type) {
 
@@ -489,10 +490,10 @@ spec_close(void *v)
 		 * if the reference count is 2 (this last descriptor
 		 * plus the session), release the reference from the session.
 		 */
-		if (vcount(vp) == 2 && ap->a_p && ap->a_p->p_p->ps_pgrp &&
-		    vp == ap->a_p->p_p->ps_pgrp->pg_session->s_ttyvp) {
+		if (vcount(vp) == 2 && p != NULL && p->p_p->ps_pgrp &&
+		    vp == p->p_p->ps_pgrp->pg_session->s_ttyvp) {
 			vrele(vp);
-			ap->a_p->p_p->ps_pgrp->pg_session->s_ttyvp = NULL;
+			p->p_p->ps_pgrp->pg_session->s_ttyvp = NULL;
 		}
 		if (cdevsw[major(dev)].d_flags & D_CLONE)
 			return (spec_close_clone(ap));
@@ -516,10 +517,10 @@ spec_close(void *v)
 		 * vclean(), the vnode is already locked.
 		 */
 		if (!(vp->v_flag & VXLOCK))
-			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, ap->a_p);
-		error = vinvalbuf(vp, V_SAVE, ap->a_cred, ap->a_p, 0, 0);
+			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+		error = vinvalbuf(vp, V_SAVE, ap->a_cred, p, 0, 0);
 		if (!(vp->v_flag & VXLOCK))
-			VOP_UNLOCK(vp, 0, ap->a_p);
+			VOP_UNLOCK(vp, 0, p);
 		if (error)
 			return (error);
 		/*
@@ -541,7 +542,14 @@ spec_close(void *v)
 		panic("spec_close: not special");
 	}
 
-	return ((*devclose)(dev, ap->a_fflag, mode, ap->a_p));
+	/* release lock if held and this isn't coming from vclean() */
+	relock = VOP_ISLOCKED(vp) && !(vp->v_flag & VXLOCK);
+	if (relock)
+		VOP_UNLOCK(vp, 0, p);
+	error = (*devclose)(dev, ap->a_fflag, mode, p);
+	if (relock)
+		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
+	return (error);
 }
 
 int
@@ -560,15 +568,16 @@ int
 spec_setattr(void *v)
 {
 	struct vop_getattr_args	*ap = v;
+	struct proc		*p = ap->a_p;
 	struct vnode		*vp = ap->a_vp;
 	int			 error;
 
 	if (!(vp->v_flag & VCLONE))
 		return (EBADF);
 
-	vn_lock(vp->v_specparent, LK_EXCLUSIVE|LK_RETRY, ap->a_p);
-	error = VOP_SETATTR(vp->v_specparent, ap->a_vap, ap->a_cred, ap->a_p);
-	VOP_UNLOCK(vp, 0, ap->a_p);
+	vn_lock(vp->v_specparent, LK_EXCLUSIVE|LK_RETRY, p);
+	error = VOP_SETATTR(vp->v_specparent, ap->a_vap, ap->a_cred, p);
+	VOP_UNLOCK(vp, 0, p);
 
 	return (error);
 }
@@ -691,6 +700,9 @@ spec_open_clone(struct vop_open_args *ap)
 
 	DNPRINTF("cloning vnode\n");
 
+	if (minor(vp->v_rdev) >= (1 << CLONE_SHIFT))
+		return (ENXIO);
+
 	for (i = 1; i < sizeof(vp->v_specbitmap) * NBBY; i++)
 		if (isclr(vp->v_specbitmap, i)) {
 			setbit(vp->v_specbitmap, i);
@@ -700,9 +712,12 @@ spec_open_clone(struct vop_open_args *ap)
 	if (i == sizeof(vp->v_specbitmap) * NBBY)
 		return (EBUSY); /* too many open instances */
 
-	error = cdevvp(makedev(major(vp->v_rdev), i), &cvp);
-	if (error)
+	error = cdevvp(makedev(major(vp->v_rdev),
+	    (i << CLONE_SHIFT) | minor(vp->v_rdev)), &cvp);
+	if (error) {
+		clrbit(vp->v_specbitmap, i);
 		return (error); /* out of vnodes */
+	}
 
 	VOP_UNLOCK(vp, 0, ap->a_p);
 
@@ -712,8 +727,9 @@ spec_open_clone(struct vop_open_args *ap)
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, ap->a_p);
 
 	if (error) {
-		 clrbit(vp->v_specbitmap, i);
-		 return (error); /* device open failed */
+		vput(cvp);
+		clrbit(vp->v_specbitmap, i);
+		return (error); /* device open failed */
 	}
 
 	cvp->v_flag |= VCLONE;
@@ -743,7 +759,7 @@ spec_close_clone(struct vop_close_args *ap)
 		return (error); /* device close failed */
 
 	pvp = vp->v_specparent; /* get parent device */
-	clrbit(pvp->v_specbitmap, minor(vp->v_rdev));
+	clrbit(pvp->v_specbitmap, minor(vp->v_rdev) >> CLONE_SHIFT);
 	vrele(pvp);
 
 	return (0); /* clone closed */

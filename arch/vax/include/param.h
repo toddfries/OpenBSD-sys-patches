@@ -1,4 +1,4 @@
-/*	$OpenBSD: param.h,v 1.40 2013/03/26 05:04:10 deraadt Exp $ */
+/*	$OpenBSD: param.h,v 1.42 2013/11/24 22:15:24 miod Exp $ */
 
 /*-
  * Copyright (c) 1990 The Regents of the University of California.
@@ -63,7 +63,7 @@
 #define	USPACE_ALIGN	(0)			/* u-area alignment 0-none */
 #define	REDZONEADDR	(VAX_NBPG*3)		/* Must be > sizeof(struct user) */
 
-#define	NMBCLUSTERS	768			/* map size, max cluster allocation */
+#define	NMBCLUSTERS	1024			/* map size, max cluster allocation */
 
 #ifndef	MSGBUFSIZE
 #define	MSGBUFSIZE	(2 * PAGE_SIZE)		/* default message buffer size */
@@ -78,8 +78,6 @@
 /* MD conversion macros */
 #define	vax_atop(x)	(((unsigned)(x) + VAX_PGOFSET) >> VAX_PGSHIFT)
 #define	vax_btop(x)	(((unsigned)(x)) >> VAX_PGSHIFT)
-
-#define	ovbcopy(x,y,z)	bcopy(x, y, z)
 
 #include <machine/intr.h>
 

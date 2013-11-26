@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axe.c,v 1.118 2013/04/15 09:23:01 mglocker Exp $	*/
+/*	$OpenBSD: if_axe.c,v 1.123 2013/11/15 10:17:39 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Jonathan Gray <jsg@openbsd.org>
@@ -112,7 +112,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -361,11 +360,6 @@ axe_miibus_statchg(struct device *dev)
 	struct ifnet		*ifp;
 	int			val, err;
 
-	if ((mii->mii_media_active & IFM_GMASK) == IFM_FDX)
-		val = AXE_MEDIA_FULL_DUPLEX;
-	else
-		val = 0;
-
 	ifp = GET_IFP(sc);
 	if (mii == NULL || ifp == NULL ||
 	    (ifp->if_flags & IFF_RUNNING) == 0)
@@ -521,11 +515,16 @@ axe_reset(struct axe_softc *sc)
 	return;
 }
 
+#define AXE_GPIO_WRITE(x,y) do {                                \
+	axe_cmd(sc, AXE_CMD_WRITE_GPIO, 0, (x), NULL);          \
+	usbd_delay_ms(sc->axe_udev, (y));			\
+} while (0)
+
 void
 axe_ax88178_init(struct axe_softc *sc)
 {
-	int gpio0 = 0, phymode = 0;
-	u_int16_t eeprom;
+	int gpio0 = 0, phymode = 0, ledmode;
+	u_int16_t eeprom, val;
 
 	axe_cmd(sc, AXE_CMD_SROM_WR_ENABLE, 0, 0, NULL);
 	/* XXX magic */
@@ -538,32 +537,39 @@ axe_ax88178_init(struct axe_softc *sc)
 
 	/* if EEPROM is invalid we have to use to GPIO0 */
 	if (eeprom == 0xffff) {
-		phymode = 0;
+		phymode = AXE_PHY_MODE_MARVELL;
 		gpio0 = 1;
+		ledmode = 0;
 	} else {
-		phymode = eeprom & 7;
+		phymode = eeprom & 0x7f;
 		gpio0 = (eeprom & 0x80) ? 0 : 1;
+		ledmode = eeprom >> 8;
 	}
 
-	DPRINTF(("use gpio0: %d, phymode %d\n", gpio0, phymode));
+	DPRINTF(("use gpio0: %d, phymode 0x%02x, eeprom 0x%04x\n",
+	    gpio0, phymode, eeprom));
 
-	axe_cmd(sc, AXE_CMD_WRITE_GPIO, 0, 0x008c, NULL);
-	usbd_delay_ms(sc->axe_udev, 40);
-	if ((eeprom >> 8) != 1) {
-		axe_cmd(sc, AXE_CMD_WRITE_GPIO, 0, 0x003c, NULL);
-		usbd_delay_ms(sc->axe_udev, 30);
-
-		axe_cmd(sc, AXE_CMD_WRITE_GPIO, 0, 0x001c, NULL);
-		usbd_delay_ms(sc->axe_udev, 300);
-
-		axe_cmd(sc, AXE_CMD_WRITE_GPIO, 0, 0x003c, NULL);
-		usbd_delay_ms(sc->axe_udev, 30);
+	/* power up external phy */
+	AXE_GPIO_WRITE(AXE_GPIO1|AXE_GPIO1_EN | AXE_GPIO_RELOAD_EEPROM, 40);
+	if (ledmode == 1) {
+		AXE_GPIO_WRITE(AXE_GPIO1_EN, 30);
+		AXE_GPIO_WRITE(AXE_GPIO1_EN | AXE_GPIO1, 30);
 	} else {
-		DPRINTF(("axe gpio phymode == 1 path\n"));
-		axe_cmd(sc, AXE_CMD_WRITE_GPIO, 0, 0x0004, NULL);
-		usbd_delay_ms(sc->axe_udev, 30);
-		axe_cmd(sc, AXE_CMD_WRITE_GPIO, 0, 0x000c, NULL);
-		usbd_delay_ms(sc->axe_udev, 30);
+		val = gpio0 == 1 ? AXE_GPIO0 | AXE_GPIO0_EN : 
+	    	    AXE_GPIO1 | AXE_GPIO1_EN;
+		AXE_GPIO_WRITE(val | AXE_GPIO2 | AXE_GPIO2_EN, 30);
+		AXE_GPIO_WRITE(val | AXE_GPIO2_EN, 300);
+		AXE_GPIO_WRITE(val | AXE_GPIO2 | AXE_GPIO2_EN, 30);
+	}
+
+	/* initialize phy */
+	if (phymode == AXE_PHY_MODE_REALTEK_8211CL) {
+		axe_miibus_writereg(&sc->axe_dev, sc->axe_phyno, 0x1f, 0x0005);
+		axe_miibus_writereg(&sc->axe_dev, sc->axe_phyno, 0x0c, 0x0000);
+		val = axe_miibus_readreg(&sc->axe_dev, sc->axe_phyno, 0x0001);
+		axe_miibus_writereg(&sc->axe_dev, sc->axe_phyno, 0x01,
+		    val | 0x0080);
+		axe_miibus_writereg(&sc->axe_dev, sc->axe_phyno, 0x1f, 0x0000);
 	}
 
 	/* soft reset */
@@ -1049,7 +1055,7 @@ axe_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 			if ((pktlen % 2) != 0)
 				pktlen++;
 
-			if ((total_len - pktlen) < 0)
+			if (total_len < pktlen)
 				total_len = 0;
 			else
 				total_len -= pktlen;
@@ -1494,11 +1500,7 @@ axe_stop(struct axe_softc *sc)
 
 	/* Stop transfers. */
 	if (sc->axe_ep[AXE_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_RX]);
-		if (err) {
-			printf("axe%d: abort rx pipe failed: %s\n",
-			    sc->axe_unit, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_RX]);
 		err = usbd_close_pipe(sc->axe_ep[AXE_ENDPT_RX]);
 		if (err) {
 			printf("axe%d: close rx pipe failed: %s\n",
@@ -1508,11 +1510,7 @@ axe_stop(struct axe_softc *sc)
 	}
 
 	if (sc->axe_ep[AXE_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_TX]);
-		if (err) {
-			printf("axe%d: abort tx pipe failed: %s\n",
-			    sc->axe_unit, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_TX]);
 		err = usbd_close_pipe(sc->axe_ep[AXE_ENDPT_TX]);
 		if (err) {
 			printf("axe%d: close tx pipe failed: %s\n",
@@ -1522,11 +1520,7 @@ axe_stop(struct axe_softc *sc)
 	}
 
 	if (sc->axe_ep[AXE_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_INTR]);
-		if (err) {
-			printf("axe%d: abort intr pipe failed: %s\n",
-			    sc->axe_unit, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->axe_ep[AXE_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->axe_ep[AXE_ENDPT_INTR]);
 		if (err) {
 			printf("axe%d: close intr pipe failed: %s\n",

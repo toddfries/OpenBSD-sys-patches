@@ -1,4 +1,4 @@
-/*	$OpenBSD: wd.c,v 1.109 2012/10/08 21:47:50 deraadt Exp $ */
+/*	$OpenBSD: wd.c,v 1.114 2013/10/14 23:33:13 krw Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -465,11 +465,12 @@ wdstart(void *arg)
 void
 __wdstart(struct wd_softc *wd, struct buf *bp)
 {
-	daddr64_t nblks;
+	struct disklabel *lp;
+	u_int64_t nsecs;
 
-	wd->sc_wdc_bio.blkno = bp->b_blkno +
-	    DL_GETPOFFSET(&wd->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)]);
-	wd->sc_wdc_bio.blkno /= (wd->sc_dk.dk_label->d_secsize / DEV_BSIZE);
+	lp = wd->sc_dk.dk_label;
+	wd->sc_wdc_bio.blkno = DL_BLKTOSEC(lp, bp->b_blkno + DL_SECTOBLK(lp,
+	    DL_GETPOFFSET(&lp->d_partitions[DISKPART(bp->b_dev)])));
 	wd->sc_wdc_bio.blkdone =0;
 	wd->sc_bp = bp;
 	/*
@@ -481,11 +482,11 @@ __wdstart(struct wd_softc *wd, struct buf *bp)
 		wd->sc_wdc_bio.flags = ATA_SINGLE;
 	else
 		wd->sc_wdc_bio.flags = 0;
-	nblks = bp->b_bcount / wd->sc_dk.dk_label->d_secsize;
+	nsecs = howmany(bp->b_bcount, lp->d_secsize);
 	if ((wd->sc_flags & WDF_LBA48) &&
 	    /* use LBA48 only if really need */
-	    ((wd->sc_wdc_bio.blkno + nblks - 1 >= LBA48_THRESHOLD) ||
-	     (nblks > 0xff)))
+	    ((wd->sc_wdc_bio.blkno + nsecs - 1 >= LBA48_THRESHOLD) ||
+	     (nsecs > 0xff)))
 		wd->sc_wdc_bio.flags |= ATA_LBA48;
 	if (wd->sc_flags & WDF_LBA)
 		wd->sc_wdc_bio.flags |= ATA_LBA;
@@ -873,12 +874,13 @@ wdformat(struct buf *bp)
 }
 #endif
 
-daddr64_t
+daddr_t
 wdsize(dev_t dev)
 {
 	struct wd_softc *wd;
+	struct disklabel *lp;
 	int part, omask;
-	int64_t size;
+	daddr_t size;
 
 	WDCDEBUG_PRINT(("wdsize\n"), DEBUG_FUNCS);
 
@@ -894,8 +896,8 @@ wdsize(dev_t dev)
 		goto exit;
 	}
 
-	size = DL_GETPSIZE(&wd->sc_dk.dk_label->d_partitions[part]) *
-	    (wd->sc_dk.dk_label->d_secsize / DEV_BSIZE);
+	lp = wd->sc_dk.dk_label;
+	size = DL_SECTOBLK(lp, DL_GETPSIZE(&lp->d_partitions[part]));
 	if (omask == 0 && wdclose(dev, 0, S_IFBLK, NULL) != 0)
 		size = -1;
 
@@ -913,12 +915,13 @@ static int wddumpmulti = 1;
  * Dump core after a system crash.
  */
 int
-wddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
+wddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 {
 	struct wd_softc *wd;	/* disk unit to do the I/O */
 	struct disklabel *lp;   /* disk's disklabel */
 	int unit, part;
 	int nblks;	/* total number of sectors left to write */
+	int nwrt;	/* sectors to write with current i/o. */
 	int err;
 	char errbuf[256];
 
@@ -960,14 +963,14 @@ wddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 	}
 
 	while (nblks > 0) {
+		nwrt = min(nblks, wddumpmulti);
 		wd->sc_wdc_bio.blkno = blkno;
 		wd->sc_wdc_bio.flags = ATA_POLL;
 		if (wd->sc_flags & WDF_LBA48)
 			wd->sc_wdc_bio.flags |= ATA_LBA48;
 		if (wd->sc_flags & WDF_LBA)
 			wd->sc_wdc_bio.flags |= ATA_LBA;
-		wd->sc_wdc_bio.bcount =
-			min(nblks, wddumpmulti) * lp->d_secsize;
+		wd->sc_wdc_bio.bcount = nwrt * lp->d_secsize;
 		wd->sc_wdc_bio.databuf = va;
 		wd->sc_wdc_bio.wd = wd;
 #ifndef WD_DUMP_NOT_TRUSTED
@@ -1019,9 +1022,9 @@ wddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 #endif
 
 		/* update block count */
-		nblks -= min(nblks, wddumpmulti);
-		blkno += min(nblks, wddumpmulti);
-		va += min(nblks, wddumpmulti) * lp->d_secsize;
+		nblks -= nwrt;
+		blkno += nwrt;
+		va += nwrt * lp->d_secsize;
 	}
 
 	wddoingadump = 0;

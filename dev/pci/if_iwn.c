@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_iwn.c,v 1.118 2012/11/17 14:02:51 kettenis Exp $	*/
+/*	$OpenBSD: if_iwn.c,v 1.125 2013/11/14 12:40:00 dlg Exp $	*/
 
 /*-
  * Copyright (c) 2007-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -32,7 +32,7 @@
 #include <sys/malloc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -53,7 +53,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -91,7 +90,10 @@ static const struct pci_matchid iwn_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_1030_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_1 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_2 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_130_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_130_2 },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6235_1 },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6235_2 },
 };
 
 int		iwn_match(struct device *, void *, void *);
@@ -208,6 +210,7 @@ int		iwn_send_sensitivity(struct iwn_softc *);
 int		iwn_set_pslevel(struct iwn_softc *, int, int, int);
 int		iwn_send_temperature_offset(struct iwn_softc *);
 int		iwn_send_btcoex(struct iwn_softc *);
+int		iwn_send_advanced_btcoex(struct iwn_softc *);
 int		iwn5000_runtime_calib(struct iwn_softc *);
 int		iwn_config(struct iwn_softc *);
 int		iwn_scan(struct iwn_softc *, uint16_t);
@@ -305,6 +308,8 @@ iwn_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pct = pa->pa_pc;
 	sc->sc_pcitag = pa->pa_tag;
 	sc->sc_dmat = pa->pa_dmat;
+
+	task_set(&sc->sc_resume_t, iwn_resume, sc, NULL);
 
 	/*
 	 * Get the offset of the PCI Express Capability Structure in PCI
@@ -639,11 +644,8 @@ iwn5000_attach(struct iwn_softc *sc, pci_product_id_t pid)
 		break;
 	case IWN_HW_REV_TYPE_6005:
 		sc->limits = &iwn6000_sensitivity_limits;
-		if (pid == PCI_PRODUCT_INTEL_WL_1030_1 ||
-		    pid == PCI_PRODUCT_INTEL_WL_1030_2 ||
-		    pid == PCI_PRODUCT_INTEL_WL_6030_1 ||
-		    pid == PCI_PRODUCT_INTEL_WL_6030_2 ||
-		    pid == PCI_PRODUCT_INTEL_WL_6235_1) {
+		if (pid != PCI_PRODUCT_INTEL_WL_6005_1 &&
+		    pid != PCI_PRODUCT_INTEL_WL_6005_2) {
 			sc->fwname = "iwn-6030";
 			sc->sc_flags |= IWN_FLAG_ADV_BT_COEX;
 		} else
@@ -719,8 +721,7 @@ iwn_activate(struct device *self, int act)
 			iwn_stop(ifp, 0);
 		break;
 	case DVACT_RESUME:
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    iwn_resume, sc, NULL);
+		task_add(systq, &sc->sc_resume_t);
 		break;
 	}
 
@@ -1824,7 +1825,7 @@ iwn_ccmp_decap(struct iwn_softc *sc, struct mbuf *m, struct ieee80211_key *k)
 
 	/* Clear Protected bit and strip IV. */
 	wh->i_fc[1] &= ~IEEE80211_FC1_PROTECTED;
-	ovbcopy(wh, mtod(m, caddr_t) + IEEE80211_CCMP_HDRLEN, hdrlen);
+	memmove(mtod(m, caddr_t) + IEEE80211_CCMP_HDRLEN, wh, hdrlen);
 	m_adj(m, IEEE80211_CCMP_HDRLEN);
 	/* Strip MIC. */
 	m_adj(m, -IEEE80211_CCMP_MICLEN);
@@ -4145,6 +4146,65 @@ iwn_send_btcoex(struct iwn_softc *sc)
 }
 
 int
+iwn_send_advanced_btcoex(struct iwn_softc *sc)
+{
+	static const uint32_t btcoex_3wire[12] = {
+		0xaaaaaaaa, 0xaaaaaaaa, 0xaeaaaaaa, 0xaaaaaaaa,
+		0xcc00ff28, 0x0000aaaa, 0xcc00aaaa, 0x0000aaaa,
+		0xc0004000, 0x00004000, 0xf0005000, 0xf0005000,
+	};
+	struct iwn6000_btcoex_config btconfig;
+	struct iwn_btcoex_priotable btprio;
+	struct iwn_btcoex_prot btprot;
+	int error, i;
+
+	memset(&btconfig, 0, sizeof btconfig);
+	btconfig.flags = IWN_BT_FLAG_COEX6000_CHAN_INHIBITION |
+	    (IWN_BT_FLAG_COEX6000_MODE_3W << IWN_BT_FLAG_COEX6000_MODE_SHIFT) |
+	    IWN_BT_FLAG_SYNC_2_BT_DISABLE;
+	btconfig.max_kill = 5;
+	btconfig.bt3_t7_timer = 1;
+	btconfig.kill_ack = htole32(0xffff0000);
+	btconfig.kill_cts = htole32(0xffff0000);
+	btconfig.sample_time = 2;
+	btconfig.bt3_t2_timer = 0xc;
+	for (i = 0; i < 12; i++)
+		btconfig.lookup_table[i] = htole32(btcoex_3wire[i]);
+	btconfig.valid = htole16(0xff);
+	btconfig.prio_boost = 0xf0;
+	DPRINTF(("configuring advanced bluetooth coexistence\n"));
+	error = iwn_cmd(sc, IWN_CMD_BT_COEX, &btconfig, sizeof(btconfig), 1);
+	if (error != 0)
+		return (error);
+
+	memset(&btprio, 0, sizeof btprio);
+	btprio.calib_init1 = 0x6;
+	btprio.calib_init2 = 0x7;
+	btprio.calib_periodic_low1 = 0x2;
+	btprio.calib_periodic_low2 = 0x3;
+	btprio.calib_periodic_high1 = 0x4;
+	btprio.calib_periodic_high2 = 0x5;
+	btprio.dtim = 0x6;
+	btprio.scan52 = 0x8;
+	btprio.scan24 = 0xa;
+	error = iwn_cmd(sc, IWN_CMD_BT_COEX_PRIOTABLE, &btprio, sizeof(btprio),
+	    1);
+	if (error != 0)
+		return (error);
+
+	/* Force BT state machine change */
+	memset(&btprot, 0, sizeof btprot);
+	btprot.open = 1;
+	btprot.type = 1;
+	error = iwn_cmd(sc, IWN_CMD_BT_COEX_PROT, &btprot, sizeof(btprot), 1);
+	if (error != 0)
+		return (error);
+
+	btprot.open = 0;
+	return (iwn_cmd(sc, IWN_CMD_BT_COEX_PROT, &btprot, sizeof(btprot), 1));
+}
+
+int
 iwn5000_runtime_calib(struct iwn_softc *sc)
 {
 	struct iwn5000_calib_config cmd;
@@ -4201,15 +4261,14 @@ iwn_config(struct iwn_softc *sc)
 	}
 
 	/* Configure bluetooth coexistence. */
-	if (sc->sc_flags & IWN_FLAG_ADV_BT_COEX) {
-		/* XXX Advanced bluetooth coexistence isn't implemented yet. */
-	} else {
+	if (sc->sc_flags & IWN_FLAG_ADV_BT_COEX)
+		error = iwn_send_advanced_btcoex(sc);
+	else
 		error = iwn_send_btcoex(sc);
-		if (error != 0) {
-			printf("%s: could not configure bluetooth coexistence\n",
-			    sc->sc_dev.dv_xname);
-			return error;
-		}
+	if (error != 0) {
+		printf("%s: could not configure bluetooth coexistence\n",
+		    sc->sc_dev.dv_xname);
+		return error;
 	}
 
 	/* Set mode, channel, RX filter and enable RX. */
@@ -5290,7 +5349,7 @@ iwn_read_firmware_leg(struct iwn_softc *sc, struct iwn_fw_info *fw)
 		ptr++;
 	}
 	if (fw->size < hdrlen) {
-		printf("%s: firmware too short: %d bytes\n",
+		printf("%s: firmware too short: %zu bytes\n",
 		    sc->sc_dev.dv_xname, fw->size);
 		return EINVAL;
 	}
@@ -5303,7 +5362,7 @@ iwn_read_firmware_leg(struct iwn_softc *sc, struct iwn_fw_info *fw)
 	/* Check that all firmware sections fit. */
 	if (fw->size < hdrlen + fw->main.textsz + fw->main.datasz +
 	    fw->init.textsz + fw->init.datasz + fw->boot.textsz) {
-		printf("%s: firmware too short: %d bytes\n",
+		printf("%s: firmware too short: %zu bytes\n",
 		    sc->sc_dev.dv_xname, fw->size);
 		return EINVAL;
 	}
@@ -5331,7 +5390,7 @@ iwn_read_firmware_tlv(struct iwn_softc *sc, struct iwn_fw_info *fw,
 	uint32_t len;
 
 	if (fw->size < sizeof (*hdr)) {
-		printf("%s: firmware too short: %d bytes\n",
+		printf("%s: firmware too short: %zu bytes\n",
 		    sc->sc_dev.dv_xname, fw->size);
 		return EINVAL;
 	}
@@ -5363,7 +5422,7 @@ iwn_read_firmware_tlv(struct iwn_softc *sc, struct iwn_fw_info *fw,
 
 		ptr += sizeof (*tlv);
 		if (ptr + len > end) {
-			printf("%s: firmware too short: %d bytes\n",
+			printf("%s: firmware too short: %zu bytes\n",
 			    sc->sc_dev.dv_xname, fw->size);
 			return EINVAL;
 		}
@@ -5418,7 +5477,7 @@ iwn_read_firmware(struct iwn_softc *sc)
 		return error;
 	}
 	if (fw->size < sizeof (uint32_t)) {
-		printf("%s: firmware too short: %d bytes\n",
+		printf("%s: firmware too short: %zu bytes\n",
 		    sc->sc_dev.dv_xname, fw->size);
 		free(fw->data, M_DEVBUF);
 		return EINVAL;

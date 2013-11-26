@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.85 2013/04/12 04:48:52 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.88 2013/09/05 20:40:32 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -320,6 +320,7 @@ lose:
 		    fault_addr, frame, frame->tf_cpu);
 #endif
 
+		pcb_onfault = p->p_addr->u_pcb.pcb_onfault;
 		switch (pbus_type) {
 		case CMMU_PFSR_SUCCESS:
 			/*
@@ -327,22 +328,37 @@ lose:
 			 * to drain the data unit pipe line and reset dmt0
 			 * so that trap won't get called again.
 			 */
+			p->p_addr->u_pcb.pcb_onfault = 0;
 			data_access_emulation((u_int *)frame);
-			frame->tf_dpfsr = 0;
+			p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
 			frame->tf_dmt0 = 0;
+			frame->tf_dpfsr = 0;
 			KERNEL_UNLOCK();
 			return;
 		case CMMU_PFSR_SFAULT:
 		case CMMU_PFSR_PFAULT:
-			if ((pcb_onfault = p->p_addr->u_pcb.pcb_onfault) != 0)
-				p->p_addr->u_pcb.pcb_onfault = 0;
+			p->p_addr->u_pcb.pcb_onfault = 0;
 			result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
 			p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
-			/*
-			 * This could be a fault caused in copyout*()
-			 * while accessing kernel space.
-			 */
-			if (result != 0 && pcb_onfault != 0) {
+			if (result == 0) {
+				/*
+				 * We could resolve the fault. Call
+				 * data_access_emulation to drain the data
+				 * unit pipe line and reset dmt0 so that trap
+				 * won't get called again.
+				 */
+				p->p_addr->u_pcb.pcb_onfault = 0;
+				data_access_emulation((u_int *)frame);
+				p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
+				frame->tf_dmt0 = 0;
+				frame->tf_dpfsr = 0;
+				KERNEL_UNLOCK();
+				return;
+			} else if (pcb_onfault != 0) {
+				/*
+				 * This could be a fault caused in copyout*()
+				 * while accessing kernel space.
+				 */
 				frame->tf_snip = pcb_onfault | NIP_V;
 				frame->tf_sfip = (pcb_onfault + 4) | FIP_V;
 				frame->tf_sxip = 0;
@@ -351,19 +367,8 @@ lose:
 				 * but do not try to complete the faulting
 				 * access.
 				 */
-				frame->tf_dmt0 |= DMT_SKIP;
-				result = 0;
-			}
-			if (result == 0) {
-				/*
-				 * We could resolve the fault. Call
-				 * data_access_emulation to drain the data
-				 * unit pipe line and reset dmt0 so that trap
-				 * won't get called again.
-				 */
-				data_access_emulation((u_int *)frame);
-				frame->tf_dpfsr = 0;
 				frame->tf_dmt0 = 0;
+				frame->tf_dpfsr = 0;
 				KERNEL_UNLOCK();
 				return;
 			}
@@ -434,22 +439,6 @@ user_fault:
 		if (result == 0 && (caddr_t)va >= vm->vm_maxsaddr)
 			uvm_grow(p, va);
 
-		/*
-		 * This could be a fault caused in copyin*()
-		 * while accessing user space.
-		 */
-		if (result != 0 && pcb_onfault != 0) {
-			frame->tf_snip = pcb_onfault | NIP_V;
-			frame->tf_sfip = (pcb_onfault + 4) | FIP_V;
-			frame->tf_sxip = 0;
-			/*
-			 * Continue as if the fault had been resolved, but
-			 * do not try to complete the faulting access.
-			 */
-			frame->tf_dmt0 |= DMT_SKIP;
-			result = 0;
-		}
-
 		if (result == 0) {
 			if (type == T_INSTFLT + T_USER) {
 				/*
@@ -466,14 +455,33 @@ user_fault:
 			 	 * pipe line and reset dmt0 so that trap won't
 			 	 * get called again.
 			 	 */
+				p->p_addr->u_pcb.pcb_onfault = 0;
 				data_access_emulation((u_int *)frame);
-				frame->tf_dpfsr = 0;
+				p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
 				frame->tf_dmt0 = 0;
+				frame->tf_dpfsr = 0;
 			}
 		} else {
-			sig = result == EACCES ? SIGBUS : SIGSEGV;
-			fault_type = result == EACCES ?
-			    BUS_ADRERR : SEGV_MAPERR;
+			/*
+			 * This could be a fault caused in copyin*()
+			 * while accessing user space.
+			 */
+			if (pcb_onfault != 0) {
+				frame->tf_snip = pcb_onfault | NIP_V;
+				frame->tf_sfip = (pcb_onfault + 4) | FIP_V;
+				frame->tf_sxip = 0;
+				/*
+				 * Continue as if the fault had been resolved,
+				 * but do not try to complete the faulting
+				 * access.
+				 */
+				frame->tf_dmt0 = 0;
+				frame->tf_dpfsr = 0;
+			} else {
+				sig = result == EACCES ? SIGBUS : SIGSEGV;
+				fault_type = result == EACCES ?
+				    BUS_ADRERR : SEGV_MAPERR;
+			}
 		}
 		KERNEL_UNLOCK();
 		break;
@@ -506,7 +514,33 @@ user_fault:
 		fault_type = FPE_INTOVF;
 		break;
 	case T_FPEPFLT+T_USER:
-		sig = SIGFPE;
+		m88100_fpu_precise_exception(frame);
+		goto maysigfpe;
+	case T_FPEIFLT+T_USER:
+		m88100_fpu_imprecise_exception(frame);
+maysigfpe:
+		/* Check for a SIGFPE condition */
+		if (frame->tf_fpsr & frame->tf_fpcr) {
+			sig = SIGFPE;
+			if (frame->tf_fpecr & FPECR_FIOV)
+				fault_type = FPE_FLTSUB;
+			else if (frame->tf_fpecr & FPECR_FROP)
+				fault_type = FPE_FLTINV;
+			else if (frame->tf_fpecr & FPECR_FDVZ)
+				fault_type = FPE_INTDIV;
+			else if (frame->tf_fpecr & FPECR_FUNF) {
+				if (frame->tf_fpsr & FPSR_EFUNF)
+					fault_type = FPE_FLTUND;
+				else if (frame->tf_fpsr & FPSR_EFINX)
+					fault_type = FPE_FLTRES;
+			} else if (frame->tf_fpecr & FPECR_FOVF) {
+				if (frame->tf_fpsr & FPSR_EFOVF)
+					fault_type = FPE_FLTOVF;
+				else if (frame->tf_fpsr & FPSR_EFINX)
+					fault_type = FPE_FLTRES;
+			} else if (frame->tf_fpecr & FPECR_FINX)
+				fault_type = FPE_FLTRES;
+		}
 		break;
 	case T_SIGSYS+T_USER:
 		sig = SIGSYS;
@@ -1393,6 +1427,9 @@ child_return(arg)
 	tf->tf_r[2] = 0;
 	tf->tf_r[3] = 0;
 	tf->tf_epsr &= ~PSR_C;
+	/* reset r26 (used by the threads library) if __tfork */
+	if (p->p_flag & P_THREAD)
+		tf->tf_r[26] = 0;
 	/* skip br instruction as in syscall() */
 #ifdef M88100
 	if (CPU_IS88100) {

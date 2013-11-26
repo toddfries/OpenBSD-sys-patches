@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi.c,v 1.243 2013/04/18 18:30:41 deraadt Exp $ */
+/* $OpenBSD: acpi.c,v 1.247 2013/11/06 10:40:36 mpi Exp $ */
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -60,6 +60,7 @@
 #define APMDEV_NORMAL	0
 #define APMDEV_CTL	8
 
+#include "wd.h"
 #include "wsdisplay.h"
 
 #ifdef ACPI_DEBUG
@@ -73,6 +74,7 @@ int	acpi_hasprocfvs;
 
 void 	acpi_pci_match(struct device *, struct pci_attach_args *);
 pcireg_t acpi_pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
+void	 acpi_pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int, int);
 
 int	acpi_match(struct device *, void *, void *);
 void	acpi_attach(struct device *, struct device *, void *);
@@ -154,8 +156,7 @@ void	acpi_disable_allgpes(struct acpi_softc *);
 extern struct aml_node aml_root;
 
 struct cfattach acpi_ca = {
-	sizeof(struct acpi_softc), acpi_match, acpi_attach, NULL,
-	config_activate_children
+	sizeof(struct acpi_softc), acpi_match, acpi_attach
 };
 
 struct cfdriver acpi_cd = {
@@ -559,15 +560,26 @@ void
 acpi_pci_match(struct device *dev, struct pci_attach_args *pa)
 {
 	struct acpi_pci *pdev;
+	int state;
 
 	TAILQ_FOREACH(pdev, &acpi_pcidevs, next) {
-		if (pdev->bus == pa->pa_bus && 
-		    pdev->dev == pa->pa_device && 
-		    pdev->fun == pa->pa_function) {
-			dnprintf(10,"%s at acpi0 %s\n", 
-			    dev->dv_xname, aml_nodename(pdev->node));
-			pdev->device = dev;
-		}
+		if (pdev->bus != pa->pa_bus ||
+		    pdev->dev != pa->pa_device ||
+		    pdev->fun != pa->pa_function)
+			continue;
+
+		dnprintf(10,"%s at acpi0 %s\n", dev->dv_xname,
+		    aml_nodename(pdev->node));
+
+		pdev->device = dev;
+
+		/*
+		 * If some Power Resources are dependent on this device
+		 * initialize them.
+		 */
+		state = pci_get_powerstate(pa->pa_pc, pa->pa_tag);
+		acpi_pci_set_powerstate(pa->pa_pc, pa->pa_tag, state, 1);
+		acpi_pci_set_powerstate(pa->pa_pc, pa->pa_tag, state, 0);
 	}
 }
 
@@ -604,6 +616,66 @@ acpi_pci_min_powerstate(pci_chipset_tag_t pc, pcitag_t tag)
 }
 
 void
+acpi_pci_set_powerstate(pci_chipset_tag_t pc, pcitag_t tag, int state, int pre)
+{
+#if NACPIPWRRES > 0
+	struct acpi_softc *sc = acpi_softc;
+	struct acpi_pwrres *pr;
+	struct acpi_pci *pdev;
+	int bus, dev, fun;
+	char name[5];
+
+	pci_decompose_tag(pc, tag, &bus, &dev, &fun);
+	TAILQ_FOREACH(pdev, &acpi_pcidevs, next) {
+		if (pdev->bus == bus && pdev->dev == dev && pdev->fun == fun)
+			break;
+	}
+
+	/* XXX Add a check to discard nodes without Power Resources? */
+	if (pdev == NULL)
+		return;
+
+	SIMPLEQ_FOREACH(pr, &sc->sc_pwrresdevs, p_next) {
+		if (pr->p_node != pdev->node)
+			continue;
+
+		/*
+		 * If the firmware is already aware that the device
+		 * is in the given state, there's nothing to do.
+		 */
+		if (pr->p_state == state)
+			continue;
+
+		if (pre) {
+			/*
+			 * If a Resource is dependent on this device for
+			 * the given state, make sure it is turned "_ON".
+			 */
+			if (pr->p_res_state == state)
+				acpipwrres_ref_incr(pr->p_res_sc, pr->p_node);
+		} else {
+			/*
+			 * If a Resource was referenced for the state we
+			 * left, drop a reference and turn it "_OFF" if
+			 * it was the last one.
+			 */
+			if (pr->p_res_state == pr->p_state)
+				acpipwrres_ref_decr(pr->p_res_sc, pr->p_node);
+
+			if (pr->p_res_state == state) {
+				snprintf(name, sizeof(name), "_PS%d", state);
+				aml_evalname(sc, pr->p_node, name, 0,
+				    NULL, NULL);
+			}
+
+			pr->p_state = state;
+		}
+
+	}
+#endif /* NACPIPWRRES > 0 */
+}
+
+void
 acpi_pciroots_attach(struct device *dev, void *aux, cfprint_t pr)
 {
 	struct acpi_pci			*pdev;
@@ -631,6 +703,7 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	struct acpi_dsdt *p_dsdt;
 	int idx;
 #ifndef SMALL_KERNEL
+	int wakeup_dev_ct;
 	struct acpi_wakeq *wentry;
 	struct device *dev;
 	struct acpi_ac *ac;
@@ -657,6 +730,10 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 
 	SIMPLEQ_INIT(&sc->sc_tables);
 	SIMPLEQ_INIT(&sc->sc_wakedevs);
+#if NACPIPWRRES > 0
+	SIMPLEQ_INIT(&sc->sc_pwrresdevs);
+#endif /* NACPIPWRRES > 0 */
+
 
 #ifndef SMALL_KERNEL
 	sc->sc_note = malloc(sizeof(struct klist), M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -796,10 +873,15 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 
 #ifndef SMALL_KERNEL
 	/* Display wakeup devices and lowest S-state */
+	wakeup_dev_ct = 0;
 	printf("%s: wakeup devices", DEVNAME(sc));
 	SIMPLEQ_FOREACH(wentry, &sc->sc_wakedevs, q_next) {
-		printf(" %.4s(S%d)", wentry->q_node->name,
-		    wentry->q_state);
+		if (wakeup_dev_ct < 16)
+			printf(" %.4s(S%d)", wentry->q_node->name,
+			    wentry->q_state);
+		else if (wakeup_dev_ct == 16)
+			printf(" [...]");
+		wakeup_dev_ct ++;
 	}
 	printf("\n");
 
@@ -855,8 +937,10 @@ acpi_attach(struct device *parent, struct device *self, void *aux)
 	/* attach battery, power supply and button devices */
 	aml_find_node(&aml_root, "_HID", acpi_foundhid, sc);
 
+#if NWD > 0
 	/* Attach IDE bay */
 	aml_walknodes(&aml_root, AML_WALK_PRE, acpi_foundide, sc);
+#endif
 
 	/* attach docks */
 	aml_find_node(&aml_root, "_DCK", acpi_founddock, sc);
@@ -1362,6 +1446,7 @@ is_ejectable_bay(struct aml_node *node)
 	return ((is_ata(node) || is_ata(node->parent)) && is_ejectable(node));
 }
 
+#if NWD > 0
 int
 acpiide_notify(struct aml_node *node, int ntype, void *arg)
 {
@@ -1448,6 +1533,7 @@ acpi_foundide(struct aml_node *node, void *arg)
 	aml_register_notify(node, "acpiide", acpiide_notify, ide, 0);
 	return (0);
 }
+#endif /* NWD > 0 */
 
 void
 acpi_reset(void)

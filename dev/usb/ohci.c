@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.112 2013/05/20 08:19:47 yasuoka Exp $ */
+/*	$OpenBSD: ohci.c,v 1.116 2013/11/09 08:46:05 mpi Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -73,8 +73,6 @@ int ohcidebug = 0;
 #define DPRINTFN(n,x)
 #endif
 
-#define mstohz(ms) ((ms) * hz / 1000)
-
 /*
  * The OHCI controller is little endian, so on big endian machines
  * the data stored in memory needs to be swapped.
@@ -99,7 +97,6 @@ usbd_status	ohci_alloc_std_chain(struct ohci_pipe *,
 			    struct ohci_softc *, u_int, int, struct usbd_xfer *,
 			    struct ohci_soft_td *, struct ohci_soft_td **);
 
-void		ohci_shutdown(void *v);
 usbd_status	ohci_open(struct usbd_pipe *);
 void		ohci_poll(struct usbd_bus *);
 void		ohci_softintr(void *);
@@ -325,6 +322,7 @@ ohci_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_SUSPEND:
+		rv = config_activate_children(self, act);
 		sc->sc_bus.use_polling++;
 		reg = OREAD4(sc, OHCI_CONTROL) & ~OHCI_HCFS_MASK;
 		if (sc->sc_control == 0) {
@@ -341,6 +339,10 @@ ohci_activate(struct device *self, int act)
 		OWRITE4(sc, OHCI_CONTROL, reg);
 		usb_delay_ms(&sc->sc_bus, USB_RESUME_WAIT);
 		sc->sc_bus.use_polling--;
+		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
+		OWRITE4(sc, OHCI_CONTROL, OHCI_HCFS_RESET);
 		break;
 	case DVACT_RESUME:
 		sc->sc_bus.use_polling++;
@@ -377,6 +379,7 @@ ohci_activate(struct device *self, int act)
 		usb_delay_ms(&sc->sc_bus, USB_RESUME_RECOVERY);
 		sc->sc_control = sc->sc_intre = sc->sc_ival = 0;
 		sc->sc_bus.use_polling--;
+		rv = config_activate_children(self, act);
 		break;
 	case DVACT_DEACTIVATE:
 		if (sc->sc_child != NULL)
@@ -399,9 +402,6 @@ ohci_detach(struct ohci_softc *sc, int flags)
 		return (rv);
 
 	timeout_del(&sc->sc_tmo_rhsc);
-
-	if (sc->sc_shutdownhook != NULL)
-		shutdownhook_disestablish(sc->sc_shutdownhook);
 
 	usb_delay_ms(&sc->sc_bus, 300); /* XXX let stray task complete */
 
@@ -501,7 +501,7 @@ ohci_alloc_std_chain(struct ohci_pipe *opipe, struct ohci_softc *sc,
     u_int alen, int rd, struct usbd_xfer *xfer,
     struct ohci_soft_td *sp, struct ohci_soft_td **ep)
 {
-	struct ohci_soft_td *next, *cur;
+	struct ohci_soft_td *next, *cur, *end;
 	ohci_physaddr_t dataphys, dataphysend;
 	u_int32_t tdflags;
 	u_int len, curlen;
@@ -512,6 +512,8 @@ ohci_alloc_std_chain(struct ohci_pipe *opipe, struct ohci_softc *sc,
 
 	len = alen;
 	cur = sp;
+	end = NULL;
+
 	dataphys = DMAADDR(dma, 0);
 	dataphysend = OHCI_PAGE(dataphys + len - 1);
 	tdflags = htole32(
@@ -519,7 +521,7 @@ ohci_alloc_std_chain(struct ohci_pipe *opipe, struct ohci_softc *sc,
 	    (flags & USBD_SHORT_XFER_OK ? OHCI_TD_R : 0) |
 	    OHCI_TD_NOCC | OHCI_TD_TOGGLE_CARRY | OHCI_TD_NOINTR);
 
-	for (;;) {
+	while (len > 0) {
 		next = ohci_alloc_std(sc);
 		if (next == NULL)
 			goto nomem;
@@ -556,17 +558,15 @@ ohci_alloc_std_chain(struct ohci_pipe *opipe, struct ohci_softc *sc,
 		cur->xfer = xfer;
 		DPRINTFN(10,("ohci_alloc_std_chain: cbp=0x%08x be=0x%08x\n",
 			    dataphys, dataphys + curlen - 1));
-		if (len == 0)
-			break;
 		DPRINTFN(10,("ohci_alloc_std_chain: extend chain\n"));
 		dataphys += curlen;
+		end = cur;
 		cur = next;
 	}
-	if (!rd && (flags & USBD_FORCE_SHORT_XFER) &&
+	if (!rd && ((flags & USBD_FORCE_SHORT_XFER) || alen == 0) &&
 	    alen % UGETW(opipe->pipe.endpoint->edesc->wMaxPacketSize) == 0) {
 		/* Force a 0 length transfer at the end. */
 
-		cur = next;
 		next = ohci_alloc_std(sc);
 		if (next == NULL)
 			goto nomem;
@@ -580,8 +580,9 @@ ohci_alloc_std_chain(struct ohci_pipe *opipe, struct ohci_softc *sc,
 		cur->flags = 0;
 		cur->xfer = xfer;
 		DPRINTFN(2,("ohci_alloc_std_chain: add 0 xfer\n"));
+		end = cur;
 	}
-	*ep = cur;
+	*ep = end;
 
 	return (USBD_NORMAL_COMPLETION);
 
@@ -919,7 +920,6 @@ ohci_init(struct ohci_softc *sc)
 	sc->sc_bus.pipe_size = sizeof(struct ohci_pipe);
 
 	sc->sc_control = sc->sc_intre = 0;
-	sc->sc_shutdownhook = shutdownhook_establish(ohci_shutdown, sc);
 
 	timeout_set(&sc->sc_tmo_rhsc, ohci_rhsc_enable, sc);
 
@@ -984,18 +984,6 @@ ohci_freex(struct usbd_bus *bus, struct usbd_xfer *xfer)
 	xfer->busy_free = XFER_FREE;
 #endif
 	SIMPLEQ_INSERT_HEAD(&sc->sc_free_xfers, xfer, next);
-}
-
-/*
- * Shut down the controller when the system is going down.
- */
-void
-ohci_shutdown(void *v)
-{
-	struct ohci_softc *sc = v;
-
-	DPRINTF(("ohci_shutdown: stopping the HC\n"));
-	OWRITE4(sc, OHCI_CONTROL, OHCI_HCFS_RESET);
 }
 
 #ifdef OHCI_DEBUG
@@ -1315,8 +1303,7 @@ ohci_softintr(void *v)
 			continue;
 		}
 		timeout_del(&xfer->timeout_handle);
-		usb_rem_task(xfer->pipe->device,
-		    &((struct ohci_xfer *)xfer)->abort_task);
+		usb_rem_task(xfer->pipe->device, &xfer->abort_task);
 
 		len = std->len;
 		if (std->td.td_cbp != 0)
@@ -1715,7 +1702,7 @@ ohci_device_request(struct usbd_xfer *xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
                 timeout_del(&xfer->timeout_handle);
                 timeout_set(&xfer->timeout_handle, ohci_timeout, xfer);
-                timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+                timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 	splx(s);
 
@@ -1868,9 +1855,9 @@ ohci_timeout(void *addr)
 	}
 
 	/* Execute the abort in a process context. */
-	usb_init_task(&oxfer->abort_task, ohci_timeout_task, addr,
+	usb_init_task(&oxfer->xfer.abort_task, ohci_timeout_task, addr,
 	    USB_TASK_TYPE_ABORT);
-	usb_add_task(oxfer->xfer.pipe->device, &oxfer->abort_task);
+	usb_add_task(oxfer->xfer.pipe->device, &oxfer->xfer.abort_task);
 }
 
 void
@@ -2153,8 +2140,7 @@ ohci_abort_xfer(struct usbd_xfer *xfer, usbd_status status)
 		s = splusb();
 		xfer->status = status;	/* make software ignore it */
 		timeout_del(&xfer->timeout_handle);
-		usb_rem_task(xfer->pipe->device,
-		    &((struct ohci_xfer *)xfer)->abort_task);
+		usb_rem_task(xfer->pipe->device, &xfer->abort_task);
 		usb_transfer_complete(xfer);
 		splx(s);
 		return;
@@ -2169,8 +2155,7 @@ ohci_abort_xfer(struct usbd_xfer *xfer, usbd_status status)
 	s = splusb();
 	xfer->status = status;	/* make software ignore it */
 	timeout_del(&xfer->timeout_handle);
-	usb_rem_task(xfer->pipe->device,
-	    &((struct ohci_xfer *)xfer)->abort_task);
+	usb_rem_task(xfer->pipe->device, &xfer->abort_task);
 	splx(s);
 	DPRINTFN(1,("ohci_abort_xfer: stop ed=%p\n", sed));
 	sed->ed.ed_flags |= htole32(OHCI_ED_SKIP); /* force hardware skip */
@@ -2892,7 +2877,7 @@ ohci_device_bulk_start(struct usbd_xfer *xfer)
 	if (xfer->timeout && !sc->sc_bus.use_polling) {
                 timeout_del(&xfer->timeout_handle);
                 timeout_set(&xfer->timeout_handle, ohci_timeout, xfer);
-                timeout_add(&xfer->timeout_handle, mstohz(xfer->timeout));
+                timeout_add_msec(&xfer->timeout_handle, xfer->timeout);
 	}
 
 #if 0

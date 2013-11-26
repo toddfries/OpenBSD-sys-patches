@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.1 2013/01/21 11:17:48 patrick Exp $ */
+/*	$OpenBSD: ahci.c,v 1.4 2013/11/06 12:06:58 deraadt Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -30,9 +30,20 @@
 
 #include <machine/bus.h>
 
-
 #include <dev/ic/ahcivar.h>
 #include <dev/ic/ahcireg.h>
+
+#ifdef AHCI_DEBUG
+#define DPRINTF(m, f...) do { if ((ahcidebug & (m)) == (m)) printf(f); } \
+    while (0)
+#define AHCI_D_TIMEOUT		0x00
+#define AHCI_D_VERBOSE		0x01
+#define AHCI_D_INTR		0x02
+#define AHCI_D_XFER		0x08
+int ahcidebug = AHCI_D_VERBOSE;
+#else
+#define DPRINTF(m, f...)
+#endif
 
 #ifdef HIBERNATE
 #include <uvm/uvm.h>
@@ -3159,6 +3170,8 @@ ahci_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size,
 		struct ahci_ccb *ccb;
 		struct ahci_cmd_hdr *hdr_buf;
 		int pmp_port;
+		daddr_t poffset;
+		size_t psize;
 	} *my = page;
 	struct ata_fis_h2d *fis;
 	u_int32_t sector_count;
@@ -3177,6 +3190,9 @@ ahci_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size,
 		paddr_t page_phys;
 		u_int64_t item_phys;
 		u_int32_t cmd;
+
+		my->poffset = blkno;
+		my->psize = size;
 
 		/* map dev to an ahci port */
 		disk = disk_lookup(&sd_cd, DISKUNIT(dev));
@@ -3291,6 +3307,10 @@ ahci_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size,
 		ahci_activate(&my->ap->ap_sc->sc_dev, DVACT_RESUME);
 		return (0);
 	}
+
+	if (blkno > my->psize)
+		return (E2BIG);
+	blkno += my->poffset;
 
 	/* build fis */
 	sector_count = size / 512;	/* dlg promises this is okay */

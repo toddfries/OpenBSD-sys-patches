@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_lge.c,v 1.57 2012/11/29 21:10:32 brad Exp $	*/
+/*	$OpenBSD: if_lge.c,v 1.61 2013/11/26 09:50:33 mpi Exp $	*/
 /*
  * Copyright (c) 2001 Wind River Systems
  * Copyright (c) 1997, 1998, 1999, 2000, 2001
@@ -92,7 +92,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -326,7 +325,9 @@ lge_setmulti(struct lge_softc *sc)
 	/* Make sure multicast hash table is enabled. */
 	CSR_WRITE_4(sc, LGE_MODE1, LGE_MODE1_SETRST_CTL1|LGE_MODE1_RX_MCAST);
 
-allmulti:
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
 		CSR_WRITE_4(sc, LGE_MAR0, 0xFFFFFFFF);
 		CSR_WRITE_4(sc, LGE_MAR1, 0xFFFFFFFF);
@@ -340,10 +341,6 @@ allmulti:
 	/* now program new ones */
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
-		}
 		h = (ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26) &
 		    0x0000003F;
 		if (h < 32)
@@ -483,7 +480,7 @@ lge_attach(struct device *parent, struct device *self, void *aux)
 	if (bus_dmamem_map(sc->sc_dmatag, &seg, rseg,
 			   sizeof(struct lge_list_data), &kva,
 			   BUS_DMA_NOWAIT)) {
-		printf("%s: can't map dma buffers (%d bytes)\n",
+		printf("%s: can't map dma buffers (%zd bytes)\n",
 		       sc->sc_dv.dv_xname, sizeof(struct lge_list_data));
 		goto fail_3;
 	}
@@ -726,7 +723,7 @@ lge_alloc_jumbo_mem(struct lge_softc *sc)
 	state = 1;
 	if (bus_dmamem_map(sc->sc_dmatag, &seg, rseg, LGE_JMEM, &kva,
 			   BUS_DMA_NOWAIT)) {
-		printf("%s: can't map dma buffers (%d bytes)\n",
+		printf("%s: can't map dma buffers (%zd bytes)\n",
 		       sc->sc_dv.dv_xname, LGE_JMEM);
 		error = ENOBUFS;
 		goto out;
@@ -891,7 +888,7 @@ lge_rxeof(struct lge_softc *sc, int cnt)
 
 		if (lge_newbuf(sc, &LGE_RXTAIL(sc), NULL) == ENOBUFS) {
 			m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
-			    ifp, NULL);
+			    ifp);
 			lge_newbuf(sc, &LGE_RXTAIL(sc), m);
 			if (m0 == NULL) {
 				ifp->if_ierrors++;

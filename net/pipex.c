@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex.c,v 1.41 2013/04/16 07:36:55 yasuoka Exp $	*/
+/*	$OpenBSD: pipex.c,v 1.48 2013/11/11 09:15:34 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -64,7 +64,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -653,9 +652,12 @@ pipex_lookup_by_ip_address(struct in_addr addr)
 	    &pipex_in4, &pipex_in4mask, &pipex_rd_head4);
 
 #ifdef PIPEX_DEBUG
-	if (session == NULL)
+	if (session == NULL) {
+		char buf[INET_ADDRSTRLEN];
+
 		PIPEX_DBG((NULL, LOG_DEBUG, "<%s> session not found (addr=%s)",
-		    __func__, inet_ntoa(addr)));
+		    __func__, inet_ntop(AF_INET, &addr, buf, sizeof(buf))));
+	}
 #endif
 
 	return (session);
@@ -850,19 +852,22 @@ pipex_timer(void *ignored_arg)
 
 		case PIPEX_STATE_CLOSE_WAIT:
 		case PIPEX_STATE_CLOSE_WAIT2:
+			/* Wait PIPEXDSESSION from userland */
 			session->stat.idle_time++;
 			if (session->stat.idle_time < PIPEX_CLOSE_TIMEOUT)
 				continue;
+
+			if (session->state == PIPEX_STATE_CLOSE_WAIT)
+				LIST_REMOVE(session, state_list);
 			session->state = PIPEX_STATE_CLOSED;
 			/* FALLTHROUGH */
+
 		case PIPEX_STATE_CLOSED:
 			/*
-			 * if mbuf which queued pipexinq has
-			 * session reference pointer, the
-			 * referenced session must not destroy.
+			 * mbuf queued in pipexinq or pipexoutq may have a
+			 * refererce to this session.
 			 */
-			if (!IF_IS_EMPTY(&pipexinq) ||
-			    !IF_IS_EMPTY(&pipexoutq))
+			if (!IF_IS_EMPTY(&pipexinq) || !IF_IS_EMPTY(&pipexoutq))
 				continue;
 
 			pipex_destroy_session(session);
@@ -1144,9 +1149,11 @@ pipex_ip_input(struct mbuf *m0, struct pipex_session *session)
 		ip = mtod(m0, struct ip *);
 		if ((ip->ip_src.s_addr & session->ip_netmask.sin_addr.s_addr) !=
 		    session->ip_address.sin_addr.s_addr) {
+			char src[INET_ADDRSTRLEN];
+
 			pipex_session_log(session, LOG_DEBUG,
 			    "ip packet discarded by ingress filter (src %s)",
-			    inet_ntoa(ip->ip_src));
+			    inet_ntop(AF_INET, &ip->ip_src, src, sizeof(src)));
 			goto drop;
 		}
 	}
@@ -1972,7 +1979,9 @@ pipex_l2tp_output(struct mbuf *m0, struct pipex_session *session)
 	udp->uh_sport = session->local.sin6.sin6_port;
 	udp->uh_dport = session->peer.sin6.sin6_port;
 	udp->uh_ulen = htons(plen);
+	udp->uh_sum = 0;
 
+	m0->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
 	m0->m_pkthdr.rcvif = session->pipex_iface->ifnet_this;
 #if NPF > 0
 	pf_pkt_addr_changed(m0);
@@ -1986,13 +1995,6 @@ pipex_l2tp_output(struct mbuf *m0, struct pipex_session *session)
 		ip->ip_len = htons(hlen + plen);
 		ip->ip_ttl = MAXTTL;
 		ip->ip_tos = 0;
-
-		if (udpcksum) {
-			udp->uh_sum = in_cksum_phdr(ip->ip_src.s_addr,
-			   ip->ip_dst.s_addr, htons(plen  + IPPROTO_UDP));
-			m0->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
-		} else
-			udp->uh_sum = 0;
 
 		if (ip_output(m0, NULL, NULL, IP_IPSECFLOW, NULL, NULL,
 		    session->proto.l2tp.ipsecflowinfo) != 0) {
@@ -2013,10 +2015,6 @@ pipex_l2tp_output(struct mbuf *m0, struct pipex_session *session)
 		    &session->peer.sin6, NULL, NULL);
 		/* ip6->ip6_plen will be filled in ip6_output. */
 
-		udp->uh_sum = 0;
-		if ((udp->uh_sum = in6_cksum(m0, IPPROTO_UDP,
-		    sizeof(struct ip6_hdr), plen)) == 0)
-			udp->uh_sum = 0xffff;
 		if (ip6_output(m0, NULL, NULL, 0, NULL, NULL, NULL) != 0) {
 			PIPEX_DBG((session, LOG_DEBUG, "ip6_output failed."));
 			goto drop;
@@ -3061,14 +3059,18 @@ int
 pipex_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
     size_t newlen)
 {
-	/* All sysctl names at this level are terminal. */
-	if (namelen != 1)
-		return (ENOTDIR);
-
 	switch (name[0]) {
 	case PIPEXCTL_ENABLE:
+		if (namelen != 1)
+			return (ENOTDIR);
 		return (sysctl_int(oldp, oldlenp, newp, newlen,
 		    &pipex_enable));
+	case PIPEXCTL_INQ:
+	        return (sysctl_ifq(name + 1, namelen - 1,
+		    oldp, oldlenp, newp, newlen, &pipexinq));
+	case PIPEXCTL_OUTQ:
+	        return (sysctl_ifq(name + 1, namelen - 1,
+		    oldp, oldlenp, newp, newlen, &pipexoutq));
 	default:
 		return (ENOPROTOOPT);
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_aue.c,v 1.87 2013/04/15 09:23:01 mglocker Exp $ */
+/*	$OpenBSD: if_aue.c,v 1.91 2013/11/17 13:57:03 jsg Exp $ */
 /*	$NetBSD: if_aue.c,v 1.82 2003/03/05 17:37:36 shiba Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -100,7 +100,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -185,6 +184,7 @@ const struct aue_type aue_devs[] = {
  {{ USB_VENDOR_HP,		USB_PRODUCT_HP_HN210E},           PII },
  {{ USB_VENDOR_IODATA,		USB_PRODUCT_IODATA_USBETTX},	  0 },
  {{ USB_VENDOR_IODATA,		USB_PRODUCT_IODATA_USBETTXS},	  PII },
+ {{ USB_VENDOR_IODATA,		USB_PRODUCT_IODATA_ETXUS2},	  PII },
  {{ USB_VENDOR_KINGSTON,	USB_PRODUCT_KINGSTON_KNU101TX},   0 },
  {{ USB_VENDOR_LINKSYS,		USB_PRODUCT_LINKSYS_USB10TX1},	  LSYS|PII },
  {{ USB_VENDOR_LINKSYS,		USB_PRODUCT_LINKSYS_USB10T},	  LSYS },
@@ -586,6 +586,7 @@ aue_crc(caddr_t addr)
 void
 aue_setmulti(struct aue_softc *sc)
 {
+	struct arpcom		*ac = &sc->arpcom;
 	struct ifnet		*ifp;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
@@ -595,8 +596,7 @@ aue_setmulti(struct aue_softc *sc)
 
 	ifp = GET_IFP(sc);
 
-	if (ifp->if_flags & IFF_PROMISC) {
-allmulti:
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
 		ifp->if_flags |= IFF_ALLMULTI;
 		AUE_SETBIT(sc, AUE_CTL0, AUE_CTL0_ALLMULTI);
 		return;
@@ -609,12 +609,8 @@ allmulti:
 		aue_csr_write_1(sc, AUE_MAR0 + i, 0);
 
 	/* now program new ones */
-	ETHER_FIRST_MULTI(step, &sc->arpcom, enm);
+	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (memcmp(enm->enm_addrlo,
-		    enm->enm_addrhi, ETHER_ADDR_LEN) != 0)
-			goto allmulti;
-
 		h = aue_crc(enm->enm_addrlo);
 		AUE_SETBIT(sc, AUE_MAR + (h >> 3), 1 << (h & 0x7));
 		ETHER_NEXT_MULTI(step, enm);
@@ -1609,11 +1605,7 @@ aue_stop(struct aue_softc *sc)
 
 	/* Stop transfers. */
 	if (sc->aue_ep[AUE_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->aue_ep[AUE_ENDPT_RX]);
-		if (err) {
-			printf("%s: abort rx pipe failed: %s\n",
-			    sc->aue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->aue_ep[AUE_ENDPT_RX]);
 		err = usbd_close_pipe(sc->aue_ep[AUE_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
@@ -1623,11 +1615,7 @@ aue_stop(struct aue_softc *sc)
 	}
 
 	if (sc->aue_ep[AUE_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->aue_ep[AUE_ENDPT_TX]);
-		if (err) {
-			printf("%s: abort tx pipe failed: %s\n",
-			    sc->aue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->aue_ep[AUE_ENDPT_TX]);
 		err = usbd_close_pipe(sc->aue_ep[AUE_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
@@ -1637,11 +1625,7 @@ aue_stop(struct aue_softc *sc)
 	}
 
 	if (sc->aue_ep[AUE_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->aue_ep[AUE_ENDPT_INTR]);
-		if (err) {
-			printf("%s: abort intr pipe failed: %s\n",
-			    sc->aue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->aue_ep[AUE_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->aue_ep[AUE_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",

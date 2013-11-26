@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ppp.c,v 1.69 2013/03/28 16:55:27 deraadt Exp $	*/
+/*	$OpenBSD: if_ppp.c,v 1.71 2013/10/23 15:12:42 mpi Exp $	*/
 /*	$NetBSD: if_ppp.c,v 1.39 1997/05/17 21:11:59 christos Exp $	*/
 
 /*
@@ -128,7 +128,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #else
 #ifdef _KERNEL
@@ -633,19 +632,6 @@ pppsioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
     case SIOCADDMULTI:
     case SIOCDELMULTI:
-	if (ifr == 0) {
-	    error = EAFNOSUPPORT;
-	    break;
-	}
-	switch(ifr->ifr_addr.sa_family) {
-#ifdef INET
-	case AF_INET:
-	    break;
-#endif
-	default:
-	    error = EAFNOSUPPORT;
-	    break;
-	}
 	break;
 
     case SIOCGPPPSTATS:

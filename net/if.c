@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.c,v 1.258 2013/04/02 08:54:37 mpi Exp $	*/
+/*	$OpenBSD: if.c,v 1.277 2013/11/19 09:00:43 mpi Exp $	*/
 /*	$NetBSD: if.c,v 1.35 1996/05/07 05:26:04 thorpej Exp $	*/
 
 /*
@@ -81,6 +81,7 @@
 #include <sys/ioctl.h>
 #include <sys/domain.h>
 #include <sys/sysctl.h>
+#include <sys/workq.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -91,7 +92,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/igmp.h>
 #ifdef MROUTING
@@ -103,6 +103,7 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
+#include <netinet6/in6_var.h>
 #include <netinet6/in6_ifattach.h>
 #include <netinet6/nd6.h>
 #include <netinet/ip6.h>
@@ -115,10 +116,6 @@
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
-#endif
-
-#if NTRUNK > 0
-#include <net/if_trunk.h>
 #endif
 
 #if NBRIDGE > 0
@@ -152,6 +149,8 @@ struct if_clone	*if_clone_lookup(const char *, int *);
 
 void	if_congestion_clear(void *);
 int	if_group_egress_build(void);
+
+void	if_link_state_change_task(void *, void *);
 
 int	ifai_cmp(struct ifaddr_item *,  struct ifaddr_item *);
 void	ifa_item_insert(struct sockaddr *, struct ifaddr *, struct ifnet *);
@@ -204,31 +203,37 @@ if_attachsetup(struct ifnet *ifp)
 {
 	int wrapped = 0;
 
-	if (ifindex2ifnet == 0)
+	/*
+	 * Always increment the index to avoid races.
+	 */
+	if_index++;
+
+	/*
+	 * If we hit USHRT_MAX, we skip back to 1 since there are a
+	 * number of places where the value of ifp->if_index or
+	 * if_index itself is compared to or stored in an unsigned
+	 * short.  By jumping back, we won't botch those assignments
+	 * or comparisons.
+	 */
+	if (if_index == USHRT_MAX) {
 		if_index = 1;
-	else {
-		while (if_index < if_indexlim &&
-		    ifindex2ifnet[if_index] != NULL) {
-			if_index++;
+		wrapped++;
+	}
+
+	while (if_index < if_indexlim && ifindex2ifnet[if_index] != NULL) {
+		if_index++;
+
+		if (if_index == USHRT_MAX) {
 			/*
-			 * If we hit USHRT_MAX, we skip back to 1 since
-			 * there are a number of places where the value
-			 * of ifp->if_index or if_index itself is compared
-			 * to or stored in an unsigned short.  By
-			 * jumping back, we won't botch those assignments
-			 * or comparisons.
+			 * If we have to jump back to 1 twice without
+			 * finding an empty slot then there are too many
+			 * interfaces.
 			 */
-			if (if_index == USHRT_MAX) {
-				if_index = 1;
-				/*
-				 * However, if we have to jump back to 1
-				 * *twice* without finding an empty
-				 * slot in ifindex2ifnet[], then there
-				 * there are too many (>65535) interfaces.
-				 */
-				if (wrapped++)
-					panic("too many interfaces");
-			}
+			if (wrapped)
+				panic("too many interfaces");
+
+			if_index = 1;
+			wrapped++;
 		}
 	}
 	ifp->if_index = if_index;
@@ -435,19 +440,13 @@ if_attach_common(struct ifnet *ifp)
 
 	TAILQ_INIT(&ifp->if_addrlist);
 	ifp->if_addrhooks = malloc(sizeof(*ifp->if_addrhooks),
-	    M_TEMP, M_NOWAIT);
-	if (ifp->if_addrhooks == NULL)
-		panic("if_attach_common: malloc");
+	    M_TEMP, M_WAITOK);
 	TAILQ_INIT(ifp->if_addrhooks);
 	ifp->if_linkstatehooks = malloc(sizeof(*ifp->if_linkstatehooks),
-	    M_TEMP, M_NOWAIT);
-	if (ifp->if_linkstatehooks == NULL)
-		panic("if_attach_common: malloc");
+	    M_TEMP, M_WAITOK);
 	TAILQ_INIT(ifp->if_linkstatehooks);
 	ifp->if_detachhooks = malloc(sizeof(*ifp->if_detachhooks),
-	    M_TEMP, M_NOWAIT);
-	if (ifp->if_detachhooks == NULL)
-		panic("if_attach_common: malloc");
+	    M_TEMP, M_WAITOK);
 	TAILQ_INIT(ifp->if_detachhooks);
 }
 
@@ -508,13 +507,12 @@ if_detach(struct ifnet *ifp)
 	ifp->if_ioctl = if_detached_ioctl;
 	ifp->if_watchdog = if_detached_watchdog;
 
-	/* Call detach hooks, ie. to remove vlan interfaces */
+	/*
+	 * Call detach hooks from head to tail.  To make sure detach
+	 * hooks are executed in the reverse order they were added, all
+	 * the hooks have to be added to the head!
+	 */
 	dohooks(ifp->if_detachhooks, HOOK_REMOVE | HOOK_FREE);
-
-#if NTRUNK > 0
-	if (ifp->if_type == IFT_IEEE8023ADLAG)
-		trunk_port_ifdetach(ifp);
-#endif
 
 #if NBRIDGE > 0
 	/* Remove the interface from any bridge it is part of.  */
@@ -548,6 +546,9 @@ if_detach(struct ifnet *ifp)
 	vif_delete(ifp);
 #endif
 #endif
+#ifdef INET
+	in_ifdetach(ifp);
+#endif
 #ifdef INET6
 	in6_ifdetach(ifp);
 #endif
@@ -573,9 +574,6 @@ do { \
 #ifdef INET6
 	IF_DETACH_QUEUES(ip6intrq);
 #endif
-#ifdef NATM
-	IF_DETACH_QUEUES(natmintrq);
-#endif
 #undef IF_DETACH_QUEUES
 
 	/*
@@ -593,10 +591,6 @@ do { \
 	 */
 	while ((ifa = TAILQ_FIRST(&ifp->if_addrlist)) != NULL) {
 		ifa_del(ifp, ifa);
-#ifdef INET
-		if (ifa->ifa_addr->sa_family == AF_INET)
-			TAILQ_REMOVE(&in_ifaddr, ifatoia(ifa), ia_list);
-#endif
 		/* XXX if_free_sadl needs this */
 		if (ifa == ifp->if_lladdr)
 			continue;
@@ -994,7 +988,7 @@ ifaof_ifpforaddr(struct sockaddr *addr, struct ifnet *ifp)
  * This should be moved to /sys/net/link.c eventually.
  */
 void
-link_rtrequest(int cmd, struct rtentry *rt, struct rt_addrinfo *info)
+link_rtrequest(int cmd, struct rtentry *rt)
 {
 	struct ifaddr *ifa;
 	struct sockaddr *dst;
@@ -1008,7 +1002,7 @@ link_rtrequest(int cmd, struct rtentry *rt, struct rt_addrinfo *info)
 		ifafree(rt->rt_ifa);
 		rt->rt_ifa = ifa;
 		if (ifa->ifa_rtrequest && ifa->ifa_rtrequest != link_rtrequest)
-			ifa->ifa_rtrequest(cmd, rt, info);
+			ifa->ifa_rtrequest(cmd, rt);
 	}
 }
 
@@ -1114,17 +1108,35 @@ if_up(struct ifnet *ifp)
 }
 
 /*
- * Process a link state change.
- * NOTE: must be called at splsoftnet or equivalent.
+ * Schedule a link state change task.
  */
 void
 if_link_state_change(struct ifnet *ifp)
 {
-	rt_ifmsg(ifp);
+	/* try to put the routing table update task on syswq */
+	workq_add_task(NULL, 0, if_link_state_change_task,
+	    (void *)((unsigned long)ifp->if_index), NULL);
+}
+
+/*
+ * Process a link state change.
+ */
+void
+if_link_state_change_task(void *arg, void *unused)
+{
+	unsigned int index = (unsigned long)arg;
+	struct ifnet *ifp;
+	int s;
+
+	s = splsoftnet();
+	if ((ifp = if_get(index)) != NULL) {
+		rt_ifmsg(ifp);
 #ifndef SMALL_KERNEL
-	rt_if_track(ifp);
+		rt_if_track(ifp);
 #endif
-	dohooks(ifp->if_linkstatehooks, 0);
+		dohooks(ifp->if_linkstatehooks, 0);
+	}
+	splx(s);
 }
 
 /*
@@ -1186,7 +1198,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 {
 	struct ifnet *ifp;
 	struct ifreq *ifr;
-	struct ifaddr *ifa, *nifa;
+	struct ifaddr *ifa;
 	struct sockaddr_dl *sdl;
 	struct ifgroupreq *ifgr;
 	char ifdescrbuf[IFDESCRSIZE];
@@ -1195,6 +1207,7 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 	size_t bytesdone;
 	short oif_flags;
 	const char *label;
+	short up = 0;
 
 	switch (cmd) {
 
@@ -1477,6 +1490,16 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		/* XXX hell this is ugly */
 		if (ifr->ifr_rdomainid != ifp->if_rdomain) {
 			s = splnet();
+			if (ifp->if_flags & IFF_UP)
+				up = 1;
+			/*
+			 * We are tearing down the world.
+			 * Take down the IF so:
+			 * 1. everything that cares gets a message
+			 * 2. the automagic IPv6 bits are recreated
+			 */
+			if (up)
+				if_down(ifp);
 			rt_if_remove(ifp);
 #ifdef INET
 			rti_delete(ifp);
@@ -1486,20 +1509,9 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 #endif
 #ifdef INET6
 			in6_ifdetach(ifp);
-			ifp->if_xflags |= IFXF_NOINET6;
 #endif
 #ifdef INET
-			TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrlist, ifa_list,
-			    nifa) {
-				/* only remove AF_INET */
-				if (ifa->ifa_addr->sa_family != AF_INET)
-					continue;
-
-				TAILQ_REMOVE(&in_ifaddr, ifatoia(ifa), ia_list);
-				ifa_del(ifp, ifa);
-				ifa->ifa_ifp = NULL;
-				ifafree(ifa);
-			}
+			in_ifdetach(ifp);
 #endif
 			splx(s);
 		}
@@ -1552,7 +1564,6 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 		switch (ifp->if_type) {
 		case IFT_ETHER:
 		case IFT_CARP:
-		case IFT_FDDI:
 		case IFT_XETHER:
 		case IFT_ISO88025:
 		case IFT_L2VLAN:
@@ -1643,6 +1654,12 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct proc *p)
 			splx(s);
 		}
 #endif
+	}
+	/* If we took down the IF, bring it back */
+	if (up) {
+		s = splnet();
+		if_up(ifp);
+		splx(s);
 	}
 	return (error);
 }
@@ -2062,7 +2079,7 @@ if_group_egress_build(void)
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			rt = rt_mpath_next(rt, 0);
+			rt = rt_mpath_next(rt);
 #else
 			rt = NULL;
 #endif
@@ -2076,7 +2093,7 @@ if_group_egress_build(void)
 			if (rt->rt_ifp)
 				if_addgroup(rt->rt_ifp, IFG_EGRESS);
 #ifndef SMALL_KERNEL
-			rt = rt_mpath_next(rt, 0);
+			rt = rt_mpath_next(rt);
 #else
 			rt = NULL;
 #endif
@@ -2243,15 +2260,19 @@ ifa_print_rb(void)
 	struct ifaddr_item *ifai, *p;
 	RB_FOREACH(p, ifaddr_items, &ifaddr_items) {
 		for (ifai = p; ifai; ifai = ifai->ifai_next) {
+			char addr[INET6_ADDRSTRLEN];
+
 			switch (ifai->ifai_addr->sa_family) {
 			case AF_INET:
-				printf("%s", inet_ntoa((satosin(
-				    ifai->ifai_addr))->sin_addr));
+				printf("%s", inet_ntop(AF_INET,
+				    &satosin(ifai->ifai_addr)->sin_addr,
+				    addr, sizeof(addr)));
 				break;
 #ifdef INET6
 			case AF_INET6:
-				printf("%s", ip6_sprintf(&(satosin6(
-				    ifai->ifai_addr))->sin6_addr));
+				printf("%s", inet_ntop(AF_INET6,
+				    &(satosin6(ifai->ifai_addr))->sin6_addr,
+				    addr, sizeof(addr)));
 				break;
 #endif
 			case AF_LINK:

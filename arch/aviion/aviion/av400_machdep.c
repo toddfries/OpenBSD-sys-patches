@@ -1,4 +1,4 @@
-/*	$OpenBSD: av400_machdep.c,v 1.21 2013/02/17 18:07:36 miod Exp $	*/
+/*	$OpenBSD: av400_machdep.c,v 1.26 2013/10/23 10:07:14 miod Exp $	*/
 /*
  * Copyright (c) 2006, 2007, Miodrag Vallat.
  *
@@ -193,6 +193,7 @@ const struct board board_av400 = {
 	av400_bootstrap,
 	av400_memsize,
 	av400_startup,
+	av400_get_boot_device,
 	av400_intr,
 	cio_init_clocks,
 	av400_getipl,
@@ -203,6 +204,7 @@ const struct board board_av400 = {
 	m88100_smp_setup,
 #endif
 	av400_intsrc,
+	av400_exintsrc,
 	av400_get_vme_ranges,
 
 	av400_ptable
@@ -259,7 +261,7 @@ av400_startup()
 {
 }
 
-void
+u_int
 av400_bootstrap()
 {
 	extern const struct cmmu_p cmmu8820x;
@@ -286,6 +288,50 @@ av400_bootstrap()
 	 * we can still use it.
 	 */
 	scm_getenaddr(hostaddr);
+
+	/*
+	 * Return the delay const value to use (which matches the CPU speed).
+	 */
+	switch (cputyp) {
+	case AVIION_300_310:
+	case AVIION_400_4000:
+	case AVIION_300C_310C:
+	case AVIION_300CD_310CD:
+	case AVIION_300D_310D:
+	case AVIION_4300_16:
+		return 16;
+	case AVIION_410_4100:
+	case AVIION_4300_20:
+		return 20;
+	default:
+	case AVIION_4300_25:
+		return 25;
+	}
+}
+
+/*
+ * Return the address of the boot device, providing the default boot device
+ * if none is requested.
+ */
+paddr_t
+av400_get_boot_device(uint32_t *name, u_int unit)
+{
+	/* default boot device is on-board insc() */
+	if (*name == 0)
+		*name = SCM_INSC;
+
+	switch (*name) {
+	case SCM_INEN:
+		if (unit == 0)
+			return AV400_LAN;
+		break;
+	case SCM_INSC:
+		if (unit == 0)
+			return AV400_SCSI;
+		break;
+	}
+
+	return 0;
 }
 
 /*
@@ -462,7 +508,7 @@ av400_clock_ipi_handler(struct trapframe *eframe)
 /*
  * Provide the interrupt masks for a given logical interrupt source.
  */
-u_int64_t
+u_int32_t
 av400_intsrc(int i)
 {
 	static const u_int32_t intsrc[] = {
@@ -476,7 +522,7 @@ av400_intsrc(int i)
 		AV400_IRQ_ECI,
 		0,
 		AV400_IRQ_SCI,
-		0,
+		AV400_IRQ_DTC,
 		AV400_IRQ_VME1,
 		AV400_IRQ_VME2,
 		AV400_IRQ_VME3,
@@ -486,7 +532,13 @@ av400_intsrc(int i)
 		AV400_IRQ_VME7
 	};
 
-	return ((u_int64_t)intsrc[i]);
+	return intsrc[i];
+}
+
+u_int32_t
+av400_exintsrc(int i)
+{
+	return 0;
 }
 
 /*
@@ -506,7 +558,7 @@ static const u_int av400_obio_vec[32] = {
 	INTSRC_VME(3),		/* VME3 */
 	0,			/* DWP */
 	INTSRC_VME(4),		/* VME4 */
-	0,			/* DTC */
+	INTSRC_DMA,		/* DTC */
 	INTSRC_VME(5),		/* VME5 */
 	INTSRC_ETHERNET1,	/* ECI */
 	INTSRC_DUART2,		/* DI2 */

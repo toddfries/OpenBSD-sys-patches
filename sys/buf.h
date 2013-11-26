@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.84 2013/03/24 17:42:43 deraadt Exp $	*/
+/*	$OpenBSD: buf.h,v 1.93 2013/11/21 01:16:52 dlg Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -42,7 +42,6 @@
 #include <sys/queue.h>
 #include <sys/tree.h>
 #include <sys/mutex.h>
-#include <sys/workq.h>
 
 #define NOLIST ((struct buf *)0x87654321)
 
@@ -64,11 +63,10 @@ LIST_HEAD(workhead, worklist);
  * Buffer queues
  */
 #define BUFQ_NSCAN_N	128
-#define BUFQ_DISKSORT	0
-#define BUFQ_FIFO	1
-#define BUFQ_NSCAN	2
+#define BUFQ_FIFO	0
+#define BUFQ_NSCAN	1
 #define BUFQ_DEFAULT	BUFQ_NSCAN
-#define BUFQ_HOWMANY	3
+#define BUFQ_HOWMANY	2
 
 /*
  * Write limits for bufq - defines high and low water marks for how
@@ -126,19 +124,11 @@ struct bufq_nscan {
 	SIMPLEQ_ENTRY(buf)	bqf_entries;
 };
 
-/* Abuse bufq_fifo, for swapping to regular files. */
-struct bufq_swapreg {
-	SIMPLEQ_ENTRY(buf)	bqf_entries;
-	struct workq_task	bqf_wqtask;
-
-};
-
 /* bufq link in struct buf */
 union bufq_data {
 	struct bufq_disksort	bufq_data_disksort;
 	struct bufq_fifo	bufq_data_fifo;
 	struct bufq_nscan	bufq_data_nscan;
-	struct bufq_swapreg	bufq_swapreg;
 };
 
 /*
@@ -184,8 +174,8 @@ struct buf {
 	struct uvm_object *b_pobj;	/* Object containing the pages */
 	off_t	b_poffs;		/* Offset within object */
 
-	daddr64_t	b_lblkno;	/* Logical block number. */
-	daddr64_t	b_blkno;	/* Underlying physical block number. */
+	daddr_t	b_lblkno;		/* Logical block number. */
+	daddr_t	b_blkno;		/* Underlying physical block number. */
 					/* Function to call upon completion.
 					 * Will be called at splbio(). */
 	void	(*b_iodone)(struct buf *);
@@ -197,15 +187,8 @@ struct buf {
  	struct	workhead b_dep;		/* List of filesystem dependencies. */
 };
 
-/*
- * For portability with historic industry practice, the cylinder number has
- * to be maintained in the `b_resid' field.
- */
-#define	b_cylinder b_resid		/* Cylinder number for disksort(). */
-
 /* Device driver compatibility definitions. */
 #define	b_active b_bcount		/* Driver queue head: drive active. */
-#define	b_errcnt b_resid		/* Retry count while I/O in progress. */
 
 /*
  * These flags are kept in b_flags.
@@ -269,13 +252,13 @@ struct cluster_save {
 #define B_SYNC		0x02	/* Do all allocations synchronously. */
 
 struct cluster_info {
-	daddr64_t	ci_lastr;	/* last read (read-ahead) */
-	daddr64_t	ci_lastw;	/* last write (write cluster) */
-	daddr64_t	ci_cstart;	/* start block of cluster */
-	daddr64_t	ci_lasta;	/* last allocation */
-	int		ci_clen; 	/* length of current cluster */
-	int		ci_ralen;	/* Read-ahead length */
-	daddr64_t	ci_maxra;	/* last readahead block */
+	daddr_t	ci_lastr;	/* last read (read-ahead) */
+	daddr_t	ci_lastw;	/* last write (write cluster) */
+	daddr_t	ci_cstart;	/* start block of cluster */
+	daddr_t	ci_lasta;	/* last allocation */
+	int	ci_clen; 	/* length of current cluster */
+	int	ci_ralen;	/* Read-ahead length */
+	daddr_t	ci_maxra;	/* last readahead block */
 };
 
 #ifdef _KERNEL
@@ -297,8 +280,8 @@ void	bawrite(struct buf *);
 void	bdwrite(struct buf *);
 void	biodone(struct buf *);
 int	biowait(struct buf *);
-int bread(struct vnode *, daddr64_t, int, struct buf **);
-int breadn(struct vnode *, daddr64_t, int, daddr64_t *, int *, int,
+int bread(struct vnode *, daddr_t, int, struct buf **);
+int breadn(struct vnode *, daddr_t, int, daddr_t *, int *, int,
     struct buf **);
 void	brelse(struct buf *);
 void	bremfree(struct buf *);
@@ -306,9 +289,9 @@ void	bufinit(void);
 void	buf_dirty(struct buf *);
 void    buf_undirty(struct buf *);
 int	bwrite(struct buf *);
-struct buf *getblk(struct vnode *, daddr64_t, int, int, int);
+struct buf *getblk(struct vnode *, daddr_t, int, int, int);
 struct buf *geteblk(int);
-struct buf *incore(struct vnode *, daddr64_t);
+struct buf *incore(struct vnode *, daddr_t);
 
 /*
  * buf_kvm_init initializes the kvm handling for buffers.
@@ -341,7 +324,7 @@ void  buf_replacevnode(struct buf *, struct vnode *);
 void  buf_daemon(struct proc *);
 void  buf_replacevnode(struct buf *, struct vnode *);
 void  buf_daemon(struct proc *);
-int bread_cluster(struct vnode *, daddr64_t, int, struct buf **);
+int bread_cluster(struct vnode *, daddr_t, int, struct buf **);
 
 #ifdef DEBUG
 void buf_print(struct buf *);

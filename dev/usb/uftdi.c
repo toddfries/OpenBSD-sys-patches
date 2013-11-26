@@ -1,4 +1,4 @@
-/*	$OpenBSD: uftdi.c,v 1.64 2013/04/15 09:23:02 mglocker Exp $ 	*/
+/*	$OpenBSD: uftdi.c,v 1.67 2013/11/15 08:25:31 pirofti Exp $ 	*/
 /*	$NetBSD: uftdi.c,v 1.14 2003/02/23 04:20:07 simonb Exp $	*/
 
 /*
@@ -89,8 +89,6 @@ struct uftdi_softc {
 	u_char			 sc_lsr;
 
 	struct device		*sc_subdev;
-
-	u_char			 sc_dying;
 
 	u_int			 last_lcr;
 };
@@ -748,7 +746,7 @@ int
 uftdi_match(struct device *parent, void *match, void *aux)
 {
 	struct usb_attach_arg *uaa = aux;
-	usbd_status err;
+	int err;
 	u_int8_t nifaces;
 
 	if (usb_lookup(uftdi_devs, uaa->vendor, uaa->product) == NULL)
@@ -891,23 +889,20 @@ uftdi_attach(struct device *parent, struct device *self, void *aux)
 
 bad:
 	DPRINTF(("uftdi_attach: ATTACH ERROR\n"));
-	sc->sc_dying = 1;
+	usbd_deactivate(sc->sc_udev);
 }
 
 int
 uftdi_activate(struct device *self, int act)
 {
 	struct uftdi_softc *sc = (struct uftdi_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 int
@@ -934,7 +929,7 @@ uftdi_open(void *vsc, int portno)
 
 	DPRINTF(("uftdi_open: sc=%p\n", sc));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	/* Perform a full reset on the device */
@@ -1058,7 +1053,7 @@ uftdi_param(void *vsc, int portno, struct termios *t)
 
 	DPRINTF(("uftdi_param: sc=%p\n", sc));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	switch (sc->sc_type) {

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.302 2013/04/26 15:45:35 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.314 2013/11/19 15:12:13 krw Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -33,6 +33,7 @@
 #include <sys/queue.h>
 #include <sys/fcntl.h>
 #include <sys/disklabel.h>
+#include <sys/vnode.h>
 #include <sys/mount.h>
 #include <sys/sensors.h>
 #include <sys/stat.h>
@@ -138,9 +139,8 @@ void			sr_rebuild(void *);
 void			sr_rebuild_thread(void *);
 void			sr_roam_chunks(struct sr_discipline *);
 int			sr_chunk_in_use(struct sr_softc *, dev_t);
-void			sr_startwu_callback(void *, void *);
 int			sr_rw(struct sr_softc *, dev_t, char *, size_t,
-			    daddr64_t, long);
+			    daddr_t, long);
 void			sr_wu_done_callback(void *, void *);
 
 /* don't include these on RAMDISK */
@@ -154,7 +154,7 @@ void			sr_sensors_delete(struct sr_discipline *);
 int			sr_meta_probe(struct sr_discipline *, dev_t *, int);
 int			sr_meta_attach(struct sr_discipline *, int, int);
 int			sr_meta_rw(struct sr_discipline *, dev_t, void *,
-			    size_t, daddr64_t, long);
+			    size_t, daddr_t, long);
 int			sr_meta_clear(struct sr_discipline *);
 void			sr_meta_init(struct sr_discipline *, int, int);
 void			sr_meta_init_complete(struct sr_discipline *);
@@ -200,7 +200,7 @@ void			sr_meta_print(struct sr_metadata *);
 
 /* the metadata driver should remain stateless */
 struct sr_meta_driver {
-	daddr64_t		smd_offset;	/* metadata location */
+	daddr_t			smd_offset;	/* metadata location */
 	u_int32_t		smd_size;	/* size of metadata */
 
 	int			(*smd_probe)(struct sr_softc *,
@@ -398,7 +398,7 @@ sr_meta_getdevname(struct sr_softc *sc, dev_t dev, char *buf, int size)
 }
 
 int
-sr_rw(struct sr_softc *sc, dev_t dev, char *buf, size_t size, daddr64_t offset,
+sr_rw(struct sr_softc *sc, dev_t dev, char *buf, size_t size, daddr_t offset,
     long flags)
 {
 	struct vnode		*vp;
@@ -407,8 +407,8 @@ sr_rw(struct sr_softc *sc, dev_t dev, char *buf, size_t size, daddr64_t offset,
 	int			rv = 1;
 	char			*dma_buf;
 
-	DNPRINTF(SR_D_MISC, "%s: sr_rw(0x%x, %p, %d, %llu 0x%x)\n",
-	    DEVNAME(sc), dev, buf, size, offset, flags);
+	DNPRINTF(SR_D_MISC, "%s: sr_rw(0x%x, %p, %zu, %lld 0x%x)\n",
+	    DEVNAME(sc), dev, buf, size, (long long)offset, flags);
 
 	dma_bufsize = (size > MAXPHYS) ? MAXPHYS : size;
 	dma_buf = dma_alloc(dma_bufsize, PR_WAITOK);
@@ -473,12 +473,12 @@ done:
 
 int
 sr_meta_rw(struct sr_discipline *sd, dev_t dev, void *md, size_t size,
-    daddr64_t offset, long flags)
+    daddr_t offset, long flags)
 {
 	int			rv = 1;
 
-	DNPRINTF(SR_D_META, "%s: sr_meta_rw(0x%x, %p, %d, %llu 0x%x)\n",
-	    DEVNAME(sd->sd_sc), dev, md, size, offset, flags);
+	DNPRINTF(SR_D_META, "%s: sr_meta_rw(0x%x, %p, %zu, %lld 0x%x)\n",
+	    DEVNAME(sd->sd_sc), dev, md, size, (long long)offset, flags);
 
 	if (md == NULL) {
 		printf("%s: sr_meta_rw: invalid metadata pointer\n",
@@ -1191,7 +1191,10 @@ sr_boot_assembly(struct sr_softc *sc)
 		}
 
 		/* native softraid uses partitions */
+		rw_enter_write(&sc->sc_lock);
+		bio_status_init(&sc->sc_status, &sc->sc_dev);
 		sr_meta_native_bootprobe(sc, dk->dk_devno, &bch);
+		rw_exit_write(&sc->sc_lock);
 
 		/* probe non-native disks if native failed. */
 
@@ -1225,7 +1228,8 @@ sr_boot_assembly(struct sr_softc *sc)
 			bv = malloc(sizeof(struct sr_boot_volume),
 			    M_DEVBUF, M_NOWAIT | M_CANFAIL | M_ZERO);
 			if (bv == NULL) {
-				sr_error(sc, "failed to allocate boot volume");
+				printf("%s: failed to allocate boot volume\n",
+				    DEVNAME(sc));
 				goto unwind;
 			}
 
@@ -1548,7 +1552,7 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 	struct disklabel	label;
 	char			*devname;
 	int			error, part;
-	daddr64_t		size;
+	daddr_t			size;
 
 	DNPRINTF(SR_D_META, "%s: sr_meta_native_probe(%s)\n",
 	   DEVNAME(sc), ch_entry->src_devname);
@@ -1568,7 +1572,7 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 
 	/* Make sure this is a 512-byte/sector device. */
 	if (label.d_secsize != DEV_BSIZE) {
-		sr_error(sc, "%s has unsupported sector size (%d)",
+		sr_error(sc, "%s has unsupported sector size (%u)",
 		    devname, label.d_secsize);
 		goto unwind;
 	}
@@ -1582,7 +1586,8 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 		goto unwind;
 	}
 
-	size = DL_GETPSIZE(&label.d_partitions[part]) - SR_DATA_OFFSET;
+	size = DL_SECTOBLK(&label, DL_GETPSIZE(&label.d_partitions[part])) -
+	    SR_DATA_OFFSET;
 	if (size <= 0) {
 		DNPRINTF(SR_D_META, "%s: %s partition too small\n", DEVNAME(sc),
 		    devname);
@@ -1590,8 +1595,8 @@ sr_meta_native_probe(struct sr_softc *sc, struct sr_chunk *ch_entry)
 	}
 	ch_entry->src_size = size;
 
-	DNPRINTF(SR_D_META, "%s: probe found %s size %d\n", DEVNAME(sc),
-	    devname, size);
+	DNPRINTF(SR_D_META, "%s: probe found %s size %lld\n", DEVNAME(sc),
+	    devname, (long long)size);
 
 	return (SR_META_F_NATIVE);
 unwind:
@@ -1855,7 +1860,7 @@ sr_detach(struct device *self, int flags)
 		sc->sc_scsibus = NULL;
 	}
 
-	return (rv);
+	return (0);
 }
 
 void
@@ -1910,7 +1915,7 @@ sr_copy_internal_data(struct scsi_xfer *xs, void *v, size_t size)
 {
 	size_t			copy_cnt;
 
-	DNPRINTF(SR_D_MISC, "sr_copy_internal_data xs: %p size: %d\n",
+	DNPRINTF(SR_D_MISC, "sr_copy_internal_data xs: %p size: %zu\n",
 	    xs, size);
 
 	if (xs->datalen) {
@@ -2009,8 +2014,8 @@ sr_ccb_put(struct sr_ccb *ccb)
 }
 
 struct sr_ccb *
-sr_ccb_rw(struct sr_discipline *sd, int chunk, daddr64_t blkno,
-    daddr64_t len, u_int8_t *data, int xsflags, int ccbflags)
+sr_ccb_rw(struct sr_discipline *sd, int chunk, daddr_t blkno,
+    daddr_t len, u_int8_t *data, int xsflags, int ccbflags)
 {
 	struct sr_chunk		*sc = sd->sd_vol.sv_chunks[chunk];
 	struct sr_ccb		*ccb = NULL;
@@ -2048,7 +2053,7 @@ sr_ccb_rw(struct sr_discipline *sd, int chunk, daddr64_t blkno,
 	DNPRINTF(SR_D_DIS, "%s: %s %s ccb "
 	    "b_bcount %d b_blkno %lld b_flags 0x%0x b_data %p\n",
 	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, sd->sd_name,
-	    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_blkno,
+	    ccb->ccb_buf.b_bcount, (long long)ccb->ccb_buf.b_blkno,
 	    ccb->ccb_buf.b_flags, ccb->ccb_buf.b_data);
 
 out:
@@ -2066,7 +2071,7 @@ sr_ccb_done(struct sr_ccb *ccb)
 	    " b_flags 0x%0x block %lld target %d\n",
 	    DEVNAME(sc), sd->sd_meta->ssd_devname, sd->sd_name,
 	    ccb->ccb_buf.b_bcount, ccb->ccb_buf.b_resid, ccb->ccb_buf.b_flags,
-	    ccb->ccb_buf.b_blkno, ccb->ccb_target);
+	    (long long)ccb->ccb_buf.b_blkno, ccb->ccb_target);
 
 	splassert(IPL_BIO);
 
@@ -2075,13 +2080,17 @@ sr_ccb_done(struct sr_ccb *ccb)
 
 	if (ccb->ccb_buf.b_flags & B_ERROR) {
 		DNPRINTF(SR_D_INTR, "%s: i/o error on block %lld target %d\n",
-		    DEVNAME(sc), ccb->ccb_buf.b_blkno, ccb->ccb_target);
-		if (!ISSET(sd->sd_capabilities, SR_CAP_REDUNDANT))
+		    DEVNAME(sc), (long long)ccb->ccb_buf.b_blkno,
+		    ccb->ccb_target);
+		if (ISSET(sd->sd_capabilities, SR_CAP_REDUNDANT))
+			sd->sd_set_chunk_state(sd, ccb->ccb_target,
+			    BIOC_SDOFFLINE);
+		else
 			printf("%s: i/o error on block %lld target %d "
-			    "b_error %d\n", DEVNAME(sc), ccb->ccb_buf.b_blkno,
-			    ccb->ccb_target, ccb->ccb_buf.b_error);
+			    "b_error %d\n", DEVNAME(sc),
+			    (long long)ccb->ccb_buf.b_blkno, ccb->ccb_target,
+			    ccb->ccb_buf.b_error);
 		ccb->ccb_state = SR_CCB_FAILED;
-		sd->sd_set_chunk_state(sd, ccb->ccb_target, BIOC_SDOFFLINE);
 		wu->swu_ios_failed++;
 	} else {
 		ccb->ccb_state = SR_CCB_OK;
@@ -2288,8 +2297,6 @@ sr_wu_done_callback(void *arg1, void *arg2)
 			sr_raid_recreate_wu(wu->swu_collider);
 
 		/* XXX Should the collider be failed if this xs failed? */
-		wu->swu_collider->swu_state = SR_WU_INPROGRESS;
-		TAILQ_REMOVE(&sd->sd_wu_defq, wu->swu_collider, swu_link);
 		sr_raid_startwu(wu->swu_collider);
 	}
 
@@ -2349,8 +2356,8 @@ sr_scsi_cmd(struct scsi_xfer *xs)
 	struct sr_workunit	*wu = xs->io;
 	struct sr_discipline	*sd;
 
-	DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd: target %d xs: %p "
-	    "flags: %#x\n", DEVNAME(sc), link->target, xs, xs->flags);
+	DNPRINTF(SR_D_CMD, "%s: sr_scsi_cmd target %d xs %p flags %#x\n",
+	    DEVNAME(sc), link->target, xs, xs->flags);
 
 	sd = sc->sc_targets[link->target];
 	if (sd == NULL) {
@@ -2589,7 +2596,7 @@ sr_ioctl_vol(struct sr_softc *sc, struct bioc_vol *bv)
 	int			vol = -1, rv = EINVAL;
 	struct sr_discipline	*sd;
 	struct sr_chunk		*hotspare;
-	daddr64_t		rb, sz;
+	daddr_t			rb, sz;
 
 	TAILQ_FOREACH(sd, &sc->sc_dis_list, sd_link) {
 		vol++;
@@ -2813,7 +2820,7 @@ sr_hotspare(struct sr_softc *sc, dev_t dev)
 	struct sr_uuid		uuid;
 	struct disklabel	label;
 	struct vnode		*vn;
-	daddr64_t		size;
+	daddr_t			size;
 	char			devname[32];
 	int			rv = EINVAL;
 	int			c, part, open = 0;
@@ -2860,7 +2867,7 @@ sr_hotspare(struct sr_softc *sc, dev_t dev)
 		goto fail;
 	}
 	if (label.d_secsize != DEV_BSIZE) {
-		sr_error(sc, "%s has unsupported sector size (%d)",
+		sr_error(sc, "%s has unsupported sector size (%u)",
 		    devname, label.d_secsize);
 		goto fail;
 	}
@@ -2871,7 +2878,8 @@ sr_hotspare(struct sr_softc *sc, dev_t dev)
 	}
 
 	/* Calculate partition size. */
-	size = DL_GETPSIZE(&label.d_partitions[part]) - SR_DATA_OFFSET;
+	size = DL_SECTOBLK(&label, DL_GETPSIZE(&label.d_partitions[part])) -
+	    SR_DATA_OFFSET;
 
 	/*
 	 * Create and populate chunk metadata.
@@ -3091,7 +3099,7 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 	struct sr_meta_chunk	*meta;
 	struct disklabel	label;
 	struct vnode		*vn;
-	daddr64_t		size, csize;
+	daddr_t			size, csize;
 	char			devname[32];
 	int			rv = EINVAL, open = 0;
 	int			cid, i, part, status;
@@ -3161,7 +3169,7 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 		goto done;
 	}
 	if (label.d_secsize != DEV_BSIZE) {
-		sr_error(sc, "%s has unsupported sector size (%d)",
+		sr_error(sc, "%s has unsupported sector size (%u)",
 		    devname, label.d_secsize);
 		goto done;
 	}
@@ -3172,14 +3180,15 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 	}
 
 	/* Is the partition large enough? */
-	size = DL_GETPSIZE(&label.d_partitions[part]) - SR_DATA_OFFSET;
+	size = DL_SECTOBLK(&label, DL_GETPSIZE(&label.d_partitions[part])) -
+	    SR_DATA_OFFSET;
 	if (size < csize) {
-		sr_error(sc, "%s partition too small, at least %llu bytes "
-		    "required", devname, csize << DEV_BSHIFT);
+		sr_error(sc, "%s partition too small, at least %lld bytes "
+		    "required", devname, (long long)(csize << DEV_BSHIFT));
 		goto done;
 	} else if (size > csize)
-		sr_warn(sc, "%s partition too large, wasting %llu bytes",
-		    devname, (size - csize) << DEV_BSHIFT);
+		sr_warn(sc, "%s partition too large, wasting %lld bytes",
+		    devname, (long long)((size - csize) << DEV_BSHIFT));
 
 	/* Ensure that this chunk is not already in use. */
 	status = sr_chunk_in_use(sc, dev);
@@ -4006,7 +4015,7 @@ sr_raid_read_cap(struct sr_workunit *wu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct scsi_read_cap_data rcd;
 	struct scsi_read_cap_data_16 rcd16;
-	daddr64_t		addr;
+	daddr_t			addr;
 	int			rv = 1;
 
 	DNPRINTF(SR_D_DIS, "%s: sr_raid_read_cap\n", DEVNAME(sd->sd_sc));
@@ -4145,14 +4154,77 @@ sr_raid_intr(struct buf *bp)
 }
 
 void
-sr_startwu_callback(void *arg1, void *arg2)
+sr_schedule_wu(struct sr_workunit *wu)
 {
-	struct sr_discipline	*sd = arg1;
-	struct sr_workunit	*wu = arg2;
-	struct sr_ccb		*ccb;
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct sr_workunit	*wup;
 	int			s;
 
+	DNPRINTF(SR_D_WU, "sr_schedule_wu: schedule wu %p state %i "
+	    "flags 0x%x\n", wu, wu->swu_state, wu->swu_flags);
+
 	s = splbio();
+
+	/* Construct the work unit, do not schedule it. */
+	if (wu->swu_state == SR_WU_CONSTRUCT)
+		goto queued;
+
+	/* Deferred work unit being reconstructed, do not start. */
+	if (wu->swu_state == SR_WU_REQUEUE)
+		goto queued;
+
+	/* Current work unit failed, restart. */
+	if (wu->swu_state == SR_WU_RESTART)
+		goto start;
+
+	if (wu->swu_state != SR_WU_INPROGRESS)
+		panic("sr_schedule_wu: work unit not in progress (state %i)\n",
+		    wu->swu_state);
+
+	/* Walk queue backwards and fill in collider if we have one. */
+	TAILQ_FOREACH_REVERSE(wup, &sd->sd_wu_pendq, sr_wu_list, swu_link) {
+		if (wu->swu_blk_end < wup->swu_blk_start ||
+		    wup->swu_blk_end < wu->swu_blk_start)
+			continue;
+
+		/* Defer work unit due to LBA collision. */
+		DNPRINTF(SR_D_WU, "sr_schedule_wu: deferring work unit %p\n",
+		    wu);
+		wu->swu_state = SR_WU_DEFERRED;
+		while (wup->swu_collider)
+			wup = wup->swu_collider;
+		wup->swu_collider = wu;
+		TAILQ_INSERT_TAIL(&sd->sd_wu_defq, wu, swu_link);
+		sd->sd_wu_collisions++;
+		goto queued;
+	}
+
+start:
+	sr_raid_startwu(wu);
+
+queued:
+	splx(s);
+}
+
+void
+sr_raid_startwu(struct sr_workunit *wu)
+{
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct sr_ccb		*ccb;
+
+	DNPRINTF(SR_D_WU, "sr_raid_startwu: start wu %p\n", wu);
+
+	splassert(IPL_BIO);
+
+	if (wu->swu_state == SR_WU_DEFERRED) {
+		TAILQ_REMOVE(&sd->sd_wu_defq, wu, swu_link);
+		wu->swu_state = SR_WU_INPROGRESS;
+	}
+
+	if (wu->swu_state != SR_WU_RESTART)
+		TAILQ_INSERT_TAIL(&sd->sd_wu_pendq, wu, swu_link);
+
+	/* Start all of the individual I/Os. */
 	if (wu->swu_cb_active == 1)
 		panic("%s: sr_startwu_callback", DEVNAME(sd->sd_sc));
 	wu->swu_cb_active = 1;
@@ -4161,29 +4233,6 @@ sr_startwu_callback(void *arg1, void *arg2)
 		VOP_STRATEGY(&ccb->ccb_buf);
 
 	wu->swu_cb_active = 0;
-	splx(s);
-}
-
-void
-sr_raid_startwu(struct sr_workunit *wu)
-{
-	struct sr_discipline	*sd = wu->swu_dis;
-
-	splassert(IPL_BIO);
-
-	if (wu->swu_state == SR_WU_RESTART)
-		/*
-		 * no need to put the wu on the pending queue since we
-		 * are restarting the io
-		 */
-		 ;
-	else
-		/* move wu to pending queue */
-		TAILQ_INSERT_TAIL(&sd->sd_wu_pendq, wu, swu_link);
-
-	/* start all individual ios */
-	workq_queue_task(sd->sd_workq, &wu->swu_wqt, 0, sr_startwu_callback,
-	    sd, wu);
 }
 
 void
@@ -4458,7 +4507,7 @@ sr_shutdown(struct sr_softc *sc)
 }
 
 int
-sr_validate_io(struct sr_workunit *wu, daddr64_t *blk, char *func)
+sr_validate_io(struct sr_workunit *wu, daddr_t *blk, char *func)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
@@ -4500,8 +4549,8 @@ sr_validate_io(struct sr_workunit *wu, daddr64_t *blk, char *func)
 	if (wu->swu_blk_end > sd->sd_meta->ssdi.ssd_size) {
 		DNPRINTF(SR_D_DIS, "%s: %s out of bounds start: %lld "
 		    "end: %lld length: %d\n",
-		    DEVNAME(sd->sd_sc), func, wu->swu_blk_start,
-		    wu->swu_blk_end, xs->datalen);
+		    DEVNAME(sd->sd_sc), func, (long long)wu->swu_blk_start,
+		    (long long)wu->swu_blk_end, xs->datalen);
 
 		sd->sd_scsi_sense.error_code = SSD_ERRCODE_CURRENT |
 		    SSD_ERRCODE_VALID;
@@ -4515,38 +4564,6 @@ sr_validate_io(struct sr_workunit *wu, daddr64_t *blk, char *func)
 	rv = 0;
 bad:
 	return (rv);
-}
-
-int
-sr_check_io_collision(struct sr_workunit *wu)
-{
-	struct sr_discipline	*sd = wu->swu_dis;
-	struct sr_workunit	*wup;
-
-	splassert(IPL_BIO);
-
-	/* walk queue backwards and fill in collider if we have one */
-	TAILQ_FOREACH_REVERSE(wup, &sd->sd_wu_pendq, sr_wu_list, swu_link) {
-		if (wu->swu_blk_end < wup->swu_blk_start ||
-		    wup->swu_blk_end < wu->swu_blk_start)
-			continue;
-
-		/* we have an LBA collision, defer wu */
-		wu->swu_state = SR_WU_DEFERRED;
-		if (wup->swu_collider)
-			/* wu is on deferred queue, append to last wu */
-			while (wup->swu_collider)
-				wup = wup->swu_collider;
-
-		wup->swu_collider = wu;
-		TAILQ_INSERT_TAIL(&sd->sd_wu_defq, wu, swu_link);
-		sd->sd_wu_collisions++;
-		goto queued;
-	}
-
-	return (0);
-queued:
-	return (1);
 }
 
 void
@@ -4566,8 +4583,8 @@ sr_rebuild_thread(void *arg)
 {
 	struct sr_discipline	*sd = arg;
 	struct sr_softc		*sc = sd->sd_sc;
-	daddr64_t		whole_blk, partial_blk, blk, sz, lba;
-	daddr64_t		psz, rb, restart;
+	daddr_t			whole_blk, partial_blk, blk, sz, lba;
+	daddr_t			psz, rb, restart;
 	struct sr_workunit	*wu_r, *wu_w;
 	struct scsi_xfer	xs_r, xs_w;
 	struct scsi_rw_16	*cr, *cw;
@@ -4632,6 +4649,7 @@ sr_rebuild_thread(void *arg)
 		cr->opcode = READ_16;
 		_lto4b(sz, cr->length);
 		_lto8b(lba, cr->addr);
+		wu_r->swu_state = SR_WU_CONSTRUCT;
 		wu_r->swu_flags |= SR_WUF_REBUILD;
 		wu_r->swu_xs = &xs_r;
 		if (sd->sd_scsi_rw(wu_r)) {
@@ -4652,6 +4670,7 @@ sr_rebuild_thread(void *arg)
 		cw->opcode = WRITE_16;
 		_lto4b(sz, cw->length);
 		_lto8b(lba, cw->addr);
+		wu_w->swu_state = SR_WU_CONSTRUCT;
 		wu_w->swu_flags |= SR_WUF_REBUILD | SR_WUF_WAKEUP;
 		wu_w->swu_xs = &xs_w;
 		if (sd->sd_scsi_rw(wu_w)) {
@@ -4668,14 +4687,10 @@ sr_rebuild_thread(void *arg)
 		wu_r->swu_collider = wu_w;
 		s = splbio();
 		TAILQ_INSERT_TAIL(&sd->sd_wu_defq, wu_w, swu_link);
-
-		/* schedule io */
-		if (sr_check_io_collision(wu_r))
-			goto queued;
-
-		sr_raid_startwu(wu_r);
-queued:
 		splx(s);
+
+		wu_r->swu_state = SR_WU_INPROGRESS;
+		sr_schedule_wu(wu_r);
 
 		/* wait for read completion */
 		slept = 0;

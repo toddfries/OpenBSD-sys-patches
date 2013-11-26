@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdce.c,v 1.54 2013/04/26 13:46:40 mglocker Exp $ */
+/*	$OpenBSD: if_cdce.c,v 1.57 2013/11/15 10:17:39 pirofti Exp $ */
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003 Bill Paul <wpaul@windriver.com>
@@ -59,7 +59,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 
@@ -395,7 +394,7 @@ cdce_start(struct ifnet *ifp)
 	struct cdce_softc	*sc = ifp->if_softc;
 	struct mbuf		*m_head = NULL;
 
-	if (sc->cdce_dying || (ifp->if_flags & IFF_OACTIVE))
+	if (usbd_is_dying(sc->cdce_udev) || (ifp->if_flags & IFF_OACTIVE))
 		return;
 
 	IFQ_POLL(&ifp->if_snd, m_head);
@@ -464,10 +463,7 @@ cdce_stop(struct cdce_softc *sc)
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	if (sc->cdce_bulkin_pipe != NULL) {
-		err = usbd_abort_pipe(sc->cdce_bulkin_pipe);
-		if (err)
-			printf("%s: abort rx pipe failed: %s\n",
-			    sc->cdce_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->cdce_bulkin_pipe);
 		err = usbd_close_pipe(sc->cdce_bulkin_pipe);
 		if (err)
 			printf("%s: close rx pipe failed: %s\n",
@@ -476,10 +472,7 @@ cdce_stop(struct cdce_softc *sc)
 	}
 
 	if (sc->cdce_bulkout_pipe != NULL) {
-		err = usbd_abort_pipe(sc->cdce_bulkout_pipe);
-		if (err)
-			printf("%s: abort tx pipe failed: %s\n",
-			    sc->cdce_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->cdce_bulkout_pipe);
 		err = usbd_close_pipe(sc->cdce_bulkout_pipe);
 		if (err)
 			printf("%s: close tx pipe failed: %s\n",
@@ -488,10 +481,7 @@ cdce_stop(struct cdce_softc *sc)
 	}
 
 	if (sc->cdce_intr_pipe != NULL) {
-		err = usbd_abort_pipe(sc->cdce_intr_pipe);
-		if (err)
-			printf("%s: abort interrupt pipe failed: %s\n",
-			    sc->cdce_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->cdce_intr_pipe);
 		err = usbd_close_pipe(sc->cdce_intr_pipe);
 		if (err)
 			printf("%s: close interrupt pipe failed: %s\n",
@@ -530,7 +520,7 @@ cdce_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	struct ifaddr		*ifa = (struct ifaddr *)data;
 	int			 s, error = 0;
 
-	if (sc->cdce_dying)
+	if (usbd_is_dying(sc->cdce_udev))
 		return (EIO);
 
 	s = splnet();
@@ -574,7 +564,7 @@ cdce_watchdog(struct ifnet *ifp)
 {
 	struct cdce_softc	*sc = ifp->if_softc;
 
-	if (sc->cdce_dying)
+	if (usbd_is_dying(sc->cdce_udev))
 		return;
 
 	ifp->if_oerrors++;
@@ -751,7 +741,7 @@ cdce_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	int			 total_len = 0;
 	int			 s;
 
-	if (sc->cdce_dying || !(ifp->if_flags & IFF_RUNNING))
+	if (usbd_is_dying(sc->cdce_udev) || !(ifp->if_flags & IFF_RUNNING))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -766,7 +756,7 @@ cdce_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 		if (sc->cdce_rxeof_errors++ > 10) {
 			printf("%s: too many errors, disabling\n",
 			    sc->cdce_dev.dv_xname);
-			sc->cdce_dying = 1;
+			usbd_deactivate(sc->cdce_udev);
 			return;
 		}
 		goto done;
@@ -827,7 +817,7 @@ cdce_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	usbd_status		 err;
 	int			 s;
 
-	if (sc->cdce_dying)
+	if (usbd_is_dying(sc->cdce_udev))
 		return;
 
 	s = splnet();
@@ -874,7 +864,7 @@ cdce_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->cdce_dying = 1;
+		usbd_deactivate(sc->cdce_udev);
 		break;
 	}
 	return (0);

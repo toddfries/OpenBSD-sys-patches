@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid0.c,v 1.39 2013/03/31 15:44:52 jsing Exp $ */
+/* $OpenBSD: softraid_raid0.c,v 1.45 2013/11/21 16:54:46 krw Exp $ */
 /*
  * Copyright (c) 2008 Marco Peereboom <marco@peereboom.us>
  *
@@ -84,7 +84,8 @@ sr_raid0_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 	 */
 	sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
 	sd->sd_meta->ssdi.ssd_size = (coerced_size &
-	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) * no_chunk;
+	    ~(((u_int64_t)sd->sd_meta->ssdi.ssd_strip_size >>
+	    DEV_BSHIFT) - 1)) * no_chunk;
 
 	return sr_raid0_init(sd);
 }
@@ -120,10 +121,11 @@ sr_raid0_rw(struct sr_workunit *wu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_ccb		*ccb;
 	struct sr_chunk		*scp;
-	int			s;
-	daddr64_t		blk, lbaoffs, strip_no, chunk, stripoffs;
-	daddr64_t		strip_size, no_chunk, chunkoffs, physoffs;
-	daddr64_t		strip_bits, length, leftover;
+	daddr_t			blk;
+	int64_t			chunkoffs, lbaoffs, physoffs, stripoffs;
+	int64_t			strip_bits, strip_no, strip_size;
+	int64_t			chunk, no_chunk;
+	int64_t			length, leftover;
 	u_int8_t		*data;
 
 	/* blk and scsi error will be handled by sr_validate_io */
@@ -136,7 +138,7 @@ sr_raid0_rw(struct sr_workunit *wu)
 
 	DNPRINTF(SR_D_DIS, "%s: %s: front end io: lba %lld size %d\n",
 	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
-	    blk, xs->datalen);
+	    (long long)blk, xs->datalen);
 
 	/* all offs are in bytes */
 	lbaoffs = blk << DEV_BSHIFT;
@@ -187,15 +189,10 @@ sr_raid0_rw(struct sr_workunit *wu)
 		length = MIN(leftover,strip_size);
 	}
 
-	s = splbio();
+	sr_schedule_wu(wu);
 
-	if (sr_check_io_collision(wu))
-		goto queued;
-
-	sr_raid_startwu(wu);
-queued:
-	splx(s);
 	return (0);
+
 bad:
 	/* wu is unwound by sr_wu_put */
 	return (1);

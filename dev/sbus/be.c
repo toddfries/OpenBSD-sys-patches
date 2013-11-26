@@ -1,4 +1,4 @@
-/*	$OpenBSD: be.c,v 1.23 2008/11/28 02:44:18 brad Exp $	*/
+/*	$OpenBSD: be.c,v 1.26 2013/11/26 09:50:33 mpi Exp $	*/
 /*	$NetBSD: be.c,v 1.26 2001/03/20 15:39:20 pk Exp $	*/
 
 /*-
@@ -78,7 +78,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -1117,6 +1116,9 @@ be_mcreset(struct be_softc *sc)
 		return;
 	}
 
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if (ifp->if_flags & IFF_ALLMULTI) {
 		hash[3] = hash[2] = hash[1] = hash[0] = 0xffff;
 		goto chipit;
@@ -1126,22 +1128,6 @@ be_mcreset(struct be_softc *sc)
 
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			/*
-			 * We must listen to a range of multicast
-			 * addresses.  For now, just accept all
-			 * multicasts, rather than trying to set only
-			 * those filter bits needed to match the range.
-			 * (At this time, the only use of address
-			 * ranges is for IP multicast routing, for
-			 * which the range is big enough to require
-			 * all bits set.)
-			 */
-			hash[3] = hash[2] = hash[1] = hash[0] = 0xffff;
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto chipit;
-		}
-
 		crc = 0xffffffff;
 
 		for (i = 0; i < ETHER_ADDR_LEN; i++) {
@@ -1531,6 +1517,7 @@ be_intphy_service(struct be_softc *sc, struct mii_data *mii, int cmd)
 				    sc->sc_dev.dv_xname,
 				    (bmcr & BMCR_S100) ? "100" : "10");
 			}
+			sc->sc_mii_ticks = 0;
 			return (0);
 		}
 

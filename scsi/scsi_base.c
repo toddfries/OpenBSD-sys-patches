@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsi_base.c,v 1.201 2012/07/01 19:32:55 miod Exp $	*/
+/*	$OpenBSD: scsi_base.c,v 1.208 2013/10/07 17:54:23 miod Exp $	*/
 /*	$NetBSD: scsi_base.c,v 1.43 1997/04/02 02:29:36 mycroft Exp $	*/
 
 /*
@@ -86,9 +86,6 @@ void			scsi_xsh_ioh(void *, void *);
 
 int			scsi_link_open(struct scsi_link *);
 void			scsi_link_close(struct scsi_link *);
-
-int			scsi_sem_enter(struct mutex *, u_int *);
-int			scsi_sem_leave(struct mutex *, u_int *);
 
 /* ioh/xsh queue state */
 #define RUNQ_IDLE	0
@@ -217,7 +214,7 @@ scsi_plug_detach(void *xsc, void *xp)
 }
 
 int
-scsi_sem_enter(struct mutex *mtx, u_int *running)
+scsi_pending_start(struct mutex *mtx, u_int *running)
 {
 	int rv = 1;
 
@@ -231,14 +228,16 @@ scsi_sem_enter(struct mutex *mtx, u_int *running)
 }
 
 int
-scsi_sem_leave(struct mutex *mtx, u_int *running)
+scsi_pending_finish(struct mutex *mtx, u_int *running)
 {
 	int rv = 1;
 
 	mtx_enter(mtx);
 	(*running)--;
-	if ((*running) > 0)
+	if ((*running) > 0) {
+		(*running) = 1;
 		rv = 0;
+	}
 	mtx_leave(mtx);
 
 	return (rv);
@@ -312,16 +311,18 @@ scsi_ioh_set(struct scsi_iohandler *ioh, struct scsi_iopool *iopl,
 	ioh->cookie = cookie;
 }
 
-void
+int
 scsi_ioh_add(struct scsi_iohandler *ioh)
 {
-	struct scsi_iopool *iopl = ioh->pool;
+	struct scsi_iopool *iopl = ioh->pool;	
+	int rv = 0;
 
 	mtx_enter(&iopl->mtx);
 	switch (ioh->q_state) {
 	case RUNQ_IDLE:
 		TAILQ_INSERT_TAIL(&iopl->queue, ioh, q_entry);
 		ioh->q_state = RUNQ_POOLQ;
+		rv = 1;
 		break;
 #ifdef DIAGNOSTIC
 	case RUNQ_POOLQ:
@@ -334,18 +335,22 @@ scsi_ioh_add(struct scsi_iohandler *ioh)
 
 	/* lets get some io up in the air */
 	scsi_ioh_runqueue(iopl);
+
+	return (rv);
 }
 
-void
+int
 scsi_ioh_del(struct scsi_iohandler *ioh)
 {
 	struct scsi_iopool *iopl = ioh->pool;
+	int rv = 0;
 
 	mtx_enter(&iopl->mtx);
 	switch (ioh->q_state) {
 	case RUNQ_POOLQ:
 		TAILQ_REMOVE(&iopl->queue, ioh, q_entry);
 		ioh->q_state = RUNQ_IDLE;
+		rv = 1;
 		break;
 #ifdef DIAGNOSTIC
 	case RUNQ_IDLE:
@@ -354,8 +359,9 @@ scsi_ioh_del(struct scsi_iohandler *ioh)
 		panic("scsi_ioh_del: unexpected state %u", ioh->q_state);
 #endif
 	}
-
 	mtx_leave(&iopl->mtx);
+
+	return (rv);
 }
 
 /*
@@ -396,7 +402,7 @@ scsi_ioh_runqueue(struct scsi_iopool *iopl)
 	struct scsi_iohandler *ioh;
 	void *io;
 
-	if (!scsi_sem_enter(&iopl->mtx, &iopl->running))
+	if (!scsi_pending_start(&iopl->mtx, &iopl->running))
 		return;
 	do {
 		while (scsi_ioh_pending(iopl)) {
@@ -412,7 +418,7 @@ scsi_ioh_runqueue(struct scsi_iopool *iopl)
 
 			ioh->handler(ioh->cookie, io);
 		}
-	} while (!scsi_sem_leave(&iopl->mtx, &iopl->running));
+	} while (!scsi_pending_finish(&iopl->mtx, &iopl->running));
 }
 
 /*
@@ -493,33 +499,39 @@ scsi_xsh_set(struct scsi_xshandler *xsh, struct scsi_link *link,
 	xsh->handler = handler;
 }
 
-void
+int
 scsi_xsh_add(struct scsi_xshandler *xsh)
 {
 	struct scsi_link *link = xsh->link;
+	int rv = 0;
 
 	if (ISSET(link->state, SDEV_S_DYING))
-		return;
+		return (0);
 
 	mtx_enter(&link->pool->mtx);
 	if (xsh->ioh.q_state == RUNQ_IDLE) {
 		TAILQ_INSERT_TAIL(&link->queue, &xsh->ioh, q_entry);
 		xsh->ioh.q_state = RUNQ_LINKQ;
+		rv = 1;
 	}
 	mtx_leave(&link->pool->mtx);
 
 	/* lets get some io up in the air */
 	scsi_xsh_runqueue(link);
+
+	return (rv);
 }
 
-void
+int
 scsi_xsh_del(struct scsi_xshandler *xsh)
 {
 	struct scsi_link *link = xsh->link;
+	int rv = 1;
 
 	mtx_enter(&link->pool->mtx);
 	switch (xsh->ioh.q_state) {
 	case RUNQ_IDLE:
+		rv = 0;
 		break;
 	case RUNQ_LINKQ:
 		TAILQ_REMOVE(&link->queue, &xsh->ioh, q_entry);
@@ -535,6 +547,8 @@ scsi_xsh_del(struct scsi_xshandler *xsh)
 	}
 	xsh->ioh.q_state = RUNQ_IDLE;
 	mtx_leave(&link->pool->mtx);
+
+	return (rv);
 }
 
 /*
@@ -547,7 +561,7 @@ scsi_xsh_runqueue(struct scsi_link *link)
 	struct scsi_iohandler *ioh;
 	int runq;
 
-	if (!scsi_sem_enter(&link->pool->mtx, &link->running))
+	if (!scsi_pending_start(&link->pool->mtx, &link->running))
 		return;
 	do {
 		runq = 0;
@@ -568,7 +582,7 @@ scsi_xsh_runqueue(struct scsi_link *link)
 
 		if (runq)
 			scsi_ioh_runqueue(link->pool);
-	} while (!scsi_sem_leave(&link->pool->mtx, &link->running));
+	} while (!scsi_pending_finish(&link->pool->mtx, &link->running));
 }
 
 void
@@ -758,114 +772,6 @@ scsi_xs_put(struct scsi_xfer *xs)
 
 	scsi_io_put(link->pool, io);
 	scsi_link_close(link);
-}
-
-/*
- * Find out from the device what its capacity is.
- */
-daddr64_t
-scsi_size(struct scsi_link *sc_link, int flags, u_int32_t *blksize)
-{
-	struct scsi_read_cap_data_16 *rdcap16;
-	struct scsi_read_capacity_16 *cmd;
-	struct scsi_read_cap_data *rdcap;
-	struct scsi_read_capacity *cmd10;
-	struct scsi_xfer *xs;
-	daddr64_t max_addr;
-	int error;
-
-	if (blksize != NULL)
-		*blksize = 0;
-
-	CLR(flags, SCSI_IGNORE_ILLEGAL_REQUEST);
-
-	/*
-	 * Start with a READ CAPACITY(10).
-	 */
-	rdcap = dma_alloc(sizeof(*rdcap), ((flags & SCSI_NOSLEEP) ?
-	    PR_NOWAIT : PR_WAITOK) | PR_ZERO);
-	if (rdcap == NULL)
-		return (0);
-
-	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
-	if (xs == NULL) {
-		dma_free(rdcap, sizeof(*rdcap));
-		return (0);
-	}
-	xs->cmdlen = sizeof(*cmd10);
-	xs->data = (void *)rdcap;
-	xs->datalen = sizeof(*rdcap);
-	xs->timeout = 20000;
-
-	cmd10 = (struct scsi_read_capacity *)xs->cmd;
-	cmd10->opcode = READ_CAPACITY;
-
-	error = scsi_xs_sync(xs);
-	scsi_xs_put(xs);
-
-	if (error) {
-		SC_DEBUG(sc_link, SDEV_DB1, ("READ CAPACITY error (%#x)\n",
-		    error));
-		dma_free(rdcap, sizeof(*rdcap));
-		return (0);
-	}
-
-	max_addr = _4btol(rdcap->addr);
-	if (blksize != NULL)
-		*blksize = _4btol(rdcap->length);
-	dma_free(rdcap, sizeof(*rdcap));
-
-	if (SCSISPC(sc_link->inqdata.version) < 3 && max_addr != 0xffffffff)
-		goto exit;
-
-	/*
-	 * SCSI-3 devices, or devices reporting more than 2^32-1 sectors can
-	 * try READ CAPACITY(16).
-	 */
-	rdcap16 = dma_alloc(sizeof(*rdcap16), ((flags & SCSI_NOSLEEP) ?
-	    PR_NOWAIT : PR_WAITOK) | PR_ZERO);
-	if (rdcap16 == NULL)
-		goto exit;
-
-	xs = scsi_xs_get(sc_link, flags | SCSI_DATA_IN | SCSI_SILENT);
-	if (xs == NULL) {
-		dma_free(rdcap16, sizeof(*rdcap16));
-		goto exit;
-	}
-	xs->cmdlen = sizeof(*cmd);
-	xs->data = (void *)rdcap16;
-	xs->datalen = sizeof(*rdcap16);
-	xs->timeout = 20000;
-
-	cmd = (struct scsi_read_capacity_16 *)xs->cmd;
-	cmd->opcode = READ_CAPACITY_16;
-	cmd->byte2 = SRC16_SERVICE_ACTION;
-	_lto4b(sizeof(*rdcap16), cmd->length);
-
-	error = scsi_xs_sync(xs);
-	scsi_xs_put(xs);
-	if (error) {
-		SC_DEBUG(sc_link, SDEV_DB1, ("READ CAPACITY 16 error (%#x)\n",
-		    error));
-		dma_free(rdcap16, sizeof(*rdcap16));
-		goto exit;
-	}
-
-	max_addr = _8btol(rdcap16->addr);
-	if (blksize != NULL)
-		*blksize = _4btol(rdcap16->length);
-	/* XXX The other READ CAPACITY(16) info could be stored away. */
-	dma_free(rdcap16, sizeof(*rdcap16));
-
-	return (max_addr + 1);
-
-exit:
-	/* Return READ CAPACITY 10 values. */
-	if (max_addr != 0xffffffff)
-		return (max_addr + 1);
-	else if (blksize != NULL)
-		*blksize = 0;
-	return (0);
 }
 
 /*
@@ -1375,7 +1281,7 @@ scsi_xs_exec(struct scsi_xfer *xs)
 	}
 #endif
 
-	/* The adapter's scsi_cmd() is responsible for callng scsi_done(). */
+	/* The adapter's scsi_cmd() is responsible for calling scsi_done(). */
 	xs->sc_link->adapter->scsi_cmd(xs);
 }
 

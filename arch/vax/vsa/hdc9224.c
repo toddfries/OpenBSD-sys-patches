@@ -1,4 +1,4 @@
-/*	$OpenBSD: hdc9224.c,v 1.38 2011/09/19 21:23:42 miod Exp $	*/
+/*	$OpenBSD: hdc9224.c,v 1.42 2013/11/20 00:13:54 dlg Exp $	*/
 /*	$NetBSD: hdc9224.c,v 1.16 2001/07/26 15:05:09 wiz Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -134,14 +134,14 @@ struct	hdcsoftc {
 	struct evcount sc_intrcnt;
 	struct vsbus_dma sc_vd;
 	vaddr_t sc_regs;		/* register addresses */
-	struct buf sc_buf_queue;
+	struct bufq sc_bufq;
 	struct buf *sc_active;
 	struct hdc9224_UDCreg sc_creg;	/* (command) registers to be written */
 	struct hdc9224_UDCreg sc_sreg;	/* (status) registers being read */
 	caddr_t	sc_dmabase;		/* */
 	int	sc_dmasize;
 	caddr_t sc_bufaddr;		/* Current in-core address */
-	daddr64_t sc_diskblk;		/* Current block on disk */
+	daddr_t sc_diskblk;		/* Current block on disk */
 	int sc_bytecnt;			/* How much left to transfer */
 	int sc_xfer;			/* Current transfer size */
 	int sc_retries;
@@ -198,7 +198,7 @@ struct cfdriver hd_cd = {
 /* At least 0.7 uS between register accesses */
 static int hd_dmasize, inq = 0;	/* XXX should be in softc... but only 1 ctrl */
 static int u;
-#define	WAIT	asm("movl _u,_u;movl _u,_u;movl _u,_u; movl _u,_u")
+#define	WAIT	asm("movl %0,%0;movl %0,%0;movl %0,%0; movl %0,%0" :: "m"(u))
 
 #define	HDC_WREG(x)	*(volatile char *)(sc->sc_regs) = (x)
 #define	HDC_RREG	*(volatile char *)(sc->sc_regs)
@@ -387,7 +387,7 @@ hdcintr(void *arg)
 	struct buf *bp;
 
 	sc->sc_status = HDC_RSTAT;
-	if (sc->sc_active == 0)
+	if (sc->sc_active == NULL)
 		return; /* Complain? */
 
 	if ((sc->sc_status & (DKC_ST_INTPEND | DKC_ST_DONE)) !=
@@ -395,7 +395,7 @@ hdcintr(void *arg)
 		return; /* Why spurious ints sometimes??? */
 
 	bp = sc->sc_active;
-	sc->sc_active = 0;
+	sc->sc_active = NULL;
 	if ((sc->sc_status & DKC_ST_TERMCOD) != DKC_TC_SUCCESS) {
 		int i;
 		u_char *g = (u_char *)&sc->sc_sreg;
@@ -455,8 +455,9 @@ hdstrategy(struct buf *bp)
 	if (bounds_check_with_label(bp, hd->sc_disk.dk_label) == -1)
 		goto done;
 
+	bufq_queue(&sc->sc_bufq, bp);
+
 	s = splbio();
-	disksort(&sc->sc_buf_queue, bp);
 	if (inq == 0) {
 		inq = 1;
 		vsbus_dma_start(&sc->sc_vd);
@@ -474,13 +475,11 @@ void
 hdc_qstart(void *arg)
 {
 	struct hdcsoftc *sc = arg;
-	struct buf *dp;
 
 	inq = 0;
 
 	hdcstart(sc, NULL);
-	dp = &sc->sc_buf_queue;
-	if (dp->b_actf != NULL) {
+	if (bufq_peek(&sc->sc_bufq)) {
 		vsbus_dma_start(&sc->sc_vd); /* More to go */
 		inq = 1;
 	}
@@ -492,22 +491,21 @@ hdcstart(struct hdcsoftc *sc, struct buf *ob)
 	struct hdc9224_UDCreg *p = &sc->sc_creg;
 	struct disklabel *lp;
 	struct hdsoftc *hd;
-	struct buf *dp, *bp;
+	struct buf *bp;
 	int cn, sn, tn, blks;
 	volatile char ch;
-	daddr64_t bn;
+	daddr_t bn;
 
 	splassert(IPL_BIO);
 
-	if (sc->sc_active)
+	if (sc->sc_active != NULL)
 		return; /* Already doing something */
 
 	if (ob == NULL) {
-		dp = &sc->sc_buf_queue;
-		if ((bp = dp->b_actf) == NULL)
+		bp = bufq_dequeue(&sc->sc_bufq);
+		if (bp == NULL)
 			return; /* Nothing to do */
 
-		dp->b_actf = bp->b_actf;
 		sc->sc_bufaddr = bp->b_data;
 		sc->sc_bytecnt = bp->b_bcount;
 		sc->sc_retries = 0;
@@ -619,12 +617,12 @@ hdc_printgeom(p)
 /*
  * Return the size of a partition, if known, or -1 if not.
  */
-daddr64_t
+daddr_t
 hdsize(dev_t dev)
 {
 	struct hdsoftc *hd;
 	int unit = DISKUNIT(dev);
-	int size;
+	daddr_t size;
 
 	if (unit >= hd_cd.cd_ndevs || hd_cd.cd_devs[unit] == 0)
 		return -1;
@@ -760,7 +758,7 @@ hdwrite(dev_t dev, struct uio *uio, int flag)
  *
  */
 int
-hddump(dev_t dev, daddr64_t daddr, caddr_t addr, size_t size)
+hddump(dev_t dev, daddr_t daddr, caddr_t addr, size_t size)
 {
 	return 0;
 }

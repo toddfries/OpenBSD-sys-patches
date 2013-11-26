@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.17 2013/01/05 11:20:55 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.20 2013/10/10 21:24:59 miod Exp $	*/
 /*
  * Copyright (c) 2005, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -68,7 +68,7 @@
 #include <machine/trap.h>
 #include <machine/vmparam.h>
 
-#define	SYM_MAGIC	0x6274ef2e
+#define	BOOT_MAGIC	0x6274ef2e
 
 	.text
 
@@ -83,6 +83,26 @@ ASGLOBAL(__start)
 	br	_ASM_LABEL(main_start)
 	br	_ASM_LABEL(main_start)
 	br	_ASM_LABEL(main_start)
+
+	/*
+	 * Room for the kernel VBR page.
+	 * Note this page is in kernel text, in order to be write-protected
+	 * by pmap_bootstrap().
+	 */
+	.balign	PAGE_SIZE
+
+#ifdef M88100
+	/*
+	 * The 88100 may execute the first instruction of the next trap
+	 * handler, as documented in its Errata. Processing trap #511
+	 * would then fall into the next page, unless the address computation
+	 * wraps, or software traps are exempt from the issue - the Errata
+	 * does not provide more detail.
+	 * Although the MVME BUG does not add an extra NOP after its VBR page,
+	 * it is cheap to add an extra NOP for safety.
+	 */
+	NOP
+#endif
 
 	/*
 	 * Startup code for main processor.
@@ -103,18 +123,34 @@ ASLOCAL(main_start)
 	st	%r3,  %r13, %lo16(_C_LABEL(bootdev))
 	or.u	%r13, %r0,  %hi16(_C_LABEL(bootunit))
 	st	%r4,  %r13, %lo16(_C_LABEL(bootunit))
-	or.u	%r13, %r0,  %hi16(_C_LABEL(bootpart))
-	st	%r5,  %r13, %lo16(_C_LABEL(bootpart))
-#if defined(DDB) || NKSYMS > 0
-	or.u	%r12, %r0,  %hi16(SYM_MAGIC)
-	or	%r12, %r12, %lo16(SYM_MAGIC)
+	or.u	%r13, %r0,  %hi16(_C_LABEL(bootlun))
+	st	%r5,  %r13, %lo16(_C_LABEL(bootlun))
+
+	or.u	%r12, %r0,  %hi16(BOOT_MAGIC)
+	or	%r12, %r12, %lo16(BOOT_MAGIC)
 	cmp	%r2,  %r6,  %r12
-	bb1	ne,   %r2,  1f
+	bb1	eq,   %r2,  1f
+	addu	%r12, %r12, 1		/* BOOT_MAGIC + 1 */
+	cmp	%r2,  %r6,  %r12
+	bb1	ne,   %r2,  2f
+
+	/* BOOT_MAGIC + 1 */
+	or.u	%r13, %r0,  %hi16(_C_LABEL(bootpart))
+	st	%r7,  %r13, %lo16(_C_LABEL(bootpart))
+#if defined(DDB) || NKSYMS > 0
+	or.u	%r13, %r0,  %hi16(_C_LABEL(esym))
+	st	%r8,  %r13, %lo16(_C_LABEL(esym))
+#endif
+	br	2f
+
+	/* BOOT_MAGIC */
+1:
+#if defined(DDB) || NKSYMS > 0
 	or.u	%r13, %r0,  %hi16(_C_LABEL(esym))
 	st	%r7,  %r13, %lo16(_C_LABEL(esym))
-1:
 #endif
 
+2:
 	/* set cputyp */
 	ldcr	%r1,  PID
 	extu	%r8,  %r1,  8<8>
@@ -127,8 +163,6 @@ ASLOCAL(main_start)
 	ldcr	%r12, VBR
 	or.u	%r13, %r0,  %hi16(_C_LABEL(prom_vbr))
 	st	%r12, %r13, %lo16(_C_LABEL(prom_vbr))
-	stcr	%r0,  VBR
-	FLUSH_PIPELINE
 
 	/*
 	 * Have curcpu() point at the dummy cpuinfo structure,
@@ -167,8 +201,14 @@ ASLOCAL(main_start)
 #endif /* M88100 */
 2:
 	or	%r4, %r0, 1
+	or.u	%r2, %r0, %hi16(_ASM_LABEL(__start))
 	bsr.n	_C_LABEL(vector_init)
-	 ldcr	%r2, VBR
+	 or	%r2, %r2, %lo16(_ASM_LABEL(__start))
+	stcr	%r2, VBR
+	FLUSH_PIPELINE
+
+	or.u	%r3, %r0, %hi16(_C_LABEL(kernel_vbr))
+	st	%r2, %r3, %lo16(_C_LABEL(kernel_vbr))
 
 #ifdef MULTIPROCESSOR
 	bsr	_C_LABEL(atomic_init)
@@ -232,7 +272,9 @@ GLOBAL(secondary_start)
 	bsr.n	_ASM_LABEL(setup_psr)
 	 or	%r31, %r31, %lo16(_ASM_LABEL(slavestack_end))
 
-	stcr	%r0,  VBR	/* set Vector Base Register to 0, ALWAYS! */
+	or.u	%r3,  %r0,  %hi16(_C_LABEL(kernel_vbr))
+	ld	%r2,  %r3,  %lo16(_C_LABEL(kernel_vbr))
+	stcr	%r2,  VBR
 	FLUSH_PIPELINE
 
 	/*
@@ -291,6 +333,14 @@ GLOBAL(delay)
 	 subu	%r4, %r4, 2	/* two cycles per iteration */
 2:
 	jmp	%r1
+
+/*
+ * Switch to a 1:1 mapped stack at shutdown/reboot time.
+ */
+GLOBAL(bootstack)
+	or.u	%r31, %r0,  %hi16(_ASM_LABEL(initstack_end))
+	jmp.n	%r1
+	 or	%r31, %r31, %lo16(_ASM_LABEL(initstack_end))
 
 /*****************************************************************************/
 

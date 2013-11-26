@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdcef.c,v 1.28 2013/04/15 09:23:01 mglocker Exp $	*/
+/*	$OpenBSD: if_cdcef.c,v 1.31 2013/11/11 10:09:40 mpi Exp $	*/
 
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
@@ -44,7 +44,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 
@@ -81,7 +80,6 @@ struct cdcef_softc {
 
 	int			sc_rxeof_errors;
 	int			sc_unit;
-	int			sc_attached;
 	int			sc_listening;
 };
 
@@ -262,7 +260,6 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	sc->sc_attached = 1;
 	splx(s);
 }
 
@@ -387,8 +384,6 @@ cdcef_rxeof(struct usbf_xfer *xfer, void *priv,
 		if (sc->sc_rxeof_errors++ > 10) {
 			printf("%s: too many errors, disabling\n",
 			    DEVNAME(sc));
-			/* sc->sc_dying = 1; */
-			// return;
 		}
 		goto done;
 	}
@@ -517,11 +512,6 @@ cdcef_watchdog(struct ifnet *ifp)
 {
 	struct cdcef_softc	*sc = ifp->if_softc;
 	int s;
-
-#if 0
-	if (sc->sc_dying)
-		return;
-#endif
 
 	ifp->if_oerrors++;
 	printf("%s: watchdog timeout\n", DEVNAME(sc));

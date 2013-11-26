@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.38 2013/04/15 09:23:01 mglocker Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.44 2013/11/21 14:08:05 mpi Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
@@ -44,7 +44,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -161,7 +160,7 @@ urndis_ctrl_send(struct urndis_softc *sc, void *buf, size_t len)
 {
 	usbd_status err;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return(0);
 
 	err = urndis_ctrl_msg(sc, UT_WRITE_CLASS_INTERFACE, UR_GET_STATUS,
@@ -342,8 +341,8 @@ urndis_ctrl_handle_query(struct urndis_softc *sc,
 	if (letoh32(msg->rm_infobuflen) + letoh32(msg->rm_infobufoffset) +
 	    RNDIS_HEADER_OFFSET > letoh32(msg->rm_len)) {
 		printf("%s: ctrl message error: invalid query info "
-		    "len/offset/end_position(%d/%d/%d) -> "
-		    "go out of buffer limit %d\n",
+		    "len/offset/end_position(%u/%u/%zu) -> "
+		    "go out of buffer limit %u\n",
 		    DEVNAME(sc),
 		    letoh32(msg->rm_infobuflen),
 		    letoh32(msg->rm_infobufoffset), 
@@ -806,7 +805,7 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 
 		if (len < sizeof(*msg)) {
 			printf("%s: urndis_decap invalid buffer len %u < "
-			    "minimum header %u\n",
+			    "minimum header %zu\n",
 			    DEVNAME(sc),
 			    len,
 			    sizeof(*msg));
@@ -833,7 +832,7 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 			return;
 		}
 		if (letoh32(msg->rm_len) < sizeof(*msg)) {
-			printf("%s: urndis_decap invalid msg len %u < %u\n",
+			printf("%s: urndis_decap invalid msg len %u < %zu\n",
 			    DEVNAME(sc),
 			    letoh32(msg->rm_len),
 			    sizeof(*msg));
@@ -852,7 +851,7 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 		    letoh32(msg->rm_datalen) + RNDIS_HEADER_OFFSET 
 		        > letoh32(msg->rm_len)) {
 			printf("%s: urndis_decap invalid data "
-			    "len/offset/end_position(%u/%u/%u) -> "
+			    "len/offset/end_position(%u/%u/%zu) -> "
 			    "go out of receive buffer limit %u\n",
 			    DEVNAME(sc),
 			    letoh32(msg->rm_datalen),
@@ -866,7 +865,7 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 		if (letoh32(msg->rm_datalen) < sizeof(struct ether_header)) {
 			ifp->if_ierrors++;
 			printf("%s: urndis_decap invalid ethernet size "
-			    "%d < %d\n",
+			    "%u < %zu\n",
 			    DEVNAME(sc),
 			    letoh32(msg->rm_datalen),
 			    sizeof(struct ether_header));
@@ -994,7 +993,7 @@ urndis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	ifa = (struct ifaddr *)data;
 	error = 0;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	s = splnet();
@@ -1042,7 +1041,7 @@ urndis_watchdog(struct ifnet *ifp)
 
 	sc = ifp->if_softc;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	ifp->if_oerrors++;
@@ -1130,10 +1129,7 @@ urndis_stop(struct urndis_softc *sc)
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	if (sc->sc_bulkin_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_bulkin_pipe);
-		if (err)
-			printf("%s: abort rx pipe failed: %s\n",
-			    DEVNAME(sc), usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_bulkin_pipe);
 		err = usbd_close_pipe(sc->sc_bulkin_pipe);
 		if (err)
 			printf("%s: close rx pipe failed: %s\n",
@@ -1142,10 +1138,7 @@ urndis_stop(struct urndis_softc *sc)
 	}
 
 	if (sc->sc_bulkout_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_bulkout_pipe);
-		if (err)
-			printf("%s: abort tx pipe failed: %s\n",
-			    DEVNAME(sc), usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_bulkout_pipe);
 		err = usbd_close_pipe(sc->sc_bulkout_pipe);
 		if (err)
 			printf("%s: close tx pipe failed: %s\n",
@@ -1184,7 +1177,7 @@ urndis_start(struct ifnet *ifp)
 
 	sc = ifp->if_softc;
 
-	if (sc->sc_dying || (ifp->if_flags & IFF_OACTIVE))
+	if (usbd_is_dying(sc->sc_udev) || (ifp->if_flags & IFF_OACTIVE))
 		return;
 
 	IFQ_POLL(&ifp->if_snd, m_head);
@@ -1231,7 +1224,7 @@ urndis_rxeof(struct usbd_xfer *xfer,
 	ifp = GET_IFP(sc);
 	total_len = 0;
 
-	if (sc->sc_dying || !(ifp->if_flags & IFF_RUNNING))
+	if (usbd_is_dying(sc->sc_udev) || !(ifp->if_flags & IFF_RUNNING))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -1275,7 +1268,7 @@ urndis_txeof(struct usbd_xfer *xfer,
 
 	DPRINTF(("%s: urndis_txeof\n", DEVNAME(sc)));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	s = splnet();
@@ -1540,7 +1533,7 @@ urndis_activate(struct device *self, int devact)
 
 	switch (devact) {
 	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 

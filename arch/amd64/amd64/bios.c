@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.24 2013/04/24 08:23:44 blambert Exp $	*/
+/*	$OpenBSD: bios.c,v 1.26 2013/11/19 04:12:17 guenther Exp $	*/
 /*
  * Copyright (c) 2006 Gordon Willem Klok <gklok@cogeco.ca>
  *
@@ -55,8 +55,7 @@ int bios_print(void *, const char *);
 char *fixstring(char *);
 
 struct cfattach bios_ca = {
-	sizeof(struct bios_softc), bios_match, bios_attach, NULL,
-	config_activate_children
+	sizeof(struct bios_softc), bios_match, bios_attach
 };
 
 struct cfdriver bios_cd = {
@@ -137,7 +136,7 @@ bios_attach(struct device *parent, struct device *self, void *aux)
 		for (; pa < end; pa+= NBPG, va+= NBPG)
 			pmap_kenter_pa(va, pa, VM_PROT_READ);
 
-		printf(": SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
+		printf(": SMBIOS rev. %d.%d @ 0x%x (%d entries)",
 		    hdr->majrev, hdr->minrev, hdr->addr, hdr->count);
 
 		smbiosrev = hdr->majrev * 100 + hdr->minrev;

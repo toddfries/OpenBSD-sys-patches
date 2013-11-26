@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.74 2013/05/16 19:26:04 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.77 2013/11/06 10:40:36 mpi Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -787,6 +787,8 @@ pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 		flags = level & IPL_MPSAFE;
 		level &= ~IPL_MPSAFE;
 
+		KASSERT(level <= IPL_TTY || flags & IPL_MPSAFE);
+
 		if (pci_get_capability(pc, tag, PCI_CAP_MSI, &off, &reg) == 0)
 			panic("%s: no msi capability", __func__);
 
@@ -939,6 +941,8 @@ pci_init_extents(void)
 #include "acpi.h"
 #if NACPI > 0
 void acpi_pci_match(struct device *, struct pci_attach_args *);
+pcireg_t acpi_pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
+void acpi_pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int, int);
 #endif
 
 void
@@ -949,16 +953,20 @@ pci_dev_postattach(struct device *dev, struct pci_attach_args *pa)
 #endif
 }
 
-#if NACPI > 0
-pcireg_t acpi_pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
-#endif
-
 pcireg_t
 pci_min_powerstate(pci_chipset_tag_t pc, pcitag_t tag)
 {
 #if NACPI > 0
 	return acpi_pci_min_powerstate(pc, tag);
 #else
-	return PCI_PMCSR_STATE_D3;
+	return pci_get_powerstate(pc, tag);
+#endif
+}
+
+void
+pci_set_powerstate_md(pci_chipset_tag_t pc, pcitag_t tag, int state, int pre)
+{
+#if NACPI > 0
+	acpi_pci_set_powerstate(pc, tag, state, pre);
 #endif
 }

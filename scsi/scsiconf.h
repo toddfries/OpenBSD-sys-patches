@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.152 2013/03/28 16:55:27 deraadt Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.157 2013/09/27 11:43:19 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -472,7 +472,6 @@ const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
     workq_add_task(NULL, (_fl), (_f), (_a1), (_a2))
 
 void	scsi_init(void);
-daddr64_t scsi_size(struct scsi_link *, int, u_int32_t *);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
 int	scsi_inquire_vpd(struct scsi_link *, void *, u_int, u_int8_t, int);
@@ -559,13 +558,19 @@ void	scsi_default_put(void *, void *);
  */
 void	scsi_ioh_set(struct scsi_iohandler *, struct scsi_iopool *,
 	    void (*)(void *, void *), void *);
-void	scsi_ioh_add(struct scsi_iohandler *);
-void	scsi_ioh_del(struct scsi_iohandler *);
+int	scsi_ioh_add(struct scsi_iohandler *);
+int	scsi_ioh_del(struct scsi_iohandler *);
 
 void	scsi_xsh_set(struct scsi_xshandler *, struct scsi_link *,
 	    void (*)(struct scsi_xfer *));
-void	scsi_xsh_add(struct scsi_xshandler *);
-void	scsi_xsh_del(struct scsi_xshandler *);
+int	scsi_xsh_add(struct scsi_xshandler *);
+int	scsi_xsh_del(struct scsi_xshandler *);
+
+/*
+ * utility functions
+ */
+int	scsi_pending_start(struct mutex *, u_int *);
+int	scsi_pending_finish(struct mutex *, u_int *);
 
 /*
  * Utility functions for SCSI HBA emulation.

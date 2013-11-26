@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vnops.c,v 1.59 2013/03/28 03:29:44 guenther Exp $	*/
+/*	$OpenBSD: cd9660_vnops.c,v 1.63 2013/08/13 05:52:22 guenther Exp $	*/
 /*	$NetBSD: cd9660_vnops.c,v 1.42 1997/10/16 23:56:57 christos Exp $	*/
 
 /*-
@@ -78,69 +78,10 @@ struct isoreaddir {
 	struct uio *uio;
 	off_t uio_off;
 	int eofflag;
-	u_long *cookies;
-	int ncookies;
 };
 
 int	iso_uiodir(struct isoreaddir *, struct dirent *, off_t);
 int	iso_shipdir(struct isoreaddir *);
-
-#if 0
-/*
- * Mknod vnode call
- *  Actually remap the device number
- */
-int
-cd9660_mknod(ndp, vap, cred, p)
-	struct nameidata *ndp;
-	struct ucred *cred;
-	struct vattr *vap;
-	struct proc *p;
-{
-#ifndef	ISODEVMAP
-	pool_put(&namei_pool, ndp->ni_pnbuf);
-	vput(ndp->ni_dvp);
-	vput(ndp->ni_vp);
-	return (EINVAL);
-#else
-	register struct vnode *vp;
-	struct iso_node *ip;
-	struct iso_dnode *dp;
-	int error;
-
-	vp = ndp->ni_vp;
-	ip = VTOI(vp);
-
-	if (ip->i_mnt->iso_ftype != ISO_FTYPE_RRIP
-	    || vap->va_type != vp->v_type
-	    || (vap->va_type != VCHR && vap->va_type != VBLK)) {
-		pool_put(&namei_pool, ndp->ni_pnbuf);
-		vput(ndp->ni_dvp);
-		vput(ndp->ni_vp);
-		return (EINVAL);
-	}
-
-	dp = iso_dmap(ip->i_dev,ip->i_number,1);
-	if (ip->inode.iso_rdev == vap->va_rdev || vap->va_rdev == VNOVAL) {
-		/* same as the unmapped one, delete the mapping */
-		remque(dp);
-		free(dp, M_CACHE);
-	} else
-		/* enter new mapping */
-		dp->d_dev = vap->va_rdev;
-
-	/*
-	 * Remove inode so that it will be reloaded by iget and
-	 * checked to see if it is an alias of an existing entry
-	 * in the inode cache.
-	 */
-	vput(vp);
-	vp->v_type = VNON;
-	vgone(vp);
-	return (0);
-#endif
-}
-#endif
 
 /*
  * Setattr call. Only allowed for block and character special devices.
@@ -279,7 +220,7 @@ cd9660_read(void *v)
 	register struct iso_node *ip = VTOI(vp);
 	register struct iso_mnt *imp;
 	struct buf *bp;
-	daddr64_t lbn, rablock;
+	daddr_t lbn, rablock;
 	off_t diff;
 	int error = 0;
 	long size, n, on;
@@ -307,7 +248,7 @@ cd9660_read(void *v)
 #define MAX_RA 32
 		if (ci->ci_lastr + 1 == lbn) {
 			struct ra {
-				daddr64_t blks[MAX_RA];
+				daddr_t blks[MAX_RA];
 				int sizes[MAX_RA];
 			} *ra;
 			int i;
@@ -401,16 +342,7 @@ iso_uiodir(idp,dp,off)
 		return (-1);
 	}
 
-	if (idp->cookies) {
-		if (idp->ncookies <= 0) {
-			idp->eofflag = 0;
-			return (-1);
-		}
-
-		*idp->cookies++ = off;
-		--idp->ncookies;
-	}
-
+	dp->d_off = off;
 	if ((error = uiomove((caddr_t)dp, dp->d_reclen, idp->uio)) != 0)
 		return (error);
 	idp->uio_off = off;
@@ -491,8 +423,7 @@ cd9660_readdir(void *v)
 	int error = 0;
 	int reclen;
 	u_short namelen;
-	int  ncookies = 0;
-	u_long *cookies = NULL;
+	cdino_t ino;
 
 	dp = VTOI(vdp);
 	imp = dp->i_mnt;
@@ -507,17 +438,6 @@ cd9660_readdir(void *v)
 	idp->saveent.d_type = idp->assocent.d_type = idp->current.d_type =
 	    DT_UNKNOWN;
 	idp->uio = uio;
-	if (ap->a_ncookies == NULL) {
-		idp->cookies = NULL;
-	} else {
-               /*
-                * Guess the number of cookies needed.
-                */
-               ncookies = uio->uio_resid / 16;
-               cookies = malloc(ncookies * sizeof(u_long), M_TEMP, M_WAITOK);
-               idp->cookies = cookies;
-               idp->ncookies = ncookies;
-	}
 	idp->eofflag = 1;
 	idp->curroff = uio->uio_offset;
 	idp->uio_off = uio->uio_offset;
@@ -579,22 +499,23 @@ cd9660_readdir(void *v)
 		}
 
 		if (isonum_711(ep->flags)&2)
-			idp->current.d_fileno = isodirino(ep, imp);
+			ino = isodirino(ep, imp);
 		else
-			idp->current.d_fileno = dbtob(bp->b_blkno) +
-				entryoffsetinblock;
+			ino = dbtob(bp->b_blkno) + entryoffsetinblock;
 
 		idp->curroff += reclen;
 
 		switch (imp->iso_ftype) {
 		case ISO_FTYPE_RRIP:
 			cd9660_rrip_getname(ep,idp->current.d_name, &namelen,
-					   &idp->current.d_fileno,imp);
+					   &ino, imp);
+			idp->current.d_fileno = ino;
 			idp->current.d_namlen = (u_char)namelen;
 			if (idp->current.d_namlen)
 				error = iso_uiodir(idp,&idp->current,idp->curroff);
 			break;
 		default:	/* ISO_FTYPE_DEFAULT || ISO_FTYPE_9660 */
+			idp->current.d_fileno = ino;
 			strlcpy(idp->current.d_name,"..",
 			    sizeof idp->current.d_name);
 			if (idp->current.d_namlen == 1 && ep->name[0] == 0) {
@@ -630,18 +551,6 @@ cd9660_readdir(void *v)
 	if (error < 0)
 		error = 0;
 
-	if (ap->a_ncookies != NULL) {
-		if (error)
-			free(cookies, M_TEMP);
-		else {
-			/*
-			 * Work out the number of cookies actually used.
-			 */
-			*ap->a_ncookies = ncookies - idp->ncookies;
-			*ap->a_cookies = cookies;
-		}
-	}
-	
 	if (bp)
 		brelse (bp);
 

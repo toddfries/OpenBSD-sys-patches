@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.92 2013/04/15 09:23:01 mglocker Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.95 2013/09/30 05:18:56 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2008-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -48,7 +48,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -117,8 +116,9 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(ASUS,		RT2870_3),
 	USB_ID(ASUS,		RT2870_4),
 	USB_ID(ASUS,		RT2870_5),
-	USB_ID(ASUS,		RT3070),
 	USB_ID(ASUS,		RT3070_1),
+	USB_ID(ASUS,		USBN13),
+	USB_ID(ASUS,		USBN53),
 	USB_ID(ASUS2,		USBN11),
 	USB_ID(AZUREWAVE,	RT2870_1),
 	USB_ID(AZUREWAVE,	RT2870_2),
@@ -158,6 +158,7 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(COREGA,		RT2870_3),
 	USB_ID(COREGA,		RT3070),
 	USB_ID(CYBERTAN,	RT2870),
+	USB_ID(DLINK,		DWA127),
 	USB_ID(DLINK,		RT2870),
 	USB_ID(DLINK,		RT3072),
 	USB_ID(DLINK2,		DWA130),
@@ -200,11 +201,12 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(LINKSYS4,	WUSB54GCV3),
 	USB_ID(LINKSYS4,	WUSB600N),
 	USB_ID(LINKSYS4,	WUSB600NV2),
+	USB_ID(LOGITEC,		LANW150NU2),
 	USB_ID(LOGITEC,		LANW300NU2),
+	USB_ID(LOGITEC,		LANW300NU2S),
 	USB_ID(LOGITEC,		RT2870_1),
 	USB_ID(LOGITEC,		RT2870_2),
 	USB_ID(LOGITEC,		RT2870_3),
-	USB_ID(LOGITEC,		RT3020),
 	USB_ID(MELCO,		RT2870_1),
 	USB_ID(MELCO,		RT2870_2),
 	USB_ID(MELCO,		WLIUCAG300N),
@@ -213,6 +215,7 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(MELCO,		WLIUCGN),
 	USB_ID(MELCO,		WLIUCGNHP),
 	USB_ID(MELCO,		WLIUCGNM),
+	USB_ID(MELCO,		WLIUCGNM2),
 	USB_ID(MOTOROLA4,	RT2770),
 	USB_ID(MOTOROLA4,	RT3070),
 	USB_ID(MSI,		RT3070_1),
@@ -1966,7 +1969,7 @@ run_rx_frame(struct run_softc *sc, uint8_t *buf, int dmalen)
 
 	if (flags & RT2860_RX_L2PAD) {
 		u_int hdrlen = ieee80211_get_hdrlen(wh);
-		ovbcopy(wh, (caddr_t)wh + 2, hdrlen);
+		memmove((caddr_t)wh + 2, wh, hdrlen);
 		wh = (struct ieee80211_frame *)((caddr_t)wh + 2);
 	}
 

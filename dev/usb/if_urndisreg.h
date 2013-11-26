@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndisreg.h,v 1.16 2013/04/15 09:23:01 mglocker Exp $ */
+/*	$OpenBSD: if_urndisreg.h,v 1.19 2013/11/21 14:08:05 mpi Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
@@ -42,7 +42,6 @@ struct urndis_softc {
 	struct device			sc_dev;
 
 	char				sc_attached;
-	int				sc_dying;
 	struct arpcom			sc_arpcom;
 
 	/* RNDIS device info */

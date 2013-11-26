@@ -1,4 +1,4 @@
-/*	$OpenBSD: topcat.c,v 1.15 2006/08/11 18:33:13 miod Exp $	*/
+/*	$OpenBSD: topcat.c,v 1.18 2013/10/21 10:36:13 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat.
@@ -129,15 +129,14 @@ int	topcat_ioctl(void *, u_long, caddr_t, int, struct proc *);
 void	topcat_burner(void *, u_int, u_int);
 
 struct	wsdisplay_accessops	topcat_accessops = {
-	topcat_ioctl,
-	diofb_mmap,
-	diofb_alloc_screen,
-	diofb_free_screen,
-	diofb_show_screen,
-	NULL,	/* load_font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	topcat_burner
+	.ioctl = topcat_ioctl,
+	.mmap = diofb_mmap,
+	.alloc_screen = diofb_alloc_screen,
+	.free_screen = diofb_free_screen,
+	.show_screen = diofb_show_screen,
+	.load_font = diofb_load_font,
+	.list_font = diofb_list_font,
+	.burn_screen = topcat_burner
 };
 
 /*
@@ -246,7 +245,10 @@ topcat_end_attach(struct topcat_softc *sc, u_int8_t id)
 	case GID_TOPCAT:
 		switch (sc->sc_fb->planes) {
 		case 1:
-			fbname = "HP98544 topcat";
+			if (sc->sc_fb->dheight == 400)
+				fbname = "HP98542 topcat";
+			else
+				fbname = "HP98544 topcat";
 			break;
 		case 4:
 			if (sc->sc_fb->dheight == 400)
@@ -414,6 +416,10 @@ void
 topcat_setcolor(struct diofb *fb, u_int index)
 {
 	volatile struct tcboxfb *tc = (struct tcboxfb *)fb->regkva;
+
+	/* Monochrome topcat may not have the colormap logic present */
+	if (fb->planes <= 1)
+		return;
 
 	if (tc->regs.fbid != GID_TOPCAT) {
 		tccm_waitbusy(tc);

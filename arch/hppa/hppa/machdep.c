@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.210 2012/12/02 07:03:31 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.213 2013/11/23 07:20:52 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -892,40 +892,42 @@ boot(int howto)
 		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
-	} else {
+		goto haltsys;
+	}
 
-		boothowto = howto | (boothowto & RB_HALT);
+	boothowto = howto | (boothowto & RB_HALT);
 
-		if (!(howto & RB_NOSYNC)) {
-			waittime = 0;
-			vfs_shutdown();
-			/*
-			 * If we've been adjusting the clock, the todr
-			 * will be out of synch; adjust it now unless
-			 * the system was sitting in ddb.
-			 */
-			if ((howto & RB_TIMEBAD) == 0)
-				resettodr();
-			else
-				printf("WARNING: not updating battery clock\n");
-		}
-		if_downall();
+	if (!(howto & RB_NOSYNC)) {
+		waittime = 0;
+		vfs_shutdown();
+		/*
+		 * If we've been adjusting the clock, the todr
+		 * will be out of synch; adjust it now unless
+		 * the system was sitting in ddb.
+		 */
+		if ((howto & RB_TIMEBAD) == 0)
+			resettodr();
+		else
+			printf("WARNING: not updating battery clock\n");
+	}
+	if_downall();
 
-		/* XXX probably save howto into stable storage */
+	/* XXX probably save howto into stable storage */
 
-		uvm_shutdown();
-		splhigh();
+	uvm_shutdown();
+	splhigh();
 
-		if (howto & RB_DUMP)
-			dumpsys();
+	if (howto & RB_DUMP)
+		dumpsys();
 
-		doshutdownhooks();
+haltsys:
+	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
 		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
-		hppa_ipi_broadcast(HPPA_IPI_HALT);
+	hppa_ipi_broadcast(HPPA_IPI_HALT);
 #endif
-	}
 
 	/* in case we came on powerfail interrupt */
 	if (cold_hook)
@@ -1027,8 +1029,8 @@ dumpsys(void)
 {
 	int psize, bytes, i, n;
 	caddr_t maddr;
-	daddr64_t blkno;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error;
 
 	/* Save registers

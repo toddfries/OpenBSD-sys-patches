@@ -1,4 +1,4 @@
-/*	$OpenBSD: in.c,v 1.76 2013/05/13 10:17:13 mpi Exp $	*/
+/*	$OpenBSD: in.c,v 1.88 2013/10/23 13:39:35 mpi Exp $	*/
 /*	$NetBSD: in.c,v 1.26 1996/02/13 23:41:39 christos Exp $	*/
 
 /*
@@ -87,10 +87,12 @@
 
 #ifdef INET
 
+void in_socktrim(struct sockaddr_in *);
 void in_len2mask(struct in_addr *, int);
 int in_lifaddr_ioctl(struct socket *, u_long, caddr_t,
 	struct ifnet *);
 
+void in_purgeaddr(struct ifaddr *);
 int in_addprefix(struct in_ifaddr *, int);
 int in_scrubprefix(struct in_ifaddr *);
 
@@ -192,6 +194,7 @@ int
 in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 {
 	struct ifreq *ifr = (struct ifreq *)data;
+	struct ifaddr *ifa;						\
 	struct in_ifaddr *ia = NULL;
 	struct in_aliasreq *ifra = (struct in_aliasreq *)data;
 	struct sockaddr_in oldaddr;
@@ -215,21 +218,24 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 	 * Find address for this interface, if it exists.
 	 */
 	if (ifp)
-		TAILQ_FOREACH(ia, &in_ifaddr, ia_list)
-			if (ia->ia_ifp == ifp)
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list)
+			if (ifa->ifa_addr->sa_family == AF_INET) {
+				ia = ifatoia(ifa);
 				break;
+			}
 
 	switch (cmd) {
 
 	case SIOCAIFADDR:
 	case SIOCDIFADDR:
 		if (ifra->ifra_addr.sin_family == AF_INET)
-			for (; ia != NULL; ia = TAILQ_NEXT(ia, ia_list)) {
-				if (ia->ia_ifp == ifp &&
-				    ia->ia_addr.sin_addr.s_addr ==
-					ifra->ifra_addr.sin_addr.s_addr)
-				    break;
+			for (; ifa != NULL; ifa = TAILQ_NEXT(ifa, ifa_list)) {
+				if ((ifa->ifa_addr->sa_family == AF_INET) &&
+				    ifatoia(ifa)->ia_addr.sin_addr.s_addr ==
+				    ifra->ifra_addr.sin_addr.s_addr)
+					break;
 			}
+			ia = ifatoia(ifa);
 		if (cmd == SIOCDIFADDR && ia == NULL)
 			return (EADDRNOTAVAIL);
 		/* FALLTHROUGH */
@@ -241,8 +247,6 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 			panic("in_control");
 		if (ia == NULL) {
 			ia = malloc(sizeof *ia, M_IFADDR, M_WAITOK | M_ZERO);
-			s = splsoftnet();
-			TAILQ_INSERT_TAIL(&in_ifaddr, ia, ia_list);
 			ia->ia_addr.sin_family = AF_INET;
 			ia->ia_addr.sin_len = sizeof(ia->ia_addr);
 			ia->ia_ifa.ifa_addr = sintosa(&ia->ia_addr);
@@ -255,7 +259,6 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 			}
 			ia->ia_ifp = ifp;
 			LIST_INIT(&ia->ia_multiaddrs);
-			splx(s);
 
 			newifaddr = 1;
 		} else
@@ -274,17 +277,14 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 	case SIOCGIFDSTADDR:
 	case SIOCGIFBRDADDR:
 		if (ia && satosin(&ifr->ifr_addr)->sin_addr.s_addr) {
-			struct in_ifaddr *ia2;
-
-			for (ia2 = ia; ia2 != NULL;
-			    ia2 = TAILQ_NEXT(ia2, ia_list)) {
-				if (ia2->ia_ifp == ifp &&
-				    ia2->ia_addr.sin_addr.s_addr ==
-				    satosin(&ifr->ifr_addr)->sin_addr.s_addr)
+			for (; ifa != NULL; ifa = TAILQ_NEXT(ifa, ifa_list)) {
+				if ((ifa->ifa_addr->sa_family == AF_INET) &&
+				    ifatoia(ifa)->ia_addr.sin_addr.s_addr ==
+				    satosin(&ifr->ifr_addr)->sin_addr.s_addr) {
+					ia = ifatoia(ifa);
 					break;
+				}
 			}
-			if (ia2 && ia2->ia_ifp == ifp)
-				ia = ia2;
 		}
 		if (ia == NULL)
 			return (EADDRNOTAVAIL);
@@ -341,16 +341,12 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 
 	case SIOCSIFADDR:
 		s = splsoftnet();
-		error = in_ifinit(ifp, ia, satosin(&ifr->ifr_addr), 1,
-		    newifaddr);
+		in_ifscrub(ifp, ia);
+		error = in_ifinit(ifp, ia, satosin(&ifr->ifr_addr), newifaddr);
 		if (!error)
 			dohooks(ifp->if_addrhooks, 0);
-		else if (newifaddr) {
-			splx(s);
-			goto cleanup;
-		}
 		splx(s);
-		return error;
+		return (error);
 
 	case SIOCSIFNETMASK:
 		ia->ia_netmask = ia->ia_sockmask.sin_addr.s_addr =
@@ -391,22 +387,14 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp)
 				    sintosa(&ifra->ifra_broadaddr));
 		}
 		if (ifra->ifra_addr.sin_family == AF_INET && needinit) {
-			error = in_ifinit(ifp, ia, &ifra->ifra_addr, 0,
-			    newifaddr);
+			error = in_ifinit(ifp, ia, &ifra->ifra_addr, newifaddr);
 		}
 		if (!error)
 			dohooks(ifp->if_addrhooks, 0);
-		else if (newifaddr) {
-			splx(s);
-			goto cleanup;
-		}
 		splx(s);
 		return (error);
 		}
-	case SIOCDIFADDR: {
-
-		error = 0;
-cleanup:
+	case SIOCDIFADDR:
 		/*
 		 * Even if the individual steps were safe, shouldn't
 		 * these kinds of changes happen atomically?  What 
@@ -414,22 +402,10 @@ cleanup:
 		 * the scrub but before the other steps? 
 		 */
 		s = splsoftnet();
-		in_ifscrub(ifp, ia);
-		if (!error)
-			ifa_del(ifp, &ia->ia_ifa);
-		TAILQ_REMOVE(&in_ifaddr, ia, ia_list);
-		if (ia->ia_allhosts != NULL) {
-			in_delmulti(ia->ia_allhosts);
-			ia->ia_allhosts = NULL;
-		}
-		/* remove backpointer, since ifp may die before ia */
-		ia->ia_ifp = NULL;
-		ifafree((&ia->ia_ifa));
-		if (!error)
-			dohooks(ifp->if_addrhooks, 0);
+		in_purgeaddr(&ia->ia_ifa);
+		dohooks(ifp->if_addrhooks, 0);
 		splx(s);
-		return (error);
-		}
+		break;
 
 #ifdef MROUTING
 	case SIOCGETVIFCNT:
@@ -641,12 +617,19 @@ in_ifscrub(struct ifnet *ifp, struct in_ifaddr *ia)
  */
 int
 in_ifinit(struct ifnet *ifp, struct in_ifaddr *ia, struct sockaddr_in *sin,
-    int scrub, int newaddr)
+    int newaddr)
 {
 	u_int32_t i = sin->sin_addr.s_addr;
 	struct sockaddr_in oldaddr;
-	int s = splnet(), flags = RTF_UP, error;
+	int s = splnet(), flags = RTF_UP, error = 0;
 
+	if (newaddr)
+		TAILQ_INSERT_TAIL(&in_ifaddr, ia, ia_list);
+
+	/*
+	 * Always remove the address from the tree to make sure its
+	 * position gets updated in case the key changes.
+	 */
 	if (!newaddr)
 		ifa_del(ifp, &ia->ia_ifa);
 	oldaddr = ia->ia_addr;
@@ -661,7 +644,7 @@ in_ifinit(struct ifnet *ifp, struct in_ifaddr *ia, struct sockaddr_in *sin,
 	    (error = (*ifp->if_ioctl)(ifp, SIOCSIFADDR, (caddr_t)ia))) {
 		ia->ia_addr = oldaddr;
 		splx(s);
-		return (error);
+		goto out;
 	}
 	splx(s);
 
@@ -672,12 +655,6 @@ in_ifinit(struct ifnet *ifp, struct in_ifaddr *ia, struct sockaddr_in *sin,
 	 * Be safe for now.
 	 */
 	splsoftassert(IPL_SOFTNET);
-
-	if (scrub) {
-		ia->ia_ifa.ifa_addr = sintosa(&oldaddr);
-		in_ifscrub(ifp, ia);
-		ia->ia_ifa.ifa_addr = sintosa(&ia->ia_addr);
-	}
 
 	if (ia->ia_netmask == 0) {
 		if (IN_CLASSA(i))
@@ -706,10 +683,8 @@ in_ifinit(struct ifnet *ifp, struct in_ifaddr *ia, struct sockaddr_in *sin,
 		ia->ia_dstaddr = ia->ia_addr;
 		flags |= RTF_HOST;
 	} else if (ifp->if_flags & IFF_POINTOPOINT) {
-		if (ia->ia_dstaddr.sin_family != AF_INET) {
-			ifa_add(ifp, &ia->ia_ifa);
-			return (0);
-		}
+		if (ia->ia_dstaddr.sin_family != AF_INET)
+			goto out;
 		flags |= RTF_HOST;
 	}
 	error = in_addprefix(ia, flags);
@@ -725,10 +700,43 @@ in_ifinit(struct ifnet *ifp, struct in_ifaddr *ia, struct sockaddr_in *sin,
 		ia->ia_allhosts = in_addmulti(&addr, ifp);
 	}
 
-	if (!error)
-		ifa_add(ifp, &ia->ia_ifa);
+out:
+	/*
+	 * Add the address to the local list and the global tree
+	 * even if an error occured to make sure the various
+	 * global structures are consistent.
+	 *
+	 * XXX This is necessary because we added the address
+	 * to the global list in the first place because of
+	 * carp(4).
+	 */
+	ifa_add(ifp, &ia->ia_ifa);
+
+	if (error && newaddr)
+		in_purgeaddr(&ia->ia_ifa);
 
 	return (error);
+}
+
+void
+in_purgeaddr(struct ifaddr *ifa)
+{
+	struct ifnet *ifp = ifa->ifa_ifp;
+	struct in_ifaddr *ia = ifatoia(ifa);
+
+	splsoftassert(IPL_SOFTNET);
+
+	in_ifscrub(ifp, ia);
+
+	ifa_del(ifp, &ia->ia_ifa);
+	TAILQ_REMOVE(&in_ifaddr, ia, ia_list);
+	if (ia->ia_allhosts != NULL) {
+		in_delmulti(ia->ia_allhosts);
+		ia->ia_allhosts = NULL;
+	}
+
+	ia->ia_ifp = NULL;
+	ifafree(&ia->ia_ifa);
 }
 
 #define rtinitflags(x) \
@@ -992,7 +1000,7 @@ in_delmulti(struct in_multi *inm)
 		 * Unlink from list.
 		 */
 		LIST_REMOVE(inm, inm_list);
-		ifp = inm->inm_ia->ia_ifp;
+		ifp = inm->inm_ifp;
 		ifafree(&inm->inm_ia->ia_ifa);
 
 		if (ifp) {
@@ -1010,3 +1018,16 @@ in_delmulti(struct in_multi *inm)
 }
 
 #endif
+
+void
+in_ifdetach(struct ifnet *ifp)
+{
+	struct ifaddr *ifa, *next;
+
+	/* nuke any of IPv4 addresses we have */
+	TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrlist, ifa_list, next) {
+		if (ifa->ifa_addr->sa_family != AF_INET)
+			continue;
+		in_purgeaddr(ifa);
+	}
+}

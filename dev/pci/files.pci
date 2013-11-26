@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.293 2013/01/21 11:17:48 patrick Exp $
+#	$OpenBSD: files.pci,v 1.299 2013/11/04 14:07:14 deraadt Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -106,10 +106,6 @@ file	dev/pci/mfii.c			mfii
 device	ips: scsi
 attach	ips at pci
 file	dev/pci/ips.c			ips
-
-# I2O
-attach	iop at pci with iop_pci
-file	dev/pci/iop_pci.c		iop_pci
 
 # Ensoniq AudioPCI S5016, 1371
 device	eap: audio, auconv, mulaw, ac97, midibus
@@ -248,11 +244,6 @@ file	dev/pci/if_de.c			de
 # device declaration in sys/conf/files
 attach	ep at pci with ep_pci
 file	dev/pci/if_ep_pci.c		ep_pci
-
-# Digital DEFPA PCI FDDI Controller
-device	fpa: pdq, fddi, ifnet
-attach	fpa at pci
-file	dev/pci/if_fpa.c		fpa
 
 # AMD PCnet-PCI Ethernet controller family
 device pcn: ether, ifnet, ifmedia, mii
@@ -452,11 +443,6 @@ file	dev/pci/nofn.c			nofn
 device	ubsec: crypto
 attach	ubsec at pci
 file	dev/pci/ubsec.c			ubsec
-
-# Netoctave NSP2000
-device	noct: crypto
-attach	noct at pci
-file	dev/pci/noct.c			noct
 
 # Safenet SafeXcel 1141
 device	safe: crypto
@@ -753,10 +739,20 @@ attach	art at musycc
 file	dev/pci/if_art.c		art
 file	dev/pci/bt8370.c		art
 
-# VMware Virtual NIC
+# VMware VMXnet virtual interface
 device	vic: ether, ifnet, ifmedia
 attach	vic at pci
 file	dev/pci/if_vic.c		vic
+
+# VMware VMXNET3 virtual interface
+device	vmx: ether, ifnet, ifmedia
+attach	vmx at pci
+file	dev/pci/if_vmx.c		vmx
+
+# VMware Paravirtual SCSI controller
+device	vmwpvs: scsi
+attach	vmwpvs at pci
+file	dev/pci/vmwpvs.c		vmwpvs
 
 # Atheros L2 Ethernet
 device	lii: ether, ifnet, ifmedia, mii
@@ -844,3 +840,6 @@ file	dev/pci/vioblk.c		vioblk
 device	viomb
 attach	viomb at virtio
 file	dev/pci/viomb.c			viomb
+
+include "dev/pci/files.agp"
+include "dev/pci/drm/files.drm"

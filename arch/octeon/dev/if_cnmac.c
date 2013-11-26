@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cnmac.c,v 1.10 2013/04/12 15:22:26 bcallah Exp $	*/
+/*	$OpenBSD: if_cnmac.c,v 1.12 2013/09/16 20:52:14 jmatthew Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -66,7 +66,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 
 #include <machine/bus.h>
@@ -260,15 +259,6 @@ static const struct octeon_evcnt_entry octeon_evcnt_entries[] = {
 };
 #endif
 
-/* XXX board-specific */
-static const int	octeon_eth_phy_table[] = {
-#if defined __seil5__
-	0x04, 0x01, 0x02
-#else
-	0x02, 0x03, 0x22
-#endif
-};
-
 /* ---- buffer management */
 
 static const struct octeon_eth_pool_param {
@@ -339,6 +329,7 @@ octeon_eth_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_port_type = ga->ga_port_type;
 	sc->sc_gmx = ga->ga_gmx;
 	sc->sc_gmx_port = ga->ga_gmx_port;
+	sc->sc_phy_addr = ga->ga_phy_addr;
 
 	sc->sc_init_flag = 0;
 
@@ -550,30 +541,14 @@ static int
 octeon_eth_mii_readreg(struct device *self, int phy_no, int reg)
 {
 	struct octeon_eth_softc *sc = (struct octeon_eth_softc *)self;
-	int phy_addr = octeon_eth_phy_table[phy_no];
-
-	if (sc->sc_port >= (int)nitems(octeon_eth_phy_table) ||
-	    phy_no != sc->sc_port) {
-		log(LOG_ERR,
-		    "mii read address mismatch, phy number %d.\n", phy_no);
-		return -1;
-	}
-	return cn30xxsmi_read(sc->sc_smi, phy_addr, reg);
+	return cn30xxsmi_read(sc->sc_smi, phy_no, reg);
 }
 
 static void
 octeon_eth_mii_writereg(struct device *self, int phy_no, int reg, int value)
 {
 	struct octeon_eth_softc *sc = (struct octeon_eth_softc *)self;
-	int phy_addr = octeon_eth_phy_table[phy_no];
-
-	if (sc->sc_port >= (int)nitems(octeon_eth_phy_table) ||
-	    phy_no != sc->sc_port) {
-		log(LOG_ERR,
-		    "mii write address mismatch, phy number %d.\n", phy_no);
-		return;
-	}
-	cn30xxsmi_write(sc->sc_smi, phy_addr, reg, value);
+	cn30xxsmi_write(sc->sc_smi, phy_no, reg, value);
 }
 
 static void
@@ -607,7 +582,7 @@ octeon_eth_mediainit(struct octeon_eth_softc *sc)
 	    octeon_eth_mediastatus);
 
 	mii_attach(&sc->sc_dev, &sc->sc_mii,
-	    0xffffffff, sc->sc_port, MII_OFFSET_ANY, MIIF_DOPAUSE);
+	    0xffffffff, sc->sc_phy_addr, MII_OFFSET_ANY, MIIF_DOPAUSE);
 
 	/* XXX */
 	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL) {

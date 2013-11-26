@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.58 2013/04/26 14:43:22 mpi Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.60 2013/08/21 05:21:45 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -43,7 +43,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -1761,7 +1760,7 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	rxdesc = (struct upgt_lmac_rx_desc *)data;
 
 	/* create mbuf which is suitable for strict alignment archs */
-	m = m_devget(rxdesc->data, pkglen, ETHER_ALIGN, ifp, NULL);
+	m = m_devget(rxdesc->data, pkglen, ETHER_ALIGN, ifp);
 	if (m == NULL) {
 		DPRINTF(1, "%s: could not create RX mbuf!\n", sc->sc_dev.dv_xname);
 		ifp->if_ierrors++;

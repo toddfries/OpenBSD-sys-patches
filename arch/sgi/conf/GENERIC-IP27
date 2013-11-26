@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC-IP27,v 1.44 2012/09/27 14:01:35 jsg Exp $
+#	$OpenBSD: GENERIC-IP27,v 1.48 2013/11/15 19:42:20 sasano Exp $
 #
 # THIS KERNEL IS FOR Origin, Onyx, Fuel, Tezro (IP27, IP35) SYSTEMS ONLY.
 #
@@ -114,7 +114,6 @@ audio*		at uaudio?
 ulpt*		at uhub?	# USB Printers	
 umass*		at uhub?	# USB Mass Storage devices
 urio*		at uhub?	# Diamond Multimedia Rio 500
-uscanner*	at uhub? disable# USB Scanners
 uhidev*		at uhub?	# Human Interface Devices
 ums*		at uhidev?	# USB mouse
 wsmouse*	at ums? mux 0
@@ -137,13 +136,16 @@ uath*		at uhub?	# Atheros AR5005UG/AR5005UX
 udav*		at uhub?	# Davicom DM9601 based Ethernet
 upgt*		at uhub?	# Conexant/Intersil PrismGT SoftMAC USB
 upl*		at uhub?	# Prolific PL2301/PL2302 host-to-host `network'
+ugl*		at uhub?	# Genesys Logic GL620USB-A host-to-host `network'
 ural*		at uhub?	# Ralink RT2500USB
 url*		at uhub?	# Realtek RTL8150L based adapters
 urtw*		at uhub?	# RealTek 8187
+urtwn*		at uhub?	# RealTek RTL8188CU/RTL8192CU
 wi*		at uhub?	# WaveLAN IEEE 802.11DS
 zyd*		at uhub?	# Zydas ZD1211
 ugen*		at uhub?	# USB Generic driver
 uthum*		at uhidev?	# TEMPerHUM sensor
+ugold*		at uhidev?	# gold TEMPer sensor
 utwitch*	at uhidev?	# YUREX BBU sensor
 
 # USB Video

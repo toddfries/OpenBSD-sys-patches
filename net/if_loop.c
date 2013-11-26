@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_loop.c,v 1.49 2013/03/28 16:55:27 deraadt Exp $	*/
+/*	$OpenBSD: if_loop.c,v 1.53 2013/10/24 11:31:43 mpi Exp $	*/
 /*	$NetBSD: if_loop.c,v 1.15 1996/05/07 02:40:33 thorpej Exp $	*/
 
 /*
@@ -125,7 +125,6 @@
 #ifdef	INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #endif
 
@@ -133,7 +132,6 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
-#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #endif
 
@@ -373,7 +371,7 @@ lo_altqstart(struct ifnet *ifp)
 
 /* ARGSUSED */
 void
-lortrequest(int cmd, struct rtentry *rt, struct rt_addrinfo *info)
+lortrequest(int cmd, struct rtentry *rt)
 {
 	if (rt)
 		rt->rt_rmx.rmx_mtu = LOMTU;
@@ -408,26 +406,6 @@ loioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		ifr = (struct ifreq *)data;
-		if (ifr == 0) {
-			error = EAFNOSUPPORT;		/* XXX */
-			break;
-		}
-		switch (ifr->ifr_addr.sa_family) {
-
-#ifdef INET
-		case AF_INET:
-			break;
-#endif
-#ifdef INET6
-		case AF_INET6:
-			break;
-#endif /* INET6 */
-
-		default:
-			error = EAFNOSUPPORT;
-			break;
-		}
 		break;
 
 	case SIOCSIFMTU:

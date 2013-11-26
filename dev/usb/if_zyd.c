@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zyd.c,v 1.90 2013/04/15 09:23:01 mglocker Exp $	*/
+/*	$OpenBSD: if_zyd.c,v 1.93 2013/11/06 15:55:15 jeremy Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -49,7 +49,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #endif
@@ -796,11 +795,11 @@ zyd_cmd(struct zyd_softc *sc, uint16_t code, const void *idata, int ilen,
 			splx(s);
 		printf("%s: could not send command (error=%s)\n",
 		    sc->sc_dev.dv_xname, usbd_errstr(error));
-		(void)usbd_free_xfer(xfer);
+		usbd_free_xfer(xfer);
 		return EIO;
 	}
 	if (!(flags & ZYD_CMD_FLAG_READ)) {
-		(void)usbd_free_xfer(xfer);
+		usbd_free_xfer(xfer);
 		return 0;	/* write: don't wait for reply */
 	}
 	/* wait at most one second for command reply */
@@ -808,7 +807,7 @@ zyd_cmd(struct zyd_softc *sc, uint16_t code, const void *idata, int ilen,
 	sc->odata = NULL;	/* in case answer is received too late */
 	splx(s);
 
-	(void)usbd_free_xfer(xfer);
+	usbd_free_xfer(xfer);
 	return error;
 }
 
@@ -1643,6 +1642,9 @@ zyd_set_multi(struct zyd_softc *sc)
 	uint32_t lo, hi;
 	uint8_t bit;
 
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if ((ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
 		lo = hi = 0xffffffff;
 		goto done;
@@ -1650,11 +1652,6 @@ zyd_set_multi(struct zyd_softc *sc)
 	lo = hi = 0;
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			lo = hi = 0xffffffff;
-			goto done;
-		}
 		bit = enm->enm_addrlo[5] >> 2;
 		if (bit < 32)
 			lo |= 1 << bit;

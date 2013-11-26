@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.129 2013/02/02 13:36:06 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.131 2013/09/28 12:40:31 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -493,7 +493,8 @@ boot(howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		printf("System halted. Press any key to reboot...\n\n");
@@ -564,9 +565,9 @@ dumpsys()
 {
 	int maj;
 	int psize;
-	daddr64_t blkno;		/* current block to write */
+	daddr_t blkno;		/* current block to write */
 					/* dump routine */
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int pg;				/* page being dumped */
 	paddr_t maddr;			/* PA being dumped */
 	int error;			/* error code from (*dump)() */

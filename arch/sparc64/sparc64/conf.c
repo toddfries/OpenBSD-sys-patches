@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.66 2012/12/08 20:38:10 kettenis Exp $	*/
+/*	$OpenBSD: conf.c,v 1.70 2013/11/04 14:11:29 deraadt Exp $	*/
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -86,6 +86,9 @@
 
 #include "fdc.h"		/* has NFDC and NFD; see files.sparc */
 
+#include "drm.h"
+cdev_decl(drm);
+
 #include "wsdisplay.h"
 #include "wskbd.h"
 #include "wsmouse.h"
@@ -104,9 +107,6 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
-#include "uscanner.h"
-
-#include "bthub.h"
 
 #include "pf.h"
 
@@ -117,6 +117,7 @@ cdev_decl(pci);
 #include "hotplug.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -243,7 +244,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 84 */
 	cdev_notdef(),			/* 85 */
 	cdev_notdef(),			/* 86 */
-	cdev_notdef(),			/* 87 */
+	cdev_drm_init(NDRM,drm),	/* 87: drm */
 	cdev_notdef(),			/* 88 */
 	cdev_notdef(),			/* 89 */
 	cdev_usb_init(NUSB,usb),	/* 90: USB controller */
@@ -252,7 +253,7 @@ struct cdevsw	cdevsw[] =
 	cdev_ulpt_init(NULPT,ulpt),	/* 93: USB printers */
 	cdev_urio_init(NURIO,urio),	/* 94: USB Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),	/* 95: USB tty */
-	cdev_usbdev_init(NUSCANNER,uscanner), /* 96: USB scanners */
+	cdev_notdef(),			/* 96: was USB scanners */
 	cdev_notdef(),			/* 97 */
 	cdev_notdef(),			/* 98 */
 	cdev_notdef(),			/* 99 */
@@ -285,11 +286,12 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NSBBC,sbbc),	/* 126: SBBC console */
 	cdev_tty_init(NVCCTTY,vcctty),	/* 127: virtual console concentrator */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 128: vscsi */
-	cdev_bthub_init(NBTHUB,bthub),	/* 129: bluetooth hub */
+	cdev_notdef(),
 	cdev_disk_init(1,diskmap),	/* 130: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 131: pppx */
 	cdev_gen_init(NVLDCP,vldcp),	/* 132: vldcp */
-	cdev_vdsp_init(NVDSP,vdsp)	/* 133: vdsp */
+	cdev_vdsp_init(NVDSP,vdsp),	/* 133: vdsp */
+	cdev_fuse_init(NFUSE,fuse),	/* 134: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 

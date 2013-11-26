@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.125 2013/04/05 05:45:09 brad Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.132 2013/11/15 19:42:20 sasano Exp $
 
 machine		amd64		# architecture, used by config; REQUIRED
 
@@ -116,8 +116,8 @@ mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 #urio*	at uhub?		# Diamond Multimedia Rio 500
-#uscanner* at uhub?		# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 #ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
@@ -188,12 +188,8 @@ siop*	at pci?			# NCR 538XX SCSI controllers(new)
 adw*	at pci?			# AdvanSys ULTRA WIDE SCSI
 pcscp*	at pci?			# AMD 53c974 PCscsi-PCI SCSI
 #trm*	at pci?			# Tekram DC-3x5U SCSI Controllers
+vmwpvs*	at pci?			# VMware ParaVirtual SCSI
 softraid0	at root		# Software RAID
-
-# I2O
-iop*	at pci?			# I2O processor
-ioprbs*	at iop?			# I2O arrays
-iopsp*	at iop?			# I2O SCSI pass-through
 
 scsibus* at scsi?
 sd*	at scsibus?		# SCSI disk drives
@@ -230,7 +226,6 @@ ne*	at pcmcia?		# PCMCIA based NE2000 ethernet
 ep*	at pcmcia?		# PCMCIA based 3C5xx ethernet
 sm*	at pcmcia?		# PCMCIA based sm ethernet
 xe*	at pcmcia?		# Xircom ethernet
-#fpa*	at pci?			# DEC DEFPA FDDI
 xl*	at pci?			# 3C9xx ethernet
 xl*	at cardbus?		# 3C575 ethernet
 rl*	at pci?			# RealTek 81[23]9 ethernet
@@ -269,6 +264,7 @@ nfe*	at pci?			# NVIDIA nForce Ethernet
 xge*	at pci?			# Neterion Xframe-I/II 10Gb ethernet
 bce*	at pci?			# Broadcom BCM4401
 vic*	at pci?			# VMware VMXnet virtual interface
+vmx*	at pci?			# VMware VMXNET3 virtual interface
 et*	at pci?			# Agere/LSI ET1310
 age*	at pci?			# Attansic L1 Ethernet
 alc*	at pci?			# Attansic L1C/L1D/L2C Ethernet
@@ -291,7 +287,6 @@ wi*	at pci?			# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?		# WaveLAN IEEE 802.11DS
 an*	at pcmcia?		# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?		# Xircom Netwave
-#ray*	at pcmcia?		# Raylink Aviator2.4/Pro 802.11FH
 ipw*	at pci?			# Intel PRO/Wireless 2100
 iwi*	at pci?			# Intel PRO/Wireless 2200BG/2915ABG
 wpi*	at pci?			# Intel PRO/Wireless 3945ABG

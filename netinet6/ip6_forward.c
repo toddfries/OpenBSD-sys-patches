@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_forward.c,v 1.57 2012/11/06 12:32:42 henning Exp $	*/
+/*	$OpenBSD: ip6_forward.c,v 1.63 2013/11/11 09:15:35 mpi Exp $	*/
 /*	$KAME: ip6_forward.c,v 1.75 2001/06/29 12:42:13 jinmei Exp $	*/
 
 /*
@@ -49,8 +49,8 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/ip_var.h>
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
@@ -100,12 +100,12 @@ ip6_forward(struct mbuf *m, int srcrt)
 	struct tdb_ident *tdbi;
 	u_int32_t sspi;
 	struct tdb *tdb;
-	int s;
 #if NPF > 0
 	struct ifnet *encif;
 #endif
 #endif /* IPSEC */
 	u_int rtableid = 0;
+	char src6[INET6_ADDRSTRLEN], dst6[INET6_ADDRSTRLEN];
 
 	/*
 	 * Do not forward packets to multicast destination (should be handled
@@ -120,11 +120,12 @@ ip6_forward(struct mbuf *m, int srcrt)
 		/* XXX in6_ifstat_inc(rt->rt_ifp, ifs6_in_discard) */
 		if (ip6_log_time + ip6_log_interval < time_second) {
 			ip6_log_time = time_second;
+			inet_ntop(AF_INET6, &ip6->ip6_src, src6, sizeof(src6));
+			inet_ntop(AF_INET6, &ip6->ip6_dst, dst6, sizeof(dst6));
 			log(LOG_DEBUG,
 			    "cannot forward "
 			    "from %s to %s nxt %d received on %s\n",
-			    ip6_sprintf(&ip6->ip6_src),
-			    ip6_sprintf(&ip6->ip6_dst),
+			    src6, dst6,
 			    ip6->ip6_nxt,
 			    m->m_pkthdr.rcvif->if_xname);
 		}
@@ -148,8 +149,6 @@ reroute:
 	if (!ipsec_in_use)
 		goto done_spd;
 
-	s = splnet();
-
 	/*
 	 * Check if there was an outgoing SA bound to the flow
 	 * from a transport protocol.
@@ -160,7 +159,7 @@ reroute:
 	if (mtag != NULL) {
 #ifdef DIAGNOSTIC
 		if (mtag->m_tag_len != sizeof (struct tdb_ident))
-			panic("ip6_forward: tag of length %d (should be %d",
+			panic("ip6_forward: tag of length %hu (should be %zu",
 			    mtag->m_tag_len, sizeof (struct tdb_ident));
 #endif
 		tdbi = (struct tdb_ident *)(mtag + 1);
@@ -174,8 +173,6 @@ reroute:
 		    &error, IPSP_DIRECTION_OUT, NULL, NULL, 0);
 
 	if (tdb == NULL) {
-	        splx(s);
-
 		if (error == 0) {
 		        /*
 			 * No IPsec processing required, we'll just send the
@@ -209,7 +206,6 @@ reroute:
 			    tdbi->rdomain == tdb->tdb_rdomain &&
 			    !bcmp(&tdbi->dst, &tdb->tdb_dst,
 			    sizeof(union sockaddr_union))) {
-				splx(s);
 				sproto = 0; /* mark as no-IPsec-needed */
 				goto done_spd;
 			}
@@ -219,7 +215,6 @@ reroute:
 	        bcopy(&tdb->tdb_dst, &sdst, sizeof(sdst));
 		sspi = tdb->tdb_spi;
 		sproto = tdb->tdb_sproto;
-	        splx(s);
 	}
 
 	/* Fall through to the routing/multicast handling code */
@@ -314,11 +309,12 @@ reroute:
 
 		if (ip6_log_time + ip6_log_interval < time_second) {
 			ip6_log_time = time_second;
+			inet_ntop(AF_INET6, &ip6->ip6_src, src6, sizeof(src6));
+			inet_ntop(AF_INET6, &ip6->ip6_dst, dst6, sizeof(dst6));
 			log(LOG_DEBUG,
 			    "cannot forward "
 			    "src %s, dst %s, nxt %d, rcvif %s, outif %s\n",
-			    ip6_sprintf(&ip6->ip6_src),
-			    ip6_sprintf(&ip6->ip6_dst),
+			    src6, dst6,
 			    ip6->ip6_nxt,
 			    m->m_pkthdr.rcvif->if_xname, rt->rt_ifp->if_xname);
 		}
@@ -337,12 +333,9 @@ reroute:
 	 * PMTU notification.  is it okay?
 	 */
 	if (sproto != 0) {
-		s = splnet();
-
 		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
 		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
-			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
 			goto senderr;	/*XXX*/
@@ -352,15 +345,12 @@ reroute:
 		if ((encif = enc_getif(tdb->tdb_rdomain,
 		    tdb->tdb_tap)) == NULL ||
 		    pf_test(AF_INET6, PF_FWD, encif, &m, NULL) != PF_PASS) {
-			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
 			goto senderr;
 		}
-		if (m == NULL) {
-			splx(s);
+		if (m == NULL)
 			goto senderr;
-		}
 		ip6 = mtod(m, struct ip6_hdr *);
 		/*
 		 * PF_TAG_REROUTE handling or not...
@@ -370,19 +360,19 @@ reroute:
 		 * What's the behaviour?
 		 */
 #endif
+		in6_proto_cksum_out(m, encif);
 
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 
 		/* Callee frees mbuf */
 		error = ipsp_process_packet(m, tdb, AF_INET6, 0);
-		splx(s);
 		m_freem(mcopy);
 		goto freert;
 	}
 #endif /* IPSEC */
 
 	if (rt->rt_flags & RTF_GATEWAY)
-		dst = (struct sockaddr_in6 *)rt->rt_gateway;
+		dst = satosin6(rt->rt_gateway);
 
 	/*
 	 * If we are to forward the packet using the same interface
@@ -396,7 +386,7 @@ reroute:
 	if (rt->rt_ifp == m->m_pkthdr.rcvif && !srcrt && ip6_sendredirects &&
 	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0) {
 		if ((rt->rt_ifp->if_flags & IFF_POINTOPOINT) &&
-		    nd6_is_addr_neighbor((struct sockaddr_in6 *)&ip6_forward_rt.ro_dst, rt->rt_ifp)) {
+		    nd6_is_addr_neighbor(&ip6_forward_rt.ro_dst, rt->rt_ifp)) {
 			/*
 			 * If the incoming interface is equal to the outgoing
 			 * one, the link attached to the interface is
@@ -445,10 +435,11 @@ reroute:
 		if ((rt->rt_flags & (RTF_BLACKHOLE|RTF_REJECT)) == 0)
 #endif
 		{
+			inet_ntop(AF_INET6, &ip6->ip6_src, src6, sizeof(src6));
+			inet_ntop(AF_INET6, &ip6->ip6_dst, dst6, sizeof(dst6));
 			printf("ip6_forward: outgoing interface is loopback. "
 			       "src %s, dst %s, nxt %d, rcvif %s, outif %s\n",
-			       ip6_sprintf(&ip6->ip6_src),
-			       ip6_sprintf(&ip6->ip6_dst),
+			       src6, dst6,
 			       ip6->ip6_nxt, m->m_pkthdr.rcvif->if_xname,
 			       rt->rt_ifp->if_xname);
 		}
@@ -470,7 +461,6 @@ reroute:
 	}
 	if (m == NULL)
 		goto senderr;
-
 	ip6 = mtod(m, struct ip6_hdr *);
 	if ((m->m_pkthdr.pf.flags & (PF_TAG_REROUTE | PF_TAG_GENERATED)) ==
 	    (PF_TAG_REROUTE | PF_TAG_GENERATED)) {
@@ -483,6 +473,7 @@ reroute:
 		goto reroute;
 	}
 #endif 
+	in6_proto_cksum_out(m, rt->rt_ifp);
 
 	/* Check the size after pf_test to give pf a chance to refragment. */
 	if (m->m_pkthdr.len > IN6_LINKMTU(rt->rt_ifp)) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_pool.c,v 1.120 2013/05/03 18:26:07 tedu Exp $	*/
+/*	$OpenBSD: subr_pool.c,v 1.124 2013/11/05 03:28:45 dlg Exp $	*/
 /*	$NetBSD: subr_pool.c,v 1.61 2001/09/26 07:14:56 chs Exp $	*/
 
 /*-
@@ -131,9 +131,9 @@ void	pool_large_free_ni(struct pool *, void *);
 
 #ifdef DDB
 void	 pool_print_pagelist(struct pool_pagelist *, int (*)(const char *, ...)
-	    /* __attribute__((__format__(__kprintf__,1,2))) */);
+	     __attribute__((__format__(__kprintf__,1,2))));
 void	 pool_print1(struct pool *, const char *, int (*)(const char *, ...)
-	    /* __attribute__((__format__(__kprintf__,1,2))) */);
+	     __attribute__((__format__(__kprintf__,1,2))));
 #endif
 
 #define pool_sleep(pl) msleep(pl, &pl->pr_mtx, PSWP, pl->pr_wchan, 0)
@@ -342,11 +342,6 @@ pool_init(struct pool *pp, size_t size, u_int align, u_int ioff, int flags,
 	if (pool_serial == 0)
 		panic("pool_init: too much uptime");
 
-        /* constructor, destructor, and arg */
-	pp->pr_ctor = NULL;
-	pp->pr_dtor = NULL;
-	pp->pr_arg = NULL;
-
 	/*
 	 * Decide whether to put the page header off page to avoid
 	 * wasting too large a part of the page. Off-page page headers
@@ -484,8 +479,11 @@ pool_get(struct pool *pp, int flags)
 	KASSERT(flags & (PR_WAITOK | PR_NOWAIT));
 
 #ifdef DIAGNOSTIC
-	if ((flags & PR_WAITOK) != 0)
+	if ((flags & PR_WAITOK) != 0) {
 		assertwaitok();
+		if (pool_debug == 2)
+			yield();
+	}
 #endif /* DIAGNOSTIC */
 
 	mtx_enter(&pp->pr_mtx);
@@ -508,20 +506,9 @@ pool_get(struct pool *pp, int flags)
 	if (v == NULL)
 		return (v);
 
-	if (pp->pr_ctor) {
-		if (flags & PR_ZERO)
-			panic("pool_get: PR_ZERO when ctor set");
-		if (pp->pr_ctor(pp->pr_arg, v, flags)) {
-			mtx_enter(&pp->pr_mtx);
-			pp->pr_nget--;
-			pool_do_put(pp, v);
-			mtx_leave(&pp->pr_mtx);
-			v = NULL;
-		}
-	} else {
-		if (flags & PR_ZERO)
-			memset(v, 0, pp->pr_size);
-	}
+	if (flags & PR_ZERO)
+		memset(v, 0, pp->pr_size);
+
 	return (v);
 }
 
@@ -719,8 +706,6 @@ startover:
 void
 pool_put(struct pool *pp, void *v)
 {
-	if (pp->pr_dtor)
-		pp->pr_dtor(pp->pr_arg, v);
 	mtx_enter(&pp->pr_mtx);
 #ifdef POOL_DEBUG
 	if (pp->pr_roflags & PR_DEBUGCHK) {
@@ -777,6 +762,12 @@ pool_do_put(struct pool *pp, void *v)
 	 * Return to item list.
 	 */
 #ifdef DIAGNOSTIC
+	if (pool_debug) {
+		struct pool_item *qi;
+		XSIMPLEQ_FOREACH(qi, &ph->ph_itemlist, pi_list)
+			if (pi == qi)
+				panic("double pool_put: %p", pi);
+	}
 	pi->pi_magic = poison_value(pi);
 	if (ph->ph_magic) {
 		poison_mem(pi + 1, pp->pr_size - sizeof(*pi));
@@ -1042,14 +1033,6 @@ pool_set_constraints(struct pool *pp, const struct kmem_pa_mode *mode)
 	pp->pr_crange = mode;
 }
 
-void
-pool_set_ctordtor(struct pool *pp, int (*ctor)(void *, void *, int),
-    void (*dtor)(void *, void *), void *arg)
-{
-	pp->pr_ctor = ctor;
-	pp->pr_dtor = dtor;
-	pp->pr_arg = arg;
-}
 /*
  * Release all complete pages that have not been used recently.
  *
@@ -1124,14 +1107,14 @@ pool_reclaim_all(void)
  */
 void
 pool_printit(struct pool *pp, const char *modif,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	pool_print1(pp, modif, pr);
 }
 
 void
 pool_print_pagelist(struct pool_pagelist *pl,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	struct pool_item_header *ph;
 #ifdef DIAGNOSTIC
@@ -1154,7 +1137,7 @@ pool_print_pagelist(struct pool_pagelist *pl,
 
 void
 pool_print1(struct pool *pp, const char *modif,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	struct pool_item_header *ph;
 	int print_pagelist = 0;
@@ -1368,8 +1351,9 @@ pool_chk(struct pool *pp)
 #ifdef DDB
 void
 pool_walk(struct pool *pp, int full,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */,
-    void (*func)(void *, int, int (*)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */))
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))),
+    void (*func)(void *, int, int (*)(const char *, ...)
+	    __attribute__((__format__(__kprintf__,1,2)))))
 {
 	struct pool_item_header *ph;
 	struct pool_item *pi;

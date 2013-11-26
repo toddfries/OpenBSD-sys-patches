@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath_hds.c,v 1.6 2011/07/11 01:02:48 dlg Exp $ */
+/*	$OpenBSD: mpath_hds.c,v 1.13 2013/11/23 23:35:02 gsoares Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -86,15 +86,12 @@ struct cfdriver hds_cd = {
 
 void		hds_mpath_start(struct scsi_xfer *);
 int		hds_mpath_checksense(struct scsi_xfer *);
-int		hds_mpath_online(struct scsi_link *);
-int		hds_mpath_offline(struct scsi_link *);
+void		hds_mpath_status(struct scsi_link *);
 
 const struct mpath_ops hds_mpath_ops = {
 	"hds",
 	hds_mpath_checksense,
-	hds_mpath_online,
-	hds_mpath_offline,
-	MPATH_ROUNDROBIN
+	hds_mpath_status
 };
 
 struct hds_device {
@@ -131,7 +128,7 @@ hds_match(struct device *parent, void *match, void *aux)
 		if (bcmp(s->vendor, inq->vendor, strlen(s->vendor)) == 0 &&
 		    bcmp(s->product, inq->product, strlen(s->product)) == 0 &&
 		    hds_inquiry(link, &mode) == 0)
-			return (3);
+			return (8);
 	}
 
 	return (0);
@@ -155,12 +152,12 @@ hds_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_path.p_link = link;
 
 	if (hds_inquiry(link, &sc->sc_mode) != 0) {
-		printf("%s: unable to query controller mode\n");
+		printf("%s: unable to query controller mode\n", DEVNAME(sc));
 		return;
 	}
 
 	if (hds_info(sc) != 0) {
-		printf("%s: unable to query path info\n");
+		printf("%s: unable to query path info\n", DEVNAME(sc));
 		return;
 	}
 
@@ -172,7 +169,8 @@ hds_attach(struct device *parent, struct device *self, void *aux)
 	if (!preferred)
 		return;
 
-	if (mpath_path_attach(&sc->sc_path, &hds_mpath_ops) != 0)
+	/* XXX id isnt real, needs to come from hds_info */
+	if (mpath_path_attach(&sc->sc_path, 0, &hds_mpath_ops) != 0)
 		printf("%s: unable to attach path\n", DEVNAME(sc));
 }
 
@@ -193,7 +191,7 @@ hds_activate(struct device *self, int act)
 	case DVACT_RESUME:
 		break;
 	case DVACT_DEACTIVATE:
-		if (sc->sc_path.p_dev != NULL)
+		if (sc->sc_path.p_group != NULL)
 			mpath_path_detach(&sc->sc_path);
 		break;
 	}
@@ -211,19 +209,15 @@ hds_mpath_start(struct scsi_xfer *xs)
 int
 hds_mpath_checksense(struct scsi_xfer *xs)
 {
-	return (0);
+	return (MPATH_SENSE_DECLINED);
 }
 
-int
-hds_mpath_online(struct scsi_link *link)
+void
+hds_mpath_status(struct scsi_link *link)
 {
-	return (0);
-}
+	struct hds_softc *sc = link->device_softc;
 
-int
-hds_mpath_offline(struct scsi_link *link)
-{
-	return (0);
+	mpath_path_status(&sc->sc_path, MPATH_S_UNKNOWN);
 }
 
 int

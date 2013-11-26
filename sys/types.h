@@ -1,4 +1,4 @@
-/*	$OpenBSD: types.h,v 1.35 2013/01/09 12:17:38 jsg Exp $	*/
+/*	$OpenBSD: types.h,v 1.39 2013/09/14 01:35:02 guenther Exp $	*/
 /*	$NetBSD: types.h,v 1.29 1996/11/15 22:48:25 jtc Exp $	*/
 
 /*-
@@ -129,7 +129,6 @@ typedef __psize_t	psize_t;
 typedef	char *		caddr_t;	/* core address */
 typedef	__int32_t	daddr32_t;	/* 32-bit disk address */
 typedef	__int64_t	daddr_t;	/* 64-bit disk address */
-typedef	__int64_t	daddr64_t;	/* 64-bit disk address */
 typedef	__dev_t		dev_t;		/* device number */
 typedef	__fixpt_t	fixpt_t;	/* fixed point number */
 typedef	__gid_t		gid_t;		/* group id */
@@ -138,7 +137,6 @@ typedef	__ino_t		ino_t;		/* inode number */
 typedef	__key_t		key_t;		/* IPC key (for Sys V IPC) */
 typedef	__mode_t	mode_t;		/* permissions */
 typedef	__nlink_t	nlink_t;	/* link count */
-typedef	__pid_t		pid_t;		/* process id */
 typedef __rlim_t	rlim_t;		/* resource limit */
 typedef	__segsz_t	segsz_t;	/* segment size */
 typedef	__swblk_t	swblk_t;	/* swap offset */
@@ -170,6 +168,11 @@ typedef	__clock_t	clock_t;
 #ifndef	_CLOCKID_T_DEFINED_
 #define	_CLOCKID_T_DEFINED_
 typedef	__clockid_t	clockid_t;
+#endif
+
+#ifndef	_PID_T_DEFINED_
+#define	_PID_T_DEFINED_
+typedef	__pid_t		pid_t;
 #endif
 
 #ifndef	_SIZE_T_DEFINED_

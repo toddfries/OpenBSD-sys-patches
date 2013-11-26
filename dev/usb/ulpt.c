@@ -1,4 +1,4 @@
-/*	$OpenBSD: ulpt.c,v 1.43 2013/04/15 09:23:02 mglocker Exp $ */
+/*	$OpenBSD: ulpt.c,v 1.45 2013/11/07 13:11:10 pirofti Exp $ */
 /*	$NetBSD: ulpt.c,v 1.57 2003/01/05 10:19:42 scw Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ulpt.c,v 1.24 1999/11/17 22:33:44 n_hibma Exp $	*/
 
@@ -103,7 +103,6 @@ struct ulpt_softc {
 	u_char sc_laststatus;
 
 	int sc_refcnt;
-	u_char sc_dying;
 
 	struct ulpt_fwdev *sc_fwdev;
 };
@@ -266,7 +265,7 @@ ulpt_attach(struct device *parent, struct device *self, void *aux)
 		if (err) {
 			printf("%s: setting alternate interface failed\n",
 			       sc->sc_dev.dv_xname);
-			sc->sc_dying = 1;
+			usbd_deactivate(sc->sc_udev);
 			return;
 		}
 	}
@@ -294,7 +293,7 @@ ulpt_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_out == -1) {
 		printf("%s: could not find bulk out endpoint\n",
 		    sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -365,7 +364,7 @@ ulpt_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 	return (0);
@@ -482,7 +481,7 @@ ulptopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (sc == NULL)
 		return (ENXIO);
 
-	if (sc == NULL || sc->sc_iface == NULL || sc->sc_dying)
+	if (sc == NULL || sc->sc_iface == NULL || usbd_is_dying(sc->sc_udev))
 		return (ENXIO);
 
 	if (sc->sc_state)
@@ -497,7 +496,7 @@ ulptopen(dev_t dev, int flag, int mode, struct proc *p)
 
 	if ((flags & ULPT_NOPRIME) == 0) {
 		ulpt_reset(sc);
-		if (sc->sc_dying) {
+		if (usbd_is_dying(sc->sc_udev)) {
 			error = ENXIO;
 			sc->sc_state = 0;
 			goto done;
@@ -636,9 +635,11 @@ ulpt_do_write(struct ulpt_softc *sc, struct uio *uio, int flags)
 		if (error)
 			break;
 		DPRINTFN(1, ("ulptwrite: transfer %d bytes\n", n));
-		err = usbd_bulk_transfer(xfer, sc->sc_out_pipe, USBD_NO_COPY,
-			  USBD_NO_TIMEOUT, bufp, &n, "ulptwr");
+		usbd_setup_xfer(xfer, sc->sc_out_pipe, 0, bufp, n,
+		    USBD_NO_COPY | USBD_SYNCHRONOUS | USBD_CATCH, 0, NULL);
+		err = usbd_transfer(xfer);
 		if (err) {
+			usbd_clear_endpoint_stall(sc->sc_out_pipe);
 			DPRINTF(("ulptwrite: error=%d\n", err));
 			error = EIO;
 			break;
@@ -657,7 +658,7 @@ ulptwrite(dev_t dev, struct uio *uio, int flags)
 
 	sc = ulpt_cd.cd_devs[ULPTUNIT(dev)];
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	sc->sc_refcnt++;
@@ -704,9 +705,11 @@ ulpt_ucode_loader_hp(struct ulpt_softc *sc)
 	while (remain > 0) {
 		len = min(remain, ULPT_BSIZE);
 		memcpy(bufp, &ucode[offset], len);
-		error = usbd_bulk_transfer(xfer, sc->sc_out_pipe, USBD_NO_COPY,
-			  USBD_NO_TIMEOUT, bufp, &len, "ulptwr");
+		usbd_setup_xfer(xfer, sc->sc_out_pipe, 0, bufp, len,
+		    USBD_NO_COPY | USBD_SYNCHRONOUS, 0, NULL);
+		error = usbd_transfer(xfer);
 		if (error != USBD_NORMAL_COMPLETION) {
+			usbd_clear_endpoint_stall(sc->sc_out_pipe);
 			printf("%s: ucode upload error=%s!\n",
 			    sc->sc_dev.dv_xname, usbd_errstr(error));
 			break;

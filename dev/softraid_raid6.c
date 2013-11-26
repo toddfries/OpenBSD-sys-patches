@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.49 2013/04/27 14:06:09 jsing Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.57 2013/11/21 17:06:45 krw Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -63,7 +63,7 @@ void	sr_raid6_set_vol_state(struct sr_discipline *);
 
 void	sr_raid6_xorp(void *, void *, int);
 void	sr_raid6_xorq(void *, void *, int, int);
-int	sr_raid6_addio(struct sr_workunit *wu, int, daddr64_t, daddr64_t,
+int	sr_raid6_addio(struct sr_workunit *wu, int, daddr_t, daddr_t,
 	    void *, int, int, void *, void *, int);
 void	sr_dump(void *, int);
 void	sr_raid6_scrub(struct sr_discipline *);
@@ -130,8 +130,8 @@ sr_raid6_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 	 */
 	sd->sd_meta->ssdi.ssd_strip_size = MAXPHYS;
 	sd->sd_meta->ssdi.ssd_size = (coerced_size &
-	    ~((sd->sd_meta->ssdi.ssd_strip_size >> DEV_BSHIFT) - 1)) *
-	    (no_chunk - 2);
+	    ~(((u_int64_t)sd->sd_meta->ssdi.ssd_strip_size >>
+	    DEV_BSHIFT) - 1)) * (no_chunk - 2);
 
 	return sr_raid6_init(sd);
 }
@@ -382,9 +382,11 @@ sr_raid6_rw(struct sr_workunit *wu)
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_chunk		*scp;
 	int			s, fail, i, gxinv, pxinv;
-	daddr64_t		blk, lbaoffs, strip_no, chunk, qchunk, pchunk, fchunk;
-	daddr64_t		strip_size, no_chunk, lba, chunk_offs, phys_offs;
-	daddr64_t		strip_bits, length, strip_offs, datalen, row_size;
+	daddr_t			blk, lba;
+	int64_t			chunk_offs, lbaoffs, phys_offs, strip_offs;
+	int64_t			strip_no, strip_size, strip_bits;
+	int64_t			fchunk, no_chunk, chunk, qchunk, pchunk;
+	int64_t			length, datalen, row_size;
 	void			*pbuf, *data, *qbuf;
 
 	/* blk and scsi error will be handled by sr_validate_io */
@@ -405,6 +407,7 @@ sr_raid6_rw(struct sr_workunit *wu)
 			printf("%s: can't get wu_r", DEVNAME(sd->sd_sc));
 			goto bad;
 		}
+		wu_r->swu_state = SR_WU_INPROGRESS;
 		wu_r->swu_flags |= SR_WUF_DISCIPLINE;
 	}
 
@@ -629,26 +632,10 @@ sr_raid6_rw(struct sr_workunit *wu)
 
 		wu = wu_r;
 	}
-
-	/* rebuild io, let rebuild routine deal with it */
-	if (wu->swu_flags & SR_WUF_REBUILD)
-		goto queued;
-
-	/* current io failed, restart */
-	if (wu->swu_state == SR_WU_RESTART)
-		goto start;
-
-	/* deferred io failed, don't restart */
-	if (wu->swu_state == SR_WU_REQUEUE)
-		goto queued;
-
-	if (sr_check_io_collision(wu))
-		goto queued;
-
-start:
-	sr_raid_startwu(wu);
-queued:
 	splx(s);
+
+	sr_schedule_wu(wu);
+
 	return (0);
 bad:
 	/* XXX - can leak pbuf/qbuf on error. */
@@ -732,14 +719,14 @@ sr_raid6_wu_done(struct sr_workunit *wu)
 
 	if (xs->flags & SCSI_DATA_IN) {
 		printf("%s: retrying read on block %lld\n",
-		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 		sr_wu_release_ccbs(wu);
 		wu->swu_state = SR_WU_RESTART;
 		if (sd->sd_scsi_rw(wu) == 0)
 			return SR_WU_RESTART;
 	} else {
 		printf("%s: permanently fail write on block %lld\n",
-		    sd->sd_meta->ssd_devname, wu->swu_blk_start);
+		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 	}
 
 	wu->swu_state = SR_WU_FAILED;
@@ -749,8 +736,8 @@ sr_raid6_wu_done(struct sr_workunit *wu)
 }
 
 int
-sr_raid6_addio(struct sr_workunit *wu, int chunk, daddr64_t blkno,
-    daddr64_t len, void *data, int xsflags, int ccbflags, void *pbuf,
+sr_raid6_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
+    daddr_t len, void *data, int xsflags, int ccbflags, void *pbuf,
     void *qbuf, int gn)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
@@ -758,7 +745,8 @@ sr_raid6_addio(struct sr_workunit *wu, int chunk, daddr64_t blkno,
 	struct sr_raid6_opaque  *pqbuf;
 
 	DNPRINTF(SR_D_DIS, "sr_raid6_addio: %s %d.%llx %llx %p:%p\n",
-	    (xsflags & SCSI_DATA_IN) ? "read" : "write", chunk, blkno, len,
+	    (xsflags & SCSI_DATA_IN) ? "read" : "write", chunk,
+	    (long long)blkno, (long long)len,
 	    pbuf, qbuf);
 
 	/* Allocate temporary buffer. */

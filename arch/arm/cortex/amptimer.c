@@ -1,4 +1,4 @@
-/* $OpenBSD: amptimer.c,v 1.2 2013/05/09 13:35:43 patrick Exp $ */
+/* $OpenBSD: amptimer.c,v 1.4 2013/08/08 10:07:22 rapha Exp $ */
 /*
  * Copyright (c) 2011 Dale Rahn <drahn@openbsd.org>
  *
@@ -144,7 +144,10 @@ amptimer_readcnt64(struct amptimer_softc *sc)
 int
 amptimer_match(struct device *parent, void *cfdata, void *aux)
 {
-	return (1);
+	if ((cpufunc_id() & CPU_ID_CORTEX_A9_MASK) == CPU_ID_CORTEX_A9)
+		return (1);
+
+	return 0;
 }
 
 void
@@ -244,11 +247,6 @@ amptimer_intr(void *frame)
 	while (pc->pc_nexttickevent <= now) {
 		pc->pc_nexttickevent += sc->sc_ticks_per_intr;
 		pc->pc_ticks_err_sum += sc->sc_ticks_err_cnt;
-		/* looping a few times is faster than divide */
-		while (pc->pc_ticks_err_sum > hz) {
-			pc->pc_nexttickevent += 1;
-			pc->pc_ticks_err_sum -= hz;
-		}
 
 		/* looping a few times is faster than divide */
 		while (pc->pc_ticks_err_sum  > hz) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_biomem.c,v 1.23 2013/01/18 10:07:37 beck Exp $ */
+/*	$OpenBSD: vfs_biomem.c,v 1.28 2013/07/09 15:37:43 beck Exp $ */
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
  *

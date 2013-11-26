@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath_emc.c,v 1.8 2011/07/11 01:02:48 dlg Exp $ */
+/*	$OpenBSD: mpath_emc.c,v 1.15 2013/11/23 23:35:02 gsoares Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -91,15 +91,12 @@ struct cfdriver emc_cd = {
 
 void		emc_mpath_start(struct scsi_xfer *);
 int		emc_mpath_checksense(struct scsi_xfer *);
-int		emc_mpath_online(struct scsi_link *);
-int		emc_mpath_offline(struct scsi_link *);
+void		emc_mpath_status(struct scsi_link *);
 
 const struct mpath_ops emc_mpath_ops = {
 	"emc",
 	emc_mpath_checksense,
-	emc_mpath_online,
-	emc_mpath_offline,
-	MPATH_ROUNDROBIN
+	emc_mpath_status
 };
 
 struct emc_device {
@@ -135,7 +132,7 @@ emc_match(struct device *parent, void *match, void *aux)
 
 		if (bcmp(s->vendor, inq->vendor, strlen(s->vendor)) == 0 &&
 		    bcmp(s->product, inq->product, strlen(s->product)) == 0)
-			return (3);
+			return (8);
 	}
 
 	return (0);
@@ -171,10 +168,13 @@ emc_attach(struct device *parent, struct device *self, void *aux)
 	printf("%s: %s %s SP-%c port %d\n", DEVNAME(sc), model, serial,
 	    sc->sc_sp + 'A', sc->sc_port);
 
-	if (sc->sc_lun_state == EMC_SP_INFO_LUN_STATE_OWNED) {
-		if (mpath_path_attach(&sc->sc_path, &emc_mpath_ops) != 0)
-			printf("%s: unable to attach path\n", DEVNAME(sc));
+	if (sc->sc_lun_state != EMC_SP_INFO_LUN_STATE_OWNED) {
+		/* XXX add failover support */
+		return;
 	}
+
+	if (mpath_path_attach(&sc->sc_path, sc->sc_sp, &emc_mpath_ops) != 0)
+		printf("%s: unable to attach path\n", DEVNAME(sc));
 }
 
 int
@@ -194,7 +194,7 @@ emc_activate(struct device *self, int act)
 	case DVACT_RESUME:
 		break;
 	case DVACT_DEACTIVATE:
-		if (sc->sc_path.p_dev != NULL)
+		if (sc->sc_path.p_group != NULL)
 			mpath_path_detach(&sc->sc_path);
 		break;
 	}
@@ -212,19 +212,15 @@ emc_mpath_start(struct scsi_xfer *xs)
 int
 emc_mpath_checksense(struct scsi_xfer *xs)
 {
-	return (0);
+	return (MPATH_SENSE_DECLINED);
 }
 
-int
-emc_mpath_online(struct scsi_link *link)
+void
+emc_mpath_status(struct scsi_link *link)
 {
-	return (0);
-}
+	struct emc_softc *sc = link->device_softc;
 
-int
-emc_mpath_offline(struct scsi_link *link)
-{
-	return (0);
+	mpath_path_status(&sc->sc_path, MPATH_S_UNKNOWN);
 }
 
 int
@@ -238,7 +234,7 @@ emc_inquiry(struct emc_softc *sc, char *model, char *serial)
 
 	length = MIN(sc->sc_path.p_link->inqdata.additional_length + 5, 255);
 	if (length < 160) {
-		printf("%s: FC (Legacy)\n");
+		printf("%s: FC (Legacy)\n", DEVNAME(sc));
 		return (0);
 	}
 

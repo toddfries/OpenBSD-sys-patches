@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkeyv2_convert.c,v 1.39 2013/03/28 23:10:05 tedu Exp $	*/
+/*	$OpenBSD: pfkeyv2_convert.c,v 1.42 2013/10/24 11:31:43 mpi Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@keromytis.org)
  *
@@ -108,9 +108,6 @@
 #endif
 
 #include <netinet/ip_ipsp.h>
-#ifdef INET6
-#include <netinet6/in6_var.h>
-#endif
 #include <net/pfkeyv2.h>
 #include <crypto/cryptodev.h>
 #include <crypto/xform.h>
@@ -994,7 +991,7 @@ import_tag(struct tdb *tdb, struct sadb_x_tag *stag)
 
 	if (stag) {
 		s = (char *)(stag + 1);
-		tdb->tdb_tag = pf_tagname2tag(s);
+		tdb->tdb_tag = pf_tagname2tag(s, 1);
 	}
 }
 
@@ -1005,10 +1002,11 @@ export_tag(void **p, struct tdb *tdb)
 	struct sadb_x_tag *stag = (struct sadb_x_tag *)*p;
 	char *s = (char *)(stag + 1);
 
+	pf_tag2tagname(tdb->tdb_tag, s);
+
 	stag->sadb_x_tag_taglen = strlen(s) + 1;
 	stag->sadb_x_tag_len = (sizeof(struct sadb_x_tag) +
 	    PADUP(stag->sadb_x_tag_taglen)) / sizeof(uint64_t);
-	pf_tag2tagname(tdb->tdb_tag, s);
 	*p += sizeof(struct sadb_x_tag) + PADUP(stag->sadb_x_tag_taglen);
 }
 

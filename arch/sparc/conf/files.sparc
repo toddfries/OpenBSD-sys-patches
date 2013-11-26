@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc,v 1.92 2013/04/21 14:44:16 sebastia Exp $
+#	$OpenBSD: files.sparc,v 1.94 2013/09/24 20:10:49 miod Exp $
 #	$NetBSD: files.sparc,v 1.44 1997/08/31 21:29:16 pk Exp $
 
 # @(#)files.sparc	8.1 (Berkeley) 7/19/93
@@ -239,7 +239,7 @@ attach	zx at sbus
 file	arch/sparc/dev/zx.c		zx
 
 # device definition in sys/conf/files
-attach	le at sbus, ledma, lebuffer, obio
+attach	le at sbus, ledma, lebuffer, obio: le24
 file	arch/sparc/dev/if_le.c		le
 
 attach	ie at obio, vmes, vmel
@@ -361,7 +361,7 @@ file	arch/sparc/dev/tctrl.c		tctrl needs-flag
 
 # Prestoserve NVRAM
 device	presto: disk
-attach	presto at sbus
+attach	presto at mainbus, sbus
 file	arch/sparc/dev/presto.c		presto needs-flag
 
 # PCMCIA devices

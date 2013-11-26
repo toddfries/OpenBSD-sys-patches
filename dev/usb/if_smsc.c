@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_smsc.c,v 1.7 2013/04/15 09:23:01 mglocker Exp $	*/
+/*	$OpenBSD: if_smsc.c,v 1.10 2013/11/15 10:17:39 pirofti Exp $	*/
 /* $FreeBSD: src/sys/dev/usb/net/if_smsc.c,v 1.1 2012/08/15 04:03:55 gonzo Exp $ */
 /*-
  * Copyright (c) 2012
@@ -84,7 +84,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -671,11 +670,7 @@ smsc_stop(struct smsc_softc *sc)
 
 	/* Stop transfers. */
 	if (sc->sc_ep[SMSC_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->sc_ep[SMSC_ENDPT_RX]);
-		if (err) {
-			printf("%s: abort rx pipe failed: %s\n",
-			    sc->sc_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->sc_ep[SMSC_ENDPT_RX]);
 		err = usbd_close_pipe(sc->sc_ep[SMSC_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
@@ -685,11 +680,7 @@ smsc_stop(struct smsc_softc *sc)
 	}
 
 	if (sc->sc_ep[SMSC_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->sc_ep[SMSC_ENDPT_TX]);
-		if (err) {
-			printf("%s: abort tx pipe failed: %s\n",
-			    sc->sc_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->sc_ep[SMSC_ENDPT_TX]);
 		err = usbd_close_pipe(sc->sc_ep[SMSC_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
@@ -699,11 +690,7 @@ smsc_stop(struct smsc_softc *sc)
 	}
 
 	if (sc->sc_ep[SMSC_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->sc_ep[SMSC_ENDPT_INTR]);
-		if (err) {
-			printf("%s: abort intr pipe failed: %s\n",
-			    sc->sc_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->sc_ep[SMSC_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->sc_ep[SMSC_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",
@@ -1247,7 +1234,7 @@ smsc_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 
 		buf += sizeof(rxhdr);
 
-		if ((total_len - pktlen) < 0)
+		if (total_len < pktlen)
 			total_len = 0;
 		else
 			total_len -= pktlen;

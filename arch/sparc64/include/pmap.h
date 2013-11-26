@@ -135,6 +135,7 @@ struct prom_map {
 
 #define PMAP_NC		0x001	/* Set the E bit in the page */
 #define PMAP_NVC	0x002	/* Don't enable the virtual cache */
+#define PMAP_NOCACHE	PMAP_NC
 #define PMAP_LITTLE	0x004	/* Map in little endian mode */
 /* Large page size hints -- we really should use another param to pmap_enter() */
 #define PMAP_8K		0x000
@@ -178,7 +179,7 @@ void pmap_bootstrap(u_long, u_long, u_int, u_int);
 /* SPARC specific? */
 void		pmap_redzone(void);
 int             pmap_dumpsize(void);
-int             pmap_dumpmmu(int (*)(dev_t, daddr64_t, caddr_t, size_t), daddr64_t);
+int             pmap_dumpmmu(int (*)(dev_t, daddr_t, caddr_t, size_t), daddr_t);
 int		pmap_pa_exists(paddr_t);
 struct proc;
 void		switchexit(struct proc *);

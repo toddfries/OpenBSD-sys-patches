@@ -1,4 +1,4 @@
-/*	$OpenBSD: mld6.c,v 1.28 2011/11/24 17:39:55 sperreault Exp $	*/
+/*	$OpenBSD: mld6.c,v 1.33 2013/11/14 23:30:23 patrick Exp $	*/
 /*	$KAME: mld6.c,v 1.26 2001/02/16 14:50:35 itojun Exp $	*/
 
 /*
@@ -76,7 +76,7 @@
 #include <net/if.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet/icmp6.h>
@@ -89,6 +89,7 @@ static int mld_timers_are_running;
 static struct in6_addr mld_all_nodes_linklocal = IN6ADDR_LINKLOCAL_ALLNODES_INIT;
 static struct in6_addr mld_all_routers_linklocal = IN6ADDR_LINKLOCAL_ALLROUTERS_INIT;
 
+void mld6_checktimer(struct ifnet *);
 static void mld6_sendpkt(struct in6_multi *, int, const struct in6_addr *);
 
 void
@@ -128,7 +129,7 @@ mld6_start_listening(struct in6_multi *in6m)
 	mld_all_nodes_linklocal.s6_addr16[1] =
 	    htons(in6m->in6m_ifp->if_index); /* XXX */
 	if (IN6_ARE_ADDR_EQUAL(&in6m->in6m_addr, &mld_all_nodes_linklocal) ||
-	    IPV6_ADDR_MC_SCOPE(&in6m->in6m_addr) < IPV6_ADDR_SCOPE_LINKLOCAL) {
+	    __IPV6_ADDR_MC_SCOPE(&in6m->in6m_addr) < __IPV6_ADDR_SCOPE_LINKLOCAL) {
 		in6m->in6m_timer = 0;
 		in6m->in6m_state = MLD_OTHERLISTENER;
 	} else {
@@ -152,7 +153,7 @@ mld6_stop_listening(struct in6_multi *in6m)
 
 	if (in6m->in6m_state == MLD_IREPORTEDLAST &&
 	    (!IN6_ARE_ADDR_EQUAL(&in6m->in6m_addr, &mld_all_nodes_linklocal)) &&
-	    IPV6_ADDR_MC_SCOPE(&in6m->in6m_addr) > IPV6_ADDR_SCOPE_INTFACELOCAL)
+	    __IPV6_ADDR_MC_SCOPE(&in6m->in6m_addr) > __IPV6_ADDR_SCOPE_INTFACELOCAL)
 		mld6_sendpkt(in6m, MLD_LISTENER_DONE,
 		    &mld_all_routers_linklocal);
 }
@@ -177,10 +178,12 @@ mld6_input(struct mbuf *m, int off)
 	ip6 = mtod(m, struct ip6_hdr *);/* in case mpullup */
 	if (!IN6_IS_ADDR_LINKLOCAL(&ip6->ip6_src)) {
 #if 0
+		char src[INET6_ADDRSTRLEN], grp[INET6_ADDRSTRLEN];
+
 		log(LOG_ERR,
 		    "mld_input: src %s is not link-local (grp=%s)\n",
-		    ip6_sprintf(&ip6->ip6_src),
-		    ip6_sprintf(&mldh->mld_addr));
+		    inet_ntop(AF_INET6, &ip6->ip6_src, src, sizeof(src)),
+		    inet_ntop(AF_INET6, &mldh->mld_addr, grp, sizeof(grp)));
 #endif
 		/*
 		 * spec (RFC2710) does not explicitly
@@ -243,8 +246,8 @@ mld6_input(struct mbuf *m, int off)
 		LIST_FOREACH(in6m, &ia->ia6_multiaddrs, in6m_entry) {
 			if (IN6_ARE_ADDR_EQUAL(&in6m->in6m_addr,
 						&mld_all_nodes_linklocal) ||
-			    IPV6_ADDR_MC_SCOPE(&in6m->in6m_addr) <
-			    IPV6_ADDR_SCOPE_LINKLOCAL)
+			    __IPV6_ADDR_MC_SCOPE(&in6m->in6m_addr) <
+			    __IPV6_ADDR_SCOPE_LINKLOCAL)
 				continue;
 
 			if (IN6_IS_ADDR_UNSPECIFIED(&mldh->mld_addr) ||
@@ -317,10 +320,9 @@ mld6_input(struct mbuf *m, int off)
 }
 
 void
-mld6_fasttimeo()
+mld6_fasttimeo(void)
 {
-	struct in6_multi *in6m;
-	struct in6_multistep step;
+	struct ifnet *ifp;
 	int s;
 
 	/*
@@ -332,8 +334,20 @@ mld6_fasttimeo()
 
 	s = splsoftnet();
 	mld_timers_are_running = 0;
-	IN6_FIRST_MULTI(step, in6m);
-	while (in6m != NULL) {
+	TAILQ_FOREACH(ifp, &ifnet, if_list)
+		mld6_checktimer(ifp);
+	splx(s);
+}
+
+void
+mld6_checktimer(struct ifnet *ifp)
+{
+	struct in6_multi *in6m;
+	struct in6_ifaddr *ia;
+
+	splsoftassert(IPL_SOFTNET);
+
+	IN6_FOREACH_MULTI(ia, ifp, in6m) {
 		if (in6m->in6m_timer == 0) {
 			/* do nothing */
 		} else if (--in6m->in6m_timer == 0) {
@@ -342,9 +356,7 @@ mld6_fasttimeo()
 		} else {
 			mld_timers_are_running = 1;
 		}
-		IN6_NEXT_MULTI(step, in6m);
 	}
-	splx(s);
 }
 
 static void

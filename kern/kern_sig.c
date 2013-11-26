@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sig.c,v 1.151 2013/04/29 17:06:20 matthew Exp $	*/
+/*	$OpenBSD: kern_sig.c,v 1.155 2013/10/08 03:50:07 guenther Exp $	*/
 /*	$NetBSD: kern_sig.c,v 1.54 1996/04/22 01:38:32 christos Exp $	*/
 
 /*
@@ -811,27 +811,39 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		}
 
 		/*
-		 * A process-wide signal can be diverted to a different
-		 * thread that's in sigwait() for this signal.  If there
-		 * isn't such a thread, then pick a thread that doesn't
-		 * have it blocked so that the stop/kill consideration
-		 * isn't delayed.  Otherwise, mark it pending on the
-		 * main thread.
+		 * If the current thread can process the signal
+		 * immediately, either because it's sigwait()ing
+		 * on it or has it unblocked, then have it take it.
 		 */
-		TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
-			/* ignore exiting threads */
-			if (q->p_flag & P_WEXIT)
-				continue;
+		q = curproc;
+		if (q != NULL && q->p_p == pr && (q->p_flag & P_WEXIT) == 0 &&
+		    ((q->p_sigdivert & mask) || (q->p_sigmask & mask) == 0))
+			p = q;
+		else {
+			/*
+			 * A process-wide signal can be diverted to a
+			 * different thread that's in sigwait() for this
+			 * signal.  If there isn't such a thread, then
+			 * pick a thread that doesn't have it blocked so
+			 * that the stop/kill consideration isn't
+			 * delayed.  Otherwise, mark it pending on the
+			 * main thread.
+			 */
+			TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
+				/* ignore exiting threads */
+				if (q->p_flag & P_WEXIT)
+					continue;
 
-			/* sigwait: definitely go to this thread */
-			if (q->p_sigdivert & mask) {
-				p = q;
-				break;
+				/* sigwait: definitely go to this thread */
+				if (q->p_sigdivert & mask) {
+					p = q;
+					break;
+				}
+
+				/* unblocked: possibly go to this thread */
+				if ((q->p_sigmask & mask) == 0)
+					p = q;
 			}
-
-			/* unblocked: possibly go to this thread */
-			if ((q->p_sigmask & mask) == 0)
-				p = q;
 		}
 	}
 
@@ -863,11 +875,11 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		 */
 		if (p->p_sigacts->ps_sigignore & mask)
 			return;
-		if (p->p_sigmask & mask)
+		if (p->p_sigmask & mask) {
 			action = SIG_HOLD;
-		else if (p->p_sigacts->ps_sigcatch & mask)
+		} else if (p->p_sigacts->ps_sigcatch & mask) {
 			action = SIG_CATCH;
-		else {
+		} else {
 			action = SIG_DFL;
 
 			if (prop & SA_KILL &&  pr->ps_nice > NZERO)
@@ -886,9 +898,8 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 		atomic_setbits_int(&p->p_siglist, mask);
 	}
 
-	if (prop & SA_CONT) {
+	if (prop & SA_CONT)
 		atomic_clearbits_int(&p->p_siglist, stopsigmask);
-	}
 
 	if (prop & SA_STOP) {
 		atomic_clearbits_int(&p->p_siglist, contsigmask);
@@ -898,12 +909,10 @@ ptsignal(struct proc *p, int signum, enum signal_type type)
 	/*
 	 * XXX delay processing of SA_STOP signals unless action == SIG_DFL?
 	 */
-	if (prop & (SA_CONT | SA_STOP) && type != SPROPAGATED) {
-		TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
+	if (prop & (SA_CONT | SA_STOP) && type != SPROPAGATED)
+		TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link)
 			if (q != p)
 				ptsignal(q, signum, SPROPAGATED);
-		}
-	}
 
 	/*
 	 * Defer further processing for signals which are held,
@@ -1082,7 +1091,7 @@ issignal(struct proc *p)
 
 		/*
 		 * We should see pending but ignored signals
-		 * only if P_TRACED was on when they were posted.
+		 * only if PS_TRACED was on when they were posted.
 		 */
 		if (mask & p->p_sigacts->ps_sigignore &&
 		    (pr->ps_flags & PS_TRACED) == 0)
@@ -1137,7 +1146,6 @@ issignal(struct proc *p)
 		 * to clear it from the pending mask.
 		 */
 		switch ((long)p->p_sigacts->ps_sigact[signum]) {
-
 		case (long)SIG_DFL:
 			/*
 			 * Don't take default actions on system processes.
@@ -1181,7 +1189,6 @@ issignal(struct proc *p)
 			} else
 				goto keep;
 			/*NOTREACHED*/
-
 		case (long)SIG_IGN:
 			/*
 			 * Masking above should prevent us ever trying
@@ -1192,7 +1199,6 @@ issignal(struct proc *p)
 			    (pr->ps_flags & PS_TRACED) == 0)
 				printf("issignal\n");
 			break;		/* == ignore */
-
 		default:
 			/*
 			 * This signal has an action, let
@@ -1337,8 +1343,9 @@ postsig(int signum)
 		if (p->p_flag & P_SIGSUSPEND) {
 			atomic_clearbits_int(&p->p_flag, P_SIGSUSPEND);
 			returnmask = p->p_oldmask;
-		} else
+		} else {
 			returnmask = p->p_sigmask;
+		}
 		p->p_sigmask |= ps->ps_catchmask[signum];
 		if ((ps->ps_sigreset & mask) != 0) {
 			ps->ps_sigcatch &= ~mask;
@@ -1564,7 +1571,7 @@ coredump_write(void *cookie, enum uio_seg segflg, const void *data, size_t len)
 			    " at %lld failed: %d\n",
 			    io->io_proc->p_pid, io->io_proc->p_comm,
 			    segflg == UIO_USERSPACE ? "user" : "system",
-			    len, data, (long long) io->io_offset, error);
+			    len, data, (long long)io->io_offset, error);
 			return (error);
 		}
 
@@ -1740,6 +1747,20 @@ void
 userret(struct proc *p)
 {
 	int sig;
+
+	/* send SIGPROF or SIGVTALRM if their timers interrupted this thread */
+	if (p->p_flag & P_PROFPEND) {
+		atomic_clearbits_int(&p->p_flag, P_PROFPEND);
+		KERNEL_LOCK();
+		psignal(p, SIGPROF);
+		KERNEL_UNLOCK();
+	}
+	if (p->p_flag & P_ALRMPEND) {
+		atomic_clearbits_int(&p->p_flag, P_ALRMPEND);
+		KERNEL_LOCK();
+		psignal(p, SIGVTALRM);
+		KERNEL_UNLOCK();
+	}
 
 	while ((sig = CURSIG(p)) != 0)
 		postsig(sig);

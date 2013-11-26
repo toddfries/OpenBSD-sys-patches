@@ -1,4 +1,4 @@
-/*	$OpenBSD: m8820x.c,v 1.10 2010/12/31 21:38:07 miod Exp $	*/
+/*	$OpenBSD: m8820x.c,v 1.12 2013/09/29 14:08:53 miod Exp $	*/
 /*
  * Copyright (c) 2004, 2006, 2010 Miodrag Vallat.
  *
@@ -31,6 +31,7 @@
 
 #include <machine/asm_macro.h>
 #include <machine/avcommon.h>
+#include <machine/board.h>
 #include <machine/cmmu.h>
 #include <machine/cpu.h>
 #include <machine/m8820x.h>
@@ -40,6 +41,8 @@
 extern	u_int32_t pfsr_straight[];
 extern	u_int32_t pfsr_double[];
 extern	u_int32_t pfsr_six[];
+
+volatile u_int32_t *whoamiptr;
 
 /*
  * This routine sets up the CPU/CMMU configuration.
@@ -54,6 +57,30 @@ m8820x_setup_board_config()
 	volatile u_int *cr;
 	u_int32_t whoami;
 	u_int32_t *m8820x_pfsr;
+
+	/*
+	 * Check whether the WHOAMI register exists.
+	 * According to documentation, that register is not available
+	 * on 100, 200 and 300 models.
+	 *
+	 * Since it is unknown whether models 100 and 200 share the
+	 * 300/310 cpuid, we'd better check whether the register can
+	 * be read.
+	 */
+
+	switch (cpuid) {
+	case AVIION_300_310:
+	/* the following for consistency and safety */
+	case AVIION_300C_310C:
+	case AVIION_300CD_310CD:
+	case AVIION_300D_310D:
+		break;
+	default:
+		if (badaddr((vaddr_t)AV_WHOAMI, 4) == 0)
+			whoamiptr = (volatile u_int32_t *)AV_WHOAMI;
+		break;
+	}
+	
 
 	/*
 	 * First, find if any CPU0 CMMU is a 88204. If so, we can
@@ -129,7 +156,12 @@ hardprobe:
 		/*
 		 * Deduce our configuration from the WHOAMI register.
 		 */
-		whoami = (*(volatile u_int32_t *)AV_WHOAMI & 0xf0) >> 4;
+
+		if (whoamiptr == NULL)
+			whoami = 0x0a;	/* 1 CPU, 2 CMMUs */
+		else
+			whoami = (*whoamiptr & 0xf0) >> 4;
+
 		switch (whoami) {
 		case 0:		/* 4 CPUs, 8 CMMUs */
 			scc.cpucount = 4;
@@ -137,11 +169,11 @@ hardprobe:
 		case 5:		/* 2 CPUs, 4 CMMUs */
 			scc.cpucount = 2;
 			break;
-		case 0x0a:	/* 1 CPU, 2 CMMU */
+		case 0x0a:	/* 1 CPU, 2 CMMUs */
 			scc.cpucount = 1;
 			break;
 		case 3:		/* 2 CPUs, 12 CMMUs */
-		case 7:		/* 1 CPU, 6 CMMU */
+		case 7:		/* 1 CPU, 6 CMMUs */
 			/*
 			 * Regular logic can't cope with asymmetrical
 			 * designs. Report a 4:1 ratio with two missing
@@ -151,7 +183,12 @@ hardprobe:
 			cmmu_per_cpu = 6;
 			cmmu_shift = 3;
 			max_cmmus = ncpusfound << cmmu_shift;
-			scc.isplit = scc.dsplit = 0;	/* XXX unknown */
+#if 0
+			scc.igang = 4;
+			scc.isplit = (1U << 12) | (1U << 13);
+			scc.dgang = 2;
+			scc.dsplit = (1U << 12);
+#endif
 			m8820x_pfsr = pfsr_six;
 			goto done;
 			break;
@@ -211,11 +248,30 @@ done:
 		}
 	}
 
-
 	/*
 	 * Now set up addressing limits
 	 */
-	if (cmmu_shift > 1) {
+	switch (cmmu_shift) {
+	case 3:	/* 6:1 schemes */
+		for (cmmu_num = 0, cmmu = m8820x_cmmu; cmmu_num < max_cmmus;
+		    cmmu_num++, cmmu++) {
+			if (cmmu->cmmu_regs == NULL)
+				continue;
+
+			cpu_cmmu_num = cmmu_num >> 1; /* CPU view of the CMMU */
+
+			if (CMMU_MODE(cmmu_num) == INST_CMMU) {
+				/* I0, I1, I2, I3: A13:A12 split */
+				cmmu->cmmu_addr = (cpu_cmmu_num & 0x03) << 12;
+				cmmu->cmmu_addr_mask = (1U << 13) | (1U << 12);
+			} else {
+				/* D0, D1: A12 split */
+				cmmu->cmmu_addr = (cpu_cmmu_num & 0x01) << 12;
+				cmmu->cmmu_addr_mask = 1U << 12;
+			}
+		}
+		break;
+	case 2:	/* 4:1 schemes */
 		for (cmmu_num = 0, cmmu = m8820x_cmmu; cmmu_num < max_cmmus;
 		    cmmu_num++, cmmu++) {
 			cpu_cmmu_num = cmmu_num >> 1; /* CPU view of the CMMU */
@@ -232,6 +288,7 @@ done:
 				cmmu->cmmu_addr_mask = scc.dsplit;
 			}
 		}
+		break;
 	}
 
 	/*
@@ -254,7 +311,10 @@ m8820x_cpu_number()
 	u_int32_t whoami;
 	cpuid_t cpu;
 
-	whoami = *(volatile u_int32_t *)AV_WHOAMI;
+	if (whoamiptr == NULL)
+		return 0;
+
+	whoami = *whoamiptr;
 	switch ((whoami & 0xf0) >> 4) {
 	case 0:
 	case 3:

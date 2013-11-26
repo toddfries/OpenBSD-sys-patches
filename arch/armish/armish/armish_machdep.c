@@ -1,4 +1,4 @@
-/*	$OpenBSD: armish_machdep.c,v 1.18 2011/10/19 20:18:31 drahn Exp $ */
+/*	$OpenBSD: armish_machdep.c,v 1.21 2013/11/13 18:30:48 jasper Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -98,10 +98,13 @@
 #include <sys/device.h>
 #include <dev/cons.h>
 #include <dev/ic/smc91cxxreg.h>
+#include <sys/socket.h>
 
 #include <machine/db_machdep.h>
 #include <ddb/db_sym.h>
 #include <ddb/db_extern.h>
+
+#include <net/if.h>
 
 #include <machine/bootconfig.h>
 #include <machine/bus.h>
@@ -266,6 +269,10 @@ boot(int howto)
 	if (!(howto & RB_NOSYNC))
 		bootsync(howto);
 
+	if_downall();
+
+	uvm_shutdown();
+
 	/* Say NO to interrupts */
 	splhigh();
 
@@ -275,6 +282,8 @@ boot(int howto)
 	
 haltsys:
 	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;

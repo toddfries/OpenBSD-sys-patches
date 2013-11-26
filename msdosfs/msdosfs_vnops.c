@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vnops.c,v 1.85 2013/03/28 03:29:44 guenther Exp $	*/
+/*	$OpenBSD: msdosfs_vnops.c,v 1.90 2013/10/01 20:22:13 sf Exp $	*/
 /*	$NetBSD: msdosfs_vnops.c,v 1.63 1997/10/17 11:24:19 ws Exp $	*/
 
 /*-
@@ -512,7 +512,7 @@ msdosfs_read(void *v)
 	int isadir;
 	uint32_t n;
 	long on;
-	daddr64_t lbn, rablock, rablkno;
+	daddr_t lbn, rablock, rablkno;
 	struct buf *bp;
 	struct vnode *vp = ap->a_vp;
 	struct denode *dep = VTODE(vp);
@@ -594,12 +594,12 @@ msdosfs_write(void *v)
 	int n;
 	int croffset;
 	int resid;
-	int overrun;
+	ssize_t overrun;
 	int extended = 0;
 	uint32_t osize;
 	int error = 0;
 	uint32_t count, lastcn;
-	daddr64_t bn;
+	daddr_t bn;
 	struct buf *bp;
 	int ioflag = ap->a_ioflag;
 	struct uio *uio = ap->a_uio;
@@ -943,7 +943,7 @@ msdosfs_rename(void *v)
 	int doingdirectory = 0, newparent = 0;
 	int error;
 	uint32_t cn, pcl;
-	daddr64_t bn;
+	daddr_t bn;
 	struct msdosfsmount *pmp;
 	struct direntry *dotdotp;
 	struct buf *bp;
@@ -1275,7 +1275,7 @@ msdosfs_mkdir(void *v)
 	struct denode *dep;
 	struct denode *pdep = VTODE(ap->a_dvp);
 	int error;
-	daddr64_t bn;
+	daddr_t bn;
 	uint32_t newcluster, pcl;
 	struct direntry *denp;
 	struct msdosfsmount *pmp = pdep->de_pmp;
@@ -1470,15 +1470,13 @@ msdosfs_readdir(void *v)
 	uint32_t cn, lbn;
 	uint32_t fileno;
 	long bias = 0;
-	daddr64_t bn;
+	daddr_t bn;
 	struct buf *bp;
 	struct denode *dep = VTODE(ap->a_vp);
 	struct msdosfsmount *pmp = dep->de_pmp;
 	struct direntry *dentp;
 	struct dirent dirbuf;
 	struct uio *uio = ap->a_uio;
-	u_long *cookies = NULL;
-	int ncookies = 0;
 	off_t offset, wlast = -1;
 	int chksum = -1;
 
@@ -1513,13 +1511,6 @@ msdosfs_readdir(void *v)
 		return (EINVAL);
 	lost = uio->uio_resid - count;
 	uio->uio_resid = count;
-
-	if (ap->a_ncookies) {
-		ncookies = uio->uio_resid / sizeof(struct direntry) + 3;
-		cookies = malloc(ncookies * sizeof(u_long), M_TEMP, M_WAITOK);
-		*ap->a_cookies = cookies;
-		*ap->a_ncookies = ncookies;
-	}
 
 	dirsperblk = pmp->pm_BytesPerSec / sizeof(struct direntry);
 
@@ -1558,18 +1549,14 @@ msdosfs_readdir(void *v)
 					break;
 				}
 				dirbuf.d_reclen = DIRENT_SIZE(&dirbuf);
+				dirbuf.d_off = offset +
+				    sizeof(struct direntry);
 				if (uio->uio_resid < dirbuf.d_reclen)
 					goto out;
-				error = uiomove((caddr_t) &dirbuf,
-						dirbuf.d_reclen, uio);
+				error = uiomove(&dirbuf, dirbuf.d_reclen, uio);
 				if (error)
 					goto out;
-				offset += sizeof(struct direntry);
-				if (cookies) {
-					*cookies++ = offset;
-					if (--ncookies <= 0)
-						goto out;
-				}
+				offset = dirbuf.d_off;
 			}
 		}
 	}
@@ -1685,6 +1672,7 @@ msdosfs_readdir(void *v)
 				dirbuf.d_name[dirbuf.d_namlen] = 0;
 			chksum = -1;
 			dirbuf.d_reclen = DIRENT_SIZE(&dirbuf);
+			dirbuf.d_off = offset + sizeof(struct direntry);
 			if (uio->uio_resid < dirbuf.d_reclen) {
 				brelse(bp);
 				/* Remember long-name offset. */
@@ -1693,28 +1681,16 @@ msdosfs_readdir(void *v)
 				goto out;
 			}
 			wlast = -1;
-			error = uiomove((caddr_t) &dirbuf,
-					dirbuf.d_reclen, uio);
+			error = uiomove(&dirbuf, dirbuf.d_reclen, uio);
 			if (error) {
 				brelse(bp);
 				goto out;
-			}
-			if (cookies) {
-				*cookies++ = offset + sizeof(struct direntry);
-				if (--ncookies <= 0) {
-					brelse(bp);
-					goto out;
-				}
 			}
 		}
 		brelse(bp);
 	}
 
 out:
-	/* Subtract unused cookies */
-	if (ap->a_ncookies)
-		*ap->a_ncookies -= ncookies;
-
 	uio->uio_offset = offset;
 	uio->uio_resid += lost;
 	if (dep->de_FileSize - (offset - bias) <= 0)
@@ -1845,7 +1821,7 @@ msdosfs_print(void *v)
 	struct denode *dep = VTODE(ap->a_vp);
 
 	printf(
-	    "tag VT_MSDOSFS, startcluster %ld, dircluster %ld, diroffset %ld ",
+	    "tag VT_MSDOSFS, startcluster %u, dircluster %u, diroffset %u ",
 	    dep->de_StartCluster, dep->de_dirclust, dep->de_diroffset);
 	printf(" dev %d, %d, %s\n",
 	    major(dep->de_dev), minor(dep->de_dev),
@@ -1957,7 +1933,8 @@ struct vops msdosfs_vops = {
 	.vop_islocked	= msdosfs_islocked,
 	.vop_pathconf	= msdosfs_pathconf,
 	.vop_advlock	= msdosfs_advlock,
-	.vop_bwrite	= vop_generic_bwrite
+	.vop_bwrite	= vop_generic_bwrite,
+	.vop_revoke	= vop_generic_revoke,
 };
 
 struct filterops msdosfsreadwrite_filtops =

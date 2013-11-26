@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_proc.c,v 1.50 2013/02/17 17:39:29 miod Exp $	*/
+/*	$OpenBSD: kern_proc.c,v 1.54 2013/10/02 21:17:32 sf Exp $	*/
 /*	$NetBSD: kern_proc.c,v 1.14 1996/02/09 18:59:41 christos Exp $	*/
 
 /*
@@ -381,7 +381,7 @@ orphanpg(struct pgrp *pg)
 #ifdef DDB
 void 
 proc_printit(struct proc *p, const char *modif,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	static const char *const pstat[] = {
 		"idle", "run", "sleep", "stop", "zombie", "dead", "onproc"
@@ -395,8 +395,9 @@ proc_printit(struct proc *p, const char *modif,
 	else
 		pst = pstat[(int)p->p_stat - 1];
 
-	(*pr)("PROC (%s) pid=%d stat=%s flags=%b\n",
-	    p->p_comm, p->p_pid, pst, p->p_flag, P_BITS);
+	(*pr)("PROC (%s) pid=%d stat=%s\n", p->p_comm, p->p_pid, pst);
+	(*pr)("    flags process=%b proc=%b\n",
+	    p->p_p->ps_flags, PS_BITS, p->p_flag, P_BITS);
 	(*pr)("    pri=%u, usrpri=%u, nice=%d\n",
 	    p->p_priority, p->p_usrpri, p->p_p->ps_nice);
 	(*pr)("    forw=%p, list=%p,%p\n",
@@ -406,7 +407,7 @@ proc_printit(struct proc *p, const char *modif,
 	(*pr)("    estcpu=%u, cpticks=%d, pctcpu=%u.%u, swtime=%u\n",
 	    p->p_estcpu, p->p_cpticks, p->p_pctcpu / 100, p->p_pctcpu % 100,
 	    p->p_swtime);
-	(*pr)("    user=%llu, sys=%llu, intr=%llu\n",
+	(*pr)("    user=%u, sys=%u, intr=%u\n",
 	    p->p_uticks, p->p_sticks, p->p_iticks);
 }
 #include <machine/db_machdep.h>
@@ -474,7 +475,8 @@ db_show_all_procs(db_expr_t addr, int haddr, db_expr_t count, char *modif)
 				    "%-12.12s  %-16s\n",
 				    ppr ? ppr->ps_pid : -1,
 				    pr->ps_pgrp ? pr->ps_pgrp->pg_id : -1,
-				    pr->ps_cred->p_ruid, p->p_stat, p->p_flag,
+				    pr->ps_cred->p_ruid, p->p_stat,
+				    p->p_flag | p->p_p->ps_flags,
 				    (p->p_wchan && p->p_wmesg) ?
 					p->p_wmesg : "", p->p_comm);
 				break;

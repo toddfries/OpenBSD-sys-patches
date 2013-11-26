@@ -1,4 +1,4 @@
-/*	$OpenBSD: zaurus_lcd.c,v 1.24 2010/09/07 16:21:41 deraadt Exp $	*/
+/*	$OpenBSD: zaurus_lcd.c,v 1.27 2013/10/21 10:36:22 miod Exp $	*/
 /* $NetBSD: lubbock_lcd.c,v 1.1 2003/08/09 19:38:53 bsh Exp $ */
 
 /*
@@ -88,23 +88,21 @@ const struct wsscreen_list lcd_screen_list = {
 };
 
 int	lcd_ioctl(void *, u_long, caddr_t, int, struct proc *);
-void	lcd_burner(void *, u_int, u_int);
 int	lcd_show_screen(void *, void *, int,
 	    void (*)(void *, int, int), void *);
+void	lcd_burner(void *, u_int, u_int);
 
-int	lcd_param(struct pxa2x0_lcd_softc *, u_long,
-    struct wsdisplay_param *);
+int	lcd_param(struct pxa2x0_lcd_softc *, u_long, struct wsdisplay_param *);
 
 const struct wsdisplay_accessops lcd_accessops = {
-	lcd_ioctl,
-	pxa2x0_lcd_mmap,
-	pxa2x0_lcd_alloc_screen,
-	pxa2x0_lcd_free_screen,
-	lcd_show_screen,
-	NULL,	/* load_font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	lcd_burner
+	.ioctl = lcd_ioctl,
+	.mmap = pxa2x0_lcd_mmap,
+	.alloc_screen = pxa2x0_lcd_alloc_screen,
+	.free_screen = pxa2x0_lcd_free_screen,
+	.show_screen = lcd_show_screen,
+	.load_font = pxa2x0_lcd_load_font,
+	.list_font = pxa2x0_lcd_list_font,
+	.burn_screen = lcd_burner
 };
 
 struct cfattach lcd_pxaip_ca = {
@@ -399,6 +397,7 @@ int
 lcd_activate(struct device *self, int act)
 {
 	struct pxa2x0_lcd_softc *sc = (struct pxa2x0_lcd_softc *)self;
+	int ret = 0;
 
 	switch (act) {
 	case DVACT_SUSPEND:
@@ -409,6 +408,9 @@ lcd_activate(struct device *self, int act)
 		pxa2x0_lcd_resume(sc);
 		lcd_set_brightness(lcd_get_brightness());
 		break;
+	case DVACT_POWERDOWN:
+		ret = config_activate_children(self, act);
+		break;
 	}
-	return 0;
+	return (ret);
 }

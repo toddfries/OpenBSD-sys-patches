@@ -1,4 +1,4 @@
-/*	$OpenBSD: mount.h,v 1.109 2013/04/15 15:32:19 jsing Exp $	*/
+/*	$OpenBSD: mount.h,v 1.116 2013/09/24 09:20:12 espie Exp $	*/
 /*	$NetBSD: mount.h,v 1.48 1996/02/18 11:55:47 fvdl Exp $	*/
 
 /*
@@ -245,6 +245,23 @@ struct udf_args {
 };
 
 /*
+ * Arguments to mount tmpfs file systems
+ */
+#define TMPFS_ARGS_VERSION	1
+struct tmpfs_args {
+	int			ta_version;
+
+	/* Size counters. */
+	ino_t			ta_nodes_max;
+	off_t			ta_size_max;
+
+	/* Root node attributes. */
+	uid_t			ta_root_uid;
+	gid_t			ta_root_gid;
+	mode_t			ta_root_mode;
+};
+
+/*
  * Arguments to mount procfs filesystems
  */
 struct procfs_args {
@@ -258,6 +275,15 @@ struct procfs_args {
 #define PROCFS_ARGSVERSION      1
 #define PROCFSMNT_LINUXCOMPAT   0x01
 
+/*
+ * Arguments to mount fusefs filesystems
+ */
+struct fusefs_args {
+	char *name;
+	char *url;
+	int fd;
+	int flags;
+};
 
 /*
  * file system statistics
@@ -275,6 +301,7 @@ union mount_info {
 	struct procfs_args procfs_args;
 	struct msdosfs_args msdosfs_args;
 	struct ntfs_args ntfs_args;
+	struct tmpfs_args tmpfs_args;
 	char __align[160];	/* 64-bit alignment and room to grow */
 };
 
@@ -310,40 +337,6 @@ struct statfs {
 	union mount_info mount_info;	/* per-filesystem mount options */
 };
 
-#ifdef _KERNEL
-/* COMPAT_O53 version without f_mntfromspec and smaller f_ctime */
-struct statfs53 {
-	u_int32_t	f_flags;	/* copy of mount flags */
-	u_int32_t	f_bsize;	/* file system block size */
-	u_int32_t	f_iosize;	/* optimal transfer block size */
-
-					/* unit is f_bsize */
-	u_int64_t  	f_blocks;	/* total data blocks in file system */
-	u_int64_t  	f_bfree;	/* free blocks in fs */
-	int64_t  	f_bavail;	/* free blocks avail to non-superuser */
-
-	u_int64_t 	f_files;	/* total file nodes in file system */
-	u_int64_t  	f_ffree;	/* free file nodes in fs */
-	int64_t  	f_favail;	/* free file nodes avail to non-root */
-
-	u_int64_t  	f_syncwrites;	/* count of sync writes since mount */
-	u_int64_t  	f_syncreads;	/* count of sync reads since mount */
-	u_int64_t  	f_asyncwrites;	/* count of async writes since mount */
-	u_int64_t  	f_asyncreads;	/* count of async reads since mount */
-
-	fsid_t	   	f_fsid;		/* file system id */
-	u_int32_t	f_namemax;      /* maximum filename length */
-	uid_t	   	f_owner;	/* user that mounted the file system */
-	u_int32_t  	f_ctime;	/* last mount [-u] time */
-	u_int32_t	f_spare[3];	/* spare for later */
-
-	char f_fstypename[MFSNAMELEN];	/* fs type name */
-	char f_mntonname[MNAMELEN];	/* directory on which mounted */
-	char f_mntfromname[MNAMELEN];	/* mounted file system */
-	union mount_info mount_info;	/* per-filesystem mount options */
-};
-#endif /* _KERNEL */
-
 
 /*
  * File system types.
@@ -360,6 +353,8 @@ struct statfs53 {
 #define	MOUNT_NCPFS	"ncpfs"		/* NetWare Network File System */
 #define	MOUNT_NTFS	"ntfs"		/* NTFS */
 #define	MOUNT_UDF	"udf"		/* UDF */
+#define	MOUNT_TMPFS	"tmpfs"		/* tmpfs */
+#define	MOUNT_FUSEFS	"fuse"		/* FUSE */
 
 /*
  * Structure per mounted file system.  Each mounted file system has an

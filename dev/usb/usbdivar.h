@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdivar.h,v 1.49 2013/04/26 14:05:24 mpi Exp $ */
+/*	$OpenBSD: usbdivar.h,v 1.53 2013/11/01 12:00:54 mpi Exp $ */
 /*	$NetBSD: usbdivar.h,v 1.70 2002/07/11 21:14:36 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdivar.h,v 1.11 1999/11/17 22:33:51 n_hibma Exp $	*/
 
@@ -84,7 +84,7 @@ struct usbd_port {
 };
 
 struct usbd_hub {
-	usbd_status	      (*explore)(struct usbd_device *hub);
+	int		      (*explore)(struct usbd_device *hub);
 	void		       *hubsoftc;
 	usb_hub_descriptor_t	hubdesc;
 	struct usbd_port        *ports;
@@ -159,7 +159,6 @@ struct usbd_pipe {
 	struct usbd_interface  *iface;
 	struct usbd_device     *device;
 	struct usbd_endpoint   *endpoint;
-	int			refcnt;
 	char			running;
 	char			aborting;
 	SIMPLEQ_HEAD(, usbd_xfer) queue;
@@ -211,6 +210,7 @@ struct usbd_xfer {
 
 	void		       *hcpriv; /* private use by the HC driver */
 
+	struct usb_task		abort_task;
 	struct timeout		timeout_handle;
 };
 
@@ -234,9 +234,7 @@ usbd_status	usbd_setup_pipe(struct usbd_device *dev,
 		    struct usbd_pipe **pipe);
 usbd_status	usbd_new_device(struct device *parent, struct usbd_bus *bus,
 		    int depth, int lowspeed, int port, struct usbd_port *);
-int		usbd_printBCD(char *cp, size_t len, int bcd);
 usbd_status	usbd_fill_iface_data(struct usbd_device *dev, int i, int a);
-void		usb_free_device(struct usbd_device *, struct usbd_port *);
 
 usbd_status	usb_insert_transfer(struct usbd_xfer *xfer);
 void		usb_transfer_complete(struct usbd_xfer *xfer);

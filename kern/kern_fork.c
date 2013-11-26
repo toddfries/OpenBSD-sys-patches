@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.146 2013/04/06 03:44:34 tedu Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.154 2013/10/08 03:50:07 guenther Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -72,7 +72,6 @@
 int	nprocesses = 1;		/* process 0 */
 int	nthreads = 1;		/* proc 0 */
 int	randompid;		/* when set to 1, pid's go random */
-pid_t	lastpid;
 struct	forkstat forkstat;
 
 void fork_return(void *);
@@ -141,31 +140,6 @@ sys___tfork(struct proc *p, void *v, register_t *retval)
 	    tfork_child_return, param.tf_tcb, retval, NULL));
 }
 
-#ifdef COMPAT_O51
-int
-compat_o51_sys___tfork(struct proc *p, void *v, register_t *retval)
-{
-	struct compat_o51_sys___tfork_args /* {
-		syscallarg(struct __tfork51) *param;
-	} */ *uap = v;
-	struct __tfork51 param;
-	int flags;
-	int error;
-
-	if ((error = copyin(SCARG(uap, param), &param, sizeof(param))))
-		return (error);
-
-	if (param.tf_flags != 0)
-		return (EINVAL);
-
-	flags = FORK_TFORK | FORK_THREAD | FORK_SIGHAND | FORK_SHAREVM
-	    | FORK_NOZOMBIE | FORK_SHAREFILES;
-
-	return (fork1(p, 0, flags, NULL, param.tf_tid, tfork_child_return,
-	    param.tf_tcb, retval, NULL));
-}
-#endif
-
 void
 tfork_child_return(void *arg)
 {
@@ -197,20 +171,18 @@ process_new(struct proc *p, struct process *parent)
 	 * Start by zeroing the section of proc that is zero-initialized,
 	 * then copy the section that is copied directly from the parent.
 	 */
-	bzero(&pr->ps_startzero,
-	    (unsigned) ((caddr_t)&pr->ps_endzero - (caddr_t)&pr->ps_startzero));
-	bcopy(&parent->ps_startcopy, &pr->ps_startcopy,
-	    (unsigned) ((caddr_t)&pr->ps_endcopy - (caddr_t)&pr->ps_startcopy));
+	memset(&pr->ps_startzero, 0,
+	    (caddr_t)&pr->ps_endzero - (caddr_t)&pr->ps_startzero);
+	memcpy(&pr->ps_startcopy, &parent->ps_startcopy,
+	    (caddr_t)&pr->ps_endcopy - (caddr_t)&pr->ps_startcopy);
 
 	/* post-copy fixups */
 	pr->ps_cred = pool_get(&pcred_pool, PR_WAITOK);
-	bcopy(parent->ps_cred, pr->ps_cred, sizeof(*pr->ps_cred));
+	memcpy(pr->ps_cred, parent->ps_cred, sizeof(*pr->ps_cred));
 	crhold(parent->ps_cred->pc_ucred);
 	pr->ps_limit->p_refcnt++;
 
 	timeout_set(&pr->ps_realit_to, realitexpire, pr);
-	timeout_set(&pr->ps_virt_to, virttimer_trampoline, pr);
-	timeout_set(&pr->ps_prof_to, proftimer_trampoline, pr);
 
 	pr->ps_flags = parent->ps_flags & (PS_SUGID | PS_SUGIDEXEC);
 	if (parent->ps_session->s_ttyvp != NULL &&
@@ -323,7 +295,6 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	if (flags & FORK_THREAD) {
 		atomic_setbits_int(&p->p_flag, P_THREAD);
 		p->p_p = pr = curpr;
-		TAILQ_INSERT_TAIL(&pr->ps_threads, p, p_thr_link);
 		pr->ps_refcnt++;
 	} else {
 		process_new(p, curpr);
@@ -335,10 +306,10 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	 * Start by zeroing the section of proc that is zero-initialized,
 	 * then copy the section that is copied directly from the parent.
 	 */
-	bzero(&p->p_startzero,
-	    (unsigned) ((caddr_t)&p->p_endzero - (caddr_t)&p->p_startzero));
-	bcopy(&curp->p_startcopy, &p->p_startcopy,
-	    (unsigned) ((caddr_t)&p->p_endcopy - (caddr_t)&p->p_startcopy));
+	memset(&p->p_startzero, 0,
+	    (caddr_t)&p->p_endzero - (caddr_t)&p->p_startzero);
+	memcpy(&p->p_startcopy, &curp->p_startcopy,
+	    (caddr_t)&p->p_endcopy - (caddr_t)&p->p_startcopy);
 
 	/*
 	 * Initialize the timeouts.
@@ -437,11 +408,7 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 		newstrp = systrace_getproc();
 #endif
 
-	/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
-	do {
-		lastpid = 1 + (randompid ? arc4random() : lastpid) % PID_MAX;
-	} while (pidtaken(lastpid));
-	p->p_pid = lastpid;
+	p->p_pid = allocpid();
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
 	LIST_INSERT_HEAD(PIDHASH(p->p_pid), p, p_hash);
@@ -466,6 +433,16 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 				pr->ps_ptstat->pe_other_pid = curpr->ps_pid;
 			}
 		}
+	} else {
+		TAILQ_INSERT_TAIL(&pr->ps_threads, p, p_thr_link);
+		/*
+		 * if somebody else wants to take us to single threaded mode,
+		 * count ourselves in.
+		 */
+		if (pr->ps_single) {
+			curpr->ps_singlecount++;
+			atomic_setbits_int(&p->p_flag, P_SUSPSINGLE);
+		}
 	}
 
 #if NSYSTRACE > 0
@@ -484,18 +461,21 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	 * For new processes, set accounting bits
 	 */
 	if ((flags & FORK_THREAD) == 0) {
-		getmicrotime(&pr->ps_start);
+		getnanotime(&pr->ps_start);
 		pr->ps_acflag = AFORK;
 	}
 
 	/*
 	 * Make child runnable and add to run queue.
 	 */
-	SCHED_LOCK(s);
-	p->p_stat = SRUN;
-	p->p_cpu = sched_choosecpu_fork(curp, flags);
-	setrunqueue(p);
-	SCHED_UNLOCK(s);
+	if ((flags & FORK_IDLE) == 0) {
+		SCHED_LOCK(s);
+		p->p_stat = SRUN;
+		p->p_cpu = sched_choosecpu_fork(curp, flags);
+		setrunqueue(p);
+		SCHED_UNLOCK(s);
+	} else
+		p->p_cpu = arg;
 
 	if (newptstat)
 		free(newptstat, M_SUBPROC);
@@ -553,20 +533,54 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 /*
  * Checks for current use of a pid, either as a pid or pgid.
  */
+pid_t oldpids[100];
 int
-pidtaken(pid_t pid)
+ispidtaken(pid_t pid)
 {
+	uint32_t i;
 	struct proc *p;
+
+	for (i = 0; i < nitems(oldpids); i++)
+		if (pid == oldpids[i])
+			return (1);
 
 	if (pfind(pid) != NULL)
 		return (1);
 	if (pgfind(pid) != NULL)
 		return (1);
 	LIST_FOREACH(p, &zombproc, p_list) {
-		if (p->p_pid == pid || (p->p_p->ps_pgrp && p->p_p->ps_pgrp->pg_id == pid))
+		if (p->p_pid == pid ||
+		    (p->p_p->ps_pgrp && p->p_p->ps_pgrp->pg_id == pid))
 			return (1);
 	}
 	return (0);
+}
+
+/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
+pid_t
+allocpid(void)
+{
+	static pid_t lastpid;
+	pid_t pid;
+
+	if (!randompid) {
+		/* only used early on for system processes */
+		pid = ++lastpid;
+	} else {
+		do {
+			pid = 1 + arc4random_uniform(PID_MAX - 1);
+		} while (ispidtaken(pid));
+	}
+
+	return pid;
+}
+
+void
+freepid(pid_t pid)
+{
+	static uint32_t idx;
+
+	oldpids[idx++ % nitems(oldpids)] = pid;
 }
 
 #if defined(MULTIPROCESSOR)

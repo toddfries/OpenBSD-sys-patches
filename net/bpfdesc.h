@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpfdesc.h,v 1.17 2006/03/25 22:41:47 djm Exp $	*/
+/*	$OpenBSD: bpfdesc.h,v 1.21 2013/11/12 01:12:09 dlg Exp $	*/
 /*	$NetBSD: bpfdesc.h,v 1.11 1995/09/27 18:30:42 thorpej Exp $	*/
 
 /*
@@ -40,6 +40,8 @@
 #ifndef _NET_BPFDESC_H_
 #define _NET_BPFDESC_H_
 
+#ifdef _KERNEL
+
 #include <sys/selinfo.h>
 
 /*
@@ -65,8 +67,8 @@ struct bpf_d {
 	int		bd_bufsize;	/* absolute length of buffers */
 
 	struct bpf_if *	bd_bif;		/* interface descriptor */
-	u_long		bd_rtout;	/* Read timeout in 'ticks' */
-	u_long		bd_rdStart;	/* when the read started */
+	int		bd_rtout;	/* Read timeout in 'ticks' */
+	int		bd_rdStart;	/* when the read started */
 	struct bpf_insn *bd_rfilter; 	/* read filter code */
 	struct bpf_insn *bd_wfilter; 	/* write filter code */
 	u_long		bd_rcount;	/* number of packets received */
@@ -102,7 +104,6 @@ struct bpf_if {
 	struct ifnet *bif_ifp;		/* correspoding interface */
 };
 
-#ifdef _KERNEL
 int	 bpf_setf(struct bpf_d *, struct bpf_program *, int);
 #endif /* _KERNEL */
 #endif /* _NET_BPFDESC_H_ */

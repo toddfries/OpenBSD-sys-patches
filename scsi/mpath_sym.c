@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpath_sym.c,v 1.8 2013/02/04 01:27:55 dlg Exp $ */
+/*	$OpenBSD: mpath_sym.c,v 1.18 2013/09/03 06:39:04 dlg Exp $ */
 
 /*
  * Copyright (c) 2010 David Gwynne <dlg@openbsd.org>
@@ -62,23 +62,18 @@ struct cfdriver sym_cd = {
 
 void		sym_mpath_start(struct scsi_xfer *);
 int		sym_mpath_checksense(struct scsi_xfer *);
-int		sym_mpath_online(struct scsi_link *);
-int		sym_mpath_offline(struct scsi_link *);
+void		sym_mpath_status(struct scsi_link *);
 
 const struct mpath_ops sym_mpath_sym_ops = {
 	"sym",
 	sym_mpath_checksense,
-	sym_mpath_online,
-	sym_mpath_offline,
-	MPATH_ROUNDROBIN
+	sym_mpath_status
 };
 
 const struct mpath_ops sym_mpath_asym_ops = {
 	"sym",
 	sym_mpath_checksense,
-	sym_mpath_online,
-	sym_mpath_offline,
-	MPATH_MRU
+	sym_mpath_status
 };
 
 struct sym_device {
@@ -89,15 +84,17 @@ struct sym_device {
 struct sym_device sym_devices[] = {
 /*	  " vendor "  "     device     " */
 /*	  "01234567"  "0123456789012345" */
+	{ "TOSHIBA ", "MBF" },
 	{ "SEAGATE ", "ST" },
 	{ "FUJITSU ", "MBD" },
-	{ "FUJITSU ", "MAP" }
+	{ "FUJITSU ", "MA" }
 };
 
 struct sym_device asym_devices[] = {
 /*	  " vendor "  "     device     " */
 /*	  "01234567"  "0123456789012345" */
 	{ "DELL    ", "MD1220          " },
+	{ "DELL    ", "MD3060e         " },
 	{ "SUN     ", "StorEdge 3510F D" },
 	{ "Transtec", "PROVIGO1100" },
 	{ "NetBSD", "NetBSD iSCSI" }
@@ -119,14 +116,14 @@ sym_match(struct device *parent, void *match, void *aux)
 
 		if (bcmp(s->vendor, inq->vendor, strlen(s->vendor)) == 0 &&
 		    bcmp(s->product, inq->product, strlen(s->product)) == 0)
-			return (3);
+			return (8);
 	}
 	for (i = 0; i < nitems(asym_devices); i++) {
 		s = &asym_devices[i];
 
 		if (bcmp(s->vendor, inq->vendor, strlen(s->vendor)) == 0 &&
 		    bcmp(s->product, inq->product, strlen(s->product)) == 0)
-			return (3);
+			return (8);
 	}
 
 	return (0);
@@ -141,6 +138,7 @@ sym_attach(struct device *parent, struct device *self, void *aux)
 	struct scsi_inquiry_data *inq = sa->sa_inqbuf;
 	const struct mpath_ops *ops = &sym_mpath_sym_ops;
 	struct sym_device *s;
+	u_int id = 0;
 	int i;
 
 	printf("\n");
@@ -152,6 +150,7 @@ sym_attach(struct device *parent, struct device *self, void *aux)
 		if (bcmp(s->vendor, inq->vendor, strlen(s->vendor)) == 0 &&
 		    bcmp(s->product, inq->product, strlen(s->product)) == 0) {
 			ops = &sym_mpath_asym_ops;
+			id = sc->sc_dev.dv_unit;
 			break;
 		}
 	}
@@ -163,7 +162,7 @@ sym_attach(struct device *parent, struct device *self, void *aux)
 	scsi_xsh_set(&sc->sc_path.p_xsh, link, sym_mpath_start);
 	sc->sc_path.p_link = link;
 
-	if (mpath_path_attach(&sc->sc_path, ops) != 0)
+	if (mpath_path_attach(&sc->sc_path, id, ops) != 0)
 		printf("%s: unable to attach path\n", DEVNAME(sc));
 }
 
@@ -184,7 +183,7 @@ sym_activate(struct device *self, int act)
 	case DVACT_RESUME:
 		break;
 	case DVACT_DEACTIVATE:
-		if (sc->sc_path.p_dev != NULL)
+		if (sc->sc_path.p_group != NULL)
 			mpath_path_detach(&sc->sc_path);
 		break;
 	}
@@ -202,17 +201,13 @@ sym_mpath_start(struct scsi_xfer *xs)
 int
 sym_mpath_checksense(struct scsi_xfer *xs)
 {
-	return (0);
+	return (MPATH_SENSE_DECLINED);
 }
 
-int
-sym_mpath_online(struct scsi_link *link)
+void
+sym_mpath_status(struct scsi_link *link)
 {
-	return (0);
-}
+	struct sym_softc *sc = link->device_softc;
 
-int
-sym_mpath_offline(struct scsi_link *link)
-{
-	return (0);
+	mpath_path_status(&sc->sc_path, MPATH_S_ACTIVE);
 }

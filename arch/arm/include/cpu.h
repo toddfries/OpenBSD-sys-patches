@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.34 2013/03/12 09:37:16 mpi Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.38 2013/09/12 11:43:51 patrick Exp $	*/
 /*	$NetBSD: cpu.h,v 1.34 2003/06/23 11:01:08 martin Exp $	*/
 
 /*
@@ -142,8 +142,7 @@ extern int cpu_do_powersave;
  * CLKF_INTR: True if we took the interrupt from inside another
  * interrupt handler.
  */
-extern int current_intr_depth;
-#define CLKF_INTR(frame)	(current_intr_depth > 1) 
+#define CLKF_INTR(frame)	(curcpu()->ci_idepth > 1) 
 
 /*
  * CLKF_PC: Extract the program counter from a clockframe
@@ -179,33 +178,38 @@ void	arm32_vector_init(vaddr_t, int);
 #include <sys/device.h>
 #include <sys/sched.h>
 struct cpu_info {
-	struct proc *ci_curproc;
-
-	struct schedstate_percpu ci_schedstate; /* scheduler state */
-#if defined(DIAGNOSTIC) || defined(LOCKDEBUG)
-	u_long ci_spin_locks;		/* # of spin locks held */
-	u_long ci_simple_locks;		/* # of simple locks held */
-#endif
-#ifdef DIAGNOSTIC
-	int	ci_mutex_level;
-#endif
 	struct device *ci_dev;		/* Device corresponding to this CPU */
+	struct cpu_info *ci_next;
+	struct schedstate_percpu ci_schedstate; /* scheduler state */
+
+	struct proc *ci_curproc;
+	u_int32_t ci_cpuid;
+	u_int32_t ci_randseed;
+
+	struct pcb *ci_curpcb;
+
 	u_int32_t ci_arm_cpuid;		/* aggregate CPU id */
 	u_int32_t ci_arm_cputype;	/* CPU type */
 	u_int32_t ci_arm_cpurev;	/* CPU revision */
 	u_int32_t ci_ctrl;		/* The CPU control register */
-	u_int32_t ci_randseed;
 
 	uint32_t ci_cpl;
 	uint32_t ci_ipending;
+	uint32_t ci_idepth;
+#ifdef DIAGNOSTIC
+	int	ci_mutex_level;
+#endif
+
 #ifdef GPROF
 	struct gmonparam *ci_gmon;
 #endif
 };
 
+extern struct cpu_info cpu_info_primary;
+extern struct cpu_info *cpu_info_list;
+
 #ifndef MULTIPROCESSOR
-extern struct cpu_info cpu_info_store;
-#define	curcpu()	(&cpu_info_store)
+#define	curcpu()	(&cpu_info_primary)
 #define cpu_number()	0
 #define CPU_IS_PRIMARY(ci)	1
 #define CPU_INFO_ITERATOR	int
@@ -214,7 +218,23 @@ extern struct cpu_info cpu_info_store;
 #define CPU_INFO_UNIT(ci)	0
 #define MAXCPUS	1
 #define cpu_unidle(ci)
-#endif
+#else
+#define cpu_number()		(curcpu()->ci_cpuid)
+#define CPU_IS_PRIMARY(ci)	((ci) == &cpu_info_primary)
+#define CPU_INFO_ITERATOR		int
+#define CPU_INFO_FOREACH(cii, ci)	for (cii = 0, ci = cpu_info_list; \
+					    ci != NULL; ci = ci->ci_next)
+
+#define CPU_INFO_UNIT(ci)	((ci)->ci_dev ? (ci)->ci_dev->dv_unit : 0)
+#define MAXCPUS	4
+#define cpu_unidle(ci)
+
+extern struct cpu_info *cpu_info[MAXCPUS];
+
+void cpu_boot_secondary_processors(void);
+#endif /* !MULTIPROCESSOR */
+
+#define curpcb		curcpu()->ci_curpcb
 
 /*
  * Scheduling glue

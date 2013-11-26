@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_usrreq.c,v 1.112 2013/05/17 09:04:30 mpi Exp $	*/
+/*	$OpenBSD: tcp_usrreq.c,v 1.117 2013/11/22 07:59:09 mpi Exp $	*/
 /*	$NetBSD: tcp_usrreq.c,v 1.20 1996/02/13 23:44:16 christos Exp $	*/
 
 /*
@@ -100,6 +100,10 @@
 #include <netinet/tcpip.h>
 #include <netinet/tcp_debug.h>
 
+#ifdef INET6
+#include <netinet6/in6_var.h>
+#endif
+
 #ifndef TCP_SENDSPACE
 #define	TCP_SENDSPACE	1024*16
 #endif
@@ -140,7 +144,7 @@ tcp_usrreq(so, req, m, nam, control, p)
 #ifdef INET6
 		if (sotopf(so) == PF_INET6)
 			return in6_control(so, (u_long)m, (caddr_t)nam,
-			    (struct ifnet *)control, 0);
+			    (struct ifnet *)control);
 		else
 #endif /* INET6 */
 			return (in_control(so, (u_long)m, (caddr_t)nam,
@@ -498,9 +502,6 @@ tcp_ctloutput(op, so, level, optname, mp)
 			(void) m_free(*mp);
 		return (ECONNRESET);
 	}
-#ifdef INET6
-	tp = intotcpcb(inp);
-#endif /* INET6 */
 	if (level != IPPROTO_TCP) {
 		switch (so->so_proto->pr_domain->dom_family) {
 #ifdef INET6
@@ -518,9 +519,7 @@ tcp_ctloutput(op, so, level, optname, mp)
 		splx(s);
 		return (error);
 	}
-#ifndef INET6
 	tp = intotcpcb(inp);
-#endif /* !INET6 */
 
 	switch (op) {
 
@@ -535,6 +534,18 @@ tcp_ctloutput(op, so, level, optname, mp)
 				tp->t_flags |= TF_NODELAY;
 			else
 				tp->t_flags &= ~TF_NODELAY;
+			break;
+
+		case TCP_NOPUSH:
+			if (m == NULL || m->m_len < sizeof (int))
+				error = EINVAL;
+			else if (*mtod(m, int *))
+				tp->t_flags |= TF_NOPUSH;
+			else if (tp->t_flags & TF_NOPUSH) {
+				tp->t_flags &= ~TF_NOPUSH;
+				if (TCPS_HAVEESTABLISHED(tp->t_state))
+					error = tcp_output(tp);
+			}
 			break;
 
 		case TCP_MAXSEG:
@@ -609,6 +620,9 @@ tcp_ctloutput(op, so, level, optname, mp)
 		switch (optname) {
 		case TCP_NODELAY:
 			*mtod(m, int *) = tp->t_flags & TF_NODELAY;
+			break;
+		case TCP_NOPUSH:
+			*mtod(m, int *) = tp->t_flags & TF_NOPUSH;
 			break;
 		case TCP_MAXSEG:
 			*mtod(m, int *) = tp->t_maxseg;
@@ -816,12 +830,12 @@ tcp_ident(void *oldp, size_t *oldlenp, void *newp, size_t newlen, int dodrop)
 #ifdef INET6
 	case AF_INET6:
 		inp = in6_pcbhashlookup(&tcbtable, &f6,
-		    fin6->sin6_port, &l6, lin6->sin6_port);
+		    fin6->sin6_port, &l6, lin6->sin6_port, tir.rdomain);
 		break;
 #endif
 	case AF_INET:
-		inp = in_pcbhashlookup(&tcbtable,  fin->sin_addr,
-		    fin->sin_port, lin->sin_addr, lin->sin_port , tir.rdomain);
+		inp = in_pcbhashlookup(&tcbtable, fin->sin_addr,
+		    fin->sin_port, lin->sin_addr, lin->sin_port, tir.rdomain);
 		break;
 	}
 
@@ -841,7 +855,7 @@ tcp_ident(void *oldp, size_t *oldlenp, void *newp, size_t newlen, int dodrop)
 #ifdef INET6
 		case AF_INET6:
 			inp = in6_pcblookup_listen(&tcbtable,
-			    &l6, lin6->sin6_port, 0, NULL);
+			    &l6, lin6->sin6_port, 0, NULL, tir.rdomain);
 			break;
 #endif
 		case AF_INET:

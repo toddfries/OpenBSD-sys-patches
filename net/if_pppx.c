@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pppx.c,v 1.18 2013/04/10 01:35:55 guenther Exp $ */
+/*	$OpenBSD: if_pppx.c,v 1.26 2013/10/19 14:46:30 mpi Exp $ */
 
 /*
  * Copyright (c) 2010 Claudio Jeker <claudio@openbsd.org>
@@ -77,6 +77,7 @@
 #endif
 
 #ifdef INET6
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/nd6.h>
 #endif /* INET6 */
@@ -894,7 +895,6 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 	ifaddr.sin_addr = req->pr_ip_srcaddr;
 
 	ia = malloc(sizeof (*ia), M_IFADDR, M_WAITOK | M_ZERO);
-	TAILQ_INSERT_TAIL(&in_ifaddr, ia, ia_list);
 
 	ia->ia_addr.sin_family = AF_INET;
 	ia->ia_addr.sin_len = sizeof(struct sockaddr_in);
@@ -915,7 +915,7 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 	
 	ia->ia_netmask = ia->ia_sockmask.sin_addr.s_addr;
 
-	error = in_ifinit(ifp, ia, &ifaddr, 0, 1);
+	error = in_ifinit(ifp, ia, &ifaddr, 1);
 	if (error) {
 		printf("pppx: unable to set addresses for %s, error=%d\n",
 		    ifp->if_xname, error);
@@ -1102,19 +1102,6 @@ pppx_if_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		switch (ifr->ifr_addr.sa_family) {
-#ifdef INET
-		case AF_INET:
-			break;
-#endif
-#ifdef INET6
-		case AF_INET6:
-			break;
-#endif
-		default:
-			error = EAFNOSUPPORT;
-			break;
-		}
 		break;
 
 	case SIOCSIFMTU:

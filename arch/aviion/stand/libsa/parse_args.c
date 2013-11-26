@@ -1,4 +1,4 @@
-/*	$OpenBSD: parse_args.c,v 1.2 2010/04/18 15:09:00 miod Exp $ */
+/*	$OpenBSD: parse_args.c,v 1.6 2013/10/16 16:59:35 miod Exp $ */
 
 /*-
  * Copyright (c) 1995 Theo de Raadt
@@ -29,7 +29,6 @@
 #include <sys/param.h>
 #include <sys/reboot.h>
 #include <machine/prom.h>
-#include <a.out.h>
 
 #include "stand.h"
 #include "libsa.h"
@@ -39,9 +38,9 @@
 int	boothowto = 0;
 
 /* skip end of token and whitespace */
-static char *stws(char *);
-static char *
-stws(char *p)
+static const char *stws(const char *);
+static const char *
+stws(const char *p)
 {
 	while (*p != ' ' && *p != '\0')
 		p++;
@@ -53,9 +52,9 @@ stws(char *p)
 }
 
 int
-parse_args(char *line, char **filep, int first)
+parse_args(const char *line, char **filep, int first)
 {
-	char *s = NULL, *p;
+	const char *po, *pc, *p;
 	char *name;
 	size_t namelen;
 
@@ -65,41 +64,49 @@ parse_args(char *line, char **filep, int first)
 			return (1);
 	}
 
-	/*
-	 * The command line should be under the form
-	 *   devtype(...)filename args
-	 * such as
-	 *   inen()bsd -s
-	 * and we only care about the kernel name here.
-	 *
-	 * However, if the kernel could not be loaded, and we asked the
-	 * user, he may not give the devtype() part - especially since
-	 * at the moment we only support inen() anyway.
-	 */
-
-	/* search for a set of braces */
-	for (p = line; *p != '\0' && *p != '('; p++) ;
-	if (*p != '\0') {
-		for (p = line; *p != '\0' && *p != ')'; p++) ;
-		if (*p != '\0')
-			s = ++p;
+	/* skip boot device; up to two nested foo(...) constructs */
+	p = line;
+	po = strchr(line, '(');
+	if (po != NULL) {
+		pc = strchr(po + 1, ')');
+		if (pc != NULL) {
+			p = strchr(po + 1, '(');
+			if (p == NULL || pc < p)
+				p = pc + 1;
+			else if (pc != NULL) {
+				p = strchr(pc + 1, ')');
+				if (p != NULL)
+					p = p + 1;
+				else
+					p = line;
+			}
+		}
 	}
-		
-	if (s == NULL)
-		s = line;
+
+	/* skip partition number if any */
+	pc = strchr(p, ':');
+	if (pc != NULL)
+		p = pc + 1;
 
 	/* figure out how long the kernel name is */
-	for (p = s; *p != '\0' && *p != ' '; p++) ;
-	namelen = p - s;
+	pc = strchr(p, ' ');
+	if (pc == NULL)
+		pc = p + strlen(p);
 
-	/* empty, use the default */
-	if (namelen == 0)
-		name = KERNEL_NAME;
-	else {
+	if (p == pc) {
+		/* empty, use the default kernel name */
+		namelen = 1 + (p - line) + strlen(KERNEL_NAME);
+		name = (char *)alloc(namelen);
+		if (name == NULL)
+			panic("out of memory");
+		memcpy(name, line, p - line);
+		memcpy(name + (p - line), KERNEL_NAME, sizeof(KERNEL_NAME));
+	} else {
+		namelen = pc - line;
 		name = (char *)alloc(1 + namelen);
 		if (name == NULL)
 			panic("out of memory");
-		bcopy(s, name, namelen);
+		memcpy(name, line, namelen);
 		name[namelen] = '\0';
 	}
 	*filep = name;
@@ -115,8 +122,8 @@ parse_args(char *line, char **filep, int first)
 			if (*p++ == '-')
 				while (*p != ' ' && *p != '\0')
 					switch (*p++) {
-					case 'z':
-						boothowto |= BOOT_ETHERNET_ZERO;
+					case 'a':
+						boothowto |= RB_ASKNAME;
 						break;
 					}
 			p = stws(p);

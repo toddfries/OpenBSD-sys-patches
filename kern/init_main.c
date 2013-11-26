@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.188 2013/03/28 16:55:25 deraadt Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.191 2013/10/29 04:23:16 dlg Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -75,6 +75,7 @@
 #include <sys/mbuf.h>
 #include <sys/pipe.h>
 #include <sys/workq.h>
+#include <sys/task.h>
 
 #include <sys/syscall.h>
 #include <sys/syscallargs.h>
@@ -125,7 +126,7 @@ extern	struct user *proc0paddr;
 
 struct	vnode *rootvp, *swapdev_vp;
 int	boothowto;
-struct	timeval boottime;
+struct	timespec boottime;
 int	ncpus =  1;
 int	ncpusfound = 1;			/* number of cpus we find */
 __volatile int start_init_exec;		/* semaphore for start_init() */
@@ -148,6 +149,7 @@ void	crypto_init(void);
 void	init_exec(void);
 void	kqueue_init(void);
 void	workq_init(void);
+void	taskq_init(void);
 
 extern char sigcode[], esigcode[];
 #ifdef SYSCALL_DEBUG
@@ -340,11 +342,17 @@ main(void *framep)
 
 	/* Initialize work queues */
 	workq_init();
+	taskq_init();
 
 	random_start();
 
 	/* Initialize the interface/address trees */
 	ifinit();
+
+#if NMPATH > 0
+	/* Attach mpath before hardware */
+	config_rootfound("mpath", NULL);
+#endif
 
 	/* Configure the devices */
 	cpu_configure();
@@ -456,9 +464,6 @@ main(void *framep)
 
 	dostartuphooks();
 
-#if NMPATH > 0
-	config_rootfound("mpath", NULL);
-#endif
 #if NVSCSI > 0
 	config_rootfound("vscsi", NULL);
 #endif
@@ -496,11 +501,11 @@ main(void *framep)
 	 * from the file system.  Reset p->p_rtime as it may have been
 	 * munched in mi_switch() after the time got set.
 	 */
-	microtime(&boottime);
+	nanotime(&boottime);
 	LIST_FOREACH(p, &allproc, p_list) {
 		p->p_p->ps_start = boottime;
-		microuptime(&p->p_cpu->ci_schedstate.spc_runtime);
-		p->p_rtime.tv_sec = p->p_rtime.tv_usec = 0;
+		nanouptime(&p->p_cpu->ci_schedstate.spc_runtime);
+		timespecclear(&p->p_rtime);
 	}
 
 	uvm_swap_init();

@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi_util.c,v 1.31 2013/04/15 09:23:02 mglocker Exp $ */
+/*	$OpenBSD: usbdi_util.c,v 1.34 2013/11/13 13:48:08 pirofti Exp $ */
 /*	$NetBSD: usbdi_util.c,v 1.40 2002/07/11 21:14:36 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi_util.c,v 1.14 1999/11/17 22:33:50 n_hibma Exp $	*/
 
@@ -38,11 +38,14 @@
 #include <sys/malloc.h>
 #include <sys/device.h>
 
+#include <machine/bus.h>
+
 #include <dev/usb/usb.h>
 #include <dev/usb/usbhid.h>
 
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdi_util.h>
+#include <dev/usb/usbdivar.h>
 
 #ifdef USB_DEBUG
 #define DPRINTF(x)	do { if (usbdebug) printf x; } while (0)
@@ -52,6 +55,13 @@ extern int usbdebug;
 #define DPRINTF(x)
 #define DPRINTFN(n,x)
 #endif
+
+static void
+usbd_interface2device_handle(struct usbd_interface *iface,
+    struct usbd_device **dev)
+{
+	*dev = iface->device;
+}
 
 usbd_status
 usbd_get_desc(struct usbd_device *dev, int type, int index, int len, void *desc)
@@ -67,26 +77,6 @@ usbd_get_desc(struct usbd_device *dev, int type, int index, int len, void *desc)
 	USETW(req.wIndex, 0);
 	USETW(req.wLength, len);
 	return (usbd_do_request(dev, &req, desc));
-}
-
-usbd_status
-usbd_get_config_desc(struct usbd_device *dev, int confidx,
-    usb_config_descriptor_t *d)
-{
-	usbd_status err;
-
-	DPRINTFN(3,("usbd_get_config_desc: confidx=%d\n", confidx));
-	err = usbd_get_desc(dev, UDESC_CONFIG, confidx,
-	    USB_CONFIG_DESCRIPTOR_SIZE, d);
-	if (err)
-		return (err);
-	if (d->bDescriptorType != UDESC_CONFIG) {
-		DPRINTFN(-1,("usbd_get_config_desc: confidx=%d, bad desc "
-		    "len=%d type=%d\n", confidx, d->bLength,
-		    d->bDescriptorType));
-		return (USBD_INVAL);
-	}
-	return (USBD_NORMAL_COMPLETION);
 }
 
 usbd_status
@@ -394,90 +384,6 @@ usbd_get_config(struct usbd_device *dev, u_int8_t *conf)
 	USETW(req.wIndex, 0);
 	USETW(req.wLength, 1);
 	return (usbd_do_request(dev, &req, conf));
-}
-
-void usbd_bulk_transfer_cb(struct usbd_xfer *xfer, void *priv,
-    usbd_status status);
-void
-usbd_bulk_transfer_cb(struct usbd_xfer *xfer, void *priv,
-    usbd_status status)
-{
-	wakeup(xfer);
-}
-
-usbd_status
-usbd_bulk_transfer(struct usbd_xfer *xfer, struct usbd_pipe *pipe,
-    u_int16_t flags, u_int32_t timeout, void *buf, u_int32_t *size, char *lbl)
-{
-	usbd_status err;
-	int s, error, pri;
-
-	usbd_setup_xfer(xfer, pipe, 0, buf, *size, flags, timeout,
-	    usbd_bulk_transfer_cb);
-	DPRINTFN(1, ("usbd_bulk_transfer: start transfer %d bytes\n", *size));
-	s = splusb();		/* don't want callback until tsleep() */
-	err = usbd_transfer(xfer);
-	if (err != USBD_IN_PROGRESS) {
-		splx(s);
-		return (err);
-	}
-	pri = timeout == 0 ? (PZERO | PCATCH) : PZERO;
-	error = tsleep((caddr_t)xfer, pri, lbl, 0);
-	splx(s);
-	if (error) {
-		DPRINTF(("usbd_bulk_transfer: tsleep=%d\n", error));
-		usbd_abort_pipe(pipe);
-		return (USBD_INTERRUPTED);
-	}
-	usbd_get_xfer_status(xfer, NULL, NULL, size, &err);
-	DPRINTFN(1,("usbd_bulk_transfer: transferred %d\n", *size));
-	if (err) {
-		DPRINTF(("usbd_bulk_transfer: error=%d\n", err));
-		usbd_clear_endpoint_stall(pipe);
-	}
-	return (err);
-}
-
-void usbd_intr_transfer_cb(struct usbd_xfer *xfer, void *priv,
-    usbd_status status);
-void
-usbd_intr_transfer_cb(struct usbd_xfer *xfer, void *priv,
-    usbd_status status)
-{
-	wakeup(xfer);
-}
-
-usbd_status
-usbd_intr_transfer(struct usbd_xfer *xfer, struct usbd_pipe *pipe,
-    u_int16_t flags, u_int32_t timeout, void *buf, u_int32_t *size, char *lbl)
-{
-	usbd_status err;
-	int s, error, pri;
-
-	usbd_setup_xfer(xfer, pipe, 0, buf, *size, flags, timeout,
-	    usbd_intr_transfer_cb);
-	DPRINTFN(1, ("usbd_intr_transfer: start transfer %d bytes\n", *size));
-	s = splusb();		/* don't want callback until tsleep() */
-	err = usbd_transfer(xfer);
-	if (err != USBD_IN_PROGRESS) {
-		splx(s);
-		return (err);
-	}
-	pri = timeout == 0 ? (PZERO | PCATCH) : PZERO;
-	error = tsleep(xfer, pri, lbl, 0);
-	splx(s);
-	if (error) {
-		DPRINTF(("usbd_intr_transfer: tsleep=%d\n", error));
-		usbd_abort_pipe(pipe);
-		return (USBD_INTERRUPTED);
-	}
-	usbd_get_xfer_status(xfer, NULL, NULL, size, &err);
-	DPRINTFN(1,("usbd_intr_transfer: transferred %d\n", *size));
-	if (err) {
-		DPRINTF(("usbd_intr_transfer: error=%d\n", err));
-		usbd_clear_endpoint_stall(pipe);
-	}
-	return (err);
 }
 
 void

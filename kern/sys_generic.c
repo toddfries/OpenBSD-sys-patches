@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_generic.c,v 1.80 2013/05/19 19:14:44 guenther Exp $	*/
+/*	$OpenBSD: sys_generic.c,v 1.84 2013/09/14 02:28:02 guenther Exp $	*/
 /*	$NetBSD: sys_generic.c,v 1.24 1996/03/29 00:25:32 cgd Exp $	*/
 
 /*
@@ -211,8 +211,7 @@ dofilereadv(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 #ifdef KTRACE
 	if (ktriov != NULL) {
 		if (error == 0)
-			ktrgenio(p, fd, UIO_READ, ktriov, cnt,
-			    error);
+			ktrgenio(p, fd, UIO_READ, ktriov, cnt);
 		free(ktriov, M_TEMP);
 	}
 #endif
@@ -368,7 +367,7 @@ dofilewritev(struct proc *p, int fd, struct file *fp, const struct iovec *iovp,
 #ifdef KTRACE
 	if (ktriov != NULL) {
 		if (error == 0)
-			ktrgenio(p, fd, UIO_WRITE, ktriov, cnt, error);
+			ktrgenio(p, fd, UIO_WRITE, ktriov, cnt);
 		free(ktriov, M_TEMP);
 	}
 #endif
@@ -1018,4 +1017,24 @@ bad:
 	if (pl != pfds)
 		free(pl, M_TEMP);
 	return (error);
+}
+
+/*
+ * utrace system call
+ */
+/* ARGSUSED */
+int
+sys_utrace(struct proc *curp, void *v, register_t *retval)
+{
+#ifdef KTRACE
+	struct sys_utrace_args /* {
+		syscallarg(const char *) label;
+		syscallarg(const void *) addr;
+		syscallarg(size_t) len;
+	} */ *uap = v;
+	return (ktruser(curp, SCARG(uap, label), SCARG(uap, addr),
+	    SCARG(uap, len)));
+#else
+	return (0);
+#endif
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_descrip.c,v 1.99 2012/08/23 00:11:56 guenther Exp $	*/
+/*	$OpenBSD: kern_descrip.c,v 1.104 2013/09/14 01:35:00 guenther Exp $	*/
 /*	$NetBSD: kern_descrip.c,v 1.42 1996/03/30 22:24:38 christos Exp $	*/
 
 /*
@@ -615,7 +615,6 @@ sys_close(struct proc *p, void *v, register_t *retval)
 /*
  * Return status information about a file descriptor.
  */
-/* ARGSUSED */
 int
 sys_fstat(struct proc *p, void *v, register_t *retval)
 {
@@ -752,7 +751,8 @@ void
 fdexpand(struct proc *p)
 {
 	struct filedesc *fdp = p->p_fd;
-	int nfiles, i;
+	int nfiles;
+	size_t copylen;
 	struct file **newofile;
 	char *newofileflags;
 	u_int *newhimap, *newlomap;
@@ -774,12 +774,13 @@ fdexpand(struct proc *p)
 	 * Copy the existing ofile and ofileflags arrays
 	 * and zero the new portion of each array.
 	 */
-	bcopy(fdp->fd_ofiles, newofile,
-		(i = sizeof(struct file *) * fdp->fd_nfiles));
-	bzero((char *)newofile + i, nfiles * sizeof(struct file *) - i);
-	bcopy(fdp->fd_ofileflags, newofileflags,
-		(i = sizeof(char) * fdp->fd_nfiles));
-	bzero(newofileflags + i, nfiles * sizeof(char) - i);
+	copylen = sizeof(struct file *) * fdp->fd_nfiles;
+	memcpy(newofile, fdp->fd_ofiles, copylen);
+	memset((char *)newofile + copylen, 0,
+	    nfiles * sizeof(struct file *) - copylen);
+	copylen = sizeof(char) * fdp->fd_nfiles;
+	memcpy(newofileflags, fdp->fd_ofileflags, copylen);
+	memset(newofileflags + copylen, 0, nfiles * sizeof(char) - copylen);
 
 	if (fdp->fd_nfiles > NDFILE)
 		free(fdp->fd_ofiles, M_FILEDESC);
@@ -790,15 +791,15 @@ fdexpand(struct proc *p)
 		newlomap = malloc(NDLOSLOTS(nfiles) * sizeof(u_int),
 		    M_FILEDESC, M_WAITOK);
 
-		bcopy(fdp->fd_himap, newhimap,
-		    (i = NDHISLOTS(fdp->fd_nfiles) * sizeof(u_int)));
-		bzero((char *)newhimap + i,
-		    NDHISLOTS(nfiles) * sizeof(u_int) - i);
+		copylen = NDHISLOTS(fdp->fd_nfiles) * sizeof(u_int);
+		memcpy(newhimap, fdp->fd_himap, copylen);
+		memset((char *)newhimap + copylen, 0,
+		    NDHISLOTS(nfiles) * sizeof(u_int) - copylen);
 
-		bcopy(fdp->fd_lomap, newlomap,
-		    (i = NDLOSLOTS(fdp->fd_nfiles) * sizeof(u_int)));
-		bzero((char *)newlomap + i,
-		    NDLOSLOTS(nfiles) * sizeof(u_int) - i);
+		copylen = NDLOSLOTS(fdp->fd_nfiles) * sizeof(u_int);
+		memcpy(newlomap, fdp->fd_lomap, copylen);
+		memset((char *)newlomap + copylen, 0,
+		    NDLOSLOTS(nfiles) * sizeof(u_int) - copylen);
 
 		if (NDHISLOTS(fdp->fd_nfiles) > NDHISLOTS(NDFILE)) {
 			free(fdp->fd_himap, M_FILEDESC);
@@ -921,7 +922,7 @@ fdcopy(struct proc *p)
 
 	fdplock(fdp);
 	newfdp = pool_get(&fdesc_pool, PR_WAITOK);
-	bcopy(fdp, newfdp, sizeof(struct filedesc));
+	memcpy(newfdp, fdp, sizeof(struct filedesc));
 	if (newfdp->fd_cdir)
 		vref(newfdp->fd_cdir);
 	if (newfdp->fd_rdir)
@@ -964,10 +965,10 @@ fdcopy(struct proc *p)
 		    M_FILEDESC, M_WAITOK);
 	}
 	newfdp->fd_nfiles = i;
-	bcopy(fdp->fd_ofiles, newfdp->fd_ofiles, i * sizeof(struct file **));
-	bcopy(fdp->fd_ofileflags, newfdp->fd_ofileflags, i * sizeof(char));
-	bcopy(fdp->fd_himap, newfdp->fd_himap, NDHISLOTS(i) * sizeof(u_int));
-	bcopy(fdp->fd_lomap, newfdp->fd_lomap, NDLOSLOTS(i) * sizeof(u_int));
+	memcpy(newfdp->fd_ofiles, fdp->fd_ofiles, i * sizeof(struct file **));
+	memcpy(newfdp->fd_ofileflags, fdp->fd_ofileflags, i * sizeof(char));
+	memcpy(newfdp->fd_himap, fdp->fd_himap, NDHISLOTS(i) * sizeof(u_int));
+	memcpy(newfdp->fd_lomap, fdp->fd_lomap, NDLOSLOTS(i) * sizeof(u_int));
 	fdpunlock(fdp);
 
 	fdplock(newfdp);
@@ -1059,7 +1060,7 @@ closef(struct file *fp, struct proc *p)
 
 #ifdef DIAGNOSTIC
 	if (fp->f_count < 2)
-		panic("closef: count (%d) < 2", fp->f_count);
+		panic("closef: count (%ld) < 2", fp->f_count);
 #endif
 	fp->f_count--;
 
@@ -1095,7 +1096,7 @@ fdrop(struct file *fp, struct proc *p)
 
 #ifdef DIAGNOSTIC
 	if (fp->f_count != 0)
-		panic("fdrop: count (%d) != 0", fp->f_count);
+		panic("fdrop: count (%ld) != 0", fp->f_count);
 #endif
 
 	if (fp->f_ops)
@@ -1145,7 +1146,7 @@ sys_flock(struct proc *p, void *v, register_t *retval)
 	lf.l_len = 0;
 	if (how & LOCK_UN) {
 		lf.l_type = F_UNLCK;
-		fp->f_flag &= ~FHASLOCK;
+		fp->f_iflags &= ~FIF_HASLOCK;
 		error = VOP_ADVLOCK(vp, (caddr_t)fp, F_UNLCK, &lf, F_FLOCK);
 		goto out;
 	}
@@ -1157,7 +1158,7 @@ sys_flock(struct proc *p, void *v, register_t *retval)
 		error = EINVAL;
 		goto out;
 	}
-	fp->f_flag |= FHASLOCK;
+	fp->f_iflags |= FIF_HASLOCK;
 	if (how & LOCK_NB)
 		error = VOP_ADVLOCK(vp, (caddr_t)fp, F_SETLK, &lf, F_FLOCK);
 	else

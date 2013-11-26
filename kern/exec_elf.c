@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.91 2013/03/28 16:55:25 deraadt Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.93 2013/07/04 17:37:05 tedu Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -491,8 +491,7 @@ ELFNAME(load_file)(struct proc *p, char *path, struct exec_package *epp,
 bad1:
 	VOP_CLOSE(nd.ni_vp, FREAD, p->p_ucred, p);
 bad:
-	if (ph != NULL)
-		free(ph, M_TEMP);
+	free(ph, M_TEMP);
 
 	*last = addr;
 	vput(nd.ni_vp);
@@ -904,8 +903,7 @@ ELFNAME(os_pt_note)(struct proc *p, struct exec_package *epp, Elf_Ehdr *eh,
 out3:
 	error = ENOEXEC;
 out2:
-	if (np)
-		free(np, M_TEMP);
+	free(np, M_TEMP);
 out1:
 	free(hph, M_TEMP);
 	return error;
@@ -1080,8 +1078,7 @@ ELFNAMEEND(coredump)(struct proc *p, void *cookie)
 	}
 
 out:
-	if (psections)
-		free(psections, M_TEMP);
+	free(psections, M_TEMP);
 	return (error);
 #endif
 }
@@ -1265,8 +1262,9 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 
 	/*
 	 * Now, for each thread, write the register info and any other
-	 * per-thread notes.  Since we're dumping core, we don't bother
-	 * locking.
+	 * per-thread notes.  Since we're dumping core, all the other
+	 * threads in the process have been stopped and the list can't
+	 * change.
 	 */
 	TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
 		if (q == p)		/* we've taken care of this thread */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mtd8xx.c,v 1.19 2012/11/29 21:10:32 brad Exp $	*/
+/*	$OpenBSD: mtd8xx.c,v 1.21 2013/11/26 09:50:33 mpi Exp $	*/
 
 /*
  * Copyright (c) 2003 Oleg Safiullin <form@pdp11.org.ru>
@@ -315,13 +315,16 @@ mtd_miibus_statchg(struct device *self)
 void
 mtd_setmulti(struct mtd_softc *sc)
 {
+	struct arpcom *ac = &sc->sc_arpcom;
 	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	u_int32_t rxfilt, crc, hash[2] = { 0, 0 };
 	struct ether_multistep step;
 	struct ether_multi *enm;
 	int mcnt = 0;
 
-allmulti:
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	rxfilt = CSR_READ_4(MTD_TCRRCR) & ~RCR_AM;
 	if (ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) {
 		rxfilt |= RCR_AM;
@@ -336,12 +339,8 @@ allmulti:
 	CSR_WRITE_4(MTD_MAR4, 0);
 
 	/* Now program new ones. */
-	ETHER_FIRST_MULTI(step, &sc->sc_arpcom, enm);
+	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
-		}
 		crc = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26;
 		hash[crc >> 5] |= 1 << (crc & 0xf);
 		++mcnt;
@@ -926,8 +925,7 @@ mtd_rxeof(struct mtd_softc *sc)
 		    0, sc->mtd_cdata.mtd_rx_chain[i].sd_map->dm_mapsize,
 		    BUS_DMASYNC_POSTREAD);
 
-		m0 = m_devget(mtod(m, char *), total_len,  ETHER_ALIGN,
-		    ifp, NULL);
+		m0 = m_devget(mtod(m, char *), total_len,  ETHER_ALIGN, ifp);
 		mtd_newbuf(sc, i, m);
 		i = (i + 1) % MTD_RX_LIST_CNT;
 		if (m0 == NULL) {

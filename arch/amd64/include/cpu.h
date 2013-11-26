@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.80 2013/03/31 17:07:02 deraadt Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.82 2013/10/05 16:58:30 guenther Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -105,9 +105,20 @@ struct cpu_info {
 	u_int32_t	ci_cflushsz;
 	u_int64_t	ci_tsc_freq;
 
+#define ARCH_HAVE_CPU_TOPOLOGY
+	u_int32_t	ci_smt_id;
+	u_int32_t	ci_core_id;
+	u_int32_t	ci_pkg_id;
+
 	struct cpu_functions *ci_func;
 	void (*cpu_setup)(struct cpu_info *);
 	void (*ci_info)(struct cpu_info *);
+
+	u_int		*ci_mwait;
+/* bits in ci_mwait[0] */
+#define	MWAIT_IN_IDLE		0x1	/* don't need IPI to wake */
+#define	MWAIT_KEEP_IDLING	0x2	/* cleared by other cpus to wake me */
+#define	MWAIT_IDLING	(MWAIT_IN_IDLE | MWAIT_KEEP_IDLING)
 
 	int		ci_want_resched;
 
@@ -190,6 +201,7 @@ extern struct cpu_info *cpu_info[MAXCPUS];
 void cpu_boot_secondary_processors(void);
 void cpu_init_idle_pcbs(void);    
 
+void cpu_kick(struct cpu_info *);
 void cpu_unidle(struct cpu_info *);
 
 #else /* !MULTIPROCESSOR */
@@ -201,6 +213,7 @@ extern struct cpu_info cpu_info_primary;
 
 #define curcpu()		(&cpu_info_primary)
 
+#define cpu_kick(ci)
 #define cpu_unidle(ci)
 
 #endif

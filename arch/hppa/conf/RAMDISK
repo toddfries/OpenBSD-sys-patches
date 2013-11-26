@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.96 2013/03/09 02:19:21 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.99 2013/11/15 19:42:20 sasano Exp $
 #
 # Diskless kernel config
 #
@@ -150,9 +150,9 @@ smsc*	at uhub?		# SMSC LAN95xx Ethernet
 cdce*	at uhub?		# CDC Ethernet
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 #urio*	at uhub?		# Diamond Multimedia Rio 500
-#uscanner* at uhub?		# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 #udsbr*	at uhub?		# D-Link DSB-R100 radio
 #radio*	at udsbr?		# USB radio
@@ -240,7 +240,6 @@ em*	at pci?			# Intel Pro/1000 ethernet
 #ti*	at pci?			# Alteon Tigon 1Gb ethernet
 #txp*	at pci?			# 3com 3CR990
 #epic*	at pci?			# SMC EPIC/100 ethernet
-#fpa*	at pci?			# DEC DEFPA FDDI
 #de*	at pci?			# 21x4[012]-based Ethernet
 #de*	at eisa?
 dc*	at pci?			# 21143, "tulip" clone ethernet

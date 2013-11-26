@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_input.c,v 1.211 2013/05/17 09:04:30 mpi Exp $	*/
+/*	$OpenBSD: ip_input.c,v 1.221 2013/11/17 10:07:32 bluhm Exp $	*/
 /*	$NetBSD: ip_input.c,v 1.30 1996/03/16 23:53:58 christos Exp $	*/
 
 /*
@@ -76,8 +76,6 @@
 #include <netinet/ip_carp.h>
 #endif
 
-#define IPMTUDISCTIMEOUT (10 * 60)	/* as per RFC 1191 */
-
 struct ipqhead ipq;
 
 int encdebug = 0;
@@ -106,9 +104,6 @@ int	ip_defttl = IPDEFTTL;
 int	ip_mtudisc = 1;
 u_int	ip_mtudisc_timeout = IPMTUDISCTIMEOUT;
 int	ip_directedbcast = 0;
-#ifdef DIAGNOSTIC
-int	ipprintfs = 0;
-#endif
 
 struct rttimer_queue *ip_mtudisc_timeout_q = NULL;
 
@@ -126,38 +121,25 @@ struct pool ipq_pool;
 
 struct ipstat ipstat;
 
+void	ip_ours(struct mbuf *);
 int	in_ouraddr(struct in_addr, struct mbuf *);
 
-char *
-inet_ntoa(ina)
-	struct in_addr ina;
-{
-	static char buf[4*sizeof "123"];
-	unsigned char *ucp = (unsigned char *)&ina;
-
-	snprintf(buf, sizeof buf, "%d.%d.%d.%d",
-	    ucp[0] & 0xff, ucp[1] & 0xff,
-	    ucp[2] & 0xff, ucp[3] & 0xff);
-	return (buf);
-}
-
 /*
- * We need to save the IP options in case a protocol wants to respond
+ * Used to save the IP options in case a protocol wants to respond
  * to an incoming packet over the same route if the packet got here
  * using IP source routing.  This allows connection establishment and
  * maintenance when the remote end is on a network that is not known
  * to us.
  */
-int	ip_nhops = 0;
-static	struct ip_srcrt {
-	struct	in_addr dst;			/* final destination */
-	char	nop;				/* one NOP to align */
-	char	srcopt[IPOPT_OFFSET + 1];	/* OPTVAL, OLEN and OFFSET */
-	struct	in_addr route[MAX_IPOPTLEN/sizeof(struct in_addr)];
-} ip_srcrt;
+struct ip_srcrt {
+	int		isr_nhops;		   /* number of hops */
+	struct in_addr	isr_dst;		   /* final destination */
+	char		isr_nop;		   /* one NOP to align */
+	char		isr_hdr[IPOPT_OFFSET + 1]; /* OPTVAL, OLEN & OFFSET */
+	struct in_addr	isr_routes[MAX_IPOPTLEN/sizeof(struct in_addr)];
+};
 
-void save_rte(u_char *, struct in_addr);
-int ip_weadvertise(u_int32_t, u_int);
+void save_rte(struct mbuf *, u_char *, struct in_addr);
 
 /*
  * IP initialization: fill in IP protocol switch table.
@@ -234,19 +216,18 @@ ipintr(void)
 }
 
 /*
- * Ip input routine.  Checksum and byte swap header.  If fragmented
- * try to reassemble.  Process options.  Pass to next level.
+ * IPv4 input routine.
+ *
+ * Checksum and byte swap header.  Process options. Forward or deliver.
  */
 void
 ipv4_input(struct mbuf *m)
 {
 	struct ip *ip;
-	struct ipq *fp;
-	struct ipqent *ipqe;
-	int hlen, mff, len;
+	int hlen, len;
 	in_addr_t pfrdr = 0;
 #ifdef IPSEC
-	int error, s;
+	int error;
 	struct tdb *tdb;
 	struct tdb_ident *tdbi;
 	struct m_tag *mtag;
@@ -364,13 +345,14 @@ ipv4_input(struct mbuf *m)
 	 * error was detected (causing an icmp message
 	 * to be sent and the original packet to be freed).
 	 */
-	ip_nhops = 0;		/* for source routed packets */
 	if (hlen > sizeof (struct ip) && ip_dooptions(m)) {
 	        return;
 	}
 
-	if (in_ouraddr(ip->ip_dst, m))
-		goto ours;
+	if (in_ouraddr(ip->ip_dst, m)) {
+		ip_ours(m);
+		return;
+	}
 
 	if (IN_MULTICAST(ip->ip_dst.s_addr)) {
 		struct in_multi *inm;
@@ -397,8 +379,7 @@ ipv4_input(struct mbuf *m)
 			 */
 			if (ip_mforward(m, m->m_pkthdr.rcvif) != 0) {
 				ipstat.ips_cantforward++;
-				m_freem(m);
-				return;
+				goto bad;
 			}
 
 			/*
@@ -406,8 +387,10 @@ ipv4_input(struct mbuf *m)
 			 * all multicast IGMP packets, whether or not this
 			 * host belongs to their destination groups.
 			 */
-			if (ip->ip_p == IPPROTO_IGMP)
-				goto ours;
+			if (ip->ip_p == IPPROTO_IGMP) {
+				ip_ours(m);
+				return;
+			}
 			ipstat.ips_forward++;
 		}
 #endif
@@ -420,15 +403,17 @@ ipv4_input(struct mbuf *m)
 			ipstat.ips_notmember++;
 			if (!IN_LOCAL_GROUP(ip->ip_dst.s_addr))
 				ipstat.ips_cantforward++;
-			m_freem(m);
-			return;
+			goto bad;
 		}
-		goto ours;
+		ip_ours(m);
+		return;
 	}
 
 	if (ip->ip_dst.s_addr == INADDR_BROADCAST ||
-	    ip->ip_dst.s_addr == INADDR_ANY)
-		goto ours;
+	    ip->ip_dst.s_addr == INADDR_ANY) {
+		ip_ours(m);
+		return;
+	}
 
 #if NCARP > 0
 	if (m->m_pkthdr.rcvif->if_type == IFT_CARP &&
@@ -441,8 +426,7 @@ ipv4_input(struct mbuf *m)
 	 */
 	if (ipforwarding == 0) {
 		ipstat.ips_cantforward++;
-		m_freem(m);
-		return;
+		goto bad;
 	}
 #ifdef IPSEC
 	if (ipsec_in_use) {
@@ -451,7 +435,6 @@ ipv4_input(struct mbuf *m)
 		 * inner-most IPsec SA used.
 		 */
 		mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL);
-                s = splnet();
 		if (mtag != NULL) {
 			tdbi = (struct tdb_ident *)(mtag + 1);
 			tdb = gettdb(tdbi->rdomain, tdbi->spi,
@@ -460,13 +443,11 @@ ipv4_input(struct mbuf *m)
 			tdb = NULL;
 	        ipsp_spd_lookup(m, AF_INET, hlen, &error,
 		    IPSP_DIRECTION_IN, tdb, NULL, 0);
-                splx(s);
 
 		/* Error or otherwise drop-packet indication */
 		if (error) {
 			ipstat.ips_cantforward++;
-			m_freem(m);
-			return;
+			goto bad;
 		}
 
 		/*
@@ -478,8 +459,34 @@ ipv4_input(struct mbuf *m)
 
 	ip_forward(m, pfrdr);
 	return;
+bad:
+	m_freem(m);
+}
 
-ours:
+/*
+ * IPv4 local-delivery routine.
+ *
+ * If fragmented try to reassemble.  Pass to next level.
+ */
+void
+ip_ours(struct mbuf *m)
+{
+	struct ip *ip = mtod(m, struct ip *);
+	struct ipq *fp;
+	struct ipqent *ipqe;
+	int mff, hlen;
+#ifdef IPSEC
+	int error;
+	struct tdb *tdb;
+	struct tdb_ident *tdbi;
+	struct m_tag *mtag;
+#endif /* IPSEC */
+
+	hlen = ip->ip_hl << 2;
+
+	/* pf might have modified stuff, might have to chksum */
+	in_proto_cksum_out(m, NULL);
+
 	/*
 	 * If offset or IP_MF are set, must reassemble.
 	 * Otherwise, nothing need be done.
@@ -611,7 +618,6 @@ found:
 	 * that's needed in the real world (who uses bundles anyway ?).
 	 */
 	mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL);
-        s = splnet();
 	if (mtag) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
 	        tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst,
@@ -620,13 +626,11 @@ found:
 		tdb = NULL;
 	ipsp_spd_lookup(m, AF_INET, hlen, &error, IPSP_DIRECTION_IN,
 	    tdb, NULL, 0);
-        splx(s);
 
 	/* Error or otherwise drop-packet indication. */
 	if (error) {
 	        ipstat.ips_cantforward++;
-		m_freem(m);
-		return;
+	        goto bad;
 	}
 
  skipipsec:
@@ -672,6 +676,8 @@ in_ouraddr(struct in_addr ina, struct mbuf *m)
 	ia = ifatoia(ifa_ifwithaddr(sintosa(&sin), m->m_pkthdr.rdomain));
 
 	if (ia == NULL) {
+		struct ifaddr *ifa;
+
 		/*
 		 * No local address or broadcast address found, so check for
 		 * ancient classful broadcast addresses.
@@ -682,16 +688,19 @@ in_ouraddr(struct in_addr ina, struct mbuf *m)
 		    !IN_CLASSFULBROADCAST(ina.s_addr, ina.s_addr))
 			return (0);
 
+		if (m->m_pkthdr.rcvif->if_rdomain != m->m_pkthdr.rdomain)
+			return (0);
 		/*
 		 * The check in the loop assumes you only rx a packet on an UP
 		 * interface, and that M_BCAST will only be set on a BROADCAST
 		 * interface.
 		 */
-		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-			if (ia->ia_ifp == m->m_pkthdr.rcvif &&
-			    ia->ia_ifp->if_rdomain == m->m_pkthdr.rdomain &&
-			    IN_CLASSFULBROADCAST(ina.s_addr,
-			    ia->ia_addr.sin_addr.s_addr))
+		TAILQ_FOREACH(ifa, &m->m_pkthdr.rcvif->if_addrlist, ifa_list) {
+			if (ifa->ifa_addr->sa_family != AF_INET)
+				continue;
+
+			if (IN_CLASSFULBROADCAST(ina.s_addr,
+			    ifatoia(ifa)->ia_addr.sin_addr.s_addr))
 				return (1);
 		}
 
@@ -1074,7 +1083,7 @@ ip_dooptions(struct mbuf *m)
 				/*
 				 * End of source route.  Should be for us.
 				 */
-				save_rte(cp, ip->ip_src);
+				save_rte(m, cp, ip->ip_src);
 				break;
 			}
 
@@ -1243,67 +1252,25 @@ ip_rtaddr(struct in_addr dst, u_int rtableid)
  * to be picked up later by ip_srcroute if the receiver is interested.
  */
 void
-save_rte(u_char *option, struct in_addr dst)
+save_rte(struct mbuf *m, u_char *option, struct in_addr dst)
 {
+	struct ip_srcrt *isr;
+	struct m_tag *mtag;
 	unsigned olen;
 
 	olen = option[IPOPT_OLEN];
-#ifdef DIAGNOSTIC
-	if (ipprintfs)
-		printf("save_rte: olen %d\n", olen);
-#endif /* 0 */
-	if (olen > sizeof(ip_srcrt) - (1 + sizeof(dst)))
+	if (olen > sizeof(isr->isr_hdr) + sizeof(isr->isr_routes))
 		return;
-	bcopy((caddr_t)option, (caddr_t)ip_srcrt.srcopt, olen);
-	ip_nhops = (olen - IPOPT_OFFSET - 1) / sizeof(struct in_addr);
-	ip_srcrt.dst = dst;
-}
 
-/*
- * Check whether we do proxy ARP for this address and we point to ourselves.
- * Code shamelessly copied from arplookup().
- */
-int
-ip_weadvertise(u_int32_t addr, u_int rtableid)
-{
-	struct rtentry *rt;
-	struct ifnet *ifp;
-	struct ifaddr *ifa;
-	struct sockaddr_inarp sin;
+	mtag = m_tag_get(PACKET_TAG_SRCROUTE, sizeof(*isr), M_NOWAIT);
+	if (mtag == NULL)
+		return;
+	isr = (struct ip_srcrt *)(mtag + 1);
 
-	sin.sin_len = sizeof(sin);
-	sin.sin_family = AF_INET;
-	sin.sin_addr.s_addr = addr;
-	sin.sin_other = SIN_PROXY;
-	rt = rtalloc1((struct sockaddr *)&sin, 0, rtableid);
-	if (rt == 0)
-		return 0;
-
-	if ((rt->rt_flags & RTF_GATEWAY) || (rt->rt_flags & RTF_LLINFO) == 0 ||
-	    rt->rt_gateway->sa_family != AF_LINK) {
-		RTFREE(rt);
-		return 0;
-	}
-
-	rtableid = rtable_l2(rtableid);
-	TAILQ_FOREACH(ifp, &ifnet, if_list) {
-		if (ifp->if_rdomain != rtableid)
-			continue;
-		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-			if (ifa->ifa_addr->sa_family != rt->rt_gateway->sa_family)
-				continue;
-
-			if (!bcmp(LLADDR((struct sockaddr_dl *)ifa->ifa_addr),
-			    LLADDR((struct sockaddr_dl *)rt->rt_gateway),
-			    ETHER_ADDR_LEN)) {
-				RTFREE(rt);
-				return 1;
-			}
-		}
-	}
-
-	RTFREE(rt);
-	return 0;
+	bcopy(option, isr->isr_hdr, olen);
+	isr->isr_nhops = (olen - IPOPT_OFFSET - 1) / sizeof(struct in_addr);
+	isr->isr_dst = dst;
+	m_tag_prepend(m, mtag);
 }
 
 /*
@@ -1312,44 +1279,44 @@ ip_weadvertise(u_int32_t addr, u_int rtableid)
  * The first hop is placed before the options, will be removed later.
  */
 struct mbuf *
-ip_srcroute(void)
+ip_srcroute(struct mbuf *m0)
 {
 	struct in_addr *p, *q;
 	struct mbuf *m;
+	struct ip_srcrt *isr;
+	struct m_tag *mtag;
 
-	if (ip_nhops == 0)
-		return ((struct mbuf *)0);
+	if (!ip_dosourceroute)
+		return (NULL);
+
+	mtag = m_tag_find(m0, PACKET_TAG_SRCROUTE, NULL);
+	if (mtag == NULL)
+		return (NULL);
+	isr = (struct ip_srcrt *)(mtag + 1);
+
+	if (isr->isr_nhops == 0)
+		return (NULL);
 	m = m_get(M_DONTWAIT, MT_SOOPTS);
-	if (m == 0)
-		return ((struct mbuf *)0);
+	if (m == NULL)
+		return (NULL);
 
-#define OPTSIZ	(sizeof(ip_srcrt.nop) + sizeof(ip_srcrt.srcopt))
+#define OPTSIZ	(sizeof(isr->isr_nop) + sizeof(isr->isr_hdr))
 
-	/* length is (nhops+1)*sizeof(addr) + sizeof(nop + srcrt header) */
-	m->m_len = ip_nhops * sizeof(struct in_addr) + sizeof(struct in_addr) +
-	    OPTSIZ;
-#ifdef DIAGNOSTIC
-	if (ipprintfs)
-		printf("ip_srcroute: nhops %d mlen %d", ip_nhops, m->m_len);
-#endif
+	/* length is (nhops+1)*sizeof(addr) + sizeof(nop + header) */
+	m->m_len = (isr->isr_nhops + 1) * sizeof(struct in_addr) + OPTSIZ;
 
 	/*
 	 * First save first hop for return route
 	 */
-	p = &ip_srcrt.route[ip_nhops - 1];
+	p = &(isr->isr_routes[isr->isr_nhops - 1]);
 	*(mtod(m, struct in_addr *)) = *p--;
-#ifdef DIAGNOSTIC
-	if (ipprintfs)
-		printf(" hops %x", ntohl(mtod(m, struct in_addr *)->s_addr));
-#endif
 
 	/*
 	 * Copy option fields and padding (nop) to mbuf.
 	 */
-	ip_srcrt.nop = IPOPT_NOP;
-	ip_srcrt.srcopt[IPOPT_OFFSET] = IPOPT_MINOFF;
-	bcopy((caddr_t)&ip_srcrt.nop,
-	    mtod(m, caddr_t) + sizeof(struct in_addr), OPTSIZ);
+	isr->isr_nop = IPOPT_NOP;
+	isr->isr_hdr[IPOPT_OFFSET] = IPOPT_MINOFF;
+	bcopy(&isr->isr_nop, mtod(m, caddr_t) + sizeof(struct in_addr), OPTSIZ);
 	q = (struct in_addr *)(mtod(m, caddr_t) +
 	    sizeof(struct in_addr) + OPTSIZ);
 #undef OPTSIZ
@@ -1357,33 +1324,22 @@ ip_srcroute(void)
 	 * Record return path as an IP source route,
 	 * reversing the path (pointers are now aligned).
 	 */
-	while (p >= ip_srcrt.route) {
-#ifdef DIAGNOSTIC
-		if (ipprintfs)
-			printf(" %x", ntohl(q->s_addr));
-#endif
+	while (p >= isr->isr_routes) {
 		*q++ = *p--;
 	}
 	/*
 	 * Last hop goes to final destination.
 	 */
-	*q = ip_srcrt.dst;
-#ifdef DIAGNOSTIC
-	if (ipprintfs)
-		printf(" %x\n", ntohl(q->s_addr));
-#endif
+	*q = isr->isr_dst;
+	m_tag_delete(m0, (struct m_tag *)isr);
 	return (m);
 }
 
 /*
- * Strip out IP options, at higher
- * level protocol in the kernel.
- * Second argument is buffer to which options
- * will be moved, and return value is their length.
- * XXX should be deleted; last arg currently ignored.
+ * Strip out IP options, at higher level protocol in the kernel.
  */
 void
-ip_stripoptions(struct mbuf *m, struct mbuf *mopt)
+ip_stripoptions(struct mbuf *m)
 {
 	int i;
 	struct ip *ip = mtod(m, struct ip *);
@@ -1398,6 +1354,7 @@ ip_stripoptions(struct mbuf *m, struct mbuf *mopt)
 	if (m->m_flags & M_PKTHDR)
 		m->m_pkthdr.len -= olen;
 	ip->ip_hl = sizeof(struct ip) >> 2;
+	ip->ip_len = htons(ntohs(ip->ip_len) - olen);
 }
 
 int inetctlerrmap[PRC_NCMDS] = {
@@ -1435,11 +1392,6 @@ ip_forward(struct mbuf *m, int srcrt)
 	n_long dest;
 
 	dest = 0;
-#ifdef DIAGNOSTIC
-	if (ipprintfs)
-		printf("forward: src %x dst %x ttl %x\n", ip->ip_src.s_addr,
-		    ip->ip_dst.s_addr, ip->ip_ttl);
-#endif
 	if (m->m_flags & (M_BCAST|M_MCAST) || in_canforward(ip->ip_dst) == 0) {
 		ipstat.ips_cantforward++;
 		m_freem(m);
@@ -1506,8 +1458,7 @@ ip_forward(struct mbuf *m, int srcrt)
 	    (rt->rt_flags & (RTF_DYNAMIC|RTF_MODIFIED)) == 0 &&
 	    satosin(rt_key(rt))->sin_addr.s_addr != 0 &&
 	    ipsendredirects && !srcrt &&
-	    !ip_weadvertise(satosin(rt_key(rt))->sin_addr.s_addr,
-	    m->m_pkthdr.rdomain)) {
+	    !arpproxy(satosin(rt_key(rt))->sin_addr, m->m_pkthdr.rdomain)) {
 		if (rt->rt_ifa &&
 		    (ip->ip_src.s_addr & ifatoia(rt->rt_ifa)->ia_netmask) ==
 		    ifatoia(rt->rt_ifa)->ia_net) {
@@ -1518,10 +1469,6 @@ ip_forward(struct mbuf *m, int srcrt)
 		    /* Router requirements says to only send host redirects */
 		    type = ICMP_REDIRECT;
 		    code = ICMP_REDIRECT_HOST;
-#ifdef DIAGNOSTIC
-		    if (ipprintfs)
-			printf("redirect (%d) to %x\n", code, (u_int32_t)dest);
-#endif
 		}
 	}
 
@@ -1731,7 +1678,7 @@ ip_savecontrol(struct inpcb *inp, struct mbuf **mp, struct ip *ip,
 	}
 	/* ip_srcroute doesn't do what we want here, need to fix */
 	if (inp->inp_flags & INP_RECVRETOPTS) {
-		*mp = sbcreatecontrol((caddr_t) ip_srcroute(),
+		*mp = sbcreatecontrol((caddr_t) ip_srcroute(m),
 		    sizeof(struct in_addr), IP_RECVRETOPTS, IPPROTO_IP);
 		if (*mp)
 			mp = &(*mp)->m_next;

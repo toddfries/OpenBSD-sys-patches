@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_osfp.c,v 1.26 2011/09/28 17:15:45 bluhm Exp $ */
+/*	$OpenBSD: pf_osfp.c,v 1.28 2013/11/11 09:15:34 mpi Exp $ */
 
 /*
  * Copyright (c) 2003 Mike Frantzen <frantzen@w4g.org>
@@ -35,9 +35,6 @@
 #include <net/pfvar.h>
 
 #include <netinet/ip6.h>
-#ifdef _KERNEL
-#include <netinet6/in6_var.h>
-#endif
 
 
 #ifdef _KERNEL
@@ -140,7 +137,7 @@ pf_osfp_fingerprint_hdr(const struct ip *ip, const struct ip6_hdr *ip6,
 		if (ip->ip_off & htons(IP_DF))
 			fp.fp_flags |= PF_OSFP_DF;
 #ifdef _KERNEL
-		strlcpy(srcname, inet_ntoa(ip->ip_src), sizeof(srcname));
+		inet_ntop(AF_INET, &ip->ip_src, srcname, sizeof(srcname));
 #else
 		memset(&sin, 0, sizeof(sin));
 		sin.sin_family = AF_INET;
@@ -163,8 +160,7 @@ pf_osfp_fingerprint_hdr(const struct ip *ip, const struct ip6_hdr *ip6,
 		fp.fp_flags |= PF_OSFP_DF;
 		fp.fp_flags |= PF_OSFP_INET6;
 #ifdef _KERNEL
-		strlcpy(srcname, ip6_sprintf((struct in6_addr *)&ip6->ip6_src),
-		    sizeof(srcname));
+		inet_ntop(AF_INET6, &ip6->ip6_src, srcname, sizeof(srcname));
 #else
 		memset(&sin6, 0, sizeof(sin6));
 		sin6.sin6_family = AF_INET6;

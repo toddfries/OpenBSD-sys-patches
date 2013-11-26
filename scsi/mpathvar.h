@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpathvar.h,v 1.3 2011/07/11 01:02:48 dlg Exp $ */
+/*	$OpenBSD: mpathvar.h,v 1.9 2013/08/27 00:53:10 dlg Exp $ */
 
 /*
  * Copyright (c) 2010 David Gwynne <dlg@openbsd.org>
@@ -19,20 +19,20 @@
 #ifndef _SYS_SCSI_MPATH_H_
 #define _SYS_SCSI_MPATH_H_
 
-struct mpath_dev;
 struct mpath_group;
 
 struct mpath_ops {
 	char	op_name[16];
 	int	(*op_checksense)(struct scsi_xfer *);
-	int	(*op_online)(struct scsi_link *);
-	int	(*op_offline)(struct scsi_link *);
-	int	op_schedule;
+	void	(*op_status)(struct scsi_link *);
 };
 
-#define MPATH_ROUNDROBIN	0 /* use all active paths */
-#define MPATH_NEXT		MPATH_ROUNDROBIN
-#define MPATH_MRU		1 /* use most recently used path */
+#define MPATH_SENSE_DECLINED	0 /* path driver declined to interpret sense */
+#define MPATH_SENSE_FAILOVER	1 /* sense says controllers have failed over */
+
+#define MPATH_S_UNKNOWN		-1
+#define MPATH_S_ACTIVE		0
+#define MPATH_S_PASSIVE		1
 
 struct mpath_path {
 	/* the path driver must set these */
@@ -40,16 +40,16 @@ struct mpath_path {
 	struct scsi_link	*p_link;
 	int			 p_gid;
 
-	/* the follwoing are private to mpath.c */
+	/* the following are private to mpath.c */
 	TAILQ_ENTRY(mpath_path)	 p_entry;
-	struct mpath_dev	*p_dev;
+	struct mpath_group	*p_group;
 	int			 p_state;
 };
 
 int			 mpath_path_probe(struct scsi_link *);
-int			 mpath_path_attach(struct mpath_path *,
+int			 mpath_path_attach(struct mpath_path *, u_int,
 			    const struct mpath_ops *);
-void			 mpath_path_state(struct mpath_path *, int);
+void			 mpath_path_status(struct mpath_path *, int);
 int			 mpath_path_detach(struct mpath_path *);
 
 void			 mpath_start(struct mpath_path *, struct scsi_xfer *);

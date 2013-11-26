@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.25 2013/01/05 11:20:55 miod Exp $	*/
+/*	$OpenBSD: locore.S,v 1.29 2013/11/02 17:49:19 miod Exp $	*/
 /*
  * Copyright (c) 1998 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -67,6 +67,8 @@
 #include <machine/trap.h>
 #include <machine/vmparam.h>
 
+#define	BOOT_MAGIC	0xf1abde3f
+
 /*
  * The memory looks like:
  *   0x00000 - 0x01000	trap vectors
@@ -77,6 +79,27 @@
 
 GLOBAL(kernelstart)
 GLOBAL(kernel_text)
+
+	/*
+	 * Room for the kernel (post-autoconf) VBR page.
+	 * Note this page is in kernel text, in order to be write-protected
+	 * by pmap_bootstrap().
+	 */
+
+	.balign	PAGE_SIZE
+	.space	PAGE_SIZE
+
+	/*
+	 * The 88100 may execute the first instruction of the next trap
+	 * handler, as documented in its Errata. Processing trap #511
+	 * would then fall into the next page, unless the address computation
+	 * wraps, or software traps are exempt from the issue - the Errata
+	 * does not provide more detail.
+	 * Although the MVME BUG does not add an extra NOP after its VBR page,
+	 * it is cheap to add an extra NOP for safety.
+	 */
+	NOP
+
 ASGLOBAL(__start)
 	/*
 	 * A few identical jump instructions to make sure the pipeline is
@@ -91,18 +114,21 @@ ASGLOBAL(__start)
 	 * Startup code common to all processors.
 	 */
 ASLOCAL(main_start)
+#if defined(DDB) || NKSYMS > 0
+	or.u	%r10, %r0,  %hi16(BOOT_MAGIC)
+	or	%r10, %r10, %lo16(BOOT_MAGIC)
+	cmp	%r11, %r2,  %r10
+	bb1	ne,   %r11, 1f
+
+	or.u	%r4,  %r0,  %hi16(_C_LABEL(esym))
+	st	%r3,  %r4,  %lo16(_C_LABEL(esym))
+1:
+#endif
+
 	bsr	_ASM_LABEL(setup_psr)
 
-	stcr	%r0,  VBR	/* set Vector Base Register to 0, ALWAYS! */
+	stcr	%r0,  VBR		/* start with VBR set to zero */
 	FLUSH_PIPELINE
-
-	/* clear BSS. PROM might have already done this... */
-	or.u	%r2, %r0, %hi16(_C_LABEL(edata))
-	or	%r2, %r2, %lo16(_C_LABEL(edata))
-	or.u	%r4, %r0, %hi16(_C_LABEL(end))
-	or	%r4, %r4, %lo16(_C_LABEL(end))
-	bsr.n	_C_LABEL(bzero)		/* bzero(edata, end-edata) */
-	 subu	%r3, %r4, %r2
 
 	/*
 	 * Now we will compete with the other processors to see which one
@@ -148,6 +174,26 @@ ASLOCAL(main_start)
 	 * cpu_hatch_mutex held).
 	 */
 ASLOCAL(main_init)
+	/* clear BSS. PROM might have already done this... */
+	or.u	%r2, %r0, %hi16(_C_LABEL(edata))
+	or	%r2, %r2, %lo16(_C_LABEL(edata))
+	or.u	%r4, %r0, %hi16(_C_LABEL(end))
+	or	%r4, %r4, %lo16(_C_LABEL(end))
+	bsr.n	_C_LABEL(bzero)		/* bzero(edata, end-edata) */
+	 subu	%r3, %r4, %r2
+
+	/* figure out the end of the kernel image. */
+#if defined(DDB) || NKSYMS > 0
+	or.u	%r4, %r0, %hi16(_C_LABEL(esym))
+	ld	%r4, %r4, %lo16(_C_LABEL(esym))
+	bcnd	ne0, %r4, 1f
+#endif
+	or.u	%r4, %r0, %hi16(_C_LABEL(end))
+	or	%r4, %r4, %lo16(_C_LABEL(end))		/* if no symbols */
+1:
+	or.u	%r5, %r0, %hi16(_C_LABEL(first_addr))
+	st	%r4, %r5, %lo16(_C_LABEL(first_addr))
+
 	/*
 	 * Have curcpu() point to the dummy cpuinfo structure,
 	 * and initialize cr17.
@@ -164,9 +210,9 @@ ASLOCAL(main_init)
 
 	or.u	%r3,  %r0,  %hi16(_C_LABEL(vector_list))
 	or	%r3,  %r3,  %lo16(_C_LABEL(vector_list))
-	or	%r4,  %r0,  1
-	bsr.n	_C_LABEL(vector_init)
-	 ldcr	%r2,  VBR
+
+	bsr.n	_C_LABEL(luna88k_vector_init)
+	 ldcr	%r2, VBR
 
 	/* PIO stuff */
 	or	%r10, %r0,  0xb6		/* initialize pio 0 */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: netisr.h,v 1.37 2012/10/07 23:56:21 mikeb Exp $	*/
+/*	$OpenBSD: netisr.h,v 1.39 2013/10/24 18:50:16 deraadt Exp $	*/
 /*	$NetBSD: netisr.h,v 1.12 1995/08/12 23:59:24 mycroft Exp $	*/
 
 /*
@@ -34,6 +34,7 @@
 
 #ifndef _NET_NETISR_H_
 #define _NET_NETISR_H_
+
 /*
  * The networking code runs off software interrupts.
  *
@@ -57,7 +58,6 @@
 #define	NETISR_ARP	18		/* same as AF_LINK */
 #define	NETISR_IPV6	24		/* same as AF_INET6 */
 #define	NETISR_ISDN	26		/* same as AF_E164 */
-#define	NETISR_NATM	27		/* same as AF_ATM */
 #define	NETISR_PPP	28		/* for PPP processing */
 #define	NETISR_BRIDGE	29		/* for bridge processing */
 #define	NETISR_PPPOE	30		/* for pppoe processing */
@@ -73,7 +73,6 @@ void	ipintr(void);
 void	ip6intr(void);
 void	atintr(void);
 void	clnlintr(void);
-void	natmintr(void);
 void	pppintr(void);
 void	bridgeintr(void);
 void	pppoeintr(void);
@@ -92,7 +91,7 @@ do {									\
 
 void	netisr_init(void);
 
-#endif
-#endif
+#endif /* _KERNEL */
+#endif /*_LOCORE */
 
 #endif /* _NET_NETISR_H_ */

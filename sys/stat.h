@@ -1,4 +1,4 @@
-/*	$OpenBSD: stat.h,v 1.21 2012/12/05 23:20:24 deraadt Exp $	*/
+/*	$OpenBSD: stat.h,v 1.24 2013/09/14 01:35:02 guenther Exp $	*/
 /*	$NetBSD: stat.h,v 1.20 1996/05/16 22:17:49 cgd Exp $	*/
 
 /*-
@@ -43,24 +43,23 @@
 #include <sys/time.h>
 
 struct stat {
+	mode_t	  st_mode;		/* inode protection mode */
 	dev_t	  st_dev;		/* inode's device */
 	ino_t	  st_ino;		/* inode's number */
-	mode_t	  st_mode;		/* inode protection mode */
 	nlink_t	  st_nlink;		/* number of hard links */
 	uid_t	  st_uid;		/* user ID of the file's owner */
 	gid_t	  st_gid;		/* group ID of the file's group */
 	dev_t	  st_rdev;		/* device type */
-	int32_t	  st_lspare0;
 #if __POSIX_VISIBLE >= 200809 || __BSD_VISIBLE
 	struct	timespec st_atim;	/* time of last access */
 	struct	timespec st_mtim;	/* time of last data modification */
 	struct	timespec st_ctim;	/* time of last file status change */
 #else
-	time_t	  st_atime;		/* time of last access */
+	time_t    st_atime;		/* time of last access */
 	long	  st_atimensec;		/* nsec of last access */
-	time_t	  st_mtime;		/* time of last data modification */
+	time_t    st_mtime;		/* time of last data modification */
 	long	  st_mtimensec;		/* nsec of last data modification */
-	time_t	  st_ctime;		/* time of last file status change */
+	time_t    st_ctime;		/* time of last file status change */
 	long	  st_ctimensec;		/* nsec of last file status change */
 #endif /* __POSIX_VISIBLE >= 200809 || __BSD_VISIBLE */
 	off_t	  st_size;		/* file size, in bytes */
@@ -68,14 +67,12 @@ struct stat {
 	u_int32_t st_blksize;		/* optimal blocksize for I/O */
 	u_int32_t st_flags;		/* user defined flags for file */
 	u_int32_t st_gen;		/* file generation number */
-	int32_t	  st_lspare1;
 #if __POSIX_VISIBLE >= 200809 || __BSD_VISIBLE
 	struct	timespec __st_birthtim;	/* time of file creation */
 #else
-	time_t	  __st_birthtime;	/* time of file creation */
+	time_t    __st_birthtime;	/* time of file creation */
 	long	  __st_birthtimensec;	/* nsec of file creation */
 #endif /* __POSIX_VISIBLE >= 200809 || __BSD_VISIBLE */
-	int64_t	  st_qspare[2];
 };
 #if __POSIX_VISIBLE >= 200809 || __BSD_VISIBLE
 #define	st_atime		st_atim.tv_sec
@@ -141,6 +138,13 @@ struct stat {
 #if __POSIX_VISIBLE >= 200112 || __BSD_VISIBLE
 #define	S_ISLNK(m)	((m & 0170000) == 0120000)	/* symbolic link */
 #define	S_ISSOCK(m)	((m & 0170000) == 0140000)	/* socket */
+#endif
+
+#if __POSIX_VISIBLE >= 200809
+/* manadated to be present, but permitted to always return zero */
+#define	S_TYPEISMQ(m)	0
+#define	S_TYPEISSEM(m)	0
+#define	S_TYPEISSHM(m)	0
 #endif
 
 #if __BSD_VISIBLE

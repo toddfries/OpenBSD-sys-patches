@@ -1,4 +1,4 @@
-/*	$OpenBSD: umodem.c,v 1.49 2013/04/26 13:46:40 mglocker Exp $ */
+/*	$OpenBSD: umodem.c,v 1.53 2013/11/15 10:17:39 pirofti Exp $ */
 /*	$NetBSD: umodem.c,v 1.45 2002/09/23 05:51:23 simonb Exp $	*/
 
 /*
@@ -103,7 +103,6 @@ struct umodem_softc {
 	struct device		*sc_subdev;	/* ucom device */
 
 	u_char			 sc_opening;	/* lock during open */
-	u_char			 sc_dying;	/* disconnecting */
 
 	int			 sc_ctl_notify;	/* Notification endpoint */
 	struct usbd_pipe	*sc_notify_pipe; /* Notification pipe */
@@ -402,7 +401,7 @@ umodem_attach(struct device *parent, struct device *self, void *aux)
 	return;
 
  bad:
-	sc->sc_dying = 1;
+	usbd_deactivate(sc->sc_udev);
 }
 
 int
@@ -438,10 +437,7 @@ umodem_close(void *addr, int portno)
 	DPRINTF(("umodem_close: sc=%p\n", sc));
 
 	if (sc->sc_notify_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_notify_pipe);
-		if (err)
-			printf("%s: abort notify pipe failed: %s\n",
-			    sc->sc_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_notify_pipe);
 		err = usbd_close_pipe(sc->sc_notify_pipe);
 		if (err)
 			printf("%s: close notify pipe failed: %s\n",
@@ -456,7 +452,7 @@ umodem_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	struct umodem_softc *sc = priv;
 	u_char mstatus;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -575,7 +571,7 @@ umodem_ioctl(void *addr, int portno, u_long cmd, caddr_t data, int flag,
 	struct umodem_softc *sc = addr;
 	int error = 0;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	DPRINTF(("umodemioctl: cmd=0x%08lx\n", cmd));
@@ -746,16 +742,13 @@ int
 umodem_activate(struct device *self, int act)
 {
 	struct umodem_softc *sc = (struct umodem_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
-		if (sc->sc_subdev)
-			rv = config_deactivate(sc->sc_subdev);
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 int
@@ -765,6 +758,12 @@ umodem_detach(struct device *self, int flags)
 	int rv = 0;
 
 	DPRINTF(("umodem_detach: sc=%p flags=%d\n", sc, flags));
+
+	if (sc->sc_notify_pipe != NULL) {
+		usbd_abort_pipe(sc->sc_notify_pipe);
+		usbd_close_pipe(sc->sc_notify_pipe);
+		sc->sc_notify_pipe = NULL;
+	}
 
 	if (sc->sc_subdev != NULL)
 		rv = config_detach(sc->sc_subdev, flags);

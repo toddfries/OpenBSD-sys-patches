@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_subr.c,v 1.89 2013/04/15 09:23:02 mglocker Exp $ */
+/*	$OpenBSD: usb_subr.c,v 1.95 2013/11/19 14:04:07 pirofti Exp $ */
 /*	$NetBSD: usb_subr.c,v 1.103 2003/01/10 11:19:13 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_subr.c,v 1.18 1999/11/17 22:33:47 n_hibma Exp $	*/
 
@@ -68,9 +68,11 @@ int		usbd_getnewaddr(struct usbd_bus *);
 int		usbd_print(void *, const char *);
 int		usbd_submatch(struct device *, void *, void *);
 void		usbd_free_iface_data(struct usbd_device *, int);
-void		usbd_kill_pipe(struct usbd_pipe *);
 usbd_status	usbd_probe_and_attach(struct device *,
 		    struct usbd_device *, int, int);
+
+int		usbd_printBCD(char *cp, size_t len, int bcd);
+void		usb_free_device(struct usbd_device *, struct usbd_port *);
 
 #ifdef USBVERBOSE
 #include <dev/usb/usbdevs_data.h>
@@ -608,8 +610,9 @@ usbd_set_config_no(struct usbd_device *dev, int no, int msg)
 	DPRINTFN(5,("usbd_set_config_no: %d\n", no));
 	/* Figure out what config index to use. */
 	for (index = 0; index < dev->ddesc.bNumConfigurations; index++) {
-		err = usbd_get_config_desc(dev, index, &cd);
-		if (err)
+		err = usbd_get_desc(dev, UDESC_CONFIG, index,
+		    USB_CONFIG_DESCRIPTOR_SIZE, &cd);
+		if (err || cd.bDescriptorType != UDESC_CONFIG)
 			return (err);
 		if (cd.bConfigurationValue == no)
 			return (usbd_set_config_index(dev, index, msg));
@@ -652,8 +655,9 @@ usbd_set_config_index(struct usbd_device *dev, int index, int msg)
 	}
 
 	/* Get the short descriptor. */
-	err = usbd_get_config_desc(dev, index, &cd);
-	if (err)
+	err = usbd_get_desc(dev, UDESC_CONFIG, index,
+	    USB_CONFIG_DESCRIPTOR_SIZE, &cd);
+	if (err || cd.bDescriptorType != UDESC_CONFIG)
 		return (err);
 	len = UGETW(cd.wTotalLength);
 	cdp = malloc(len, M_USB, M_NOWAIT);
@@ -718,8 +722,8 @@ usbd_set_config_index(struct usbd_device *dev, int index, int msg)
 			selfpowered = 1;
 	}
 	DPRINTF(("usbd_set_config_index: (addr %d) cno=%d attr=0x%02x, "
-		 "selfpowered=%d, power=%d\n",
-		 cdp->bConfigurationValue, dev->address, cdp->bmAttributes,
+		 "selfpowered=%d, power=%d\n", dev->address,
+		 cdp->bConfigurationValue, cdp->bmAttributes,
 		 selfpowered, cdp->bMaxPower * 2));
 
 	/* Check if we have enough power. */
@@ -801,7 +805,6 @@ usbd_setup_pipe(struct usbd_device *dev, struct usbd_interface *iface,
 	p->iface = iface;
 	p->endpoint = ep;
 	ep->refcnt++;
-	p->refcnt = 1;
 	p->intrxfer = 0;
 	p->running = 0;
 	p->aborting = 0;
@@ -818,16 +821,6 @@ usbd_setup_pipe(struct usbd_device *dev, struct usbd_interface *iface,
 	}
 	*pipe = p;
 	return (USBD_NORMAL_COMPLETION);
-}
-
-/* Abort the device control pipe. */
-void
-usbd_kill_pipe(struct usbd_pipe *pipe)
-{
-	usbd_abort_pipe(pipe);
-	pipe->methods->close(pipe);
-	pipe->endpoint->refcnt--;
-	free(pipe, M_USB);
 }
 
 int
@@ -1307,18 +1300,6 @@ usbd_submatch(struct device *parent, void *match, void *aux)
 	     )
 	   )
 		return 0;
-	if (cf->uhubcf_vendor != UHUB_UNK_VENDOR &&
-	    cf->uhubcf_vendor == uaa->vendor &&
-	    cf->uhubcf_product != UHUB_UNK_PRODUCT &&
-	    cf->uhubcf_product == uaa->product) {
-		/* We have a vendor&product locator match */
-		if (cf->uhubcf_release != UHUB_UNK_RELEASE &&
-		    cf->uhubcf_release == uaa->release)
-			uaa->matchlvl = UMATCH_VENDOR_PRODUCT_REV;
-		else
-			uaa->matchlvl = UMATCH_VENDOR_PRODUCT;
-	} else
-		uaa->matchlvl = 0;
 	return ((*cf->cf_attach->ca_match)(parent, cf, aux));
 }
 
@@ -1403,8 +1384,9 @@ usbd_get_cdesc(struct usbd_device *dev, int index, int *lenp)
 		memcpy(cdesc, tdesc, len);
 		DPRINTFN(5,("usbd_get_cdesc: current, len=%d\n", len));
 	} else {
-		err = usbd_get_config_desc(dev, index, &cdescr);
-		if (err)
+		err = usbd_get_desc(dev, UDESC_CONFIG, index,
+		    USB_CONFIG_DESCRIPTOR_SIZE, &cdescr);
+		if (err || cdescr.bDescriptorType != UDESC_CONFIG)
 			return (0);
 		len = UGETW(cdescr.wTotalLength);
 		DPRINTFN(5,("usbd_get_cdesc: index=%d, len=%d\n", index, len));
@@ -1427,8 +1409,10 @@ usb_free_device(struct usbd_device *dev, struct usbd_port *up)
 
 	DPRINTF(("usb_free_device: %p\n", dev));
 
-	if (dev->default_pipe != NULL)
-		usbd_kill_pipe(dev->default_pipe);
+	if (dev->default_pipe != NULL) {
+		usbd_abort_pipe(dev->default_pipe);
+		usbd_close_pipe(dev->default_pipe);
+	}
 	if (dev->ifaces != NULL) {
 		nifc = dev->cdesc->bNumInterface;
 		for (ifcidx = 0; ifcidx < nifc; ifcidx++)

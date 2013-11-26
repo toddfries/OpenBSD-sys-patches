@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.204 2013/05/15 08:29:24 ratchov Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.207 2013/11/09 05:51:11 jsg Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -462,6 +462,7 @@ azalia_configure_pci(azalia_t *az)
 	case PCI_PRODUCT_INTEL_QS57_HDA:
 	case PCI_PRODUCT_INTEL_6SERIES_HDA:
 	case PCI_PRODUCT_INTEL_7SERIES_HDA:
+	case PCI_PRODUCT_INTEL_8SERIES_HDA:
 		reg = azalia_pci_read(az->pc, az->tag,
 		    INTEL_PCIE_NOSNOOP_REG);
 		reg &= INTEL_PCIE_NOSNOOP_MASK;
@@ -528,8 +529,8 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	interrupt_str = pci_intr_string(pa->pa_pc, ih);
-	sc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO, azalia_intr,
-	    sc, sc->dev.dv_xname);
+	sc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO | IPL_MPSAFE,
+	    azalia_intr, sc, sc->dev.dv_xname);
 	if (sc->ih == NULL) {
 		printf(": can't establish interrupt");
 		if (interrupt_str != NULL)
@@ -550,8 +551,6 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->audiodev = audio_attach_mi(&azalia_hw_if, sc, &sc->dev);
 
-	shutdownhook_establish(azalia_shutdown, sc);
-
 	return;
 
 err_exit:
@@ -571,6 +570,9 @@ azalia_pci_activate(struct device *self, int act)
 		break;
 	case DVACT_SUSPEND:
 		azalia_suspend(sc);
+		break;
+	case DVACT_POWERDOWN:
+		azalia_shutdown(sc);
 		break;
 	case DVACT_RESUME:
 		azalia_resume(sc);

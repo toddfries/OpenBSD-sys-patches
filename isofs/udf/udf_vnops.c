@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf_vnops.c,v 1.46 2013/03/28 02:08:39 guenther Exp $	*/
+/*	$OpenBSD: udf_vnops.c,v 1.53 2013/09/22 15:42:53 guenther Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -54,7 +54,7 @@
 #include <isofs/udf/udf.h>
 #include <isofs/udf/udf_extern.h>
 
-int udf_bmap_internal(struct unode *, off_t, daddr64_t *, uint32_t *);
+int udf_bmap_internal(struct unode *, off_t, daddr_t *, uint32_t *);
 
 struct vops udf_vops = {
 	.vop_access	= udf_access,
@@ -72,15 +72,16 @@ struct vops udf_vops = {
 	.vop_strategy	= udf_strategy,
 	.vop_lock	= udf_lock,
 	.vop_unlock	= udf_unlock,
+	.vop_pathconf	= udf_pathconf,
 	.vop_islocked	= udf_islocked,
 	.vop_print	= udf_print
 };
 
 #define UDF_INVALID_BMAP	-1
 
-/* Look up a unode based on the ino_t passed in and return its vnode */
+/* Look up a unode based on the udfino_t passed in and return its vnode */
 int
-udf_hashlookup(struct umount *ump, ino_t id, int flags, struct vnode **vpp)
+udf_hashlookup(struct umount *ump, udfino_t id, int flags, struct vnode **vpp)
 {
 	struct unode *up;
 	struct udf_hash_lh *lh;
@@ -251,16 +252,17 @@ udf_timetotimespec(struct timestamp *time, struct timespec *t)
 		int16_t		s_tz_offset;
 	} tz;
 
-	t->tv_nsec = 0;
-
 	/* DirectCD seems to like using bogus year values */
 	year = letoh16(time->year);
 	if (year < 1970) {
 		t->tv_sec = 0;
+		t->tv_nsec = 0;
 		return;
 	}
 
 	/* Calculate the time and day */
+	t->tv_nsec = 1000 * time->usec + 100000 * time->hund_usec
+	    + 10000000 * time->centisec;
 	t->tv_sec = time->second;
 	t->tv_sec += time->minute * 60;
 	t->tv_sec += time->hour * 3600;
@@ -388,10 +390,10 @@ udf_ioctl(void *v)
  * I'm not sure that this has much value in a read-only filesystem, but
  * cd9660 has it too.
  */
-#if 0
-static int
-udf_pathconf(struct vop_pathconf_args *a)
+int
+udf_pathconf(void *v)
 {
+	struct vop_pathconf_args *ap = v;
 	int error = 0;
 
 	switch (ap->a_name) {
@@ -401,8 +403,14 @@ udf_pathconf(struct vop_pathconf_args *a)
 	case _PC_NAME_MAX:
 		*ap->a_retval = NAME_MAX;
 		break;
+	case _PC_CHOWN_RESTRICTED:
+		*ap->a_retval = 1;
+		break;
 	case _PC_NO_TRUNC:
 		*ap->a_retval = 1;
+		break;
+	case _PC_TIMESTAMP_RESOLUTION:
+		*ap->a_retval = 1000;		/* 1 microsecond */
 		break;
 	default:
 		error = EINVAL;
@@ -411,7 +419,6 @@ udf_pathconf(struct vop_pathconf_args *a)
 
 	return (error);
 }
-#endif
 
 int
 udf_read(void *v)
@@ -525,27 +532,20 @@ udf_cmpname(char *cs0string, char *cmpname, int cs0len, int cmplen, struct umoun
 
 struct udf_uiodir {
 	struct dirent *dirent;
-	u_long *cookies;
-	int ncookies;
-	int acookies;
 	int eofflag;
 };
 
 static int
-udf_uiodir(struct udf_uiodir *uiodir, int de_size, struct uio *uio, long cookie)
+udf_uiodir(struct udf_uiodir *uiodir, struct uio *uio, long off)
 {
-	if (uiodir->cookies != NULL) {
-		if (++uiodir->acookies > uiodir->ncookies) {
-			uiodir->eofflag = 0;
-			return (-1);
-		}
-		*uiodir->cookies++ = cookie;
-	}
+	int de_size = DIRENT_SIZE(uiodir->dirent);
 
 	if (uio->uio_resid < de_size) {
 		uiodir->eofflag = 0;
 		return (-1);
 	}
+	uiodir->dirent->d_off = off;
+	uiodir->dirent->d_reclen = de_size;
 
 	return (uiomove(uiodir->dirent, de_size, uio));
 }
@@ -679,12 +679,12 @@ udf_getfid(struct udf_dirstream *ds)
 	 * Update the offset. Align on a 4 byte boundary because the
 	 * UDF spec says so.
 	 */
-	ds->this_off = ds->off;
 	if (!ds->fid_fragment) {
 		ds->off += (total_fid_size + 3) & ~0x03;
 	} else {
 		ds->off = (total_fid_size - frag_size + 3) & ~0x03;
 	}
+	ds->this_off = ds->offset + ds->off;
 
 	return (fid);
 }
@@ -704,6 +704,9 @@ udf_closedir(struct udf_dirstream *ds)
 	pool_put(&udf_ds_pool, ds);
 }
 
+#define SELF_OFFSET	1
+#define PARENT_OFFSET	2
+
 int
 udf_readdir(void *v)
 {
@@ -716,33 +719,29 @@ udf_readdir(void *v)
 	struct fileid_desc *fid;
 	struct udf_uiodir uiodir;
 	struct udf_dirstream *ds;
-	u_long *cookies = NULL;
-	int ncookies;
+	off_t last_off;
+	enum { MODE_NORMAL, MODE_SELF, MODE_PARENT } mode;
 	int error = 0;
-
-#define GENERIC_DIRSIZ(dp) \
-    ((sizeof (struct dirent) - (MAXNAMLEN+1)) + (((dp)->d_namlen+1 + 3) &~ 3))
 
 	vp = ap->a_vp;
 	uio = ap->a_uio;
 	up = VTOU(vp);
 	ump = up->u_ump;
 	uiodir.eofflag = 1;
+	uiodir.dirent = &dir;
 
-	if (ap->a_ncookies != NULL) {
-		/*
-		 * Guess how many entries are needed.  If we run out, this
-		 * function will be called again and thing will pick up were
-		 * it left off.
-		 */
-		ncookies = uio->uio_resid / 8;
-		cookies = malloc(sizeof(u_long) * ncookies, M_TEMP, M_WAITOK);
-		uiodir.ncookies = ncookies;
-		uiodir.cookies = cookies;
-		uiodir.acookies = 0;
-	} else {
-		uiodir.cookies = NULL;
-	}
+	/*
+	 * if asked to start at SELF_OFFSET or PARENT_OFFSET, search
+	 * for the parent ref
+	 */
+	if (uio->uio_offset == SELF_OFFSET) {
+		mode = MODE_SELF;
+		uio->uio_offset = 0;
+	} else if (uio->uio_offset == PARENT_OFFSET) {
+		mode = MODE_PARENT;
+		uio->uio_offset = 0;
+	} else
+		mode = MODE_NORMAL;
 
 	/*
 	 * Iterate through the file id descriptors.  Give the parent dir
@@ -755,6 +754,7 @@ udf_readdir(void *v)
 	ds = udf_opendir(up, uio->uio_offset,
 	    letoh64(up->u_fentry->inf_len), up->u_ump);
 
+	last_off = ds->offset + ds->off;
 	while ((fid = udf_getfid(ds)) != NULL) {
 
 		/* Should we return an error on a bad fid? */
@@ -770,52 +770,54 @@ udf_readdir(void *v)
 
 		if ((fid->l_fi == 0) && (fid->file_char & UDF_FILE_CHAR_PAR)) {
 			/* Do up the '.' and '..' entries.  Dummy values are
-			 * used for the cookies since the offset here is
+			 * used for the offset since the offset here is
 			 * usually zero, and NFS doesn't like that value
 			 */
-			dir.d_fileno = up->u_ino;
-			dir.d_type = DT_DIR;
-			dir.d_name[0] = '.';
-			dir.d_name[1] = '\0';
-			dir.d_namlen = 1;
-			dir.d_reclen = GENERIC_DIRSIZ(&dir);
-			uiodir.dirent = &dir;
-			error = udf_uiodir(&uiodir, dir.d_reclen, uio, 1);
-			if (error)
-				break;
-
-			dir.d_fileno = udf_getid(&fid->icb);
-			dir.d_type = DT_DIR;
-			dir.d_name[0] = '.';
-			dir.d_name[1] = '.';
-			dir.d_name[2] = '\0';
-			dir.d_namlen = 2;
-			dir.d_reclen = GENERIC_DIRSIZ(&dir);
-			uiodir.dirent = &dir;
-			error = udf_uiodir(&uiodir, dir.d_reclen, uio, 2);
+			if (mode == MODE_NORMAL) {
+				dir.d_fileno = up->u_ino;
+				dir.d_type = DT_DIR;
+				dir.d_name[0] = '.';
+				dir.d_name[1] = '\0';
+				dir.d_namlen = 1;
+				error = udf_uiodir(&uiodir, uio, SELF_OFFSET);
+				if (error)
+					break;
+			}
+			if (mode != MODE_PARENT) {
+				dir.d_fileno = udf_getid(&fid->icb);
+				dir.d_type = DT_DIR;
+				dir.d_name[0] = '.';
+				dir.d_name[1] = '.';
+				dir.d_name[2] = '\0';
+				dir.d_namlen = 2;
+				error = udf_uiodir(&uiodir, uio, PARENT_OFFSET);
+			}
+			mode = MODE_NORMAL;
+		} else if (mode != MODE_NORMAL) {
+			continue;
 		} else {
 			dir.d_namlen = udf_transname(&fid->data[fid->l_iu],
 			    &dir.d_name[0], fid->l_fi, ump);
 			dir.d_fileno = udf_getid(&fid->icb);
 			dir.d_type = (fid->file_char & UDF_FILE_CHAR_DIR) ?
 			    DT_DIR : DT_UNKNOWN;
-			dir.d_reclen = GENERIC_DIRSIZ(&dir);
-			uiodir.dirent = &dir;
-			error = udf_uiodir(&uiodir, dir.d_reclen, uio,
-			    ds->this_off);
+			error = udf_uiodir(&uiodir, uio, ds->this_off);
 		}
 		if (error) {
-			printf("uiomove returned %d\n", error);
+			/*
+			 * udf_uiodir() indicates there isn't space for
+			 * another entry by returning -1
+			 */
+			if (error == -1)
+				error = 0;
 			break;
 		}
-
+		last_off = ds->this_off;
 	}
-
-#undef GENERIC_DIRSIZ
 
 	/* tell the calling layer whether we need to be called again */
 	*ap->a_eofflag = uiodir.eofflag;
-	uio->uio_offset = ds->offset + ds->off;
+	uio->uio_offset = last_off;
 
 	if (!error)
 		error = ds->error;
@@ -824,15 +826,6 @@ udf_readdir(void *v)
 	if (ISSET(up->u_ump->um_flags, UDF_MNT_USES_META)) {
 		up->u_ump->um_start = up->u_ump->um_realstart;
 		up->u_ump->um_len = up->u_ump->um_reallen;
-	}
-
-	if (ap->a_ncookies != NULL) {
-		if (error)
-			free(cookies, M_TEMP);
-		else {
-			*ap->a_ncookies = uiodir.acookies;
-			*ap->a_cookies = cookies;
-		}
 	}
 
 	return (error);
@@ -948,7 +941,7 @@ udf_bmap(void *v)
 	struct vop_bmap_args *ap = v;
 	struct unode *up;
 	uint32_t max_size;
-	daddr64_t lsector;
+	daddr_t lsector;
 	int error;
 
 	up = VTOU(ap->a_vp);
@@ -992,7 +985,7 @@ udf_lookup(void *v)
 	u_long flags;
 	char *nameptr;
 	long namelen;
-	ino_t id = 0;
+	udfino_t id = 0;
 	int offset, error = 0;
 	int numdirpasses, fsize;
 
@@ -1205,7 +1198,7 @@ udf_readatoffset(struct unode *up, int *size, off_t offset,
 	struct file_entry *fentry = NULL;
 	struct buf *bp1;
 	uint32_t max_size;
-	daddr64_t sector;
+	daddr_t sector;
 	int error;
 
 	ump = up->u_ump;
@@ -1252,7 +1245,7 @@ udf_readatoffset(struct unode *up, int *size, off_t offset,
  * block.
  */
 int
-udf_bmap_internal(struct unode *up, off_t offset, daddr64_t *sector,
+udf_bmap_internal(struct unode *up, off_t offset, daddr_t *sector,
     uint32_t *max_size)
 {
 	struct umount *ump;
@@ -1261,7 +1254,7 @@ udf_bmap_internal(struct unode *up, off_t offset, daddr64_t *sector,
 	void *icb;
 	struct icb_tag *tag;
 	uint32_t icblen = 0;
-	daddr64_t lsector;
+	daddr_t lsector;
 	int ad_offset, ad_num = 0;
 	int i, p_offset, l_ea, l_ad;
 

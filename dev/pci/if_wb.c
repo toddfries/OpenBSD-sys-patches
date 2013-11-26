@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wb.c,v 1.51 2012/11/29 21:10:32 brad Exp $	*/
+/*	$OpenBSD: if_wb.c,v 1.55 2013/11/26 09:50:33 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -105,7 +105,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -538,7 +537,9 @@ void wb_setmulti(sc)
 
 	rxfilt = CSR_READ_4(sc, WB_NETCFG);
 
-allmulti:
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
 		rxfilt |= WB_NETCFG_RX_MULTI;
 		CSR_WRITE_4(sc, WB_NETCFG, rxfilt);
@@ -554,10 +555,6 @@ allmulti:
 	/* now program new ones */
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
-		}
 		h = ~(ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26);
 		if (h < 32)
 			hashes[0] |= (1 << h);
@@ -773,7 +770,7 @@ wb_attach(parent, self, aux)
 	}
 	if (bus_dmamem_map(pa->pa_dmat, &seg, rseg,
 	    sizeof(struct wb_list_data), &kva, BUS_DMA_NOWAIT)) {
-		printf(": can't map list data, size %d\n",
+		printf(": can't map list data, size %zd\n",
 		    sizeof(struct wb_list_data));
 		goto fail_3;
 	}
@@ -977,7 +974,7 @@ void wb_rxeof(sc)
 		total_len -= ETHER_CRC_LEN;
 
 		m = m_devget(cur_rx->wb_buf + sizeof(u_int64_t), total_len,
-		    ETHER_ALIGN, ifp, NULL);
+		    ETHER_ALIGN, ifp);
 		wb_newbuf(sc, cur_rx);
 		if (m == NULL) {
 			ifp->if_ierrors++;

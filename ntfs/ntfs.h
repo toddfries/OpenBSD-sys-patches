@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs.h,v 1.14 2013/01/25 22:25:14 brad Exp $	*/
+/*	$OpenBSD: ntfs.h,v 1.17 2013/11/24 16:02:30 jsing Exp $	*/
 /*	$NetBSD: ntfs.h,v 1.5 2003/04/24 07:50:19 christos Exp $	*/
 
 /*-
@@ -45,6 +45,12 @@ typedef u_int16_t wchar;
 #define	NTFS_BADCLUSINO		8
 #define	NTFS_UPCASEINO		10
 #define NTFS_MAXFILENAME	255
+
+/*
+ * UFS directories use 32bit inode numbers internally, regardless
+ * of what the system on top of it uses.
+ */
+typedef u_int32_t	ntfsino_t;
 
 struct fixuphdr {
 	u_int32_t       fh_magic;
@@ -286,7 +292,7 @@ struct ntfsmount {
 #define	VTOF(v)		((struct fnode *)((v)->v_data))
 #define	FTOV(f)		((f)->f_vp)
 #define	FTONT(f)	((f)->f_ip)
-#define ntfs_cntobn(cn)	(daddr64_t)((cn) * (ntmp->ntm_spc))
+#define ntfs_cntobn(cn)	(daddr_t)((cn) * (ntmp->ntm_spc))
 #define ntfs_cntob(cn)	(off_t)((cn) * (ntmp)->ntm_spc * (ntmp)->ntm_bps)
 #define ntfs_btocn(off)	(cn_t)((off) / ((ntmp)->ntm_spc * (ntmp)->ntm_bps))
 #define ntfs_btocl(off)	(cn_t)((off + ntfs_cntob(1) - 1) / ((ntmp)->ntm_spc * (ntmp)->ntm_bps))
@@ -296,13 +302,13 @@ struct ntfsmount {
 #ifdef _KERNEL
 #if defined(NTFS_DEBUG)
 extern int ntfs_debug;
-#define DPRINTF(X, Y) do { if(ntfs_debug >= (X)) printf Y; } while(0)
-#define dprintf(a) DPRINTF(1, a)
-#define ddprintf(a) DPRINTF(2, a)
+#define DNPRINTF(n, x...) do { if(ntfs_debug >= (n)) printf(x); } while(0)
+#define DPRINTF(x...) DNPRINTF(1, x)
+#define DDPRINTF(x...) DNPRINTF(2, x)
 #else /* NTFS_DEBUG */
-#define DPRINTF(X, Y)
-#define dprintf(a)
-#define ddprintf(a)
+#define DNPRINTF(n, x...)
+#define DPRINTF(x...)
+#define DDPRINTF(x...)
 #endif
 
 extern struct vops ntfs_vops;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ktrace.c,v 1.58 2012/04/10 20:39:37 mikeb Exp $	*/
+/*	$OpenBSD: kern_ktrace.c,v 1.61 2013/09/14 02:28:01 guenther Exp $	*/
 /*	$NetBSD: kern_ktrace.c,v 1.23 1996/02/09 18:59:36 christos Exp $	*/
 
 /*
@@ -31,8 +31,6 @@
  *
  *	@(#)kern_ktrace.c	8.2 (Berkeley) 9/23/93
  */
-
-#ifdef KTRACE
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -161,7 +159,7 @@ ktrsyscall(struct proc *p, register_t code, size_t argsize, register_t args[])
 		 * array because it is interesting.
 		 */
 		if (args[1] > 0)
-			nargs = min(args[1], CTL_MAXNAME);
+			nargs = lmin(args[1], CTL_MAXNAME);
 		len += nargs * sizeof(int);
 	}
 	atomic_setbits_int(&p->p_flag, P_INKTR);
@@ -227,21 +225,22 @@ ktremul(struct proc *p, char *emul)
 }
 
 void
-ktrgenio(struct proc *p, int fd, enum uio_rw rw, struct iovec *iov, int len,
-    int error)
+ktrgenio(struct proc *p, int fd, enum uio_rw rw, struct iovec *iov,
+    ssize_t len)
 {
 	struct ktr_header kth;
 	struct ktr_genio *ktp;
 	caddr_t cp;
-	int resid = len, count;
+	int count;
 	int buflen;
-
-	if (error)
-		return;
 
 	atomic_setbits_int(&p->p_flag, P_INKTR);
 
-	buflen = min(PAGE_SIZE, len + sizeof(struct ktr_genio));
+	/* beware overflow */
+	if (len > PAGE_SIZE - sizeof(struct ktr_genio))
+		buflen = PAGE_SIZE;
+	else
+		buflen = len + sizeof(struct ktr_genio);
 
 	ktrinitheader(&kth, p, KTR_GENIO);
 	ktp = malloc(buflen, M_TEMP, M_WAITOK);
@@ -251,7 +250,7 @@ ktrgenio(struct proc *p, int fd, enum uio_rw rw, struct iovec *iov, int len,
 	cp = (caddr_t)((char *)ktp + sizeof (struct ktr_genio));
 	buflen -= sizeof(struct ktr_genio);
 
-	while (resid > 0) {
+	while (len > 0) {
 		/*
 		 * Don't allow this process to hog the cpu when doing
 		 * huge I/O.
@@ -259,9 +258,9 @@ ktrgenio(struct proc *p, int fd, enum uio_rw rw, struct iovec *iov, int len,
 		if (curcpu()->ci_schedstate.spc_schedflags & SPCF_SHOULDYIELD)
 			preempt(NULL);
 
-		count = min(iov->iov_len, buflen);
-		if (count > resid)
-			count = resid;
+		count = lmin(iov->iov_len, buflen);
+		if (count > len)
+			count = len;
 		if (copyin(iov->iov_base, cp, count))
 			break;
 
@@ -276,7 +275,7 @@ ktrgenio(struct proc *p, int fd, enum uio_rw rw, struct iovec *iov, int len,
 		if (iov->iov_len == 0)
 			iov++;
 
-		resid -= count;
+		len -= count;
 	}
 
 	free(ktp, M_TEMP);
@@ -344,6 +343,49 @@ ktrstruct(struct proc *p, const char *name, const void *data, size_t datalen)
 	free(buf, M_TEMP);
 	atomic_clearbits_int(&p->p_flag, P_INKTR);
 }
+
+int
+ktruser(struct proc *p, const char *id, const void *addr, size_t len)
+{
+	struct ktr_header kth;
+	struct ktr_user *ktp;
+	int error;
+	void *memp;
+	size_t size;
+#define	STK_PARAMS	128
+	long long stkbuf[STK_PARAMS / sizeof(long long)];
+
+	if (!KTRPOINT(p, KTR_USER))
+		return (0);
+	if (len > KTR_USER_MAXLEN)
+		return EINVAL;
+
+	atomic_setbits_int(&p->p_flag, P_INKTR);
+	ktrinitheader(&kth, p, KTR_USER);
+	size = sizeof(*ktp) + len;
+	memp = NULL;
+	if (size > sizeof(stkbuf)) {
+		memp = malloc(sizeof(*ktp) + len, M_TEMP, M_WAITOK);
+		ktp = (struct ktr_user *)memp;
+	} else
+		ktp = (struct ktr_user *)stkbuf;
+	bzero(ktp->ktr_id, KTR_USER_MAXIDLEN);
+	error = copyinstr(id, ktp->ktr_id, KTR_USER_MAXIDLEN, NULL);
+	if (error)
+	    goto out;
+
+	error = copyin(addr, (void *)(ktp + 1), len);
+	if (error)
+		goto out;
+	kth.ktr_len = sizeof(*ktp) + len;
+	ktrwrite(p, &kth, ktp);
+out:
+	if (memp != NULL)
+		free(memp, M_TEMP);
+	atomic_clearbits_int(&p->p_flag, P_INKTR);
+	return (error);
+}
+
 
 /* Interface and common routines */
 
@@ -607,5 +649,3 @@ ktrcanset(struct proc *callp, struct process *targetpr)
 
 	return (0);
 }
-
-#endif

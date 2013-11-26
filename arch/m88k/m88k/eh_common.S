@@ -1,4 +1,4 @@
-/*   $OpenBSD: eh_common.S,v 1.57 2013/01/05 11:20:56 miod Exp $	*/
+/*   $OpenBSD: eh_common.S,v 1.61 2013/09/05 20:40:32 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -451,16 +451,18 @@ GLOBAL(overflow_handler)
 	bsr	_ASM_LABEL(clear_FPp_ssbr_bit);
 GLOBAL(fp_precise_handler)
 	PREP88100("FPU precise", 114, FPp_SSBR_STUFF,)
+	or	%r2, %r0, T_FPEPFLT
 	or	%r3, %r0, %r30
-	XCALL(_ASM_LABEL(m88100_Xfp_precise), _ASM_LABEL(check_ast))
+	XCALL(_C_LABEL(m88100_trap), _ASM_LABEL(check_ast))
 
 /* Floating-point imprecise handler */
 #define	FPi_SSBR_STUFF \
 	bsr	_ASM_LABEL(clear_FPi_ssbr_bit);
 GLOBAL(fp_imprecise_handler)
 	PREP88100("FPU imprecise", 115, FPi_SSBR_STUFF,)
+	or	%r2, %r0, T_FPEIFLT
 	or	%r3, %r0, %r30
-	XCALL(_ASM_LABEL(Xfp_imprecise), _ASM_LABEL(check_ast))
+	XCALL(_C_LABEL(m88100_trap), _ASM_LABEL(check_ast))
 
 /* trap 450: system calls */
 GLOBAL(syscall_handler)
@@ -734,7 +736,7 @@ ASLOCAL(m88110_ignore_data_exception)
  *
  * If all LEN bytes starting at ADDR are accessible, zero is returned.
  *
- * Len may be be 1, 2, or 4.
+ * Len may be be 1, 2, 4 or 8.
  *
  * This is implemented by setting a special flag in SR1 before trying to access
  * the given address. If a data access exception is raised, the address
@@ -761,70 +763,81 @@ GLOBAL(badaddr)
 	set	%r5, %r5, 1<FLAG_IGNORE_DATA_EXCEPTION>
 	/* resetting r5 to SR1 done in the delay slot below. */
 
-	/*
-	 * If it's a word we're doing, do that here. Otherwise,
-	 * see if it's a halfword.....
-	 */
-	sub	%r6, %r3, 4
-	bcnd.n	ne0, %r6, _ASM_LABEL(badaddr__maybe_halfword)
+	/* make sure the upper 28 bits of the size are zero... */
+	ext	%r6, %r3, 0<4>
+	bcnd.n	ne0, %r6, _ASM_LABEL(badaddr__return_nonzero)
 	 stcr	%r5, SR1
 
+	or.u	%r6, %r0, %hi16(_ASM_LABEL(badaddr_switch))
+	or	%r6, %r6, %lo16(_ASM_LABEL(badaddr_switch))
+	lda	%r3, %r6[%r3]
+	jmp	%r3
+
+ASLOCAL(badaddr_switch)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__b)
+	br	_ASM_LABEL(badaddr__h)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__w)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__d)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+	br	_ASM_LABEL(badaddr__return_nonzero)
+
 	/*
-	 * It's a bad address if it's misaligned.
+	 * The load attemps below will either fault or not. If they fault,
+	 * execution will go to data_access_handler, then to
+	 * ignore_data_exception, then to badaddr__return_nonzero, which
+	 * will return to the calling function.
+	 * If there is no fault, execution will just continue as normal.
 	 */
+
+ASLOCAL(badaddr__b)
+	FLUSH_PIPELINE
+	ld.b	%r6, %r2, 0
+	FLUSH_PIPELINE
+	br.n	_ASM_LABEL(badaddr__return)
+	 or	%r2, %r0, %r0
+
+ASLOCAL(badaddr__h)
+	/* It's a bad address if it's misaligned. */
+	bb1	0, %r2, _ASM_LABEL(badaddr__return_nonzero)
+
+	FLUSH_PIPELINE
+	ld.h	%r6, %r2, 0
+	FLUSH_PIPELINE
+	br.n	_ASM_LABEL(badaddr__return)
+	 or	%r2, %r0, %r0
+
+ASLOCAL(badaddr__w)
+	/* It's a bad address if it's misaligned. */
 	bb1	0, %r2, _ASM_LABEL(badaddr__return_nonzero)
 	bb1	1, %r2, _ASM_LABEL(badaddr__return_nonzero)
-	/*
-	 * The next line will either fault or not. If it faults, execution
-	 * will go to:  data_access_handler (see above)
-	 * and then to: ignore_data_exception (see above)
-	 * and then to: badaddr__return_nonzero (see below)
-	 * which will return to the calling function.
-	 *
-	 * If there is no fault, execution just continues as normal.
-	 */
+
 	FLUSH_PIPELINE
-	ld	%r5, %r2, 0
+	ld	%r6, %r2, 0
 	FLUSH_PIPELINE
 	br.n	_ASM_LABEL(badaddr__return)
 	 or	%r2, %r0, %r0	/* indicate a zero (address not bad) return.*/
 
-ASLOCAL(badaddr__maybe_halfword)
-	/* More or less like the code for checking a word above */
-	sub	%r6, %r3, 2
-	bcnd	ne0, %r6, _ASM_LABEL(badaddr__maybe_byte)
-
-	/* it's bad if it's misaligned */
+ASLOCAL(badaddr__d)
+	/* It's a bad address if it's misaligned. */
 	bb1	0, %r2, _ASM_LABEL(badaddr__return_nonzero)
+	bb1	1, %r2, _ASM_LABEL(badaddr__return_nonzero)
+	bb1	2, %r2, _ASM_LABEL(badaddr__return_nonzero)
 
 	FLUSH_PIPELINE
-	ld.h	%r5, %r2, 0
+	ld.d	%r6, %r2, 0
 	FLUSH_PIPELINE
 	br.n	_ASM_LABEL(badaddr__return)
-	 or	%r2, %r0, %r0
-
-ASLOCAL(badaddr__maybe_byte)
-#ifdef DEBUG
-	/* More or less like the code for checking a word above */
-	sub	%r6, %r3, 1
-	bcnd	ne0, %r6, _ASM_LABEL(badaddr__unknown_size)
-#endif
-	FLUSH_PIPELINE
-	ld.b	%r5, %r2, 0
-	FLUSH_PIPELINE
-	br.n	_ASM_LABEL(badaddr__return)
-	 or	%r2, %r0, %r0
-ASLOCAL(badaddr__unknown_size)
-#ifdef	DEBUG
-	data
-1: 	string "bad length (%d) to badaddr() from 0x%x\000"
-	text
-	or.u	%r2, %r0, %hi16(1b)
-	or	%r2, %r2, %lo16(1b)
-	bsr.n	_C_LABEL(panic)
-	 or	%r4, %r0, %r1
-	/*NOTREACHED*/
-#endif
+	 or	%r2, %r0, %r0	/* indicate a zero (address not bad) return.*/
 
 ASLOCAL(badaddr__return_nonzero)
 	or	%r2, %r0, 1
@@ -1058,15 +1071,14 @@ ASLOCAL(pfsr_done)
 	st	TMP2, %r31, EF_DMD1
 	st	TMP3, %r31, EF_DMD2
 
-/*
- * need to clear "appropriate" bits in the SSBR before
- * we restart the FPU
- */
-
-	ldcr	TMP2, DMT0
-	bb0.n	DMT_VALID_BIT, TMP2, 8f
 	/* make sure an exception in fpu_enable will not see our DMT0 */
-	 stcr	%r0,   DMT0
+	stcr	%r0,   DMT0
+
+	/*
+ 	 * need to clear "appropriate" bits in the SSBR before
+ 	 * we restart the FPU
+ 	 */
+	ld	TMP2, %r31, EF_DMT0
 	bb1	DMT_LOCK_BIT,  TMP2, 1f
 	bb1	DMT_WRITE_BIT, TMP2, 2f
 1:
@@ -1121,7 +1133,7 @@ ASLOCAL(pfsr_done)
 
 ASLOCAL(clear_FPi_ssbr_bit)
 	/*
-	 * Clear floatingpoint-imprecise ssbr bits.
+	 * Clear floating point imprecise ssbr bits.
 	 * Also, save appropriate FPU control registers to the E.F.
 	 *
 	 * r1:  return address to calling exception handler
@@ -1159,7 +1171,7 @@ ASLOCAL(clear_FPi_ssbr_bit)
 
 ASLOCAL(clear_FPp_ssbr_bit)
 	/*
-	 * Clear floating pont precise ssbr bits.
+	 * Clear floating point precise ssbr bits.
 	 * Also, save appropriate FPU control registers to the E.F.
 	 *
 	 * r1:  return address to calling exception handler
@@ -1193,7 +1205,7 @@ ASLOCAL(clear_FPp_ssbr_bit)
 	br.n	3f
 	 set	TMP3, TMP3, 1<5>	/* size=1 - clear one bit for float */
 2:
-	set	TMP3, TMP3, 1<6>	/* size=2 - clear two bit for double */
+	set	TMP3, TMP3, 1<6>	/* size=2 - clear two bits for double */
 3:
 	jmp.n	%r1
 	 clr	TMP,  TMP,  TMP3	/* clear bit(s) in ssbr. */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.163 2013/04/02 03:34:31 lteo Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.169 2013/11/15 16:15:42 bluhm Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -79,10 +79,12 @@ struct m_hdr {
 
 /* pf stuff */
 struct pf_state_key;
+struct inpcb;
 
 struct pkthdr_pf {
 	void		*hdr;		/* saved hdr pos in mbuf, for ECN */
 	struct pf_state_key *statekey;	/* pf stackside statekey */
+	struct inpcb	*inp;		/* connected pcb for outgoing packet */
 	u_int32_t	 qid;		/* queue id */
 	u_int16_t	 tag;		/* tag id */
 	u_int8_t	 flags;
@@ -98,6 +100,7 @@ struct pkthdr_pf {
 #define	PF_TAG_DIVERTED_PACKET		0x10
 #define	PF_TAG_REROUTE			0x20
 #define	PF_TAG_REFRAGMENTED		0x40	/* refragmented ipv6 packet */
+#define	PF_TAG_PROCESSED		0x80	/* packet was checked by pf */
 
 /* record/packet header in first mbuf of chain; valid if M_PKTHDR set */
 struct	pkthdr {
@@ -184,7 +187,7 @@ struct mbuf {
 
 /* Checksumming flags */
 #define	M_IPV4_CSUM_OUT		0x0001	/* IPv4 checksum needed */
-#define M_TCP_CSUM_OUT		0x0002	/* TCP checksum needed */
+#define	M_TCP_CSUM_OUT		0x0002	/* TCP checksum needed */
 #define	M_UDP_CSUM_OUT		0x0004	/* UDP checksum needed */
 #define	M_IPV4_CSUM_IN_OK	0x0008	/* IPv4 checksum verified */
 #define	M_IPV4_CSUM_IN_BAD	0x0010	/* IPv4 checksum bad */
@@ -421,8 +424,7 @@ void	m_freem(struct mbuf *);
 void	m_reclaim(void *, int);
 void	m_copydata(struct mbuf *, int, int, caddr_t);
 void	m_cat(struct mbuf *, struct mbuf *);
-struct mbuf *m_devget(char *, int, int, struct ifnet *,
-	    void (*)(const void *, void *, size_t));
+struct mbuf *m_devget(char *, int, int, struct ifnet *);
 int	m_apply(struct mbuf *, int, int,
 	    int (*)(caddr_t, caddr_t, unsigned int), caddr_t);
 int	m_dup_pkthdr(struct mbuf *, struct mbuf *, int);
@@ -452,6 +454,8 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 #define PACKET_TAG_PF_DIVERT		0x0200 /* pf(4) diverted packet */
 #define PACKET_TAG_PIPEX		0x0400 /* pipex session cache */
 #define PACKET_TAG_PF_REASSEMBLED	0x0800 /* pf reassembled ipv6 packet */
+#define PACKET_TAG_SRCROUTE		0x1000 /* IPv4 source routing options */
+#define PACKET_TAG_TUNNEL		0x2000	/* Tunnel endpoint address */
 
 /*
  * Maximum tag payload length (that is excluding the m_tag structure).
@@ -459,7 +463,7 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
  * length for an existing packet tag type or when adding a new one that
  * has payload larger than the value below.
  */
-#define PACKET_TAG_MAXSIZE		40
+#define PACKET_TAG_MAXSIZE		52
 
 #endif /* _KERNEL */
 #endif /* _SYS_MBUF_H_ */

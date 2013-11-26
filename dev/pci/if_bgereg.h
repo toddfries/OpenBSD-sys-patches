@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bgereg.h,v 1.113 2013/02/22 01:26:55 dlg Exp $	*/
+/*	$OpenBSD: if_bgereg.h,v 1.117 2013/06/28 11:59:42 mikeb Exp $	*/
 
 /*
  * Copyright (c) 2001 Wind River Systems
@@ -216,15 +216,6 @@
 #define	BGE_PCI_GEN2_PRODID_ASICREV	0xF4
 #define	BGE_PCI_GEN15_PRODID_ASICREV	0xFC
 
-/* XXX:
- * Used in PCI-Express code for 575x chips.
- * Should be replaced with checking for a PCI config-space
- * capability for PCI-Express, and PCI-Express standard 
- * offsets into that capability block.
- */
-#define	BGE_PCI_CONF_DEV_CTRL		0xD8
-#define	BGE_PCI_CONF_DEV_STUS		0xDA
-
 /* PCI Misc. Host control register */
 #define	BGE_PCIMISCCTL_CLEAR_INTA	0x00000001
 #define	BGE_PCIMISCCTL_MASK_PCI_INTR	0x00000002
@@ -234,6 +225,7 @@
 #define	BGE_PCIMISCCTL_CLOCKCTL_RW	0x00000020
 #define	BGE_PCIMISCCTL_REG_WORDSWAP	0x00000040
 #define	BGE_PCIMISCCTL_INDIRECT_ACCESS	0x00000080
+#define	BGE_PCIMISCCTL_TAGGED_STATUS	0x00000200
 #define	BGE_PCIMISCCTL_ASICREV		0xFFFF0000
 #define	BGE_PCIMISCCTL_ASICREV_SHIFT	16
 
@@ -731,7 +723,7 @@
 #define	BGE_LEDCTL_BLINKPERIOD_OVERRIDE	0x80000000
 
 /* TX backoff seed register */
-#define	BGE_TX_BACKOFF_SEED_MASK	0x3F
+#define	BGE_TX_BACKOFF_SEED_MASK	0x3FF
 
 /* Autopoll status register */
 #define	BGE_AUTOPOLLSTS_ERROR		0x00000001
@@ -963,6 +955,7 @@
 #define	BGE_MIMODE_CLKCNT		0x001F0000
 #define	BGE_MIMODE_500KHZ_CONST		0x00008000
 #define	BGE_MIMODE_BASE			0x000C0000
+#define	BGE_MIMODE_PHYADDR(x)		((x & 0x1F) << 5)
 
 /*
  * Send data initiator control registers.
@@ -1927,8 +1920,7 @@
 #define	BGE_MSIMODE_PCI_TGT_ABRT_ATTN	0x00000004
 #define	BGE_MSIMODE_PCI_MSTR_ABRT_ATTN	0x00000008
 #define	BGE_MSIMODE_PCI_PERR_ATTN	0x00000010
-#define	BGE_MSIMODE_MSI_FIFOUFLOW_ATTN	0x00000020
-#define	BGE_MSIMODE_MSI_FIFOOFLOW_ATTN	0x00000040
+#define	BGE_MSIMODE_ONE_SHOT_DISABLE	0x00000020
 
 /* MSI status register */
 #define	BGE_MSISTAT_PCI_TGT_ABRT_ATTN	0x00000004
@@ -2409,7 +2401,7 @@ struct bge_sts_idx {
 
 struct bge_status_block {
 	u_int32_t		bge_status;
-	u_int32_t		bge_rsvd0;
+	u_int32_t		bge_status_tag;
 #if BYTE_ORDER == LITTLE_ENDIAN
 	u_int16_t		bge_rx_jumbo_cons_idx;
 	u_int16_t		bge_rx_std_cons_idx;
@@ -2815,6 +2807,10 @@ struct bge_softc {
 	struct pci_attach_args	bge_pa;
 	struct mii_data		bge_mii;
 	struct ifmedia		bge_ifmedia;	/* media info */
+	u_int32_t		bge_expcap;
+	u_int32_t		bge_mps;
+	u_int32_t		bge_expmrq;
+	u_int32_t		bge_lasttag;
 	u_int32_t		bge_flags;
 #define	BGE_TXRING_VALID	0x00000001
 #define	BGE_RXRING_VALID	0x00000002
@@ -2846,6 +2842,7 @@ struct bge_softc {
 #define	BGE_57765_PLUS		0x08000000
 #define	BGE_APE			0x10000000
 #define	BGE_CPMU_PRESENT	0x20000000
+#define	BGE_TAGGED_STATUS	0x40000000
 
 	bus_dma_tag_t		bge_dmatag;
 	u_int32_t		bge_mfw_flags;  /* Management F/W flags */

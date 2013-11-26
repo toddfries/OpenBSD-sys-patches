@@ -1,4 +1,4 @@
-/*	$OpenBSD: dp8390.c,v 1.43 2010/08/29 18:01:21 deraadt Exp $	*/
+/*	$OpenBSD: dp8390.c,v 1.46 2013/11/26 09:50:33 mpi Exp $	*/
 /*	$NetBSD: dp8390.c,v 1.13 1998/07/05 06:49:11 jonathan Exp $	*/
 
 /*
@@ -33,7 +33,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -805,9 +804,6 @@ dp8390_intr(void *arg)
 	}
 }
 
-/*
- * Process an ioctl request.  This code needs some work - it looks pretty ugly.
- */
 int
 dp8390_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
@@ -823,46 +819,29 @@ dp8390_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if ((error = dp8390_enable(sc)) != 0)
 			break;
 		ifp->if_flags |= IFF_UP;
-
-		switch (ifa->ifa_addr->sa_family) {
+		if (!(ifp->if_flags & IFF_RUNNING))
+			dp8390_init(sc);
 #ifdef INET
-		case AF_INET:
-			dp8390_init(sc);
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_arpcom, ifa);
-			break;
 #endif
-		default:
-			dp8390_init(sc);
-			break;
-		}
 		break;
 
 	case SIOCSIFFLAGS:
-		if ((ifp->if_flags & IFF_UP) == 0 &&
-		    (ifp->if_flags & IFF_RUNNING) != 0) {
-			/*
-			 * If interface is marked down and it is running, then
-			 * stop it.
-			 */
-			dp8390_stop(sc);
-			ifp->if_flags &= ~IFF_RUNNING;
-			dp8390_disable(sc);
-		} else if ((ifp->if_flags & IFF_UP) != 0 &&
-		    (ifp->if_flags & IFF_RUNNING) == 0) {
-			/*
-			 * If interface is marked up and it is stopped, then
-			 * start it.
-			 */
-			if ((error = dp8390_enable(sc)) != 0)
-				break;
-			dp8390_init(sc);
-		} else if ((ifp->if_flags & IFF_UP) != 0) {
-			/*
-			 * Reset the interface to pick up changes in any other
-			 * flags that affect hardware registers.
-			 */
-			dp8390_stop(sc);
-			dp8390_init(sc);
+		if (ifp->if_flags & IFF_UP) {
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else {
+				if ((error = dp8390_enable(sc)) != 0)
+					break;
+				dp8390_init(sc);
+			}
+		} else {
+			if (ifp->if_flags & IFF_RUNNING) {
+				dp8390_stop(sc);
+				ifp->if_flags &= ~IFF_RUNNING;
+				dp8390_disable(sc);
+			}
 		}
 		break;
 
@@ -877,7 +856,7 @@ dp8390_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING) {
-			dp8390_stop(sc);	/* XXX for ds_setmcaf? */
+			dp8390_stop(sc);
 			dp8390_init(sc);
 		}
 		error = 0;
@@ -944,7 +923,7 @@ dp8390_getmcaf(struct arpcom *ac, u_int8_t *af)
 	 * the word.
 	 */
 
-	if (ifp->if_flags & IFF_PROMISC) {
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
 		ifp->if_flags |= IFF_ALLMULTI;
 		for (i = 0; i < 8; i++)
 			af[i] = 0xff;
@@ -954,22 +933,6 @@ dp8390_getmcaf(struct arpcom *ac, u_int8_t *af)
 		af[i] = 0;
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
-		    sizeof(enm->enm_addrlo)) != 0) {
-			/*
-			 * We must listen to a range of multicast addresses.
-			 * For now, just accept all multicasts, rather than
-			 * trying to set only those filter bits needed to match
-			 * the range.  (At this time, the only use of address
-			 * ranges is for IP multicast routing, for which the
-			 * range is big enough to require all bits set.)
-			 */
-			ifp->if_flags |= IFF_ALLMULTI;
-			for (i = 0; i < 8; i++)
-				af[i] = 0xff;
-			return;
-		}
-
 		/* Just want the 6 most significant bits. */
 		crc = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26;
 

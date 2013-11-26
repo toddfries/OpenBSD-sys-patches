@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_boot.c,v 1.26 2010/04/03 20:03:38 krw Exp $ */
+/*	$OpenBSD: nfs_boot.c,v 1.30 2013/11/11 09:15:35 mpi Exp $ */
 /*	$NetBSD: nfs_boot.c,v 1.26 1996/05/07 02:51:25 thorpej Exp $	*/
 
 /*
@@ -45,6 +45,7 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
+#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 
 #include <nfs/rpcv2.h>
@@ -103,7 +104,7 @@ static int bp_getfile(struct sockaddr_in *bpsin, char *key,
 
 /* mountd RPC */
 static int md_mount(struct sockaddr_in *mdsin, char *path,
-	u_char *fh);
+	struct nfs_args *argp);
 
 char	*nfsbootdevname;
 
@@ -114,11 +115,13 @@ int
 nfs_boot_init(struct nfs_diskless *nd, struct proc *procp)
 {
 	struct ifreq ireq;
+	struct in_aliasreq ifra;
 	struct in_addr my_ip, gw_ip;
 	struct sockaddr_in bp_sin;
 	struct sockaddr_in *sin;
 	struct ifnet *ifp;
 	struct socket *so;
+	char addr[INET_ADDRSTRLEN];
 	int error;
 
 	/*
@@ -169,18 +172,21 @@ nfs_boot_init(struct nfs_diskless *nd, struct proc *procp)
 	 */
 	if ((error = revarpwhoami(&my_ip, ifp)) != 0)
 		panic("reverse arp not answered by rarpd(8) or dhcpd(8)");
-	printf("nfs_boot: client_addr=%s\n", inet_ntoa(my_ip));
+	inet_ntop(AF_INET, &my_ip, addr, sizeof(addr));
+	printf("nfs_boot: client_addr=%s\n", addr);
 
 	/*
 	 * Do enough of ifconfig(8) so that the chosen interface
 	 * can talk to the servers.  (just set the address)
 	 */
-	sin = (struct sockaddr_in *)&ireq.ifr_addr;
-	bzero((caddr_t)sin, sizeof(*sin));
+	bzero(&ifra, sizeof(ifra));
+	bcopy(ifp->if_xname, ifra.ifra_name, sizeof(ifra.ifra_name));
+
+	sin = (struct sockaddr_in *)&ifra.ifra_addr;
 	sin->sin_len = sizeof(*sin);
 	sin->sin_family = AF_INET;
 	sin->sin_addr.s_addr = my_ip.s_addr;
-	error = ifioctl(so, SIOCSIFADDR, (caddr_t)&ireq, procp);
+	error = ifioctl(so, SIOCAIFADDR, (caddr_t)&ifra, procp);
 	if (error)
 		panic("nfs_boot: set if addr, error=%d", error);
 
@@ -192,7 +198,7 @@ nfs_boot_init(struct nfs_diskless *nd, struct proc *procp)
 	 * Use the old broadcast address for the WHOAMI
 	 * call because we do not yet know our netmask.
 	 * The server address returned by the WHOAMI call
-	 * is used for all subsequent booptaram RPCs.
+	 * is used for all subsequent bootparam RPCs.
 	 */
 	bzero((caddr_t)&bp_sin, sizeof(bp_sin));
 	bp_sin.sin_len = sizeof(bp_sin);
@@ -204,8 +210,8 @@ nfs_boot_init(struct nfs_diskless *nd, struct proc *procp)
 	error = bp_whoami(&bp_sin, &my_ip, &gw_ip);
 	if (error)
 		panic("nfs_boot: bootparam whoami, error=%d", error);
-	printf("nfs_boot: server_addr=%s hostname=%s\n",
-	    inet_ntoa(bp_sin.sin_addr), hostname);
+	inet_ntop(AF_INET, &bp_sin.sin_addr, addr, sizeof(addr));
+	printf("nfs_boot: server_addr=%s hostname=%s\n", addr, hostname);
 
 #ifdef	NFS_BOOT_GATEWAY
 	/*
@@ -242,7 +248,8 @@ nfs_boot_init(struct nfs_diskless *nd, struct proc *procp)
 		info.rti_info[RTAX_NETMASK] = &mask;
 		info.rti_flags = (RTF_UP | RTF_GATEWAY | RTF_STATIC);
 
-		printf("nfs_boot: gateway=%s\n", inet_ntoa(gw_ip));
+		inet_ntop(AF_INET, gw_ip, addr, sizeof(addr));
+		printf("nfs_boot: gateway=%s\n", addr);
 		/* add, dest, gw, mask, flags, 0 */
 		error = rtrequest1(RTM_ADD, &info, RTP_STATIC, NULL, 0);
 		if (error)
@@ -264,10 +271,35 @@ int
 nfs_boot_getfh(struct sockaddr_in *bpsin, char *key,
     struct nfs_dlmount *ndmntp, int retries)
 {
+	struct nfs_args *args;
 	char pathname[MAXPATHLEN];
 	char *sp, *dp, *endp;
 	struct sockaddr_in *sin;
 	int error;
+
+	args = &ndmntp->ndm_args;
+
+	/* Initialize mount args. */
+	bzero((caddr_t) args, sizeof(*args));
+	args->addr     = (struct sockaddr *)&ndmntp->ndm_saddr;
+	args->addrlen  = args->addr->sa_len;
+	args->sotype   = SOCK_DGRAM;
+	args->fh       = ndmntp->ndm_fh;
+	args->hostname = ndmntp->ndm_host;
+	args->flags    = NFSMNT_NFSV3;
+#ifdef	NFS_BOOT_OPTIONS
+	args->flags    |= NFS_BOOT_OPTIONS;
+#endif
+#ifdef	NFS_BOOT_RWSIZE
+	/*
+	 * Reduce rsize,wsize for interfaces that consistently
+	 * drop fragments of long UDP messages.	 (i.e. wd8003).
+	 * You can always change these later via remount.
+	 */
+	args->flags   |= NFSMNT_WSIZE | NFSMNT_RSIZE;
+	args->wsize    = NFS_BOOT_RWSIZE;
+	args->rsize    = NFS_BOOT_RWSIZE;
+#endif
 
 	sin = &ndmntp->ndm_saddr;
 
@@ -286,7 +318,7 @@ nfs_boot_getfh(struct sockaddr_in *bpsin, char *key,
 	 * Get file handle for "key" (root or swap)
 	 * using RPC to mountd/mount
 	 */
-	error = md_mount(sin, pathname, ndmntp->ndm_fh);
+	error = md_mount(sin, pathname, args);
 	if (error) {
 		printf("nfs_boot: mountd %s, error=%d\n", key, error);
 		return (error);
@@ -294,9 +326,11 @@ nfs_boot_getfh(struct sockaddr_in *bpsin, char *key,
 
 	/* Set port number for NFS use. */
 	/* XXX: NFS port is always 2049, right? */
-	error = krpc_portmap(sin, NFS_PROG, NFS_VER2, &sin->sin_port);
+	error = krpc_portmap(sin, NFS_PROG,
+	    (args->flags & NFSMNT_NFSV3) ? NFS_VER3 : NFS_VER2,
+	    &sin->sin_port);
 	if (error) {
-		printf("nfs_boot: portmap NFS/v2, error=%d\n", error);
+		printf("nfs_boot: portmap NFS, error=%d\n", error);
 		return (error);
 	}
 
@@ -511,30 +545,48 @@ out:
  * mdsin:	mountd server address
  */
 static int
-md_mount(struct sockaddr_in *mdsin, char *path, u_char *fhp)
+md_mount(struct sockaddr_in *mdsin, char *path, struct nfs_args *argp)
 {
 	/* The RPC structures */
 	struct rdata {
 		u_int32_t errno;
-		u_int8_t  fh[NFSX_V2FH];
+		union {
+			u_int8_t v2fh[NFSX_V2FH];
+			struct {
+				u_int32_t fhlen;
+				u_int8_t fh[1];
+			} v3fh;
+		} fh;
 	} *rdata;
 	struct mbuf *m;
-	int error;
+	u_int8_t *fh;
+	int minlen, error;
+	int mntver;
 
-	/* Get port number for MOUNTD. */
-	error = krpc_portmap(mdsin, RPCPROG_MNT, RPCMNT_VER1,
-						 &mdsin->sin_port);
-	if (error) return error;
+	mntver = (argp->flags & NFSMNT_NFSV3) ? 3 : 2;
+	do {
+		error = krpc_portmap(mdsin, RPCPROG_MNT, mntver,
+		    &mdsin->sin_port);
+		if (error)
+			continue;
 
-	m = xdr_string_encode(path, strlen(path));
-	if (m == NULL)
-		return ENOMEM;
+		m = xdr_string_encode(path, strlen(path));
+		if (m == NULL)
+			return ENOMEM;
 
-	/* Do RPC to mountd. */
-	error = krpc_call(mdsin, RPCPROG_MNT, RPCMNT_VER1,
-			RPCMNT_MOUNT, &m, NULL, -1);
+		/* Do RPC to mountd. */
+		error = krpc_call(mdsin, RPCPROG_MNT, mntver,
+		    RPCMNT_MOUNT, &m, NULL, -1);
+
+		if (error != EPROGMISMATCH)
+			break;
+		/* Try lower version of mountd. */
+	} while (--mntver >= 1);
 	if (error)
 		return error;	/* message already freed */
+
+	if (mntver != 3)
+		argp->flags &= ~NFSMNT_NFSV3;
 
 	/* The reply might have only the errno. */
 	if (m->m_len < 4)
@@ -546,13 +598,26 @@ md_mount(struct sockaddr_in *mdsin, char *path, u_char *fhp)
 		goto out;
 
 	 /* Have errno==0, so the fh must be there. */
-	if (m->m_len < sizeof(*rdata)) {
-		m = m_pullup(m, sizeof(*rdata));
-		if (m == NULL)
+	if (mntver == 3) {
+		argp->fhsize = fxdr_unsigned(u_int32_t, rdata->fh.v3fh.fhlen);
+		if (argp->fhsize > NFSX_V3FHMAX)
 			goto bad;
+		minlen = 2 * sizeof(u_int32_t) + argp->fhsize;
+	} else {
+		argp->fhsize = NFSX_V2FH;
+		minlen = sizeof(u_int32_t) + argp->fhsize;
+	}
+
+	if (m->m_len < minlen) {
+		m = m_pullup(m, minlen);
+		if (m == NULL)
+			return (EBADRPC);
 		rdata = mtod(m, struct rdata *);
 	}
-	bcopy(rdata->fh, fhp, NFSX_V2FH);
+
+	fh = (mntver == 3) ? rdata->fh.v3fh.fh : rdata->fh.v2fh;
+	bcopy(fh, argp->fh, argp->fhsize);
+
 	goto out;
 
 bad:

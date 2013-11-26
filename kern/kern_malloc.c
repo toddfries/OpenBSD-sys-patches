@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_malloc.c,v 1.100 2013/05/03 18:26:07 tedu Exp $	*/
+/*	$OpenBSD: kern_malloc.c,v 1.103 2013/08/08 23:25:06 syl Exp $	*/
 /*	$NetBSD: kern_malloc.c,v 1.15.4.2 1996/06/13 17:10:56 cgd Exp $	*/
 
 /*
@@ -180,8 +180,14 @@ malloc(unsigned long size, int type, int flags)
 
 	KASSERT(flags & (M_WAITOK | M_NOWAIT));
 
-	if ((flags & M_NOWAIT) == 0)
+#ifdef DIAGNOSTIC
+	if ((flags & M_NOWAIT) == 0) {
+		extern int pool_debug;
 		assertwaitok();
+		if (pool_debug == 2)
+			yield();
+	}
+#endif
 
 #ifdef MALLOC_DEBUG
 	if (debug_malloc(size, type, flags, (void **)&va)) {
@@ -369,6 +375,9 @@ free(void *addr, int type)
 #ifdef KMEMSTATS
 	struct kmemstats *ksp = &kmemstats[type];
 #endif
+
+	if (addr == NULL)
+		return;
 
 #ifdef MALLOC_DEBUG
 	if (debug_free(addr, type))
@@ -665,7 +674,7 @@ malloc_roundup(size_t sz)
 
 void
 malloc_printit(
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 #ifdef KMEMSTATS
 	struct kmemstats *km;

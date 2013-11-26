@@ -1,4 +1,4 @@
-/*	$OpenBSD: specdev.h,v 1.31 2011/07/05 05:37:07 deraadt Exp $	*/
+/*	$OpenBSD: specdev.h,v 1.34 2013/11/02 00:16:31 deraadt Exp $	*/
 /*	$NetBSD: specdev.h,v 1.12 1996/02/13 13:13:01 mycroft Exp $	*/
 
 /*
@@ -43,7 +43,7 @@ struct specinfo {
 	struct  mount *si_mountpoint;
 	dev_t	si_rdev;
 	struct	lockf *si_lockf;
-	daddr64_t si_lastr;
+	daddr_t si_lastr;
 	union {
 		struct vnode *ci_parent; /* pointer back to parent device */
 		u_int8_t ci_bitmap[8]; /* bitmap of devices cloned off us */
@@ -67,6 +67,12 @@ struct cloneinfo {
 #define v_specbitmap v_specinfo->si_ci.ci_bitmap
 
 /*
+ * We use the upper 16 bits of the minor to record the clone instance.
+ * This gives us 8 bits for encoding the real minor number.
+ */
+#define CLONE_SHIFT	8
+
+/*
  * Special device management
  */
 #define	SPECHSZ	64
@@ -76,9 +82,10 @@ struct cloneinfo {
 #define	SPECHASH(rdev)	(((unsigned)((rdev>>5)+(rdev)))%SPECHSZ)
 #endif
 
+#ifdef	_KERNEL
+
 extern struct vnode *speclisth[SPECHSZ];
 
-#ifdef	_KERNEL
 /*
  * Prototypes for special file operations on vnodes.
  */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.51 2013/03/15 09:10:52 ratchov Exp $ */
+/*	$OpenBSD: conf.c,v 1.56 2013/11/04 17:14:26 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -89,8 +89,6 @@ cdev_decl(com);
 #include "wskbd.h"
 #include "wsmouse.h"
 
-#include "iop.h"
-
 #include "bpfilter.h"
 
 #include "tun.h"
@@ -108,12 +106,10 @@ cdev_decl(com);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
-#include "uscanner.h"
 
 #include "inet.h"
 
 #include "apm.h"
-#include "bthub.h"
 #include "agp.h"
 cdev_decl(agp);
 #include "drm.h"
@@ -141,6 +137,7 @@ cdev_decl(pci);
 #include "bio.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct cdevsw cdevsw[] = {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
@@ -224,21 +221,22 @@ struct cdevsw cdevsw[] = {
 	cdev_notdef(),
 #endif
 	cdev_notdef(),			/* 72: ALTQ (deprecated) */
-	cdev_iop_init(NIOP,iop),	/* 73: I2O IOP control interface */
-	cdev_usbdev_init(NUSCANNER,uscanner), /* 74: usb scanner */
+	cdev_notdef(),
+	cdev_notdef(),			/* 74: was USB scanners */
 	cdev_bktr_init(NBKTR,bktr),	/* 75: Bt848 video capture device */
 	cdev_radio_init(NRADIO, radio),	/* 76: generic radio I/O */
 	cdev_ptm_init(NPTY,ptm),	/* 77: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 78: devices hot plugging */
 	cdev_gpio_init(NGPIO,gpio),	/* 79: GPIO interface */
 	cdev_bio_init(NBIO,bio),	/* 80: ioctl tunnel */
-	cdev_bthub_init(NBTHUB,bthub),	/* 81: bthub */
+	cdev_notdef(),
 	cdev_openprom_init(1,openprom),	/* 82: /dev/openprom */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 83: vscsi */
 	cdev_disk_init(1,diskmap),	/* 84: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 85: pppx */
 	cdev_agp_init(NAGP,agp),	/* 86: agp */
 	cdev_drm_init(NDRM,drm),	/* 87: drm */
+	cdev_fuse_init(NFUSE,fuse),	/* 88: fuse */
 };
 int nchrdev = nitems(cdevsw);
 
@@ -335,12 +333,9 @@ int chrtoblktbl[] = {
 int nchrtoblktbl = nitems(chrtoblktbl);
 
 #include <dev/cons.h>
-#include "vgafb_pci.h"
 
 cons_decl(ws);
 cons_decl(zs);
-cons_decl(ofc);
-cons_decl(com);
 
 struct consdev constab[] = {
 #if NWSDISPLAY > 0
@@ -348,9 +343,6 @@ struct consdev constab[] = {
 #endif
 #if NZSTTY > 0
 	cons_init(zs),
-#endif
-#if NOFCONS > 0
-	cons_init(ofc),
 #endif
 	{ 0 },
 };

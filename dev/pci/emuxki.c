@@ -1,4 +1,4 @@
-/*	$OpenBSD: emuxki.c,v 1.41 2013/05/15 08:29:24 ratchov Exp $	*/
+/*	$OpenBSD: emuxki.c,v 1.43 2013/06/23 21:23:45 brad Exp $	*/
 /*	$NetBSD: emuxki.c,v 1.1 2001/10/17 18:39:41 jdolecek Exp $	*/
 
 /*-
@@ -454,8 +454,8 @@ emuxki_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	intrstr = pci_intr_string(pa->pa_pc, ih);
-	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO, emuxki_intr,
-		sc, sc->sc_dev.dv_xname);
+	sc->sc_ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO | IPL_MPSAFE,
+	    emuxki_intr, sc, sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
 		printf(": can't establish interrupt");
 		if (intrstr != NULL)
@@ -1451,7 +1451,7 @@ emuxki_voice_channel_destroy(struct emuxki_voice *voice)
 int
 emuxki_recsrc_reserve(struct emuxki_voice *voice, emuxki_recsrc_t source)
 {
-	if (source < 0 || source >= EMU_NUMRECSRCS) {
+	if (source >= EMU_NUMRECSRCS) {
 #ifdef EMUXKI_DEBUG
 		printf("Tried to reserve invalid source: %d\n", source);
 #endif

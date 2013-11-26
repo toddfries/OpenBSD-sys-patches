@@ -31,7 +31,7 @@ POSSIBILITY OF SUCH DAMAGE.
 
 ***************************************************************************/
 
-/* $OpenBSD: if_em.c,v 1.269 2013/01/27 04:18:02 brad Exp $ */
+/* $OpenBSD: if_em.c,v 1.272 2013/11/21 14:44:37 jsg Exp $ */
 /* $FreeBSD: if_em.c,v 1.46 2004/09/29 18:28:28 mlaier Exp $ */
 
 #include <dev/pci/if_em.h>
@@ -130,6 +130,10 @@ const struct pci_matchid em_devices[] = {
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82578DM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82579LM },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82579V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I217_LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I217_V },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I218_LM },
+	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I218_V },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_COPPER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_FIBER },
 	{ PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82580_SERDES },
@@ -211,10 +215,8 @@ int  em_rxfill(struct em_softc *);
 void em_rxeof(struct em_softc *);
 void em_receive_checksum(struct em_softc *, struct em_rx_desc *,
 			 struct mbuf *);
-#ifdef EM_CSUM_OFFLOAD
 void em_transmit_checksum_setup(struct em_softc *, struct mbuf *,
 				u_int32_t *, u_int32_t *);
-#endif
 void em_iff(struct em_softc *);
 #ifdef EM_DEBUG
 void em_print_hw_stats(struct em_softc *);
@@ -232,7 +234,6 @@ void em_82547_move_tail_locked(struct em_softc *);
 int  em_dma_malloc(struct em_softc *, bus_size_t, struct em_dma_alloc *,
 		   int);
 void em_dma_free(struct em_softc *, struct em_dma_alloc *);
-int  em_is_valid_ether_addr(u_int8_t *);
 u_int32_t em_fill_descriptors(u_int64_t address, u_int32_t length,
 			      PDESC_ARRAY desc_array);
 
@@ -501,11 +502,6 @@ em_attach(struct device *parent, struct device *self, void *aux)
 	if (em_read_mac_addr(&sc->hw) < 0) {
 		printf("%s: EEPROM read error while reading mac address\n",
 		       sc->sc_dv.dv_xname);
-		goto err_mac_addr;
-	}
-
-	if (!em_is_valid_ether_addr(sc->hw.mac_addr)) {
-		printf("%s: Invalid mac address\n", sc->sc_dv.dv_xname);
 		goto err_mac_addr;
 	}
 
@@ -796,6 +792,7 @@ em_init(void *arg)
 		break;
 	case em_pchlan:
 	case em_pch2lan:
+	case em_pch_lpt:
 		pba = E1000_PBA_26K;
 		break;
 	default:
@@ -1121,14 +1118,11 @@ em_encap(struct em_softc *sc, struct mbuf *m_head)
 	if (map->dm_nsegs > sc->num_tx_desc_avail - 2)
 		goto fail;
 
-#ifdef EM_CSUM_OFFLOAD
-	if (sc->hw.mac_type >= em_82543)
+	if (sc->hw.mac_type >= em_82543 && sc->hw.mac_type != em_82575 &&
+	    sc->hw.mac_type != em_82580 && sc->hw.mac_type != em_i350)
 		em_transmit_checksum_setup(sc, m_head, &txd_upper, &txd_lower);
 	else
 		txd_upper = txd_lower = 0;
-#else
-	txd_upper = txd_lower = 0;
-#endif
 
 	i = sc->next_avail_tx_desc;
 	if (sc->pcix_82544)
@@ -1637,7 +1631,8 @@ em_allocate_pci_resources(struct em_softc *sc)
 	    sc->hw.mac_type == em_ich9lan ||
 	    sc->hw.mac_type == em_ich10lan ||
 	    sc->hw.mac_type == em_pchlan ||
-	    sc->hw.mac_type == em_pch2lan) {
+	    sc->hw.mac_type == em_pch2lan ||
+	    sc->hw.mac_type == em_pch_lpt) {
 		val = pci_conf_read(pa->pa_pc, pa->pa_tag, EM_FLASH);
 		if (PCI_MAPREG_TYPE(val) != PCI_MAPREG_TYPE_MEM) {
 			printf(": flash is not mem space\n");
@@ -1853,10 +1848,9 @@ em_setup_interface(struct em_softc *sc)
 		ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
 #endif
 
-#ifdef EM_CSUM_OFFLOAD
-	if (sc->hw.mac_type >= em_82543)
-		ifp->if_capabilities |= IFCAP_CSUM_TCPv4|IFCAP_CSUM_UDPv4;
-#endif
+	if (sc->hw.mac_type >= em_82543 && sc->hw.mac_type != em_82575 &&
+	    sc->hw.mac_type != em_82580 && sc->hw.mac_type != em_i350)
+		ifp->if_capabilities |= IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
 
 	/* 
 	 * Specify the media types supported by this adapter and register
@@ -2275,7 +2269,6 @@ em_free_transmit_structures(struct em_softc *sc)
 		sc->txtag = NULL;
 }
 
-#ifdef EM_CSUM_OFFLOAD
 /*********************************************************************
  *
  *  The offload context needs to be set when we transfer the first
@@ -2356,7 +2349,6 @@ em_transmit_checksum_setup(struct em_softc *sc, struct mbuf *mp,
 	sc->num_tx_desc_avail--;
 	sc->next_avail_tx_desc = curr_txd;
 }
-#endif /* EM_CSUM_OFFLOAD */
 
 /**********************************************************************
  *
@@ -3051,17 +3043,6 @@ em_disable_intr(struct em_softc *sc)
 		E1000_WRITE_REG(&sc->hw, IMC, (0xffffffff & ~E1000_IMC_RXSEQ));
 	else
 		E1000_WRITE_REG(&sc->hw, IMC, 0xffffffff);
-}
-
-int
-em_is_valid_ether_addr(u_int8_t *addr)
-{
-	const char zero_addr[6] = { 0, 0, 0, 0, 0, 0 };
-
-	if ((addr[0] & 1) || (!bcmp(addr, zero_addr, ETHER_ADDR_LEN)))
-		return (FALSE);
-
-	return (TRUE);
 }
 
 void

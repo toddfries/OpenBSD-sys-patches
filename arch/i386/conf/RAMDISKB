@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISKB,v 1.121 2012/03/15 20:06:03 deraadt Exp $
+#	$OpenBSD: RAMDISKB,v 1.126 2013/10/28 12:33:32 mpi Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -132,14 +132,14 @@ com2	at isa? port 0x3e8 irq 5
 #ahb*	at eisa?		# Adaptec 174[024] SCSI controllers
 ahc0	at isa?			# Adaptec 284x SCSI controllers
 #ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
-ahc*	at pci?			# Adaptec 2940 SCSI controllers
+#ahc*	at pci?			# Adaptec 2940 SCSI controllers
 ahd*	at pci?			# Adaptec 79?? SCSI controllers
 mpi*	at pci?			# LSI Logic Fusion-MPT Message Passing Interface
 #gdt*	at pci?			# ICP Vortex GDT RAID controllers
 #aac*	at pci?			# Adaptec FSA RAID controllers
 ami*	at pci?			# AMI MegaRAID controllers
 mfi*	at pci?			# LSI MegaRAID SAS controllers
-cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
+#cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 #cac*	at eisa?
 #ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
 #twe*	at pci?			# 3ware Escalade RAID controllers
@@ -161,8 +161,8 @@ cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 
 scsibus* at scsi?
 sd*	at scsibus?		# SCSI disk drives
-st*	at scsibus?		# SCSI tape drives
-cd*	at scsibus?		# SCSI CD-ROM drives
+#st*	at scsibus?		# SCSI tape drives
+#cd*	at scsibus?		# SCSI CD-ROM drives
 #ch*	at scsibus?		# SCSI autochangers
 #uk*	at scsibus?		# SCSI unknown devices
 
@@ -209,7 +209,6 @@ atapiscsi* at pciide?
 #le0	at isa? port 0x360 irq 15 drq 6	# IsoLan, NE2100, and DEPCA
 #ex0	at isa? port 0x320 irq 5	# Intel EtherExpress PRO/10
 #ep*	at eisa?			# 3C579 ethernet cards
-#fea*	at eisa?			# DEC DEFEA FDDI cards
 #ep*	at isapnp?			# 3C509 PnP ethernet cards
 #le*	at isapnp?
 de*	at pci?				# DC21X4X-based ethernet cards
@@ -220,7 +219,6 @@ ep*	at pci?				# 3C59x ethernet cards
 #ep*	at pcmcia?			# PCMCIA based 3c5xx cards
 #sm*	at pcmcia?			# PCMCIA based sm cards
 #xe*	at pcmcia?			# Xircom ethernet
-#fpa*	at pci?				# DEC DEFPA FDDI cards
 #xl*	at pci?				# 3C9xx ethernet cards
 #rl*	at pci?				# RealTek 81[23]9 ethernet
 #epic*	at pci?				# SMC EPIC/100 ethernet
@@ -247,7 +245,6 @@ nfe*	at pci?				# NVIDIA nForce Ethernet
 #wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
 #an*	at pcmcia?			# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?			# Xircom Netwave
-#ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
 
 # Media Independent Interface (mii) drivers
 #exphy*	at mii?				# 3Com internal PHYs

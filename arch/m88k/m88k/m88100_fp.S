@@ -1,4 +1,4 @@
-/* $OpenBSD: m88100_fp.S,v 1.7 2013/02/17 18:05:51 miod Exp $	*/
+/* $OpenBSD: m88100_fp.S,v 1.9 2013/09/05 20:40:32 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1991 Carnegie Mellon University
@@ -71,8 +71,8 @@
 #define efovf		6
 #define efinx		5
 
-ASENTRY(m88100_Xfp_precise)
-	or	%r29, %r3,  %r0		/* r29 is now the E.F. */
+ENTRY(m88100_fpu_precise_exception)
+	or	%r29, %r2,  %r0		/* r29 is now the E.F. */
 	subu	%r31, %r31, 16
 	st	%r1,  %r31, 8
 	st	%r29, %r31, 12
@@ -135,7 +135,7 @@ ASLOCAL(FPuimp)
 	 */
 
 ASLOCAL(wrapup)
-	tb1	0, %r0, 0	/* make sure all floating point operations */
+	FLUSH_PIPELINE		/* make sure all floating point operations */
 				/* have finished */
 	ldcr	%r10, %cr1	/* load the PSR */
 #if 0
@@ -148,8 +148,10 @@ ASLOCAL(wrapup)
 	ld	%r29, %r31, 12
 	addu	%r31, %r31, 16
 
-	fstcr	%r2, FPSR		/* write revised value of FPSR */
-	fstcr	%r3, FPCR		/* write revised value of FPCR */
+	fstcr	%r2, FPSR		/* write revised value of FPSR... */
+	fstcr	%r3, FPCR		/* ...and FPCR... */
+	st	%r2, %r29, EF_FPSR	/* ...into the trapframe as well */
+	st	%r3, %r29, EF_FPCR
 
 	/* result writeback routine */
 	addu	%r3, %r29, EF_R0
@@ -2634,9 +2636,8 @@ S2noinfd:
 operation:
 	jmp	%r1
 
-ASENTRY(Xfp_imprecise)
-/* input: r3 is the exception frame */
-	or	%r29, %r3,  %r0			/* r29 is now the E.F. */
+ENTRY(m88100_fpu_imprecise_exception)
+	or	%r29, %r2,  %r0			/* r29 is now the E.F. */
 	subu	%r31, %r31, 16
 	st	%r1,  %r31, 4
 	st	%r29, %r31, 8
@@ -2665,7 +2666,7 @@ ASENTRY(Xfp_imprecise)
 	/* XXX handle inexact!!! */
 
 fpui_wrapup:
-	tb1	0,    %r0,  0			/* make sure all floating */
+	FLUSH_PIPELINE				/* make sure all floating */
 						/* point operations have */
 						/* finished */
 	ldcr	%r4,  %cr1			/* load the PSR */
@@ -2678,8 +2679,10 @@ fpui_wrapup:
 	ld	%r29, %r31, 8
 	addu	%r31, %r31, 16
 
-	fstcr	%r2,  FPSR			/* write revised value of */
-	fstcr	%r3,  FPCR			/* FPSR and FPCR */
+	fstcr	%r2, FPSR		/* write revised value of FPSR... */
+	fstcr	%r3, FPCR		/* ...and FPCR... */
+	st	%r2, %r29, EF_FPSR	/* ...into the trapframe as well */
+	st	%r3, %r29, EF_FPCR
 
 	/* write back the results */
 	extu	%r2,  %r12, 5<0>

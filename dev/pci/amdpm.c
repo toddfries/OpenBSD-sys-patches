@@ -1,4 +1,4 @@
-/*	$OpenBSD: amdpm.c,v 1.28 2012/10/05 10:51:28 haesbaert Exp $	*/
+/*	$OpenBSD: amdpm.c,v 1.31 2013/10/01 20:06:00 sf Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -185,8 +185,8 @@ int	amdpm_i2c_exec(void *, i2c_op_t, i2c_addr_t, const void *, size_t,
 int	amdpm_intr(void *);
 
 struct cfattach amdpm_ca = {
-	sizeof(struct amdpm_softc), amdpm_match, amdpm_attach, NULL,
-	amdpm_activate
+	sizeof(struct amdpm_softc), amdpm_match, amdpm_attach,
+	NULL, amdpm_activate
 };
 
 struct cfdriver amdpm_cd = {
@@ -247,7 +247,7 @@ amdpm_attach(struct device *parent, struct device *self, void *aux)
 		    (cfg_reg & AMDPM_STOPTMR) == 0 &&
 		    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_PBC768_PMC ||
 		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_8111_PMC)) {
-			printf(": %d-bit timer at %dHz",
+			printf(": %d-bit timer at %lluHz",
 			    (cfg_reg & AMDPM_TMR32) ? 32 : 24,
 			    amdpm_timecounter.tc_frequency);
 
@@ -312,8 +312,15 @@ int
 amdpm_activate(struct device *self, int act)
 {
 	struct amdpm_softc *sc = (struct amdpm_softc *)self;
+	int ret = 0;
 
 	switch (act) {
+	case DVACT_QUIESCE:
+		ret = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		ret = config_activate_children(self, act);
+		break;
 	case DVACT_RESUME:
 		if (timeout_initialized(&sc->sc_rnd_ch)) {
 			pcireg_t cfg_reg;
@@ -325,9 +332,13 @@ amdpm_activate(struct device *self, int act)
 			    AMDPM_CONFREG, cfg_reg | AMDPM_RNGEN);
 		
 		}
+		ret = config_activate_children(self, act);
+		break;
+	case DVACT_POWERDOWN:
+		ret = config_activate_children(self, act);
 		break;
 	}
-	return (0);
+	return (ret);
 }
 
 void
@@ -493,7 +504,7 @@ timeout:
 	/*
 	 * Transfer timeout. Kill the transaction and clear status bits.
 	 */
-	printf("%s: exec: op %d, addr 0x%02x, cmdlen %d, len %d, "
+	printf("%s: exec: op %d, addr 0x%02x, cmdlen %zu, len %zu, "
 	    "flags 0x%02x: timeout, status 0x%b\n",
 	    sc->sc_dev.dv_xname, op, addr, cmdlen, len, flags,
 	    st, AMDPM_SMBSTAT_BITS);

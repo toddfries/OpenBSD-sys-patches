@@ -1,4 +1,4 @@
-/* $OpenBSD: wsdisplay.c,v 1.108 2013/05/12 20:41:45 kettenis Exp $ */
+/* $OpenBSD: wsdisplay.c,v 1.117 2013/11/04 05:45:04 miod Exp $ */
 /* $NetBSD: wsdisplay.c,v 1.82 2005/02/27 00:27:52 perry Exp $ */
 
 /*
@@ -31,12 +31,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef	SMALL_KERNEL
-#define WSMOUSED_SUPPORT
-#define	BURNER_SUPPORT
-#define	SCROLLBACK_SUPPORT
-#endif
-
 #include <sys/param.h>
 #include <sys/conf.h>
 #include <sys/device.h>
@@ -54,6 +48,7 @@
 #include <sys/timeout.h>
 #include <sys/poll.h>
 
+#include <dev/wscons/wscons_features.h>
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wsdisplayvar.h>
 #include <dev/wscons/wsksymvar.h>
@@ -115,7 +110,7 @@ struct wsscreen {
 
 	struct wsdisplay_softc *sc;
 
-#ifdef WSMOUSED_SUPPORT
+#ifdef HAVE_WSMOUSED_SUPPORT
 	/* mouse console support via wsmoused(8) */
 	u_int mouse;		/* mouse cursor position */
 	u_int cursor;		/* selection cursor position (if
@@ -144,7 +139,7 @@ struct wsscreen {
 #define IS_SEL_BY_CHAR(scr)	((scr)->mouse_flags & SEL_BY_CHAR)
 #define IS_SEL_BY_WORD(scr)	((scr)->mouse_flags & SEL_BY_WORD)
 #define IS_SEL_BY_LINE(scr)	((scr)->mouse_flags & SEL_BY_LINE)
-#endif	/* WSMOUSED_SUPPORT */
+#endif	/* HAVE_WSMOUSED_SUPPORT */
 };
 
 struct wsscreen *wsscreen_attach(struct wsdisplay_softc *, int, const char *,
@@ -156,7 +151,6 @@ int	wsdisplay_getscreen(struct wsdisplay_softc *,
 	    struct wsdisplay_addscreendata *);
 void	wsdisplay_resume_device(struct device *);
 void	wsdisplay_suspend_device(struct device *);
-void	wsdisplay_shutdownhook(void *);
 void	wsdisplay_addscreen_print(struct wsdisplay_softc *, int, int);
 void	wsdisplay_closescreen(struct wsdisplay_softc *, struct wsscreen *);
 int	wsdisplay_delscreen(struct wsdisplay_softc *, int, int);
@@ -174,7 +168,7 @@ struct wsdisplay_softc {
 	int sc_focusidx;	/* available only if sc_focus isn't null */
 	struct wsscreen *sc_focus;
 
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 	struct timeout sc_burner;
 	int	sc_burnoutintvl;
 	int	sc_burninintvl;
@@ -182,8 +176,6 @@ struct wsdisplay_softc {
 	int	sc_burnman;
 	int	sc_burnflags;
 #endif
-
-	struct wsdisplay_font sc_fonts[WSDISPLAY_MAXFONT];
 
 	int	sc_isconsole;
 
@@ -200,7 +192,7 @@ struct wsdisplay_softc {
 #endif
 #endif /* NWSKBD > 0 */
 
-#ifdef WSMOUSED_SUPPORT
+#ifdef HAVE_WSMOUSED_SUPPORT
 	dev_t wsmoused_dev; /* device opened by wsmoused(8), when active */
 	int wsmoused_sleep; /* true when wsmoused(8) is sleeping */
 
@@ -216,13 +208,15 @@ int	wsdisplay_emul_match(struct device *, void *, void *);
 void	wsdisplay_emul_attach(struct device *, struct device *, void *);
 int	wsdisplay_emul_detach(struct device *, int);
 
+int	wsdisplay_activate(struct device *, int);
+
 struct cfdriver wsdisplay_cd = {
 	NULL, "wsdisplay", DV_TTY
 };
 
 struct cfattach wsdisplay_emul_ca = {
 	sizeof(struct wsdisplay_softc), wsdisplay_emul_match,
-	    wsdisplay_emul_attach, wsdisplay_emul_detach
+	wsdisplay_emul_attach, wsdisplay_emul_detach, wsdisplay_activate
 };
 
 void	wsdisplaystart(struct tty *);
@@ -414,7 +408,7 @@ wsdisplay_addscreen(struct wsdisplay_softc *sc, int idx,
 	}
 	splx(s);
 
-#ifdef WSMOUSED_SUPPORT
+#ifdef HAVE_WSMOUSED_SUPPORT
 	allocate_copybuffer(sc); /* enlarge the copy buffer if necessary */
 #endif
 	return (0);
@@ -585,6 +579,20 @@ wsdisplay_emul_detach(struct device *self, int flags)
 }
 
 int
+wsdisplay_activate(struct device *self, int act)
+{
+	int ret = 0;
+
+	switch (act) {
+	case DVACT_POWERDOWN:
+		wsdisplay_switchtoconsole();
+		break;
+	}
+
+	return (ret);
+}
+
+int
 wsdisplay_common_detach(struct wsdisplay_softc *sc, int flags)
 {
 	int i;
@@ -603,7 +611,7 @@ wsdisplay_common_detach(struct wsdisplay_softc *sc, int flags)
 				return (rc);
 		}
 
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 	timeout_del(&sc->sc_burner);
 #endif
 
@@ -653,13 +661,26 @@ wsemuldisplaydevprint(void *aux, const char *pnp)
 	return (UNCONF);
 }
 
+/* Submatch function (for parent devices). */
+int
+wsemuldisplaydevsubmatch(struct device *parent, void *match, void *aux)
+{
+	extern struct cfdriver wsdisplay_cd;
+	struct cfdata *cf = match;
+
+	/* only allow wsdisplay to attach */
+	if (cf->cf_driver == &wsdisplay_cd)
+		return ((*cf->cf_attach->ca_match)(parent, match, aux));
+
+	return (0);
+}
+
 void
 wsdisplay_common_attach(struct wsdisplay_softc *sc, int console, int kbdmux,
     const struct wsscreen_list *scrdata,
     const struct wsdisplay_accessops *accessops, void *accesscookie,
     u_int defaultscreens)
 {
-	static int hookset = 0;
 	int i, start = 0;
 #if NWSKBD > 0
 	struct wsevsrc *kme;
@@ -745,18 +766,15 @@ wsdisplay_common_attach(struct wsdisplay_softc *sc, int console, int kbdmux,
 	if (i > start)
 		wsdisplay_addscreen_print(sc, start, i-start);
 
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 	sc->sc_burnoutintvl = (hz * WSDISPLAY_DEFBURNOUT) / 1000;
-	sc->sc_burninintvl = (hz * WSDISPLAY_DEFBURNIN ) / 1000;
-	sc->sc_burnflags = 0;	/* off by default */
+	sc->sc_burninintvl = (hz * WSDISPLAY_DEFBURNIN) / 1000;
+	sc->sc_burnflags = WSDISPLAY_BURN_OUTPUT | WSDISPLAY_BURN_KBD |
+	    WSDISPLAY_BURN_MOUSE;
 	timeout_set(&sc->sc_burner, wsdisplay_burner, sc);
 	sc->sc_burnout = sc->sc_burnoutintvl;
 	wsdisplay_burn(sc, sc->sc_burnflags);
 #endif
-
-	if (hookset == 0)
-		shutdownhook_establish(wsdisplay_shutdownhook, NULL);
-	hookset = 1;
 
 #if NWSKBD > 0 && NWSMUX == 0
 	if (console == 0) {
@@ -926,7 +944,7 @@ wsdisplayclose(dev_t dev, int flag, int mode, struct proc *p)
 
 	scr->scr_flags &= ~SCR_OPEN;
 
-#ifdef WSMOUSED_SUPPORT
+#ifdef HAVE_WSMOUSED_SUPPORT
 	/* remove the selection at logout */
 	if (sc->sc_copybuffer != NULL)
 		bzero(sc->sc_copybuffer, sc->sc_copybuffer_size);
@@ -1020,8 +1038,12 @@ wsdisplayioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		return (error);
 #endif
 
-	if (ISWSDISPLAYCTL(dev))
-		return (wsdisplay_cfg_ioctl(sc, cmd, data, flag, p));
+	if (ISWSDISPLAYCTL(dev)) {
+	       	if (cmd != WSDISPLAYIO_GTYPE)
+			return (wsdisplay_cfg_ioctl(sc, cmd, data, flag, p));
+		/* pass WSDISPLAYIO_GTYPE to the first screen */
+		dev = makedev(major(dev), WSDISPLAYMINOR(unit, 0));
+	}
 
 	if (WSDISPLAYSCREEN(dev) >= WSDISPLAY_MAXSCREEN)
 		return (ENODEV);
@@ -1097,7 +1119,7 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 	switch (cmd) {
 	case WSDISPLAYIO_SMODE:
 	case WSDISPLAYIO_USEFONT:
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_SBURNER:
 #endif
@@ -1130,7 +1152,7 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 			scr->scr_flags |= SCR_GRAPHICS |
 			    ((d == WSDISPLAYIO_MODE_DUMBFB) ?  SCR_DUMBFB : 0);
 
-#ifdef WSMOUSED_SUPPORT
+#ifdef HAVE_WSMOUSED_SUPPORT
 			/*
 			 * wsmoused cohabitation with X-Window support
 			 * X-Window is starting
@@ -1142,22 +1164,26 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 			(*scr->scr_dconf->wsemul->reset)
 			    (scr->scr_dconf->wsemulcookie, WSEMUL_CLEARCURSOR);
 
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 			/* enable video _immediately_ if it nedes to be... */
 			if (sc->sc_burnman)
 				wsdisplay_burner(sc);
 			/* ...and disable the burner while X is running */
-			if (sc->sc_burnout)
+			if (sc->sc_burnout) {
 				timeout_del(&sc->sc_burner);
+				sc->sc_burnout = 0;
+			}
 #endif
 		} else {
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 			/* reenable the burner after exiting from X */
-			if (!sc->sc_burnman)
+			if (!sc->sc_burnman) {
+				sc->sc_burnout = sc->sc_burnoutintvl;
 				wsdisplay_burn(sc, sc->sc_burnflags);
+			}
 #endif
 
-#ifdef WSMOUSED_SUPPORT
+#ifdef HAVE_WSMOUSED_SUPPORT
 			/*
 			 * wsmoused cohabitation with X-Window support
 			 * X-Window is ending
@@ -1184,7 +1210,7 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 			    (scr->scr_dconf->wsemulcookie, WSEMUL_SYNCFONT);
 		return (error);
 #undef d
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 	case WSDISPLAYIO_GVIDEO:
 		*(u_int *)data = !sc->sc_burnman;
 		break;
@@ -1243,7 +1269,7 @@ wsdisplay_internal_ioctl(struct wsdisplay_softc *sc, struct wsscreen *scr,
 		}
 		return (error);
 #undef d
-#endif	/* BURNER_SUPPORT */
+#endif	/* HAVE_BURNER_SUPPORT */
 	case WSDISPLAYIO_GETSCREEN:
 		return (wsdisplay_getscreen(sc,
 		    (struct wsdisplay_addscreendata *)data));
@@ -1291,7 +1317,7 @@ wsdisplay_cfg_ioctl(struct wsdisplay_softc *sc, u_long cmd, caddr_t data,
 #endif
 
 	switch (cmd) {
-#ifdef WSMOUSED_SUPPORT
+#ifdef HAVE_WSMOUSED_SUPPORT
 	case WSDISPLAYIO_WSMOUSED:
 		error = wsmoused(sc, cmd, data, flag, p);
 		return (error);
@@ -1316,8 +1342,6 @@ wsdisplay_cfg_ioctl(struct wsdisplay_softc *sc, u_long cmd, caddr_t data,
 #define d ((struct wsdisplay_font *)data)
 		if (!sc->sc_accessops->load_font)
 			return (EINVAL);
-		if (d->index >= WSDISPLAY_MAXFONT)
-			return (EINVAL);
 		fontsz = d->fontheight * d->stride * d->numchars;
 		if (fontsz > WSDISPLAY_MAXFONTSZ)
 			return (EINVAL);
@@ -1333,15 +1357,14 @@ wsdisplay_cfg_ioctl(struct wsdisplay_softc *sc, u_long cmd, caddr_t data,
 		  (*sc->sc_accessops->load_font)(sc->sc_accesscookie, 0, d);
 		if (error)
 			free(buf, M_DEVBUF);
-		else if (d->index >= 0 || d->index < WSDISPLAY_MAXFONT)
-			sc->sc_fonts[d->index] = *d;
 		return (error);
 
 	case WSDISPLAYIO_LSFONT:
-		if (d->index < 0 || d->index >= WSDISPLAY_MAXFONT)
+		if (!sc->sc_accessops->list_font)
 			return (EINVAL);
-		*d = sc->sc_fonts[d->index];
-		return (0);
+		error =
+		  (*sc->sc_accessops->list_font)(sc->sc_accesscookie, d);
+		return (error);
 
 	case WSDISPLAYIO_DELFONT:
 		return (EINVAL);
@@ -1468,10 +1491,10 @@ wsdisplaystart(struct tty *tp)
 	buf = tp->t_outq.c_cf;
 
 	if (!(scr->scr_flags & SCR_GRAPHICS)) {
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 		wsdisplay_burn(sc, WSDISPLAY_BURN_OUTPUT);
 #endif
-#ifdef WSMOUSED_SUPPORT
+#ifdef HAVE_WSMOUSED_SUPPORT
 		if (scr == sc->sc_focus) {
 			if (ISSET(scr->mouse_flags, SEL_EXISTS))
 				/* hide a potential selection */
@@ -1579,11 +1602,11 @@ wsdisplay_emulinput(void *v, const u_char *data, u_int count)
  * Calls from the keyboard interface.
  */
 void
-wsdisplay_kbdinput(struct device *dev, keysym_t *ks, int num)
+wsdisplay_kbdinput(struct device *dev, kbd_t layout, keysym_t *ks, int num)
 {
 	struct wsdisplay_softc *sc = (struct wsdisplay_softc *)dev;
 	struct wsscreen *scr;
-	const char *dp;
+	const u_char *dp;
 	int count;
 	struct tty *tp;
 
@@ -1593,15 +1616,11 @@ wsdisplay_kbdinput(struct device *dev, keysym_t *ks, int num)
 
 
 	tp = scr->scr_tty;
-	for (; num > 0; num--, ks++) {
-		if (KS_GROUP(*ks) == KS_GROUP_Ascii)
-			(*linesw[tp->t_line].l_rint)(KS_VALUE(*ks), tp);
-		else {
-			count = (*scr->scr_dconf->wsemul->translate)
-			    (scr->scr_dconf->wsemulcookie, *ks, &dp);
-			while (count-- > 0)
-				(*linesw[tp->t_line].l_rint)(*dp++, tp);
-		}
+	for (; num > 0; num--) {
+		count = (*scr->scr_dconf->wsemul->translate)
+		    (scr->scr_dconf->wsemulcookie, layout, *ks++, &dp);
+		while (count-- > 0)
+			(*linesw[tp->t_line].l_rint)(*dp++, tp);
 	}
 }
 
@@ -1863,7 +1882,7 @@ wsdisplay_switch(struct device *dev, int no, int waitok)
 		sc->sc_oldscreen = sc->sc_focusidx;
 
 
-#ifdef WSMOUSED_SUPPORT
+#ifdef HAVE_WSMOUSED_SUPPORT
 	/*
 	 *  wsmoused cohabitation with X-Window support
 	 *
@@ -1906,7 +1925,7 @@ wsdisplay_switch(struct device *dev, int no, int waitok)
 
 		wsmoused_wakeup(sc);
 	}
-#endif	/* WSMOUSED_SUPPORT */
+#endif	/* HAVE_WSMOUSED_SUPPORT */
 
 #ifdef WSDISPLAY_COMPAT_USL
 #define wsswitch_cb1 ((void (*)(void *, int, int))wsdisplay_switch1)
@@ -2127,7 +2146,7 @@ wsdisplay_cnputc(dev_t dev, int i)
 		return;
 
 	dc = &wsdisplay_console_conf;
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 	/*wsdisplay_burn(wsdisplay_console_device, WSDISPLAY_BURN_OUTPUT);*/
 #endif
 	(void)(*dc->wsemul->output)(dc->wsemulcookie, &c, 1, 1);
@@ -2291,7 +2310,7 @@ wsdisplay_resume_device(struct device *dev)
 	}
 }
 
-#ifdef SCROLLBACK_SUPPORT
+#ifdef HAVE_SCROLLBACK_SUPPORT
 void
 wsscrollback(void *arg, int op)
 {
@@ -2316,7 +2335,7 @@ wsscrollback(void *arg, int op)
 }
 #endif
 
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 void
 wsdisplay_burn(void *v, u_int flags)
 {
@@ -2353,16 +2372,7 @@ wsdisplay_burner(void *v)
 }
 #endif
 
-/*
- * Switch the console at shutdown.
- */
-void
-wsdisplay_shutdownhook(void *arg)
-{
-	wsdisplay_switchtoconsole();
-}
-
-#ifdef WSMOUSED_SUPPORT
+#ifdef HAVE_WSMOUSED_SUPPORT
 /*
  * wsmoused(8) support functions
  */
@@ -3444,4 +3454,4 @@ wsmoused_wakeup(struct wsdisplay_softc *sc)
 	}
 #endif /* NWSMOUSE > 0 */
 }
-#endif /* WSMOUSED_SUPPORT */
+#endif /* HAVE_WSMOUSED_SUPPORT */

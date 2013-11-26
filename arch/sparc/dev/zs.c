@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.50 2013/04/21 14:44:16 sebastia Exp $	*/
+/*	$OpenBSD: zs.c,v 1.53 2013/10/21 12:14:52 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.50 1997/10/18 00:00:40 gwr Exp $	*/
 
 /*-
@@ -34,8 +34,8 @@
  * Zilog Z8530 Dual UART driver (machine-dependent part)
  *
  * Runs two serial lines per chip using slave drivers.
- * Plain tty/async lines use the zs_async slave.
- * Sun keyboard/mouse uses the zs_kbd/zs_ms slaves.
+ * Plain tty/async lines use the zstty slave.
+ * Sun keyboard/mouse uses the zskbd/zsms slaves.
  */
 
 #include <sys/param.h>
@@ -503,7 +503,7 @@ zs_set_speed(cs, bps)
 int
 zs_set_modes(cs, cflag)
 	struct zs_chanstate *cs;
-	int cflag;	/* bits per second */
+	int cflag;
 {
 	int s;
 
@@ -577,7 +577,8 @@ zs_write_reg(cs, reg, val)
 	ZS_DELAY();
 }
 
-u_char zs_read_csr(cs)
+u_char
+zs_read_csr(cs)
 	struct zs_chanstate *cs;
 {
 	register u_char val;
@@ -587,7 +588,8 @@ u_char zs_read_csr(cs)
 	return val;
 }
 
-void  zs_write_csr(cs, val)
+void
+zs_write_csr(cs, val)
 	struct zs_chanstate *cs;
 	u_char val;
 {
@@ -595,7 +597,8 @@ void  zs_write_csr(cs, val)
 	ZS_DELAY();
 }
 
-u_char zs_read_data(cs)
+u_char
+zs_read_data(cs)
 	struct zs_chanstate *cs;
 {
 	register u_char val;
@@ -605,7 +608,8 @@ u_char zs_read_data(cs)
 	return val;
 }
 
-void  zs_write_data(cs, val)
+void
+zs_write_data(cs, val)
 	struct zs_chanstate *cs;
 	u_char val;
 {
@@ -750,7 +754,7 @@ zs_putc(arg, c)
 	 * interrupts we put in the 2us delay regardless of cpu model.
 	 */
         zc->zc_data = c;
-        delay(2);
+	ZS_DELAY();
 
 	splx(s);
 }
@@ -1155,11 +1159,7 @@ setup_console:
 		return;
 	}
 	zs_conschan = zc;
-	/* hardcoded: console is only on unit 0, 
-	 * unit 1 is keyboard/mouse, see zs_attach
-	 */
-	if (zs_unit == 0)
-	    zs_hwflags[zs_unit][channel] = ZS_HWFLAG_CONSOLE;
+	zs_hwflags[zs_unit][channel] = ZS_HWFLAG_CONSOLE;
 	/* switch to selected console */
 	cn_tab = console;
 	(*cn_tab->cn_probe)(cn_tab);

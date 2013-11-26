@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.146 2013/02/15 22:58:17 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.149 2013/11/01 17:36:19 krw Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -655,7 +655,8 @@ boot(howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	/* If powerdown was requested, do it. */
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
@@ -755,8 +756,8 @@ void
 dumpsys()
 {
 	int psize;
-	daddr64_t blkno;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error = 0;
 	struct mem_region *mp;
 	extern struct mem_region *mem;
@@ -801,7 +802,7 @@ dumpsys()
 
 	error = pmap_dumpmmu(dump, blkno);
 	blkno += pmap_dumpsize();
-printf("starting dump, blkno %lld\n", blkno);
+printf("starting dump, blkno %lld\n", (long long)blkno);
 	for (mp = mem; mp->size; mp++) {
 		u_int64_t i = 0, n;
 		paddr_t maddr = mp->start;

@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.c,v 1.30 2013/05/17 12:03:42 kettenis Exp $ */
+/* $OpenBSD: i915_drv.c,v 1.50 2013/11/19 19:14:09 kettenis Exp $ */
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -50,11 +50,12 @@
 #include <dev/pci/drm/i915_drm.h>
 #include "i915_drv.h"
 #include "intel_drv.h"
+#include "i915_trace.h"
 
 #include <machine/pmap.h>
 
 #include <sys/queue.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 #if 0
 #	define INTELDRM_WATCH_COHERENCY
 #	define WATCH_INACTIVE
@@ -142,6 +143,15 @@ void	i965_alloc_ifp(struct inteldrm_softc *, struct pci_attach_args *);
 int	i915_drm_freeze(struct drm_device *);
 int	__i915_drm_thaw(struct drm_device *);
 int	i915_drm_thaw(struct drm_device *);
+
+#define INTEL_VGA_DEVICE(id, info) {		\
+	.class = PCI_CLASS_DISPLAY << 16,	\
+	.class_mask = 0xff0000,			\
+	.vendor = 0x8086,			\
+	.device = id,				\
+	.subvendor = PCI_ANY_ID,		\
+	.subdevice = PCI_ANY_ID,		\
+	.driver_data = (unsigned long) info }
 
 static const struct intel_device_info intel_i830_info = {
 	.gen = 2, .is_mobile = 1, .cursor_needs_physical = 1,
@@ -311,148 +321,93 @@ static const struct intel_device_info intel_haswell_m_info = {
 	.has_force_wake = 1,
 };
 
-const static struct drm_pcidev inteldrm_pciidlist[] = {
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830M_IGD,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82854_IGD,		0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82855GM_IGD,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82865G_IGD,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915G_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E7221_IGD,		0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915GM_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945G_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GM_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GME_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82946GZ_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G35_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q965_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G965_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM965_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GME965_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G33_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q35_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q33_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_4SERIES_IGD,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G41_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82B43_IGD_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82B43_IGD_2,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PINEVIEW_IGC_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PINEVIEW_M_IGC_1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CLARKDALE_IGD,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ARRANDALE_IGD,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_S_GT,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT2,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT2,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT2_PLUS,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT2_PLUS,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_D_GT1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_M_GT1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_S_GT1,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_D_GT2,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_M_GT2,	0 },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_S_GT2,	0 },
+const static struct drm_pcidev inteldrm_pciidlist[] = {		/* aka */
+	INTEL_VGA_DEVICE(0x3577, &intel_i830_info),		/* I830_M */
+	INTEL_VGA_DEVICE(0x2562, &intel_845g_info),		/* 845_G */
+	INTEL_VGA_DEVICE(0x3582, &intel_i85x_info),		/* I855_GM */
+	INTEL_VGA_DEVICE(0x358e, &intel_i85x_info),
+	INTEL_VGA_DEVICE(0x2572, &intel_i865g_info),		/* I865_G */
+	INTEL_VGA_DEVICE(0x2582, &intel_i915g_info),		/* I915_G */
+	INTEL_VGA_DEVICE(0x258a, &intel_i915g_info),		/* E7221_G */
+	INTEL_VGA_DEVICE(0x2592, &intel_i915gm_info),		/* I915_GM */
+	INTEL_VGA_DEVICE(0x2772, &intel_i945g_info),		/* I945_G */
+	INTEL_VGA_DEVICE(0x27a2, &intel_i945gm_info),		/* I945_GM */
+	INTEL_VGA_DEVICE(0x27ae, &intel_i945gm_info),		/* I945_GME */
+	INTEL_VGA_DEVICE(0x2972, &intel_i965g_info),		/* I946_GZ */
+	INTEL_VGA_DEVICE(0x2982, &intel_i965g_info),		/* G35_G */
+	INTEL_VGA_DEVICE(0x2992, &intel_i965g_info),		/* I965_Q */
+	INTEL_VGA_DEVICE(0x29a2, &intel_i965g_info),		/* I965_G */
+	INTEL_VGA_DEVICE(0x29b2, &intel_g33_info),		/* Q35_G */
+	INTEL_VGA_DEVICE(0x29c2, &intel_g33_info),		/* G33_G */
+	INTEL_VGA_DEVICE(0x29d2, &intel_g33_info),		/* Q33_G */
+	INTEL_VGA_DEVICE(0x2a02, &intel_i965gm_info),		/* I965_GM */
+	INTEL_VGA_DEVICE(0x2a12, &intel_i965gm_info),		/* I965_GME */
+	INTEL_VGA_DEVICE(0x2a42, &intel_gm45_info),		/* GM45_G */
+	INTEL_VGA_DEVICE(0x2e02, &intel_g45_info),		/* IGD_E_G */
+	INTEL_VGA_DEVICE(0x2e12, &intel_g45_info),		/* Q45_G */
+	INTEL_VGA_DEVICE(0x2e22, &intel_g45_info),		/* G45_G */
+	INTEL_VGA_DEVICE(0x2e32, &intel_g45_info),		/* G41_G */
+	INTEL_VGA_DEVICE(0x2e42, &intel_g45_info),		/* B43_G */
+	INTEL_VGA_DEVICE(0x2e92, &intel_g45_info),		/* B43_G.1 */
+	INTEL_VGA_DEVICE(0xa001, &intel_pineview_info),
+	INTEL_VGA_DEVICE(0xa011, &intel_pineview_info),
+	INTEL_VGA_DEVICE(0x0042, &intel_ironlake_d_info),
+	INTEL_VGA_DEVICE(0x0046, &intel_ironlake_m_info),
+	INTEL_VGA_DEVICE(0x0102, &intel_sandybridge_d_info),
+	INTEL_VGA_DEVICE(0x0112, &intel_sandybridge_d_info),
+	INTEL_VGA_DEVICE(0x0122, &intel_sandybridge_d_info),
+	INTEL_VGA_DEVICE(0x0106, &intel_sandybridge_m_info),
+	INTEL_VGA_DEVICE(0x0116, &intel_sandybridge_m_info),
+	INTEL_VGA_DEVICE(0x0126, &intel_sandybridge_m_info),
+	INTEL_VGA_DEVICE(0x010A, &intel_sandybridge_d_info),
+	INTEL_VGA_DEVICE(0x0156, &intel_ivybridge_m_info), /* GT1 mobile */
+	INTEL_VGA_DEVICE(0x0166, &intel_ivybridge_m_info), /* GT2 mobile */
+	INTEL_VGA_DEVICE(0x0152, &intel_ivybridge_d_info), /* GT1 desktop */
+	INTEL_VGA_DEVICE(0x0162, &intel_ivybridge_d_info), /* GT2 desktop */
+	INTEL_VGA_DEVICE(0x015a, &intel_ivybridge_d_info), /* GT1 server */
+	INTEL_VGA_DEVICE(0x016a, &intel_ivybridge_d_info), /* GT2 server */
+	INTEL_VGA_DEVICE(0x0402, &intel_haswell_d_info), /* GT1 desktop */
+	INTEL_VGA_DEVICE(0x0412, &intel_haswell_d_info), /* GT2 desktop */
+	INTEL_VGA_DEVICE(0x0422, &intel_haswell_d_info), /* GT2 desktop */
+	INTEL_VGA_DEVICE(0x040a, &intel_haswell_d_info), /* GT1 server */
+	INTEL_VGA_DEVICE(0x041a, &intel_haswell_d_info), /* GT2 server */
+	INTEL_VGA_DEVICE(0x042a, &intel_haswell_d_info), /* GT2 server */
+	INTEL_VGA_DEVICE(0x0406, &intel_haswell_m_info), /* GT1 mobile */
+	INTEL_VGA_DEVICE(0x0416, &intel_haswell_m_info), /* GT2 mobile */
+	INTEL_VGA_DEVICE(0x0426, &intel_haswell_m_info), /* GT2 mobile */
+	INTEL_VGA_DEVICE(0x0C02, &intel_haswell_d_info), /* SDV GT1 desktop */
+	INTEL_VGA_DEVICE(0x0C12, &intel_haswell_d_info), /* SDV GT2 desktop */
+	INTEL_VGA_DEVICE(0x0C22, &intel_haswell_d_info), /* SDV GT2 desktop */
+	INTEL_VGA_DEVICE(0x0C0A, &intel_haswell_d_info), /* SDV GT1 server */
+	INTEL_VGA_DEVICE(0x0C1A, &intel_haswell_d_info), /* SDV GT2 server */
+	INTEL_VGA_DEVICE(0x0C2A, &intel_haswell_d_info), /* SDV GT2 server */
+	INTEL_VGA_DEVICE(0x0C06, &intel_haswell_m_info), /* SDV GT1 mobile */
+	INTEL_VGA_DEVICE(0x0C16, &intel_haswell_m_info), /* SDV GT2 mobile */
+	INTEL_VGA_DEVICE(0x0C26, &intel_haswell_m_info), /* SDV GT2 mobile */
+	INTEL_VGA_DEVICE(0x0A02, &intel_haswell_d_info), /* ULT GT1 desktop */
+	INTEL_VGA_DEVICE(0x0A12, &intel_haswell_d_info), /* ULT GT2 desktop */
+	INTEL_VGA_DEVICE(0x0A22, &intel_haswell_d_info), /* ULT GT2 desktop */
+	INTEL_VGA_DEVICE(0x0A0A, &intel_haswell_d_info), /* ULT GT1 server */
+	INTEL_VGA_DEVICE(0x0A1A, &intel_haswell_d_info), /* ULT GT2 server */
+	INTEL_VGA_DEVICE(0x0A2A, &intel_haswell_d_info), /* ULT GT2 server */
+	INTEL_VGA_DEVICE(0x0A06, &intel_haswell_m_info), /* ULT GT1 mobile */
+	INTEL_VGA_DEVICE(0x0A16, &intel_haswell_m_info), /* ULT GT2 mobile */
+	INTEL_VGA_DEVICE(0x0A26, &intel_haswell_m_info), /* ULT GT2 mobile */
+	INTEL_VGA_DEVICE(0x0D02, &intel_haswell_d_info), /* CRW GT1 desktop */
+	INTEL_VGA_DEVICE(0x0D12, &intel_haswell_d_info), /* CRW GT2 desktop */
+	INTEL_VGA_DEVICE(0x0D22, &intel_haswell_d_info), /* CRW GT2 desktop */
+	INTEL_VGA_DEVICE(0x0D0A, &intel_haswell_d_info), /* CRW GT1 server */
+	INTEL_VGA_DEVICE(0x0D1A, &intel_haswell_d_info), /* CRW GT2 server */
+	INTEL_VGA_DEVICE(0x0D2A, &intel_haswell_d_info), /* CRW GT2 server */
+	INTEL_VGA_DEVICE(0x0D06, &intel_haswell_m_info), /* CRW GT1 mobile */
+	INTEL_VGA_DEVICE(0x0D16, &intel_haswell_m_info), /* CRW GT2 mobile */
+	INTEL_VGA_DEVICE(0x0D26, &intel_haswell_m_info), /* CRW GT2 mobile */
+#ifdef notyet
+	INTEL_VGA_DEVICE(0x0f30, &intel_valleyview_m_info),
+	INTEL_VGA_DEVICE(0x0157, &intel_valleyview_m_info),
+	INTEL_VGA_DEVICE(0x0155, &intel_valleyview_d_info),
+#endif
 	{0, 0, 0}
-};
-
-static const struct intel_gfx_device_id {
-	int vendor;
-        int device;
-        const struct intel_device_info *info;
-} inteldrm_pciidlist_info[] = {
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82830M_IGD,
-	    &intel_i830_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82845G_IGD,
-	    &intel_845g_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82854_IGD,
-	    &intel_i85x_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82855GM_IGD,
-	    &intel_i85x_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82865G_IGD,
-	    &intel_i865g_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915G_IGD_1,
-	    &intel_i915g_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_E7221_IGD,
-	    &intel_i915g_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82915GM_IGD_1,
-	    &intel_i915gm_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945G_IGD_1,
-	    &intel_i945g_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GM_IGD_1,
-	    &intel_i945gm_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82945GME_IGD_1,
-	    &intel_i945gm_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82946GZ_IGD_1,
-	    &intel_i965g_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G35_IGD_1,
-	    &intel_i965g_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q965_IGD_1,
-	    &intel_i965g_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G965_IGD_1,
-	    &intel_i965g_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM965_IGD_1,
-	    &intel_i965gm_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GME965_IGD_1,
-	    &intel_i965gm_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G33_IGD_1,
-	    &intel_g33_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q35_IGD_1,
-	    &intel_g33_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q33_IGD_1,
-	    &intel_g33_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_IGD_1,
-	    &intel_gm45_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_4SERIES_IGD,
-	    &intel_g45_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82Q45_IGD_1,
-	    &intel_g45_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G45_IGD_1,
-	    &intel_g45_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82G41_IGD_1,
-	    &intel_g45_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82B43_IGD_1,
-	    &intel_g45_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82B43_IGD_2,
-	    &intel_g45_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PINEVIEW_IGC_1,
-	    &intel_pineview_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PINEVIEW_M_IGC_1,
-	    &intel_pineview_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CLARKDALE_IGD,
-	    &intel_ironlake_d_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_ARRANDALE_IGD,
-	    &intel_ironlake_m_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT1,
-	    &intel_sandybridge_d_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT1,
-	    &intel_sandybridge_m_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_S_GT,
-	    &intel_sandybridge_d_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT2,
-	    &intel_sandybridge_d_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT2,
-	    &intel_sandybridge_m_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_GT2_PLUS,
-	    &intel_sandybridge_d_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE2G_M_GT2_PLUS,
-	    &intel_sandybridge_m_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_D_GT1,
-	    &intel_ivybridge_d_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_M_GT1,
-	    &intel_ivybridge_m_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_S_GT1,
-	    &intel_ivybridge_d_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_D_GT2,
-	    &intel_ivybridge_d_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_M_GT2,
-	    &intel_ivybridge_m_info },
-	{PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE3G_S_GT2,
-	    &intel_ivybridge_d_info },
-	{0, 0, NULL}
 };
 
 static struct drm_driver_info inteldrm_driver = {
@@ -487,12 +442,12 @@ static struct drm_driver_info inteldrm_driver = {
 const struct intel_device_info *
 i915_get_device_id(int device)
 {
-	const struct intel_gfx_device_id *did;
+	const struct drm_pcidev *did;
 
-	for (did = &inteldrm_pciidlist_info[0]; did->device != 0; did++) {
+	for (did = &inteldrm_pciidlist[0]; did->device != 0; did++) {
 		if (did->device != device)
 			continue;
-		return (did->info);
+		return ((const struct intel_device_info *)did->driver_data);
 	}
 	return (NULL);
 }
@@ -525,7 +480,7 @@ i915_semaphore_is_enabled(struct drm_device *dev)
 int
 i915_drm_freeze(struct drm_device *dev)
 {
-	struct inteldrm_softc *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	drm_kms_helper_poll_disable(dev);
 
@@ -542,6 +497,7 @@ i915_drm_freeze(struct drm_device *dev)
 		}
 
 		timeout_del(&dev_priv->rps.delayed_resume_to);
+		task_del(systq, &dev_priv->rps.delayed_resume_task);
 
 		intel_modeset_disable(dev);
 
@@ -561,7 +517,7 @@ i915_drm_freeze(struct drm_device *dev)
 int
 __i915_drm_thaw(struct drm_device *dev)
 {
-	struct inteldrm_softc *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int error = 0;
 
 	i915_restore_state(dev);
@@ -631,6 +587,8 @@ void inteldrm_free_screen(void *, void *);
 int inteldrm_show_screen(void *, void *, int,
     void (*)(void *, int, int), void *);
 void inteldrm_doswitch(void *, void *);
+int inteldrm_load_font(void *, void *, struct wsdisplay_font *);
+int inteldrm_list_font(void *, struct wsdisplay_font *);
 int inteldrm_getchar(void *, int, int, struct wsdisplay_charcell *);
 void inteldrm_burner(void *, u_int, u_int);
 
@@ -652,15 +610,15 @@ struct wsscreen_list inteldrm_screenlist = {
 };
 
 struct wsdisplay_accessops inteldrm_accessops = {
-	inteldrm_wsioctl,
-	inteldrm_wsmmap,
-	inteldrm_alloc_screen,
-	inteldrm_free_screen,
-	inteldrm_show_screen,
-	NULL,
-	NULL,
-	inteldrm_getchar,
-	inteldrm_burner
+	.ioctl = inteldrm_wsioctl,
+	.mmap = inteldrm_wsmmap,
+	.alloc_screen = inteldrm_alloc_screen,
+	.free_screen = inteldrm_free_screen,
+	.show_screen = inteldrm_show_screen,
+	.getchar = inteldrm_getchar,
+	.load_font = inteldrm_load_font,
+	.list_font = inteldrm_list_font,
+	.burn_screen = inteldrm_burner
 };
 
 extern int (*ws_get_param)(struct wsdisplay_param *);
@@ -675,6 +633,9 @@ inteldrm_wsioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 	extern u32 _intel_panel_get_max_backlight(struct drm_device *);
 
 	switch (cmd) {
+	case WSDISPLAYIO_GTYPE:
+		*(int *)data = WSDISPLAY_TYPE_INTELDRM;
+		return 0;
 	case WSDISPLAYIO_GETPARAM:
 		if (ws_get_param && ws_get_param(dp) == 0)
 			return 0;
@@ -771,6 +732,24 @@ inteldrm_getchar(void *v, int row, int col, struct wsdisplay_charcell *cell)
 	struct rasops_info *ri = &dev_priv->ro;
 
 	return rasops_getchar(ri, row, col, cell);
+}
+
+int
+inteldrm_load_font(void *v, void *cookie, struct wsdisplay_font *font)
+{
+	struct inteldrm_softc *dev_priv = v;
+	struct rasops_info *ri = &dev_priv->ro;
+
+	return rasops_load_font(ri, cookie, font);
+}
+
+int
+inteldrm_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct inteldrm_softc *dev_priv = v;
+	struct rasops_info *ri = &dev_priv->ro;
+
+	return rasops_list_font(ri, font);
 }
 
 void
@@ -932,9 +911,9 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	dev_priv->workq = workq_create("intelrel", 1, IPL_TTY);
-	if (dev_priv->workq == NULL) {
-		printf("couldn't create workq\n");
+	dev_priv->mm.retire_taskq = taskq_create("intelrel", 1, IPL_TTY);
+	if (dev_priv->mm.retire_taskq == NULL) {
+		printf("couldn't create taskq\n");
 		return;
 	}
 
@@ -979,9 +958,9 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	i915_gem_load(dev);
 
 	mtx_init(&dev_priv->irq_lock, IPL_TTY);
-	mtx_init(&dev_priv->rps.lock, IPL_NONE);
-	mtx_init(&dev_priv->dpio_lock, IPL_NONE);
-	mtx_init(&mchdev_lock, IPL_NONE);
+	mtx_init(&dev_priv->rps.lock, IPL_TTY);
+	mtx_init(&dev_priv->dpio_lock, IPL_TTY);
+	mtx_init(&mchdev_lock, IPL_TTY);
 	mtx_init(&dev_priv->error_completion_lock, IPL_NONE);
 
 	rw_init(&dev_priv->rps.hw_lock, "rpshw");
@@ -1046,6 +1025,17 @@ inteldrm_attach(struct device *parent, struct device *self, void *aux)
 	ri->ri_hw = dev_priv;
 	dev_priv->sc_copyrows = ri->ri_copyrows;
 	ri->ri_copyrows = inteldrm_copyrows;
+
+	/*
+	 * On older hardware the fast scrolling code causes page table
+	 * errors.  As a workaround, we set the "avoid framebuffer
+	 * reads" flag, which has the side-effect of disabling the
+	 * fast scrolling code, but still gives us a half-decent
+	 * scrolling speed.
+	 */
+	if (INTEL_INFO(dev)->gen < 3 || IS_I915G(dev) || IS_I915GM(dev))
+		ri->ri_flg |= RI_WRONLY;
+	ri->ri_flg |= RI_WRONLY;
 
 	inteldrm_stdscreen.capabilities = ri->ri_caps;
 	inteldrm_stdscreen.nrows = ri->ri_rows;
@@ -1146,7 +1136,7 @@ inteldrm_ioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 
 	dev_priv->entries++;
 
-	error = inteldrm_doioctl(dev, cmd, data, file_priv);
+	error = -inteldrm_doioctl(dev, cmd, data, file_priv);
 
 	dev_priv->entries--;
 	return (error);
@@ -1156,12 +1146,10 @@ int
 inteldrm_doioctl(struct drm_device *dev, u_long cmd, caddr_t data,
     struct drm_file *file_priv)
 {
-	struct inteldrm_softc	*dev_priv = dev->dev_private;
-
 	if (file_priv->authenticated == 1) {
 		switch (cmd) {
 		case DRM_IOCTL_I915_GETPARAM:
-			return (i915_getparam(dev_priv, data));
+			return (i915_getparam(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_EXECBUFFER2:
 			return (i915_gem_execbuffer2(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_BUSY:
@@ -1200,6 +1188,12 @@ inteldrm_doioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 		case DRM_IOCTL_I915_GEM_GET_CACHING:
 			return (i915_gem_get_caching_ioctl(dev, data,
 			    file_priv));
+		case DRM_IOCTL_I915_GEM_CONTEXT_CREATE:
+			return (i915_gem_context_create_ioctl(dev, data,
+			    file_priv));
+		case DRM_IOCTL_I915_GEM_CONTEXT_DESTROY:
+			return (i915_gem_context_destroy_ioctl(dev, data,
+			    file_priv));
 		default:
 			break;
 		}
@@ -1208,7 +1202,7 @@ inteldrm_doioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 	if (file_priv->master == 1) {
 		switch (cmd) {
 		case DRM_IOCTL_I915_SETPARAM:
-			return (i915_setparam(dev_priv, data));
+			return (i915_setparam(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_INIT:
 			return (i915_gem_init_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_I915_GEM_ENTERVT:
@@ -1229,7 +1223,7 @@ inteldrm_doioctl(struct drm_device *dev, u_long cmd, caddr_t data,
 			return (intel_sprite_set_colorkey(dev, data, file_priv));
 		}
 	}
-	return (EINVAL);
+	return -EINVAL;
 }
 
 void
@@ -1333,272 +1327,11 @@ i915_gem_chipset_flush(struct drm_device *dev)
 }
 
 void
-inteldrm_set_max_obj_size(struct inteldrm_softc *dev_priv)
-{
-	struct drm_device	*dev = (struct drm_device *)dev_priv->drmdev;
-
-	/*
-	 * Allow max obj size up to the size where ony 2 would fit the
-	 * aperture, but some slop exists due to alignment etc
-	 */
-	dev_priv->max_gem_obj_size = (dev->gtt_total -
-	    atomic_read(&dev->pin_memory)) * 3 / 4 / 2;
-
-}
-
-void
-inteldrm_wipe_mappings(struct drm_obj *obj)
-{
-	struct drm_i915_gem_object *obj_priv = to_intel_bo(obj);
-	struct drm_device	*dev = obj->dev;
-	struct inteldrm_softc	*dev_priv = dev->dev_private;
-	struct vm_page		*pg;
-
-	DRM_ASSERT_HELD(obj);
-	/* make sure any writes hit the bus before we do whatever change
-	 * that prompted us to kill the mappings.
-	 */
-	DRM_MEMORYBARRIER();
-	/* nuke all our mappings. XXX optimise. */
-	for (pg = &dev_priv->pgs[atop(obj_priv->gtt_offset)]; pg !=
-	    &dev_priv->pgs[atop(obj_priv->gtt_offset + obj->size)]; pg++)
-		pmap_page_protect(pg, VM_PROT_NONE);
-}
-
-/**
- * Pin an object to the GTT and evaluate the relocations landing in it.
- */
-int
-i915_gem_object_pin_and_relocate(struct drm_obj *obj,
-    struct drm_file *file_priv, struct drm_i915_gem_exec_object2 *entry,
-    struct drm_i915_gem_relocation_entry *relocs)
-{
-	struct drm_device	*dev = obj->dev;
-	struct inteldrm_softc	*dev_priv = dev->dev_private;
-	struct drm_obj		*target_obj;
-	struct drm_i915_gem_object *obj_priv = to_intel_bo(obj);
-	bus_space_handle_t	 bsh;
-	int			 i, ret, needs_fence;
-
-	DRM_ASSERT_HELD(obj);
-	needs_fence = ((entry->flags & EXEC_OBJECT_NEEDS_FENCE) &&
-	    obj_priv->tiling_mode != I915_TILING_NONE);
-	if (needs_fence)
-		atomic_setbits_int(&obj->do_flags, I915_EXEC_NEEDS_FENCE);
-
-	/* Choose the GTT offset for our buffer and put it there. */
-	ret = i915_gem_object_pin(obj_priv, (u_int32_t)entry->alignment,
-	    needs_fence, false);
-	if (ret)
-		return ret;
-
-	if (needs_fence) {
-		ret = i915_gem_object_get_fence(obj_priv);
-		if (ret)
-			return ret;
-
-		if (i915_gem_object_pin_fence(obj_priv))
-			obj->do_flags |= __EXEC_OBJECT_HAS_FENCE;
-
-		obj_priv->pending_fenced_gpu_access = true;
-	}
-
-	entry->offset = obj_priv->gtt_offset;
-
-	/* Apply the relocations, using the GTT aperture to avoid cache
-	 * flushing requirements.
-	 */
-	for (i = 0; i < entry->relocation_count; i++) {
-		struct drm_i915_gem_relocation_entry *reloc = &relocs[i];
-		struct drm_i915_gem_object *target_obj_priv;
-		uint32_t reloc_val, reloc_offset;
-
-		target_obj = drm_gem_object_lookup(obj->dev, file_priv,
-		    reloc->target_handle);
-		/* object must have come before us in the list */
-		if (target_obj == NULL) {
-			i915_gem_object_unpin(obj_priv);
-			return (ENOENT);
-		}
-		if ((target_obj->do_flags & I915_IN_EXEC) == 0) {
-			printf("%s: object not already in execbuffer\n",
-			__func__);
-			ret = EBADF;
-			goto err;
-		}
-
-		target_obj_priv = to_intel_bo(target_obj);
-
-		/* The target buffer should have appeared before us in the
-		 * exec_object list, so it should have a GTT space bound by now.
-		 */
-		if (target_obj_priv->dmamap == 0) {
-			DRM_ERROR("No GTT space found for object %d\n",
-				  reloc->target_handle);
-			ret = EINVAL;
-			goto err;
-		}
-
-		/* must be in one write domain and one only */
-		if (reloc->write_domain & (reloc->write_domain - 1)) {
-			ret = EINVAL;
-			goto err;
-		}
-		if (reloc->read_domains & I915_GEM_DOMAIN_CPU ||
-		    reloc->write_domain & I915_GEM_DOMAIN_CPU) {
-			DRM_ERROR("relocation with read/write CPU domains: "
-			    "obj %p target %d offset %d "
-			    "read %08x write %08x", obj,
-			    reloc->target_handle, (int)reloc->offset,
-			    reloc->read_domains, reloc->write_domain);
-			ret = EINVAL;
-			goto err;
-		}
-
-		if (reloc->write_domain && target_obj->pending_write_domain &&
-		    reloc->write_domain != target_obj->pending_write_domain) {
-			DRM_ERROR("Write domain conflict: "
-				  "obj %p target %d offset %d "
-				  "new %08x old %08x\n",
-				  obj, reloc->target_handle,
-				  (int) reloc->offset,
-				  reloc->write_domain,
-				  target_obj->pending_write_domain);
-			ret = EINVAL;
-			goto err;
-		}
-
-		target_obj->pending_read_domains |= reloc->read_domains;
-		target_obj->pending_write_domain |= reloc->write_domain;
-
-
-		if (reloc->offset > obj->size - 4) {
-			DRM_ERROR("Relocation beyond object bounds: "
-				  "obj %p target %d offset %d size %d.\n",
-				  obj, reloc->target_handle,
-				  (int) reloc->offset, (int) obj->size);
-			ret = EINVAL;
-			goto err;
-		}
-		if (reloc->offset & 3) {
-			DRM_ERROR("Relocation not 4-byte aligned: "
-				  "obj %p target %d offset %d.\n",
-				  obj, reloc->target_handle,
-				  (int) reloc->offset);
-			ret = EINVAL;
-			goto err;
-		}
-
-		/* Map the page containing the relocation we're going to
-		 * perform.
-		 */
-		reloc_offset = obj_priv->gtt_offset + reloc->offset;
-		reloc_val = target_obj_priv->gtt_offset + reloc->delta;
-
-		if (target_obj_priv->gtt_offset == reloc->presumed_offset) {
-			drm_gem_object_unreference(target_obj);
-			 continue;
-		}
-
-		ret = i915_gem_object_set_to_gtt_domain(obj_priv, true);
-		if (ret != 0)
-			goto err;
-
-		if ((ret = agp_map_subregion(dev_priv->agph,
-		    trunc_page(reloc_offset), PAGE_SIZE, &bsh)) != 0) {
-			DRM_ERROR("map failed...\n");
-			goto err;
-		}
-
-		bus_space_write_4(dev_priv->bst, bsh, reloc_offset & PAGE_MASK,
-		     reloc_val);
-
-		reloc->presumed_offset = target_obj_priv->gtt_offset;
-
-		agp_unmap_subregion(dev_priv->agph, bsh, PAGE_SIZE);
-		drm_gem_object_unreference(target_obj);
-	}
-
-	return 0;
-
-err:
-	/* we always jump to here mid-loop */
-	drm_gem_object_unreference(target_obj);
-	i915_gem_object_unpin(obj_priv);
-	return (ret);
-}
-
-int
-i915_gem_get_relocs_from_user(struct drm_i915_gem_exec_object2 *exec_list,
-    u_int32_t buffer_count, struct drm_i915_gem_relocation_entry **relocs)
-{
-	u_int32_t	reloc_count = 0, reloc_index = 0, i;
-	int		ret, relocs_max;
-
-	relocs_max = INT_MAX / sizeof(struct drm_i915_gem_relocation_entry);
-
-	*relocs = NULL;
-	for (i = 0; i < buffer_count; i++) {
-		/* First check for malicious input causing overflow in
-		 * the worst case where we need to allocate the entire
-		 * relocation tree as a single array.
-		 */
-		if (exec_list[i].relocation_count > relocs_max - reloc_count)
-			return (EINVAL);
-		reloc_count += exec_list[i].relocation_count;
-	}
-
-	if (reloc_count == 0)
-		return (0);
-
-	if (SIZE_MAX / reloc_count < sizeof(**relocs))
-		return (EINVAL);
-	*relocs = drm_alloc(reloc_count * sizeof(**relocs));
-	for (i = 0; i < buffer_count; i++) {
-		if ((ret = copyin((void *)(uintptr_t)exec_list[i].relocs_ptr,
-		    &(*relocs)[reloc_index], exec_list[i].relocation_count *
-		    sizeof(**relocs))) != 0) {
-			drm_free(*relocs);
-			*relocs = NULL;
-			return (ret);
-		}
-		reloc_index += exec_list[i].relocation_count;
-	}
-
-	return (0);
-}
-
-int
-i915_gem_put_relocs_to_user(struct drm_i915_gem_exec_object2 *exec_list,
-    u_int32_t buffer_count, struct drm_i915_gem_relocation_entry *relocs)
-{
-	u_int32_t	reloc_count = 0, i;
-	int		ret = 0;
-
-	if (relocs == NULL)
-		return (0);
-
-	for (i = 0; i < buffer_count; i++) {
-		if ((ret = copyout(&relocs[reloc_count],
-		    (void *)(uintptr_t)exec_list[i].relocs_ptr,
-		    exec_list[i].relocation_count * sizeof(*relocs))) != 0)
-			break;
-		reloc_count += exec_list[i].relocation_count;
-	}
-
-	drm_free(relocs);
-
-	return (ret);
-}
-
-void
 inteldrm_timeout(void *arg)
 {
-	struct inteldrm_softc	*dev_priv = arg;
+	struct inteldrm_softc *dev_priv = arg;
 
-	if (workq_add_task(dev_priv->workq, 0, i915_gem_retire_work_handler,
-	    dev_priv, NULL) == ENOMEM)
-		DRM_ERROR("failed to run retire handler\n");
+	task_add(dev_priv->mm.retire_taskq, &dev_priv->mm.retire_task);
 }
 
 int
@@ -1688,7 +1421,7 @@ i965_do_reset(struct drm_device *dev)
 int
 ironlake_do_reset(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32 gdrst;
 	int retries;
 
@@ -1725,7 +1458,7 @@ ironlake_do_reset(struct drm_device *dev)
 int
 gen6_do_reset(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int ret = 0;
 	int retries;
 
@@ -1769,7 +1502,7 @@ gen6_do_reset(struct drm_device *dev)
 int
 intel_gpu_reset(struct drm_device *dev)
 {
-	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_private *dev_priv = dev->dev_private;
 	int ret = -ENODEV;
 
 	switch (INTEL_INFO(dev)->gen) {
@@ -1871,8 +1604,8 @@ i915_reset(struct drm_device *dev)
 		for_each_ring(ring, dev_priv, i)
 			ring->init(ring);
 
-#ifdef notyet
 		i915_gem_context_init(dev);
+#ifdef notyet
 		i915_gem_init_ppgtt(dev);
 #endif
 
@@ -1896,24 +1629,6 @@ i915_reset(struct drm_device *dev)
 /*
  * Debug code from here.
  */
-#ifdef WATCH_INACTIVE
-void
-inteldrm_verify_inactive(struct inteldrm_softc *dev_priv, char *file,
-    int line)
-{
-	struct drm_obj		*obj;
-	struct drm_i915_gem_object *obj_priv;
-
-	TAILQ_FOREACH(obj_priv, &dev_priv->mm.inactive_list, list) {
-		obj = &obj_priv->base;
-		if (obj_priv->pin_count || obj_priv->active ||
-		    obj->write_domain & I915_GEM_GPU_DOMAINS)
-			DRM_ERROR("inactive %p (p $d a $d w $x) %s:%d\n",
-			    obj, obj_priv->pin_count, obj_priv->active,
-			    obj->write_domain, file, line);
-	}
-}
-#endif /* WATCH_INACTIVE */
 
 #if (INTELDRM_DEBUG > 1)
 
@@ -2329,3 +2044,176 @@ intel_detect_pch(struct inteldrm_softc *dev_priv)
 	}
 }
 
+/* We give fast paths for the really cool registers */
+#define NEEDS_FORCE_WAKE(dev, reg) \
+	((HAS_FORCE_WAKE(dev)) && \
+	 ((reg) < 0x40000) &&            \
+	 ((reg) != FORCEWAKE))
+
+static bool IS_DISPLAYREG(u32 reg)
+{
+	/*
+	 * This should make it easier to transition modules over to the
+	 * new register block scheme, since we can do it incrementally.
+	 */
+	if (reg >= VLV_DISPLAY_BASE)
+		return false;
+
+	if (reg >= RENDER_RING_BASE &&
+	    reg < RENDER_RING_BASE + 0xff)
+		return false;
+	if (reg >= GEN6_BSD_RING_BASE &&
+	    reg < GEN6_BSD_RING_BASE + 0xff)
+		return false;
+	if (reg >= BLT_RING_BASE &&
+	    reg < BLT_RING_BASE + 0xff)
+		return false;
+
+	if (reg == PGTBL_ER)
+		return false;
+
+	if (reg >= IPEIR_I965 &&
+	    reg < HWSTAM)
+		return false;
+
+	if (reg == MI_MODE)
+		return false;
+
+	if (reg == GFX_MODE_GEN7)
+		return false;
+
+	if (reg == RENDER_HWS_PGA_GEN7 ||
+	    reg == BSD_HWS_PGA_GEN7 ||
+	    reg == BLT_HWS_PGA_GEN7)
+		return false;
+
+	if (reg == GEN6_BSD_SLEEP_PSMI_CONTROL ||
+	    reg == GEN6_BSD_RNCID)
+		return false;
+
+	if (reg == GEN6_BLITTER_ECOSKPD)
+		return false;
+
+	if (reg >= 0x4000c &&
+	    reg <= 0x4002c)
+		return false;
+
+	if (reg >= 0x4f000 &&
+	    reg <= 0x4f08f)
+		return false;
+
+	if (reg >= 0x4f100 &&
+	    reg <= 0x4f11f)
+		return false;
+
+	if (reg >= VLV_MASTER_IER &&
+	    reg <= GEN6_PMIER)
+		return false;
+
+	if (reg >= FENCE_REG_SANDYBRIDGE_0 &&
+	    reg < (FENCE_REG_SANDYBRIDGE_0 + (16*8)))
+		return false;
+
+	if (reg >= VLV_IIR_RW &&
+	    reg <= VLV_ISR)
+		return false;
+
+	if (reg == FORCEWAKE_VLV ||
+	    reg == FORCEWAKE_ACK_VLV)
+		return false;
+
+	if (reg == GEN6_GDRST)
+		return false;
+
+	switch (reg) {
+	case _3D_CHICKEN3:
+	case IVB_CHICKEN3:
+	case GEN7_COMMON_SLICE_CHICKEN1:
+	case GEN7_L3CNTLREG1:
+	case GEN7_L3_CHICKEN_MODE_REGISTER:
+	case GEN7_ROW_CHICKEN2:
+	case GEN7_L3SQCREG4:
+	case GEN7_SQ_CHICKEN_MBCUNIT_CONFIG:
+	case GEN7_HALF_SLICE_CHICKEN1:
+	case GEN6_MBCTL:
+	case GEN6_UCGCTL2:
+		return false;
+	default:
+		break;
+	}
+
+	return true;
+}
+
+static void
+ilk_dummy_write(struct drm_i915_private *dev_priv)
+{
+	/* WaIssueDummyWriteToWakeupFromRC6: Issue a dummy write to wake up the
+	 * chip from rc6 before touching it for real. MI_MODE is masked, hence
+	 * harmless to write 0 into. */
+	I915_WRITE_NOTRACE(MI_MODE, 0);
+}
+
+#define __i915_read(x, y) \
+u##x i915_read##x(struct drm_i915_private *dev_priv, u32 reg) { \
+	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev; \
+	u##x val = 0; \
+	mtx_enter(&dev_priv->gt_lock); \
+	if (IS_GEN5(dev)) \
+		ilk_dummy_write(dev_priv); \
+	if (NEEDS_FORCE_WAKE((dev), (reg))) { \
+		if (dev_priv->forcewake_count == 0) \
+			dev_priv->gt.force_wake_get(dev_priv); \
+		val = read##x(dev_priv, reg); \
+		if (dev_priv->forcewake_count == 0) \
+			dev_priv->gt.force_wake_put(dev_priv); \
+	} else if (IS_VALLEYVIEW(dev) && IS_DISPLAYREG(reg)) { \
+		val = read##x(dev_priv, reg + 0x180000);		\
+	} else { \
+		val = read##x(dev_priv, reg); \
+	} \
+	mtx_leave(&dev_priv->gt_lock); \
+	trace_i915_reg_rw(false, reg, val, sizeof(val)); \
+	return val; \
+}
+
+__i915_read(8, b)
+__i915_read(16, w)
+__i915_read(32, l)
+__i915_read(64, q)
+#undef __i915_read
+
+#define __i915_write(x, y) \
+void i915_write##x(struct drm_i915_private *dev_priv, u32 reg, u##x val) { \
+	u32 __fifo_ret = 0; \
+	struct drm_device *dev = (struct drm_device *)dev_priv->drmdev; \
+	trace_i915_reg_rw(true, reg, val, sizeof(val)); \
+	mtx_enter(&dev_priv->gt_lock); \
+	if (NEEDS_FORCE_WAKE((dev), (reg))) { \
+		__fifo_ret = __gen6_gt_wait_for_fifo(dev_priv); \
+	} \
+	if (IS_GEN5(dev)) \
+		ilk_dummy_write(dev_priv); \
+	if (IS_HASWELL(dev) && (I915_READ_NOTRACE(GEN7_ERR_INT) & ERR_INT_MMIO_UNCLAIMED)) { \
+		DRM_ERROR("Unknown unclaimed register before writing to %x\n", reg); \
+		I915_WRITE_NOTRACE(GEN7_ERR_INT, ERR_INT_MMIO_UNCLAIMED); \
+	} \
+	if (IS_VALLEYVIEW(dev) && IS_DISPLAYREG(reg)) { \
+		write##x(dev_priv, reg + 0x180000, val);		\
+	} else {							\
+		write##x(dev_priv, reg, val);			\
+	}								\
+	if (unlikely(__fifo_ret)) { \
+		gen6_gt_check_fifodbg(dev_priv); \
+	} \
+	if (IS_HASWELL(dev) && (I915_READ_NOTRACE(GEN7_ERR_INT) & ERR_INT_MMIO_UNCLAIMED)) { \
+		DRM_ERROR("Unclaimed write to %x\n", reg); \
+		write32(dev_priv, GEN7_ERR_INT, ERR_INT_MMIO_UNCLAIMED);	\
+	} \
+	mtx_leave(&dev_priv->gt_lock); \
+}
+__i915_write(8, b)
+__i915_write(16, w)
+__i915_write(32, l)
+__i915_write(64, q)
+#undef __i915_write

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kue.c,v 1.67 2013/04/15 09:23:01 mglocker Exp $ */
+/*	$OpenBSD: if_kue.c,v 1.71 2013/11/15 10:17:39 pirofti Exp $ */
 /*	$NetBSD: if_kue.c,v 1.50 2002/07/16 22:00:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -91,7 +91,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -334,6 +333,7 @@ kue_load_fw(struct kue_softc *sc)
 void
 kue_setmulti(struct kue_softc *sc)
 {
+	struct arpcom		*ac = &sc->arpcom;
 	struct ifnet		*ifp = GET_IFP(sc);
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
@@ -341,7 +341,7 @@ kue_setmulti(struct kue_softc *sc)
 
 	DPRINTFN(5,("%s: %s: enter\n", sc->kue_dev.dv_xname, __func__));
 
-	if (ifp->if_flags & IFF_PROMISC) {
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
 allmulti:
 		ifp->if_flags |= IFF_ALLMULTI;
 		sc->kue_rxfilt |= KUE_RXFILT_ALLMULTI;
@@ -353,11 +353,9 @@ allmulti:
 	sc->kue_rxfilt &= ~KUE_RXFILT_ALLMULTI;
 
 	i = 0;
-	ETHER_FIRST_MULTI(step, &sc->arpcom, enm);
+	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (i == KUE_MCFILTCNT(sc) ||
-		    memcmp(enm->enm_addrlo, enm->enm_addrhi,
-			ETHER_ADDR_LEN) != 0)
+		if (i == KUE_MCFILTCNT(sc))
 			goto allmulti;
 
 		memcpy(KUE_MCFILT(sc, i), enm->enm_addrlo, ETHER_ADDR_LEN);
@@ -593,7 +591,7 @@ kue_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->kue_dying = 1;
+		usbd_deactivate(sc->kue_udev);
 		break;
 	}
 	return (0);
@@ -710,7 +708,7 @@ kue_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	DPRINTFN(10,("%s: %s: enter status=%d\n", sc->kue_dev.dv_xname,
 		     __func__, status));
 
-	if (sc->kue_dying)
+	if (usbd_is_dying(sc->kue_udev))
 		return;
 
 	if (!(ifp->if_flags & IFF_RUNNING))
@@ -808,7 +806,7 @@ kue_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 	struct ifnet		*ifp = GET_IFP(sc);
 	int			s;
 
-	if (sc->kue_dying)
+	if (usbd_is_dying(sc->kue_udev))
 		return;
 
 	s = splnet();
@@ -896,7 +894,7 @@ kue_start(struct ifnet *ifp)
 
 	DPRINTFN(10,("%s: %s: enter\n", sc->kue_dev.dv_xname,__func__));
 
-	if (sc->kue_dying)
+	if (usbd_is_dying(sc->kue_udev))
 		return;
 
 	if (ifp->if_flags & IFF_OACTIVE)
@@ -1047,7 +1045,7 @@ kue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	DPRINTFN(5,("%s: %s: enter\n", sc->kue_dev.dv_xname,__func__));
 
-	if (sc->kue_dying)
+	if (usbd_is_dying(sc->kue_udev))
 		return (EIO);
 
 #ifdef DIAGNOSTIC
@@ -1121,7 +1119,7 @@ kue_watchdog(struct ifnet *ifp)
 
 	DPRINTFN(5,("%s: %s: enter\n", sc->kue_dev.dv_xname,__func__));
 
-	if (sc->kue_dying)
+	if (usbd_is_dying(sc->kue_udev))
 		return;
 
 	ifp->if_oerrors++;
@@ -1156,11 +1154,7 @@ kue_stop(struct kue_softc *sc)
 
 	/* Stop transfers. */
 	if (sc->kue_ep[KUE_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_RX]);
-		if (err) {
-			printf("%s: abort rx pipe failed: %s\n",
-			    sc->kue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_RX]);
 		err = usbd_close_pipe(sc->kue_ep[KUE_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
@@ -1170,11 +1164,7 @@ kue_stop(struct kue_softc *sc)
 	}
 
 	if (sc->kue_ep[KUE_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_TX]);
-		if (err) {
-			printf("%s: abort tx pipe failed: %s\n",
-			    sc->kue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_TX]);
 		err = usbd_close_pipe(sc->kue_ep[KUE_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
@@ -1184,11 +1174,7 @@ kue_stop(struct kue_softc *sc)
 	}
 
 	if (sc->kue_ep[KUE_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_INTR]);
-		if (err) {
-			printf("%s: abort intr pipe failed: %s\n",
-			    sc->kue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->kue_ep[KUE_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",

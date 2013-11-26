@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_output.c,v 1.97 2012/09/20 10:25:03 blambert Exp $	*/
+/*	$OpenBSD: tcp_output.c,v 1.101 2013/10/24 11:31:43 mpi Exp $	*/
 /*	$NetBSD: tcp_output.c,v 1.16 1997/06/03 16:17:09 kml Exp $	*/
 
 /*
@@ -68,6 +68,8 @@
  * Research Laboratory (NRL).
  */
 
+#include "pf.h"
+
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
@@ -92,11 +94,6 @@
 #include <netinet/tcp_var.h>
 #include <netinet/tcpip.h>
 #include <netinet/tcp_debug.h>
-
-#ifdef INET6
-#include <netinet6/tcpipv6.h>
-#include <netinet6/in6_var.h>
-#endif /* INET6 */
 
 #ifdef notyet
 extern struct mbuf *m_copypack();
@@ -413,8 +410,9 @@ again:
 	if (len) {
 		if (len == txmaxseg)
 			goto send;
-		if ((idle || tp->t_flags & TF_NODELAY) &&
-		    len + off >= so->so_snd.sb_cc && !soissending(so))
+		if ((idle || (tp->t_flags & TF_NODELAY)) &&
+		    len + off >= so->so_snd.sb_cc && !soissending(so) &&
+		    (tp->t_flags & TF_NOPUSH) == 0)
 			goto send;
 		if (tp->t_force)
 			goto send;
@@ -944,28 +942,8 @@ send:
 	}
 #endif /* TCP_SIGNATURE */
 
-	/*
-	 * Put TCP length in extended header, and then
-	 * checksum extended header and data.
-	 */
-	switch (tp->pf) {
-	case 0:	/*default to PF_INET*/
-#ifdef INET
-	case AF_INET:
-		/* Defer checksumming until later (ip_output() or hardware) */
-		m->m_pkthdr.csum_flags |= M_TCP_CSUM_OUT;
-		if (len + optlen)
-			th->th_sum = in_cksum_addword(th->th_sum,
-			    htons((u_int16_t)(len + optlen)));
-		break;
-#endif /* INET */
-#ifdef INET6
-	case AF_INET6:
-		th->th_sum = in6_cksum(m, IPPROTO_TCP, sizeof(struct ip6_hdr),
-			hdrlen - sizeof(struct ip6_hdr) + len);
-		break;
-#endif /* INET6 */
-	}
+	/* Defer checksumming until later (ip_output() or hardware) */
+	m->m_pkthdr.csum_flags |= M_TCP_CSUM_OUT;
 
 	/*
 	 * In transmit state, time the transmission and arrange for
@@ -1074,6 +1052,10 @@ send:
 
 	/* force routing domain */
 	m->m_pkthdr.rdomain = tp->t_inpcb->inp_rtableid;
+
+#if NPF > 0
+	m->m_pkthdr.pf.inp = tp->t_inpcb;
+#endif
 
 	switch (tp->pf) {
 	case 0:	/*default to PF_INET*/

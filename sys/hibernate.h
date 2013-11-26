@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate.h,v 1.24 2013/04/09 18:58:03 mlarkin Exp $	*/
+/*	$OpenBSD: hibernate.h,v 1.30 2013/11/09 06:54:00 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -23,10 +23,6 @@
 #include <sys/tree.h>
 #include <lib/libz/zlib.h>
 #include <machine/vmparam.h>
-
-#if 0
-#define HIBERNATE_DEBUG
-#endif
 
 #define HIBERNATE_CHUNK_USED 1
 #define HIBERNATE_CHUNK_CONFLICT 2
@@ -90,10 +86,9 @@ union hibernate_info {
 		struct hibernate_memory_range	ranges[VM_PHYSSEG_MAX];
 		size_t				image_size;
 		size_t				chunk_ctr;
-		u_int32_t			secsize;
-		dev_t				device;
-		daddr_t				swap_offset;
+		dev_t				dev;
 		daddr_t				sig_offset;
+		daddr_t				chunktable_offset;
 		daddr_t				image_offset;
 		paddr_t				piglet_pa;
 		vaddr_t				piglet_va;
@@ -127,7 +122,6 @@ void	hibernate_inflate_region(union hibernate_info *, paddr_t, paddr_t,
 size_t	hibernate_deflate(union hibernate_info *, paddr_t, size_t *);
 void	hibernate_process_chunk(union hibernate_info *,
 	    struct hibernate_disk_chunk *, paddr_t);
-int	hibernate_get_next_rle(void);
 int	hibernate_inflate_page(void);
 
 int	hibernate_block_io(union hibernate_info *, daddr_t, size_t, vaddr_t, int);

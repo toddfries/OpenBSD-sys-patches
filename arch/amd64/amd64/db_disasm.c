@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_disasm.c,v 1.9 2008/10/06 20:42:02 chl Exp $	*/
+/*	$OpenBSD: db_disasm.c,v 1.11 2013/11/19 04:12:17 guenther Exp $	*/
 /*	$NetBSD: db_disasm.c,v 1.11 1996/05/03 19:41:58 christos Exp $	*/
 
 /* 
@@ -1000,7 +1000,7 @@ db_disasm_esc(db_addr_t loc, int inst, int short_addr, int size, int rex,
 		 * Normal address modes.
 		 */
 		loc = db_read_address(loc, short_addr, regmodrm, rex, &address);
-		db_printf(fp->f_name);
+		db_printf("%s", fp->f_name);
 		switch (fp->f_size) {
 		case SNGL:
 			db_printf("s");
@@ -1222,7 +1222,7 @@ db_disasm(db_addr_t loc, boolean_t altfmt)
 		if (size == WORD)
 			db_printf("%s", i_name);
 		else if (size == LONG)
-			db_printf("%s", ip->i_extra);
+			db_printf("%s", (char *)ip->i_extra);
 		else {
 			char *cp = ip->i_extra;
 			while (*cp)
@@ -1398,7 +1398,7 @@ db_disasm(db_addr_t loc, boolean_t altfmt)
 		case OS: //XXX
 			get_value_inc(imm, loc, len, FALSE);	/* offset */
 			get_value_inc(imm2, loc, 2, FALSE);	/* segment */
-			db_printf("$0x%#lx", imm2);
+			db_printf("$0x%#x", imm2);
 			break;
 		}
 	}

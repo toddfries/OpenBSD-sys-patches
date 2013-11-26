@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.93 2012/09/27 14:01:35 jsg Exp $
+#	$OpenBSD: RAMDISK,v 1.99 2013/11/15 19:42:20 sasano Exp $
 #
 # PPC GENERIC config file
 #
@@ -6,10 +6,6 @@
 machine		macppc powerpc
 
 maxusers	32
-
-# default type, instructs system to try to determin what proper type is
-# actual machine type probed via name of openfirmware root node.
-option		SYS_TYPE=APPL
 
 option		PCIVERBOSE
 
@@ -90,10 +86,6 @@ wi*		at pci?		# WaveLAN IEEE 802.11DS
 vr*		at pci?		# VIA Rhine ethernet
 pcn*		at pci?		# AMD PCnet-PCI Ethernet
 xge*		at pci?		# Neterion Xframe-I/II 10Gb ethernet
-
-iop*		at pci?		# I2O processor
-ioprbs*		at iop?		# I2O arrays
-iopsp*		at iop?		# I2O SCSI pass-through
 
 # how many of these are needed?
 amphy*		at mii?		# AMD 79C873 PHYs
@@ -179,17 +171,38 @@ kue*		at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 smsc*		at uhub?		# SMSC LAN95xx Ethernet
 cdce*		at uhub?		# CDC Ethernet
 upl*		at uhub?		# Prolific PL2301/PL2302 host-to-host
+ugl*		at uhub?		# Genesys Logic GL620A-USB host-to-host
 udav*		at uhub?		# Davicom DM9601 based Ethernet
 mos*		at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 ural*		at uhub?		# Ralink RT2500
 rum*		at uhub?		# Ralink RT2501USB/RT2601USB
+urtwn*		at uhub?		# Realtek RTL8188CU/RTL8192CU
 zyd*		at uhub?		# Zydas ZD1211
 url*		at uhub?		# Realtek RTL8150L based adapters
 wi*		at uhub?		# WaveLAN IEEE 802.11DS
-#uscanner*	at uhub?		# USB Scanner driver
 #uyap*		at uhub?		# Y@P firmware loader
 #ugen*		at uhub?		# USB Generic driver
 umass*		at uhub?		# USB Mass Storage devices
+
+# I2C bus support
+iic*		at kiic?
+#iic*		at piic?
+#iic*		at smu?
+
+# I2C devices
+#lmtemp*		at iic?
+#lmenv*		at iic?
+#maxtmp*		at iic?
+#adc*		at iic?
+#tsl*		at iic?
+#admtmp*		at iic?
+#pcagpio*	at iic?
+#gpio*		at pcagpio?
+#maxds*		at iic?
+fcu*		at iic?
+#adt*		at iic?
+#asms*		at iic?
+#spdmem*		at mem?
 
 # CardBus bus support
 cardbus*	at cardslot?

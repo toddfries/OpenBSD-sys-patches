@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vfsops.c,v 1.62 2013/04/15 15:32:19 jsing Exp $	*/
+/*	$OpenBSD: cd9660_vfsops.c,v 1.65 2013/11/21 00:13:33 dlg Exp $	*/
 /*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-
@@ -490,7 +490,6 @@ iso_disklabelspoof(dev, strat, lp)
 		bp->b_bcount = ISO_DEFAULT_BLOCK_SIZE;
 		CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
 		SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
-		bp->b_cylinder = bp->b_blkno / lp->d_secpercyl;
 
 		/*printf("d_secsize %d iso_blknum %d b_blkno %d bcount %d\n",
 		    lp->d_secsize, iso_blknum, bp->b_blkno, bp->b_bcount);*/
@@ -588,11 +587,6 @@ cd9660_unmount(mp, mntflags, p)
 
 	isomp = VFSTOISOFS(mp);
 
-#ifdef	ISODEVMAP
-	if (isomp->iso_ftype == ISO_FTYPE_RRIP)
-		iso_dunmap(isomp->im_dev);
-#endif
-	
 	isomp->im_devvp->v_specmountpoint = NULL;
 	vn_lock(isomp->im_devvp, LK_EXCLUSIVE | LK_RETRY, p);
 	error = VOP_CLOSE(isomp->im_devvp, FREAD, NOCRED, p);
@@ -614,7 +608,7 @@ cd9660_root(mp, vpp)
 	struct iso_mnt *imp = VFSTOISOFS(mp);
 	struct iso_directory_record *dp =
 	    (struct iso_directory_record *)imp->root;
-	ino_t ino = isodirino(dp, imp);
+	cdino_t ino = isodirino(dp, imp);
 	
 	/*
 	 * With RRIP we must use the `.' entry of the root directory.
@@ -736,6 +730,10 @@ cd9660_vget(mp, ino, vpp)
 	struct vnode **vpp;
 {
 
+	if (ino > (cdino_t)-1)
+		panic("cd9660_vget: alien ino_t %llu",
+		    (unsigned long long)ino);
+
 	/*
 	 * XXXX
 	 * It would be nice if we didn't always set the `relocated' flag
@@ -754,7 +752,7 @@ cd9660_vget(mp, ino, vpp)
 int
 cd9660_vget_internal(mp, ino, vpp, relocated, isodir)
 	struct mount *mp;
-	ino_t ino;
+	cdino_t ino;
 	struct vnode **vpp;
 	int relocated;
 	struct iso_directory_record *isodir;
@@ -926,10 +924,6 @@ retry:
 		/*
 		 * if device, look at device number table for translation
 		 */
-#ifdef	ISODEVMAP
-		if (dp = iso_dmap(dev, ino, 0))
-			ip->inode.iso_rdev = dp->d_dev;
-#endif
 		vp->v_op = &cd9660_specvops;
 		if ((nvp = checkalias(vp, ip->inode.iso_rdev, mp)) != NULL) {
 			/*

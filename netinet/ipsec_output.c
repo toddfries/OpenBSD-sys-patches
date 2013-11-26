@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_output.c,v 1.48 2013/04/10 08:50:59 mpi Exp $ */
+/*	$OpenBSD: ipsec_output.c,v 1.50 2013/10/24 11:31:43 mpi Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -48,7 +48,6 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
-#include <netinet6/in6_var.h>
 #endif /* INET6 */
 
 #include <netinet/udp.h>
@@ -549,7 +548,7 @@ ipsec_hdrsz(struct tdb *tdbp)
 		if (tdbp->tdb_authalgxform != NULL)
 			adjust += tdbp->tdb_authalgxform->authsize;
 		/* Padding */
-		adjust += tdbp->tdb_encalgxform->blocksize;
+		adjust += MAX(4, tdbp->tdb_encalgxform->blocksize);
 		break;
 
 	case IPPROTO_AH:

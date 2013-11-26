@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.230 2013/03/15 09:10:52 ratchov Exp $
+#	$OpenBSD: GENERIC,v 1.235 2013/11/15 19:42:19 sasano Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -109,10 +109,10 @@ cdce*	at uhub?			# CDC Ethernet
 urndis*	at uhub?			# Remote NDIS Ethernet
 udav*	at uhub?			# Davicom DM9601 based Ethernet
 upl*	at uhub?			# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?			# Genesys Logic GL620USB-A host-to-host `network'
 url*	at uhub?			# Realtek RTL8150L based adapters
 wi*	at uhub?			# WaveLAN IEEE 802.11DS
 urio*	at uhub?			# Diamond Multimedia Rio 500
-uscanner* at uhub? disable		# USB Scanners
 #uyap*	at uhub?			# Y@P firmware loader
 udsbr*	at uhub?			# D-Link DSB-R100 radio
 radio*	at udsbr?			# USB radio
@@ -124,6 +124,7 @@ run*	at uhub?			# Ralink RT2700U/RT2800U/RT3000U
 uow*	at uhub?			# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 uthum*	at uhidev?			# TEMPerHUM sensor
+ugold*	at uhidev?			# gold TEMPer sensor
 utwitch* at uhidev?			# yurex BBU sensor
 
 # USB Video
@@ -167,7 +168,6 @@ asc*	at	tc?
 #cfb*	at	tc?
 #sfb*	at	tc?
 le*	at	tc?
-fta*	at	tc?			# DEC DEFTA FDDI cards
 
 # PCI host bus adapter support
 apecs*	at	mainbus?
@@ -220,7 +220,6 @@ fxp*	at pci?				# EtherExpress 10/100B ethernet
 ep*	at pci?				# 3COM 3c59x
 xl*	at pci?				# 3COM 3c9xx
 txp*	at pci?				# 3COM 3CR990
-fpa*	at pci?				# DEC DEFPA FDDI cards
 bge*	at pci?				# Broadcom BCM57xx (aka Tigon3)
 vge*	at pci?				# VIA VT612x
 re*	at pci?				# Realtek 8169/8169S/8110S
@@ -356,7 +355,6 @@ fd*	at fdc?
 #ahc0	at isa?				# Adaptec 284x SCSI controllers
 
 # EISA devices
-fea*	at eisa?			# DEC DEFEA FDDI cards
 ahc*	at eisa?			# Adaptec 274x, aic7770 SCSI
 
 # SCSI devices

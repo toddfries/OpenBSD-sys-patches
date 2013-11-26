@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.171 2013/03/28 16:55:25 deraadt Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.176 2013/11/09 06:38:42 dlg Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -383,7 +383,7 @@ m_cldrop(struct ifnet *ifp, int pi)
 	mclp = &ifp->if_data.ifi_mclpool[pi];
 	if (m_livelock == 0 && ISSET(ifp->if_flags, IFF_RUNNING) &&
 	    mclp->mcl_alive <= 4 && mclp->mcl_cwm < mclp->mcl_hwm &&
-	    mclp->mcl_grown < ticks) {
+	    mclp->mcl_grown - ticks < 0) {
 		/* About to run out, so increase the current watermark */
 		mclp->mcl_cwm++;
 		mclp->mcl_grown = ticks;
@@ -548,7 +548,7 @@ m_defrag(struct mbuf *m, int how)
 	struct mbuf *m0;
 
 	if (m->m_next == NULL)
-		return 0;
+		return (0);
 
 #ifdef DIAGNOSTIC
 	if (!(m->m_flags & M_PKTHDR))
@@ -556,12 +556,12 @@ m_defrag(struct mbuf *m, int how)
 #endif
 
 	if ((m0 = m_gethdr(how, m->m_type)) == NULL)
-		return -1;
+		return (ENOBUFS);
 	if (m->m_pkthdr.len > MHLEN) {
 		MCLGETI(m0, how, NULL, m->m_pkthdr.len);
 		if (!(m0->m_flags & M_EXT)) {
 			m_free(m0);
-			return -1;
+			return (ENOBUFS);
 		}
 	}
 	m_copydata(m, 0, m->m_pkthdr.len, mtod(m0, caddr_t));
@@ -583,13 +583,13 @@ m_defrag(struct mbuf *m, int how)
 	 * original mbuf chain.
 	 */
 	if (m0->m_flags & M_EXT) {
-		bcopy(&m0->m_ext, &m->m_ext, sizeof(struct mbuf_ext));
+		memcpy(&m->m_ext, &m0->m_ext, sizeof(struct mbuf_ext));
 		MCLINITREFERENCE(m);
 		m->m_flags |= M_EXT|M_CLUSTER;
 		m->m_data = m->m_ext.ext_buf;
 	} else {
 		m->m_data = m->m_pktdat;
-		bcopy(m0->m_data, m->m_data, m0->m_len);
+		memcpy(m->m_data, m0->m_data, m0->m_len);
 	}
 	m->m_pkthdr.len = m->m_len = m0->m_len;
 	m->m_pkthdr.pf.hdr = NULL;	/* altq will cope */
@@ -597,7 +597,7 @@ m_defrag(struct mbuf *m, int how)
 	m0->m_flags &= ~(M_EXT|M_CLUSTER);	/* cluster is gone */
 	m_free(m0);
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -1168,8 +1168,7 @@ extpacket:
  * Routine to copy from device local memory into mbufs.
  */
 struct mbuf *
-m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
-    void (*copy)(const void *, void *, size_t))
+m_devget(char *buf, int totlen, int off, struct ifnet *ifp)
 {
 	struct mbuf	*m;
 	struct mbuf	*top, **mp;
@@ -1224,11 +1223,7 @@ m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
 		}
 
 		m->m_len = len = min(totlen, len);
-
-		if (copy)
-			copy(buf, mtod(m, caddr_t), (size_t)len);
-		else
-			bcopy(buf, mtod(m, caddr_t), (size_t)len);
+		memcpy(mtod(m, void *), buf, (size_t)len);
 
 		buf += len;
 		*mp = m;
@@ -1346,7 +1341,7 @@ m_dup_pkthdr(struct mbuf *to, struct mbuf *from, int wait)
 #ifdef DDB
 void
 m_print(void *v,
-    int (*pr)(const char *, ...) /* __attribute__((__format__(__kprintf__,1,2))) */)
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	struct mbuf *m = v;
 

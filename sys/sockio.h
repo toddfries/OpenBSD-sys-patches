@@ -1,4 +1,4 @@
-/*	$OpenBSD: sockio.h,v 1.50 2012/11/23 20:12:03 sthen Exp $	*/
+/*	$OpenBSD: sockio.h,v 1.53 2013/10/13 10:10:04 reyk Exp $	*/
 /*	$NetBSD: sockio.h,v 1.5 1995/08/23 00:40:47 thorpej Exp $	*/
 
 /*-
@@ -83,9 +83,6 @@
 #define	SIOCSIFMEDIA	_IOWR('i', 53, struct ifreq)	/* set net media */
 #define	SIOCGIFMEDIA	_IOWR('i', 54, struct ifmediareq) /* get net media */
 
-#define	SIOCSIFGENERIC	 _IOW('i', 57, struct ifreq)	/* generic IF set op */
-#define	SIOCGIFGENERIC	_IOWR('i', 58, struct ifreq)	/* generic IF get op */
-
 #define SIOCSIFPHYADDR   _IOW('i', 70, struct ifaliasreq) /* set gif address */
 #define	SIOCGIFPSRCADDR	_IOWR('i', 71, struct ifreq)	/* get gif psrc addr */
 #define	SIOCGIFPDSTADDR	_IOWR('i', 72, struct ifreq)	/* get gif pdst addr */
@@ -161,7 +158,11 @@
 #define	SIOCSIFTIMESLOT	 _IOW('i', 133, struct ifreq)	/* set ifnet timeslot */
 #define	SIOCGIFTIMESLOT	_IOWR('i', 134, struct ifreq)	/* get ifnet timeslot */
 
-/* 143 and 144 (SIOC[GS]VLANPRIO) were removed, do not reuse it before 5.1 */
+#define	SIOCSETVLAN	 _IOW('i', 143, struct ifreq)	/* set vlan parent if */
+#define	SIOCGETVLAN	_IOWR('i', 144, struct ifreq)	/* get vlan parent if */
+
+#define	SIOCSSPPPPARAMS	 _IOW('i', 147, struct ifreq)	/* set pppoe params */
+#define	SIOCGSPPPPARAMS	_IOWR('i', 148, struct ifreq)	/* get pppoe params */
 
 #define SIOCSETLABEL	 _IOW('i', 153, struct ifreq)	/* set MPLS label */
 #define SIOCGETLABEL	 _IOW('i', 154, struct ifreq)	/* get MPLS label */
@@ -182,6 +183,12 @@
 #define SIOCGETKALIVE	_IOWR('i', 164, struct ifkalivereq)
 
 #define	SIOCGIFHARDMTU	_IOWR('i', 165, struct ifreq)	/* get ifnet hardmtu */
+
+#define SIOCSVNETID	_IOW('i', 166, struct ifreq)	/* set virt net id */
+#define SIOCGVNETID	_IOWR('i', 167, struct ifreq)	/* get virt net id */
+
+#define SIOCSLIFPHYTTL	_IOW('i', 168, struct ifreq)	/* set tunnel ttl */
+#define SIOCGLIFPHYTTL	_IOWR('i', 169, struct ifreq)	/* get tunnel ttl */
 
 #define	SIOCSVH		_IOWR('i', 245, struct ifreq)	/* set carp param */
 #define	SIOCGVH		_IOWR('i', 246, struct ifreq)	/* get carp param */

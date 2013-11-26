@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.72 2013/03/30 06:32:25 tedu Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.74 2013/09/14 02:28:01 guenther Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -232,7 +232,7 @@ vn_writechk(struct vnode *vp)
  * via the 'overrun' argument.
  */
 int
-vn_fsizechk(struct vnode *vp, struct uio *uio, int ioflag, int *overrun)
+vn_fsizechk(struct vnode *vp, struct uio *uio, int ioflag, ssize_t *overrun)
 {
 	struct proc *p = uio->uio_procp;
 
@@ -536,7 +536,7 @@ vn_closefile(struct file *fp, struct proc *p)
 	struct vnode *vp = fp->f_data;
 	struct flock lf;
 	
-	if ((fp->f_flag & FHASLOCK)) {
+	if ((fp->f_iflags & FIF_HASLOCK)) {
 		lf.l_whence = SEEK_SET;
 		lf.l_start = 0;
 		lf.l_len = 0;

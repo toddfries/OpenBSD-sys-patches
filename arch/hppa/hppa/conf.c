@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.55 2012/08/23 06:12:49 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.58 2013/11/04 14:11:29 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -117,9 +117,8 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
-#include "uscanner.h"
 
-#include "bthub.h"
+#include "fuse.h"
 
 struct cdevsw   cdevsw[] =
 {
@@ -174,7 +173,7 @@ struct cdevsw   cdevsw[] =
 	cdev_ulpt_init(NULPT,ulpt),	/* 43: USB printers */
 	cdev_urio_init(NURIO,urio),	/* 44: USB Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),	/* 45: USB tty */
-	cdev_usbdev_init(NUSCANNER,uscanner), /* 46: USB scanners */
+	cdev_notdef(),			/* 46: was USB scanners */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 47: devices hot plugging */
 	cdev_lkm_dummy(),		/* 48: */
 	cdev_lkm_dummy(),		/* 49: */
@@ -183,9 +182,10 @@ struct cdevsw   cdevsw[] =
 	cdev_lkm_dummy(),		/* 52: */
 	cdev_lkm_dummy(),		/* 53: */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 54: vscsi */
-	cdev_bthub_init(NBTHUB,bthub),	/* 55: bthub */
+	cdev_notdef(),
 	cdev_disk_init(1,diskmap),	/* 56: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 57: pppx */
+	cdev_fuse_init(NFUSE,fuse),	/* 58: fuse */
 };
 int nchrdev = nitems(cdevsw);
 

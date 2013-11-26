@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_subr.c,v 1.34 2010/09/07 16:21:47 deraadt Exp $	*/
+/*	$OpenBSD: kern_subr.c,v 1.37 2013/10/19 09:24:57 reyk Exp $	*/
 /*	$NetBSD: kern_subr.c,v 1.15 1996/04/09 17:21:56 ragge Exp $	*/
 
 /*
@@ -50,7 +50,7 @@ int
 uiomove(void *cp, int n, struct uio *uio)
 {
 	struct iovec *iov;
-	u_int cnt;
+	size_t cnt;
 	int error = 0;
 	struct proc *p;
 
@@ -233,10 +233,10 @@ hook_disestablish(struct hook_desc_head *head, void *vhook)
 void
 dohooks(struct hook_desc_head *head, int flags)
 {
-	struct hook_desc *hdp;
+	struct hook_desc *hdp, *hdp_temp;
 
 	if ((flags & HOOK_REMOVE) == 0) {
-		TAILQ_FOREACH(hdp, head, hd_list) {
+		TAILQ_FOREACH_SAFE(hdp, head, hd_list, hdp_temp) {
 			(*hdp->hd_fn)(hdp->hd_arg);
 		}
 	} else {

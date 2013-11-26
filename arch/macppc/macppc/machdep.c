@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.135 2012/12/06 12:35:22 mpi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.142 2013/11/18 08:20:22 uebayasi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -103,16 +103,11 @@ struct vm_map *phys_map = NULL;
 
 int ppc_malloc_ok = 0;
 
-#ifndef SYS_TYPE
-/* XXX Hardwire it for now */
-#define SYS_TYPE POWER4e
-#endif
-
-int system_type = SYS_TYPE;	/* XXX Hardwire it for now */
-
-char ofw_eth_addr[6];		/* Save address of first network ifc found */
 char *bootpath;
 char bootpathbuf[512];
+
+/* from autoconf.c */
+extern void parseofwbp(char *);
 
 struct firmware *fw = NULL;
 
@@ -128,12 +123,8 @@ int allowaperture = 0;
 #endif
 #endif
 
-void ofw_dbg(char *str);
-
 void dumpsys(void);
-void systype(char *name);
 int lcsplx(int ipl);	/* called from LCore */
-int power4e_get_eth_addr(void);
 void ppc_intr_setup(intr_establish_t *establish,
     intr_disestablish_t *disestablish);
 void *ppc_intr_establish(void *lcv, pci_intr_handle_t ih, int type,
@@ -147,15 +138,10 @@ void bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh,
 
 
 /*
- * Extent maps to manage I/O. Allocate storage for 8 regions in each,
- * initially. Later devio_malloc_safe will indicate that it's safe to
- * use malloc() to dynamically allocate region descriptors.
+ * Extent maps to manage I/O. Allocate storage for 8 regions in each.
  */
 static long devio_ex_storage[EXTENT_FIXED_STORAGE_SIZE(8) / sizeof (long)];
 struct extent *devio_ex;
-static int devio_malloc_safe = 0;
-
-extern int OF_stdout;
 
 /* XXX, called from asm */
 void initppc(u_int startkernel, u_int endkernel, char *args);
@@ -367,7 +353,8 @@ initppc(startkernel, endkernel, args)
 			}
 		}
 	}
-	bootpath= &bootpathbuf[0];
+	bootpath = &bootpathbuf[0];
+	parseofwbp(bootpath);
 
 #ifdef DDB
 	ddb_init();
@@ -419,20 +406,9 @@ initppc(startkernel, endkernel, args)
 		Debugger();
 #endif
 
-	/*
-	 * Figure out ethernet address.
-	 */
-	(void)power4e_get_eth_addr();
-
         pool_init(&ppc_vecpl, sizeof(struct vreg), 16, 0, 0, "ppcvec", NULL);
 
 }
-void ofw_dbg(char *str)
-{
-	int i = strlen (str);
-	OF_write(OF_stdout, str, i);
-}
-
 
 void
 install_extint(void (*handler)(void))
@@ -500,8 +476,6 @@ cpu_startup()
 	 * Set up the buffers.
 	 */
 	bufinit();
-
-	devio_malloc_safe = 1;
 }
 
 /*
@@ -717,7 +691,7 @@ int cpu_dump(void);
 int
 cpu_dump()
 {
-	int (*dump) (dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump) (dev_t, daddr_t, caddr_t, size_t);
 	long buf[dbtob(1) / sizeof (long)];
 	kcore_seg_t	*segp;
 
@@ -740,8 +714,8 @@ dumpsys()
 #if 0
 	u_int npg;
 	u_int i, j;
-	daddr64_t blkno;
-	int (*dump) (dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump) (dev_t, daddr_t, caddr_t, size_t);
 	char *str;
 	int maddr;
 	extern int msgbufmapped;
@@ -850,9 +824,14 @@ boot(int howto)
 
 	uvm_shutdown();
 	splhigh();
-	if (howto & RB_HALT) {
-		doshutdownhooks();
+
+	if (!cold && (howto & RB_DUMP))
+		dumpsys();
+	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
 		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+
+	if (howto & RB_HALT) {
 		if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
 #if NADB > 0
 			delay(1000000);
@@ -865,10 +844,6 @@ boot(int howto)
 		printf("halted\n\n");
 		(fw->exit)();
 	}
-	if (!cold && (howto & RB_DUMP))
-		dumpsys();
-	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 	printf("rebooting\n\n");
 
 #if NADB > 0
@@ -879,33 +854,6 @@ boot(int howto)
 	OF_exit();
 	printf("boot failed, spinning\n");
 	while(1) /* forever */;
-}
-
-/*
- *  Get Ethernet address for the onboard ethernet chip.
- */
-int
-power4e_get_eth_addr()
-{
-	int qhandle, phandle;
-	char name[32];
-
-	for (qhandle = OF_peer(0); qhandle; qhandle = phandle) {
-		if (OF_getprop(qhandle, "device_type", name, sizeof name) >= 0
-		    && !strcmp(name, "network")
-		    && OF_getprop(qhandle, "local-mac-address",
-				  &ofw_eth_addr, sizeof ofw_eth_addr) >= 0) {
-			return(0);
-		}
-		if ((phandle = OF_child(qhandle)))
-			continue;
-		while (qhandle) {
-			if ((phandle = OF_peer(qhandle)))
-				break;
-			qhandle = OF_parent(qhandle);
-		}
-	}
-	return(-1);
 }
 
 typedef void  (void_f) (void);
@@ -942,44 +890,6 @@ cpu_unidle(struct cpu_info *ci)
 		ppc_send_ipi(ci, PPC_IPI_NOP);
 }
 #endif
-
-/*
- * set system type from string
- */
-void
-systype(char *name)
-{
-	/* this table may be order specific if substrings match several
-	 * computers but a longer string matches a specific
-	 */
-	int i;
-	struct systyp {
-		char *name;
-		char *systypename;
-		int type;
-	} systypes[] = {
-		{ "MOT",	"(PWRSTK) MCG powerstack family", PWRSTK },
-		{ "V-I Power",	"(POWER4e) V-I ppc vme boards ",  POWER4e},
-		{ "iMac",	"(APPL) Apple iMac ",  APPL},
-		{ "PowerMac",	"(APPL) Apple PowerMac ",  APPL},
-		{ "PowerBook",	"(APPL) Apple Powerbook ",  APPL},
-		{ NULL,"",0}
-	};
-	for (i = 0; systypes[i].name != NULL; i++) {
-		if (strncmp( name , systypes[i].name,
-			strlen (systypes[i].name)) == 0)
-		{
-			system_type = systypes[i].type;
-			printf("recognized system type of %s as %s\n",
-				name, systypes[i].systypename);
-			break;
-		}
-	}
-	if (system_type == OFWMACH) {
-		printf("System type %snot recognized, good luck\n",
-			name);
-	}
-}
 
 /*
  * one attempt at interrupt stuff..
@@ -1067,7 +977,7 @@ bus_space_map(bus_space_tag_t t, bus_addr_t bpa, bus_size_t size,
 			printf("bus_space_map: can't free region\n");
 		}
 	}
-	return 0;
+	return error;
 }
 bus_addr_t
 bus_space_unmap_p(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
@@ -1102,9 +1012,9 @@ bus_space_unmap(bus_space_tag_t t, bus_space_handle_t bsh, bus_size_t size)
 	/* do not free memory which was stolen from the vm system */
 	if (ppc_malloc_ok &&
 	    ((sva >= VM_MIN_KERNEL_ADDRESS) && (sva < VM_MAX_KERNEL_ADDRESS)))
-		uvm_km_free(phys_map, sva, len);
+		uvm_km_free(kernel_map, sva, len);
 	else {
-		pmap_remove(vm_map_pmap(phys_map), sva, sva+len);
+		pmap_remove(pmap_kernel(), sva, sva + len);
 		pmap_update(pmap_kernel());
 	}
 }
@@ -1159,8 +1069,7 @@ bus_mem_add_mapping(bus_addr_t bpa, bus_size_t size, int flags,
 			panic("ppc_kvm_stolen, out of space");
 		}
 	} else {
-		vaddr = uvm_km_kmemalloc(phys_map, NULL, len,
-		    UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
+		vaddr = uvm_km_valloc(kernel_map, len);
 		if (vaddr == 0)
 			return (ENOMEM);
 	}
@@ -1214,8 +1123,7 @@ mapiodev(paddr_t pa, psize_t len)
 			panic("ppc_kvm_stolen, out of space");
 		}
 	} else {
-		va = uvm_km_kmemalloc(phys_map, NULL, size,
-		    UVM_KMF_NOWAIT|UVM_KMF_VALLOC);
+		va = uvm_km_valloc(kernel_map, size);
 	}
 
 	if (va == 0)
@@ -1239,14 +1147,10 @@ unmapiodev(void *kva, psize_t p_size)
 
 	vaddr = trunc_page((vaddr_t)kva);
 
-	uvm_km_free_wakeup(phys_map, vaddr, size);
+	uvm_km_free(kernel_map, vaddr, size);
 
 	for (; size > 0; size -= PAGE_SIZE) {
-#if 0
-		pmap_remove(vm_map_pmap(phys_map), vaddr, vaddr+PAGE_SIZE-1);
-#else
-		pmap_remove(pmap_kernel(), vaddr,  vaddr+PAGE_SIZE-1);
-#endif
+		pmap_remove(pmap_kernel(), vaddr, vaddr + PAGE_SIZE - 1);
 		vaddr += PAGE_SIZE;
 	}
 	pmap_update(pmap_kernel());
@@ -1370,31 +1274,6 @@ bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 {
 	*nbshp = bsh + offset;
 	return (0);
-}
-
-int
-ppc_open_pci_bridge()
-{
-	char *
-	pci_bridges[] = {
-		"/pci",
-		NULL
-	};
-	int handle;
-	int i;
-
-	for (i = 0; pci_bridges[i] != NULL; i++) {
-		handle = OF_open(pci_bridges[i]);
-		if ( handle != -1) {
-			return handle;
-		}
-	}
-	return 0;
-}
-void
-ppc_close_pci_bridge(int handle)
-{
-	OF_close(handle);
 }
 
 /* bcopy(), error on fault */

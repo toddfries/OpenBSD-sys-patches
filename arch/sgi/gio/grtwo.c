@@ -1,4 +1,4 @@
-/*	$OpenBSD: grtwo.c,v 1.5 2012/05/10 21:29:28 miod Exp $	*/
+/*	$OpenBSD: grtwo.c,v 1.7 2013/10/21 10:36:17 miod Exp $	*/
 /* $NetBSD: grtwo.c,v 1.11 2009/11/22 19:09:15 mbalmer Exp $	 */
 
 /*
@@ -132,6 +132,8 @@ int	grtwo_alloc_screen(void *, const struct wsscreen_descr *, void **,
 void	grtwo_free_screen(void *, void *);
 int	grtwo_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
+int	grtwo_load_font(void *, void *, struct wsdisplay_font *);
+int	grtwo_list_font(void *, struct wsdisplay_font *);
 
 static struct wsdisplay_accessops grtwo_accessops = {
 	.ioctl = grtwo_ioctl,
@@ -139,6 +141,8 @@ static struct wsdisplay_accessops grtwo_accessops = {
 	.alloc_screen = grtwo_alloc_screen,
 	.free_screen = grtwo_free_screen,
 	.show_screen = grtwo_show_screen,
+	.load_font = grtwo_load_font,
+	.list_font = grtwo_list_font
 };
 
 int	grtwo_cursor(void *, int, int, int);
@@ -661,7 +665,7 @@ grtwo_copycols(void *c, int row, int src, int dst, int ncol)
 
 	/* Copy columns in backing store. */
 	cell = dc->dc_bs + row * ri->ri_cols;
-	ovbcopy(cell + src, cell + dst, ncol * sizeof(*cell));
+	memmove(cell + dst, cell + src, ncol * sizeof(*cell));
 
 	if (src > dst) {
 		/* may overlap, copy cell by cell */
@@ -717,7 +721,7 @@ grtwo_copyrows(void *c, int src, int dst, int nrow)
 
 	/* Copy rows in backing store. */
 	cell = dc->dc_bs + dst * ri->ri_cols;
-	ovbcopy(dc->dc_bs + src * ri->ri_cols, cell,
+	memmove(cell, dc->dc_bs + src * ri->ri_cols,
 	    nrow * ri->ri_cols * sizeof(*cell));
 
 	if (src > dst) {
@@ -754,8 +758,8 @@ grtwo_eraserows(void *c, int startrow, int nrow, long attr)
 		cell->attr = attr;
 	}
 	for (i = 1; i < nrow; i++)
-		ovbcopy(dc->dc_bs + startrow * ri->ri_cols,
-		    dc->dc_bs + (startrow + i) * ri->ri_cols,
+		memmove(dc->dc_bs + (startrow + i) * ri->ri_cols,
+		    dc->dc_bs + startrow * ri->ri_cols,
 		    ri->ri_cols * sizeof(*cell));
 
 	ri->ri_ops.unpack_attr(ri, attr, &fg, &bg, NULL);
@@ -847,4 +851,22 @@ paddr_t
 grtwo_mmap(void *v, off_t offset, int prot)
 {
 	return -1;
+}
+
+int
+grtwo_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct grtwo_devconfig *dc = v;
+	struct rasops_info *ri = &dc->dc_ri;
+
+	return rasops_load_font(ri, emulcookie, font);
+}
+
+int
+grtwo_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct grtwo_devconfig *dc = v;
+	struct rasops_info *ri = &dc->dc_ri;
+
+	return rasops_list_font(ri, font);
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_timeout.c,v 1.35 2012/06/02 00:11:16 guenther Exp $	*/
+/*	$OpenBSD: kern_timeout.c,v 1.40 2013/10/06 04:34:35 guenther Exp $	*/
 /*
  * Copyright (c) 2001 Thomas Nordin <nordin@openbsd.org>
  * Copyright (c) 2000-2001 Artur Grabowski <art@openbsd.org>
@@ -60,7 +60,7 @@ struct circq timeout_todo;		/* Worklist */
 
 #define BUCKET(rel, abs)						\
     (timeout_wheel[							\
-	((rel) <= (1 << (2*WHEELBITS)))				\
+	((rel) <= (1 << (2*WHEELBITS)))					\
 	    ? ((rel) <= (1 << WHEELBITS))				\
 		? MASKWHEEL(0, (abs))					\
 		: MASKWHEEL(1, (abs)) + WHEELSIZE			\
@@ -71,6 +71,17 @@ struct circq timeout_todo;		/* Worklist */
 #define MOVEBUCKET(wheel, time)						\
     CIRCQ_APPEND(&timeout_todo,						\
         &timeout_wheel[MASKWHEEL((wheel), (time)) + (wheel)*WHEELSIZE])
+
+/*
+ * The first thing in a struct timeout is its struct circq, so we
+ * can get back from a pointer to the latter to a pointer to the
+ * whole timeout with just a cast.
+ */
+static __inline struct timeout *
+timeout_from_circq(struct circq *p)
+{
+	return ((struct timeout *)(p));
+}
 
 /*
  * All wheels are locked with the same mutex.
@@ -317,7 +328,7 @@ softclock(void *arg)
 	mtx_enter(&timeout_mutex);
 	while (!CIRCQ_EMPTY(&timeout_todo)) {
 
-		to = (struct timeout *)CIRCQ_FIRST(&timeout_todo); /* XXX */
+		to = timeout_from_circq(CIRCQ_FIRST(&timeout_todo));
 		CIRCQ_REMOVE(&to->to_list);
 
 		/* If due run it, otherwise insert it into the right bucket. */
@@ -350,7 +361,7 @@ timeout_adjust_ticks(int adj)
 {
 	struct timeout *to;
 	struct circq *p;
-	int new_ticks, b, old;
+	int new_ticks, b;
 
 	/* adjusting the monotonic clock backwards would be a Bad Thing */
 	if (adj <= 0)
@@ -361,10 +372,8 @@ timeout_adjust_ticks(int adj)
 	for (b = 0; b < nitems(timeout_wheel); b++) {
 		p = CIRCQ_FIRST(&timeout_wheel[b]);
 		while (p != &timeout_wheel[b]) {
-			to = (struct timeout *)p; /* XXX */
+			to = timeout_from_circq(p);
 			p = CIRCQ_FIRST(p);
-
-			old = to->to_time;
 
 			/* when moving a timeout forward need to reinsert it */
 			if (to->to_time - ticks < adj)
@@ -390,10 +399,10 @@ db_show_callout_bucket(struct circq *bucket)
 	char *name;
 
 	for (p = CIRCQ_FIRST(bucket); p != bucket; p = CIRCQ_FIRST(p)) {
-		to = (struct timeout *)p; /* XXX */
+		to = timeout_from_circq(p);
 		db_find_sym_and_offset((db_addr_t)to->to_func, &name, &offset);
 		name = name ? name : "?";
-		db_printf("%9d %2d/%-4d %8x  %s\n", to->to_time - ticks,
+		db_printf("%9d %2td/%-4td %p  %s\n", to->to_time - ticks,
 		    (bucket - timeout_wheel) / WHEELSIZE,
 		    bucket - timeout_wheel, to->to_arg, name);
 	}

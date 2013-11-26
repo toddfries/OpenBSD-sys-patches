@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.37 2013/01/16 04:42:44 brad Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.40 2013/11/18 22:21:27 brad Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -38,7 +38,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -156,7 +155,9 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Allocate interrupt */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) == 0)
+		sc->rl_flags |= RL_FLAG_MSI;
+	else if (pci_intr_map(pa, &ih) != 0) {
 		printf(": couldn't map interrupt\n");
 		return;
 	}
@@ -179,6 +180,24 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 	if (pci_get_capability(pc, pa->pa_tag, PCI_CAP_PCIEXPRESS,
 	    NULL, NULL))
 		sc->rl_flags |= RL_FLAG_PCIE;
+
+	if (!(PCI_VENDOR(pa->pa_id) == PCI_VENDOR_REALTEK &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RT8139)) {
+		u_int8_t	cfg;
+
+		CSR_WRITE_1(sc, RL_EECMD, RL_EE_MODE);
+		cfg = CSR_READ_1(sc, RL_CFG2);
+		if (sc->rl_flags & RL_FLAG_MSI) {
+			cfg |= RL_CFG2_MSI;
+			CSR_WRITE_1(sc, RL_CFG2, cfg);
+		} else {
+			if ((cfg & RL_CFG2_MSI) != 0) {
+				cfg &= ~RL_CFG2_MSI;
+				CSR_WRITE_1(sc, RL_CFG2, cfg);
+			}
+		}
+		CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
+	}
 
 	/* Call bus-independent attach routine */
 	if (re_attach(sc, intrstr)) {

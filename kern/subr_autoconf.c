@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_autoconf.c,v 1.67 2012/10/08 21:47:50 deraadt Exp $	*/
+/*	$OpenBSD: subr_autoconf.c,v 1.69 2013/11/26 11:45:48 dlg Exp $	*/
 /*	$NetBSD: subr_autoconf.c,v 1.21 1996/04/04 06:06:18 cgd Exp $	*/
 
 /*
@@ -436,7 +436,7 @@ config_make_softc(struct device *parent, struct cfdata *cf)
 
 	/* get memory for all device vars */
 	dev = malloc(ca->ca_devsize, M_DEVBUF, M_NOWAIT|M_ZERO);
-	if (!dev)
+	if (dev == NULL)
 		panic("config_make_softc: allocation for device softc failed");
 
 	dev->dv_class = cd->cd_class;
@@ -476,7 +476,7 @@ config_make_softc(struct device *parent, struct cfdata *cf)
 			new *= 2;
 		cd->cd_ndevs = new;
 		nsp = malloc(new * sizeof(void *), M_DEVBUF, M_NOWAIT|M_ZERO);
-		if (nsp == 0)
+		if (nsp == NULL)
 			panic("config_make_softc: %sing dev array",
 			    old != 0 ? "expand" : "creat");
 		if (old != 0) {
@@ -774,13 +774,10 @@ config_suspend(struct device *dev, int act)
 {
 	struct cfattach *ca = dev->dv_cfdata->cf_attach;
 
-	if (ca->ca_activate) {
-#if 0
-		printf("activate: %s %d\n", dev->dv_xname, act);
-#endif
+	if (ca->ca_activate)
 		return (*ca->ca_activate)(dev, act);
-	}
-	return (0);
+	else
+		return config_activate_children(dev, act);
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vfsops.c,v 1.136 2013/04/15 15:32:19 jsing Exp $	*/
+/*	$OpenBSD: ffs_vfsops.c,v 1.138 2013/06/11 16:42:18 deraadt Exp $	*/
 /*	$NetBSD: ffs_vfsops.c,v 1.19 1996/02/09 22:22:26 christos Exp $	*/
 
 /*
@@ -70,7 +70,7 @@ int ffs_reload_vnode(struct vnode *, void *);
 int ffs_sync_vnode(struct vnode *, void *);
 int ffs_validate(struct fs *);
 
-void ffs1_compat_read(struct fs *, struct ufsmount *, daddr64_t);
+void ffs1_compat_read(struct fs *, struct ufsmount *, daddr_t);
 void ffs1_compat_write(struct fs *, struct ufsmount *);
 
 const struct vfsops ffs_vfsops = {
@@ -663,7 +663,7 @@ ffs_mountfs(struct vnode *devvp, struct mount *mp, struct proc *p)
 	struct fs *fs;
 	dev_t dev;
 	caddr_t space;
-	daddr64_t sbloc;
+	daddr_t sbloc;
 	int error, i, blks, size, ronly;
 	int32_t *lp;
 	size_t strsize;
@@ -953,7 +953,7 @@ ffs_oldfscompat(struct fs *fs)
  * Auxiliary function for reading FFS1 super blocks.
  */
 void
-ffs1_compat_read(struct fs *fs, struct ufsmount *ump, daddr64_t sbloc)
+ffs1_compat_read(struct fs *fs, struct ufsmount *ump, daddr_t sbloc)
 {
 	if (fs->fs_magic == FS_UFS2_MAGIC)
 		return; /* UFS2 */
@@ -1235,6 +1235,9 @@ ffs_vget(struct mount *mp, ino_t ino, struct vnode **vpp)
 	dev_t dev;
 	int error;
 
+	if (ino > (ufsino_t)-1)
+		panic("ffs_vget: alien ino_t %llu", (unsigned long long)ino);
+
 	ump = VFSTOUFS(mp);
 	dev = ump->um_dev;
 retry:
@@ -1372,7 +1375,8 @@ ffs_fhtovp(struct mount *mp, struct fid *fhp, struct vnode **vpp)
 
 	ufhp = (struct ufid *)fhp;
 	fs = VFSTOUFS(mp)->um_fs;
-	if (ufhp->ufid_ino < ROOTINO ||
+	if (ufhp->ufid_len != sizeof(*ufhp) ||
+	    ufhp->ufid_ino < ROOTINO ||
 	    ufhp->ufid_ino >= fs->fs_ncg * fs->fs_ipg)
 		return (ESTALE);
 	return (ufs_fhtovp(mp, ufhp, vpp));

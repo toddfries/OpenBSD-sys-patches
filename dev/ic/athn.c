@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.75 2013/01/14 09:50:31 jsing Exp $	*/
+/*	$OpenBSD: athn.c,v 1.79 2013/11/26 09:50:32 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -52,7 +52,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -1240,7 +1239,7 @@ athn_calib_to(void *arg)
 	/* Do periodic (every 4 minutes) PA calibration. */
 	if (AR_SREV_9285_11_OR_LATER(sc) &&
 	    !AR_SREV_9380_10_OR_LATER(sc) &&
-	    ticks >= sc->pa_calib_ticks + 240 * hz) {
+	    (ticks - (sc->pa_calib_ticks + 240 * hz)) >= 0) {
 		sc->pa_calib_ticks = ticks;
 		if (AR_SREV_9271(sc))
 			ar9271_pa_calib(sc);
@@ -2627,6 +2626,9 @@ athn_set_multi(struct athn_softc *sc)
 	uint32_t val, lo, hi;
 	uint8_t bit;
 
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if ((ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
 		lo = hi = 0xffffffff;
 		goto done;
@@ -2634,11 +2636,6 @@ athn_set_multi(struct athn_softc *sc)
 	lo = hi = 0;
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (memcmp(enm->enm_addrlo, enm->enm_addrhi, 6) != 0) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			lo = hi = 0xffffffff;
-			goto done;
-		}
 		addr = enm->enm_addrlo;
 		/* Calculate the XOR value of all eight 6-bit words. */
 		val = addr[0] | addr[1] << 8 | addr[2] << 16;

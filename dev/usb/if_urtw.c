@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtw.c,v 1.41 2013/04/15 09:23:01 mglocker Exp $	*/
+/*	$OpenBSD: if_urtw.c,v 1.43 2013/08/07 01:06:43 bluhm Exp $	*/
 
 /*-
  * Copyright (c) 2009 Martynas Venckus <martynas@openbsd.org>
@@ -43,7 +43,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -3053,7 +3052,7 @@ urtw_8225_rf_set_sens(struct urtw_rf *rf)
 	struct urtw_softc *sc = rf->rf_sc;
 	usbd_status error;
 
-	if (rf->sens < 0 || rf->sens > 6)
+	if (rf->sens > 6)
 		return (-1);
 
 	if (rf->sens > 4)

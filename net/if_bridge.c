@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bridge.c,v 1.210 2013/03/28 23:10:05 tedu Exp $	*/
+/*	$OpenBSD: if_bridge.c,v 1.219 2013/10/28 12:39:42 mpi Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Jason L. Wright (jason@thought.net)
@@ -58,7 +58,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/if_ether.h>
@@ -71,6 +70,7 @@
 #endif
 
 #ifdef INET6
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #endif
@@ -87,8 +87,6 @@
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
-
-#include <net/if_vlan_var.h>
 
 #if NCARP > 0
 #include <netinet/ip_carp.h>
@@ -133,9 +131,9 @@ int	bridge_rtfind(struct bridge_softc *, struct ifbaconf *);
 void	bridge_rtage(struct bridge_softc *);
 int	bridge_rtdaddr(struct bridge_softc *, struct ether_addr *);
 void	bridge_rtflush(struct bridge_softc *, int);
-struct ifnet *	bridge_rtupdate(struct bridge_softc *,
-    struct ether_addr *, struct ifnet *ifp, int, u_int8_t);
-struct ifnet *	bridge_rtlookup(struct bridge_softc *,
+struct ifnet *bridge_rtupdate(struct bridge_softc *,
+    struct ether_addr *, struct ifnet *ifp, int, u_int8_t, struct mbuf *);
+struct bridge_rtnode *bridge_rtlookup(struct bridge_softc *,
     struct ether_addr *);
 u_int32_t	bridge_hash(struct bridge_softc *, struct ether_addr *);
 int bridge_blocknonip(struct ether_header *, struct mbuf *);
@@ -163,6 +161,7 @@ int bridge_ipsec(struct bridge_softc *, struct ifnet *,
 int     bridge_clone_create(struct if_clone *, int);
 int	bridge_clone_destroy(struct ifnet *ifp);
 int	bridge_delete(struct bridge_softc *, struct bridge_iflist *);
+void	bridge_copyaddr(struct sockaddr *, struct sockaddr *);
 
 #define	ETHERADDR_IS_IP_MCAST(a) \
 	/* struct etheraddr *a;	*/				\
@@ -552,7 +551,7 @@ bridge_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		}
 
 		ifs = bridge_rtupdate(sc, &bareq->ifba_dst, ifs, 1,
-		    bareq->ifba_flags);
+		    bareq->ifba_flags, NULL);
 		if (ifs == NULL)
 			error = ENOMEM;
 		break;
@@ -730,7 +729,7 @@ bridge_update(struct ifnet *ifp, struct ether_addr *ea, int delete)
 
 		if (!delete) {
 			/* Update the bridge table */
-			bridge_rtupdate(sc, ea, ifp, 0, IFBAF_DYNAMIC);
+			bridge_rtupdate(sc, ea, ifp, 0, IFBAF_DYNAMIC, NULL);
 		}
 	}
 }
@@ -948,7 +947,8 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
     struct rtentry *rt)
 {
 	struct ether_header *eh;
-	struct ifnet *dst_if;
+	struct ifnet *dst_if = NULL;
+	struct bridge_rtnode *dst_p = NULL;
 	struct ether_addr *dst;
 	struct bridge_softc *sc;
 	int s, error, len;
@@ -971,8 +971,6 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 	eh = mtod(m, struct ether_header *);
 	dst = (struct ether_addr *)&eh->ether_dhost[0];
 
-	s = splnet();
-
 	/*
 	 * If bridge is down, but original output interface is up,
 	 * go ahead and send out that interface.  Otherwise the packet
@@ -994,7 +992,8 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 	 * If the packet is a broadcast or we don't know a better way to
 	 * get there, send to all interfaces.
 	 */
-	dst_if = bridge_rtlookup(sc, dst);
+	if ((dst_p = bridge_rtlookup(sc, dst)) != NULL)
+		dst_if = dst_p->brt_if;
 	if (dst_if == NULL || ETHER_IS_MULTICAST(eh->ether_dhost)) {
 		struct bridge_iflist *p;
 		struct mbuf *mc;
@@ -1009,19 +1008,9 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 		    NULL)) != NULL) {
 			ipsp_skipcrypto_unmark((struct tdb_ident *)(mtag + 1));
 			m_freem(m);
-			splx(s);
 			return (0);
 		}
 #endif /* IPSEC */
-
-		/* Catch packets that need TCP/UDP hardware checksumming */
-		if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT ||
-		    m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT) {
-			m_freem(m);
-			splx(s);
-			return (0);
-		}
-
 		bridge_span(sc, NULL, m);
 
 		TAILQ_FOREACH(p, &sc->sc_iflist, next) {
@@ -1085,23 +1074,28 @@ bridge_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *sa,
 				mc = m1;
 			}
 
+			s = splnet();
 			error = bridge_ifenqueue(sc, dst_if, mc);
+			splx(s);
 			if (error)
 				continue;
 		}
 		if (!used)
 			m_freem(m);
-		splx(s);
 		return (0);
 	}
 
 sendunicast:
+	if (dst_p != NULL && dst_p->brt_tunnel.sa.sa_family != AF_UNSPEC &&
+	    (sa = bridge_tunneltag(m, dst_p->brt_tunnel.sa.sa_family)) != NULL)
+		memcpy(sa, &dst_p->brt_tunnel.sa, dst_p->brt_tunnel.sa.sa_len);
+
 	bridge_span(sc, NULL, m);
 	if ((dst_if->if_flags & IFF_RUNNING) == 0) {
 		m_freem(m);
-		splx(s);
 		return (ENETDOWN);
 	}
+	s = splnet();
 	bridge_ifenqueue(sc, dst_if, m);
 	splx(s);
 	return (0);
@@ -1146,6 +1140,7 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 	int s, len;
 	struct ifnet *src_if, *dst_if;
 	struct bridge_iflist *ifl;
+	struct bridge_rtnode *dst_p;
 	struct ether_addr *dst, *src;
 	struct ether_header eh;
 
@@ -1188,7 +1183,7 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 	    !(eh.ether_shost[0] == 0 && eh.ether_shost[1] == 0 &&
 	    eh.ether_shost[2] == 0 && eh.ether_shost[3] == 0 &&
 	    eh.ether_shost[4] == 0 && eh.ether_shost[5] == 0))
-		bridge_rtupdate(sc, src, src_if, 0, IFBAF_DYNAMIC);
+		bridge_rtupdate(sc, src, src_if, 0, IFBAF_DYNAMIC, m);
 
 	if ((ifl->bif_flags & IFBIF_STP) &&
 	    (ifl->bif_state == BSTP_IFSTATE_LEARNING)) {
@@ -1206,7 +1201,10 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 	 * side of the bridge, drop it.
 	 */
 	if ((m->m_flags & (M_BCAST | M_MCAST)) == 0) {
-		dst_if = bridge_rtlookup(sc, dst);
+		if ((dst_p = bridge_rtlookup(sc, dst)) != NULL)
+			dst_if = dst_p->brt_if;
+		else
+			dst_if = NULL;
 		if (dst_if == src_if) {
 			m_freem(m);
 			return;
@@ -1262,9 +1260,7 @@ bridgeintr_frame(struct bridge_softc *sc, struct mbuf *m)
 	 */
 	if ((m->m_flags & (M_BCAST | M_MCAST)) || dst_if == NULL) {
 		sc->sc_if.if_imcasts++;
-		s = splnet();
 		bridge_broadcast(sc, src_if, &eh, m);
-		splx(s);
 		return;
 	}
 
@@ -1437,7 +1433,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 			if (srcifl->bif_flags & IFBIF_LEARNING)
 				bridge_rtupdate(sc,
 				    (struct ether_addr *)&eh->ether_shost,
-				    ifp, 0, IFBAF_DYNAMIC);
+				    ifp, 0, IFBAF_DYNAMIC, m);
 			if (bridge_filterrule(&srcifl->bif_brlin, eh, m) ==
 			    BRL_ACTION_BLOCK) {
 				m_freem(m);
@@ -1497,8 +1493,7 @@ bridge_input(struct ifnet *ifp, struct ether_header *eh, struct mbuf *m)
 
 /*
  * Send a frame to all interfaces that are members of the bridge
- * (except the one it came in on).  This code assumes that it is
- * running at splnet or higher.
+ * (except the one it came in on).
  */
 void
 bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
@@ -1507,9 +1502,7 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 	struct bridge_iflist *p;
 	struct mbuf *mc;
 	struct ifnet *dst_if;
-	int len, used = 0;
-
-	splassert(IPL_NET);
+	int len, s, used = 0;
 
 	TAILQ_FOREACH(p, &sc->sc_iflist, next) {
 		/*
@@ -1598,7 +1591,9 @@ bridge_broadcast(struct bridge_softc *sc, struct ifnet *ifp,
 		if ((len - ETHER_HDR_LEN) > dst_if->if_mtu)
 			bridge_fragment(sc, dst_if, eh, mc);
 		else {
+			s = splnet();
 			bridge_ifenqueue(sc, dst_if, mc);
+			splx(s);
 		}
 	}
 
@@ -1620,9 +1615,12 @@ bridge_localbroadcast(struct bridge_softc *sc, struct ifnet *ifp,
 	 */
 	etype = ntohs(eh->ether_type);
 	if (!(m->m_flags & M_VLANTAG) && etype == ETHERTYPE_IP) {
-		struct in_ifaddr *ia;
-		IFP_TO_IA(ifp, ia);
-		if (!ia)
+		struct ifaddr *ifa;
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+			if (ifa->ifa_addr->sa_family == AF_INET)
+				break;
+		}
+		if (ifa == NULL)
 			return;
 	}
 #endif
@@ -1654,7 +1652,7 @@ bridge_span(struct bridge_softc *sc, struct ether_header *eh,
 	struct bridge_iflist *p;
 	struct ifnet *ifp;
 	struct mbuf *mc, *m;
-	int error;
+	int s, error;
 
 	if (TAILQ_EMPTY(&sc->sc_spanlist))
 		return;
@@ -1690,7 +1688,9 @@ bridge_span(struct bridge_softc *sc, struct ether_header *eh,
 			continue;
 		}
 
+		s = splnet();
 		error = bridge_ifenqueue(sc, ifp, mc);
+		splx(s);
 		if (error)
 			continue;
 	}
@@ -1699,11 +1699,17 @@ bridge_span(struct bridge_softc *sc, struct ether_header *eh,
 
 struct ifnet *
 bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
-    struct ifnet *ifp, int setflags, u_int8_t flags)
+    struct ifnet *ifp, int setflags, u_int8_t flags, struct mbuf *m)
 {
 	struct bridge_rtnode *p, *q;
+	struct sockaddr *sa = NULL;
 	u_int32_t h;
 	int dir;
+
+	if (m != NULL) {
+		/* Check if the mbuf was tagged with a tunnel endpoint addr */
+		sa = bridge_tunnel(m);
+	}
 
 	h = bridge_hash(sc, ea);
 	p = LIST_FIRST(&sc->sc_rts[h]);
@@ -1717,6 +1723,7 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 		bcopy(ea, &p->brt_addr, sizeof(p->brt_addr));
 		p->brt_if = ifp;
 		p->brt_age = 1;
+		bridge_copyaddr(sa, (struct sockaddr *)&p->brt_tunnel);
 
 		if (setflags)
 			p->brt_flags = flags;
@@ -1743,6 +1750,9 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 			if (q->brt_if == ifp)
 				q->brt_age = 1;
 			ifp = q->brt_if;
+			bridge_copyaddr(sa,
+			     (struct sockaddr *)&q->brt_tunnel);
+
 			goto want;
 		}
 
@@ -1756,6 +1766,8 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 			bcopy(ea, &p->brt_addr, sizeof(p->brt_addr));
 			p->brt_if = ifp;
 			p->brt_age = 1;
+			bridge_copyaddr(sa,
+			    (struct sockaddr *)&p->brt_tunnel);
 
 			if (setflags)
 				p->brt_flags = flags;
@@ -1777,6 +1789,8 @@ bridge_rtupdate(struct bridge_softc *sc, struct ether_addr *ea,
 			bcopy(ea, &p->brt_addr, sizeof(p->brt_addr));
 			p->brt_if = ifp;
 			p->brt_age = 1;
+			bridge_copyaddr(sa,
+			    (struct sockaddr *)&p->brt_tunnel);
 
 			if (setflags)
 				p->brt_flags = flags;
@@ -1794,7 +1808,7 @@ want:
 	return (ifp);
 }
 
-struct ifnet *
+struct bridge_rtnode *
 bridge_rtlookup(struct bridge_softc *sc, struct ether_addr *ea)
 {
 	struct bridge_rtnode *p;
@@ -1805,7 +1819,7 @@ bridge_rtlookup(struct bridge_softc *sc, struct ether_addr *ea)
 	LIST_FOREACH(p, &sc->sc_rts[h], brt_next) {
 		dir = memcmp(ea, &p->brt_addr, sizeof(p->brt_addr));
 		if (dir == 0)
-			return (p->brt_if);
+			return (p);
 		if (dir > 0)
 			goto fail;
 	}
@@ -2032,6 +2046,8 @@ bridge_rtfind(struct bridge_softc *sc, struct ifbaconf *baconf)
 				    sizeof(bareq.ifba_ifsname));
 				bcopy(&n->brt_addr, &bareq.ifba_dst,
 				    sizeof(bareq.ifba_dst));
+				bridge_copyaddr(&n->brt_tunnel.sa,
+				    (struct sockaddr *)&bareq.ifba_dstsa);
 				bareq.ifba_age = n->brt_age;
 				bareq.ifba_flags = n->brt_flags;
 				error = copyout((caddr_t)&bareq,
@@ -2151,7 +2167,7 @@ bridge_addrule(struct bridge_iflist *bif, struct ifbrlreq *req, int out)
 	n->brl_flags = req->ifbr_flags;
 #if NPF > 0
 	if (req->ifbr_tagname[0])
-		n->brl_tag = pf_tagname2tag(req->ifbr_tagname);
+		n->brl_tag = pf_tagname2tag(req->ifbr_tagname, 1);
 	else
 		n->brl_tag = 0;
 #endif
@@ -2353,6 +2369,12 @@ bridge_ipsec(struct bridge_softc *sc, struct ifnet *ifp,
 			}
 			if (m == NULL)
 				return (1);
+			else if (af == AF_INET)
+				in_proto_cksum_out(m, encif);
+#ifdef INET6
+			else if (af == AF_INET6)
+				in6_proto_cksum_out(m, encif);
+#endif /* INET6 */
 #endif /* NPF */
 
 			ip = mtod(m, struct ip *);
@@ -2505,6 +2527,7 @@ bridge_ip(struct bridge_softc *sc, int dir, struct ifnet *ifp,
 			return (NULL);
 		if (m->m_len < sizeof(struct ip))
 			goto dropit;
+		in_proto_cksum_out(m, ifp);
 		ip = mtod(m, struct ip *);
 		ip->ip_sum = 0;
 		if (0 && (ifp->if_capabilities & IFCAP_CSUM_IPv4)) {
@@ -2550,6 +2573,7 @@ bridge_ip(struct bridge_softc *sc, int dir, struct ifnet *ifp,
 		if (m == NULL)
 			return (NULL);
 #endif /* NPF > 0 */
+		in6_proto_cksum_out(m, ifp);
 
 		break;
 	}
@@ -2829,3 +2853,65 @@ bridge_send_icmp_err(struct bridge_softc *sc, struct ifnet *ifp,
 	m_freem(n);
 }
 #endif
+
+struct sockaddr *
+bridge_tunnel(struct mbuf *m)
+{
+	struct m_tag    *mtag;
+
+	if ((mtag = m_tag_find(m, PACKET_TAG_TUNNEL, NULL)) == NULL)
+		return (NULL);
+
+	return ((struct sockaddr *)(mtag + 1));
+}
+
+struct sockaddr *
+bridge_tunneltag(struct mbuf *m, int af)
+{
+	struct m_tag    *mtag;
+	size_t		 len;
+	struct sockaddr	*sa;
+
+	if ((mtag = m_tag_find(m, PACKET_TAG_TUNNEL, NULL)) != NULL) {
+		sa = (struct sockaddr *)(mtag + 1);
+		if (sa->sa_family != af) {
+			m_tag_delete(m, mtag);
+			mtag = NULL;
+		}
+	}
+	if (mtag == NULL) {
+		if (af == AF_INET)
+			len = sizeof(struct sockaddr_in);
+		else if (af == AF_INET6)
+			len = sizeof(struct sockaddr_in6);
+		else
+			return (NULL);
+		mtag = m_tag_get(PACKET_TAG_TUNNEL, len, M_NOWAIT);
+		if (mtag == NULL)
+			return (NULL);
+		bzero(mtag + 1, len);
+		sa = (struct sockaddr *)(mtag + 1);
+		sa->sa_family = af;
+		sa->sa_len = len;
+		m_tag_prepend(m, mtag);
+	}
+
+	return ((struct sockaddr *)(mtag + 1));
+}
+
+void
+bridge_tunneluntag(struct mbuf *m)
+{
+	struct m_tag    *mtag;
+	if ((mtag = m_tag_find(m, PACKET_TAG_TUNNEL, NULL)) != NULL)
+		m_tag_delete(m, mtag);
+}
+
+void
+bridge_copyaddr(struct sockaddr *src, struct sockaddr *dst)
+{
+	if (src != NULL && src->sa_family != AF_UNSPEC)
+		memcpy(dst, src, src->sa_len);
+	else
+		dst->sa_family = AF_UNSPEC;
+}

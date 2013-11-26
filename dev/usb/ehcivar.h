@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehcivar.h,v 1.25 2013/04/15 09:23:01 mglocker Exp $ */
+/*	$OpenBSD: ehcivar.h,v 1.28 2013/11/07 10:15:15 mpi Exp $ */
 /*	$NetBSD: ehcivar.h,v 1.19 2005/04/29 15:04:29 augustss Exp $	*/
 
 /*
@@ -78,13 +78,11 @@ struct ehci_soft_itd {
 
 struct ehci_xfer {
 	struct usbd_xfer xfer;
-	struct usb_task	abort_task;
 	TAILQ_ENTRY(ehci_xfer) inext; /* list of active xfers */
 	struct ehci_soft_qtd *sqtdstart;
 	struct ehci_soft_qtd *sqtdend;
 	struct ehci_soft_itd *itdstart;
 	struct ehci_soft_itd *itdend;
-	u_int isoc_len;
 	u_int32_t ehci_xfer_flags;
 #ifdef DIAGNOSTIC
 	int isdone;
@@ -124,8 +122,6 @@ struct ehci_softc {
 
 	char sc_vendor[16];		/* vendor string for root hub */
 	int sc_id_vendor;		/* vendor ID for root hub */
-
-	u_int32_t sc_cmd;		/* shadow of cmd reg during suspend */
 
 	struct usb_dma sc_fldma;
 	ehci_link_t *sc_flist;
@@ -180,4 +176,5 @@ usbd_status	ehci_init(struct ehci_softc *);
 int		ehci_intr(void *);
 int		ehci_detach(struct ehci_softc *, int);
 int		ehci_activate(struct device *, int);
-void		ehci_shutdown(void *);
+usbd_status	ehci_reset(struct ehci_softc *);
+

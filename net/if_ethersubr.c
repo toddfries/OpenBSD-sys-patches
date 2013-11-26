@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.155 2013/03/28 16:55:27 deraadt Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.159 2013/11/18 20:22:23 deraadt Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -97,9 +97,6 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#ifdef INET
-#include <netinet/in_var.h>
-#endif
 #include <netinet/if_ether.h>
 #include <netinet/ip_ipsp.h>
 
@@ -199,11 +196,8 @@ ether_ioctl(struct ifnet *ifp, struct arpcom *arp, u_long cmd, caddr_t data)
  * Assumes that ifp is actually pointer to arpcom structure.
  */
 int
-ether_output(ifp0, m0, dst, rt0)
-	struct ifnet *ifp0;
-	struct mbuf *m0;
-	struct sockaddr *dst;
-	struct rtentry *rt0;
+ether_output(struct ifnet *ifp0, struct mbuf *m0, struct sockaddr *dst,
+    struct rtentry *rt0)
 {
 	u_int16_t etype;
 	int s, len, error = 0, hdrcmplt = 0;
@@ -363,14 +357,13 @@ ether_output(ifp0, m0, dst, rt0)
 	if (m == 0)
 		senderr(ENOBUFS);
 	eh = mtod(m, struct ether_header *);
-	bcopy((caddr_t)&etype,(caddr_t)&eh->ether_type,
-		sizeof(eh->ether_type));
-	bcopy((caddr_t)edst, (caddr_t)eh->ether_dhost, sizeof(edst));
+	eh->ether_type = etype;
+	memcpy(eh->ether_dhost, edst, sizeof(edst));
 	if (hdrcmplt)
-		bcopy((caddr_t)esrc, (caddr_t)eh->ether_shost,
+		memcpy(eh->ether_shost, esrc,
 		    sizeof(eh->ether_shost));
 	else
-		bcopy((caddr_t)ac->ac_enaddr, (caddr_t)eh->ether_shost,
+		memcpy(eh->ether_shost, ac->ac_enaddr, 
 		    sizeof(eh->ether_shost));
 
 #if NCARP > 0
@@ -453,10 +446,7 @@ bad:
  * the ether header, which is provided separately.
  */
 void
-ether_input(ifp0, eh, m)
-	struct ifnet *ifp0;
-	struct ether_header *eh;
-	struct mbuf *m;
+ether_input(struct ifnet *ifp0, struct ether_header *eh, struct mbuf *m)
 {
 	struct ifqueue *inq;
 	u_int16_t etype;
@@ -739,8 +729,7 @@ done:
  */
 static char digits[] = "0123456789abcdef";
 char *
-ether_sprintf(ap)
-	u_char *ap;
+ether_sprintf(u_char *ap)
 {
 	int i;
 	static char etherbuf[ETHER_ADDR_LEN * 3];
@@ -762,14 +751,13 @@ void
 ether_fakeaddr(struct ifnet *ifp)
 {
 	static int unit;
-	int rng;
+	int rng = arc4random();
 
 	/* Non-multicast; locally administered address */
 	((struct arpcom *)ifp)->ac_enaddr[0] = 0xfe;
 	((struct arpcom *)ifp)->ac_enaddr[1] = 0xe1;
 	((struct arpcom *)ifp)->ac_enaddr[2] = 0xba;
 	((struct arpcom *)ifp)->ac_enaddr[3] = 0xd0 | (unit++ & 0xf);
-	rng = cold ? random() ^ (long)ifp : arc4random();
 	((struct arpcom *)ifp)->ac_enaddr[4] = rng;
 	((struct arpcom *)ifp)->ac_enaddr[5] = rng >> 8;
 }
@@ -778,8 +766,7 @@ ether_fakeaddr(struct ifnet *ifp)
  * Perform common duties while attaching to interface list
  */
 void
-ether_ifattach(ifp)
-	struct ifnet *ifp;
+ether_ifattach(struct ifnet *ifp)
 {
 	/*
 	 * Any interface which provides a MAC address which is obviously
@@ -807,8 +794,7 @@ ether_ifattach(ifp)
 }
 
 void
-ether_ifdetach(ifp)
-	struct ifnet *ifp;
+ether_ifdetach(struct ifnet *ifp)
 {
 	struct arpcom *ac = (struct arpcom *)ifp;
 	struct ether_multi *enm;
@@ -1019,9 +1005,7 @@ ether_multiaddr(struct sockaddr *sa, u_int8_t addrlo[ETHER_ADDR_LEN],
  * given interface.
  */
 int
-ether_addmulti(ifr, ac)
-	struct ifreq *ifr;
-	struct arpcom *ac;
+ether_addmulti(struct ifreq *ifr, struct arpcom *ac)
 {
 	struct ether_multi *enm;
 	u_char addrlo[ETHER_ADDR_LEN];
@@ -1082,9 +1066,7 @@ ether_addmulti(ifr, ac)
  * Delete a multicast address record.
  */
 int
-ether_delmulti(ifr, ac)
-	struct ifreq *ifr;
-	struct arpcom *ac;
+ether_delmulti(struct ifreq *ifr, struct arpcom *ac)
 {
 	struct ether_multi *enm;
 	u_char addrlo[ETHER_ADDR_LEN];

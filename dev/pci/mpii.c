@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpii.c,v 1.69 2013/01/25 04:25:21 dlg Exp $	*/
+/*	$OpenBSD: mpii.c,v 1.72 2013/11/06 23:58:25 dlg Exp $	*/
 /*
  * Copyright (c) 2010, 2012 Mike Belopuhov
  * Copyright (c) 2009 James Giannoules
@@ -335,6 +335,7 @@ void		mpii_eventnotify_done(struct mpii_ccb *);
 void		mpii_eventack(void *, void *);
 void		mpii_eventack_done(struct mpii_ccb *);
 void		mpii_event_process(struct mpii_softc *, struct mpii_rcb *);
+void		mpii_event_done(struct mpii_softc *, struct mpii_rcb *);
 void		mpii_event_sas(struct mpii_softc *,
 		    struct mpii_msg_event_reply *);
 void		mpii_event_raid(struct mpii_softc *,
@@ -747,9 +748,8 @@ mpii_load_xs(struct mpii_ccb *ccb)
 		return (1);
 	}
 
-	/* safe default staring flags */
+	/* safe default starting flags */
 	flags = MPII_SGE_FL_TYPE_SIMPLE | MPII_SGE_FL_SIZE_64;
-	/* if data out */
 	if (xs->flags & SCSI_DATA_OUT)
 		flags |= MPII_SGE_FL_DIR_OUT;
 
@@ -759,8 +759,8 @@ mpii_load_xs(struct mpii_ccb *ccb)
 			sge->sg_hdr |= htole32(MPII_SGE_FL_LAST);
 			/* offset to the chain sge from the beginning */
 			io->chain_offset = ((caddr_t)csge - (caddr_t)io) / 4;
-			/* lenght of the chain buffer */
-			len = (dmap->dm_nsegs - i - 1) * sizeof(*sge);
+			/* length of the sgl segment we're pointing to */
+			len = (dmap->dm_nsegs - i) * sizeof(*sge);
 			csge->sg_hdr = htole32(MPII_SGE_FL_TYPE_CHAIN |
 			    MPII_SGE_FL_SIZE_64 | len);
 			/* address of the next sge */
@@ -1831,6 +1831,16 @@ mpii_event_process(struct mpii_softc *sc, struct mpii_rcb *rcb)
 		    DEVNAME(sc), letoh16(enp->event));
 	}
 
+	mpii_event_done(sc, rcb);
+}
+
+void
+mpii_event_done(struct mpii_softc *sc, struct mpii_rcb *rcb)
+{
+	struct mpii_msg_event_reply *enp = rcb->rcb_reply;
+
+	printf("%s: %s\n", DEVNAME(sc), __func__);
+
 	if (enp->ack_required) {
 		mtx_enter(&sc->sc_evt_ack_mtx);
 		SIMPLEQ_INSERT_TAIL(&sc->sc_evt_ack_queue, rcb, rcb_link);
@@ -1897,6 +1907,8 @@ mpii_sas_remove_device(struct mpii_softc *sc, u_int16_t handle)
 	mpii_wait(sc, ccb);
 	if (ccb->ccb_rcb != NULL)
 		mpii_push_reply(sc, ccb->ccb_rcb);
+
+	scsi_io_put(&sc->sc_iopool, ccb);
 }
 
 int

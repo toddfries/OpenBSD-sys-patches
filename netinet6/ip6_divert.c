@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip6_divert.c,v 1.11 2013/04/08 15:32:23 lteo Exp $ */
+/*      $OpenBSD: ip6_divert.c,v 1.16 2013/11/22 07:59:09 mpi Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -31,7 +31,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/in_pcb.h>
@@ -200,7 +199,7 @@ divert6_packet(struct mbuf *m, int dir)
 	struct inpcb *inp;
 	struct socket *sa = NULL;
 	struct sockaddr_in6 addr;
-	struct pf_divert *pd;
+	struct pf_divert *divert;
 
 	inp = NULL;
 	div6stat.divs_ipackets++;
@@ -211,15 +210,15 @@ divert6_packet(struct mbuf *m, int dir)
 		return (0);
 	}
 
-	pd = pf_find_divert(m);
-	if (pd == NULL) {
+	divert = pf_find_divert(m);
+	if (divert == NULL) {
 		div6stat.divs_errors++;
 		m_freem(m);
 		return (0);
 	}
 
 	CIRCLEQ_FOREACH(inp, &divb6table.inpt_queue, inp_queue) {
-		if (inp->inp_lport != pd->port)
+		if (inp->inp_lport != divert->port)
 			continue;
 		if (inp->inp_divertfl == 0)
 			break;
@@ -242,16 +241,17 @@ divert6_packet(struct mbuf *m, int dir)
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
-			addr.sin6_addr = ((struct sockaddr_in6 *)
-			    ifa->ifa_addr)->sin6_addr;
+			addr.sin6_addr = satosin6(ifa->ifa_addr)->sin6_addr;
 			break;
 		}
 	}
+	/* force checksum calculation */
+	if (dir == PF_OUT)
+		in6_proto_cksum_out(m, NULL);
 
 	if (inp != CIRCLEQ_END(&divb6table.inpt_queue)) {
 		sa = inp->inp_socket;
-		if (sbappendaddr(&sa->so_rcv, (struct sockaddr *)&addr, 
-		    m, NULL) == 0) {
+		if (sbappendaddr(&sa->so_rcv, sin6tosa(&addr), m, NULL) == 0) {
 			div6stat.divs_fullsock++;
 			m_freem(m);
 			return (0);
@@ -277,7 +277,7 @@ divert6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 
 	if (req == PRU_CONTROL) {
 		return (in6_control(so, (u_long)m, (caddr_t)addr,
-		    (struct ifnet *)control, p));
+		    (struct ifnet *)control));
 	}
 	if (inp == NULL && req != PRU_ATTACH) {
 		error = EINVAL;

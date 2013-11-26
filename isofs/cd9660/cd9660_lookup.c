@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_lookup.c,v 1.18 2011/07/04 04:30:41 tedu Exp $	*/
+/*	$OpenBSD: cd9660_lookup.c,v 1.20 2013/06/11 16:42:15 deraadt Exp $	*/
 /*	$NetBSD: cd9660_lookup.c,v 1.18 1997/05/08 16:19:59 mycroft Exp $	*/
 
 /*-
@@ -111,7 +111,7 @@ cd9660_lookup(v)
 	u_long bmask;			/* block offset mask */
 	int lockparent;			/* 1 => lockparent flag is set */
 	int error;
-	ino_t ino = 0;
+	cdino_t ino = 0;
 	int reclen;
 	u_short namelen;
 	char *altname;
@@ -430,7 +430,7 @@ cd9660_bufatoff(struct iso_node *ip, off_t offset, char **res,
 {
 	struct iso_mnt *imp;
 	struct buf *bp;
-	daddr64_t lbn;
+	daddr_t lbn;
 	int bsize, error;
 	struct vnode *vp = ITOV(ip);
 

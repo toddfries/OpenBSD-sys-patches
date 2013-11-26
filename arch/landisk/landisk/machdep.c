@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.27 2012/10/08 21:47:48 deraadt Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.29 2013/09/28 12:40:30 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.1 2006/09/01 21:26:18 uwe Exp $	*/
 
 /*-
@@ -222,7 +222,8 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
 		_reg_write_1(LANDISK_PWRMNG, PWRMNG_POWEROFF);
@@ -387,7 +388,7 @@ InitializeBsc(void)
  * Dump the machine-dependent dump header.
  */
 u_int
-cpu_dump(int (*dump)(dev_t, daddr64_t, caddr_t, size_t), daddr64_t *blknop)
+cpu_dump(int (*dump)(dev_t, daddr_t, caddr_t, size_t), daddr_t *blknop)
 {
 	extern cpu_kcore_hdr_t cpu_kcore_hdr;
 	char buf[dbtob(1)];

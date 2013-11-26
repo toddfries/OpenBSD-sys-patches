@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.140 2012/12/02 07:03:30 guenther Exp $ */
+/* $OpenBSD: machdep.c,v 1.144 2013/11/10 19:23:14 guenther Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -78,7 +78,6 @@
 #include <sys/tty.h>
 #include <sys/user.h>
 #include <sys/exec.h>
-#include <sys/exec_ecoff.h>
 #include <sys/sysctl.h>
 #include <sys/core.h>
 #include <sys/kcore.h>
@@ -1032,7 +1031,8 @@ boot(howto)
 
 haltsys:
 	doshutdownhooks();
-	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef BROKEN_PROM_CONSOLE
 	sio_intr_shutdown(NULL);
@@ -1112,7 +1112,7 @@ cpu_dump_mempagecnt()
 int
 cpu_dump()
 {
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	char buf[dbtob(1)];
 	kcore_seg_t *segp;
 	cpu_kcore_hdr_t *cpuhdrp;
@@ -1196,8 +1196,8 @@ dumpsys()
 	u_long totalbytesleft, bytes, i, n, memcl;
 	u_long maddr;
 	int psize;
-	daddr64_t blkno;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error;
 	extern int msgbufmapped;
 
@@ -1722,6 +1722,7 @@ setregs(p, pack, stack, retval)
 #ifdef DEBUG
 	for (i = 0; i < FRAME_SIZE; i++)
 		tfp->tf_regs[i] = 0xbabefacedeadbeef;
+	tfp->tf_regs[FRAME_A1] = 0;
 #else
 	bzero(tfp->tf_regs, FRAME_SIZE * sizeof tfp->tf_regs[0]);
 #endif

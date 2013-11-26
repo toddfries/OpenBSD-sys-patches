@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcireg.h,v 1.43 2012/05/13 13:47:52 kettenis Exp $	*/
+/*	$OpenBSD: pcireg.h,v 1.45 2013/08/26 09:50:47 jsg Exp $	*/
 /*	$NetBSD: pcireg.h,v 1.26 2000/05/10 16:58:42 thorpej Exp $	*/
 
 /*
@@ -547,9 +547,16 @@ typedef u_int8_t pci_revision_t;
  */
 #define PCI_PCIE_XCAP		0x00
 #define PCI_PCIE_XCAP_SI	0x01000000
+#define PCI_PCIE_XCAP_VER(x)	(((x) >> 16) & 0x0f)
 #define PCI_PCIE_DCAP		0x04
 #define PCI_PCIE_DCSR		0x08
-#define PCI_PCIE_DCSR_ENA_NO_SNOOP	0x00000800
+#define PCI_PCIE_DCSR_ERO	0x00000010
+#define PCI_PCIE_DCSR_ENS	0x00000800
+#define PCI_PCIE_DCSR_MPS	0x00007000
+#define PCI_PCIE_DCSR_CEE	0x00010000
+#define PCI_PCIE_DCSR_NFE	0x00020000
+#define PCI_PCIE_DCSR_FEE	0x00040000
+#define PCI_PCIE_DCSR_URE	0x00080000
 #define PCI_PCIE_LCAP		0x0c
 #define PCI_PCIE_LCSR		0x10
 #define PCI_PCIE_LCSR_ASPM_L0S	0x00000001
@@ -579,6 +586,7 @@ typedef u_int8_t pci_revision_t;
 #define PCI_PCIE_SLCSR_PDS	0x00400000
 #define PCI_PCIE_SLCSR_LACS	0x01000000
 #define PCI_PCIE_RCSR		0x1c
+#define PCI_PCIE_LCAP2		0x2c
 
 /*
  * Interrupt Configuration Register; contains interrupt pin and line.

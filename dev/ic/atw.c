@@ -1,4 +1,4 @@
-/*	$OpenBSD: atw.c,v 1.76 2011/04/05 19:54:35 jasper Exp $	*/
+/*	$OpenBSD: atw.c,v 1.78 2013/11/26 09:50:32 mpi Exp $	*/
 /*	$NetBSD: atw.c,v 1.69 2004/07/23 07:07:55 dyoung Exp $	*/
 
 /*-
@@ -559,6 +559,8 @@ atw_attach(struct atw_softc *sc)
 	    "RFMD", "Marvel (not supported)"};
 
 	sc->sc_txth = atw_txthresh_tab_lo;
+
+	task_set(&sc->sc_resume_t, atw_resume, sc, NULL);
 
 	SIMPLEQ_INIT(&sc->sc_txfreeq);
 	SIMPLEQ_INIT(&sc->sc_txdirtyq);
@@ -2028,7 +2030,7 @@ void
 atw_filter_setup(struct atw_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	struct arpcom *ec = &ic->ic_ac;
+	struct arpcom *ac = &ic->ic_ac;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	int hash;
 	u_int32_t hashes[2];
@@ -2056,15 +2058,14 @@ atw_filter_setup(struct atw_softc *sc)
 
 	hashes[0] = hashes[1] = 0x0;
 
+	if (ac->ac_multirangecnt > 0)
+		goto allmulti;
+
 	/*
 	 * Program the 64-bit multicast hash filter.
 	 */
-	ETHER_FIRST_MULTI(step, ec, enm);
+	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (memcmp(enm->enm_addrlo, enm->enm_addrhi,
-		    ETHER_ADDR_LEN) != 0)
-			goto allmulti;
-
 		hash = atw_calchash(enm->enm_addrlo);
 		hashes[hash >> 5] |= 1 << (hash & 0x1f);
 		ETHER_NEXT_MULTI(step, enm);
@@ -3985,8 +3986,7 @@ atw_activate(struct device *self, int act)
 			(*sc->sc_power)(sc, act);
 		break;
 	case DVACT_RESUME:
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    atw_resume, sc, NULL);
+		task_add(systq, &sc->sc_resume_t);
 		break;
 	}
 	return 0;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.18 2012/08/23 06:12:49 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.20 2013/06/13 13:42:12 aoyama Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -66,6 +66,7 @@
 #include "systrace.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -140,7 +141,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 42 */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 43: Kernel symbols device */
 	cdev_ch_init(NCH,ch),		/* 44: SCSI autochanger */
-	cdev_notdef(),			/* 45 */
+	cdev_fuse_init(NFUSE,fuse),	/* 45: fuse */
 	cdev_notdef(),			/* 46 */
 	cdev_notdef(),			/* 47 */
 	cdev_notdef(),			/* 48 */

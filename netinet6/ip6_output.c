@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.139 2013/04/11 12:06:25 mpi Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.148 2013/10/23 19:57:50 deraadt Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -70,6 +70,7 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/proc.h>
 #include <sys/systm.h>
 
 #include <net/if.h>
@@ -77,13 +78,13 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
 
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet/icmp6.h>
 #include <netinet6/ip6_var.h>
@@ -126,6 +127,8 @@ int ip6_splithdr(struct mbuf *, struct ip6_exthdrs *);
 int ip6_getpmtu(struct route_in6 *, struct route_in6 *,
 	struct ifnet *, struct in6_addr *, u_long *, int *);
 int copypktopts(struct ip6_pktopts *, struct ip6_pktopts *, int);
+void in6_delayed_cksum(struct mbuf *, u_int8_t);
+void in6_proto_cksum_out(struct mbuf *, struct ifnet *);
 
 /* Context for non-repeating IDs */
 struct idgen32_ctx ip6_id_ctx;
@@ -171,7 +174,6 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	struct tdb_ident *tdbi;
 	u_int32_t sspi;
 	struct tdb *tdb;
-	int s;
 #if NPF > 0
 	struct ifnet *encif;
 #endif
@@ -214,12 +216,6 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 		goto done_spd;
 
 	/*
-	 * splnet is chosen over splsoftnet because we are not allowed to
-	 * lower the level, and udp6_output calls us in splnet(). XXX check
-	 */
-	s = splnet();
-
-	/*
 	 * Check if there was an outgoing SA bound to the flow
 	 * from a transport protocol.
 	 */
@@ -230,7 +226,7 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	if (mtag != NULL) {
 #ifdef DIAGNOSTIC
 		if (mtag->m_tag_len != sizeof (struct tdb_ident))
-			panic("ip6_output: tag of length %d (should be %d",
+			panic("ip6_output: tag of length %hu (should be %zu",
 			    mtag->m_tag_len, sizeof (struct tdb_ident));
 #endif
 		tdbi = (struct tdb_ident *)(mtag + 1);
@@ -243,8 +239,6 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 		    &error, IPSP_DIRECTION_OUT, NULL, inp, 0);
 
 	if (tdb == NULL) {
-	        splx(s);
-
 		if (error == 0) {
 		        /*
 			 * No IPsec processing required, we'll just send the
@@ -278,7 +272,6 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 			    tdbi->rdomain == tdb->tdb_rdomain &&
 			    !bcmp(&tdbi->dst, &tdb->tdb_dst,
 			    sizeof(union sockaddr_union))) {
-				splx(s);
 				sproto = 0; /* mark as no-IPsec-needed */
 				goto done_spd;
 			}
@@ -288,7 +281,6 @@ ip6_output(struct mbuf *m0, struct ip6_pktopts *opt, struct route_in6 *ro,
 	        bcopy(&tdb->tdb_dst, &sdst, sizeof(sdst));
 		sspi = tdb->tdb_spi;
 		sproto = tdb->tdb_sproto;
-	        splx(s);
 	}
 
 	/* Fall through to the routing/multicast handling code */
@@ -461,7 +453,7 @@ reroute:
 	ro_pmtu = ro;
 	if (opt && opt->ip6po_rthdr)
 		ro = &opt->ip6po_route;
-	dst = (struct sockaddr_in6 *)&ro->ro_dst;
+	dst = &ro->ro_dst;
 
 	/*
 	 * if specified, try to fill in the traffic class field.
@@ -495,8 +487,6 @@ reroute:
 	 * ipsp_process_packet will never come back to here.
 	 */
 	if (sproto != 0) {
-	        s = splnet();
-
 		/*
 		 * XXX what should we do if ip6_hlim == 0 and the
 		 * packet gets tunneled?
@@ -505,7 +495,6 @@ reroute:
 		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
 		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
-			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
 			goto done;
@@ -515,15 +504,12 @@ reroute:
 		if ((encif = enc_getif(tdb->tdb_rdomain,
 		    tdb->tdb_tap)) == NULL ||
 		    pf_test(AF_INET6, PF_OUT, encif, &m, NULL) != PF_PASS) {
-			splx(s);
 			error = EHOSTUNREACH;
 			m_freem(m);
 			goto done;
 		}
-		if (m == NULL) {
-			splx(s);
+		if (m == NULL)
 			goto done;
-		}
 		ip6 = mtod(m, struct ip6_hdr *);
 		/*
 		 * PF_TAG_REROUTE handling or not...
@@ -533,6 +519,7 @@ reroute:
 		 * What's the behaviour?
 		 */
 #endif
+		in6_proto_cksum_out(m, encif);
 
 		m->m_flags &= ~(M_BCAST | M_MCAST);	/* just in case */
 
@@ -544,7 +531,6 @@ reroute:
 		 */
 		error = ipsp_process_packet(m, tdb, AF_INET6,
 		    exthdrs.ip6e_rthdr ? 1 : 0);
-		splx(s);
 
 		return error;  /* Nothing more to be done */
 	}
@@ -554,6 +540,7 @@ reroute:
 	dstsock.sin6_family = AF_INET6;
 	dstsock.sin6_addr = ip6->ip6_dst;
 	dstsock.sin6_len = sizeof(dstsock);
+	ro->ro_tableid = m->m_pkthdr.rdomain;
 	if ((error = in6_selectroute(&dstsock, opt, im6o, ro, &ifp,
 	    &rt, m->m_pkthdr.rdomain)) != 0) {
 		switch (error) {
@@ -606,9 +593,9 @@ reroute:
 			 * application.  We assume the next hop is an IPv6
 			 * address.
 			 */
-			dst = (struct sockaddr_in6 *)opt->ip6po_nexthop;
+			dst = satosin6(opt->ip6po_nexthop);
 		} else if ((rt->rt_flags & RTF_GATEWAY))
-			dst = (struct sockaddr_in6 *)rt->rt_gateway;
+			dst = satosin6(rt->rt_gateway);
 	}
 
 	if (!IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) {
@@ -808,6 +795,7 @@ reroute:
 		goto reroute;
 	}
 #endif
+	in6_proto_cksum_out(m, ifp);
 
 	/*
 	 * Send the packet to the outgoing interface.
@@ -855,7 +843,7 @@ reroute:
 		mtu32 = (u_int32_t)mtu;
 		bzero(&ip6cp, sizeof(ip6cp));
 		ip6cp.ip6c_cmdarg = (void *)&mtu32;
-		pfctlinput2(PRC_MSGSIZE, (struct sockaddr *)&ro_pmtu->ro_dst,
+		pfctlinput2(PRC_MSGSIZE, sin6tosa(&ro_pmtu->ro_dst),
 		    (void *)&ip6cp);
 #endif
 
@@ -905,7 +893,7 @@ reroute:
 		mtu32 = (u_int32_t)mtu;
 		bzero(&ip6cp, sizeof(ip6cp));
 		ip6cp.ip6c_cmdarg = (void *)&mtu32;
-		pfctlinput2(PRC_MSGSIZE, (struct sockaddr *)&ro_pmtu->ro_dst,
+		pfctlinput2(PRC_MSGSIZE, sin6tosa(&ro_pmtu->ro_dst),
 		    (void *)&ip6cp);
 #endif
 
@@ -1220,8 +1208,8 @@ ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro,
 
 	if (ro_pmtu != ro) {
 		/* The first hop and the final destination may differ. */
-		struct sockaddr_in6 *sa6_dst =
-		    (struct sockaddr_in6 *)&ro_pmtu->ro_dst;
+		struct sockaddr_in6 *sa6_dst = &ro_pmtu->ro_dst;
+
 		if (ro_pmtu->ro_rt &&
 		    ((ro_pmtu->ro_rt->rt_flags & RTF_UP) == 0 ||
 		     !IN6_ARE_ADDR_EQUAL(&sa6_dst->sin6_addr, dst))) {
@@ -1230,6 +1218,7 @@ ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro,
 		}
 		if (ro_pmtu->ro_rt == 0) {
 			bzero(ro_pmtu, sizeof(*ro_pmtu));
+			ro_pmtu->ro_tableid = ifp->if_rdomain;
 			sa6_dst->sin6_family = AF_INET6;
 			sa6_dst->sin6_len = sizeof(struct sockaddr_in6);
 			sa6_dst->sin6_addr = *dst;
@@ -1293,12 +1282,13 @@ ip6_ctloutput(int op, struct socket *so, int level, int optname,
 	struct inpcb *inp = sotoinpcb(so);
 	struct mbuf *m = *mp;
 	int error, optval;
+	struct proc *p = curproc; /* For IPSec and rdomain */
 #ifdef IPSEC
-	struct proc *p = curproc; /* XXX */
 	struct tdb *tdb;
 	struct tdb_ident *tdbip, tdbi;
 	int s;
 #endif
+	u_int rtid = 0;
 
 	error = optval = 0;
 
@@ -1310,11 +1300,9 @@ ip6_ctloutput(int op, struct socket *so, int level, int optname,
 		case PRCO_SETOPT:
 			switch (optname) {
 			case IPV6_2292PKTOPTIONS:
-			{
 				error = ip6_pcbopts(&inp->inp_outputopts6,
-						    m, so);
+				    m, so);
 				break;
-			}
 
 			/*
 			 * Use of some Hop-by-Hop options or some
@@ -1711,6 +1699,26 @@ do { \
 					inp->inp_secrequire = get_sa_require(inp);
 #endif
 				break;
+			case SO_RTABLE:
+				if (m == NULL || m->m_len < sizeof(u_int)) {
+					error = EINVAL;
+					break;
+				}
+				rtid = *mtod(m, u_int *);
+				if (inp->inp_rtableid == rtid)
+					break;
+				/* needs privileges to switch when already set */
+				if (p->p_p->ps_rtableid != rtid &&
+				    p->p_p->ps_rtableid != 0 &&
+				    (error = suser(p, 0)) != 0)
+					break;
+				/* table must exist */
+				if (!rtable_exists(rtid)) {
+					error = EINVAL;
+					break;
+				}
+				inp->inp_rtableid = rtid;
+				break;
 			case IPV6_PIPEX:
 				if (m != NULL && m->m_len == sizeof(int))
 					inp->inp_pipex = *mtod(m, int *);
@@ -1962,6 +1970,11 @@ do { \
 				*mtod(m, int *) = optval;
 #endif
 				break;
+			case SO_RTABLE:
+				*mp = m = m_get(M_WAIT, MT_SOOPTS);
+				m->m_len = sizeof(u_int);
+				*mtod(m, u_int *) = optval;
+				break;
 			case IPV6_PIPEX:
 				*mp = m = m_get(M_WAIT, MT_SOOPTS);
 				m->m_len = sizeof(int);
@@ -2021,14 +2034,14 @@ ip6_raw_ctloutput(int op, struct socket *so, int level, int optname,
 				if (optval != icmp6off)
 					error = EINVAL;
 			} else
-				inp->in6p_cksum = optval;
+				inp->inp_cksum6 = optval;
 			break;
 
 		case PRCO_GETOPT:
 			if (so->so_proto->pr_protocol == IPPROTO_ICMPV6)
 				optval = icmp6off;
 			else
-				optval = inp->in6p_cksum;
+				optval = inp->inp_cksum6;
 
 			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 			m->m_len = sizeof(int);
@@ -2458,7 +2471,8 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 			 *   XXX: is it a good approach?
 			 */
 			bzero(&ro, sizeof(ro));
-			dst = (struct sockaddr_in6 *)&ro.ro_dst;
+			ro.ro_tableid = m->m_pkthdr.rdomain;
+			dst = &ro.ro_dst;
 			dst->sin6_len = sizeof(struct sockaddr_in6);
 			dst->sin6_family = AF_INET6;
 			dst->sin6_addr = mreq->ipv6mr_multiaddr;
@@ -3139,7 +3153,7 @@ ip6_mloopback(struct ifnet *ifp, struct mbuf *m, struct sockaddr_in6 *dst)
 	if (IN6_IS_SCOPE_EMBED(&ip6->ip6_dst))
 		ip6->ip6_dst.s6_addr16[1] = 0;
 
-	(void)looutput(ifp, copym, (struct sockaddr *)dst, NULL);
+	(void)looutput(ifp, copym, sin6tosa(dst), NULL);
 }
 
 /*
@@ -3181,4 +3195,62 @@ void
 ip6_randomid_init(void)
 {
 	idgen32_init(&ip6_id_ctx);
+}
+
+/*
+ * Process a delayed payload checksum calculation.
+ */
+void
+in6_delayed_cksum(struct mbuf *m, u_int8_t nxt)
+{
+	int nxtp, offset;
+	u_int16_t csum;
+
+	offset = ip6_lasthdr(m, 0, IPPROTO_IPV6, &nxtp); 
+	if (offset <= 0 || nxtp != nxt)
+		/* If the desired next protocol isn't found, punt. */
+		return;
+	csum = (u_int16_t)(in6_cksum(m, nxt, offset, m->m_pkthdr.len - offset));
+
+	switch (nxt) {
+	case IPPROTO_TCP:
+		offset += offsetof(struct tcphdr, th_sum);
+		break;
+
+	case IPPROTO_UDP:
+		offset += offsetof(struct udphdr, uh_sum);
+		if (csum == 0)
+			csum = 0xffff;
+		break;
+
+	case IPPROTO_ICMPV6:
+		offset += offsetof(struct icmp6_hdr, icmp6_cksum);
+		break;
+	}
+
+	if ((offset + sizeof(u_int16_t)) > m->m_len)
+		m_copyback(m, offset, sizeof(csum), &csum, M_NOWAIT);
+	else
+		*(u_int16_t *)(mtod(m, caddr_t) + offset) = csum;
+}
+
+void
+in6_proto_cksum_out(struct mbuf *m, struct ifnet *ifp)
+{
+	if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT) {
+		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_TCPv6) ||
+		    ifp->if_bridgeport != NULL) {
+			in6_delayed_cksum(m, IPPROTO_TCP);
+			m->m_pkthdr.csum_flags &= ~M_TCP_CSUM_OUT; /* Clear */
+		}
+	} else if (m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT) {
+		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_UDPv6) ||
+		    ifp->if_bridgeport != NULL) {
+			in6_delayed_cksum(m, IPPROTO_UDP);
+			m->m_pkthdr.csum_flags &= ~M_UDP_CSUM_OUT; /* Clear */
+		}
+	} else if (m->m_pkthdr.csum_flags & M_ICMP_CSUM_OUT) {
+		in6_delayed_cksum(m, IPPROTO_ICMPV6);
+		m->m_pkthdr.csum_flags &= ~M_ICMP_CSUM_OUT; /* Clear */
+	}
 }

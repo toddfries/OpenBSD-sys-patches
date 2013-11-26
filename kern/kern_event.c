@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_event.c,v 1.49 2013/04/24 09:52:54 nicm Exp $	*/
+/*	$OpenBSD: kern_event.c,v 1.53 2013/11/14 18:09:39 chl Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -292,6 +292,7 @@ filt_proc(struct knote *kn, long hint)
 
 		kn->kn_status |= KN_DETACHED;
 		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
+		kn->kn_data = pr->ps_mainproc->p_xstat;
 		SLIST_REMOVE(&pr->ps_klist, kn, knote, kn_selnext);
 		return (1);
 	}
@@ -1019,12 +1020,12 @@ knote_attach(struct knote *kn, struct filedesc *fdp)
 		size = fdp->fd_knlistsize;
 		while (size <= kn->kn_id)
 			size += KQEXTENT;
-		list = malloc(size * sizeof(struct klist *), M_TEMP, M_WAITOK);
+		list = malloc(size * sizeof(struct klist), M_TEMP, M_WAITOK);
 		bcopy((caddr_t)fdp->fd_knlist, (caddr_t)list,
-		    fdp->fd_knlistsize * sizeof(struct klist *));
+		    fdp->fd_knlistsize * sizeof(struct klist));
 		bzero((caddr_t)list +
-		    fdp->fd_knlistsize * sizeof(struct klist *),
-		    (size - fdp->fd_knlistsize) * sizeof(struct klist *));
+		    fdp->fd_knlistsize * sizeof(struct klist),
+		    (size - fdp->fd_knlistsize) * sizeof(struct klist));
 		if (fdp->fd_knlist != NULL)
 			free(fdp->fd_knlist, M_TEMP);
 		fdp->fd_knlistsize = size;

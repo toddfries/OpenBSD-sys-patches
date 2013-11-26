@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sl.c,v 1.48 2013/04/16 12:05:04 mpi Exp $	*/
+/*	$OpenBSD: if_sl.c,v 1.50 2013/10/23 15:12:42 mpi Exp $	*/
 /*	$NetBSD: if_sl.c,v 1.39.4.1 1996/06/02 16:26:31 thorpej Exp $	*/
 
 /*
@@ -82,7 +82,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #else
 #error Huh? Slip without inet?
@@ -894,7 +893,6 @@ slioctl(ifp, cmd, data)
 {
 	struct sl_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	struct ifreq *ifr;
 	int s = splnet(), error = 0;
 	struct sl_stats *slsp;
 
@@ -914,22 +912,6 @@ slioctl(ifp, cmd, data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		ifr = (struct ifreq *)data;
-		if (ifr == 0) {
-			error = EAFNOSUPPORT;		/* XXX */
-			break;
-		}
-		switch (ifr->ifr_addr.sa_family) {
-
-#ifdef INET
-		case AF_INET:
-			break;
-#endif
-
-		default:
-			error = EAFNOSUPPORT;
-			break;
-		}
 		break;
 
 	case SIOCGSLSTATS:
