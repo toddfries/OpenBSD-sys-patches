@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev.c,v 1.3 2011/03/13 00:13:53 deraadt Exp $	*/
+/*	$OpenBSD: dev.c,v 1.5 2013/06/11 16:42:09 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2010 Miodrag Vallat.
@@ -44,10 +44,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/types.h>
+#include <sys/param.h>
 #include "libsa.h"
 #include <sys/disklabel.h>
-#include <machine/param.h>
 #include <machine/cpu.h>
 #include <machine/pmon.h>
 
@@ -81,7 +80,7 @@ pmon_iostrategy(void *f, int rw, daddr32_t dblk, size_t size, void *buf,
 	if (rw != F_READ)
 		return EOPNOTSUPP;
 
-	offs = ((daddr64_t)dblk + pi->partoff) * DEV_BSIZE;
+	offs = ((daddr_t)dblk + pi->partoff) * DEV_BSIZE;
 	if (offs != pi->curpos) {
 		pos = pmon_lseek(pi->fd, offs, 0 /* SEEK_SET */);
 		if (pos != offs)

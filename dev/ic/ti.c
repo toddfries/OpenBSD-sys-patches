@@ -1,4 +1,4 @@
-/*	$OpenBSD: ti.c,v 1.4 2011/06/21 16:52:45 tedu Exp $	*/
+/*	$OpenBSD: ti.c,v 1.7 2013/10/01 20:06:00 sf Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -91,7 +91,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -612,7 +611,7 @@ ti_alloc_jumbo_mem(struct ti_softc *sc)
 	state = 1;
 	if (bus_dmamem_map(sc->sc_dmatag, &seg, rseg, TI_JMEM, &kva,
 	    BUS_DMA_NOWAIT)) {
-		printf("%s: can't map dma buffers (%d bytes)\n",
+		printf("%s: can't map dma buffers (%zu bytes)\n",
 		    sc->sc_dv.dv_xname, TI_JMEM);
 		error = ENOBUFS;
 		goto out;
@@ -1600,7 +1599,7 @@ ti_attach(struct ti_softc *sc)
 	}
 	if (bus_dmamem_map(sc->sc_dmatag, &seg, rseg,
 	    sizeof(struct ti_ring_data), &kva, BUS_DMA_NOWAIT)) {
-		printf("%s: can't map dma buffers (%d bytes)\n",
+		printf("%s: can't map dma buffers (%zu bytes)\n",
 		       sc->sc_dv.dv_xname, sizeof(struct ti_ring_data));
 		goto fail_1;
 	}
@@ -1743,7 +1742,7 @@ ti_rxeof(struct ti_softc *sc)
 			    == ENOBUFS) {
 				struct mbuf             *m0;
 				m0 = m_devget(mtod(m, char *), cur_rx->ti_len,
-				    ETHER_ALIGN, ifp, NULL);
+				    ETHER_ALIGN, ifp);
 				ti_newbuf_jumbo(sc, sc->ti_jumbo, m);
 				if (m0 == NULL) {
 					ifp->if_ierrors++;

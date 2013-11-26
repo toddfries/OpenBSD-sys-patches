@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.35 2008/11/28 02:44:17 brad Exp $	*/
+/*	$OpenBSD: if_ie.c,v 1.38 2013/11/26 09:50:33 mpi Exp $	*/
 /*	$NetBSD: if_ie.c,v 1.51 1996/05/12 23:52:48 mycroft Exp $	*/
 
 /*-
@@ -133,7 +133,6 @@ iomem, and to make 16-pointers, we subtract sc_maddr and and with 0xffff.
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -1054,16 +1053,16 @@ check_eh(sc, eh, to_bpf)
 		 */
 #if NBPFILTER > 0
 		*to_bpf = (sc->sc_arpcom.ac_if.if_bpf != 0) ||
-		    (sc->sc_arpcom.ac_if.if_bridge != NULL);
+		    (sc->sc_arpcom.ac_if.if_bridgeport != NULL);
 #else
-		*to_bpf = (sc->sc_arpcom.ac_if.if_bridge != NULL);
+		*to_bpf = (sc->sc_arpcom.ac_if.if_bridgeport != NULL);
 #endif
 		/* If for us, accept and hand up to BPF */
 		if (ether_equal(eh->ether_dhost, sc->sc_arpcom.ac_enaddr))
 			return 1;
 
 #if NBPFILTER > 0
-		if (*to_bpf && sc->sc_arpcom.ac_if.if_bridge == NULL)
+		if (*to_bpf && sc->sc_arpcom.ac_if.if_bridgeport == NULL)
 			*to_bpf = 2; /* we don't need to see it */
 #endif
 
@@ -1095,9 +1094,9 @@ check_eh(sc, eh, to_bpf)
 		 */
 #if NBPFILTER > 0
 		*to_bpf = (sc->sc_arpcom.ac_if.if_bpf != 0) ||
-		    (sc->sc_arpcom.ac_if.if_bridge != NULL);
+		    (sc->sc_arpcom.ac_if.if_bridgeport != NULL);
 #else
-		*to_bpf = (sc->sc_arpcom.ac_if.if_bridge != NULL);
+		*to_bpf = (sc->sc_arpcom.ac_if.if_bridgeport != NULL);
 #endif
 		/* We want to see multicasts. */
 		if (eh->ether_dhost[0] & 1)
@@ -1109,7 +1108,7 @@ check_eh(sc, eh, to_bpf)
 
 		/* Anything else goes to BPF but nothing else. */
 #if NBPFILTER > 0
-		if (*to_bpf && sc->sc_arpcom.ac_if.if_bridge == NULL)
+		if (*to_bpf && sc->sc_arpcom.ac_if.if_bridgeport == NULL)
 			*to_bpf = 2;
 #endif
 		return 1;
@@ -2193,19 +2192,24 @@ static void
 mc_reset(sc)
 	struct ie_softc *sc;
 {
+	struct arpcom *ac = &sc->sc_arpcom;
 	struct ether_multi *enm;
 	struct ether_multistep step;
 
+	if (ac->ac_multirangecnt > 0) {
+		ac->ac_if.if_flags |= IFF_ALLMULTI;
+		ieioctl(&ac->ac_if, SIOCSIFFLAGS, (void *)0);
+		goto setflag;
+	}
 	/*
 	 * Step through the list of addresses.
 	 */
 	sc->mcast_count = 0;
-	ETHER_FIRST_MULTI(step, &sc->sc_arpcom, enm);
+	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm) {
-		if (sc->mcast_count >= MAXMCAST ||
-		    bcmp(enm->enm_addrlo, enm->enm_addrhi, 6) != 0) {
-			sc->sc_arpcom.ac_if.if_flags |= IFF_ALLMULTI;
-			ieioctl(&sc->sc_arpcom.ac_if, SIOCSIFFLAGS, (void *)0);
+		if (sc->mcast_count >= MAXMCAST) {
+			ac->ac_if.if_flags |= IFF_ALLMULTI;
+			ieioctl(&ac->ac_if, SIOCSIFFLAGS, (void *)0);
 			goto setflag;
 		}
 

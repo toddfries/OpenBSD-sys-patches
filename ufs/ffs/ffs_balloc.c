@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_balloc.c,v 1.37 2011/07/04 04:30:41 tedu Exp $	*/
+/*	$OpenBSD: ffs_balloc.c,v 1.39 2013/06/11 16:42:18 deraadt Exp $	*/
 /*	$NetBSD: ffs_balloc.c,v 1.3 1996/02/09 22:22:21 christos Exp $	*/
 
 /*
@@ -73,7 +73,7 @@ int
 ffs1_balloc(struct inode *ip, off_t startoffset, int size, struct ucred *cred,
     int flags, struct buf **bpp)
 {
-	daddr64_t lbn, nb, newb, pref;
+	daddr_t lbn, nb, newb, pref;
 	struct fs *fs;
 	struct buf *bp, *nbp;
 	struct vnode *vp;
@@ -238,7 +238,7 @@ ffs1_balloc(struct inode *ip, off_t startoffset, int size, struct ucred *cred,
 	allocib = NULL;
 	allocblk = allociblk;
 	if (nb == 0) {
-		pref = ffs1_blkpref(ip, lbn, 0, (int32_t *)0);
+		pref = ffs1_blkpref(ip, lbn, -indirs[0].in_off - 1, NULL);
 	        error = ffs_alloc(ip, lbn, pref, (int)fs->fs_bsize,
 				  cred, &newb);
 		if (error)
@@ -286,7 +286,7 @@ ffs1_balloc(struct inode *ip, off_t startoffset, int size, struct ucred *cred,
 			continue;
 		}
 		if (pref == 0)
-			pref = ffs1_blkpref(ip, lbn, 0, (int32_t *)0);
+			pref = ffs1_blkpref(ip, lbn, i - num - 1, NULL);
 		error = ffs_alloc(ip, lbn, pref, (int)fs->fs_bsize, cred,
 				  &newb);
 		if (error) {
@@ -433,9 +433,9 @@ int
 ffs2_balloc(struct inode *ip, off_t off, int size, struct ucred *cred,
     int flags, struct buf **bpp)
 {
-	daddr64_t lbn, lastlbn, nb, newb, *blkp;
-	daddr64_t pref, *allocblk, allociblk[NIADDR + 1];
-	daddr64_t *bap, *allocib;
+	daddr_t lbn, lastlbn, nb, newb, *blkp;
+	daddr_t pref, *allocblk, allociblk[NIADDR + 1];
+	daddr_t *bap, *allocib;
 	int deallocated, osize, nsize, num, i, error, unwindidx, r;
 	struct buf *bp, *nbp;
 	struct indir indirs[NIADDR + 2];
@@ -617,7 +617,7 @@ ffs2_balloc(struct inode *ip, off_t off, int size, struct ucred *cred,
 	allocblk = allociblk;
 
 	if (nb == 0) {
-		pref = ffs2_blkpref(ip, lbn, 0, NULL);
+		pref = ffs2_blkpref(ip, lbn, -indirs[0].in_off - 1, NULL);
 		error = ffs_alloc(ip, lbn, pref, (int) fs->fs_bsize, cred,
 		    &newb);
 		if (error)
@@ -673,7 +673,7 @@ ffs2_balloc(struct inode *ip, off_t off, int size, struct ucred *cred,
 		}
 
 		if (pref == 0)
-			pref = ffs2_blkpref(ip, lbn, 0, NULL);
+			pref = ffs2_blkpref(ip, lbn, i - num - 1, NULL);
 
 		error = ffs_alloc(ip, lbn, pref, (int) fs->fs_bsize, cred,
 		    &newb);

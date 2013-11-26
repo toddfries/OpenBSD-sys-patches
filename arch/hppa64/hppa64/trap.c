@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.29 2011/11/26 19:14:17 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.33 2012/12/31 06:46:13 guenther Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -22,13 +22,10 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/syscall.h>
-#include <sys/ktrace.h>
+#include <sys/syscall_mi.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
 #include <sys/user.h>
-
-#include "systrace.h"
-#include <dev/systrace.h>
 
 #include <uvm/uvm.h>
 
@@ -551,14 +548,8 @@ child_return(void *arg)
 	tf->tf_r1 = 0;		/* errno */
 
 	ast(p);
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p,
-		    (p->p_flag & P_THREAD) ? SYS_rfork :
-		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
-		    0, 0);
-#endif
+
+	mi_child_return(p);
 }
 
 void	syscall(struct trapframe *frame);
@@ -571,7 +562,7 @@ syscall(struct trapframe *frame)
 {
 	register struct proc *p = curproc;
 	register const struct sysent *callp;
-	int nsys, code, oerror, error;
+	int nsys, code, error;
 	register_t args[8], rval[2];
 #ifdef DIAGNOSTIC
 	long oldcpl = curcpu()->ci_cpl;
@@ -615,23 +606,11 @@ syscall(struct trapframe *frame)
 	else
 		callp += code;
 
-	oerror = error = 0;
-
-#ifdef SYSCALL_DEBUG
-	scdebug_call(p, code, args);
-#endif
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL))
-		ktrsyscall(p, code, callp->sy_argsize, args);
-#endif
 	rval[0] = 0;
 	rval[1] = frame->tf_ret1;
-#if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE))
-		oerror = error = systrace_redirect(code, p, args, rval);
-	else
-#endif
-		oerror = error = (*callp->sy_call)(p, args, rval);
+
+	error = mi_syscall(p, code, callp, args, rval);
+
 	switch (error) {
 	case 0:
 		frame->tf_ret0 = rval[0];
@@ -644,22 +623,16 @@ syscall(struct trapframe *frame)
 	case EJUSTRETURN:
 		break;
 	default:
-		if (p->p_emul->e_errno)
-			error = p->p_emul->e_errno[error];
 		frame->tf_r1 = error;
 		frame->tf_ret0 = error;
 		frame->tf_ret1 = 0;
 		break;
 	}
-#ifdef SYSCALL_DEBUG
-	scdebug_ret(p, code, oerror, rval);
-#endif
+
 	ast(p);
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, code, oerror, rval[0]);
-#endif
+
+	mi_syscall_return(p, code, error, rval);
+
 #ifdef DIAGNOSTIC
 	if (curcpu()->ci_cpl != oldcpl) {
 		printf("WARNING: SPL (0x%x) NOT LOWERED ON "

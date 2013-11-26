@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip32_machdep.c,v 1.17 2012/03/15 18:57:22 miod Exp $ */
+/*	$OpenBSD: ip32_machdep.c,v 1.21 2012/10/03 22:46:09 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -38,10 +38,10 @@
 #include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/memconf.h>
 
 #include <mips64/arcbios.h>
-#include <mips64/archtype.h>
 
 #include <sgi/localbus/crimebus.h>
 #include <sgi/localbus/macebus.h>
@@ -121,6 +121,7 @@ ip32_setup()
 	switch ((cp0_get_prid() >> 8) & 0xff) {
 	case MIPS_R12000:
 		setsr(getsr() | SR_DSD);
+		protosr |= SR_DSD;
 		break;
 	}
 
@@ -198,9 +199,7 @@ ip32_setup()
 		comconsaddr = MACE_ISA_SER1_OFFS;
 		comconsfreq = 1843200;
 		comconsiot = &macebus_tag;
-		comconsrate = bios_getenvint("dbaud");
-		if (comconsrate < 50 || comconsrate > 115200)
-			comconsrate = 9600;
+		comconsrate = bios_consrate;
 	}
 
 	/* not sure if there is a way to tell O2 and O2+ apart */

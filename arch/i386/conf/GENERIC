@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.732 2012/03/06 12:48:07 mikeb Exp $
+#	$OpenBSD: GENERIC,v 1.761 2013/11/15 19:42:20 sasano Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -27,6 +27,7 @@ option		COMPAT_LINUX	# binary compatibility with Linux
 
 option		PROCFS		# /proc
 option		NTFS		# NTFS support
+option		HIBERNATE	# Hibernate support
 
 config		bsd	swap generic
 
@@ -72,6 +73,7 @@ option		USBVERBOSE
 isa0	at mainbus0
 isa0	at pcib?
 isa0	at amdpcib?
+isa0	at tcpcib?
 isa0	at ichpcib?
 isa0	at piixpcib?
 isa0	at gscpcib?
@@ -85,6 +87,7 @@ pci*	at ppb?
 pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
 amdpcib* at pci?		# AMD 8111 LPC bridge 
+tcpcib*	at pci?			# Intel Atom E600 LPC bridge
 ichpcib* at pci?		# Intel ICHx/ICHx-M LPC bridges
 piixpcib* at pci?		# Intel PIIX4 PCI-ISA bridge
 gscpcib* at pci?		# NS Geode SC1100 PCI-ISA bridge
@@ -257,8 +260,6 @@ ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
 uts*	at uhub?		# USB touchscreen
 wsmouse* at uts? mux 0
-uhts*	 at uhidev?		# USB HID touch screen
-wsmouse* at uhts? mux 0
 ukbd*	at uhidev?		# USB keyboard
 wskbd*	at ukbd? mux 1
 ucycom*	at uhidev?		# Cypress serial
@@ -271,15 +272,16 @@ atu*	at uhub?		# Atmel AT76c50x based 802.11b
 axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
+smsc*	at uhub?		# SMSC LAN95xx Ethernet
 cdce*	at uhub?		# CDC Ethernet
 urndis*	at uhub?		# Remote NDIS Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
-uscanner* at uhub? disable	# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -296,14 +298,16 @@ upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
 urtw*	at uhub?		# RealTek 8187
 rsu*	at uhub?		# RealTek RTL8188SU/RTL8191SU/RTL8192SU
 urtwn*	at uhub?		# RealTek RTL8188CU/RTL8192CU
-#option	NATM
-#ueagle* at uhub?		# Analog Devices Eagle ADSL
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 umbg*	at uhub?		# Meinberg Funkuhren USB5131
 uthum*	at uhidev?		# TEMPerHUM sensor
+ugold*	at uhidev?		# gold TEMPer sensor
 utrh*	at uhidev?		# USBRH sensor
 utwitch* at uhidev?		# YUREX BBU sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
+uoakrh*	at uhidev?		# Toradex OAK temp and rel humidity
+uoaklux* at uhidev?		# Toradex OAK LUX
+uoakv*	at uhidev?		# Toradex OAK 10V sensor
 onewire* at uow?
 uvideo* at uhub?		# USB video
 video*  at uvideo?
@@ -311,10 +315,12 @@ udl*	at uhub?		# DisplayLink USB displays
 wsdisplay* at udl?
 
 puc*	at pci?			# PCI "universal" communication device
-#puc*	at cardbus?
+com*	at cardbus?
 
 sdhc*	at pci?			# SD Host Controller
 sdmmc*	at sdhc?		# SD/MMC bus
+rtsx*	at pci?			# Realtek SD Card Reader
+sdmmc*	at rtsx?		# SD/MMC bus
 
 # Bluetooth controllers
 #sbt*	at sdmmc? disable	# SDIO Bluetooth
@@ -345,8 +351,8 @@ vga0		at isa?
 option		X86EMU		# to POST video cards
 vga*		at pci?
 pcdisplay0	at isa?		# CGA, MDA, EGA, HGA
-wsdisplay*	at vga?
-wsdisplay*	at pcdisplay?
+wsdisplay0	at vga? console 1
+wsdisplay0	at pcdisplay? console 1
 wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
 
@@ -369,8 +375,10 @@ agp*		at viaagp?	# AGP bridges
 #option		DRMDEBUG
 inteldrm*	at vga?		# Intel i915, i945 DRM driver
 drm*		at inteldrm?
-radeondrm*	at vga? 	# ATI Radeon DRM driver
+radeondrm*	at pci? 	# ATI Radeon DRM driver
 drm*		at radeondrm?
+wsdisplay0	at radeondrm? console 1
+wsdisplay*	at radeondrm?
 
 #option		VESABIOSVERBOSE
 #option		VESAFB		# VESA bios framebuffer support for X11
@@ -382,7 +390,7 @@ pcppi0		at isa?
 com0	at isa? port 0x3f8 irq 4	# standard PC serial ports
 com1	at isa? port 0x2f8 irq 3
 com2	at isa? port 0x3e8 irq 5
-#com3	at isa? port 0x2e8 irq 9	# (conflicts with some video cards)
+com3	at isa? disable port 0x2e8 irq 9 # (conflicts with some video cards)
 #com4	at isa? port 0x220 irq 4	# Fujitsu Stylistic Touchscreen 
 ast0	at isa? port 0x1a0 irq 5	# AST 4-port serial card
 #ast1	at isa? port 0x2a0 irq 6	# 2nd AST 4-port serial card
@@ -439,6 +447,7 @@ twe*	at pci?			# 3ware Escalade RAID controllers
 #aac*	at pci?			# Adaptec FSA RAID controllers
 ami*	at pci?			# AMI MegaRAID controllers
 mfi*	at pci?			# LSI MegaRAID SAS controllers
+mfii*	at pci?			# LSI MegaRAID SAS Fusion controllers
 cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 cac*	at eisa?
 ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
@@ -461,6 +470,7 @@ uha1	at isa? disable port 0x334 # UltraStor [13]4f SCSI controllers
 uha*	at eisa?		# UltraStor 24f SCSI controllers
 wds0	at isa? disable port 0x350 irq 15 drq 6	# WD7000 and TMC-7000 controllers
 #wds1	at isa? port 0x358 irq 11 drq 5
+vmwpvs*	at pci?			# VMware ParaVirtual SCSI
 
 scsibus* at scsi?
 sd*	at scsibus?		# SCSI disk drives
@@ -514,11 +524,7 @@ lc1	at isa? port 0x280			# DEC EtherWorks
 le0	at isa? port 0x360 irq 15 drq 6		# IsoLan, NE2100, and DEPCA
 ex0	at isa? port 0x320 irq 5		# Intel EtherExpress PRO/10
 sm0	at isa? port 0x300 irq 10		# SMC 91cxx-based ethernet
-#tr0	at isa? port 0xa20 iomem 0xd8000	# IBM TROPIC based Token-Ring
-#tr1	at isa? port 0xa24 iomem 0xd0000	# IBM TROPIC based Token-Ring
-#tr*	at isa?				# 3COM TROPIC based Token-Ring
 ep*	at eisa?			# 3C579 ethernet
-fea*	at eisa?			# DEC DEFEA FDDI
 lmc*	at pci?				# Lan Media Corp SSI/T3/HSSI
 san*	at pci?				# Sangoma PCI AFT card
 le*	at isapnp?
@@ -532,7 +538,6 @@ ne*	at pcmcia?			# PCMCIA based NE2000 ethernet
 ep*	at pcmcia?			# PCMCIA based 3C5xx ethernet
 sm*	at pcmcia?			# PCMCIA based sm ethernet
 xe*	at pcmcia?			# Xircom ethernet
-fpa*	at pci?				# DEC DEFPA FDDI
 xl*	at pci?				# 3C9xx ethernet
 xl*	at cardbus?			# 3C575/3C656 ethernet
 rl*	at pci?				# RealTek 81[23]9 ethernet
@@ -558,6 +563,7 @@ gcu*	at pci?				# Intel Pro/1000 ethernet GCU
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
 ix*	at pci?				# Intel 82598EB 10Gb ethernet
 myx*	at pci?				# Myricom Myri-10G 10Gb ethernet
+oce*	at pci?				# Emulex OneConnect 10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 nge*	at pci?				# NS DP83820/DP83821 GigE
 bge*	at pci?				# Broadcom BCM57xx (aka Tigon3)
@@ -577,6 +583,7 @@ thtc*	at pci?				# Tehuti Networks 10Gb ethernet
 tht*	at thtc?
 gem*	at pci?				# Sun 'gem' ethernet
 vic*	at pci?				# VMware VMXnet virtual interface
+vmx*	at pci?				# VMware VMXNET3 virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
 alc*	at pci?				# Attansic L1C/L1D/L2C Ethernet
@@ -602,7 +609,6 @@ an*	at pci?				# Aironet IEEE 802.11DS
 an*	at isapnp?			# Aironet IEEE 802.11DS
 an*	at pcmcia?			# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?			# Xircom Netwave
-ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
 ipw*	at pci?				# Intel PRO/Wireless 2100
 iwi*	at pci?				# Intel PRO/Wireless 2200BG/2915ABG
 wpi*	at pci?				# Intel PRO/Wireless 3945ABG
@@ -756,11 +762,6 @@ ubsec*	at pci?			# Bluesteel Networks 5xxx crypto card
 safe*	at pci?			# SafeNet SafeXcel 1141/1741
 glxsb*	at pci?			# AMD Geode LX series processor security block
 
-# I2O
-iop*	at pci?			# I2O processor
-ioprbs*	at iop?			# I2O arrays
-iopsp*	at iop?			# I2O SCSI pass-through
-
 # GPIO ``pin bus'' drivers
 #gpioiic* at gpio? offset 0 mask 0x3	# I2C bus bit-banging
 gpioiic* at gpio?
@@ -779,10 +780,14 @@ owctr*	at onewire?		# Counter device
 pseudo-device	pctr		1
 pseudo-device	mtrr		1	# Memory range attributes control
 pseudo-device	nvram		1
-pseudo-device	sequencer	1
-#pseudo-device	raid		4	# RAIDframe disk driver
 pseudo-device	hotplug		1	# devices hot plugging
 
 # mouse & keyboard multiplexor pseudo-devices
 pseudo-device	wsmux		2
 pseudo-device	crypto		1
+
+# Virtio devices
+virtio*		at pci? 	# Virtio PCI device
+vioblk*		at virtio?	# Virtio block device
+vio*		at virtio?	# Virtio network device
+viomb*		at virtio?	# Virtio memory ballooning device

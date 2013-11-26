@@ -1,32 +1,29 @@
-#	$OpenBSD: Makefile,v 1.12 2008/04/02 21:53:17 miod Exp $
+#	$OpenBSD: Makefile,v 1.15 2013/05/12 10:43:45 miod Exp $
 
 S=${.CURDIR}/../../../..
 
 CFLAGS+=-I${.CURDIR}/../../include -I${.CURDIR}/../libbug -I${S}/lib/libsa
-STAGE1_CFLAGS=-DSTAGE1
-STAGE2_CFLAGS=-DSTAGE2
-NETBOOT_CFLAGS=-DNETBOOT
+STAGE1_CFLAGS=	-DLOAD_FROM_VID
+STAGE2_CFLAGS=	-DLOAD_FROM_BOOTXX
+NETBOOT_CFLAGS=	-DNETBOOT
+SREC_CFLAGS=	-DSREC
 SRCS=crt0.S
-OBJS=stage1crt.o stage2crt.o netcrt.o
-
-CLEANFILES+=stage1crt.out stage2crt.out netcrt.out ${OBJS}
+OBJS=stage1crt.o stage2crt.o netcrt.o sreccrt.o
+NOPIE=
 
 all:	${OBJS}
 
 stage1crt.o: crt0.S
 	${CC} ${CFLAGS} ${STAGE1_CFLAGS} -c ${.CURDIR}/crt0.S -o ${.TARGET}
-	${LD} -x -r ${.TARGET} -o ${.TARGET}ut
-	mv ${.TARGET}ut ${.TARGET}
 
 stage2crt.o: crt0.S
 	${CC} ${CFLAGS} ${STAGE2_CFLAGS} -c ${.CURDIR}/crt0.S -o ${.TARGET}
-	${LD} -x -r ${.TARGET} -o ${.TARGET}ut
-	mv ${.TARGET}ut ${.TARGET}
 
 netcrt.o: crt0.S
 	${CC} ${CFLAGS} ${NETBOOT_CFLAGS} -c ${.CURDIR}/crt0.S -o ${.TARGET}
-	${LD} -x -r ${.TARGET} -o ${.TARGET}ut
-	mv ${.TARGET}ut ${.TARGET}
+
+sreccrt.o: crt0.S
+	${CC} ${CFLAGS} ${SREC_CFLAGS} -c ${.CURDIR}/crt0.S -o ${.TARGET}
 
 install:
 

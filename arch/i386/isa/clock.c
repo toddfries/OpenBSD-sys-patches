@@ -1,4 +1,4 @@
-/*	$OpenBSD: clock.c,v 1.46 2011/07/05 17:11:07 oga Exp $	*/
+/*	$OpenBSD: clock.c,v 1.49 2013/05/06 00:15:11 dlg Exp $	*/
 /*	$NetBSD: clock.c,v 1.39 1996/05/12 23:11:54 mycroft Exp $	*/
 
 /*-
@@ -115,6 +115,7 @@ int	hexdectodec(int);
 int	dectohexdec(int);
 int	rtcintr(void *);
 void	rtcdrain(void *);
+int	calibrate_cyclecounter_ctr(void);
 
 u_int mc146818_read(void *, u_int);
 void mc146818_write(void *, u_int, u_int);
@@ -373,14 +374,58 @@ i8254_delay(int n)
 	}
 }
 
+int
+calibrate_cyclecounter_ctr(void)
+{
+	struct cpu_info *ci = curcpu();
+	unsigned long long count, last_count, msr;
+
+	if ((ci->ci_flags & CPUF_CONST_TSC) == 0 ||
+	    (cpu_perf_eax & CPUIDEAX_VERID) <= 1 ||
+	    CPUIDEDX_NUM_FC(cpu_perf_edx) <= 1)
+		return (-1);
+
+	msr = rdmsr(MSR_PERF_FIXED_CTR_CTRL);
+	if (msr & MSR_PERF_FIXED_CTR_FC(1, MSR_PERF_FIXED_CTR_FC_MASK)) {
+		/* some hypervisor is dicking us around */
+		return (-1);
+	}
+
+	msr |= MSR_PERF_FIXED_CTR_FC(1, MSR_PERF_FIXED_CTR_FC_1);
+	wrmsr(MSR_PERF_FIXED_CTR_CTRL, msr);
+
+	msr = rdmsr(MSR_PERF_GLOBAL_CTRL) | MSR_PERF_GLOBAL_CTR1_EN;
+	wrmsr(MSR_PERF_GLOBAL_CTRL, msr);
+
+	last_count = rdmsr(MSR_PERF_FIXED_CTR1);
+	delay(1000000);
+	count = rdmsr(MSR_PERF_FIXED_CTR1);
+
+	msr = rdmsr(MSR_PERF_FIXED_CTR_CTRL);
+	msr &= MSR_PERF_FIXED_CTR_FC(1, MSR_PERF_FIXED_CTR_FC_MASK);
+	wrmsr(MSR_PERF_FIXED_CTR_CTRL, msr);
+
+	msr = rdmsr(MSR_PERF_GLOBAL_CTRL);
+	msr &= ~MSR_PERF_GLOBAL_CTR1_EN;
+	wrmsr(MSR_PERF_GLOBAL_CTRL, msr);
+
+	cpuspeed = ((count - last_count) + 999999) / 1000000;
+
+	return (cpuspeed == 0 ? -1 : 0);
+}
+
 void
 calibrate_cyclecounter(void)
 {
 	unsigned long long count, last_count;
 
+	if (calibrate_cyclecounter_ctr() == 0)
+		return;
+
 	__asm __volatile("rdtsc" : "=A" (last_count));
 	delay(1000000);
 	__asm __volatile("rdtsc" : "=A" (count));
+
 	cpuspeed = ((count - last_count) + 999999) / 1000000;
 }
 
@@ -670,10 +715,14 @@ resettodr(void)
 void
 setstatclockrate(int arg)
 {
-	if (arg == stathz)
-		mc146818_write(NULL, MC_REGA, MC_BASE_32_KHz | MC_RATE_128_Hz);
-	else
-		mc146818_write(NULL, MC_REGA, MC_BASE_32_KHz | MC_RATE_1024_Hz);
+	if (initclock_func == i8254_initclocks) {
+		if (arg == stathz)
+			mc146818_write(NULL, MC_REGA,
+			    MC_BASE_32_KHz | MC_RATE_128_Hz);
+		else
+			mc146818_write(NULL, MC_REGA,
+			    MC_BASE_32_KHz | MC_RATE_1024_Hz);
+	}
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: etherfun.c,v 1.6 2003/08/19 10:22:30 deraadt Exp $ */
+/*	$OpenBSD: etherfun.c,v 1.9 2012/12/31 21:35:32 miod Exp $ */
 
 /*
  *
@@ -33,7 +33,7 @@
  */
 /* etherfun.c */
 
-#include <sys/cdefs.h>
+#include <sys/types.h>
 #include <stand.h>
 #include "sboot.h"
 #include "etherfun.h"
@@ -104,7 +104,7 @@ do_send_tftp(int mesgtype)
 
 	if (mesgtype == 0) {
 		tot = tftp_r + (sizeof(MSG) - 1);
-		myport = (u_short) ttime();
+		myport = (u_short)ttime();
 		if (myport < 1000)
 			myport += 1000;
 		servport = FTP_PORT;	/* to start */
@@ -156,7 +156,7 @@ int
 do_get_file(void)
 {
 	int     fail = 0, oldlen;
-	char   *loadat = (char *) LOAD_ADDR;
+	char   *loadat = (char *)STAGE2_RELOC;
 	last_ack = 0;
 
 	do_send_tftp(READ);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.h,v 1.55 2011/11/24 17:39:55 sperreault Exp $	*/
+/*	$OpenBSD: in6.h,v 1.69 2013/10/28 21:02:35 deraadt Exp $	*/
 /*	$KAME: in6.h,v 1.83 2001/03/29 02:55:07 jinmei Exp $	*/
 
 /*
@@ -74,41 +74,6 @@
  * has the table of implementation/integration differences.
  */
 #define __KAME__
-#define __KAME_VERSION		"OpenBSD-current"
-
-/*
- * Local port number conventions:
- *
- * Ports < IPPORT_RESERVED are reserved for privileged processes (e.g. root),
- * unless a kernel is compiled with IPNOPRIVPORTS defined.
- *
- * When a user does a bind(2) or connect(2) with a port number of zero,
- * a non-conflicting local port address is chosen.
- *
- * The default range is IPPORT_ANONMIN to IPPORT_ANONMAX, although
- * that is settable by sysctl(3); net.inet.ip.anonportmin and
- * net.inet.ip.anonportmax respectively.
- *
- * A user may set the IPPROTO_IP option IP_PORTRANGE to change this
- * default assignment range.
- *
- * The value IP_PORTRANGE_DEFAULT causes the default behavior.
- *
- * The value IP_PORTRANGE_HIGH is the same as IP_PORTRANGE_DEFAULT,
- * and exists only for FreeBSD compatibility purposes.
- *
- * The value IP_PORTRANGE_LOW changes the range to the "low" are
- * that is (by convention) restricted to privileged processes.
- * This convention is based on "vouchsafe" principles only.
- * It is only secure if you trust the remote host to restrict these ports.
- * The range is IPPORT_RESERVEDMIN to IPPORT_RESERVEDMAX.
- */
-
-#define	IPV6PORT_RESERVED	1024
-#define	IPV6PORT_ANONMIN	49152
-#define	IPV6PORT_ANONMAX	65535
-#define	IPV6PORT_RESERVEDMIN	600
-#define	IPV6PORT_RESERVEDMAX	(IPV6PORT_RESERVED-1)
 
 /*
  * IPv6 address
@@ -128,14 +93,16 @@ struct in6_addr {
 #define s6_addr32 __u6_addr.__u6_addr32
 #endif
 
+#ifndef INET6_ADDRSTRLEN
 #define INET6_ADDRSTRLEN	46
+#endif
 
 /*
  * Socket address for IPv6
  */
 #if __BSD_VISIBLE
-#define SIN6_LEN
-#endif
+#define SIN6_LEN	/* Indicates sockaddr_in6 has a sin6_len field */
+#endif /* __BSD_VISIBLE */
 struct sockaddr_in6 {
 	u_int8_t	sin6_len;	/* length of this struct(sa_family_t)*/
 	sa_family_t	sin6_family;	/* AF_INET6 (sa_family_t) */
@@ -144,6 +111,7 @@ struct sockaddr_in6 {
 	struct in6_addr	sin6_addr;	/* IP6 address */
 	u_int32_t	sin6_scope_id;	/* intface scope id */
 };
+
 
 /*
  * Local definition for masks
@@ -158,9 +126,7 @@ struct sockaddr_in6 {
 			    0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x00, 0x00 }}}
 #define IN6MASK128	{{{ 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, \
 			    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }}}
-#endif
 
-#ifdef _KERNEL
 extern const struct sockaddr_in6 sa6_any;
 
 extern const struct in6_addr in6mask0;
@@ -170,35 +136,25 @@ extern const struct in6_addr in6mask96;
 extern const struct in6_addr in6mask128;
 #endif /* _KERNEL */
 
+/* Both kernel and libc define these for use */
+extern const struct in6_addr in6addr_any;
+extern const struct in6_addr in6addr_loopback;
+extern const struct in6_addr in6addr_intfacelocal_allnodes;
+extern const struct in6_addr in6addr_linklocal_allnodes;
+
+#if __BSD_VISIBLE
 /*
- * Macros started with IPV6_ADDR is KAME local
+ * IPv6 route structure
  */
-#ifdef _KERNEL	/* XXX nonstandard */
-#if BYTE_ORDER == BIG_ENDIAN
-#define IPV6_ADDR_INT32_ONE	1
-#define IPV6_ADDR_INT32_TWO	2
-#define IPV6_ADDR_INT32_MNL	0xff010000
-#define IPV6_ADDR_INT32_MLL	0xff020000
-#define IPV6_ADDR_INT32_SMP	0x0000ffff
-#define IPV6_ADDR_INT16_ULL	0xfe80
-#define IPV6_ADDR_INT16_USL	0xfec0
-#define IPV6_ADDR_INT16_MLL	0xff02
-#elif BYTE_ORDER == LITTLE_ENDIAN
-#define IPV6_ADDR_INT32_ONE	0x01000000
-#define IPV6_ADDR_INT32_TWO	0x02000000
-#define IPV6_ADDR_INT32_MNL	0x000001ff
-#define IPV6_ADDR_INT32_MLL	0x000002ff
-#define IPV6_ADDR_INT32_SMP	0xffff0000
-#define IPV6_ADDR_INT16_ULL	0x80fe
-#define IPV6_ADDR_INT16_USL	0xc0fe
-#define IPV6_ADDR_INT16_MLL	0x02ff
-#endif
-#endif
+struct route_in6 {
+	struct	rtentry *ro_rt;
+	u_long		 ro_tableid;	/* padded to long for alignment */
+	struct	sockaddr_in6 ro_dst;
+};
 
 /*
  * Definition of some useful macros to handle IP6 addresses
  */
-#if __BSD_VISIBLE
 #define IN6ADDR_ANY_INIT \
 	{{{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \
 	    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }}}
@@ -217,30 +173,23 @@ extern const struct in6_addr in6mask128;
 #define IN6ADDR_LINKLOCAL_ALLROUTERS_INIT \
 	{{{ 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, \
 	    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02 }}}
-#endif
 
-extern const struct in6_addr in6addr_any;
-extern const struct in6_addr in6addr_loopback;
-#if __BSD_VISIBLE
-extern const struct in6_addr in6addr_intfacelocal_allnodes;
-extern const struct in6_addr in6addr_linklocal_allnodes;
-#endif
-
-/*
- * Equality
- * NOTE: Some of kernel programming environment (for example, OpenBSD/sparc)
- * does not supply memcmp().  For userland memcmp() is preferred as it is
- * in ANSI standard.
- */
-#ifdef _KERNEL
-#define IN6_ARE_ADDR_EQUAL(a, b)			\
-    (bcmp(&(a)->s6_addr[0], &(b)->s6_addr[0], sizeof(struct in6_addr)) == 0)
-#else
-#if __BSD_VISIBLE
 #define IN6_ARE_ADDR_EQUAL(a, b)			\
     (memcmp(&(a)->s6_addr[0], &(b)->s6_addr[0], sizeof(struct in6_addr)) == 0)
-#endif
-#endif
+
+#endif /* __BSD_VISIBLE */
+
+/*
+ * Macros started with IPV6_ADDR is KAME local
+ */
+#define __IPV6_ADDR_INT32_ONE	htonl(1)
+#define __IPV6_ADDR_INT32_TWO	htonl(2)
+#define __IPV6_ADDR_INT32_MNL	htonl(0xff010000)
+#define __IPV6_ADDR_INT32_MLL	htonl(0xff020000)
+#define __IPV6_ADDR_INT32_SMP	htonl(0x0000ffff)
+#define __IPV6_ADDR_INT16_ULL	htons(0xfe80)
+#define __IPV6_ADDR_INT16_USL	htons(0xfec0)
+#define __IPV6_ADDR_INT16_MLL	htons(0xff02)
 
 /*
  * Unspecified
@@ -258,7 +207,7 @@ extern const struct in6_addr in6addr_linklocal_allnodes;
 	((*(const u_int32_t *)(const void *)(&(a)->s6_addr[0]) == 0) &&	\
 	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[4]) == 0) &&	\
 	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[8]) == 0) &&	\
-	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[12]) == ntohl(1)))
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[12]) == __IPV6_ADDR_INT32_ONE))
 
 /*
  * IPv4 compatible
@@ -268,7 +217,7 @@ extern const struct in6_addr in6addr_linklocal_allnodes;
 	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[4]) == 0) &&	\
 	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[8]) == 0) &&	\
 	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[12]) != 0) &&	\
-	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[12]) != ntohl(1)))
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[12]) != __IPV6_ADDR_INT32_ONE))
 
 /*
  * Mapped
@@ -276,27 +225,7 @@ extern const struct in6_addr in6addr_linklocal_allnodes;
 #define IN6_IS_ADDR_V4MAPPED(a)		      \
 	((*(const u_int32_t *)(const void *)(&(a)->s6_addr[0]) == 0) &&	\
 	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[4]) == 0) &&	\
-	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[8]) == ntohl(0x0000ffff)))
-
-/*
- * KAME Scope Values
- */
-
-#ifdef _KERNEL	/* XXX nonstandard */
-#define IPV6_ADDR_SCOPE_NODELOCAL	0x01
-#define IPV6_ADDR_SCOPE_INTFACELOCAL	0x01
-#define IPV6_ADDR_SCOPE_LINKLOCAL	0x02
-#define IPV6_ADDR_SCOPE_SITELOCAL	0x05
-#define IPV6_ADDR_SCOPE_ORGLOCAL	0x08	/* just used in this file */
-#define IPV6_ADDR_SCOPE_GLOBAL		0x0e
-#else
-#define __IPV6_ADDR_SCOPE_NODELOCAL	0x01
-#define __IPV6_ADDR_SCOPE_INTFACELOCAL	0x01
-#define __IPV6_ADDR_SCOPE_LINKLOCAL	0x02
-#define __IPV6_ADDR_SCOPE_SITELOCAL	0x05
-#define __IPV6_ADDR_SCOPE_ORGLOCAL	0x08	/* just used in this file */
-#define __IPV6_ADDR_SCOPE_GLOBAL	0x0e
-#endif
+	 (*(const u_int32_t *)(const void *)(&(a)->s6_addr[8]) == __IPV6_ADDR_INT32_SMP))
 
 /*
  * Unicast Scope
@@ -310,37 +239,16 @@ extern const struct in6_addr in6addr_linklocal_allnodes;
 /*
  * Multicast
  */
+#define __IPV6_ADDR_MC_SCOPE(a)		((a)->s6_addr[1] & 0x0f)
 #define IN6_IS_ADDR_MULTICAST(a)	((a)->s6_addr[0] == 0xff)
 
-#ifdef _KERNEL	/* XXX nonstandard */
-#define IPV6_ADDR_MC_SCOPE(a)		((a)->s6_addr[1] & 0x0f)
-#else
-#define __IPV6_ADDR_MC_SCOPE(a)		((a)->s6_addr[1] & 0x0f)
-#endif
+#define __IPV6_ADDR_SCOPE_NODELOCAL	0x01
+#define __IPV6_ADDR_SCOPE_INTFACELOCAL	0x01
+#define __IPV6_ADDR_SCOPE_LINKLOCAL	0x02
+#define __IPV6_ADDR_SCOPE_SITELOCAL	0x05
+#define __IPV6_ADDR_SCOPE_ORGLOCAL	0x08	/* just used in this file */
+#define __IPV6_ADDR_SCOPE_GLOBAL	0x0e
 
-/*
- * Multicast Scope
- */
-#ifdef _KERNEL	/* refers nonstandard items */
-#define IN6_IS_ADDR_MC_NODELOCAL(a)	\
-	(IN6_IS_ADDR_MULTICAST(a) &&	\
-	 (IPV6_ADDR_MC_SCOPE(a) == IPV6_ADDR_SCOPE_NODELOCAL))
-#define IN6_IS_ADDR_MC_INTFACELOCAL(a)	\
-	(IN6_IS_ADDR_MULTICAST(a) &&	\
-	 (IPV6_ADDR_MC_SCOPE(a) == IPV6_ADDR_SCOPE_INTFACELOCAL))
-#define IN6_IS_ADDR_MC_LINKLOCAL(a)	\
-	(IN6_IS_ADDR_MULTICAST(a) &&	\
-	 (IPV6_ADDR_MC_SCOPE(a) == IPV6_ADDR_SCOPE_LINKLOCAL))
-#define IN6_IS_ADDR_MC_SITELOCAL(a)	\
-	(IN6_IS_ADDR_MULTICAST(a) && 	\
-	 (IPV6_ADDR_MC_SCOPE(a) == IPV6_ADDR_SCOPE_SITELOCAL))
-#define IN6_IS_ADDR_MC_ORGLOCAL(a)	\
-	(IN6_IS_ADDR_MULTICAST(a) &&	\
-	 (IPV6_ADDR_MC_SCOPE(a) == IPV6_ADDR_SCOPE_ORGLOCAL))
-#define IN6_IS_ADDR_MC_GLOBAL(a)	\
-	(IN6_IS_ADDR_MULTICAST(a) &&	\
-	 (IPV6_ADDR_MC_SCOPE(a) == IPV6_ADDR_SCOPE_GLOBAL))
-#else
 #define IN6_IS_ADDR_MC_NODELOCAL(a)	\
 	(IN6_IS_ADDR_MULTICAST(a) &&	\
 	 (__IPV6_ADDR_MC_SCOPE(a) == __IPV6_ADDR_SCOPE_NODELOCAL))
@@ -359,12 +267,8 @@ extern const struct in6_addr in6addr_linklocal_allnodes;
 #define IN6_IS_ADDR_MC_GLOBAL(a)	\
 	(IN6_IS_ADDR_MULTICAST(a) &&	\
 	 (__IPV6_ADDR_MC_SCOPE(a) == __IPV6_ADDR_SCOPE_GLOBAL))
-#endif
 
-#ifdef _KERNEL	/* nonstandard */
-/*
- * KAME Scope
- */
+#ifdef _KERNEL
 #define IN6_IS_SCOPE_LINKLOCAL(a)	\
 	((IN6_IS_ADDR_LINKLOCAL(a)) ||	\
 	 (IN6_IS_ADDR_MC_LINKLOCAL(a)))
@@ -381,40 +285,23 @@ extern const struct in6_addr in6addr_linklocal_allnodes;
 	((a)->ia6_lifetime.ia6t_vltime != ND6_INFINITE_LIFETIME && \
 	 (u_int32_t)((time_second - (a)->ia6_updatetime)) > \
 	 (a)->ia6_lifetime.ia6t_vltime)
-#endif
 
-/*
- * IP6 route structure
- */
-#if __BSD_VISIBLE
-struct route_in6 {
-	struct	rtentry *ro_rt;
-	u_long		 ro_tableid;	/* padded to long for alignment */
-	struct	sockaddr_in6 ro_dst;
-};
-#endif
+#endif /* _KERNEL */
 
 /*
  * Options for use with [gs]etsockopt at the IPV6 level.
  * First word of comment is data type; bool is stored in int.
  */
-#define IPV6_OPTIONS		1  /* buf/ip6_opts; set/get IP6 options */
-/* no hdrincl */
-#define IPV6_SOCKOPT_RESERVED1	3  /* reserved for future use */
 #define IPV6_UNICAST_HOPS	4  /* int; IP6 hops */
-#if 0 /* the followings are relic in IPv4 and hence are disabled */
-#define IPV6_RECVOPTS		5  /* bool; receive all IP6 opts w/dgram */
-#define IPV6_RECVRETOPTS	6  /* bool; receive IP6 opts for response */
-#define IPV6_RECVDSTADDR	7  /* bool; receive IP6 dst addr w/dgram */
-#define IPV6_RETOPTS		8  /* ip6_opts; set/get IP6 options */
-#endif
 #define IPV6_MULTICAST_IF	9  /* u_char; set/get IP6 multicast i/f */
 #define IPV6_MULTICAST_HOPS	10 /* u_char; set/get IP6 multicast hops */
 #define IPV6_MULTICAST_LOOP	11 /* u_char; set/get IP6 multicast loopback */
 #define IPV6_JOIN_GROUP		12 /* ip6_mreq; join a group membership */
 #define IPV6_LEAVE_GROUP	13 /* ip6_mreq; leave a group membership */
 #define IPV6_PORTRANGE		14 /* int; range to choose for unspec port */
+#if __BSD_VISIBLE
 #define ICMP6_FILTER		18 /* icmp6_filter; icmp6 filter */
+#endif
 
 /* RFC2292 options */
 #ifdef _KERNEL
@@ -429,13 +316,6 @@ struct route_in6 {
 
 #define IPV6_CHECKSUM		26 /* int; checksum offset for raw socket */
 #define IPV6_V6ONLY		27 /* bool; make AF_INET6 sockets v6 only */
-
-#if 0 /*KAME IPSEC*/
-#define IPV6_IPSEC_POLICY	28 /* struct; get/set security policy */
-#endif
-#define IPV6_FAITH		29 /* bool; accept FAITH'ed connections */
-
-/* 30-34: reserved */
 
 /* new socket options introduced in RFC3542 */
 #define IPV6_RTHDRDSTOPTS	35 /* ip6_dest; send dst option before rthdr */
@@ -455,9 +335,7 @@ struct route_in6 {
 #define IPV6_PATHMTU		44 /* mtuinfo; get the current path MTU (sopt),
 				      4 bytes int; MTU notification (cmsg) */
 
-/* 45: reserved */
-
-/* more new socket options introduced in RFC3542 */
+/* More new socket options introduced in RFC3542 */
 #define IPV6_PKTINFO		46 /* in6_pktinfo; send if, src addr */
 #define IPV6_HOPLIMIT		47 /* int; send hop limit */
 #define IPV6_NEXTHOP		48 /* sockaddr; next hop addr */
@@ -465,13 +343,14 @@ struct route_in6 {
 #define IPV6_DSTOPTS		50 /* ip6_dest; send dst option befor rthdr */
 #define IPV6_RTHDR		51 /* ip6_rthdr; send routing header */
 
-/* 52: reserved */
 #define IPV6_AUTH_LEVEL		53   /* int; authentication used */
 #define IPV6_ESP_TRANS_LEVEL	54   /* int; transport encryption */
 #define IPV6_ESP_NETWORK_LEVEL	55   /* int; full-packet encryption */
+#if __BSD_VISIBLE
 #define IPSEC6_OUTSA		56   /* set the outbound SA for a socket */
+#endif
 #define IPV6_RECVTCLASS		57   /* bool; recv traffic class values */
-/* 58: reserved */
+
 #define IPV6_AUTOFLOWLABEL	59   /* bool; attach flowlabel automagically */
 #define IPV6_IPCOMP_LEVEL	60   /* int; compression */
 
@@ -479,13 +358,13 @@ struct route_in6 {
 #define IPV6_DONTFRAG		62   /* bool; disable IPv6 fragmentation */
 #define IPV6_PIPEX		63   /* bool; using PIPEX */
 
+#define IPV6_RECVDSTPORT	64   /* bool; receive IP dst port w/dgram */
+
 #define IPV6_RTABLE		0x1021	/* int; routing table, see SO_RTABLE */
 
 /* to define items, should talk with KAME guys first, for *BSD compatibility */
-
-#define IPV6_RTHDR_LOOSE     0 /* this hop need not be a neighbor. XXX old spec */
-#define IPV6_RTHDR_STRICT    1 /* this hop must be a neighbor. XXX old spec */
-#define IPV6_RTHDR_TYPE_0    0 /* IPv6 routing header type 0 */
+#define IPV6_RTHDR_LOOSE	0	/* this hop need not be a neighbor */
+#define IPV6_RTHDR_TYPE_0	0	/* IPv6 routing header type 0 */
 
 /*
  * Defaults and limits for options
@@ -511,6 +390,8 @@ struct in6_pktinfo {
 
 /*
  * Control structure for IPV6_RECVPATHMTU socket option.
+ * XXX Not allowed here by POSIX, but required by RFC 3542, so go
+ * XXX with the code on the pavement.
  */
 struct ip6_mtuinfo {
 	struct sockaddr_in6 ip6m_addr;	/* or sockaddr_storage? */
@@ -524,6 +405,74 @@ struct ip6_mtuinfo {
 #define	IPV6_PORTRANGE_DEFAULT	0	/* default range */
 #define	IPV6_PORTRANGE_HIGH	1	/* "high" - request firewall bypass */
 #define	IPV6_PORTRANGE_LOW	2	/* "low" - vouchsafe security */
+
+#ifdef __BSD_VISIBLE
+
+#ifndef	_SOCKLEN_T_DEFINED_
+#define	_SOCKLEN_T_DEFINED_
+typedef	__socklen_t	socklen_t;	/* length type for network syscalls */
+#endif
+
+#endif /* __BSD_VISIBLE */
+
+#ifdef _KERNEL
+
+extern	u_char inet6ctlerrmap[];
+extern	struct ifqueue ip6intrq;	/* IP6 packet input queue */
+extern	struct in6_addr zeroin6_addr;
+extern	unsigned long in6_maxmtu;
+
+struct cmsghdr;
+
+int	in6_cksum(struct mbuf *, u_int8_t, u_int32_t, u_int32_t);
+void	in6_proto_cksum_out(struct mbuf *, struct ifnet *);
+int	in6_localaddr(struct in6_addr *);
+int	in6_addrscope(struct in6_addr *);
+struct	in6_ifaddr *in6_ifawithscope(struct ifnet *, struct in6_addr *, u_int);
+void	in6_if_up(struct ifnet *);
+void 	in6_get_rand_ifid(struct ifnet *, struct in6_addr *);
+int	in6_mask2len(struct in6_addr *, u_char *);
+
+char	*ip6_sprintf(struct in6_addr *);
+
+struct inpcb;
+
+int	in6_embedscope(struct in6_addr *, const struct sockaddr_in6 *,
+	    struct inpcb *, struct ifnet **);
+int	in6_recoverscope(struct sockaddr_in6 *, const struct in6_addr *,
+	    struct ifnet *);
+void	in6_clearscope(struct in6_addr *);
+
+struct sockaddr;
+struct sockaddr_in6;
+struct ifaddr;
+struct in6_ifaddr;
+
+/*
+ * Convert between address family specific and general structs.
+ * Inline functions check the source type and are stricter than
+ * casts or defines.
+ */
+
+static __inline struct sockaddr_in6 *
+satosin6(struct sockaddr *sa)
+{
+	return ((struct sockaddr_in6 *)(sa));
+}
+
+static __inline struct sockaddr *
+sin6tosa(struct sockaddr_in6 *sin6)
+{
+	return ((struct sockaddr *)(sin6));
+}
+
+static __inline struct in6_ifaddr *
+ifatoia6(struct ifaddr *ifa)
+{
+	return ((struct in6_ifaddr *)(ifa));
+}
+
+#endif /* _KERNEL */
 
 #if __BSD_VISIBLE
 /*
@@ -630,9 +579,6 @@ struct ip6_mtuinfo {
 #define IPV6CTL_FORWARDING	1	/* act as router */
 #define IPV6CTL_SENDREDIRECTS	2	/* may send redirects when forwarding*/
 #define IPV6CTL_DEFHLIM		3	/* default Hop-Limit */
-#ifdef notyet
-#define IPV6CTL_DEFMTU		4	/* default MTU */
-#endif
 #define IPV6CTL_FORWSRCRT	5	/* forward source-routed dgrams */
 #define IPV6CTL_STATS		6	/* stats */
 #define IPV6CTL_MRTSTATS	7	/* multicast forwarding stats */
@@ -641,19 +587,13 @@ struct ip6_mtuinfo {
 #define IPV6CTL_SOURCECHECK	10	/* verify source route and intf */
 #define IPV6CTL_SOURCECHECK_LOGINT 11	/* minimume logging interval */
 #define IPV6CTL_ACCEPT_RTADV	12
-#define IPV6CTL_KEEPFAITH	13
 #define IPV6CTL_LOG_INTERVAL	14
 #define IPV6CTL_HDRNESTLIMIT	15
 #define IPV6CTL_DAD_COUNT	16
 #define IPV6CTL_AUTO_FLOWLABEL	17
 #define IPV6CTL_DEFMCASTHLIM	18
-#ifdef notdef	/* obsolete */
-#define IPV6CTL_GIF_HLIM	19	/* default HLIM for gif encap packet */
-#endif
-#define IPV6CTL_KAME_VERSION	20
 #define IPV6CTL_USE_DEPRECATED	21	/* use deprecated addr (RFC2462 5.5.4) */
 #define IPV6CTL_RR_PRUNE	22	/* walk timer for router renumbering */
-/*#define IPV6CTL_MAPPED_ADDR	23	not for OpenBSD */
 #define IPV6CTL_V6ONLY		24
 /* 25 to 40: resrved */
 #define IPV6CTL_MAXFRAGS	41	/* max fragments */
@@ -665,7 +605,8 @@ struct ip6_mtuinfo {
 #define IPV6CTL_MAXIFDEFROUTERS 47
 #define IPV6CTL_MAXDYNROUTES	48
 #define IPV6CTL_DAD_PENDING	49
-#define IPV6CTL_MAXID		50
+#define IPV6CTL_MTUDISCTIMEOUT	50
+#define IPV6CTL_MAXID		51
 
 /* New entries should be added here from current IPV6CTL_MAXID value. */
 /* to define items, should talk with KAME guys first, for *BSD compatibility */
@@ -675,7 +616,7 @@ struct ip6_mtuinfo {
 	{ "forwarding", CTLTYPE_INT }, \
 	{ "redirect", CTLTYPE_INT }, \
 	{ "hlim", CTLTYPE_INT }, \
-	{ "mtu", CTLTYPE_INT }, \
+	{ 0, 0 }, \
 	{ "forwsrcrt", CTLTYPE_INT }, \
 	{ 0, 0 }, \
 	{ 0, 0 }, \
@@ -684,14 +625,14 @@ struct ip6_mtuinfo {
 	{ "sourcecheck", CTLTYPE_INT }, \
 	{ "sourcecheck_logint", CTLTYPE_INT }, \
 	{ "accept_rtadv", CTLTYPE_INT }, \
-	{ "keepfaith", CTLTYPE_INT }, \
+	{ 0, 0 }, \
 	{ "log_interval", CTLTYPE_INT }, \
 	{ "hdrnestlimit", CTLTYPE_INT }, \
 	{ "dad_count", CTLTYPE_INT }, \
 	{ "auto_flowlabel", CTLTYPE_INT }, \
 	{ "defmcasthlim", CTLTYPE_INT }, \
 	{ 0, 0 }, \
-	{ "kame_version", CTLTYPE_STRING }, \
+	{ 0, 0 }, \
 	{ "use_deprecated", CTLTYPE_INT }, \
 	{ "rr_prune", CTLTYPE_INT }, \
 	{ 0, 0 }, \
@@ -721,6 +662,7 @@ struct ip6_mtuinfo {
 	{ "maxifdefrouters", CTLTYPE_INT }, \
 	{ "maxdynroutes", CTLTYPE_INT }, \
 	{ "dad_pending", CTLTYPE_INT }, \
+	{ "mtudisctimeout", CTLTYPE_INT }, \
 }
 
 #define IPV6CTL_VARS { \
@@ -737,7 +679,7 @@ struct ip6_mtuinfo {
 	NULL, \
 	NULL, \
 	&ip6_accept_rtadv, \
-	&ip6_keepfaith, \
+	NULL, \
 	&ip6_log_interval, \
 	&ip6_hdrnestlimit, \
 	&ip6_dad_count, \
@@ -774,25 +716,8 @@ struct ip6_mtuinfo {
 	&ip6_maxifdefrouters, \
 	&ip6_maxdynroutes, \
 	NULL, \
+	NULL, \
 }
-
-#endif /* __BSD_VISIBLE */
-
-#ifdef _KERNEL
-struct cmsghdr;
-
-int	in6_cksum(struct mbuf *, u_int8_t, u_int32_t, u_int32_t);
-int	in6_localaddr(struct in6_addr *);
-int	in6_addrscope(struct in6_addr *);
-struct	in6_ifaddr *in6_ifawithscope(struct ifnet *, struct in6_addr *, u_int);
-extern void in6_if_up(struct ifnet *);
-void 	in6_get_rand_ifid(struct ifnet *, struct in6_addr *);
-int	in6_mask2len(struct in6_addr *, u_char *);
-
-#define	satosin6(sa)	((struct sockaddr_in6 *)(sa))
-#define	sin6tosa(sin6)	((struct sockaddr *)(sin6))
-#define	ifatoia6(ifa)	((struct in6_ifaddr *)(ifa))
-#endif /* _KERNEL */
 
 __BEGIN_DECLS
 struct cmsghdr;
@@ -810,9 +735,6 @@ extern struct cmsghdr *inet6_rthdr_init(void *, int);
 extern int inet6_rthdr_add(struct cmsghdr *, const struct in6_addr *,
 		unsigned int);
 extern int inet6_rthdr_lasthop(struct cmsghdr *, unsigned int);
-#if 0 /* not implemented yet */
-extern int inet6_rthdr_reverse(const struct cmsghdr *, struct cmsghdr *);
-#endif
 extern int inet6_rthdr_segments(const struct cmsghdr *);
 extern struct in6_addr *inet6_rthdr_getaddr(struct cmsghdr *, int);
 extern int inet6_rthdr_getflags(const struct cmsghdr *, int);
@@ -836,5 +758,6 @@ extern int inet6_rth_reverse(const void *, void *);
 extern int inet6_rth_segments(const void *);
 extern struct in6_addr *inet6_rth_getaddr(const void *, int);
 __END_DECLS
+#endif /* __BSD_VISIBLE */
 
 #endif /* !_NETINET6_IN6_H_ */

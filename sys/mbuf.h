@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.156 2012/01/14 12:11:35 haesbaert Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.169 2013/11/15 16:15:42 bluhm Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -32,6 +32,9 @@
  *	@(#)mbuf.h	8.5 (Berkeley) 2/19/95
  */
 
+#ifndef _SYS_MBUF_H_
+#define _SYS_MBUF_H_
+
 #include <sys/malloc.h>
 #include <sys/pool.h>
 #include <sys/queue.h>
@@ -47,9 +50,9 @@
 #define	MLEN		(MSIZE - sizeof(struct m_hdr))	/* normal data len */
 #define	MHLEN		(MLEN - sizeof(struct pkthdr))	/* data len w/pkthdr */
 
-/* smallest amount to put in cluster */
-#define	MINCLSIZE	(MHLEN + MLEN + 1)
-#define	M_MAXCOMPRESS	(MHLEN / 2)	/* max amount to copy for compression */
+#define	MAXMCLBYTES	(64 * 1024)		/* largest cluster from the stack */
+#define	MINCLSIZE	(MHLEN + MLEN + 1)	/* smallest amount to put in cluster */
+#define	M_MAXCOMPRESS	(MHLEN / 2)		/* max amount to copy for compression */
 
 /* Packet tags structure */
 struct m_tag {
@@ -75,9 +78,13 @@ struct m_hdr {
 };
 
 /* pf stuff */
+struct pf_state_key;
+struct inpcb;
+
 struct pkthdr_pf {
 	void		*hdr;		/* saved hdr pos in mbuf, for ECN */
-	void		*statekey;	/* pf stackside statekey */
+	struct pf_state_key *statekey;	/* pf stackside statekey */
+	struct inpcb	*inp;		/* connected pcb for outgoing packet */
 	u_int32_t	 qid;		/* queue id */
 	u_int16_t	 tag;		/* tag id */
 	u_int8_t	 flags;
@@ -93,6 +100,7 @@ struct pkthdr_pf {
 #define	PF_TAG_DIVERTED_PACKET		0x10
 #define	PF_TAG_REROUTE			0x20
 #define	PF_TAG_REFRAGMENTED		0x40	/* refragmented ipv6 packet */
+#define	PF_TAG_PROCESSED		0x80	/* packet was checked by pf */
 
 /* record/packet header in first mbuf of chain; valid if M_PKTHDR set */
 struct	pkthdr {
@@ -168,24 +176,25 @@ struct mbuf {
 #define M_CONF		0x0400  /* payload was encrypted (ESP-transport) */
 #define M_AUTH		0x0800  /* payload was authenticated (AH or ESP auth) */
 #define M_TUNNEL	0x1000  /* IP-in-IP added by tunnel mode IPsec */
-#define M_AUTH_AH	0x2000  /* header was authenticated (AH) */
+#define M_ZEROIZE	0x2000  /* Zeroize data part on free */
 #define M_COMP		0x4000  /* header was decompressed */
 #define M_LINK0		0x8000	/* link layer specific flag */
 
 /* flags copied when copying m_pkthdr */
 #define	M_COPYFLAGS	(M_PKTHDR|M_EOR|M_PROTO1|M_BCAST|M_MCAST|M_CONF|M_COMP|\
-			 M_AUTH|M_LOOP|M_TUNNEL|M_LINK0|M_VLANTAG|M_FILDROP)
+			 M_AUTH|M_LOOP|M_TUNNEL|M_LINK0|M_VLANTAG|M_FILDROP|\
+			 M_ZEROIZE)
 
 /* Checksumming flags */
 #define	M_IPV4_CSUM_OUT		0x0001	/* IPv4 checksum needed */
-#define M_TCP_CSUM_OUT		0x0002	/* TCP checksum needed */
+#define	M_TCP_CSUM_OUT		0x0002	/* TCP checksum needed */
 #define	M_UDP_CSUM_OUT		0x0004	/* UDP checksum needed */
 #define	M_IPV4_CSUM_IN_OK	0x0008	/* IPv4 checksum verified */
 #define	M_IPV4_CSUM_IN_BAD	0x0010	/* IPv4 checksum bad */
-#define	M_TCP_CSUM_IN_OK	0x0020	/* TCP/IPv4 checksum verified */
-#define	M_TCP_CSUM_IN_BAD	0x0040	/* TCP/IPv4 checksum bad */
-#define	M_UDP_CSUM_IN_OK	0x0080	/* UDP/IPv4 checksum verified */
-#define	M_UDP_CSUM_IN_BAD	0x0100	/* UDP/IPv4 checksum bad */
+#define	M_TCP_CSUM_IN_OK	0x0020	/* TCP checksum verified */
+#define	M_TCP_CSUM_IN_BAD	0x0040	/* TCP checksum bad */
+#define	M_UDP_CSUM_IN_OK	0x0080	/* UDP checksum verified */
+#define	M_UDP_CSUM_IN_BAD	0x0100	/* UDP checksum bad */
 #define	M_ICMP_CSUM_OUT		0x0200	/* ICMP checksum needed */
 #define	M_ICMP_CSUM_IN_OK	0x0400	/* ICMP checksum verified */
 #define	M_ICMP_CSUM_IN_BAD	0x0800	/* ICMP checksum bad */
@@ -415,9 +424,7 @@ void	m_freem(struct mbuf *);
 void	m_reclaim(void *, int);
 void	m_copydata(struct mbuf *, int, int, caddr_t);
 void	m_cat(struct mbuf *, struct mbuf *);
-struct mbuf *m_devget(char *, int, int, struct ifnet *,
-	    void (*)(const void *, void *, size_t));
-void	m_zero(struct mbuf *);
+struct mbuf *m_devget(char *, int, int, struct ifnet *);
 int	m_apply(struct mbuf *, int, int,
 	    int (*)(caddr_t, caddr_t, unsigned int), caddr_t);
 int	m_dup_pkthdr(struct mbuf *, struct mbuf *, int);
@@ -445,7 +452,18 @@ struct m_tag *m_tag_next(struct mbuf *, struct m_tag *);
 #define PACKET_TAG_GRE			0x0080  /* GRE processing done */
 #define PACKET_TAG_DLT			0x0100 /* data link layer type */
 #define PACKET_TAG_PF_DIVERT		0x0200 /* pf(4) diverted packet */
-#define PACKET_TAG_PIPEX		0x0400 /* pipex context XXX */
+#define PACKET_TAG_PIPEX		0x0400 /* pipex session cache */
 #define PACKET_TAG_PF_REASSEMBLED	0x0800 /* pf reassembled ipv6 packet */
+#define PACKET_TAG_SRCROUTE		0x1000 /* IPv4 source routing options */
+#define PACKET_TAG_TUNNEL		0x2000	/* Tunnel endpoint address */
 
-#endif
+/*
+ * Maximum tag payload length (that is excluding the m_tag structure).
+ * Please make sure to update this value when increasing the payload
+ * length for an existing packet tag type or when adding a new one that
+ * has payload larger than the value below.
+ */
+#define PACKET_TAG_MAXSIZE		52
+
+#endif /* _KERNEL */
+#endif /* _SYS_MBUF_H_ */

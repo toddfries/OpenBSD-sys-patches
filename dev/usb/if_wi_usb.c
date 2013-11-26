@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wi_usb.c,v 1.55 2011/12/03 03:34:40 krw Exp $ */
+/*	$OpenBSD: if_wi_usb.c,v 1.60 2013/11/15 10:17:39 pirofti Exp $ */
 
 /*
  * Copyright (c) 2003 Dale Rahn. All rights reserved.
@@ -35,7 +35,6 @@
 #include <sys/mbuf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/device.h>
 #include <sys/timeout.h>
@@ -50,7 +49,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -81,13 +79,13 @@
 
 int wi_usb_do_transmit_sync(struct wi_usb_softc *wsc, struct wi_usb_chain *c, 
     void *ident);
-void wi_usb_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
+void wi_usb_txeof(struct usbd_xfer *xfer, void *priv,
     usbd_status status);
-void wi_usb_txeof_frm(usbd_xfer_handle xfer, usbd_private_handle priv,
+void wi_usb_txeof_frm(struct usbd_xfer *xfer, void *priv,
     usbd_status status);
-void wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
+void wi_usb_rxeof(struct usbd_xfer *xfer, void *priv,
     usbd_status status);
-void wi_usb_intr(usbd_xfer_handle xfer, usbd_private_handle priv,
+void wi_usb_intr(struct usbd_xfer *xfer, void *priv,
     usbd_status status);
 void wi_usb_stop(struct wi_usb_softc *usc);
 int wi_usb_tx_list_init(struct wi_usb_softc *usc);
@@ -140,18 +138,17 @@ struct wi_usb_softc {
 
 	struct timeout		wi_usb_stat_ch;
 
-	usbd_device_handle	wi_usb_udev;
-	usbd_interface_handle	wi_usb_iface;
+	struct usbd_device	*wi_usb_udev;
+	struct usbd_interface	*wi_usb_iface;
 	u_int16_t		wi_usb_vendor;
 	u_int16_t		wi_usb_product;
 	int			wi_usb_ed[WI_USB_ENDPT_MAX];
-	usbd_pipe_handle	wi_usb_ep[WI_USB_ENDPT_MAX];
+	struct usbd_pipe	*wi_usb_ep[WI_USB_ENDPT_MAX];
 
 	struct wi_usb_chain	wi_usb_tx_chain[WI_USB_TX_LIST_CNT];
 	struct wi_usb_chain	wi_usb_rx_chain[WI_USB_RX_LIST_CNT];
 
 	int			wi_usb_refcnt;
-	char			wi_usb_dying;
 	char			wi_usb_attached;
 	int			wi_usb_intr_errs;
 	struct timeval		wi_usb_rx_notice;
@@ -303,8 +300,8 @@ wi_usb_attach(struct device *parent, struct device *self, void *aux)
 	struct wi_usb_softc	*sc = (struct wi_usb_softc *)self;
 	struct usb_attach_arg	*uaa = aux;
 /*	int			s; */
-	usbd_device_handle	dev = uaa->device;
-	usbd_interface_handle	iface;
+	struct usbd_device	*dev = uaa->device;
+	struct usbd_interface	*iface;
 	usbd_status		err;
 	usb_interface_descriptor_t	*id;
 	usb_endpoint_descriptor_t	*ed;
@@ -445,11 +442,7 @@ wi_usb_detach(struct device *self, int flags)
 	}
 
 	if (sc->wi_usb_ep[WI_USB_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_INTR]);
-		if (err) {
-			printf("%s: abort intr pipe failed: %s\n",
-			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->wi_usb_ep[WI_USB_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",
@@ -458,11 +451,7 @@ wi_usb_detach(struct device *self, int flags)
 		sc->wi_usb_ep[WI_USB_ENDPT_INTR] = NULL;
 	}
 	if (sc->wi_usb_ep[WI_USB_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_TX]);
-		if (err) {
-			printf("%s: abort tx pipe failed: %s\n",
-			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 		err = usbd_close_pipe(sc->wi_usb_ep[WI_USB_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
@@ -471,11 +460,7 @@ wi_usb_detach(struct device *self, int flags)
 		sc->wi_usb_ep[WI_USB_ENDPT_TX] = NULL;
 	}
 	if (sc->wi_usb_ep[WI_USB_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_RX]);
-		if (err) {
-			printf("%s: abort rx pipe failed: %s\n",
-			    sc->wi_usb_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 		err = usbd_close_pipe(sc->wi_usb_ep[WI_USB_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
@@ -1090,7 +1075,7 @@ done:
  */
 
 void
-wi_usb_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
+wi_usb_txeof(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct wi_usb_chain	*c = priv;
@@ -1098,7 +1083,7 @@ wi_usb_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 
 	int			s;
 
-	if (sc->wi_usb_dying)
+	if (usbd_is_dying(sc->wi_usb_udev))
 		return;
 
 	s = splnet();
@@ -1133,7 +1118,7 @@ wi_usb_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
  */
 
 void
-wi_usb_txeof_frm(usbd_xfer_handle xfer, usbd_private_handle priv,
+wi_usb_txeof_frm(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct wi_usb_chain	*c = priv;
@@ -1144,7 +1129,7 @@ wi_usb_txeof_frm(usbd_xfer_handle xfer, usbd_private_handle priv,
 	int			s;
 	int			err = 0;
 
-	if (sc->wi_usb_dying)
+	if (usbd_is_dying(sc->wi_usb_udev))
 		return;
 
 	s = splnet();
@@ -1340,7 +1325,7 @@ wi_usb_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->wi_usb_dying = 1;
+		usbd_deactivate(sc->wi_usb_udev);
 		sc->wi_thread_info->dying = 1;
 		break;
 	}
@@ -1368,7 +1353,7 @@ wi_dump_data(void *buffer, int len)
  * A frame has been received.
  */
 void
-wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+wi_usb_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct wi_usb_chain	*c = priv;
 	struct wi_usb_softc	*sc = c->wi_usb_sc;
@@ -1376,7 +1361,7 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 	int			total_len = 0;
 	u_int16_t		rtype;
 
-	if (sc->wi_usb_dying)
+	if (usbd_is_dying(sc->wi_usb_udev))
 		return;
 
 	DPRINTFN(10,("%s: %s: enter status=%d\n", sc->wi_usb_dev.dv_xname,
@@ -1491,13 +1476,13 @@ wi_usb_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status
 }
 
 void
-wi_usb_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+wi_usb_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct wi_usb_softc	*sc = priv;
 
 	DPRINTFN(2,("%s: %s: enter\n", sc->wi_usb_dev.dv_xname, __func__));
 
-	if (sc->wi_usb_dying)
+	if (usbd_is_dying(sc->wi_usb_udev))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {

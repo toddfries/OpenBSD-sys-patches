@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_swap.h,v 1.13 2010/07/01 19:48:05 oga Exp $	*/
+/*	$OpenBSD: uvm_swap.h,v 1.16 2013/11/05 06:02:45 deraadt Exp $	*/
 /*	$NetBSD: uvm_swap.h,v 1.5 2000/01/11 06:57:51 chs Exp $	*/
 
 /*
@@ -44,6 +44,9 @@ int			uvm_swap_alloc(int *, boolean_t);
 void			uvm_swap_free(int, int);
 void			uvm_swap_markbad(int, int);
 void			uvm_swap_freepages(struct vm_page **, int);
+#ifdef HIBERNATE
+int			uvm_hibswap(dev_t, u_long *, u_long *);
+#endif /* HIBERNATE */
 #ifdef UVM_SWAP_ENCRYPT
 void			uvm_swap_initcrypt_all(void);
 void			uvm_swap_finicrypt_all(void);

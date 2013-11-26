@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.5 2011/03/23 16:54:35 pirofti Exp $ */
+/*	$OpenBSD: signal.h,v 1.7 2012/12/02 07:03:31 guenther Exp $ */
 /*
  * Copyright (c) 1996 Nivas Madhur
  * All rights reserved.
@@ -38,7 +38,6 @@
 typedef int sig_atomic_t;
 
 #if __BSD_VISIBLE || __XPG_VISIBLE >= 420
-#include <machine/reg.h>
 
 /*
  * Information pushed on stack when a signal is delivered.
@@ -46,14 +45,12 @@ typedef int sig_atomic_t;
  * execution of the signal handler. It is also made available
  * to the handler to allow it to restore state properly if
  * a non-standard exit is performed.
- *
- * All machines must have an sc_onstack and sc_mask.
  */
 struct  sigcontext {
-        int     sc_onstack;             /* sigstack state to restore */
+        int     __sc_unused;
         int     sc_mask;                /* signal mask to restore */
 	/* begin machine dependent portion */
-	struct reg sc_regs;
+	unsigned int sc_regs[32 + 25];
 };
 #endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
 #endif /* _M88K_SIGNAL_H_ */

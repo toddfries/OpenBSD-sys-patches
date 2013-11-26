@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti.c,v 1.64 2011/09/19 11:15:18 miod Exp $	*/
+/*	$OpenBSD: sti.c,v 1.67 2013/10/20 20:07:29 miod Exp $	*/
 
 /*
  * Copyright (c) 2000-2003 Michael Shalayeff
@@ -84,12 +84,11 @@ int	sti_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
 
 const struct wsdisplay_accessops sti_accessops = {
-	sti_ioctl,
-	sti_mmap,
-	sti_alloc_screen,
-	sti_free_screen,
-	sti_show_screen,
-	NULL			/* load_font */
+	.ioctl = sti_ioctl,
+	.mmap = sti_mmap,
+	.alloc_screen = sti_alloc_screen,
+	.free_screen = sti_free_screen,
+	.show_screen = sti_show_screen
 };
 
 enum sti_bmove_funcs {
@@ -618,7 +617,7 @@ sti_screen_setup(struct sti_screen *scr, int flags)
 	scr->scr_wsd.textops = &sti_emulops;
 	scr->scr_wsd.fontwidth = scr->scr_curfont.width;
 	scr->scr_wsd.fontheight = scr->scr_curfont.height;
-	scr->scr_wsd.capabilities = 0;
+	scr->scr_wsd.capabilities = WSSCREEN_REVERSE;
 
 	scr->scr_scrlist[0] = &scr->scr_wsd;
 	scr->scr_screenlist.nscreens = 1;
@@ -1181,7 +1180,7 @@ sti_mapchar(void *v, int uni, u_int *index)
 	}
 
 	if (c == -1 || c < fp->first || c > fp->last) {
-		*index = ' ';
+		*index = '?';
 		return (0);
 	}
 
@@ -1195,6 +1194,9 @@ sti_putchar(void *v, int row, int col, u_int uc, long attr)
 	struct sti_screen *scr = (struct sti_screen *)v;
 	struct sti_rom *rom = scr->scr_rom;
 	struct sti_font *fp = &scr->scr_curfont;
+	int bg, fg;
+
+	sti_unpack_attr(scr, attr, &fg, &bg, NULL);
 
 	if (scr->scr_romfont != NULL) {
 		/*
@@ -1209,9 +1211,9 @@ sti_putchar(void *v, int row, int col, u_int uc, long attr)
 		bzero(&a, sizeof(a));
 
 		a.flags.flags = STI_UNPMVF_WAIT;
-		/* XXX does not handle text attributes */
-		a.in.fg_colour = STI_COLOUR_WHITE;
-		a.in.bg_colour = STI_COLOUR_BLACK;
+		a.in.fg_colour = fg;
+		a.in.bg_colour = bg;
+
 		a.in.x = col * fp->width;
 		a.in.y = row * fp->height;
 		a.in.font_addr = scr->scr_romfont;
@@ -1231,9 +1233,8 @@ sti_putchar(void *v, int row, int col, u_int uc, long attr)
 		bzero(&a, sizeof(a));
 
 		a.flags.flags = STI_BLKMVF_WAIT;
-		/* XXX does not handle text attributes */
-		a.in.fg_colour = STI_COLOUR_WHITE;
-		a.in.bg_colour = STI_COLOUR_BLACK;
+		a.in.fg_colour = fg;
+		a.in.bg_colour = bg;
 
 		a.in.srcx = ((uc - fp->first) / scr->scr_fontmaxcol) *
 		    fp->width + scr->scr_fontbase;
@@ -1309,7 +1310,7 @@ sti_alloc_attr(void *v, int fg, int bg, int flags, long *pattr)
 	struct sti_screen *scr = (struct sti_screen *)v;
 #endif
 
-	*pattr = 0;
+	*pattr = flags & WSATTR_REVERSE;
 	return 0;
 }
 
@@ -1320,8 +1321,13 @@ sti_unpack_attr(void *v, long attr, int *fg, int *bg, int *ul)
 	struct sti_screen *scr = (struct sti_screen *)v;
 #endif
 
-	*fg = WSCOL_WHITE;
-	*bg = WSCOL_BLACK;
+	if (attr & WSATTR_REVERSE) {
+		*fg = STI_COLOUR_BLACK;
+		*bg = STI_COLOUR_WHITE;
+	} else {
+		*fg = STI_COLOUR_WHITE;
+		*bg = STI_COLOUR_BLACK;
+	}
 	if (ul != NULL)
 		*ul = 0;
 }

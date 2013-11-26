@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.24 2011/10/21 20:48:11 kettenis Exp $	*/
+/*	$OpenBSD: mainbus.c,v 1.27 2013/05/30 16:15:01 deraadt Exp $	*/
 /*	$NetBSD: mainbus.c,v 1.1 2003/04/26 18:39:29 fvdl Exp $	*/
 
 /*
@@ -72,8 +72,7 @@ int	mainbus_match(struct device *, void *, void *);
 void	mainbus_attach(struct device *, struct device *, void *);
 
 struct cfattach mainbus_ca = {
-	sizeof(struct device), mainbus_match, mainbus_attach, NULL,
-	config_activate_children
+	sizeof(struct device), mainbus_match, mainbus_attach
 };
 
 struct cfdriver mainbus_cd = {
@@ -214,9 +213,13 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 		mba.mba_pba.pba_dmat = &pci_bus_dma_tag;
 		mba.mba_pba.pba_ioex = pciio_ex;
 		mba.mba_pba.pba_memex = pcimem_ex;
+		mba.mba_pba.pba_busex = pcibus_ex;
 		mba.mba_pba.pba_domain = pci_ndomains++;
 		mba.mba_pba.pba_bus = 0;
 		config_found(self, &mba.mba_pba, mainbus_print);
+#if NACPI > 0
+		acpi_pciroots_attach(self, &mba.mba_pba, mainbus_print);
+#endif
 	}
 #endif
 

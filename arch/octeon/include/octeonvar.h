@@ -1,3 +1,4 @@
+/*	$OpenBSD: octeonvar.h,v 1.15 2013/11/04 17:51:03 bcallah Exp $	*/
 /*	$NetBSD: maltavar.h,v 1.3 2002/03/18 10:10:16 simonb Exp $	*/
 
 /*-
@@ -191,8 +192,97 @@ struct octeon_fau_map {
 #define	OCTEON_POW_GROUP_CORE1_TASK_6	14
 #define	OCTEON_POW_GROUP_CORE1_TASK_7	15
 
+/*
+ * Octeon board types known to work with OpenBSD/octeon.
+ * One of the main reasons for keeping this list is to be able to tell which
+ * boards do and do not have octcf(4). Currently the only board not to have octcf(4)
+ * is BOARD_TYPE_UBIQUITI_E100. Sadly, this number is also used by other vendors, but
+ * we don't run on those boards yet. When that time comes, iobus needs extra care for
+ * not blindly attaching octcf(4) on every board.
+ */
+#define	BOARD_TYPE_SIM			1
+#define	BOARD_TYPE_UBIQUITI_E100	20002
+
 #ifdef _KERNEL
-extern struct octeon_config	octeon_configuration;
+#define OCTEON_ARGV_MAX 64
+
+/* Maximum number of cores on <= CN52XX */
+#define OCTEON_MAXCPUS	4
+
+struct boot_desc {
+	uint32_t desc_ver;
+	uint32_t desc_size;
+	uint64_t stack_top;
+	uint64_t heap_start;
+	uint64_t heap_end;
+	uint64_t __unused17;
+	uint64_t __unused16;
+	uint32_t __unused18;
+	uint32_t __unused15;
+	uint32_t __unused14;
+	uint32_t argc;
+	uint32_t argv[OCTEON_ARGV_MAX];
+	uint32_t flags;
+	uint32_t core_mask;
+	uint32_t dram_size;
+	uint32_t phy_mem_desc_addr;
+	uint32_t debugger_flag_addr;
+	uint32_t eclock;
+	uint32_t __unused10;
+	uint32_t __unused9;
+	uint16_t __unused8;
+	uint8_t __unused7;
+	uint8_t __unused6;
+	uint16_t __unused5;
+	uint8_t __unused4;
+	uint8_t __unused3;
+	uint8_t __unused2[20];
+	uint8_t __unused1[6];
+	uint8_t __unused0;
+	uint64_t boot_info_addr;
+};
+
+struct boot_info {
+	uint32_t ver_major;
+	uint32_t ver_minor;
+	uint64_t stack_top;
+	uint64_t heap_start;
+	uint64_t heap_end;
+	uint64_t boot_desc_addr;
+	uint32_t exception_base_addr;
+	uint32_t stack_size;
+	uint32_t flags;
+	uint32_t core_mask;
+	uint32_t dram_size;
+	uint32_t phys_mem_desc_addr;
+	uint32_t debugger_flags_addr;
+	uint32_t eclock;
+	uint32_t dclock;
+	uint32_t __unused0;
+	uint16_t board_type;
+	uint8_t board_rev_major;
+	uint8_t board_rev_minor;
+	uint16_t __unused1;
+	uint8_t __unused2;
+	uint8_t __unused3;
+	char board_serial[20];
+	uint8_t mac_addr_base[6];
+	uint8_t mac_addr_count;
+	uint64_t cf_common_addr;
+	uint64_t cf_attr_addr;
+	uint64_t led_display_addr;
+	uint32_t dfaclock;
+	uint32_t config_flags;
+};
+
+extern struct boot_desc *octeon_boot_desc;
+extern struct boot_info *octeon_boot_info;
+
+/* Device capabilities advertised in boot_info->config_flags */
+#define BOOTINFO_CFG_FLAG_PCI_HOST	(1ull << 0)
+#define BOOTINFO_CFG_FLAG_PCI_TARGET	(1ull << 1)
+#define BOOTINFO_CFG_FLAG_DEBUG		(1ull << 2)
+#define BOOTINFO_CFG_FLAG_NO_MAGIC	(1ull << 3)
 
 void	octeon_bus_io_init(bus_space_tag_t, void *);
 void	octeon_bus_mem_init(bus_space_tag_t, void *);
@@ -215,55 +305,6 @@ ffs64(uint64_t val)
 	return 64 - ret;
 }
 
-/* 
- * Prefetch
- *
- *	OCTEON_PREF		normal (L1 and L2)
- *	OCTEON_PREF_L1		L1 only
- *	OCTEON_PREF_L2		L2 only
- *	OCTEON_PREF_DWB		don't write back
- *	OCTEON_PREF_PFS		prepare for store
- */
-#define __OCTEON_PREF_N(n, base, offset)			\
-	__asm __volatile (					\
-		"	.set	push				\
-		"	.set	arch=octeon			\n" \
-		"	pref	"#n", "#offset"(%[base])	\n" \
-		"	.set	pop				\
-		: : [base] "d" (base)				\
-	)
-#define __OCTEON_PREF_0(base, offset)	__OCTEON_PREF_N(0, base, offset)
-#define __OCTEON_PREF_4(base, offset)	__OCTEON_PREF_N(4, base, offset)
-#define __OCTEON_PREF_28(base, offset)	__OCTEON_PREF_N(28, base, offset)
-#define __OCTEON_PREF_29(base, offset)	__OCTEON_PREF_N(29, base, offset)
-#define __OCTEON_PREF_30(base, offset)	__OCTEON_PREF_N(30, base, offset)
-#define OCTEON_PREF(base, offset)	__OCTEON_PREF_0(base, offset)
-#define OCTEON_PREF_L1(base, offset)	__OCTEON_PREF_4(base, offset)
-#define OCTEON_PREF_L2(base, offset)	__OCTEON_PREF_28(base, offset)
-#define OCTEON_PREF_DWB(base, offset)	__OCTEON_PREF_29(base, offset)
-#define OCTEON_PREF_PFS(base, offset)	__OCTEON_PREF_30(base, offset)
-
-/*
- * Sync
- */
-#define OCTEON_SYNCCOMMON(name) \
-	__asm __volatile ( \
-		_ASM_PROLOGUE_OCTEON			\
-		"	"#name"				\n" \
-		_ASM_EPILOGUE				\
-		::: "memory")
-#define OCTEON_SYNCIOBDMA	__asm __volatile (".word 0x8f" : : :"memory")
-#define OCTEON_SYNCW		__asm __volatile (".word  0x10f" : : )
-#define OCTEON_SYNC		OCTEON_SYNCCOMMON(sync)
-#define OCTEON_SYNCWS		__asm __volatile (".word  0x14f" : : )
-/* XXX backward compatibility */
-#if 1
-#define	OCT_SYNCIOBDMA		OCTEON_SYNCIOBDMA
-#define	OCT_SYNCW		OCTEON_SYNCW
-#define	OCT_SYNC		OCTEON_SYNC
-#define	OCT_SYNCWS		OCTEON_SYNCWS
-#endif
-
 static inline uint64_t
 octeon_xkphys_read_8(paddr_t address)
 {
@@ -272,19 +313,33 @@ octeon_xkphys_read_8(paddr_t address)
 	return (*p);
 }
 
+#define	MIO_BOOT_BIST_STAT			0x00011800000000f8ULL
 static inline void
 octeon_xkphys_write_8(paddr_t address, uint64_t value)
 {
 	*(volatile uint64_t *)(PHYS_TO_XKPHYS(address, CCA_NC)) = value;
-}
 
-/* XXX backward compatibility */
-#if 1
-#define octeon_read_csr(address) \
-	octeon_xkphys_read_8(address)
-#define octeon_write_csr(address, value) \
-	octeon_xkphys_write_8(address, value)
-#endif
+	/*
+	 * It seems an immediate read is necessary when doing a write to an RSL
+	 * register in order to complete the write.
+	 * We use MIO_BOOT_BIST_STAT because it's apparently the fastest
+	 * write.
+	 */
+
+	/*
+	 * XXX
+	 * This if would be better writen as:
+	 * if ((address & 0xffffff0000000000ULL) == OCTEON_MIO_BOOT_BASE) {
+	 * but octeonreg.h can't be included here and we want this inlined
+	 *
+	 * Note that the SDK masks with 0x7ffff but that doesn't make sense.
+	 * This is a physical address.
+	 */
+	if (((address >> 40) & 0xfffff) == (0x118)) {
+		value = *(volatile uint64_t *)
+		    (PHYS_TO_XKPHYS(MIO_BOOT_BIST_STAT, CCA_NC));
+	}
+}
 
 static inline void
 octeon_iobdma_write_8(uint64_t value)
@@ -311,7 +366,7 @@ static inline uint32_t
 octeon_disable_interrupt(uint32_t *new)
 {
 	uint32_t s, tmp;
-        
+
 	__asm __volatile (
 		_ASM_PROLOGUE
 		"	mfc0	%[s], $12		\n"
@@ -337,23 +392,7 @@ octeon_restore_status(uint32_t s)
 
 static inline uint64_t
 octeon_get_cycles(void)
-{ 
-#if defined(__mips_o32)
-	uint32_t s, lo, hi;
-  
-	s = octeon_disable_interrupt((void *)0);
-	__asm __volatile (
-		_ASM_PROLOGUE_MIPS64
-		"	dmfc0	%[lo], $9, 6		\n"
-		"	add	%[hi], %[lo], $0	\n"
-		"	srl	%[hi], 32		\n"
-		"	sll	%[lo], 32		\n"
-		"	srl	%[lo], 32		\n"
-		_ASM_EPILOGUE
-		: [lo]"=&r"(lo), [hi]"=&r"(hi));
-	octeon_restore_status(s);
-	return ((uint64_t)hi << 32) + (uint64_t)lo;
-#else
+{
 	uint64_t tmp;
 
 	__asm __volatile (
@@ -362,7 +401,6 @@ octeon_get_cycles(void)
 		_ASM_EPILOGUE
 		: [tmp]"=&r"(tmp));
 	return tmp;
-#endif
 }
 
 /* -------------------------------------------------------------------------- */

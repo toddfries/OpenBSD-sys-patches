@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_tun.c,v 1.112 2011/07/09 00:47:18 henning Exp $	*/
+/*	$OpenBSD: if_tun.c,v 1.120 2013/10/24 11:31:43 mpi Exp $	*/
 /*	$NetBSD: if_tun.c,v 1.24 1996/05/07 02:40:48 thorpej Exp $	*/
 
 /*
@@ -56,7 +56,6 @@
 #include <sys/poll.h>
 #include <sys/conf.h>
 
-#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -66,7 +65,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -186,7 +184,7 @@ tun_create(struct if_clone *ifc, int unit, int flags)
 	ifp->if_start = tunstart;
 	ifp->if_hardmtu = TUNMRU;
 	ifp->if_link_state = LINK_STATE_DOWN;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
 	if ((flags & TUN_LAYER2) == 0) {
@@ -317,6 +315,7 @@ tun_switch(struct tun_softc *tp, int flags)
 		/* already opened before ifconfig tunX link0 */
 		s = splnet();
 		tp->tun_flags |= open;
+		ifp->if_flags |= IFF_RUNNING;
 		tun_link_state(tp);
 		splx(s);
 		TUNDEBUG(("%s: already open\n", tp->tun_if.if_xname));
@@ -493,10 +492,6 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		tuninit(tp);
 		TUNDEBUG(("%s: destination address set\n", ifp->if_xname));
 		break;
-	case SIOCSIFBRDADDR:
-		tuninit(tp);
-		TUNDEBUG(("%s: broadcast address set\n", ifp->if_xname));
-		break;
 	case SIOCSIFMTU:
 		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > TUNMRU)
 			error = EINVAL;
@@ -504,43 +499,8 @@ tun_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			ifp->if_mtu = ifr->ifr_mtu;
 		break;
 	case SIOCADDMULTI:
-	case SIOCDELMULTI: {
-		if (ifr == 0) {
-			error = EAFNOSUPPORT;	   /* XXX */
-			break;
-		}
-
-		if (tp->tun_flags & TUN_LAYER2) {
-			error = (cmd == SIOCADDMULTI) ?
-			    ether_addmulti(ifr, &tp->arpcom) :
-			    ether_delmulti(ifr, &tp->arpcom);
-			if (error == ENETRESET) {
-				/*
-				 * Multicast list has changed; set the hardware
-				 * filter accordingly. The good thing is we do 
-				 * not have a hardware filter (:
-				 */
-				error = 0;
-			}
-			break;
-		}
-
-		switch (ifr->ifr_addr.sa_family) {
-#ifdef INET
-		case AF_INET:
-			break;
-#endif
-#ifdef INET6
-		case AF_INET6:
-			break;
-#endif
-		default:
-			error = EAFNOSUPPORT;
-			break;
-		}
+	case SIOCDELMULTI:
 		break;
-	}
-
 	case SIOCSIFFLAGS:
 		error = tun_switch(tp,
 		    ifp->if_flags & IFF_LINK0 ? TUN_LAYER2 : 0);

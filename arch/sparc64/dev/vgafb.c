@@ -1,4 +1,4 @@
-/*	$OpenBSD: vgafb.c,v 1.58 2009/06/02 18:51:03 kettenis Exp $	*/
+/*	$OpenBSD: vgafb.c,v 1.60 2013/10/20 20:07:27 miod Exp $	*/
 
 /*
  * Copyright (c) 2001 Jason L. Wright (jason@thought.net)
@@ -83,16 +83,8 @@ int vgafb_putcmap(struct vgafb_softc *, struct wsdisplay_cmap *);
 void vgafb_setcolor(void *, u_int, u_int8_t, u_int8_t, u_int8_t);
 
 struct wsdisplay_accessops vgafb_accessops = {
-	vgafb_ioctl,
-	vgafb_mmap,
-	NULL,	/* alloc_screen */
-	NULL,	/* free_screen */
-	NULL,	/* show_screen */
-	NULL,	/* load_font */
-	NULL,	/* scrollback */
-	NULL,	/* getchar */
-	NULL,	/* burner */
-	NULL	/* pollc */
+	.ioctl = vgafb_ioctl,
+	.mmap = vgafb_mmap
 };
 
 int	vgafbmatch(struct device *, void *, void *);
@@ -447,10 +439,6 @@ vgafb_mapregs(sc, pa)
 				if (sc->sc_mem_size >= bs) {
 					/* this is the mmio */
 					sc->sc_mmio_addr = ba;
-					/* ATI driver maps 0x80000 mmio, grr */
-					if (bs < 0x80000) {
-						bs = 0x80000;
-					}
 					sc->sc_mmio_size = bs;
 					hasmmio = 1;
 				} else {
@@ -459,10 +447,6 @@ vgafb_mapregs(sc, pa)
 					sc->sc_mmio_size = sc->sc_mem_size;
 					sc->sc_mem_addr = ba;
 					sc->sc_mem_size = bs;
-					/* ATI driver maps 0x80000 mmio, grr */
-					if (sc->sc_mmio_size < 0x80000) {
-						sc->sc_mmio_size = 0x80000;
-					}
 				}
 			}
 		}

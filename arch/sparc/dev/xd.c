@@ -1,4 +1,4 @@
-/*	$OpenBSD: xd.c,v 1.56 2011/07/06 04:49:35 matthew Exp $	*/
+/*	$OpenBSD: xd.c,v 1.61 2013/11/01 17:36:19 krw Exp $	*/
 /*	$NetBSD: xd.c,v 1.37 1997/07/29 09:58:16 fair Exp $	*/
 
 /*
@@ -53,7 +53,9 @@
  */
 
 #undef XDC_DEBUG		/* full debug */
+#if !defined(SMALL_KERNEL)
 #define XDC_DIAG		/* extra sanity checks */
+#endif
 #if defined(DIAGNOSTIC) && !defined(XDC_DIAG)
 #define XDC_DIAG		/* link in with master DIAG option */
 #endif
@@ -298,7 +300,7 @@ xdgetdisklabel(xd, b)
 	lp->d_secsize = XDFM_BPS;
 	if (sl->sl_magic == SUN_DKMAGIC) {
 		lp->d_secpercyl = sl->sl_nsectors * sl->sl_ntracks;
-		DL_SETDSIZE(lp, (daddr64_t)lp->d_secpercyl * sl->sl_ncylinders);
+		DL_SETDSIZE(lp, (u_int64_t)lp->d_secpercyl * sl->sl_ncylinders);
 	} else {
 		lp->d_secpercyl = 1;
 	}
@@ -772,7 +774,7 @@ xdclose(dev, flag, fmt, p)
 int
 xddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr64_t blkno;
+	daddr_t blkno;
 	caddr_t va;
 	size_t size;
 {
@@ -963,13 +965,14 @@ xdwrite(dev, uio, flags)
  * xdsize: return size of a partition for a dump
  */
 
-daddr64_t
+daddr_t
 xdsize(dev)
 	dev_t   dev;
 
 {
 	struct xd_softc *xdsc;
-	int     unit, part, size, omask;
+	int     unit, part, omask;
+	daddr_t size;
 
 	/* valid unit? */
 	unit = DISKUNIT(dev);
@@ -1378,7 +1381,7 @@ xdc_startbuf(xdcsc, xdsc, bp)
 #ifdef XDC_DEBUG
 	printf("xdc_startbuf: %s%c: %s block %lld\n",
 	    xdsc->sc_dev.dv_xname, 'a' + partno,
-	    (bp->b_flags & B_READ) ? "read" : "write", bp->b_blkno);
+	    (bp->b_flags & B_READ) ? "read" : "write", (long long)bp->b_blkno);
 	printf("xdc_startbuf: b_bcount %d, b_data 0x%x\n",
 	    bp->b_bcount, bp->b_data);
 #endif

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.inc,v 1.17 2008/03/04 22:33:03 deraadt Exp $
+#	$OpenBSD: Makefile.inc,v 1.19 2012/08/31 16:13:20 pascal Exp $
 
 CFLAGS=${DEBUG} -Os -Wall -Werror
 CPPFLAGS+=-I${S} -I. -I${.CURDIR}

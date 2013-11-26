@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip27_machdep.c,v 1.54 2012/03/15 18:57:22 miod Exp $	*/
+/*	$OpenBSD: ip27_machdep.c,v 1.57 2012/10/03 11:18:23 miod Exp $	*/
 
 /*
  * Copyright (c) 2008, 2009 Miodrag Vallat.
@@ -35,11 +35,12 @@
 #include <machine/autoconf.h>
 #include <machine/bus.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/memconf.h>
 #include <machine/mnode.h>
 #include <machine/atomic.h>
 
-#include <uvm/uvm_extern.h>
+#include <uvm/uvm.h>
 
 #include <sgi/sgi/ip27.h>
 #include <sgi/sgi/l1.h>
@@ -173,6 +174,14 @@ ip27_setup()
 			break;
 		}
 	}
+
+	/*
+	 * Register DMA-reachable memory constraints.
+	 * The xbridge(4) is limited to a 31-bit region (its IOMMU features
+	 * are too restricted to be of use).
+	 */
+	dma_constraint.ucr_low = 0;
+	dma_constraint.ucr_high = (1UL << 31) - 1;
 
 	xbow_widget_base = ip27_widget_short;
 	xbow_widget_map = ip27_widget_map;
@@ -798,7 +807,8 @@ ip27_hub_splx(int newipl)
 	/* Update masks to new ipl. Order highly important! */
 	__asm__ (".set noreorder\n");
 	ci->ci_ipl = newipl;
-	__asm__ ("sync\n\t.set reorder\n");
+	mips_sync();
+	__asm__ (".set reorder\n");
 	if (CPU_IS_PRIMARY(ci))
 		ip27_hub_setintrmask(newipl);
 	/* If we still have softints pending trigger processing. */

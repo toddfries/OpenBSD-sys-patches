@@ -1,4 +1,4 @@
-/*	$OpenBSD: cd9660_vfsops.c,v 1.60 2011/07/04 20:35:35 deraadt Exp $	*/
+/*	$OpenBSD: cd9660_vfsops.c,v 1.65 2013/11/21 00:13:33 dlg Exp $	*/
 /*	$NetBSD: cd9660_vfsops.c,v 1.26 1997/06/13 15:38:58 pk Exp $	*/
 
 /*-
@@ -134,34 +134,38 @@ cd9660_mount(mp, path, data, ndp, p)
 	struct nameidata *ndp;
 	struct proc *p;
 {
-	struct vnode *devvp;
-	struct iso_args args;
-	size_t size;
-	int error;
 	struct iso_mnt *imp = NULL;
-	
-	error = copyin(data, &args, sizeof (struct iso_args));
-	if (error)
-		return (error);
+	struct iso_args args;
+	struct vnode *devvp;
+	char fspec[MNAMELEN];
+	int error;
 	
 	if ((mp->mnt_flag & MNT_RDONLY) == 0)
 		return (EROFS);
 	
+	error = copyin(data, &args, sizeof(struct iso_args));
+	if (error)
+		return (error);
+
 	/*
 	 * If updating, check whether changing from read-only to
 	 * read/write; if there is no device name, that's all we do.
 	 */
 	if (mp->mnt_flag & MNT_UPDATE) {
 		imp = VFSTOISOFS(mp);
-		if (args.fspec == 0)
+		if (args.fspec == NULL)
 			return (vfs_export(mp, &imp->im_export, 
 			    &args.export_info));
 	}
+
 	/*
 	 * Not an update, or updating the name: look up the name
 	 * and verify that it refers to a sensible block device.
 	 */
-	NDINIT(ndp, LOOKUP, FOLLOW, UIO_USERSPACE, args.fspec, p);
+	error = copyinstr(args.fspec, fspec, sizeof(fspec), NULL);
+	if (error)
+		return (error);
+	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, p);
 	if ((error = namei(ndp)) != 0)
 		return (error);
 	devvp = ndp->ni_vp;
@@ -174,6 +178,7 @@ cd9660_mount(mp, path, data, ndp, p)
 		vrele(devvp);
 		return (ENXIO);
 	}
+
 	/*
 	 * If mount by non-root, then verify that user has necessary
 	 * permissions on the device.
@@ -200,13 +205,17 @@ cd9660_mount(mp, path, data, ndp, p)
 		return (error);
 	}
 	imp = VFSTOISOFS(mp);
-	(void)copyinstr(path, mp->mnt_stat.f_mntonname, MNAMELEN - 1, &size);
-	bzero(mp->mnt_stat.f_mntonname + size, MNAMELEN - size);
-	(void)copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
-	    &size);
-	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
+
+	bzero(mp->mnt_stat.f_mntonname, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntonname, path, MNAMELEN);
+	bzero(mp->mnt_stat.f_mntfromname, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntfromname, fspec, MNAMELEN);
+	bzero(mp->mnt_stat.f_mntfromspec, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntfromspec, fspec, MNAMELEN);
 	bcopy(&args, &mp->mnt_stat.mount_info.iso_args, sizeof(args));
-	(void)cd9660_statfs(mp, &mp->mnt_stat, p);
+
+	cd9660_statfs(mp, &mp->mnt_stat, p);
+
 	return (0);
 }
 
@@ -481,7 +490,6 @@ iso_disklabelspoof(dev, strat, lp)
 		bp->b_bcount = ISO_DEFAULT_BLOCK_SIZE;
 		CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
 		SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
-		bp->b_cylinder = bp->b_blkno / lp->d_secpercyl;
 
 		/*printf("d_secsize %d iso_blknum %d b_blkno %d bcount %d\n",
 		    lp->d_secsize, iso_blknum, bp->b_blkno, bp->b_bcount);*/
@@ -579,11 +587,6 @@ cd9660_unmount(mp, mntflags, p)
 
 	isomp = VFSTOISOFS(mp);
 
-#ifdef	ISODEVMAP
-	if (isomp->iso_ftype == ISO_FTYPE_RRIP)
-		iso_dunmap(isomp->im_dev);
-#endif
-	
 	isomp->im_devvp->v_specmountpoint = NULL;
 	vn_lock(isomp->im_devvp, LK_EXCLUSIVE | LK_RETRY, p);
 	error = VOP_CLOSE(isomp->im_devvp, FREAD, NOCRED, p);
@@ -605,7 +608,7 @@ cd9660_root(mp, vpp)
 	struct iso_mnt *imp = VFSTOISOFS(mp);
 	struct iso_directory_record *dp =
 	    (struct iso_directory_record *)imp->root;
-	ino_t ino = isodirino(dp, imp);
+	cdino_t ino = isodirino(dp, imp);
 	
 	/*
 	 * With RRIP we must use the `.' entry of the root directory.
@@ -658,8 +661,6 @@ cd9660_statfs(mp, sbp, p)
 		bcopy(&mp->mnt_stat.mount_info.iso_args,
 		    &sbp->mount_info.iso_args, sizeof(struct iso_args));
 	}
-	/* Use the first spare for flags: */
-	sbp->f_spare[0] = isomp->im_flags;
 	return (0);
 }
 
@@ -729,6 +730,10 @@ cd9660_vget(mp, ino, vpp)
 	struct vnode **vpp;
 {
 
+	if (ino > (cdino_t)-1)
+		panic("cd9660_vget: alien ino_t %llu",
+		    (unsigned long long)ino);
+
 	/*
 	 * XXXX
 	 * It would be nice if we didn't always set the `relocated' flag
@@ -747,7 +752,7 @@ cd9660_vget(mp, ino, vpp)
 int
 cd9660_vget_internal(mp, ino, vpp, relocated, isodir)
 	struct mount *mp;
-	ino_t ino;
+	cdino_t ino;
 	struct vnode **vpp;
 	int relocated;
 	struct iso_directory_record *isodir;
@@ -919,10 +924,6 @@ retry:
 		/*
 		 * if device, look at device number table for translation
 		 */
-#ifdef	ISODEVMAP
-		if (dp = iso_dmap(dev, ino, 0))
-			ip->inode.iso_rdev = dp->d_dev;
-#endif
 		vp->v_op = &cd9660_specvops;
 		if ((nvp = checkalias(vp, ip->inode.iso_rdev, mp)) != NULL) {
 			/*

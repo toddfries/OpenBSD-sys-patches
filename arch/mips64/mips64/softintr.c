@@ -1,4 +1,4 @@
-/*	$OpenBSD: softintr.c,v 1.12 2010/12/21 14:56:24 claudio Exp $	*/
+/*	$OpenBSD: softintr.c,v 1.15 2012/10/03 11:18:23 miod Exp $	*/
 /*	$NetBSD: softintr.c,v 1.2 2003/07/15 00:24:39 lukem Exp $	*/
 
 /*
@@ -43,6 +43,9 @@
 
 #include <machine/atomic.h>
 #include <machine/intr.h>
+#ifdef MULTIPROCESSOR
+#include <mips64/mips_cpu.h>
+#endif
 
 struct soft_intrq soft_intrq[SI_NQUEUES];
 
@@ -87,7 +90,7 @@ softintr_dispatch(int si)
 		TAILQ_REMOVE(&siq->siq_list, sih, sih_list);
 		sih->sih_pending = 0;
 
-		uvmexp.softs++;
+		atomic_add_int(&uvmexp.softs, 1);
 
 		mtx_leave(&siq->siq_mtx);
 
@@ -177,7 +180,7 @@ dosoftint()
 	struct cpu_info *ci = curcpu();
 	int sir, q, mask;
 #ifdef MULTIPROCESSOR
-	u_int32_t sr;
+	register_t sr;
 
 	/* Enable interrupts */
 	sr = getsr();

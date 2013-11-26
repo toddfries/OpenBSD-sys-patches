@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.6 2011/03/23 16:54:34 pirofti Exp $	*/
+/*	$OpenBSD: signal.h,v 1.8 2013/04/01 17:18:19 deraadt Exp $	*/
 /*	$NetBSD: signal.h,v 1.2 2003/04/28 23:16:17 bjh21 Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 
 typedef int sig_atomic_t;
 
-#if __BSD_VISIBLE
+#ifdef _KERNEL
 #include <machine/trap.h>
 #endif
 
@@ -81,7 +81,7 @@ struct sigcontext {
 	long	sc_ss;
 
 	struct fxsave64 *sc_fpstate;
-	int	sc_onstack;
+	int	__sc_unused;
 	int	sc_mask;
 };
 #endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */

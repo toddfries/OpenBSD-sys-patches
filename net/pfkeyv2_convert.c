@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkeyv2_convert.c,v 1.35 2011/04/13 11:28:47 markus Exp $	*/
+/*	$OpenBSD: pfkeyv2_convert.c,v 1.42 2013/10/24 11:31:43 mpi Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@keromytis.org)
  *
@@ -99,6 +99,7 @@
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <net/route.h>
 #include <net/if.h>
 
@@ -107,9 +108,6 @@
 #endif
 
 #include <netinet/ip_ipsp.h>
-#ifdef INET6
-#include <netinet6/in6_var.h>
-#endif
 #include <net/pfkeyv2.h>
 #include <crypto/cryptodev.h>
 #include <crypto/xform.h>
@@ -135,20 +133,14 @@ import_sa(struct tdb *tdb, struct sadb_sa *sadb_sa, struct ipsecinit *ii)
 		if (sadb_sa->sadb_sa_flags & SADB_SAFLAGS_PFS)
 			tdb->tdb_flags |= TDBF_PFS;
 
-		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_HALFIV)
-			tdb->tdb_flags |= TDBF_HALFIV;
-
 		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_TUNNEL)
 			tdb->tdb_flags |= TDBF_TUNNELING;
 
-		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_RANDOMPADDING)
-			tdb->tdb_flags |= TDBF_RANDOMPADDING;
-
-		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_NOREPLAY)
-			tdb->tdb_flags |= TDBF_NOREPLAY;
-
 		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_UDPENCAP)
 			tdb->tdb_flags |= TDBF_UDPENCAP;
+
+		if (sadb_sa->sadb_sa_flags & SADB_X_SAFLAGS_ESN)
+			tdb->tdb_flags |= TDBF_ESN;
 	}
 
 	if (sadb_sa->sadb_sa_state != SADB_SASTATE_MATURE)
@@ -276,21 +268,14 @@ export_sa(void **p, struct tdb *tdb)
 	if (tdb->tdb_flags & TDBF_PFS)
 		sadb_sa->sadb_sa_flags |= SADB_SAFLAGS_PFS;
 
-	/* Only relevant for the "old" IPsec transforms. */
-	if (tdb->tdb_flags & TDBF_HALFIV)
-		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_HALFIV;
-
 	if (tdb->tdb_flags & TDBF_TUNNELING)
 		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_TUNNEL;
 
-	if (tdb->tdb_flags & TDBF_RANDOMPADDING)
-		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_RANDOMPADDING;
-
-	if (tdb->tdb_flags & TDBF_NOREPLAY)
-		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_NOREPLAY;
-
 	if (tdb->tdb_flags & TDBF_UDPENCAP)
 		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_UDPENCAP;
+
+	if (tdb->tdb_flags & TDBF_ESN)
+		sadb_sa->sadb_sa_flags |= SADB_X_SAFLAGS_ESN;
 
 	*p += sizeof(struct sadb_sa);
 }
@@ -1006,7 +991,7 @@ import_tag(struct tdb *tdb, struct sadb_x_tag *stag)
 
 	if (stag) {
 		s = (char *)(stag + 1);
-		tdb->tdb_tag = pf_tagname2tag(s);
+		tdb->tdb_tag = pf_tagname2tag(s, 1);
 	}
 }
 
@@ -1018,10 +1003,11 @@ export_tag(void **p, struct tdb *tdb)
 	char *s = (char *)(stag + 1);
 
 	pf_tag2tagname(tdb->tdb_tag, s);
+
 	stag->sadb_x_tag_taglen = strlen(s) + 1;
 	stag->sadb_x_tag_len = (sizeof(struct sadb_x_tag) +
 	    PADUP(stag->sadb_x_tag_taglen)) / sizeof(uint64_t);
-	*p += PADUP(stag->sadb_x_tag_taglen) + sizeof(struct sadb_x_tag);
+	*p += sizeof(struct sadb_x_tag) + PADUP(stag->sadb_x_tag_taglen);
 }
 
 /* Import enc(4) tap device information for SA */

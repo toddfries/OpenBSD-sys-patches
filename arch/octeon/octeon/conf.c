@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.7 2011/10/06 20:49:28 deraadt Exp $ */
+/*	$OpenBSD: conf.c,v 1.11 2013/11/04 14:11:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 1992, 1993
@@ -110,10 +110,6 @@ cdev_decl(lpt);
 cdev_decl(wd);
 #include "audio.h"
 #include "video.h"
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 cdev_decl(octcf);
 
 #include "ksyms.h"
@@ -136,11 +132,10 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
-#include "uscanner.h"
 
-#include "bthub.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -203,13 +198,9 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48: */
 	cdev_bio_init(NBIO,bio),	/* 49: ioctl tunnel */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50: system call tracing */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51: */
-#endif
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
-	cdev_notdef(),			/* 53: */
+	cdev_fuse_init(NFUSE,fuse),	/* 53: fuse */
 	cdev_notdef(),			/* 54: */
 	cdev_notdef(),			/* 55: */
 	cdev_notdef(),			/* 56: */
@@ -224,11 +215,11 @@ struct cdevsw	cdevsw[] =
 	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),	/* 66: USB tty */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 67: devices hotplugging */
-	cdev_bthub_init(NBTHUB,bthub),	/* 68: bluetooth hub */
+	cdev_notdef(),
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 69: vscsi */
 	cdev_disk_init(1,diskmap),	/* 70: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 71: pppx */
-	cdev_usbdev_init(NUSCANNER,uscanner),	/* 72: USB scanners */
+	cdev_notdef(),			/* 72: was USB scanners */
 };
 
 int	nchrdev = nitems(cdevsw);

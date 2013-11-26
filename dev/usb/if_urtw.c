@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtw.c,v 1.39 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: if_urtw.c,v 1.43 2013/08/07 01:06:43 bluhm Exp $	*/
 
 /*-
  * Copyright (c) 2009 Martynas Venckus <martynas@openbsd.org>
@@ -21,7 +21,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/proc.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -44,7 +43,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -484,13 +482,13 @@ int		urtw_alloc_rx_data_list(struct urtw_softc *);
 void		urtw_free_rx_data_list(struct urtw_softc *);
 int		urtw_alloc_tx_data_list(struct urtw_softc *);
 void		urtw_free_tx_data_list(struct urtw_softc *);
-void		urtw_rxeof(usbd_xfer_handle, usbd_private_handle,
+void		urtw_rxeof(struct usbd_xfer *, void *,
 		    usbd_status);
 int		urtw_tx_start(struct urtw_softc *,
 		    struct ieee80211_node *, struct mbuf *, int);
-void		urtw_txeof_low(usbd_xfer_handle, usbd_private_handle,
+void		urtw_txeof_low(struct usbd_xfer *, void *,
 		    usbd_status);
-void		urtw_txeof_normal(usbd_xfer_handle, usbd_private_handle,
+void		urtw_txeof_normal(struct usbd_xfer *, void *,
 		    usbd_status);
 void		urtw_next_scan(void *);
 void		urtw_task(void *);
@@ -2567,7 +2565,7 @@ urtw_watchdog(struct ifnet *ifp)
 }
 
 void
-urtw_txeof_low(usbd_xfer_handle xfer, usbd_private_handle priv,
+urtw_txeof_low(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct urtw_tx_data *data = priv;
@@ -2606,7 +2604,7 @@ urtw_txeof_low(usbd_xfer_handle xfer, usbd_private_handle priv,
 }
 
 void
-urtw_txeof_normal(usbd_xfer_handle xfer, usbd_private_handle priv,
+urtw_txeof_normal(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct urtw_tx_data *data = priv;
@@ -3054,7 +3052,7 @@ urtw_8225_rf_set_sens(struct urtw_rf *rf)
 	struct urtw_softc *sc = rf->rf_sc;
 	usbd_status error;
 
-	if (rf->sens < 0 || rf->sens > 6)
+	if (rf->sens > 6)
 		return (-1);
 
 	if (rf->sens > 4)
@@ -3115,7 +3113,7 @@ urtw_isbmode(uint16_t rate)
 }
 
 void
-urtw_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+urtw_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct urtw_rx_data *data = priv;
 	struct urtw_softc *sc = data->sc;

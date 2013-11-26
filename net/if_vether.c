@@ -1,4 +1,4 @@
-/* $OpenBSD: if_vether.c,v 1.16 2011/07/22 15:59:40 deraadt Exp $ */
+/* $OpenBSD: if_vether.c,v 1.19 2013/10/19 14:46:31 mpi Exp $ */
 
 /*
  * Copyright (c) 2009 Theo de Raadt
@@ -19,7 +19,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/ioctl.h>
@@ -86,7 +85,7 @@ vether_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_softc = sc;
 	ifp->if_ioctl = vetherioctl;
 	ifp->if_start = vetherstart;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
@@ -170,24 +169,8 @@ vetherioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		break;
 
 	case SIOCADDMULTI:
-	case SIOCDELMULTI: {
-		if (ifr == 0) {
-			error = EAFNOSUPPORT;	   /* XXX */
-			break;
-		}
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->sc_ac) :
-		    ether_delmulti(ifr, &sc->sc_ac);
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly. The good thing is we do
-			 * not have a hardware filter (:
-			 */
-			error = 0;
-		}
+	case SIOCDELMULTI:
 		break;
-	}
 
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:

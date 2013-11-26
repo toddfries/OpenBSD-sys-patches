@@ -1,5 +1,5 @@
 #! /usr/bin/awk -f
-#	$OpenBSD: makemap.awk,v 1.11 2010/07/31 16:12:37 miod Exp $
+#	$OpenBSD: makemap.awk,v 1.14 2013/11/20 17:27:32 miod Exp $
 #
 # Copyright (c) 2005, Miodrag Vallat
 #
@@ -31,7 +31,7 @@
 #
 
 BEGIN {
-	rcsid = "$OpenBSD: makemap.awk,v 1.11 2010/07/31 16:12:37 miod Exp $"
+	rcsid = "$OpenBSD: makemap.awk,v 1.14 2013/11/20 17:27:32 miod Exp $"
 	ifdepth = 0
 	ignore = 0
 	declk = 0
@@ -129,11 +129,23 @@ BEGIN {
 	conv[86] = 100
 	conv[87] = 68
 	conv[88] = 69
-	conv[112] = 135
-	conv[115] = 136
-	conv[121] = 137
-	conv[123] = 138
-	conv[125] = 139
+	conv[91] = 104
+	conv[92] = 105
+	conv[93] = 106
+	conv[99] = 107
+	conv[100] = 108
+	conv[101] = 109
+	conv[102] = 110
+	conv[103] = 111
+	conv[104] = 112
+	conv[105] = 113
+	conv[106] = 114
+	conv[107] = 115
+	conv[112] = 136
+	conv[115] = 135
+	conv[121] = 138
+	conv[123] = 139
+	conv[125] = 137
 	conv[127] = 72
 	conv[156] = 88
 	conv[157] = 228
@@ -153,7 +165,7 @@ BEGIN {
 	conv[208] = 81
 	conv[209] = 78
 	conv[210] = 73
-	conv[211] = 99
+	conv[211] = 76
 	conv[219] = 227
 	conv[220] = 231
 	conv[221] = 101
@@ -318,18 +330,6 @@ $1 == "#define" || $1 == "#undef" {
 		#
 		if (nmaps++ == 0) {
 			# 102 Suspend
-			lines[104] = "    KC(104),\tKS_F13,"
-			lines[105] = "    KC(105),\tKS_F14,"
-			lines[106] = "    KC(106),\tKS_F15,"
-			lines[107] = "    KC(107),\tKS_F16,"
-			lines[108] = "    KC(108),\tKS_F17,"
-			lines[109] = "    KC(109),\tKS_F18,"
-			lines[110] = "    KC(110),\tKS_F19,"
-			lines[111] = "    KC(111),\tKS_F20,"
-			lines[112] = "    KC(112),\tKS_F21,"
-			lines[113] = "    KC(113),\tKS_F22,"
-			lines[114] = "    KC(114),\tKS_F23,"
-			lines[115] = "    KC(115),\tKS_F24,"
 			lines[116] = "    KC(116),\tKS_Open,"
 			lines[117] = "    KC(117),\tKS_Help,"
 			lines[118] = "    KC(118),\tKS_Props,"

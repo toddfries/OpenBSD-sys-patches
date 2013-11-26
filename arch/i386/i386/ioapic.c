@@ -1,4 +1,4 @@
-/*	$OpenBSD: ioapic.c,v 1.26 2011/04/16 00:40:58 deraadt Exp $	*/
+/*	$OpenBSD: ioapic.c,v 1.30 2013/10/01 20:22:11 sf Exp $	*/
 /* 	$NetBSD: ioapic.c,v 1.7 2003/07/14 22:32:40 lukem Exp $	*/
 
 /*-
@@ -300,7 +300,7 @@ ioapic_attach(struct device *parent, struct device *self, void *aux)
 
 	ioapic_add(sc);
 
-	printf(" pa 0x%lx", aaa->apic_address);
+	printf(" pa 0x%x", aaa->apic_address);
 
 	if (bus_mem_add_mapping(aaa->apic_address, PAGE_SIZE, 0, &bh) != 0) {
 		printf(", map failed\n");
@@ -399,7 +399,6 @@ ioapic_activate(struct device *self, int act)
  */
 
 struct intrhand *apic_intrhand[256];
-int	apic_intrcount[256];
 int	apic_maxlevel[256];
 
 
@@ -673,6 +672,12 @@ apic_intr_establish(int irq, int type, int level, int (*ih_fun)(void *),
 	extern int cold;
 	int minlevel, maxlevel;
 	extern void intr_calculatemasks(void); /* XXX */
+	int flags;
+
+	flags = level & IPL_MPSAFE;
+	level &= ~IPL_MPSAFE;
+
+	KASSERT(level <= IPL_TTY || flags & IPL_MPSAFE);
 
 	if (sc == NULL)
 		panic("apic_intr_establish: unknown ioapic %d", ioapic);

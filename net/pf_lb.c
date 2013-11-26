@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_lb.c,v 1.20 2012/02/03 01:57:51 bluhm Exp $ */
+/*	$OpenBSD: pf_lb.c,v 1.30 2013/10/30 11:21:26 mikeb Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -49,9 +49,9 @@
 #include <sys/kernel.h>
 #include <sys/time.h>
 #include <sys/pool.h>
-#include <sys/proc.h>
 #include <sys/rwlock.h>
 #include <sys/syslog.h>
+#include <sys/stdint.h>
 
 #include <crypto/md5.h>
 
@@ -62,7 +62,6 @@
 #include <net/radix_mpath.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -90,7 +89,6 @@
 #include <netinet/ip6.h>
 #include <netinet/in_pcb.h>
 #include <netinet/icmp6.h>
-#include <netinet6/nd6.h>
 #endif /* INET6 */
 
 
@@ -105,7 +103,10 @@ int			 pf_get_sport(struct pf_pdesc *, struct pf_rule *,
 			    u_int16_t, struct pf_src_node **);
 int			 pf_get_transaddr_af(struct pf_rule *,
 			    struct pf_pdesc *, struct pf_src_node **);
-int			 pf_islinklocal(sa_family_t, struct pf_addr *);
+int			 pf_map_addr_sticky(sa_family_t, struct pf_rule *,
+			    struct pf_addr *, struct pf_addr *,
+			    struct pf_src_node **, struct pf_pool *,
+			    enum pf_sn_types);
 
 #define mix(a,b,c) \
 	do {					\
@@ -200,7 +201,7 @@ pf_get_sport(struct pf_pdesc *pd, struct pf_rule *r,
 		 * similar 2 portloop in in_pcbbind
 		 */
 		if (!(pd->proto == IPPROTO_TCP || pd->proto == IPPROTO_UDP ||
-		    pd->proto == IPPROTO_ICMP)) {
+		    pd->proto == IPPROTO_ICMP || pd->proto == IPPROTO_ICMPV6)) {
 			/* XXX bug: icmp states dont use the id on both
 			 * XXX sides (traceroute -I through nat) */
 			key.port[1] = pd->nsport;
@@ -253,6 +254,10 @@ pf_get_sport(struct pf_pdesc *pd, struct pf_rule *r,
 		case PF_POOL_RANDOM:
 		case PF_POOL_ROUNDROBIN:
 		case PF_POOL_LEASTSTATES:
+			/*
+			 * pick a different source address since we're out
+			 * of free port choices for the current one.
+			 */
 			if (pf_map_addr(pd->naf, r, &pd->nsaddr, naddr,
 			    &init_addr, sn, &r->nat, PF_SN_NAT))
 				return (1);
@@ -268,10 +273,72 @@ pf_get_sport(struct pf_pdesc *pd, struct pf_rule *r,
 }
 
 int
-pf_islinklocal(sa_family_t af, struct pf_addr *addr)
+pf_map_addr_sticky(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
+    struct pf_addr *naddr, struct pf_src_node **sns, struct pf_pool *rpool,
+    enum pf_sn_types type)
 {
-	if (af == AF_INET6 && IN6_IS_ADDR_LINKLOCAL(&addr->v6))
-		return (1);
+	struct pf_addr		*raddr, *rmask, *cached;
+	struct pf_state		*s;
+	struct pf_src_node	 k;
+	int			 valid;
+
+	k.af = af;
+	k.type = type;
+	PF_ACPY(&k.addr, saddr, af);
+	k.rule.ptr = r;
+	pf_status.scounters[SCNT_SRC_NODE_SEARCH]++;
+	sns[type] = RB_FIND(pf_src_tree, &tree_src_tracking, &k);
+	if (sns[type] == NULL)
+		return (-1);
+
+	/* check if the cached entry is still valid */
+	cached = &(sns[type])->raddr;
+	valid = 0;
+	if (PF_AZERO(cached, af)) {
+		valid = 1;
+	} else if (rpool->addr.type == PF_ADDR_DYNIFTL) {
+		if (pfr_kentry_byaddr(rpool->addr.p.dyn->pfid_kt, cached,
+		    af, 0))
+			valid = 1;
+	} else if (rpool->addr.type == PF_ADDR_TABLE) {
+		if (pfr_kentry_byaddr(rpool->addr.p.tbl, cached, af, 0))
+			valid = 1;
+	} else if (rpool->addr.type != PF_ADDR_NOROUTE) {
+		raddr = &rpool->addr.v.a.addr;
+		rmask = &rpool->addr.v.a.mask;
+		valid = pf_match_addr(0, raddr, rmask, cached, af);
+	}
+	if (!valid) {
+		if (pf_status.debug >= LOG_DEBUG) {
+			log(LOG_DEBUG, "pf: pf_map_addr: "
+			    "stale src tracking (%u) ", type);
+			pf_print_host(&k.addr, 0, af);
+			addlog(" to ");
+			pf_print_host(cached, 0, af);
+			addlog("\n");
+		}
+		if (sns[type]->states != 0) {
+			/* XXX expensive */
+			RB_FOREACH(s, pf_state_tree_id,
+			   &tree_id)
+				pf_state_rm_src_node(s,
+				    sns[type]);
+		}
+		sns[type]->expire = 1;
+		pf_remove_src_node(sns[type]);
+		sns[type] = NULL;
+		return (-1);
+	}
+	if (!PF_AZERO(cached, af))
+		PF_ACPY(naddr, cached, af);
+	if (pf_status.debug >= LOG_DEBUG) {
+		log(LOG_DEBUG, "pf: pf_map_addr: "
+		    "src tracking (%u) maps ", type);
+		pf_print_host(&k.addr, 0, af);
+		addlog(" to ");
+		pf_print_host(naddr, 0, af);
+		addlog("\n");
+	}
 	return (0);
 }
 
@@ -284,32 +351,15 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 	struct pf_addr		 faddr;
 	struct pf_addr		*raddr = &rpool->addr.v.a.addr;
 	struct pf_addr		*rmask = &rpool->addr.v.a.mask;
-	struct pf_src_node	 k;
 	u_int64_t		 states;
 	u_int16_t		 weight;
+	u_int64_t		 load;
+	u_int64_t		 cload;
 
 	if (sns[type] == NULL && rpool->opts & PF_POOL_STICKYADDR &&
-	    (rpool->opts & PF_POOL_TYPEMASK) != PF_POOL_NONE) {
-		k.af = af;
-		k.type = type;
-		PF_ACPY(&k.addr, saddr, af);
-		k.rule.ptr = r;
-		pf_status.scounters[SCNT_SRC_NODE_SEARCH]++;
-		sns[type] = RB_FIND(pf_src_tree, &tree_src_tracking, &k);
-		if (sns[type] != NULL) {
-			if (!PF_AZERO(&(sns[type])->raddr, af))
-				PF_ACPY(naddr, &(sns[type])->raddr, af);
-			if (pf_status.debug >= LOG_DEBUG) {
-				log(LOG_DEBUG, "pf: pf_map_addr: "
-				    "src tracking (%u) maps ", type);
-				pf_print_host(&k.addr, 0, af);
-				addlog(" to ");
-				pf_print_host(naddr, 0, af);
-				addlog("\n");
-			}
-			return (0);
-		}
-	}
+	    (rpool->opts & PF_POOL_TYPEMASK) != PF_POOL_NONE &&
+	    pf_map_addr_sticky(af, r, saddr, naddr, sns, rpool, type) == 0)
+		return (0);
 
 	if (rpool->addr.type == PF_ADDR_NOROUTE)
 		return (1);
@@ -400,20 +450,17 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 		PF_POOLMASK(naddr, raddr, rmask, (struct pf_addr *)&hash, af);
 		break;
 	case PF_POOL_ROUNDROBIN:
-		if (rpool->addr.type == PF_ADDR_TABLE) {
-			if (pfr_pool_get(rpool->addr.p.tbl,
-			    &rpool->tblidx, &rpool->counter,
-			    &raddr, &rmask, &rpool->kif,
-			    &rpool->states, &rpool->weight,
-			    &rpool->curweight, af, NULL))
-				return (1);
-		} else if (rpool->addr.type == PF_ADDR_DYNIFTL) {
-			if (pfr_pool_get(rpool->addr.p.dyn->pfid_kt,
-			    &rpool->tblidx, &rpool->counter,
-			    &raddr, &rmask, &rpool->kif,
-			    &rpool->states, &rpool->weight,
-			    &rpool->curweight, af, pf_islinklocal))
-				return (1);
+		if (rpool->addr.type == PF_ADDR_TABLE ||
+		    rpool->addr.type == PF_ADDR_DYNIFTL) {
+			if (pfr_pool_get(rpool, &raddr, &rmask, af)) {
+				/*
+				 * reset counter in case its value
+				 * has been removed from the pool.
+				 */
+				bzero(&rpool->counter, sizeof(rpool->counter));
+				if (pfr_pool_get(rpool, &raddr, &rmask, af))
+					return (1);
+			}
 		} else if (pf_match_addr(0, raddr, rmask, &rpool->counter, af))
 			return (1);
 
@@ -423,21 +470,10 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 		    (rpool->addr.type == PF_ADDR_DYNIFTL &&
 		    rpool->addr.p.dyn->pfid_kt->pfrkt_refcntcost > 0)) {
 			do {
-				if (rpool->addr.type == PF_ADDR_TABLE) {
-					if (pfr_pool_get(rpool->addr.p.tbl,
-					    &rpool->tblidx, &rpool->counter,
-					    &raddr, &rmask, &rpool->kif,
-					    &rpool->states, &rpool->weight,
-					    &rpool->curweight, af, NULL))
-						return (1);
-				} else if (rpool->addr.type == PF_ADDR_DYNIFTL) {
-					if (pfr_pool_get(
-					    rpool->addr.p.dyn->pfid_kt,
-					    &rpool->tblidx, &rpool->counter,
-					    &raddr, &rmask, &rpool->kif,
-					    &rpool->states, &rpool->weight,
-					    &rpool->curweight, af,
-					    pf_islinklocal))
+				if (rpool->addr.type == PF_ADDR_TABLE ||
+				    rpool->addr.type == PF_ADDR_DYNIFTL) {
+					if (pfr_pool_get(rpool,
+					    &raddr, &rmask, af))
 						return (1);
 				} else {
 					log(LOG_ERR, "pf: pf_map_addr: "
@@ -459,24 +495,27 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 		break;
 	case PF_POOL_LEASTSTATES:
 		/* retrieve an address first */
-		if (rpool->addr.type == PF_ADDR_TABLE) {
-			if (pfr_pool_get(rpool->addr.p.tbl,
-			    &rpool->tblidx, &rpool->counter,
-			    &raddr, &rmask, &rpool->kif,
-			    &rpool->states, &rpool->weight,
-			    &rpool->curweight, af, NULL))
-				return (1);
-		} else if (rpool->addr.type == PF_ADDR_DYNIFTL) {
-			if (pfr_pool_get(rpool->addr.p.dyn->pfid_kt,
-			    &rpool->tblidx, &rpool->counter,
-			    &raddr, &rmask, &rpool->kif,
-			    &rpool->states, &rpool->weight,
-			    &rpool->curweight, af, pf_islinklocal))
-				return (1);
+		if (rpool->addr.type == PF_ADDR_TABLE ||
+		    rpool->addr.type == PF_ADDR_DYNIFTL) {
+			if (pfr_pool_get(rpool, &raddr, &rmask, af)) {
+				/* see PF_POOL_ROUNDROBIN */
+				bzero(&rpool->counter, sizeof(rpool->counter));
+				if (pfr_pool_get(rpool, &raddr, &rmask, af))
+					return (1);
+			}
 		} else if (pf_match_addr(0, raddr, rmask, &rpool->counter, af))
 			return (1);
 
 		states = rpool->states;
+		weight = rpool->weight;
+
+		if ((rpool->addr.type == PF_ADDR_TABLE &&
+		    rpool->addr.p.tbl->pfrkt_refcntcost > 0) ||
+		    (rpool->addr.type == PF_ADDR_DYNIFTL &&
+		    rpool->addr.p.dyn->pfid_kt->pfrkt_refcntcost > 0))
+			load = ((UINT16_MAX * rpool->states) / rpool->weight);
+		else
+			load = states;
 
 		PF_ACPY(&faddr, &rpool->counter, af);
 
@@ -490,27 +529,28 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 		 */
 		do  {
 			PF_AINC(&rpool->counter, af);
-			if (rpool->addr.type == PF_ADDR_TABLE) {
-				if (pfr_pool_get(rpool->addr.p.tbl,
-				    &rpool->tblidx, &rpool->counter,
-				    &raddr, &rmask, &rpool->kif,
-				    &rpool->states, &rpool->weight,
-				    &rpool->curweight, af, NULL))
-					return (1);
-			} else if (rpool->addr.type == PF_ADDR_DYNIFTL) {
-				if (pfr_pool_get(rpool->addr.p.dyn->pfid_kt,
-				    &rpool->tblidx, &rpool->counter,
-				    &raddr, &rmask, &rpool->kif,
-				    &rpool->states, &rpool->weight,
-				    &rpool->curweight, af, pf_islinklocal))
+			if (rpool->addr.type == PF_ADDR_TABLE ||
+			    rpool->addr.type == PF_ADDR_DYNIFTL) {
+				if (pfr_pool_get(rpool, &raddr, &rmask, af))
 					return (1);
 			} else if (pf_match_addr(0, raddr, rmask,
 			    &rpool->counter, af))
 				return (1);
- 
+
+			if ((rpool->addr.type == PF_ADDR_TABLE &&
+			    rpool->addr.p.tbl->pfrkt_refcntcost > 0) ||
+			    (rpool->addr.type == PF_ADDR_DYNIFTL &&
+			    rpool->addr.p.dyn->pfid_kt->pfrkt_refcntcost > 0))
+				cload = ((UINT16_MAX * rpool->states)
+					/ rpool->weight);
+			else
+				cload = rpool->states;
+
 			/* find lc minimum */
-			if (states > rpool->states) {
+			if (cload < load) {
 				states = rpool->states;
+				weight = rpool->weight;
+				load = cload;
 
 				PF_ACPY(naddr, &rpool->counter, af);
 				if (init_addr != NULL &&
@@ -563,11 +603,10 @@ pf_map_addr(sa_family_t af, struct pf_rule *r, struct pf_addr *saddr,
 		if ((rpool->opts & PF_POOL_TYPEMASK) ==
 		    PF_POOL_LEASTSTATES)
 			addlog(" with state count %llu", states);
-		if (((rpool->addr.type == PF_ADDR_TABLE &&
+		if ((rpool->addr.type == PF_ADDR_TABLE &&
 		    rpool->addr.p.tbl->pfrkt_refcntcost > 0) ||
 		    (rpool->addr.type == PF_ADDR_DYNIFTL &&
-		    rpool->addr.p.dyn->pfid_kt->pfrkt_refcntcost > 0)) &&
-		    ((rpool->opts & PF_POOL_TYPEMASK) != PF_POOL_LEASTSTATES)) 
+		    rpool->addr.p.dyn->pfid_kt->pfrkt_refcntcost > 0))
 			addlog(" with weight %u", weight);
 		addlog("\n");
 	}

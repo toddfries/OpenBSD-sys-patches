@@ -1,4 +1,4 @@
-/*	$OpenBSD: sched_bsd.c,v 1.28 2012/02/20 22:23:39 guenther Exp $	*/
+/*	$OpenBSD: sched_bsd.c,v 1.33 2013/06/03 16:55:22 guenther Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*-
@@ -52,7 +52,6 @@
 #include <sys/ktrace.h>
 #endif
 
-#include <machine/cpu.h>
 
 int	lbolt;			/* once a second sleep address */
 int	rrticks_init;		/* # of hardclock ticks per roundrobin() */
@@ -305,7 +304,7 @@ yield(void)
 	p->p_priority = p->p_usrpri;
 	p->p_stat = SRUN;
 	setrunqueue(p);
-	p->p_stats->p_ru.ru_nvcsw++;
+	p->p_ru.ru_nvcsw++;
 	mi_switch();
 	SCHED_UNLOCK(s);
 }
@@ -333,7 +332,7 @@ preempt(struct proc *newp)
 	p->p_stat = SRUN;
 	p->p_cpu = sched_choosecpu(p);
 	setrunqueue(p);
-	p->p_stats->p_ru.ru_nivcsw++;
+	p->p_ru.ru_nivcsw++;
 	mi_switch();
 	SCHED_UNLOCK(s);
 }
@@ -344,8 +343,10 @@ mi_switch(void)
 	struct schedstate_percpu *spc = &curcpu()->ci_schedstate;
 	struct proc *p = curproc;
 	struct proc *nextproc;
+	struct process *pr = p->p_p;
 	struct rlimit *rlim;
-	struct timeval tv;
+	rlim_t secs;
+	struct timespec ts;
 #ifdef MULTIPROCESSOR
 	int hold_count;
 	int sched_count;
@@ -371,26 +372,31 @@ mi_switch(void)
 	 * Compute the amount of time during which the current
 	 * process was running, and add that to its total so far.
 	 */
-	microuptime(&tv);
-	if (timercmp(&tv, &spc->spc_runtime, <)) {
+	nanouptime(&ts);
+	if (timespeccmp(&ts, &spc->spc_runtime, <)) {
 #if 0
 		printf("uptime is not monotonic! "
-		    "tv=%lu.%06lu, runtime=%lu.%06lu\n",
-		    tv.tv_sec, tv.tv_usec, spc->spc_runtime.tv_sec,
-		    spc->spc_runtime.tv_usec);
+		    "ts=%lld.%09lu, runtime=%lld.%09lu\n",
+		    (long long)tv.tv_sec, tv.tv_nsec,
+		    (long long)spc->spc_runtime.tv_sec,
+		    spc->spc_runtime.tv_nsec);
 #endif
 	} else {
-		timersub(&tv, &spc->spc_runtime, &tv);
-		timeradd(&p->p_rtime, &tv, &p->p_rtime);
+		timespecsub(&ts, &spc->spc_runtime, &ts);
+		timespecadd(&p->p_rtime, &ts, &p->p_rtime);
 	}
+
+	/* add the time counts for this thread to the process's total */
+	tuagg_unlocked(pr, p);
 
 	/*
 	 * Check if the process exceeds its cpu resource allocation.
 	 * If over max, kill it.
 	 */
-	rlim = &p->p_rlimit[RLIMIT_CPU];
-	if ((rlim_t)p->p_rtime.tv_sec >= rlim->rlim_cur) {
-		if ((rlim_t)p->p_rtime.tv_sec >= rlim->rlim_max) {
+	rlim = &pr->ps_limit->pl_rlimit[RLIMIT_CPU];
+	secs = pr->ps_tu.tu_runtime.tv_sec;
+	if (secs >= rlim->rlim_cur) {
+		if (secs >= rlim->rlim_max) {
 			psignal(p, SIGKILL);
 		} else {
 			psignal(p, SIGXCPU);
@@ -437,7 +443,7 @@ mi_switch(void)
 	 */
 	KASSERT(p->p_cpu == curcpu());
 
-	microuptime(&p->p_cpu->ci_schedstate.spc_runtime);
+	nanouptime(&p->p_cpu->ci_schedstate.spc_runtime);
 
 #ifdef MULTIPROCESSOR
 	/*
@@ -458,16 +464,7 @@ resched_proc(struct proc *p, u_char pri)
 
 	/*
 	 * XXXSMP
-	 * Since p->p_cpu persists across a context switch,
-	 * this gives us *very weak* processor affinity, in
-	 * that we notify the CPU on which the process last
-	 * ran that it should try to switch.
-	 *
-	 * This does not guarantee that the process will run on
-	 * that processor next, because another processor might
-	 * grab it the next time it performs a context switch.
-	 *
-	 * This also does not handle the case where its last
+	 * This does not handle the case where its last
 	 * CPU is running a higher-priority process, but every
 	 * other CPU is running a lower-priority process.  There
 	 * are ways to handle this situation, but they're not

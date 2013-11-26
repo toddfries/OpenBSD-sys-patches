@@ -1,4 +1,4 @@
-/*	$OpenBSD: midivar.h,v 1.5 2005/11/21 18:16:38 millert Exp $	*/
+/*	$OpenBSD: midivar.h,v 1.7 2013/03/15 09:10:52 ratchov Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Alexandre Ratchov
@@ -29,12 +29,6 @@
 #define MIDI_RATE	3125	/* midi uart baud rate in bytes/second */
 #define MIDI_UNIT(a)	((a) & 0xff)
 #define MIDI_DEV2SC(a)	(midi_cd.cd_devs[MIDI_UNIT(a)])
-
-#include "sequencer.h"
-
-#if NSEQUENCER > 0
-struct midi_dev;		/* defined in sequencervar.h */
-#endif
 
 /*
  * simple ring buffer
@@ -85,20 +79,12 @@ struct midi_softc {
 	int		    props;		/* midi hw proprieties */
 	int		    rchan;
 	int		    wchan;
-	unsigned	    wait;		/* see midi_out_do */
 	struct selinfo	    rsel;
 	struct selinfo	    wsel;
 	struct proc 	   *async;
 	struct timeout	    timeo;
 	struct midi_buffer  inbuf;
 	struct midi_buffer  outbuf;
-#if NSEQUENCER > 0
-        int		    seqopen;
-        struct midi_dev    *seq_md; 		/* structure that links us with the seq. */
-	int		    evindex;
-	unsigned char	    evstatus;
-	unsigned char	    evdata[2];
-#endif /* NSEQUENCER > 0 */
 };
 
 #endif /* _SYS_DEV_MIDIVAR_H_ */

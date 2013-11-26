@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_msk.c,v 1.93 2011/06/22 16:44:27 tedu Exp $	*/
+/*	$OpenBSD: if_msk.c,v 1.99 2013/08/07 01:06:36 bluhm Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -106,7 +106,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
@@ -165,8 +164,7 @@ int msk_miibus_readreg(struct device *, int, int);
 void msk_miibus_writereg(struct device *, int, int, int);
 void msk_miibus_statchg(struct device *);
 
-void msk_setmulti(struct sk_if_softc *);
-void msk_setpromisc(struct sk_if_softc *);
+void msk_iff(struct sk_if_softc *);
 void msk_tick(void *);
 
 #ifdef MSK_DEBUG
@@ -363,38 +361,42 @@ msk_miibus_statchg(struct device *dev)
 }
 
 void
-msk_setmulti(struct sk_if_softc *sc_if)
+msk_iff(struct sk_if_softc *sc_if)
 {
-	struct ifnet *ifp= &sc_if->arpcom.ac_if;
-	u_int32_t hashes[2] = { 0, 0 };
-	int h;
+	struct ifnet *ifp = &sc_if->arpcom.ac_if;
 	struct arpcom *ac = &sc_if->arpcom;
 	struct ether_multi *enm;
 	struct ether_multistep step;
+	u_int32_t hashes[2];
+	u_int16_t rcr;
+	int h;
 
-	/* First, zot all the existing filters. */
-	SK_YU_WRITE_2(sc_if, YUKON_MCAH1, 0);
-	SK_YU_WRITE_2(sc_if, YUKON_MCAH2, 0);
-	SK_YU_WRITE_2(sc_if, YUKON_MCAH3, 0);
-	SK_YU_WRITE_2(sc_if, YUKON_MCAH4, 0);
+	rcr = SK_YU_READ_2(sc_if, YUKON_RCR);
+	rcr &= ~(YU_RCR_MUFLEN | YU_RCR_UFLEN);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
+	/*
+	 * Always accept frames destined to our station address.
+	 */
+	rcr |= YU_RCR_UFLEN;
 
-	/* Now program new ones. */
-allmulti:
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
-		hashes[0] = 0xFFFFFFFF;
-		hashes[1] = 0xFFFFFFFF;
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			rcr &= ~YU_RCR_UFLEN;
+		else
+			rcr |= YU_RCR_MUFLEN;
+		hashes[0] = hashes[1] = 0xFFFFFFFF;
 	} else {
-		/* First find the tail of the list. */
+		rcr |= YU_RCR_MUFLEN;
+		/* Program new filter. */
+		bzero(hashes, sizeof(hashes));
+
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
-			if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
-				 ETHER_ADDR_LEN)) {
-				ifp->if_flags |= IFF_ALLMULTI;
-				goto allmulti;
-			}
-			h = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) &
-			    ((1 << SK_HASH_BITS) - 1);
+			h = ether_crc32_be(enm->enm_addrlo,
+			    ETHER_ADDR_LEN) & ((1 << SK_HASH_BITS) - 1);
+
 			if (h < 32)
 				hashes[0] |= (1 << h);
 			else
@@ -408,19 +410,7 @@ allmulti:
 	SK_YU_WRITE_2(sc_if, YUKON_MCAH2, (hashes[0] >> 16) & 0xffff);
 	SK_YU_WRITE_2(sc_if, YUKON_MCAH3, hashes[1] & 0xffff);
 	SK_YU_WRITE_2(sc_if, YUKON_MCAH4, (hashes[1] >> 16) & 0xffff);
-}
-
-void
-msk_setpromisc(struct sk_if_softc *sc_if)
-{
-	struct ifnet *ifp = &sc_if->arpcom.ac_if;
-
-	if (ifp->if_flags & IFF_PROMISC)
-		SK_YU_CLRBIT_2(sc_if, YUKON_RCR,
-		    YU_RCR_UFLEN | YU_RCR_MUFLEN);
-	else
-		SK_YU_SETBIT_2(sc_if, YUKON_RCR,
-		    YU_RCR_UFLEN | YU_RCR_MUFLEN);
+	SK_YU_WRITE_2(sc_if, YUKON_RCR, rcr);
 }
 
 int
@@ -616,25 +606,19 @@ msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 #ifdef INET
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc_if->arpcom, ifa);
-#endif /* INET */
+#endif
 		break;
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (ifp->if_flags & IFF_RUNNING &&
-			    (sc_if->sk_if_flags ^ ifp->if_flags) &
-			     IFF_PROMISC) {
-				msk_setpromisc(sc_if);
-				msk_setmulti(sc_if);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					msk_init(sc_if);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				msk_init(sc_if);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				msk_stop(sc_if, 0);
 		}
-		sc_if->sk_if_flags = ifp->if_flags;
 		break;
 
 	case SIOCGIFMEDIA:
@@ -649,7 +633,7 @@ msk_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			msk_setmulti(sc_if);
+			msk_iff(sc_if);
 		error = 0;
 	}
 
@@ -688,6 +672,32 @@ mskc_reset(struct sk_softc *sc)
 	CSR_WRITE_1(sc, SK_CSR, SK_CSR_MASTER_UNRESET);
 
 	sk_win_write_1(sc, SK_TESTCTL1, 2);
+
+	if (sc->sk_type == SK_YUKON_EC_U || sc->sk_type == SK_YUKON_EX ||
+	    sc->sk_type >= SK_YUKON_FE_P) {
+		/* enable all clocks. */
+		sk_win_write_4(sc, SK_Y2_PCI_REG(SK_PCI_OURREG3), 0);
+		reg1 = sk_win_read_4(sc, SK_Y2_PCI_REG(SK_PCI_OURREG4));
+		reg1 &= (SK_Y2_REG4_FORCE_ASPM_REQUEST|
+		    SK_Y2_REG4_ASPM_GPHY_LINK_DOWN|
+		    SK_Y2_REG4_ASPM_INT_FIFO_EMPTY|
+		    SK_Y2_REG4_ASPM_CLKRUN_REQUEST);
+		sk_win_write_4(sc, SK_Y2_PCI_REG(SK_PCI_OURREG4), reg1);
+
+		reg1 = sk_win_read_4(sc, SK_Y2_PCI_REG(SK_PCI_OURREG5));
+		reg1 &= SK_Y2_REG5_TIM_VMAIN_AV_MASK;
+		sk_win_write_4(sc, SK_Y2_PCI_REG(SK_PCI_OURREG5), reg1);
+		sk_win_write_4(sc, SK_Y2_PCI_REG(SK_PCI_CFGREG1), 0);
+
+		/*
+		 * Disable status race, workaround for Yukon EC Ultra &
+		 * Yukon EX.
+		 */
+		reg1 = sk_win_read_4(sc, SK_GPIO);
+		reg1 |= SK_Y2_GPIO_STAT_RACE_DIS;
+		sk_win_write_4(sc, SK_GPIO, reg1);
+		sk_win_read_4(sc, SK_GPIO);
+	}
 
 	reg1 = sk_win_read_4(sc, SK_Y2_PCI_REG(SK_PCI_OURREG1));
 	if (sc->sk_type == SK_YUKON_XL && sc->sk_rev > SK_YUKON_XL_REV_A1)
@@ -760,10 +770,21 @@ mskc_reset(struct sk_softc *sc)
 	 */
 	switch (sc->sk_type) {
 	case SK_YUKON_EC:
-	case SK_YUKON_XL:
-	case SK_YUKON_FE:
+	case SK_YUKON_EC_U:
+	case SK_YUKON_EX:
+	case SK_YUKON_SUPR:
+	case SK_YUKON_ULTRA2:
 	case SK_YUKON_OPTIMA:
 		imtimer_ticks = SK_IMTIMER_TICKS_YUKON_EC;
+		break;
+	case SK_YUKON_FE:
+		imtimer_ticks = SK_IMTIMER_TICKS_YUKON_FE;
+		break;
+	case SK_YUKON_FE_P:
+		imtimer_ticks = SK_IMTIMER_TICKS_YUKON_FE_P;
+		break;
+	case SK_YUKON_XL:
+		imtimer_ticks = SK_IMTIMER_TICKS_YUKON_XL;
 		break;
 	default:
 		imtimer_ticks = SK_IMTIMER_TICKS_YUKON;
@@ -944,7 +965,6 @@ msk_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = msk_ioctl;
 	ifp->if_start = msk_start;
 	ifp->if_watchdog = msk_watchdog;
-	ifp->if_baudrate = 1000000000;
 	if (sc->sk_type != SK_YUKON_FE &&
 	    sc->sk_type != SK_YUKON_FE_P)
 		ifp->if_hardmtu = SK_JUMBO_MTU;
@@ -1092,7 +1112,7 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 	struct pci_attach_args *pa = aux;
 	struct skc_attach_args skca;
 	pci_chipset_tag_t pc = pa->pa_pc;
-	pcireg_t command, memtype;
+	pcireg_t memtype;
 	pci_intr_handle_t ih;
 	const char *intrstr = NULL;
 	u_int8_t hw, pmd;
@@ -1101,35 +1121,7 @@ mskc_attach(struct device *parent, struct device *self, void *aux)
 
 	DPRINTFN(2, ("begin mskc_attach\n"));
 
-	/*
-	 * Handle power management nonsense.
-	 */
-	command = pci_conf_read(pc, pa->pa_tag, SK_PCI_CAPID) & 0x000000FF;
-
-	if (command == 0x01) {
-		command = pci_conf_read(pc, pa->pa_tag, SK_PCI_PWRMGMTCTRL);
-		if (command & SK_PSTATE_MASK) {
-			u_int32_t		iobase, membase, irq;
-
-			/* Save important PCI config data. */
-			iobase = pci_conf_read(pc, pa->pa_tag, SK_PCI_LOIO);
-			membase = pci_conf_read(pc, pa->pa_tag, SK_PCI_LOMEM);
-			irq = pci_conf_read(pc, pa->pa_tag, SK_PCI_INTLINE);
-
-			/* Reset the power state. */
-			printf("%s chip is in D%d power mode "
-			    "-- setting to D0\n", sc->sk_dev.dv_xname,
-			    command & SK_PSTATE_MASK);
-			command &= 0xFFFFFFFC;
-			pci_conf_write(pc, pa->pa_tag,
-			    SK_PCI_PWRMGMTCTRL, command);
-
-			/* Restore PCI config data. */
-			pci_conf_write(pc, pa->pa_tag, SK_PCI_LOIO, iobase);
-			pci_conf_write(pc, pa->pa_tag, SK_PCI_LOMEM, membase);
-			pci_conf_write(pc, pa->pa_tag, SK_PCI_INTLINE, irq);
-		}
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/*
 	 * Map control/status registers.
@@ -1934,12 +1926,9 @@ msk_init_yukon(struct sk_if_softc *sc_if)
 		SK_YU_WRITE_2(sc_if, YUKON_SAL2 + i * 4, reg);
 	}
 
-	/* Set promiscuous mode */
-	msk_setpromisc(sc_if);
-
-	/* Set multicast filter */
+	/* Program promiscuous mode and multicast filters */
 	DPRINTFN(6, ("msk_init_yukon: 11\n"));
-	msk_setmulti(sc_if);
+	msk_iff(sc_if);
 
 	/* enable interrupt mask for counter overflows */
 	DPRINTFN(6, ("msk_init_yukon: 12\n"));

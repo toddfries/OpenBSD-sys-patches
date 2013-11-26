@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_output.c,v 1.44 2011/03/05 01:53:16 bluhm Exp $ */
+/*	$OpenBSD: ipsec_output.c,v 1.50 2013/10/24 11:31:43 mpi Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -27,6 +27,7 @@
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/kernel.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -47,7 +48,6 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
-#include <netinet6/in6_var.h>
 #endif /* INET6 */
 
 #include <netinet/udp.h>
@@ -374,8 +374,6 @@ ipsp_process_packet(struct mbuf *m, struct tdb *tdb, int af, int tunalready)
 	/* Non expansion policy for IPCOMP */
 	if (tdb->tdb_sproto == IPPROTO_IPCOMP) {
 		if ((m->m_pkthdr.len - i) < tdb->tdb_compalgxform->minlen) {
-			extern struct ipcompstat ipcompstat;
-
 			/* No need to compress, leave the packet untouched */
 			ipcompstat.ipcomps_minlen++;
 			return ipsp_process_done(m, tdb);
@@ -543,27 +541,21 @@ ipsec_hdrsz(struct tdb *tdbp)
 			return (-1);
 
 		/* Header length */
-		if (tdbp->tdb_flags & TDBF_NOREPLAY)
-			adjust = sizeof(u_int32_t) + tdbp->tdb_ivlen;
-		else
-			adjust = 2 * sizeof(u_int32_t) + tdbp->tdb_ivlen;
+		adjust = 2 * sizeof(u_int32_t) + tdbp->tdb_ivlen;
 		if (tdbp->tdb_flags & TDBF_UDPENCAP)
 			adjust += sizeof(struct udphdr);
 		/* Authenticator */
 		if (tdbp->tdb_authalgxform != NULL)
 			adjust += tdbp->tdb_authalgxform->authsize;
 		/* Padding */
-		adjust += tdbp->tdb_encalgxform->blocksize;
+		adjust += MAX(4, tdbp->tdb_encalgxform->blocksize);
 		break;
 
 	case IPPROTO_AH:
 		if (tdbp->tdb_authalgxform == NULL)
 			return (-1);
 
-		if (!(tdbp->tdb_flags & TDBF_NOREPLAY))
-			adjust = AH_FLENGTH + sizeof(u_int32_t);
-		else
-			adjust = AH_FLENGTH;
+		adjust = AH_FLENGTH + sizeof(u_int32_t);
 		adjust += tdbp->tdb_authalgxform->authsize;
 		break;
 
@@ -600,7 +592,7 @@ ipsec_adjust_mtu(struct mbuf *m, u_int32_t mtu)
 	ssize_t adjust;
 	int s;
 
-	s = spltdb();
+	s = splsoftnet();
 
 	for (mtag = m_tag_find(m, PACKET_TAG_IPSEC_OUT_DONE, NULL); mtag;
 	     mtag = m_tag_find(m, PACKET_TAG_IPSEC_OUT_DONE, mtag)) {

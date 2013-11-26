@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_san_xilinx.c,v 1.26 2011/09/18 11:17:57 miod Exp $	*/
+/*	$OpenBSD: if_san_xilinx.c,v 1.28 2013/08/07 01:06:37 bluhm Exp $	*/
 
 /*-
  * Copyright (c) 2001-2004 Sangoma Technologies (SAN)
@@ -54,7 +54,6 @@
 #include <net/if_sppp.h>
 #include <netinet/in_systm.h>
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/udp.h>
 #include <netinet/ip.h>
 
@@ -206,7 +205,7 @@ static int	wan_xilinx_release(sdla_t*, struct ifnet *);
 /* Network device interface */
 static int	wan_xilinx_up(struct ifnet *);
 static int	wan_xilinx_down(struct ifnet *);
-static int	wan_xilinx_ioctl(struct ifnet *, int cmd, struct ifreq *);
+static int	wan_xilinx_ioctl(struct ifnet *, u_long cmd, struct ifreq *);
 static int	wan_xilinx_send(struct mbuf *, struct ifnet *);
 
 static void	handle_front_end_state(void *);
@@ -668,7 +667,7 @@ wan_xilinx_dma_tx_try:
 }
 
 static int
-wan_xilinx_ioctl(struct ifnet *ifp, int cmd, struct ifreq *ifr)
+wan_xilinx_ioctl(struct ifnet *ifp, u_long cmd, struct ifreq *ifr)
 {
 	xilinx_softc_t	*sc = (xilinx_softc_t *)ifp->if_softc;
 	struct mbuf	*m;

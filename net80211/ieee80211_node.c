@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_node.c,v 1.68 2012/01/25 17:04:02 stsp Exp $	*/
+/*	$OpenBSD: ieee80211_node.c,v 1.79 2013/11/21 16:16:08 mpi Exp $	*/
 /*	$NetBSD: ieee80211_node.c,v 1.14 2004/05/09 09:18:47 dyoung Exp $	*/
 
 /*-
@@ -50,7 +50,6 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_arp.h>
-#include <net/if_llc.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -94,12 +93,9 @@ void ieee80211_node_leave_ht(struct ieee80211com *, struct ieee80211_node *);
 #endif
 void ieee80211_node_leave_rsn(struct ieee80211com *, struct ieee80211_node *);
 void ieee80211_node_leave_11g(struct ieee80211com *, struct ieee80211_node *);
-void ieee80211_set_tim(struct ieee80211com *, int, int);
 void ieee80211_inact_timeout(void *);
 void ieee80211_node_cache_timeout(void *);
 #endif
-
-#define M_80211_NODE	M_DEVBUF
 
 #ifndef IEEE80211_STA_ONLY
 void
@@ -189,8 +185,6 @@ ieee80211_alloc_node_helper(struct ieee80211com *ic)
 	if (ic->ic_nnodes >= ic->ic_max_nnodes)
 		return NULL;
 	ni = (*ic->ic_node_alloc)(ic);
-	if (ni != NULL)
-		ic->ic_nnodes++;
 	return ni;
 }
 
@@ -206,6 +200,9 @@ ieee80211_node_lateattach(struct ifnet *ifp)
 	ni->ni_chan = IEEE80211_CHAN_ANYC;
 	ic->ic_bss = ieee80211_ref_node(ni);
 	ic->ic_txpower = IEEE80211_TXPOWER_MAX;
+#ifndef IEEE80211_STA_ONLY
+	IFQ_SET_MAXLEN(&ni->ni_savedq, IEEE80211_PS_MAX_QUEUE);
+#endif
 }
 
 void
@@ -351,6 +348,7 @@ ieee80211_create_ibss(struct ieee80211com* ic, struct ieee80211_channel *chan)
 	ic->ic_flags |= IEEE80211_F_SIBSS;
 	ni->ni_chan = chan;
 	ni->ni_rates = ic->ic_sup_rates[ieee80211_chan2mode(ic, ni->ni_chan)];
+	ni->ni_txrate = 0;
 	IEEE80211_ADDR_COPY(ni->ni_macaddr, ic->ic_myaddr);
 	IEEE80211_ADDR_COPY(ni->ni_bssid, ic->ic_myaddr);
 	if (ic->ic_opmode == IEEE80211_M_IBSS) {
@@ -759,7 +757,7 @@ ieee80211_get_rate(struct ieee80211com *ic)
 struct ieee80211_node *
 ieee80211_node_alloc(struct ieee80211com *ic)
 {
-	return malloc(sizeof(struct ieee80211_node), M_80211_NODE,
+	return malloc(sizeof(struct ieee80211_node), M_DEVBUF,
 	    M_NOWAIT | M_ZERO);
 }
 
@@ -776,7 +774,7 @@ void
 ieee80211_node_free(struct ieee80211com *ic, struct ieee80211_node *ni)
 {
 	ieee80211_node_cleanup(ic, ni);
-	free(ni, M_80211_NODE);
+	free(ni, M_DEVBUF);
 }
 
 void
@@ -815,6 +813,7 @@ ieee80211_setup_node(struct ieee80211com *ic,
 #endif
 	s = splnet();
 	RB_INSERT(ieee80211_tree, &ic->ic_tree, ni);
+	ic->ic_nnodes++;
 	splx(s);
 }
 
@@ -1081,6 +1080,8 @@ ieee80211_free_node(struct ieee80211com *ic, struct ieee80211_node *ni)
 	if (ni == ic->ic_bss)
 		panic("freeing bss node");
 
+	splassert(IPL_NET);
+
 	DPRINTF(("%s\n", ether_sprintf(ni->ni_macaddr)));
 #ifndef IEEE80211_STA_ONLY
 	timeout_del(&ni->ni_eapol_to);
@@ -1105,7 +1106,7 @@ ieee80211_release_node(struct ieee80211com *ic, struct ieee80211_node *ni)
 {
 	int s;
 
-	DPRINTF(("%s refcnt %d\n", ether_sprintf(ni->ni_macaddr),
+	DPRINTF(("%s refcnt %u\n", ether_sprintf(ni->ni_macaddr),
 	    ni->ni_refcnt));
 	s = splnet();
 	if (ieee80211_node_decref(ni) == 0 &&
@@ -1141,8 +1142,8 @@ ieee80211_free_allnodes(struct ieee80211com *ic)
  * Else, this function is called because a new node must be allocated but the
  * node cache is full. In this case, return as soon as a free slot was made
  * available. If acting as hostap, clean cached nodes regardless of their
- * recent activity and also allow de-authing inactive authenticated or
- * associated nodes.
+ * recent activity and also allow de-authing of authenticated nodes older
+ * than one cache wait interval, and de-authing of inactive associated nodes.
  */
 void
 ieee80211_clean_nodes(struct ieee80211com *ic, int cache_timeout)
@@ -1150,6 +1151,10 @@ ieee80211_clean_nodes(struct ieee80211com *ic, int cache_timeout)
 	struct ieee80211_node *ni, *next_ni;
 	u_int gen = ic->ic_scangen++;		/* NB: ok 'cuz single-threaded*/
 	int s;
+#ifndef IEEE80211_STA_ONLY
+	int nnodes = 0;
+	struct ifnet *ifp = &ic->ic_if;
+#endif
 
 	s = splnet();
 	for (ni = RB_MIN(ieee80211_tree, &ic->ic_tree);
@@ -1159,6 +1164,9 @@ ieee80211_clean_nodes(struct ieee80211com *ic, int cache_timeout)
 			break;
 		if (ni->ni_scangen == gen)	/* previously handled */
 			continue;
+#ifndef IEEE80211_STA_ONLY
+		nnodes++;
+#endif
 		ni->ni_scangen = gen;
 		if (ni->ni_refcnt > 0)
 			continue;
@@ -1172,21 +1180,31 @@ ieee80211_clean_nodes(struct ieee80211com *ic, int cache_timeout)
 				    ni->ni_inact < IEEE80211_INACT_MAX))
 					continue;
 			} else {
-				if (ni->ni_state != IEEE80211_STA_COLLECT &&
+				if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
+				    ((ni->ni_state == IEEE80211_STA_ASSOC &&
+				    ni->ni_inact < IEEE80211_INACT_MAX) ||
+				    (ni->ni_state == IEEE80211_STA_AUTH &&
+				     ni->ni_inact == 0)))
+				    	continue;
+
+				if (ic->ic_opmode == IEEE80211_M_IBSS &&
+				    ni->ni_state != IEEE80211_STA_COLLECT &&
 				    ni->ni_state != IEEE80211_STA_CACHE &&
 				    ni->ni_inact < IEEE80211_INACT_MAX)
 					continue;
 			}
 		}
+		if (ifp->if_flags & IFF_DEBUG)
+			printf("%s: station %s purged from node cache\n",
+			    ifp->if_xname, ether_sprintf(ni->ni_macaddr));
 #endif
-		DPRINTF(("station %s purged from LRU cache\n",
-		    ether_sprintf(ni->ni_macaddr)));
 		/*
 		 * If we're hostap and the node is authenticated, send
 		 * a deauthentication frame. The node will be freed when
 		 * the driver calls ieee80211_release_node().
 		 */
 #ifndef IEEE80211_STA_ONLY
+		nnodes--;
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP &&
 		    ni->ni_state >= IEEE80211_STA_AUTH &&
 		    ni->ni_state != IEEE80211_STA_COLLECT) {
@@ -1201,6 +1219,20 @@ ieee80211_clean_nodes(struct ieee80211com *ic, int cache_timeout)
 			ieee80211_free_node(ic, ni);
 		ic->ic_stats.is_node_timeout++;
 	}
+
+#ifndef IEEE80211_STA_ONLY
+	/* 
+	 * During a cache timeout we iterate over all nodes.
+	 * Check for node leaks by comparing the actual number of cached
+	 * nodes with the ic_nnodes count, which is maintained while adding
+	 * and removing nodes from the cache.
+	 */
+	if ((ifp->if_flags & IFF_DEBUG) && cache_timeout &&
+	    nnodes != ic->ic_nnodes)
+		printf("%s: number of cached nodes is %d, expected %d,"
+		    "possible nodes leak\n", ifp->if_xname, nnodes,
+		    ic->ic_nnodes);
+#endif
 	splx(s);
 }
 
@@ -1440,10 +1472,10 @@ ieee80211_node_join(struct ieee80211com *ic, struct ieee80211_node *ni,
 
 #if NBRIDGE > 0
 	/*
-	 * If the parent interface belongs to a bridge, learn
+	 * If the parent interface is a bridgeport, learn
 	 * the node's address dynamically on this interface.
 	 */
-	if (ic->ic_if.if_bridge != NULL)
+	if (ic->ic_if.if_bridgeport != NULL)
 		bridge_update(&ic->ic_if,
 		    (struct ether_addr *)ni->ni_macaddr, 0);
 #endif
@@ -1570,8 +1602,16 @@ ieee80211_node_leave(struct ieee80211com *ic, struct ieee80211_node *ni)
 		return;
 	}
 
-	if (ni->ni_pwrsave == IEEE80211_PS_DOZE)
+	if (ni->ni_pwrsave == IEEE80211_PS_DOZE) {
 		ic->ic_pssta--;
+		ni->ni_pwrsave = IEEE80211_PS_AWAKE;
+	}
+
+	if (!IF_IS_EMPTY(&ni->ni_savedq)) {
+		IF_PURGE(&ni->ni_savedq);
+		if (ic->ic_set_tim != NULL)
+			(*ic->ic_set_tim)(ic, ni->ni_associd, 0);
+	}
 
 	if (ic->ic_flags & IEEE80211_F_RSNON)
 		ieee80211_node_leave_rsn(ic, ni);
@@ -1593,10 +1633,10 @@ ieee80211_node_leave(struct ieee80211com *ic, struct ieee80211_node *ni)
 
 #if NBRIDGE > 0
 	/*
-	 * If the parent interface belongs to a bridge, delete
+	 * If the parent interface is a bridgeport, delete
 	 * any dynamically learned address for this node.
 	 */
-	if (ic->ic_if.if_bridge != NULL)
+	if (ic->ic_if.if_bridgeport != NULL)
 		bridge_update(&ic->ic_if,
 		    (struct ether_addr *)ni->ni_macaddr, 1);
 #endif

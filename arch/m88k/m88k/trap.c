@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.79 2011/11/16 20:50:18 deraadt Exp $	*/
+/*	$OpenBSD: trap.c,v 1.88 2013/09/05 20:40:32 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -51,11 +51,8 @@
 #include <sys/signalvar.h>
 #include <sys/user.h>
 #include <sys/syscall.h>
+#include <sys/syscall_mi.h>
 #include <sys/systm.h>
-#include <sys/ktrace.h>
-
-#include "systrace.h"
-#include <dev/systrace.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -84,7 +81,7 @@
 void printtrap(int, struct trapframe *);
 __dead void panictrap(int, struct trapframe *);
 __dead void error_fatal(struct trapframe *);
-int double_reg_fixup(struct trapframe *);
+int double_reg_fixup(struct trapframe *, int);
 int ss_put_value(struct proc *, vaddr_t, u_int);
 
 extern void regdump(struct trapframe *f);
@@ -323,6 +320,7 @@ lose:
 		    fault_addr, frame, frame->tf_cpu);
 #endif
 
+		pcb_onfault = p->p_addr->u_pcb.pcb_onfault;
 		switch (pbus_type) {
 		case CMMU_PFSR_SUCCESS:
 			/*
@@ -330,22 +328,37 @@ lose:
 			 * to drain the data unit pipe line and reset dmt0
 			 * so that trap won't get called again.
 			 */
+			p->p_addr->u_pcb.pcb_onfault = 0;
 			data_access_emulation((u_int *)frame);
-			frame->tf_dpfsr = 0;
+			p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
 			frame->tf_dmt0 = 0;
+			frame->tf_dpfsr = 0;
 			KERNEL_UNLOCK();
 			return;
 		case CMMU_PFSR_SFAULT:
 		case CMMU_PFSR_PFAULT:
-			if ((pcb_onfault = p->p_addr->u_pcb.pcb_onfault) != 0)
-				p->p_addr->u_pcb.pcb_onfault = 0;
+			p->p_addr->u_pcb.pcb_onfault = 0;
 			result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
 			p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
-			/*
-			 * This could be a fault caused in copyout*()
-			 * while accessing kernel space.
-			 */
-			if (result != 0 && pcb_onfault != 0) {
+			if (result == 0) {
+				/*
+				 * We could resolve the fault. Call
+				 * data_access_emulation to drain the data
+				 * unit pipe line and reset dmt0 so that trap
+				 * won't get called again.
+				 */
+				p->p_addr->u_pcb.pcb_onfault = 0;
+				data_access_emulation((u_int *)frame);
+				p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
+				frame->tf_dmt0 = 0;
+				frame->tf_dpfsr = 0;
+				KERNEL_UNLOCK();
+				return;
+			} else if (pcb_onfault != 0) {
+				/*
+				 * This could be a fault caused in copyout*()
+				 * while accessing kernel space.
+				 */
 				frame->tf_snip = pcb_onfault | NIP_V;
 				frame->tf_sfip = (pcb_onfault + 4) | FIP_V;
 				frame->tf_sxip = 0;
@@ -354,19 +367,8 @@ lose:
 				 * but do not try to complete the faulting
 				 * access.
 				 */
-				frame->tf_dmt0 |= DMT_SKIP;
-				result = 0;
-			}
-			if (result == 0) {
-				/*
-				 * We could resolve the fault. Call
-				 * data_access_emulation to drain the data
-				 * unit pipe line and reset dmt0 so that trap
-				 * won't get called again.
-				 */
-				data_access_emulation((u_int *)frame);
-				frame->tf_dpfsr = 0;
 				frame->tf_dmt0 = 0;
+				frame->tf_dpfsr = 0;
 				KERNEL_UNLOCK();
 				return;
 			}
@@ -427,33 +429,15 @@ user_fault:
 			break;
 		default:
 			result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
+			if (result == EACCES)
+				result = EFAULT;
 			break;
 		}
 
 		p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
 
-		if ((caddr_t)va >= vm->vm_maxsaddr) {
-			if (result == 0)
-				uvm_grow(p, va);
-			else if (result == EACCES)
-				result = EFAULT;
-		}
-
-		/*
-		 * This could be a fault caused in copyin*()
-		 * while accessing user space.
-		 */
-		if (result != 0 && pcb_onfault != 0) {
-			frame->tf_snip = pcb_onfault | NIP_V;
-			frame->tf_sfip = (pcb_onfault + 4) | FIP_V;
-			frame->tf_sxip = 0;
-			/*
-			 * Continue as if the fault had been resolved, but
-			 * do not try to complete the faulting access.
-			 */
-			frame->tf_dmt0 |= DMT_SKIP;
-			result = 0;
-		}
+		if (result == 0 && (caddr_t)va >= vm->vm_maxsaddr)
+			uvm_grow(p, va);
 
 		if (result == 0) {
 			if (type == T_INSTFLT + T_USER) {
@@ -471,20 +455,39 @@ user_fault:
 			 	 * pipe line and reset dmt0 so that trap won't
 			 	 * get called again.
 			 	 */
+				p->p_addr->u_pcb.pcb_onfault = 0;
 				data_access_emulation((u_int *)frame);
-				frame->tf_dpfsr = 0;
+				p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
 				frame->tf_dmt0 = 0;
+				frame->tf_dpfsr = 0;
 			}
 		} else {
-			sig = result == EACCES ? SIGBUS : SIGSEGV;
-			fault_type = result == EACCES ?
-			    BUS_ADRERR : SEGV_MAPERR;
+			/*
+			 * This could be a fault caused in copyin*()
+			 * while accessing user space.
+			 */
+			if (pcb_onfault != 0) {
+				frame->tf_snip = pcb_onfault | NIP_V;
+				frame->tf_sfip = (pcb_onfault + 4) | FIP_V;
+				frame->tf_sxip = 0;
+				/*
+				 * Continue as if the fault had been resolved,
+				 * but do not try to complete the faulting
+				 * access.
+				 */
+				frame->tf_dmt0 = 0;
+				frame->tf_dpfsr = 0;
+			} else {
+				sig = result == EACCES ? SIGBUS : SIGSEGV;
+				fault_type = result == EACCES ?
+				    BUS_ADRERR : SEGV_MAPERR;
+			}
 		}
 		KERNEL_UNLOCK();
 		break;
 	case T_MISALGNFLT+T_USER:
 		/* Fix any misaligned ld.d or st.d instructions */
-		sig = double_reg_fixup(frame);
+		sig = double_reg_fixup(frame, T_MISALGNFLT);
 		fault_type = BUS_ADRALN;
 		break;
 	case T_PRIVINFLT+T_USER:
@@ -511,7 +514,33 @@ user_fault:
 		fault_type = FPE_INTOVF;
 		break;
 	case T_FPEPFLT+T_USER:
-		sig = SIGFPE;
+		m88100_fpu_precise_exception(frame);
+		goto maysigfpe;
+	case T_FPEIFLT+T_USER:
+		m88100_fpu_imprecise_exception(frame);
+maysigfpe:
+		/* Check for a SIGFPE condition */
+		if (frame->tf_fpsr & frame->tf_fpcr) {
+			sig = SIGFPE;
+			if (frame->tf_fpecr & FPECR_FIOV)
+				fault_type = FPE_FLTSUB;
+			else if (frame->tf_fpecr & FPECR_FROP)
+				fault_type = FPE_FLTINV;
+			else if (frame->tf_fpecr & FPECR_FDVZ)
+				fault_type = FPE_INTDIV;
+			else if (frame->tf_fpecr & FPECR_FUNF) {
+				if (frame->tf_fpsr & FPSR_EFUNF)
+					fault_type = FPE_FLTUND;
+				else if (frame->tf_fpsr & FPSR_EFINX)
+					fault_type = FPE_FLTRES;
+			} else if (frame->tf_fpecr & FPECR_FOVF) {
+				if (frame->tf_fpsr & FPSR_EFOVF)
+					fault_type = FPE_FLTOVF;
+				else if (frame->tf_fpsr & FPSR_EFINX)
+					fault_type = FPE_FLTRES;
+			} else if (frame->tf_fpecr & FPECR_FINX)
+				fault_type = FPE_FLTRES;
+		}
 		break;
 	case T_SIGSYS+T_USER:
 		sig = SIGSYS;
@@ -906,6 +935,8 @@ m88110_user_fault:
 			if (frame->tf_isr & (CMMU_ISR_SI | CMMU_ISR_PI)) {
 				/* segment or page fault */
 				result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
+				if (result == EACCES)
+					result = EFAULT;
 			} else {
 #ifdef TRAPDEBUG
 				printf("Unexpected Instruction fault isr %x\n",
@@ -923,6 +954,8 @@ m88110_user_fault:
 			if (frame->tf_dsr & (CMMU_DSR_SI | CMMU_DSR_PI)) {
 				/* segment or page fault */
 				result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
+				if (result == EACCES)
+					result = EFAULT;
 			} else
 			if (frame->tf_dsr & (CMMU_DSR_CP | CMMU_DSR_WA)) {
 				/* copyback or write allocate error */
@@ -953,6 +986,8 @@ m88110_user_fault:
 					    map->pmap, va);
 #endif
 					result = uvm_fault(map, va, VM_FAULT_INVALID, ftype);
+					if (result == EACCES)
+						result = EFAULT;
 				}
 			} else {
 #ifdef TRAPDEBUG
@@ -965,12 +1000,8 @@ m88110_user_fault:
 		}
 		p->p_addr->u_pcb.pcb_onfault = pcb_onfault;
 
-		if ((caddr_t)va >= vm->vm_maxsaddr) {
-			if (result == 0)
-				uvm_grow(p, va);
-			else if (result == EACCES)
-				result = EFAULT;
-		}
+		if (result == 0 && (caddr_t)va >= vm->vm_maxsaddr)
+			uvm_grow(p, va);
 		KERNEL_UNLOCK();
 
 		/*
@@ -993,8 +1024,18 @@ m88110_user_fault:
 		break;
 	case T_MISALGNFLT+T_USER:
 		/* Fix any misaligned ld.d or st.d instructions */
-		sig = double_reg_fixup(frame);
+		sig = double_reg_fixup(frame, T_MISALGNFLT);
 		fault_type = BUS_ADRALN;
+		if (sig == 0) {
+			/* skip recovered instruction */
+			m88110_skip_insn(frame);
+			goto userexit;
+		}
+		break;
+	case T_ILLFLT+T_USER:
+		/* Fix any ld.d or st.d instruction with an odd register */
+		sig = double_reg_fixup(frame, T_ILLFLT);
+		fault_type = ILL_PRVREG;
 		if (sig == 0) {
 			/* skip recovered instruction */
 			m88110_skip_insn(frame);
@@ -1004,7 +1045,6 @@ m88110_user_fault:
 	case T_PRIVINFLT+T_USER:
 		fault_type = ILL_PRVREG;
 		/* FALLTHROUGH */
-	case T_ILLFLT+T_USER:
 #ifndef DDB
 	case T_KDB_BREAK:
 	case T_KDB_ENTRY:
@@ -1138,7 +1178,6 @@ m88100_syscall(register_t code, struct trapframe *tf)
 	struct proc *p = curproc;
 	int error;
 	register_t args[8], rval[2], *ap;
-	int nolock;
 
 	uvmexp.syscalls++;
 
@@ -1181,45 +1220,16 @@ m88100_syscall(register_t code, struct trapframe *tf)
 		panic("syscall nargs");
 	if (i > nap) {
 		bcopy((caddr_t)ap, (caddr_t)args, nap * sizeof(register_t));
-		error = copyin((caddr_t)tf->tf_r[31], (caddr_t)(args + nap),
-		    (i - nap) * sizeof(register_t));
-	} else {
+		if ((error = copyin((caddr_t)tf->tf_r[31], args + nap,
+		    (i - nap) * sizeof(register_t))))
+			goto bad;
+	} else
 		bcopy((caddr_t)ap, (caddr_t)args, i * sizeof(register_t));
-		error = 0;
-	}
 
-	if (error != 0)
-		goto bad;
-
-#ifdef SYSCALL_DEBUG
-	KERNEL_LOCK();
-	scdebug_call(p, code, args);
-	KERNEL_UNLOCK();
-#endif
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL)) {
-		KERNEL_LOCK();
-		ktrsyscall(p, code, callp->sy_argsize, args);
-		KERNEL_UNLOCK();
-	}
-#endif
 	rval[0] = 0;
 	rval[1] = tf->tf_r[3];
-#if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE)) {
-		KERNEL_LOCK();
-		error = systrace_redirect(code, p, args, rval);
-		KERNEL_UNLOCK();
-	} else
-#endif
-	{
-		nolock = (callp->sy_flags & SY_NOLOCK);
-		if (!nolock)
-			KERNEL_LOCK();
-		error = (*callp->sy_call)(p, args, rval);
-		if (!nolock)
-			KERNEL_UNLOCK();
-	}
+
+	error = mi_syscall(p, code, callp, args, rval);
 
 	/*
 	 * system call will look like:
@@ -1267,28 +1277,15 @@ m88100_syscall(register_t code, struct trapframe *tf)
 		tf->tf_epsr &= ~PSR_C;
 		break;
 	default:
-bad:
-		if (p->p_emul->e_errno)
-			error = p->p_emul->e_errno[error];
+	bad:
 		tf->tf_r[2] = error;
 		tf->tf_epsr |= PSR_C;   /* fail */
 		tf->tf_snip = tf->tf_snip & ~NIP_E;
 		tf->tf_sfip = tf->tf_sfip & ~FIP_E;
 		break;
 	}
-#ifdef SYSCALL_DEBUG
-	KERNEL_LOCK();
-	scdebug_ret(p, code, error, rval);
-	KERNEL_UNLOCK();
-#endif
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_LOCK();
-		ktrsysret(p, code, error, rval[0]);
-		KERNEL_UNLOCK();
-	}
-#endif
+
+	mi_syscall_return(p, code, error, rval);
 }
 #endif /* M88100 */
 
@@ -1302,7 +1299,6 @@ m88110_syscall(register_t code, struct trapframe *tf)
 	struct proc *p = curproc;
 	int error;
 	register_t args[8], rval[2], *ap;
-	int nolock;
 
 	uvmexp.syscalls++;
 
@@ -1345,45 +1341,16 @@ m88110_syscall(register_t code, struct trapframe *tf)
 		panic("syscall nargs");
 	if (i > nap) {
 		bcopy((caddr_t)ap, (caddr_t)args, nap * sizeof(register_t));
-		error = copyin((caddr_t)tf->tf_r[31], (caddr_t)(args + nap),
-		    (i - nap) * sizeof(register_t));
-	} else {
+		if ((error = copyin((caddr_t)tf->tf_r[31], args + nap,
+		    (i - nap) * sizeof(register_t))))
+			goto bad;
+	} else
 		bcopy((caddr_t)ap, (caddr_t)args, i * sizeof(register_t));
-		error = 0;
-	}
 
-	if (error != 0)
-		goto bad;
-
-#ifdef SYSCALL_DEBUG
-	KERNEL_LOCK();
-	scdebug_call(p, code, args);
-	KERNEL_UNLOCK();
-#endif
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL)) {
-		KERNEL_LOCK();
-		ktrsyscall(p, code, callp->sy_argsize, args);
-		KERNEL_UNLOCK();
-	}
-#endif
 	rval[0] = 0;
 	rval[1] = tf->tf_r[3];
-#if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE)) {
-		KERNEL_LOCK();
-		error = systrace_redirect(code, p, args, rval);
-		KERNEL_UNLOCK();
-	} else
-#endif
-	{
-		nolock = (callp->sy_flags & SY_NOLOCK);
-		if (!nolock)
-			KERNEL_LOCK();
-		error = (*callp->sy_call)(p, args, rval);
-		if (!nolock)
-			KERNEL_UNLOCK();
-	}
+
+	error = mi_syscall(p, code, callp, args, rval);
 
 	/*
 	 * system call will look like:
@@ -1433,9 +1400,7 @@ m88110_syscall(register_t code, struct trapframe *tf)
 		m88110_skip_insn(tf);
 		break;
 	default:
-bad:
-		if (p->p_emul->e_errno)
-			error = p->p_emul->e_errno[error];
+	bad:
 		tf->tf_r[2] = error;
 		tf->tf_epsr |= PSR_C;   /* fail */
 		/* skip one instruction */
@@ -1443,19 +1408,7 @@ bad:
 		break;
 	}
 
-#ifdef SYSCALL_DEBUG
-	KERNEL_LOCK();
-	scdebug_ret(p, code, error, rval);
-	KERNEL_UNLOCK();
-#endif
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_LOCK();
-		ktrsysret(p, code, error, rval[0]);
-		KERNEL_UNLOCK();
-	}
-#endif
+	mi_syscall_return(p, code, error, rval);
 }
 #endif	/* M88110 */
 
@@ -1474,6 +1427,9 @@ child_return(arg)
 	tf->tf_r[2] = 0;
 	tf->tf_r[3] = 0;
 	tf->tf_epsr &= ~PSR_C;
+	/* reset r26 (used by the threads library) if __tfork */
+	if (p->p_flag & P_THREAD)
+		tf->tf_r[26] = 0;
 	/* skip br instruction as in syscall() */
 #ifdef M88100
 	if (CPU_IS88100) {
@@ -1490,18 +1446,8 @@ child_return(arg)
 #endif
 
 	KERNEL_UNLOCK();
-	userret(p);
 
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_LOCK();
-		ktrsysret(p,
-		    (p->p_flag & P_THREAD) ? SYS_rfork :
-		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
-		    0, 0);
-		KERNEL_UNLOCK();
-	}
-#endif
+	mi_child_return(p);
 }
 
 #ifdef PTRACE
@@ -1734,7 +1680,7 @@ splassert_check(int wantipl, const char *func)
  * instruction exception from userland.
  */
 int
-double_reg_fixup(struct trapframe *frame)
+double_reg_fixup(struct trapframe *frame, int fault)
 {
 	u_int32_t pc, instr, value;
 	int regno, store;
@@ -1777,11 +1723,23 @@ double_reg_fixup(struct trapframe *frame)
 		break;
 	}
 
-	/* We only handle long but not long long aligned access here */
-	if ((addr & 0x07) != 4)
-		return SIGBUS;
-
 	regno = (instr >> 21) & 0x1f;
+
+	switch (fault) {
+	case T_MISALGNFLT:
+		/* We only handle long but not long long aligned access here */
+		if ((addr & 0x07) != 4)
+			return SIGBUS;
+		break;
+	case T_ILLFLT:
+		/* We only handle odd register pair number here */
+		if ((regno & 0x01) == 0)
+			return SIGILL;
+		/* We only handle long aligned access here */
+		if ((addr & 0x03) != 0)
+			return SIGBUS;
+		break;
+	}
 
 	if (store) {
 		/*

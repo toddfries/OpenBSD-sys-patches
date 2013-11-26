@@ -1,4 +1,4 @@
-/*	$OpenBSD: denode.h,v 1.23 2010/07/17 19:27:07 guenther Exp $	*/
+/*	$OpenBSD: denode.h,v 1.26 2013/06/11 16:42:16 deraadt Exp $	*/
 /*	$NetBSD: denode.h,v 1.24 1997/10/17 11:23:39 ws Exp $	*/
 
 /*-
@@ -116,10 +116,11 @@ struct fatcache {
  * cache is probably pretty worthless if a file is opened by multiple
  * processes.
  */
-#define	FC_SIZE		2	/* number of entries in the cache */
+#define	FC_SIZE		3	/* number of entries in the cache */
 #define	FC_LASTMAP	0	/* entry the last call to pcbmap() resolved
 				 * to */
 #define	FC_LASTFC	1	/* entry for the last cluster in the file */
+#define	FC_OLASTFC	2	/* entry for the previous last cluster */
 
 #define	FCE_EMPTY	0xffffffff	/* doesn't represent an actual cluster # */
 
@@ -141,7 +142,7 @@ struct denode {
 	struct vnode *de_devvp;	/* vnode of blk dev we live on */
 	uint32_t de_flag;		/* flag bits */
 	dev_t de_dev;		/* device where direntry lives */
-	daddr64_t de_lastr;
+	daddr_t de_lastr;
 	uint32_t de_dirclust;	/* cluster of the directory file containing this entry */
 	uint32_t de_diroffset;	/* offset of this entry in the directory cluster */
 	uint32_t de_fndoffset;	/* offset of found dir entry */
@@ -150,7 +151,7 @@ struct denode {
 	struct msdosfsmount *de_pmp;	/* addr of our mount struct */
 	struct lockf *de_lockf;	/* byte level lock list */
 	struct lock de_lock;    /* denode lock */
-	u_char de_Name[12];	/* name, from DOS directory entry */
+	u_char de_Name[11];	/* name, from DOS directory entry */
 	u_char de_Attributes;	/* attributes, from directory entry */
 	u_char de_CTimeHundredth; /* creation time, 1/100th of a sec */
 	u_short de_CTime;	/* creation time */

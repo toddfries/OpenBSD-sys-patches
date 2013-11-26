@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sf_pci.c,v 1.8 2011/04/03 15:36:02 jasper Exp $	*/
+/*	$OpenBSD: if_sf_pci.c,v 1.10 2013/08/07 01:06:37 bluhm Exp $	*/
 /*	$NetBSD: if_sf_pci.c,v 1.10 2006/06/17 23:34:27 christos Exp $	*/
 
 /*-
@@ -52,7 +52,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -105,16 +104,11 @@ sf_pci_attach(struct device *parent, struct device *self, void *aux)
 	const char *intrstr = NULL;
 	bus_space_tag_t iot, memt;
 	bus_space_handle_t ioh, memh;
-	int state, ioh_valid, memh_valid;
+	int ioh_valid, memh_valid;
 	bus_size_t iosize, memsize;
 	pcireg_t reg;
 
-	state = pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
-	if (state == PCI_PMCSR_STATE_D3) {
-		printf(": unable to wake up from power state D3, "
-		    "reboot required.\n");
-		return;
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/*
 	 * Map the device.

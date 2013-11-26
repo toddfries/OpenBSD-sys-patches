@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cnmac.c,v 1.7 2011/07/03 21:42:11 yasuoka Exp $	*/
+/*	$OpenBSD: if_cnmac.c,v 1.12 2013/09/16 20:52:14 jmatthew Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -66,7 +66,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 
 #include <machine/bus.h>
@@ -137,7 +136,7 @@ static void	octeon_eth_pko_init(struct octeon_eth_softc *);
 static void	octeon_eth_asx_init(struct octeon_eth_softc *);
 static void	octeon_eth_smi_init(struct octeon_eth_softc *);
 
-static void	octeon_eth_board_mac_addr(uint8_t *, size_t, int);
+static void	octeon_eth_board_mac_addr(uint8_t *);
 
 static int	octeon_eth_mii_readreg(struct device *, int, int);
 static void	octeon_eth_mii_writereg(struct device *, int, int, int);
@@ -260,15 +259,6 @@ static const struct octeon_evcnt_entry octeon_evcnt_entries[] = {
 };
 #endif
 
-/* XXX board-specific */
-static const int	octeon_eth_phy_table[] = {
-#if defined __seil5__
-	0x04, 0x01, 0x02
-#else
-	0x02, 0x03, 0x22
-#endif
-};
-
 /* ---- buffer management */
 
 static const struct octeon_eth_pool_param {
@@ -288,6 +278,9 @@ struct cn30xxfpa_buf	*octeon_eth_pools[8/* XXX */];
 #define	octeon_eth_fb_wqe	octeon_eth_pools[OCTEON_POOL_NO_WQE]
 #define	octeon_eth_fb_cmd	octeon_eth_pools[OCTEON_POOL_NO_CMD]
 #define	octeon_eth_fb_sg	octeon_eth_pools[OCTEON_POOL_NO_SG]
+
+uint64_t octeon_eth_mac_addr = 0;
+uint32_t octeon_eth_mac_addr_offset = 0;
 
 static void
 octeon_eth_buf_init(struct octeon_eth_softc *sc)
@@ -336,6 +329,7 @@ octeon_eth_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_port_type = ga->ga_port_type;
 	sc->sc_gmx = ga->ga_gmx;
 	sc->sc_gmx_port = ga->ga_gmx_port;
+	sc->sc_phy_addr = ga->ga_phy_addr;
 
 	sc->sc_init_flag = 0;
 
@@ -345,7 +339,7 @@ octeon_eth_attach(struct device *parent, struct device *self, void *aux)
 	 */
 	sc->sc_ip_offset = 0/* XXX */;
 
-	octeon_eth_board_mac_addr(enaddr, sizeof(enaddr), sc->sc_port);
+	octeon_eth_board_mac_addr(enaddr);
 	printf(", address %s\n", ether_sprintf(enaddr));
 
 	/*
@@ -488,33 +482,57 @@ octeon_eth_smi_init(struct octeon_eth_softc *sc)
 
 /* ---- XXX */
 
-#define	ADDR2UINT64(u, a) \
-	do { \
-		u = \
-		    (((uint64_t)a[0] << 40) | ((uint64_t)a[1] << 32) | \
-		     ((uint64_t)a[2] << 24) | ((uint64_t)a[3] << 16) | \
-		     ((uint64_t)a[4] <<  8) | ((uint64_t)a[5] <<  0)); \
-	} while (0)
-#define	UINT642ADDR(a, u) \
-	do { \
-		a[0] = (uint8_t)((u) >> 40); a[1] = (uint8_t)((u) >> 32); \
-		a[2] = (uint8_t)((u) >> 24); a[3] = (uint8_t)((u) >> 16); \
-		a[4] = (uint8_t)((u) >>  8); a[5] = (uint8_t)((u) >>  0); \
-	} while (0)
-
 static void
-octeon_eth_board_mac_addr(uint8_t *enaddr, size_t size, int port)
+octeon_eth_board_mac_addr(uint8_t *enaddr)
 {
-	uint64_t addr;
-	int i;
+	extern struct boot_info *octeon_boot_info;
+	int id;
 
-	/* XXX read a mac_dsc tuple from EEPROM */
-	for (i = 0; i < size; i++)
-		enaddr[i] = i;
+	/* Initialize MAC addresses from the global address base. */
+	if (octeon_eth_mac_addr == 0) {
+		memcpy((uint8_t *)&octeon_eth_mac_addr + 2,
+		       octeon_boot_info->mac_addr_base, 6);
 
-	ADDR2UINT64(addr, enaddr);
-	addr += port;
-	UINT642ADDR(enaddr, addr);
+		/*
+		 * Should be allowed to fail hard if couldn't read the
+		 * mac_addr_base address...
+		 */
+		if (octeon_eth_mac_addr == 0)
+			return;
+
+		/*
+		 * Calculate the offset from the mac_addr_base that will be used
+		 * for the next sc->sc_port.
+		 */
+		id = octeon_get_chipid();
+
+		switch (octeon_model_family(id)) {
+		case OCTEON_MODEL_FAMILY_CN56XX:
+			octeon_eth_mac_addr_offset = 1;
+			break;
+		/*
+		case OCTEON_MODEL_FAMILY_CN52XX:
+		case OCTEON_MODEL_FAMILY_CN63XX:
+			octeon_eth_mac_addr_offset = 2;
+			break;
+		*/
+		default:
+			octeon_eth_mac_addr_offset = 0;
+			break;
+		}
+
+		enaddr += octeon_eth_mac_addr_offset;
+	}
+
+	/* No more MAC addresses to assign. */
+	if (octeon_eth_mac_addr_offset >= octeon_boot_info->mac_addr_count)
+		return;
+
+	if (enaddr)
+		memcpy(enaddr, (uint8_t *)&octeon_eth_mac_addr + 2, 6);
+
+	octeon_eth_mac_addr++;
+	octeon_eth_mac_addr_offset++;
 }
 
 /* ---- media */
@@ -523,30 +541,14 @@ static int
 octeon_eth_mii_readreg(struct device *self, int phy_no, int reg)
 {
 	struct octeon_eth_softc *sc = (struct octeon_eth_softc *)self;
-	int phy_addr = octeon_eth_phy_table[phy_no];
-
-	if (sc->sc_port >= (int)nitems(octeon_eth_phy_table) ||
-	    phy_no != sc->sc_port) {
-		log(LOG_ERR,
-		    "mii read address is mismatch, phy number %d.\n", phy_no);
-		return -1;
-	}
-	return cn30xxsmi_read(sc->sc_smi, phy_addr, reg);
+	return cn30xxsmi_read(sc->sc_smi, phy_no, reg);
 }
 
 static void
 octeon_eth_mii_writereg(struct device *self, int phy_no, int reg, int value)
 {
 	struct octeon_eth_softc *sc = (struct octeon_eth_softc *)self;
-	int phy_addr = octeon_eth_phy_table[phy_no];
-
-	if (sc->sc_port >= (int)nitems(octeon_eth_phy_table) ||
-	    phy_no != sc->sc_port) {
-		log(LOG_ERR,
-		    "mii write address is mismatch, phy number %d.\n", phy_no);
-		return;
-	}
-	cn30xxsmi_write(sc->sc_smi, phy_addr, reg, value);
+	cn30xxsmi_write(sc->sc_smi, phy_no, reg, value);
 }
 
 static void
@@ -580,7 +582,7 @@ octeon_eth_mediainit(struct octeon_eth_softc *sc)
 	    octeon_eth_mediastatus);
 
 	mii_attach(&sc->sc_dev, &sc->sc_mii,
-	    0xffffffff, sc->sc_port, MII_OFFSET_ANY, MIIF_DOPAUSE);
+	    0xffffffff, sc->sc_phy_addr, MII_OFFSET_ANY, MIIF_DOPAUSE);
 
 	/* XXX */
 	if (LIST_FIRST(&sc->sc_mii.mii_phys) != NULL) {
@@ -998,8 +1000,8 @@ octeon_eth_send_makecmd(struct octeon_eth_softc *sc, struct mbuf *m,
 	int result = 0;
 
 	if (octeon_eth_send_makecmd_gbuf(sc, m, gbuf, &segs)) {
-		log(LOG_WARNING, "%s: there are a lot of number of segments"
-		    " of transmission data", sc->sc_dev.dv_xname);
+		log(LOG_WARNING, "%s: large number of transmission"
+		    " data segments", sc->sc_dev.dv_xname);
 		result = 1;
 		goto done;
 	}
@@ -1049,7 +1051,7 @@ octeon_eth_send_cmd(struct octeon_eth_softc *sc, uint64_t pko_cmd_w0,
 		buf = cn30xxfpa_buf_get_paddr(octeon_eth_fb_cmd);
 		if (buf == 0) {
 			log(LOG_WARNING,
-			    "%s: can not allocate command buffer from free pool allocator\n",
+			    "%s: cannot allocate command buffer from free pool allocator\n",
 			    sc->sc_dev.dv_xname);
 			result = 1;
 			goto done;
@@ -1106,7 +1108,7 @@ octeon_eth_send(struct octeon_eth_softc *sc, struct mbuf *m)
 	gaddr = cn30xxfpa_buf_get_paddr(octeon_eth_fb_sg);
 	if (gaddr == 0) {
 		log(LOG_WARNING,
-		    "%s: can not allocate gather buffer from free pool allocator\n",
+		    "%s: cannot allocate gather buffer from free pool allocator\n",
 		    sc->sc_dev.dv_xname);
 		OCTEON_EVCNT_INC(sc, txerrgbuf);
 		result = 1;
@@ -1196,7 +1198,7 @@ octeon_eth_start(struct ifnet *ifp)
 			ifp->if_oerrors++;
 			m_freem(m);
 			log(LOG_WARNING,
-		  	  "%s: failed in the transmission of the packet\n",
+		  	  "%s: failed to transmit packet\n",
 		    	  sc->sc_dev.dv_xname);
 			OCTEON_EVCNT_INC(sc, txerr);
 		} else {
@@ -1468,7 +1470,7 @@ octeon_eth_recv_check(struct octeon_eth_softc *sc, uint64_t word2)
 		return 1;
 	}
 
-#if 0 /* XXX Performance tunig (Jumbo-frame is not supported yet!) */
+#if 0 /* XXX Performance tuning (Jumbo-frame is not supported yet!) */
 	if (__predict_false(octeon_eth_recv_check_jumbo(sc, word2)) != 0) {
 		/* XXX jumbo frame */
 		if (ratecheck(&sc->sc_rate_recv_check_jumbo_last,
@@ -1486,13 +1488,13 @@ octeon_eth_recv_check(struct octeon_eth_softc *sc, uint64_t word2)
 			/* XXX inclement special error count */
 		} else if ((word2 & PIP_WQE_WORD2_NOIP_OPECODE) == 
 				PIP_WQE_WORD2_RE_OPCODE_PARTIAL) {
-			/* not an erorr. it's because of overload */
+			/* not an error. it's because of overload */
 		}
 		else {
 			if (ratecheck(&sc->sc_rate_recv_check_code_last,
 			    &sc->sc_rate_recv_check_code_cap)) 
 				log(LOG_WARNING,
-				    "%s: the reception error had occured, "
+				    "%s: a reception error occured, "
 				    "the packet was dropped (error code = %lld)\n",
 				    sc->sc_dev.dv_xname, word2 & PIP_WQE_WORD2_NOIP_OPECODE);
 		}
@@ -1680,7 +1682,7 @@ octeon_eth_tick_misc(void *arg)
 		if (OCTEON_ETH_FIXUP_ODD_NIBBLE_MODEL_P(sc) &&
 		    OCTEON_ETH_FIXUP_ODD_NIBBLE_DYNAMIC_SPEED_P(sc->sc_gmx_port, ifp)) {
 			log(LOG_NOTICE, 
-			    "%s: the preamble processing is switched to hardware\n", 
+			    "%s: the preamble processing switched to hardware\n", 
 			    sc->sc_dev.dv_xname);
 		}
 		sc->sc_gmx_port->sc_proc_nibble_by_soft = 0;

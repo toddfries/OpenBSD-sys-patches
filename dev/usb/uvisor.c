@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvisor.c,v 1.45 2012/02/24 06:19:00 guenther Exp $	*/
+/*	$OpenBSD: uvisor.c,v 1.48 2013/11/15 08:25:31 pirofti Exp $	*/
 /*	$NetBSD: uvisor.c,v 1.21 2003/08/03 21:59:26 nathanw Exp $	*/
 
 /*
@@ -127,8 +127,8 @@ struct uvisor_palm_connection_info {
 
 struct uvisor_softc {
 	struct device		sc_dev;		/* base device */
-	usbd_device_handle	sc_udev;	/* device */
-	usbd_interface_handle	sc_iface;	/* interface */
+	struct usbd_device	*sc_udev;	/* device */
+	struct usbd_interface	*sc_iface;	/* interface */
 /* 
  * added sc_vendor for later interrogation in failed initialisations
  */
@@ -138,8 +138,6 @@ struct uvisor_softc {
 	int			sc_numcon;
 
 	u_int16_t		sc_flags;
-
-	u_char			sc_dying;
 };
 
 usbd_status uvisor_init(struct uvisor_softc *,
@@ -232,8 +230,8 @@ uvisor_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct uvisor_softc *sc = (struct uvisor_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	usbd_device_handle dev = uaa->device;
-	usbd_interface_handle iface;
+	struct usbd_device *dev = uaa->device;
+	struct usbd_interface *iface;
 	usb_interface_descriptor_t *id;
 	struct uvisor_connection_info coninfo;
 	struct uvisor_palm_connection_info palmconinfo;
@@ -372,27 +370,20 @@ uvisor_attach(struct device *parent, struct device *self, void *aux)
 
 bad:
 	DPRINTF(("uvisor_attach: ATTACH ERROR\n"));
-	sc->sc_dying = 1;
+	usbd_deactivate(sc->sc_udev);
 }
 
 int
 uvisor_activate(struct device *self, int act)
 {
 	struct uvisor_softc *sc = (struct uvisor_softc *)self;
-	int i, rv = 0, r;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		for (i = 0; i < sc->sc_numcon; i++)
-			if (sc->sc_subdevs[i] != NULL) {
-				r = config_deactivate(sc->sc_subdevs[i]);
-				if (r)
-					rv = r;
-			}
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 int
@@ -482,7 +473,7 @@ uvisor_close(void *addr, int portno)
 	struct uvisor_connection_info coninfo; /* XXX ? */
 	int actlen;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	req.bmRequestType = UT_READ_VENDOR_ENDPOINT; /* XXX read? */

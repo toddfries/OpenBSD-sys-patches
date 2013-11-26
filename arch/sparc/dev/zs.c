@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.48 2010/07/10 19:32:24 miod Exp $	*/
+/*	$OpenBSD: zs.c,v 1.53 2013/10/21 12:14:52 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.50 1997/10/18 00:00:40 gwr Exp $	*/
 
 /*-
@@ -34,8 +34,8 @@
  * Zilog Z8530 Dual UART driver (machine-dependent part)
  *
  * Runs two serial lines per chip using slave drivers.
- * Plain tty/async lines use the zs_async slave.
- * Sun keyboard/mouse uses the zs_kbd/zs_ms slaves.
+ * Plain tty/async lines use the zstty slave.
+ * Sun keyboard/mouse uses the zskbd/zsms slaves.
  */
 
 #include <sys/param.h>
@@ -62,7 +62,7 @@
 #include <machine/z8530var.h>
 
 #include <dev/cons.h>
-#include <sparc/dev/z8530reg.h>
+#include <dev/ic/z8530reg.h>
 
 #include <sparc/sparc/vaddrs.h>
 #include <sparc/sparc/auxioreg.h>
@@ -285,18 +285,17 @@ zs_attach(parent, self, aux)
 
 		zsc_args.channel = channel;
 		zsc_args.hwflags = zs_hwflags[zs_unit][channel];
-		cs = &zsc->zsc_cs[channel];
+		cs = zsc->zsc_cs[channel] = 
+			(struct zs_chanstate *)&zsc->zsc_cs_store[channel];
 
 		cs->cs_channel = channel;
 		cs->cs_private = NULL;
 		cs->cs_ops = &zsops_null;
 		cs->cs_brg_clk = PCLK / 16;
-
 		zc = zs_get_chan_addr(zs_unit, channel);
 
 		cs->cs_reg_csr  = &zc->zc_csr;
 		cs->cs_reg_data = &zc->zc_data;
-
 		bcopy(zs_init_reg, cs->cs_creg, 16);
 		bcopy(zs_init_reg, cs->cs_preg, 16);
 
@@ -355,7 +354,7 @@ zs_attach(parent, self, aux)
 	 * Set the master interrupt enable and interrupt vector.
 	 * (common to both channels, do it on A)
 	 */
-	cs = &zsc->zsc_cs[0];
+	cs = zsc->zsc_cs[0];
 	s = splhigh();
 	/* interrupt vector */
 	zs_write_reg(cs, 2, zs_init_reg[2]);
@@ -368,7 +367,7 @@ zs_attach(parent, self, aux)
 	if (CPU_ISSUN4M) {
 		if (getpropint(ra->ra_node, "pwr-on-auxio2", 0))
 			for (channel = 0; channel < 2; channel++) {
-				cs = &zsc->zsc_cs[channel];
+				cs = zsc->zsc_cs[channel];
 				cs->disable = zs_disable;
 				cs->enable = zs_enable;
 				cs->enabled = 0;
@@ -427,7 +426,7 @@ zshard(arg)
 		if (rr3) {
 			rval |= rr3;
 		}
-		if (zsc->zsc_cs[0].cs_softreq || zsc->zsc_cs[1].cs_softreq)
+		if (zsc->zsc_cs[0]->cs_softreq || zsc->zsc_cs[1]->cs_softreq)
 			softintr_schedule(zsc->zsc_softih);
 	}
 
@@ -504,7 +503,7 @@ zs_set_speed(cs, bps)
 int
 zs_set_modes(cs, cflag)
 	struct zs_chanstate *cs;
-	int cflag;	/* bits per second */
+	int cflag;
 {
 	int s;
 
@@ -578,7 +577,8 @@ zs_write_reg(cs, reg, val)
 	ZS_DELAY();
 }
 
-u_char zs_read_csr(cs)
+u_char
+zs_read_csr(cs)
 	struct zs_chanstate *cs;
 {
 	register u_char val;
@@ -588,7 +588,8 @@ u_char zs_read_csr(cs)
 	return val;
 }
 
-void  zs_write_csr(cs, val)
+void
+zs_write_csr(cs, val)
 	struct zs_chanstate *cs;
 	u_char val;
 {
@@ -596,7 +597,8 @@ void  zs_write_csr(cs, val)
 	ZS_DELAY();
 }
 
-u_char zs_read_data(cs)
+u_char
+zs_read_data(cs)
 	struct zs_chanstate *cs;
 {
 	register u_char val;
@@ -606,7 +608,8 @@ u_char zs_read_data(cs)
 	return val;
 }
 
-void  zs_write_data(cs, val)
+void
+zs_write_data(cs, val)
 	struct zs_chanstate *cs;
 	u_char val;
 {
@@ -751,7 +754,7 @@ zs_putc(arg, c)
 	 * interrupts we put in the 2us delay regardless of cpu model.
 	 */
         zc->zc_data = c;
-        delay(2);
+	ZS_DELAY();
 
 	splx(s);
 }
@@ -1099,6 +1102,24 @@ setup_console:
 
 	if (inSource != outSink) {
 		printf("cninit: mismatched PROM output selector\n");
+		/*
+		 * In case of mismatch, force the console to be on
+		 * serial.
+		 * There are three possible mismatches:
+		 * - input and output on different serial lines:
+		 *   use the output line.
+		 * - input on keyboard, output on serial:
+		 *   use the output line (this allows systems configured
+		 *   for glass console, which frame buffers have been removed,
+		 *   to still work if the keyboard is left plugged).
+		 * - input on serial, output on video:
+		 *   use the input line, since we don't know if a keyboard
+		 *   is connected.
+		 */
+		if (outSink == PROMDEV_TTYA || outSink == PROMDEV_TTYB)
+			inSource = outSink;
+		else
+			outSink = inSource;
 	}
 
 	switch (inSource) {

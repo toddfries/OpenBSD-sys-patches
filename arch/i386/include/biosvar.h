@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosvar.h,v 1.57 2012/01/11 15:58:27 jsing Exp $	*/
+/*	$OpenBSD: biosvar.h,v 1.61 2013/11/02 15:02:27 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff
@@ -30,13 +30,13 @@
 #define _MACHINE_BIOSVAR_H_
 
 	/* some boxes put apm data seg in the 2nd page */
-#define	BOOTARG_OFF	(NBPG*2)
-#define	BOOTARG_LEN	(NBPG*1)
+#define	BOOTARG_OFF	(PAGE_SIZE * 2)
+#define	BOOTARG_LEN	(PAGE_SIZE * 1)
 #define	BOOTBIOS_ADDR	(0x7c00)
 #define	BOOTBIOS_MAXSEC	((1 << 28) - 1)
 
 	/* physical page for ptp 0 need for various tramps */
-#define PTP0_PA		(NBPG*3)	
+#define PTP0_PA		(PAGE_SIZE * 3)	
 
 	/* BIOS configure flags */
 #define	BIOSF_BIOS32	0x0001
@@ -196,6 +196,8 @@ typedef struct _bios_pciinfo {
 typedef struct _bios_consdev {
 	dev_t	consdev;
 	int	conspeed;
+	int	consaddr;
+	int	consfreq;
 } __packed bios_consdev_t;
 
 #define BOOTARG_SMPINFO 6		/* struct mp_float[] */
@@ -214,6 +216,14 @@ typedef struct _bios_ddb {
 typedef struct _bios_bootduid {
 	u_char	duid[8];
 } __packed bios_bootduid_t;
+
+#define BOOTARG_BOOTSR 10
+#define BOOTSR_UUID_MAX 16
+#define BOOTSR_CRYPTO_MAXKEYBYTES 32
+typedef struct _bios_bootsr {
+	u_int8_t	uuid[BOOTSR_UUID_MAX];
+	u_int8_t	maskkey[BOOTSR_CRYPTO_MAXKEYBYTES];
+} __packed bios_bootsr_t;
 
 #if defined(_KERNEL) || defined (_STANDALONE)
 

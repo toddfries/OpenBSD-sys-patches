@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar9287.c,v 1.16 2010/12/31 17:50:48 damien Exp $	*/
+/*	$OpenBSD: ar9287.c,v 1.18 2013/08/07 01:06:28 bluhm Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -51,7 +51,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -121,7 +120,7 @@ ar9287_attach(struct athn_softc *sc)
 	sc->ops.olpc_init = ar9287_olpc_init;
 	sc->ops.olpc_temp_compensation = ar9287_olpc_temp_compensation;
 	sc->ini = &ar9287_1_1_ini;
-	sc->serdes = ar9280_2_0_serdes;
+	sc->serdes = &ar9280_2_0_serdes;
 
 	return (ar5008_attach(sc));
 }

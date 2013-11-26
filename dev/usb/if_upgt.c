@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upgt.c,v 1.56 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: if_upgt.c,v 1.60 2013/08/21 05:21:45 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -43,7 +43,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -120,7 +119,7 @@ void		upgt_start(struct ifnet *);
 void		upgt_watchdog(struct ifnet *);
 void		upgt_tx_task(void *);
 void		upgt_tx_done(struct upgt_softc *, uint8_t *);
-void		upgt_rx_cb(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void		upgt_rx_cb(struct usbd_xfer *, void *, usbd_status);
 void		upgt_rx(struct upgt_softc *, uint8_t *, int);
 void		upgt_setup_rates(struct upgt_softc *);
 uint8_t		upgt_rx_rate(struct upgt_softc *, const int);
@@ -137,7 +136,7 @@ void		upgt_free_tx(struct upgt_softc *);
 void		upgt_free_rx(struct upgt_softc *);
 void		upgt_free_cmd(struct upgt_softc *);
 int		upgt_bulk_xmit(struct upgt_softc *, struct upgt_data *,
-		    usbd_pipe_handle, uint32_t *, int);
+		    struct usbd_pipe *, uint32_t *, int);
 
 void		upgt_hexdump(void *, int);
 uint32_t	upgt_crc32_le(const void *, size_t);
@@ -1669,7 +1668,7 @@ upgt_tx_done(struct upgt_softc *sc, uint8_t *data)
 }
 
 void
-upgt_rx_cb(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+upgt_rx_cb(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct upgt_data *data_rx = priv;
 	struct upgt_softc *sc = data_rx->sc;
@@ -1761,7 +1760,7 @@ upgt_rx(struct upgt_softc *sc, uint8_t *data, int pkglen)
 	rxdesc = (struct upgt_lmac_rx_desc *)data;
 
 	/* create mbuf which is suitable for strict alignment archs */
-	m = m_devget(rxdesc->data, pkglen, ETHER_ALIGN, ifp, NULL);
+	m = m_devget(rxdesc->data, pkglen, ETHER_ALIGN, ifp);
 	if (m == NULL) {
 		DPRINTF(1, "%s: could not create RX mbuf!\n", sc->sc_dev.dv_xname);
 		ifp->if_ierrors++;
@@ -2316,13 +2315,13 @@ upgt_free_cmd(struct upgt_softc *sc)
 
 int
 upgt_bulk_xmit(struct upgt_softc *sc, struct upgt_data *data,
-    usbd_pipe_handle pipeh, uint32_t *size, int flags)
+    struct usbd_pipe *pipeh, uint32_t *size, int flags)
 {
         usbd_status status;
 
-	status = usbd_bulk_transfer(data->xfer, pipeh,
-	    USBD_NO_COPY | flags, UPGT_USB_TIMEOUT, data->buf, size,
-	    "upgt_bulk_xmit");
+	usbd_setup_xfer(data->xfer, pipeh, 0, data->buf, *size,
+	    USBD_NO_COPY | USBD_SYNCHRONOUS | flags, UPGT_USB_TIMEOUT, NULL);
+	status = usbd_transfer(data->xfer);
 	if (status != USBD_NORMAL_COMPLETION) {
 		printf("%s: %s: error %s!\n",
 		    sc->sc_dev.dv_xname, __func__, usbd_errstr(status));

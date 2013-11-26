@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.h,v 1.47 2011/08/29 20:21:43 drahn Exp $ */
+/*	$OpenBSD: intr.h,v 1.49 2013/05/17 19:38:52 kettenis Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom, Opsycon AB and RTMX Inc, USA.
@@ -49,6 +49,8 @@
 #define	IPL_SCHED	10
 #define	IPL_HIGH	11
 #define	IPL_NUM		12
+
+#define	IPL_MPSAFE	0	/* no "mpsafe" interrupts */
 
 #define	IST_NONE	0
 #define	IST_PULSE	1
@@ -155,6 +157,7 @@ struct intrhand {
 	int		(*ih_fun)(void *);
 	void		*ih_arg;
 	struct evcount	ih_count;
+	int		ih_type;
 	int		ih_level;
 	int		ih_irq;
 	const char	*ih_what;

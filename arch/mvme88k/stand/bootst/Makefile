@@ -1,14 +1,14 @@
 #	from: @(#)Makefile	8.1 (Berkeley) 6/10/93
-#	$OpenBSD: Makefile,v 1.13 2008/04/02 21:53:17 miod Exp $
-
-SIZE?=	size
+#	$OpenBSD: Makefile,v 1.18 2013/11/06 19:37:06 miod Exp $
 
 S=	${.CURDIR}/../../../..
 DEFS= -DSTANDALONE -DCOMPAT_NOLABEL
 INCPATH=-I${.CURDIR} -I${.CURDIR}/../libsa -I${.CURDIR}/../libbug \
 	-I${.CURDIR}/../../include -I${S} -I${S}/lib/libsa
 CFLAGS+=${INCPATH} ${DEFS} ${COPTS}
-LDFLAGS=-s -N -T ${STAGE2_RELOC}
+LDFLAGS=-N -T ${S}/arch/mvme88k/stand/ld.script -Ttext ${STAGE2_RELOC}
+LDFLAGS+= -warn-common
+NOPIE=
 CLEANFILES+=stboot bootst bootst.bug
 
 .include "${S}/arch/mvme88k/stand/wrtvid/Makefile.inc"
@@ -28,10 +28,9 @@ ALL=	${BOOTS}
 
 all: ${ALL}
 
-bootst.bug:	${OBJS} ${STAGE1_CRT} ${LIBS}
-	${LD} ${LDFLAGS} ${STAGE1_CRT} -o $@ \
-	    ${OBJS} ${LIBS} `cc -print-libgcc-file-name`
-	@${SIZE} bootst.bug
+bootst.bug: ${STAGE1_CRT} ${OBJS} ${LIBS}
+	${LD} ${LDFLAGS} -o $@ \
+	    ${STAGE1_CRT} ${OBJS} ${LIBS} `${CC} -print-libgcc-file-name`
 
 bootst stboot: bootst.bug ${WRTVID}
 	${WRTVID} bootst.bug

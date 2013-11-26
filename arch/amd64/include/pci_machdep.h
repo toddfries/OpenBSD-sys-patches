@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.19 2011/10/10 19:42:36 miod Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.22 2013/11/06 10:40:36 mpi Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.1 2003/02/26 21:26:11 fvdl Exp $	*/
 
 /*
@@ -66,6 +66,7 @@ struct		pci_attach_args;
 
 extern struct extent *pciio_ex;
 extern struct extent *pcimem_ex;
+extern struct extent *pcibus_ex;
 void		pci_init_extents(void);
 
 /*
@@ -92,6 +93,9 @@ void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
 #define	pci_probe_device_hook(c, a)	(0)
 
 void 		pci_dev_postattach(struct device *, struct pci_attach_args *);
+
+pcireg_t	pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
+void		pci_set_powerstate_md(pci_chipset_tag_t, pcitag_t, int, int);
 
 /*
  * ALL OF THE FOLLOWING ARE MACHINE-DEPENDENT, AND SHOULD NOT BE USED

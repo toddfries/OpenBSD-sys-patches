@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus.h,v 1.27 2011/09/27 20:47:30 miod Exp $	*/
+/*	$OpenBSD: bus.h,v 1.29 2013/05/13 17:46:42 kettenis Exp $	*/
 /*	$NetBSD: bus.h,v 1.31 2001/09/21 15:30:41 wiz Exp $	*/
 
 /*-
@@ -197,11 +197,6 @@ struct sparc_bus_space_tag {
 		bus_space_handle_t, bus_size_t,
 		bus_size_t, bus_space_handle_t *);
 
-	void	(*sparc_bus_barrier)(bus_space_tag_t,
-		bus_space_tag_t,
-		bus_space_handle_t, bus_size_t,
-		bus_size_t, int);
-
 	paddr_t	(*sparc_bus_mmap)(bus_space_tag_t,
 		bus_space_tag_t,
 		bus_addr_t, off_t, int, int);
@@ -309,6 +304,10 @@ void bus_space_render_tag(bus_space_tag_t, char*, size_t);
 #define _BS_CALL(t,f)			\
 	(*(t)->f)
 
+/* flags for bus_space_barrier() */
+#define	BUS_SPACE_BARRIER_READ	0x01		/* force read barrier */
+#define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
+
 static inline void
 bus_space_barrier(t, h, o, s, f)
 	bus_space_tag_t t;
@@ -317,10 +316,23 @@ bus_space_barrier(t, h, o, s, f)
 	bus_size_t s;
 	int f;
 {
-	const bus_space_tag_t t0 = t;
-	_BS_PRECALL(t, sparc_bus_barrier);
-	_BS_CALL(t, sparc_bus_barrier)(t, t0, h, o, s, f);
-	_BS_POSTCALL;
+#ifdef notyet
+	switch (f) {
+	case (BUS_SPACE_BARRIER_READ|BUS_SPACE_BARRIER_WRITE):
+		membar(LoadLoad|StoreStore);
+		break;
+	case BUS_SPACE_BARRIER_READ:
+		membar(LoadLoad);
+		break;
+	case BUS_SPACE_BARRIER_WRITE:
+		membar(StoreStore);
+		break;
+	default:
+		break;
+	}
+#else
+	membar(Sync);
+#endif
 }
 
 #include <sparc64/sparc64/busop.h>
@@ -337,13 +349,9 @@ bus_space_barrier(t, h, o, s, f)
 #define BUS_SPACE_MAP_BUS4	0x0800
 
 
-/* flags for intr_establish() */
-#define BUS_INTR_ESTABLISH_FASTTRAP	1
-#define BUS_INTR_ESTABLISH_SOFTINTR	2
-
-/* flags for bus_space_barrier() */
-#define	BUS_SPACE_BARRIER_READ	0x01		/* force read barrier */
-#define	BUS_SPACE_BARRIER_WRITE	0x02		/* force write barrier */
+/* flags for bus_intr_establish() */
+#define BUS_INTR_ESTABLISH_MPSAFE	0x0001
+#define BUS_INTR_ESTABLISH_SOFTINTR	0x0002
 
 /*
  * Flags used in various bus DMA methods.

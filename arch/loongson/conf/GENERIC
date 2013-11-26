@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.36 2011/07/07 23:41:09 tedu Exp $
+#	$OpenBSD: GENERIC,v 1.41 2013/11/15 19:42:20 sasano Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -40,6 +40,7 @@ pci*		at bonito?
 glxpcib*	at pci?
 gpio*		at glxpcib?
 isa0		at glxpcib?
+glxclk*		at glxpcib?
 mcclock0	at isa? port 0x70
 pckbc0		at isa?				# Yeeloong only
 pckbd*		at pckbc?			# Yeeloong only
@@ -123,7 +124,6 @@ ucom*		at uchcom?
 ulpt*		at uhub?	# USB Printers	
 umass*		at uhub?	# USB Mass Storage devices
 urio*		at uhub?	# Diamond Multimedia Rio 500
-uscanner*	at uhub? disable# USB Scanners
 uhidev*		at uhub?	# Human Interface Devices
 ums*		at uhidev?	# USB mouse
 wsmouse*	at ums? mux 0
@@ -138,6 +138,7 @@ urndis*		at uhub?	# Remote NDIS Ethernet
 cue*		at uhub?	# CATC USB-EL1201A based Ethernet
 kue*		at uhub?	# Kawasaki KL5KUSB101B based Ethernet
 mos*		at uhub?	# MOSCHIP MCS7730/7830 10/100 Ethernet
+smsc*		at uhub?	# SMSC LAN95xx Ethernet
 otus*		at uhub?	# Atheros AR9001U
 athn*		at uhub?	# Atheros AR9002U
 rum*		at uhub?	# Ralink RT2501USB/RT2601USB
@@ -146,6 +147,7 @@ uath*		at uhub?	# Atheros AR5005UG/AR5005UX
 udav*		at uhub?	# Davicom DM9601 based Ethernet
 upgt*		at uhub?	# Conexant/Intersil PrismGT SoftMAC USB
 upl*		at uhub?	# Prolific PL2301/PL2302 host-to-host `network'
+ugl*		at uhub?	# Genesys Logic GL620USB-A host-to-host `network'
 ural*		at uhub?	# Ralink RT2500USB
 url*		at uhub?	# Realtek RTL8150L based adapters
 urtw*		at uhub?	# RealTek 8187
@@ -156,6 +158,7 @@ zyd*		at uhub?	# Zydas ZD1211
 uberry*		at uhub?	# Research In Motion Blackberry 
 udcf*		at uhub?	# Gude Expert mouseCLOCK
 uthum*		at uhidev?	# TEMPerHUM sensor
+ugold*		at uhidev?	# gold TEMPer sensor
 utwitch*	at uhidev?	# YUREX BBU sensor
 ugen*		at uhub?	# USB Generic driver
 

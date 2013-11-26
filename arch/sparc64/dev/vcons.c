@@ -1,4 +1,4 @@
-/*	$OpenBSD: vcons.c,v 1.11 2011/01/04 20:48:56 kettenis Exp $	*/
+/*	$OpenBSD: vcons.c,v 1.13 2013/07/16 19:46:56 kettenis Exp $	*/
 /*
  * Copyright (c) 2008 Mark Kettenis
  *
@@ -90,8 +90,8 @@ vcons_attach(struct device *parent, struct device *self, void *aux)
 		printf(": can't map interrupt\n");
 	printf(": ivec 0x%lx", sysino);
 
-	sc->sc_ih = bus_intr_establish(va->va_bustag, sysino, IPL_TTY, 0,
-	    vcons_intr, sc, sc->sc_dv.dv_xname);
+	sc->sc_ih = bus_intr_establish(va->va_bustag, sysino, IPL_TTY,
+	    BUS_INTR_ESTABLISH_MPSAFE, vcons_intr, sc, sc->sc_dv.dv_xname);
 	if (sc->sc_ih == NULL) {
 		printf(", can't establish interrupt\n");
 		return;
@@ -173,7 +173,7 @@ vconsopen(dev_t dev, int flag, int mode, struct proc *p)
 	struct tty *tp;
 	int unit = minor(dev);
 
-	if (unit > vcons_cd.cd_ndevs)
+	if (unit >= vcons_cd.cd_ndevs)
 		return (ENXIO);
 	sc = vcons_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -209,7 +209,7 @@ vconsclose(dev_t dev, int flag, int mode, struct proc *p)
 	struct tty *tp;
 	int unit = minor(dev);
 
-	if (unit > vcons_cd.cd_ndevs)
+	if (unit >= vcons_cd.cd_ndevs)
 		return (ENXIO);
 	sc = vcons_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -228,7 +228,7 @@ vconsread(dev_t dev, struct uio *uio, int flag)
 	struct tty *tp;
 	int unit = minor(dev);
 
-	if (unit > vcons_cd.cd_ndevs)
+	if (unit >= vcons_cd.cd_ndevs)
 		return (ENXIO);
 	sc = vcons_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -245,7 +245,7 @@ vconswrite(dev_t dev, struct uio *uio, int flag)
 	struct tty *tp;
 	int unit = minor(dev);
 
-	if (unit > vcons_cd.cd_ndevs)
+	if (unit >= vcons_cd.cd_ndevs)
 		return (ENXIO);
 	sc = vcons_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -263,7 +263,7 @@ vconsioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	int unit = minor(dev);
 	int error;
 
-	if (unit > vcons_cd.cd_ndevs)
+	if (unit >= vcons_cd.cd_ndevs)
 		return (ENXIO);
 	sc = vcons_cd.cd_devs[unit];
 	if (sc == NULL)
@@ -317,7 +317,7 @@ vconstty(dev_t dev)
 	struct vcons_softc *sc;
 	int unit = minor(dev);
 
-	if (unit > vcons_cd.cd_ndevs)
+	if (unit >= vcons_cd.cd_ndevs)
 		return (NULL);
 	sc = vcons_cd.cd_devs[unit];
 	if (sc == NULL)

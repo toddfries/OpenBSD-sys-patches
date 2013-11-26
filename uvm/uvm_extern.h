@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.104 2012/03/09 13:01:29 ariane Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.109 2013/07/09 15:37:43 beck Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -254,7 +254,6 @@ struct vmspace;
 struct pmap;
 struct vnode;
 struct pool;
-struct simplelock;
 
 /*
  * uvm_constraint_range's:
@@ -333,8 +332,8 @@ struct uvmexp {
 	int syscalls;		/* system calls */
 	int pageins;		/* pagein operation count */
 				/* pageouts are in pdpageouts below */
-	int swapins;		/* swapins */
-	int swapouts;		/* swapouts */
+	int obsolete_swapins;	/* swapins */
+	int obsolete_swapouts;	/* swapouts */
 	int pgswapin;		/* pages swapped in */
 	int pgswapout;		/* pages swapped out */
 	int forks;  		/* forks */

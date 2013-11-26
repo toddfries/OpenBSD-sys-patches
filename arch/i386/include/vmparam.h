@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.48 2011/05/30 22:25:21 oga Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.51 2013/03/25 19:33:11 deraadt Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.15 1994/10/27 04:16:34 cgd Exp $	*/
 
 /*-
@@ -58,7 +58,7 @@
 /*
  * Virtual memory related constants, all in bytes
  */
-#define	MAXTSIZ		(64*1024*1024)		/* max text size */
+#define	MAXTSIZ		(128*1024*1024)		/* max text size */
 #ifndef DFLDSIZ
 #define	DFLDSIZ		(64*1024*1024)		/* initial data size limit */
 #endif
@@ -104,9 +104,9 @@
 
 /* user/kernel map constants */
 #define VM_MIN_ADDRESS		((vaddr_t)PAGE_SIZE)
-#define VM_MAXUSER_ADDRESS	((vaddr_t)((PDSLOT_PTE<<PDSHIFT) - USPACE))
+#define VM_MAXUSER_ADDRESS	((vaddr_t)((PDSLOT_PTE<<PDSHIFT) - (2 * PAGE_SIZE)))
 #define VM_MAX_ADDRESS		((vaddr_t)((PDSLOT_PTE<<PDSHIFT) + \
-				    (PDSLOT_PTE<<PGSHIFT)))
+				    (PDSLOT_PTE<<PAGE_SHIFT)))
 #define VM_MIN_KERNEL_ADDRESS	((vaddr_t)KERNBASE)
 #define VM_MAX_KERNEL_ADDRESS	((vaddr_t)(PDSLOT_APTE<<PDSHIFT))
 

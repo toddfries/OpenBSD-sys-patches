@@ -1,4 +1,4 @@
-/*	$OpenBSD: athn.c,v 1.71 2011/01/08 15:05:24 damien Exp $	*/
+/*	$OpenBSD: athn.c,v 1.79 2013/11/26 09:50:32 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -52,7 +52,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -84,7 +83,8 @@ void		athn_init_pll(struct athn_softc *,
 		    const struct ieee80211_channel *);
 int		athn_set_power_awake(struct athn_softc *);
 void		athn_set_power_sleep(struct athn_softc *);
-void		athn_write_serdes(struct athn_softc *, const uint32_t [9]);
+void		athn_write_serdes(struct athn_softc *,
+		    const struct athn_serdes *);
 void		athn_config_pcie(struct athn_softc *);
 void		athn_config_nonpcie(struct athn_softc *);
 int		athn_set_chan(struct athn_softc *, struct ieee80211_channel *,
@@ -281,7 +281,8 @@ athn_attach(struct athn_softc *sc)
 	    IEEE80211_C_WEP |		/* WEP. */
 	    IEEE80211_C_RSN |		/* WPA/RSN. */
 #ifndef IEEE80211_STA_ONLY
-	    IEEE80211_C_HOSTAP |	/* Host Ap mode supported. */
+	    IEEE80211_C_HOSTAP |	/* Host AP mode supported. */
+	    IEEE80211_C_APPMGT |	/* Host AP power saving supported. */
 #endif
 	    IEEE80211_C_MONITOR |	/* Monitor mode supported. */
 	    IEEE80211_C_SHSLOT |	/* Short slot time supported. */
@@ -774,14 +775,13 @@ athn_init_pll(struct athn_softc *sc, const struct ieee80211_channel *c)
 }
 
 void
-athn_write_serdes(struct athn_softc *sc, const uint32_t val[9])
+athn_write_serdes(struct athn_softc *sc, const struct athn_serdes *serdes)
 {
 	int i;
 
-	/* Write 288-bit value to Serializer/Deserializer. */
-	for (i = 0; i < 288 / 32; i++)
-		AR_WRITE(sc, AR_PCIE_SERDES, val[i]);
-	AR_WRITE(sc, AR_PCIE_SERDES2, 0);
+	/* Write sequence to Serializer/Deserializer. */
+	for (i = 0; i < serdes->nvals; i++)
+		AR_WRITE(sc, serdes->regs[i], serdes->vals[i]);
 	AR_WRITE_BARRIER(sc);
 }
 
@@ -803,10 +803,45 @@ athn_config_pcie(struct athn_softc *sc)
 	AR_WRITE_BARRIER(sc);
 }
 
+/*
+ * Serializer/Deserializer programming for non-PCIe devices.
+ */
+static const uint32_t ar_nonpcie_serdes_regs[] = {
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES,
+	AR_PCIE_SERDES2,
+};
+
+static const uint32_t ar_nonpcie_serdes_vals[] = {
+	0x9248fc00,
+	0x24924924,
+	0x28000029,
+	0x57160824,
+	0x25980579,
+	0x00000000,
+	0x1aaabe40,
+	0xbe105554,
+	0x000e1007,
+	0x00000000
+};
+
+static const struct athn_serdes ar_nonpcie_serdes = {
+	nitems(ar_nonpcie_serdes_vals),
+	ar_nonpcie_serdes_regs,
+	ar_nonpcie_serdes_vals
+};
+
 void
 athn_config_nonpcie(struct athn_softc *sc)
 {
-	athn_write_serdes(sc, ar_nonpcie_serdes);
+	athn_write_serdes(sc, &ar_nonpcie_serdes);
 }
 
 int
@@ -1204,7 +1239,7 @@ athn_calib_to(void *arg)
 	/* Do periodic (every 4 minutes) PA calibration. */
 	if (AR_SREV_9285_11_OR_LATER(sc) &&
 	    !AR_SREV_9380_10_OR_LATER(sc) &&
-	    ticks >= sc->pa_calib_ticks + 240 * hz) {
+	    (ticks - (sc->pa_calib_ticks + 240 * hz)) >= 0) {
 		sc->pa_calib_ticks = ticks;
 		if (AR_SREV_9271(sc))
 			ar9271_pa_calib(sc);
@@ -2407,7 +2442,7 @@ athn_newstate(struct ieee80211com *ic, enum ieee80211_state nstate, int arg)
 #ifndef IEEE80211_STA_ONLY
 		if (ic->ic_opmode == IEEE80211_M_HOSTAP) {
 			athn_set_hostap_timers(sc);
-			/* Enable sotfware beacon alert interrupts. */
+			/* Enable software beacon alert interrupts. */
 			sc->imask |= AR_IMR_SWBA;
 		} else
 #endif
@@ -2525,6 +2560,14 @@ athn_start(struct ifnet *ifp)
 		if (ic->ic_state != IEEE80211_S_RUN)
 			break;
 
+		IF_DEQUEUE(&ic->ic_pwrsaveq, m);
+		if (m != NULL) {
+			ni = (void *)m->m_pkthdr.rcvif;
+			goto sendit;
+		}
+		if (ic->ic_state != IEEE80211_S_RUN)
+			break;
+
 		/* Encapsulate and send data frames. */
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 		if (m == NULL)
@@ -2583,6 +2626,9 @@ athn_set_multi(struct athn_softc *sc)
 	uint32_t val, lo, hi;
 	uint8_t bit;
 
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if ((ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
 		lo = hi = 0xffffffff;
 		goto done;
@@ -2590,11 +2636,6 @@ athn_set_multi(struct athn_softc *sc)
 	lo = hi = 0;
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (memcmp(enm->enm_addrlo, enm->enm_addrhi, 6) != 0) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			lo = hi = 0xffffffff;
-			goto done;
-		}
 		addr = enm->enm_addrlo;
 		/* Calculate the XOR value of all eight 6-bit words. */
 		val = addr[0] | addr[1] << 8 | addr[2] << 16;

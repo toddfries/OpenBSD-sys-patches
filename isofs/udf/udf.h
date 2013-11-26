@@ -1,4 +1,4 @@
-/*	$OpenBSD: udf.h,v 1.14 2011/07/04 04:30:41 tedu Exp $	*/
+/*	$OpenBSD: udf.h,v 1.19 2013/09/17 04:31:56 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2001, 2002 Scott Long <scottl@freebsd.org>
@@ -34,6 +34,8 @@
 
 #define UDF_HASHTBLSIZE 100
 
+typedef uint32_t udfino_t;
+
 struct unode {
 	LIST_ENTRY(unode) u_le;
 	struct vnode *u_vnode;
@@ -41,7 +43,7 @@ struct unode {
 	struct umount *u_ump;
 	struct lock u_lock;
 	dev_t u_dev;
-	ino_t u_ino;
+	udfino_t u_ino;
 	union {
 		long u_diroff;
 		long u_vatlen;
@@ -80,6 +82,10 @@ struct umount {
 #define	UDF_MNT_USES_VAT	0x02	/* Indicates a VAT must be used */
 #define	UDF_MNT_USES_META	0x04	/* Indicates we are using a Metadata partition*/
 
+#define	VTOU(vp)	((struct unode *)((vp)->v_data))
+
+#ifdef _KERNEL
+
 struct udf_dirstream {
 	struct unode	*node;
 	struct umount	*ump;
@@ -96,7 +102,6 @@ struct udf_dirstream {
 };
 
 #define	VFSTOUDFFS(mp)	((struct umount *)((mp)->mnt_data))
-#define	VTOU(vp)	((struct unode *)((vp)->v_data))
 
 /*
  * The block layer refers to things in terms of 512 byte blocks by default.
@@ -104,7 +109,8 @@ struct udf_dirstream {
  * Can the block layer be forced to use a different block size?
  */
 #define	RDSECTOR(devvp, sector, size, bp) \
-	bread(devvp, sector << (ump->um_bshift - DEV_BSHIFT), size, bp)
+	bread(devvp, \
+		((daddr_t)(sector) << ump->um_bshift) / DEV_BSIZE, size, bp)
 
 static __inline int
 udf_readlblks(struct umount *ump, int sector, int size, struct buf **bp)
@@ -121,16 +127,19 @@ udf_readlblks(struct umount *ump, int sector, int size, struct buf **bp)
  * Assumes the ICB is a long_ad.  This struct is compatible with short_ad,
  *     but not ext_ad.
  */
-static __inline ino_t
+static __inline udfino_t
 udf_getid(struct long_ad *icb)
 {
 	return (letoh32(icb->loc.lb_num));
 }
 
 int udf_allocv(struct mount *, struct vnode **, struct proc *);
-int udf_hashlookup(struct umount *, ino_t, int, struct vnode **);
+int udf_hashlookup(struct umount *, udfino_t, int, struct vnode **);
 int udf_hashins(struct unode *);
 int udf_hashrem(struct unode *);
 int udf_checktag(struct desc_tag *, uint16_t);
 
 typedef	uint16_t unicode_t;
+
+#endif /* _KERNEL */
+

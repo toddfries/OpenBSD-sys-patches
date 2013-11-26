@@ -1,10 +1,14 @@
-#	$OpenBSD: Makefile,v 1.4 2006/08/17 06:31:10 miod Exp $
+#	$OpenBSD: Makefile,v 1.6 2013/01/01 17:17:44 miod Exp $
 
 S=${.CURDIR}/../../../..
 ZDST=${.OBJDIR}
 
+NOPIE=
+
 .PATH: ${S}/lib/libz
 
-.include "${.CURDIR}/../Makefile.inc"
+CPPFLAGS+=	${SA_CPPFLAGS}
+
+CFLAGS+=-I${S}
 
 .include "${S}/lib/libz/Makefile"

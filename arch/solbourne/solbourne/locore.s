@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.s,v 1.16 2011/07/04 22:53:53 tedu Exp $	*/
+/*	$OpenBSD: locore.s,v 1.18 2013/06/13 15:34:04 deraadt Exp $	*/
 /*	OpenBSD: locore.s,v 1.64 2005/04/17 18:47:50 miod Exp 	*/
 
 /*
@@ -91,7 +91,7 @@
 #include <machine/signal.h>
 #include <machine/trap.h>
 
-#include <sparc/dev/z8530reg.h>
+#include <dev/ic/z8530reg.h>
 
 /*
  * GNU assembler does not understand `.empty' directive; Sun assembler
@@ -3665,10 +3665,9 @@ Lbcopy_done:
 	retl
 	stb	%o4,[%o1]
 /*
- * ovbcopy(src, dst, len): like bcopy, but regions may overlap.
+ * bcopy(src, dst, len): regions may overlap.
  */
 ENTRY(bcopy)
-ENTRY(ovbcopy)
 	cmp	%o0, %o1	! src < dst?
 	bgeu	Lbcopy_start	! no, go copy forwards as via bcopy
 	cmp	%o2, BCOPY_SMALL! (check length for doublecopy first)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.88 2011/06/26 23:19:11 tedu Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.92 2013/11/19 09:00:43 mpi Exp $	*/
 /*	$NetBSD: autoconf.c,v 1.20 1996/05/03 19:41:56 christos Exp $	*/
 
 /*-
@@ -54,6 +54,7 @@
 #include <sys/device.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/hibernate.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -87,6 +88,10 @@ extern dev_t bootdev;
 extern struct timeout viac3_rnd_tmo;
 extern int	viac3_rnd_present;
 void		viac3_rnd(void *);
+
+extern struct timeout rdrand_tmo;
+extern int	has_rdrand;
+void		rdrand(void *);
 
 #ifdef CRYPTO
 void		viac3_crypto_setup(void);
@@ -142,6 +147,11 @@ cpu_configure(void)
 		timeout_set(&viac3_rnd_tmo, viac3_rnd, &viac3_rnd_tmo);
 		viac3_rnd(&viac3_rnd_tmo);
 	}
+	if (has_rdrand) {
+		timeout_set(&rdrand_tmo, rdrand, &rdrand_tmo);
+		rdrand(&rdrand_tmo);
+	}
+
 #ifdef CRYPTO
 	/*
 	 * Also, if the chip has crypto available, enable it.
@@ -186,8 +196,7 @@ diskconf(void)
 
 		for (ifp = TAILQ_FIRST(&ifnet); ifp != NULL;
 		    ifp = TAILQ_NEXT(ifp, if_list)) {
-			if ((ifp->if_type == IFT_ETHER ||
-			    ifp->if_type == IFT_FDDI) &&
+			if (ifp->if_type == IFT_ETHER &&
 			    bcmp(bios_bootmac->mac,
 			    ((struct arpcom *)ifp)->ac_enaddr,
 			    ETHER_ADDR_LEN) == 0)
@@ -208,6 +217,10 @@ diskconf(void)
 
 	setroot(bootdv, part, RB_USERREQ);
 	dumpconf();
+
+#ifdef HIBERNATE
+	hibernate_resume();
+#endif /* HIBERNATE */
 }
 
 struct nam2blk nam2blk[] = {

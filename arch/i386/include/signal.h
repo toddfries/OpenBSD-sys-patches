@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.8 2011/03/23 16:54:35 pirofti Exp $	*/
+/*	$OpenBSD: signal.h,v 1.10 2013/04/01 17:18:20 deraadt Exp $	*/
 /*	$NetBSD: signal.h,v 1.6 1996/01/08 13:51:43 mycroft Exp $	*/
 
 /*
@@ -39,10 +39,7 @@
 
 typedef int sig_atomic_t;
 
-#if __BSD_VISIBLE
-/*
- * Get the "code" values
- */
+#ifdef _KERNEL
 #include <machine/trap.h>
 #endif
 
@@ -73,7 +70,7 @@ struct	sigcontext {
 	int	sc_esp;
 	int	sc_ss;
 
-	int	sc_onstack;		/* sigstack state to restore */
+	int	__sc_unused;
 	int	sc_mask;		/* signal mask to restore */
 
 	int	sc_trapno;		/* XXX should be above */

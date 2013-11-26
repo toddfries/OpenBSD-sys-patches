@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_upl.c,v 1.48 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: if_upl.c,v 1.55 2013/11/15 10:17:39 pirofti Exp $ */
 /*	$NetBSD: if_upl.c,v 1.19 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -57,7 +57,6 @@
 
 #ifdef INET
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
@@ -108,7 +107,7 @@ struct upl_softc;
 
 struct upl_chain {
 	struct upl_softc	*upl_sc;
-	usbd_xfer_handle	upl_xfer;
+	struct usbd_xfer	*upl_xfer;
 	char			*upl_buf;
 	struct mbuf		*upl_mbuf;
 	int			upl_idx;
@@ -129,18 +128,16 @@ struct upl_softc {
 	struct ifnet		sc_if;
 	struct timeout		sc_stat_ch;
 
-	usbd_device_handle	sc_udev;
-	usbd_interface_handle	sc_iface;
+	struct usbd_device	*sc_udev;
+	struct usbd_interface	*sc_iface;
 	u_int16_t		sc_vendor;
 	u_int16_t		sc_product;
 	int			sc_ed[UPL_ENDPT_MAX];
-	usbd_pipe_handle	sc_ep[UPL_ENDPT_MAX];
+	struct usbd_pipe	*sc_ep[UPL_ENDPT_MAX];
 	struct upl_cdata	sc_cdata;
 
 	uByte			sc_ibuf;
 
-	char			sc_dying;
-	char			sc_attached;
 	u_int			sc_rx_errs;
 	struct timeval		sc_rx_notice;
 	u_int			sc_intr_errs;
@@ -185,9 +182,9 @@ int upl_tx_list_init(struct upl_softc *);
 int upl_rx_list_init(struct upl_softc *);
 int upl_newbuf(struct upl_softc *, struct upl_chain *, struct mbuf *);
 int upl_send(struct upl_softc *, struct mbuf *, int);
-void upl_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void upl_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void upl_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void upl_intr(struct usbd_xfer *, void *, usbd_status);
+void upl_rxeof(struct usbd_xfer *, void *, usbd_status);
+void upl_txeof(struct usbd_xfer *, void *, usbd_status);
 void upl_start(struct ifnet *);
 int upl_ioctl(struct ifnet *, u_long, caddr_t);
 void upl_init(void *);
@@ -196,7 +193,6 @@ void upl_watchdog(struct ifnet *);
 
 int upl_output(struct ifnet *, struct mbuf *, struct sockaddr *,
 		      struct rtentry *);
-void upl_input(struct ifnet *, struct mbuf *);
 
 /*
  * Probe for a Prolific chip.
@@ -219,8 +215,8 @@ upl_attach(struct device *parent, struct device *self, void *aux)
 	struct upl_softc	*sc = (struct upl_softc *)self;
 	struct usb_attach_arg	*uaa = aux;
 	int			s;
-	usbd_device_handle	dev = uaa->device;
-	usbd_interface_handle	iface;
+	struct usbd_device	*dev = uaa->device;
+	struct usbd_interface	*iface;
 	usbd_status		err;
 	struct ifnet		*ifp;
 	usb_interface_descriptor_t	*id;
@@ -292,14 +288,13 @@ upl_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_addrlen = 0;
 	ifp->if_hdrlen = 0;
 	ifp->if_output = upl_output;
-	ifp->if_baudrate = 12000000;
+	ifp->if_baudrate = IF_Mbps(12);
 	IFQ_SET_READY(&ifp->if_snd);
 
 	/* Attach the interface. */
 	if_attach(ifp);
 	if_alloc_sadl(ifp);
 
-	sc->sc_attached = 1;
 	splx(s);
 }
 
@@ -311,10 +306,6 @@ upl_detach(struct device *self, int flags)
 	int			s;
 
 	DPRINTFN(2,("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
-
-	/* Detached before attached finished, so just bail out. */
-	if (!sc->sc_attached)
-		return (0);
 
 	s = splusb();
 
@@ -332,7 +323,6 @@ upl_detach(struct device *self, int flags)
 		       sc->sc_dev.dv_xname);
 #endif
 
-	sc->sc_attached = 0;
 	splx(s);
 
 	return (0);
@@ -347,7 +337,7 @@ upl_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 	return (0);
@@ -456,7 +446,7 @@ upl_tx_list_init(struct upl_softc *sc)
  * the higher level protocols.
  */
 void
-upl_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+upl_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct upl_chain	*c = priv;
 	struct upl_softc	*sc = c->upl_sc;
@@ -465,7 +455,7 @@ upl_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	int			total_len = 0;
 	int			s;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (!(ifp->if_flags & IFF_RUNNING))
@@ -545,14 +535,14 @@ upl_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
  * the list buffers.
  */
 void
-upl_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+upl_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct upl_chain	*c = priv;
 	struct upl_softc	*sc = c->upl_sc;
 	struct ifnet		*ifp = &sc->sc_if;
 	int			s;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	s = splnet();
@@ -633,7 +623,7 @@ upl_start(struct ifnet *ifp)
 	struct upl_softc	*sc = ifp->if_softc;
 	struct mbuf		*m_head = NULL;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	DPRINTFN(10,("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
@@ -676,7 +666,7 @@ upl_init(void *xsc)
 	struct ifnet		*ifp = &sc->sc_if;
 	int			s;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	DPRINTFN(10,("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
@@ -762,7 +752,7 @@ upl_openpipes(struct upl_softc *sc)
 }
 
 void
-upl_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+upl_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct upl_softc	*sc = priv;
 	struct ifnet		*ifp = &sc->sc_if;
@@ -770,7 +760,7 @@ upl_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 
 	DPRINTFN(15,("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (!(ifp->if_flags & IFF_RUNNING))
@@ -810,7 +800,7 @@ upl_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	struct ifreq		*ifr = (struct ifreq *)data;
 	int			s, error = 0;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	DPRINTFN(5,("%s: %s: cmd=0x%08lx\n",
@@ -864,7 +854,7 @@ upl_watchdog(struct ifnet *ifp)
 
 	DPRINTFN(5,("%s: %s: enter\n", sc->sc_dev.dv_xname,__func__));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	ifp->if_oerrors++;
@@ -896,11 +886,7 @@ upl_stop(struct upl_softc *sc)
 
 	/* Stop transfers. */
 	if (sc->sc_ep[UPL_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_RX]);
-		if (err) {
-			printf("%s: abort rx pipe failed: %s\n",
-			sc->sc_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_RX]);
 		err = usbd_close_pipe(sc->sc_ep[UPL_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
@@ -910,11 +896,7 @@ upl_stop(struct upl_softc *sc)
 	}
 
 	if (sc->sc_ep[UPL_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_TX]);
-		if (err) {
-			printf("%s: abort tx pipe failed: %s\n",
-			sc->sc_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_TX]);
 		err = usbd_close_pipe(sc->sc_ep[UPL_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
@@ -924,11 +906,7 @@ upl_stop(struct upl_softc *sc)
 	}
 
 	if (sc->sc_ep[UPL_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_INTR]);
-		if (err) {
-			printf("%s: abort intr pipe failed: %s\n",
-			sc->sc_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->sc_ep[UPL_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->sc_ep[UPL_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",
@@ -990,32 +968,4 @@ upl_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	splx(s);
 
 	return (0);
-}
-
-void
-upl_input(struct ifnet *ifp, struct mbuf *m)
-{
-	struct ifqueue *inq;
-	int s;
-
-	/* XXX Assume all traffic is IP */
-
-	schednetisr(NETISR_IP);
-	inq = &ipintrq;
-
-	s = splnet();
-	if (IF_QFULL(inq)) {
-		IF_DROP(inq);
-		splx(s);
-#if 0
-		if (sc->sc_flags & SC_DEBUG)
-			printf("%s: input queue full\n", ifp->if_xname);
-#endif
-		ifp->if_iqdrops++;
-		return;
-	}
-	IF_ENQUEUE(inq, m);
-	splx(s);
-	ifp->if_ipackets++;
-	ifp->if_ibytes += m->m_len;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_mos.c,v 1.16 2012/02/28 08:58:30 jsg Exp $	*/
+/*	$OpenBSD: if_mos.c,v 1.22 2013/11/15 10:17:39 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2008 Johann Christian Rode <jcrode@gmx.net>
@@ -64,8 +64,6 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-
 /*
  * Moschip MCS7730/MCS7830/MCS7832 USB to Ethernet controller 
  * The datasheet is available at the following URL: 
@@ -80,7 +78,6 @@
 #include <sys/rwlock.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 
 #include <sys/device.h>
@@ -98,7 +95,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -155,8 +151,8 @@ int mos_tx_list_init(struct mos_softc *);
 int mos_rx_list_init(struct mos_softc *);
 struct mbuf *mos_newbuf(void);
 int mos_encap(struct mos_softc *, struct mbuf *, int);
-void mos_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void mos_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void mos_rxeof(struct usbd_xfer *, void *, usbd_status);
+void mos_txeof(struct usbd_xfer *, void *, usbd_status);
 void mos_tick(void *);
 void mos_tick_task(void *);
 void mos_start(struct ifnet *);
@@ -180,7 +176,7 @@ int mos_readmac(struct mos_softc *, u_char *);
 int mos_writemac(struct mos_softc *, u_char *);
 int mos_write_mcast(struct mos_softc *, u_char *);
 
-void mos_setmulti(struct mos_softc *);
+void mos_iff(struct mos_softc *);
 void mos_lock_mii(struct mos_softc *);
 void mos_unlock_mii(struct mos_softc *);
 
@@ -531,46 +527,41 @@ mos_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 }
 
 void
-mos_setmulti(struct mos_softc *sc)
+mos_iff(struct mos_softc *sc)
 {
-	struct ifnet		*ifp;
+	struct ifnet		*ifp = GET_IFP(sc);
+	struct arpcom		*ac = &sc->arpcom;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
 	u_int32_t		h = 0;
-	u_int8_t		rxmode;
-	u_int8_t		hashtbl[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+	u_int8_t		rxmode, hashtbl[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
 	if (usbd_is_dying(sc->mos_udev))
 		return;
 
-	ifp = GET_IFP(sc);
-
 	rxmode = mos_reg_read_1(sc, MOS_CTL);
+	rxmode &= ~(MOS_CTL_ALLMULTI | MOS_CTL_RX_PROMISC);
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
-allmulti:
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
 		rxmode |= MOS_CTL_ALLMULTI;
-		mos_reg_write_1(sc, MOS_CTL, rxmode);
-		return;
-	} else
-		rxmode &= ~MOS_CTL_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			rxmode |= MOS_CTL_RX_PROMISC;
+	} else {
+		/* now program new ones */
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26;
 
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, &sc->arpcom, enm);
-	while (enm != NULL) {
-		if (memcmp(enm->enm_addrlo, enm->enm_addrhi,
-		   ETHER_ADDR_LEN) != 0)
-			goto allmulti;
+			hashtbl[h / 8] |= 1 << (h % 8);
 
-		h = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26;
-		hashtbl[h / 8] |= 1 << (h % 8);
-		ETHER_NEXT_MULTI(step, enm);
+			ETHER_NEXT_MULTI(step, enm);
+		}
 	}
 
-	ifp->if_flags &= ~IFF_ALLMULTI;
 	mos_write_mcast(sc, (void *)&hashtbl);
 	mos_reg_write_1(sc, MOS_CTL, rxmode);
-	return;
 }
 
 void
@@ -636,7 +627,7 @@ mos_attach(struct device *parent, struct device *self, void *aux)
 	struct mos_softc	*sc = (struct mos_softc *)self;
 	struct usb_attach_arg	*uaa = aux;
 	struct ifnet		*ifp;
-	usbd_device_handle	dev = uaa->device;
+	struct usbd_device	*dev = uaa->device;
 	usbd_status		err;
 	usb_interface_descriptor_t 	*id;
 	usb_endpoint_descriptor_t 	*ed;
@@ -920,7 +911,7 @@ mos_tx_list_init(struct mos_softc *sc)
  * the higher level protocols.
  */
 void
-mos_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+mos_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct mos_chain	*c = (struct mos_chain *)priv;
 	struct mos_softc	*sc = c->mos_sc;
@@ -1025,7 +1016,7 @@ done:
  */
 
 void
-mos_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+mos_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct mos_softc	*sc;
 	struct mos_chain	*c;
@@ -1241,21 +1232,14 @@ mos_init(void *xsc)
 	mos_reg_write_1(sc, MOS_IPG0, sc->mos_ipgs[0]);
 	mos_reg_write_1(sc, MOS_IPG1, sc->mos_ipgs[1]);
 
+	/* Program promiscuous mode and multicast filters. */
+	mos_iff(sc);
+
 	/* Enable receiver and transmitter, bridge controls speed/duplex mode */
 	rxmode = mos_reg_read_1(sc, MOS_CTL);
 	rxmode |= MOS_CTL_RX_ENB | MOS_CTL_TX_ENB | MOS_CTL_BS_ENB;
 	rxmode &= ~(MOS_CTL_SLEEP);
-
-	/* If we want promiscuous mode, set the allframes bit. */
-	if (ifp->if_flags & IFF_PROMISC)
-		rxmode |= MOS_CTL_RX_PROMISC;
-
-	/* XXX: broadcast mode? */
-
 	mos_reg_write_1(sc, MOS_CTL, rxmode);
-
-	/* Load the multicast filter. */
-	mos_setmulti(sc);
 
 	mii_mediachg(GET_MII(sc));
 
@@ -1303,8 +1287,6 @@ mos_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct mos_softc	*sc = ifp->if_softc;
 	struct ifreq		*ifr = (struct ifreq *)data;
 	struct ifaddr		*ifa = (struct ifaddr *)data;
-	struct mii_data		*mii;
-	u_int8_t		rxmode;
 	int			s, error = 0;
 
 	s = splnet();
@@ -1320,61 +1302,31 @@ mos_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 #endif
 		break;
 
-	case SIOCSIFMTU:
-		if (ifr->ifr_mtu < ETHERMIN || ifr->ifr_mtu > ifp->if_hardmtu)
-			error = EINVAL;
-		else if (ifp->if_mtu != ifr->ifr_mtu)
-			ifp->if_mtu = ifr->ifr_mtu;
-		break;
-
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (ifp->if_flags & IFF_RUNNING &&
-			    ifp->if_flags & IFF_PROMISC &&
-			    !(sc->mos_if_flags & IFF_PROMISC)) {
-				rxmode = mos_reg_read_1(sc, MOS_CTL);
-				rxmode |= MOS_CTL_RX_PROMISC;
-				mos_reg_write_1(sc, MOS_CTL, rxmode);
-				mos_setmulti(sc);
-			} else if (ifp->if_flags & IFF_RUNNING &&
-			    !(ifp->if_flags & IFF_PROMISC) &&
-			    !(sc->mos_if_flags & IFF_PROMISC)) {
-				rxmode = mos_reg_read_1(sc, MOS_CTL);
-				rxmode |= MOS_CTL_RX_PROMISC;
-				mos_reg_write_1(sc, MOS_CTL, rxmode);
-				mos_setmulti(sc);
-			} else if (!(ifp->if_flags & IFF_RUNNING))
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
 				mos_init(sc);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				mos_stop(sc);
 		}
-		sc->mos_if_flags = ifp->if_flags;
 		break;
-	case SIOCADDMULTI:
-	case SIOCDELMULTI:
-		error = (cmd == SIOCADDMULTI) ?
-		    ether_addmulti(ifr, &sc->arpcom) :
-		    ether_delmulti(ifr, &sc->arpcom);
 
-		if (error == ENETRESET) {
-			/*
-			 * Multicast list has changed; set the hardware
-			 * filter accordingly.
-			 */
-			if (ifp->if_flags & IFF_RUNNING)
-				mos_setmulti(sc);
-			error = 0;
-		}
-		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
-		mii = GET_MII(sc);
-		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
+		error = ifmedia_ioctl(ifp, ifr, &sc->mos_mii.mii_media, cmd);
 		break;
 
 	default:
 		error = ether_ioctl(ifp, &sc->arpcom, cmd, data);
+	}
+
+	if (error == ENETRESET) {
+		if (ifp->if_flags & IFF_RUNNING)
+			mos_iff(sc);
+		error = 0;
 	}
 
 	splx(s);
@@ -1426,11 +1378,7 @@ mos_stop(struct mos_softc *sc)
 
 	/* Stop transfers. */
 	if (sc->mos_ep[MOS_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_RX]);
-		if (err) {
-			printf("%s: abort rx pipe failed: %s\n",
-			    sc->mos_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_RX]);
 		err = usbd_close_pipe(sc->mos_ep[MOS_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
@@ -1440,11 +1388,7 @@ mos_stop(struct mos_softc *sc)
 	}
 
 	if (sc->mos_ep[MOS_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_TX]);
-		if (err) {
-			printf("%s: abort tx pipe failed: %s\n",
-			    sc->mos_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_TX]);
 		err = usbd_close_pipe(sc->mos_ep[MOS_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
@@ -1454,11 +1398,7 @@ mos_stop(struct mos_softc *sc)
 	}
 
 	if (sc->mos_ep[MOS_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_INTR]);
-		if (err) {
-			printf("%s: abort intr pipe failed: %s\n",
-			    sc->mos_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->mos_ep[MOS_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->mos_ep[MOS_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",

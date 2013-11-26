@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pppx.c,v 1.13 2011/10/25 23:54:58 dlg Exp $ */
+/*	$OpenBSD: if_pppx.c,v 1.26 2013/10/19 14:46:30 mpi Exp $ */
 
 /*
  * Copyright (c) 2010 Claudio Jeker <claudio@openbsd.org>
@@ -48,7 +48,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/queue.h>
 #include <sys/rwlock.h>
@@ -78,6 +77,7 @@
 #endif
 
 #ifdef INET6
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/nd6.h>
 #endif /* INET6 */
@@ -131,7 +131,7 @@ struct pppx_dev {
 };
 
 struct rwlock			pppx_devs_lk = RWLOCK_INITIALIZER("pppxdevs");
-LIST_HEAD(, pppx_dev)		pppx_devs = LIST_HEAD_INITIALIZER(&pppx_devs);
+LIST_HEAD(, pppx_dev)		pppx_devs = LIST_HEAD_INITIALIZER(pppx_devs);
 struct pool			*pppx_if_pl;
 
 struct pppx_dev			*pppx_dev_lookup(int);
@@ -683,7 +683,7 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 		over_ifp = ifunit(req->pr_proto.pppoe.over_ifname);
 		if (over_ifp == NULL)
 			return (EINVAL);
-		if (req->peer_address.ss_family != AF_UNSPEC)
+		if (req->pr_peer_address.ss_family != AF_UNSPEC)
 			return (EINVAL);
 		break;
 #endif
@@ -693,24 +693,24 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 #ifdef PIPEX_L2TP
 	case PIPEX_PROTO_L2TP:
 #endif
-		switch (req->peer_address.ss_family) {
+		switch (req->pr_peer_address.ss_family) {
 		case AF_INET:
-			if (req->peer_address.ss_len != sizeof(struct sockaddr_in))
+			if (req->pr_peer_address.ss_len != sizeof(struct sockaddr_in))
 				return (EINVAL);
 			break;
 #ifdef INET6
 		case AF_INET6:
-			if (req->peer_address.ss_len != sizeof(struct sockaddr_in6))
+			if (req->pr_peer_address.ss_len != sizeof(struct sockaddr_in6))
 				return (EINVAL);
 			break;
 #endif
 		default:
 			return (EPROTONOSUPPORT);
 		}
-		if (req->peer_address.ss_family !=
-		    req->local_address.ss_family ||
-		    req->peer_address.ss_len !=
-		    req->local_address.ss_len)
+		if (req->pr_peer_address.ss_family !=
+		    req->pr_local_address.ss_family ||
+		    req->pr_peer_address.ss_len !=
+		    req->pr_local_address.ss_len)
 			return (EINVAL);
 		break;
 	default:
@@ -754,12 +754,12 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 	session->ip_address.sin_addr.s_addr &=
 	    session->ip_netmask.sin_addr.s_addr;
 
-	if (req->peer_address.ss_len > 0)
-		memcpy(&session->peer, &req->peer_address,
-		    MIN(req->peer_address.ss_len, sizeof(session->peer)));
-	if (req->local_address.ss_len > 0)
-		memcpy(&session->local, &req->local_address,
-		    MIN(req->local_address.ss_len, sizeof(session->local)));
+	if (req->pr_peer_address.ss_len > 0)
+		memcpy(&session->peer, &req->pr_peer_address,
+		    MIN(req->pr_peer_address.ss_len, sizeof(session->peer)));
+	if (req->pr_local_address.ss_len > 0)
+		memcpy(&session->local, &req->pr_local_address,
+		    MIN(req->pr_local_address.ss_len, sizeof(session->local)));
 #ifdef PIPEX_PPPOE
 	if (req->pr_protocol == PIPEX_PROTO_PPPOE)
 		session->proto.pppoe.over_ifp = over_ifp;
@@ -874,10 +874,11 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 		pipex_timer_start();
 
 	if_attach(ifp);
+	if_addgroup(ifp, "pppx");
 	if_alloc_sadl(ifp);
 
 #if NBPFILTER > 0
-	bpfattach(&ifp->if_bpf, ifp, DLT_NULL, 0);
+	bpfattach(&ifp->if_bpf, ifp, DLT_LOOP, sizeof(u_int32_t));
 #endif
 	SET(ifp->if_flags, IFF_RUNNING);
 
@@ -894,7 +895,6 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 	ifaddr.sin_addr = req->pr_ip_srcaddr;
 
 	ia = malloc(sizeof (*ia), M_IFADDR, M_WAITOK | M_ZERO);
-	TAILQ_INSERT_TAIL(&in_ifaddr, ia, ia_list);
 
 	ia->ia_addr.sin_family = AF_INET;
 	ia->ia_addr.sin_len = sizeof(struct sockaddr_in);
@@ -915,7 +915,7 @@ pppx_add_session(struct pppx_dev *pxd, struct pipex_session_req *req)
 	
 	ia->ia_netmask = ia->ia_sockmask.sin_addr.s_addr;
 
-	error = in_ifinit(ifp, ia, &ifaddr, 0, 1);
+	error = in_ifinit(ifp, ia, &ifaddr, 1);
 	if (error) {
 		printf("pppx: unable to set addresses for %s, error=%d\n",
 		    ifp->if_xname, error);
@@ -1102,19 +1102,6 @@ pppx_if_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		switch (ifr->ifr_addr.sa_family) {
-#ifdef INET
-		case AF_INET:
-			break;
-#endif
-#ifdef INET6
-		case AF_INET6:
-			break;
-#endif
-		default:
-			error = EAFNOSUPPORT;
-			break;
-		}
 		break;
 
 	case SIOCSIFMTU:

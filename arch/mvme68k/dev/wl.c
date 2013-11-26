@@ -1,4 +1,4 @@
-/*	$OpenBSD: wl.c,v 1.23 2010/06/28 14:13:29 deraadt Exp $ */
+/*	$OpenBSD: wl.c,v 1.26 2013/10/07 17:53:57 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.
@@ -173,7 +173,7 @@ int cl_intr(struct wlsoftc *sc, int);
 int cl_mintr(struct wlsoftc *sc);
 int cl_txintr(struct wlsoftc *sc);
 int cl_rxintr(struct wlsoftc *sc);
-void cl_overflow(struct wlsoftc *sc, int channel, long *ptime, u_char *msg);
+void cl_overflow(struct wlsoftc *sc, int channel, time_t *ptime, u_char *msg);
 void cl_parity(struct wlsoftc *sc, int channel);
 void cl_frame(struct wlsoftc *sc, int channel);
 void cl_break( struct wlsoftc *sc, int channel);
@@ -1142,7 +1142,7 @@ cl_mintr(sc)
 		struct tty *tp = sc->sc_cl[channel].tty;
 		log(LOG_WARNING, "cl_mintr: channel %x cd %x\n",channel,
 		    ((msvr & 0x40) != 0x0));
-		ttymodem(tp, ((msvr & 0x40) != 0x0) );
+		(*linesw[tp->t_line].l_modem)(tp, ((msvr & 0x40) != 0x0) );
 	}
 	if (misr & MISR_DSRCHG) {
 		log(LOG_WARNING, "cl_mintr: channel %x dsr %x\n",channel,
@@ -1313,15 +1313,15 @@ void
 cl_overflow (sc, channel, ptime, msg)
 struct wlsoftc *sc;
 int channel;
-long *ptime;
+time_t *ptime;
 u_char *msg;
 {
 /*
-	if (*ptime != time.tv_sec) {
+	if (*ptime != time_second) {
 */
 	{
 /*
-		*ptime = time.tv_sec;
+		*ptime = time_second;
 */
 		log(LOG_WARNING, "%s%d[%d]: %s overrun\n", wl_cd.cd_name,
 			0 /* fix */, channel, msg);

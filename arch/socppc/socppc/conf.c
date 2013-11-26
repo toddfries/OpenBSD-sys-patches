@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.15 2011/10/06 20:49:28 deraadt Exp $ */
+/*	$OpenBSD: conf.c,v 1.19 2013/11/04 14:11:29 deraadt Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -48,7 +48,6 @@ bdev_decl(wd);
 cdev_decl(wd);
 
 #include "vnd.h"
-#include "raid.h"
 #include "video.h"
 
 struct bdevsw bdevsw[] = {
@@ -68,10 +67,10 @@ struct bdevsw bdevsw[] = {
 	bdev_lkm_dummy(),		/* 13 */
 	bdev_disk_init(NVND,vnd),	/* 14 vnode disk driver*/
 	bdev_notdef(),			/* 15 unknown*/
-	bdev_notdef(),			/* 16: was: concatenated disk driver */
+	bdev_notdef(),			/* 16 was: concatenated disk driver */
 	bdev_disk_init(NRD,rd),		/* 17 ram disk driver*/
 	bdev_notdef(),			/* 18 unknown*/
-	bdev_disk_init(NRAID,raid),	/* 19 RAIDframe disk driver */
+	bdev_notdef(),			/* 19 was: RAIDframe disk driver */
 };
 int nblkdev = nitems(bdevsw);
 
@@ -114,12 +113,11 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
-#include "uscanner.h"
 
-#include "bthub.h"
 #include "vscsi.h"
 #include "pppx.h"
 #include "hotplug.h"
+#include "fuse.h"
 
 struct cdevsw cdevsw[] = {
 	cdev_cn_init(1,cn),		/* 0: virtual console */
@@ -176,7 +174,7 @@ struct cdevsw cdevsw[] = {
 	cdev_notdef(),			/* 51 */
 	cdev_notdef(),			/* 52 */
 	cdev_notdef(),			/* 53 */
-	cdev_disk_init(NRAID,raid),	/* 54: RAIDframe disk driver */
+	cdev_notdef(),			/* 54 was: RAIDframe disk driver */
 	cdev_notdef(),			/* 55 */
 	cdev_notdef(),			/* 56 */
 	cdev_notdef(),			/* 57 */
@@ -202,17 +200,18 @@ struct cdevsw cdevsw[] = {
 #endif
 	cdev_notdef(),			/* 72 */
 	cdev_notdef(),			/* 73 */
-	cdev_usbdev_init(NUSCANNER,uscanner), /* 74: usb scanner */
+	cdev_notdef(),			/* 74: was USB scanners */
 	cdev_notdef(),			/* 75 */
 	cdev_notdef(),			/* 76 */
 	cdev_ptm_init(NPTY,ptm),	/* 77: pseudo-tty ptm device */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 78: vscsi */
 	cdev_notdef(),			/* 79 */
 	cdev_notdef(),			/* 80 */
-	cdev_bthub_init(NBTHUB,bthub),	/* 81: bluetooth hub */
+	cdev_notdef(),
 	cdev_disk_init(1,diskmap),	/* 82: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 83: pppx */
 	cdev_hotplug_init(NHOTPLUG,hotplug),	/* 84: devices hot plugging */
+	cdev_fuse_init(NFUSE,fuse),	/* 85: fuse */
 };
 int nchrdev = nitems(cdevsw);
 

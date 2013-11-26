@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.40 2011/09/15 00:48:24 miod Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.46 2013/06/30 17:04:46 miod Exp $	*/
 /*	$NetBSD: cpu.h,v 1.41 1999/10/21 20:01:36 ragge Exp $	*/
 
 /*
@@ -35,7 +35,6 @@
 #define _MACHINE_CPU_H_
 #ifdef _KERNEL
 
-#include <sys/cdefs.h>
 #include <sys/device.h>
 #include <sys/evcount.h>
 
@@ -55,6 +54,9 @@ struct cpu_info {
 	u_int32_t 		ci_randseed;
 #ifdef DIAGNOSTIC
 	int	ci_mutex_level;
+#endif
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
 #endif
 };
 
@@ -123,6 +125,7 @@ extern	int	want_resched;	/* resched() was called */
  * This is used during profiling to integrate system time.
  */
 #define	PROC_PC(p)	(((struct trapframe *)((p)->p_addr->u_pcb.framep))->pc)
+#define	PROC_STACK(p)	(((struct trapframe *)((p)->p_addr->u_pcb.framep))->sp)
 
 /*
  * Give a profiling tick to the current process when the user profiling
@@ -131,9 +134,17 @@ extern	int	want_resched;	/* resched() was called */
  */
 #define need_proftick(p) mtpr(AST_OK,PR_ASTLVL)
 
+/*
+ * Temporarily switching to ipl 1 when the kernel is idle allows SIMH
+ * to recognize the system is idle, and relinquish CPU time as well.
+ */
 #define	cpu_idle_enter()	do { /* nothing */ } while (0)
-#define	cpu_idle_cycle()	do { /* nothing */ } while (0)
 #define	cpu_idle_leave()	do { /* nothing */ } while (0)
+#define	cpu_idle_cycle() \
+do { \
+	mtpr(0x01, PR_IPL); \
+	mtpr(0x00, PR_IPL); \
+} while (0)
 
 /*
  * This defines the I/O device register space size in pages.

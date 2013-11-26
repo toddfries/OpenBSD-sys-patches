@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.8 2012/03/15 18:57:20 miod Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.11 2012/10/03 21:44:51 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -63,7 +63,7 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <mips64/archtype.h>
+#include <mips64/cache.h>
 #include <machine/cpu.h>
 #include <machine/autoconf.h>
 
@@ -306,9 +306,6 @@ void
 _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
     bus_size_t size, int op)
 {
-#define SYNC_R 0	/* WB invalidate, WT invalidate */
-#define SYNC_W 1	/* WB writeback, WT unaffected */
-#define SYNC_X 2	/* WB writeback + invalidate, WT invalidate */
 	int nsegs;
 	int curseg;
 	int cacheop;
@@ -354,21 +351,20 @@ _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
 			 */
 			if (op & BUS_DMASYNC_PREWRITE) {
 				if (op & BUS_DMASYNC_PREREAD)
-					cacheop = SYNC_X;
+					cacheop = CACHE_SYNC_X;
 				else
-					cacheop = SYNC_W;
+					cacheop = CACHE_SYNC_W;
 			} else {
 				if (op & BUS_DMASYNC_PREREAD)
-					cacheop = SYNC_R;
+					cacheop = CACHE_SYNC_R;
 				else if (op & BUS_DMASYNC_POSTREAD)
-					cacheop = SYNC_R;
+					cacheop = CACHE_SYNC_R;
 				else
 					cacheop = -1;
 			}
 
 			if (cacheop >= 0)
-				Mips_IOSyncDCache(ci, vaddr, paddr,
-				    ssize, cacheop);
+				Mips_IOSyncDCache(ci, vaddr, ssize, cacheop);
 			size -= ssize;
 		}
 		curseg++;

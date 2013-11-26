@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.56 2012/03/19 21:56:49 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.66 2012/10/03 22:46:07 miod Exp $	*/
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -23,8 +23,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	XXX This code needs some major rewriting.
  */
 
 #include <sys/param.h>
@@ -38,10 +36,10 @@
 #include <sys/shm.h>
 #endif
 
-#include <machine/cpu.h>
+#include <mips64/cache.h>
 #include <machine/autoconf.h>
+#include <machine/cpu.h>
 #include <machine/vmparam.h>
-#include <mips64/archtype.h>
 
 #include <uvm/uvm.h>
 
@@ -70,13 +68,13 @@ struct pool_allocator pmap_pg_allocator = {
 	pmap_pg_alloc, pmap_pg_free
 };
 
-static void pmap_invalidate_user_page(pmap_t, vaddr_t);
+void	pmap_invalidate_user_page(pmap_t, vaddr_t);
 #ifdef MULTIPROCESSOR
-static void pmap_invalidate_kernel_page(vaddr_t);
-static void pmap_invalidate_kernel_page_action(void *);
-static void pmap_invalidate_user_page_action(void *);
-static void pmap_update_kernel_page_action(void *);
-static void pmap_update_user_page_action(void *);
+void	pmap_invalidate_kernel_page(vaddr_t);
+void	pmap_invalidate_kernel_page_action(void *);
+void	pmap_invalidate_user_page_action(void *);
+void	pmap_update_kernel_page_action(void *);
+void	pmap_update_user_page_action(void *);
 #else
 #define pmap_invalidate_kernel_page(va) tlb_flush_addr(va)
 #endif
@@ -143,6 +141,8 @@ struct pmap *const kernel_pmap_ptr = kernel_pmap_store;
 vaddr_t	virtual_start;  /* VA of first avail page (after kernel bss)*/
 vaddr_t	virtual_end;	/* VA of last avail page (end of kernel AS) */
 
+vaddr_t	pmap_prefer_mask;
+
 static struct pmap_asid_info pmap_asid_info[MAXCPUS];
 
 pt_entry_t	*Sysmap;		/* kernel pte table */
@@ -157,7 +157,7 @@ struct pmap_invalidate_page_arg {
 	vaddr_t va;
 };
 
-static void
+void
 pmap_invalidate_kernel_page(vaddr_t va)
 {
 	struct pmap_invalidate_page_arg arg;
@@ -173,7 +173,7 @@ pmap_invalidate_kernel_page(vaddr_t va)
 	smp_rendezvous_cpus(cpumask, pmap_invalidate_kernel_page_action, &arg);
 }
 
-static void
+void
 pmap_invalidate_kernel_page_action(void *arg)
 {
 	vaddr_t va = ((struct pmap_invalidate_page_arg *)arg)->va;
@@ -181,7 +181,7 @@ pmap_invalidate_kernel_page_action(void *arg)
 	tlb_flush_addr(va);
 }
 
-static void
+void
 pmap_invalidate_user_page(pmap_t pmap, vaddr_t va)
 {
 	unsigned int cpuid = cpu_number();
@@ -206,7 +206,7 @@ pmap_invalidate_user_page(pmap_t pmap, vaddr_t va)
 	if (cpumask == 1 << cpuid) {
 		u_long asid;
 
-		asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+		asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 		tlb_flush_addr(va | asid);
 	} else if (cpumask) {
 		struct pmap_invalidate_page_arg arg;
@@ -218,7 +218,7 @@ pmap_invalidate_user_page(pmap_t pmap, vaddr_t va)
 	}
 }
 
-static void
+void
 pmap_invalidate_user_page_action(void *arg)
 {
 	pmap_t pmap = ((struct pmap_invalidate_page_arg *)arg)->pmap;
@@ -226,7 +226,7 @@ pmap_invalidate_user_page_action(void *arg)
 	unsigned int cpuid = cpu_number();
 	u_long asid;
 
-	asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+	asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 	tlb_flush_addr(va | asid);
 }
 
@@ -254,7 +254,7 @@ pmap_update_kernel_page(vaddr_t va, pt_entry_t entry)
 			    pmap_update_kernel_page_action, &arg);
 }
 
-static void
+void
 pmap_update_kernel_page_action(void *arg)
 {
 	vaddr_t va = ((struct pmap_update_page_arg *)arg)->va;
@@ -275,7 +275,7 @@ pmap_update_user_page(pmap_t pmap, vaddr_t va, pt_entry_t entry)
 		if (cpuset_isset(&cpus_running, ci)) {
 			unsigned int i = ci->ci_cpuid;
 			unsigned int m = 1 << i;
-      		if (pmap->pm_asid[i].pma_asidgen != 
+			if (pmap->pm_asid[i].pma_asidgen != 
 			    pmap_asid_info[i].pma_asidgen)
 				continue;
 			else if (ci->ci_curpmap != pmap) {
@@ -288,7 +288,7 @@ pmap_update_user_page(pmap_t pmap, vaddr_t va, pt_entry_t entry)
 	if (cpumask == 1 << cpuid) {
 		u_long asid;
 
-		asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+		asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 		tlb_update(va | asid, entry);
 	} else if (cpumask) {
 		struct pmap_update_page_arg arg;
@@ -300,7 +300,7 @@ pmap_update_user_page(pmap_t pmap, vaddr_t va, pt_entry_t entry)
 	}
 }
 
-static void
+void
 pmap_update_user_page_action(void *arg)
 {
 	pmap_t pmap = ((struct pmap_update_page_arg *)arg)->pmap;
@@ -309,15 +309,15 @@ pmap_update_user_page_action(void *arg)
 	unsigned int cpuid = cpu_number();
 	u_long asid;
 
-	asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+	asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 	tlb_update(va | asid, entry);
 }
 #else
-static void
+void
 pmap_invalidate_user_page(pmap_t pmap, vaddr_t va)
 {
 	u_long cpuid = cpu_number();
-	u_long asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+	u_long asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 
 	if (pmap->pm_asid[cpuid].pma_asidgen ==
 	    pmap_asid_info[cpuid].pma_asidgen)
@@ -328,7 +328,7 @@ void
 pmap_update_user_page(pmap_t pmap, vaddr_t va, pt_entry_t entry)
 {
 	u_long cpuid = cpu_number();
-	u_long asid = pmap->pm_asid[cpuid].pma_asid << VMTLB_PID_SHIFT;
+	u_long asid = pmap->pm_asid[cpuid].pma_asid << PG_ASID_SHIFT;
 
 	if (pmap->pm_asid[cpuid].pma_asidgen ==
 	    pmap_asid_info[cpuid].pma_asidgen)
@@ -343,7 +343,9 @@ void
 pmap_bootstrap(void)
 {
 	u_int i;
+#ifndef CPU_R8000
 	pt_entry_t *spte;
+#endif
 
 	/*
 	 * Create a mapping table for kernel virtual memory. This
@@ -356,8 +358,10 @@ pmap_bootstrap(void)
 
 	Sysmapsize = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) /
 	    PAGE_SIZE;
+#ifndef CPU_R8000
 	if (Sysmapsize & 1)
 		Sysmapsize++;	/* force even number of pages */
+#endif
 
 	Sysmap = (pt_entry_t *)
 	    uvm_pageboot_alloc(sizeof(pt_entry_t) * Sysmapsize);
@@ -370,6 +374,7 @@ pmap_bootstrap(void)
 	simple_lock_init(&pmap_kernel()->pm_lock);
 	pmap_kernel()->pm_count = 1;
 
+#ifndef CPU_R8000
 	/*
 	 * The 64 bit Mips architecture stores the AND result
 	 * of the Global bits in the pte pair in the on chip
@@ -380,10 +385,14 @@ pmap_bootstrap(void)
 	 */
 	for (i = Sysmapsize, spte = Sysmap; i != 0; i--, spte++)
 		*spte = PG_G;
+#else
+	bzero(Sysmap, sizeof(pt_entry_t) * Sysmapsize);
+#endif
+	tlb_set_gbase((vaddr_t)Sysmap, Sysmapsize);
 
 	for (i = 0; i < MAXCPUS; i++) {
 		pmap_asid_info[i].pma_asidgen = 1;
-		pmap_asid_info[i].pma_asid = 2;
+		pmap_asid_info[i].pma_asid = MIN_USER_ASID + 1;
 	}
 }
 
@@ -435,12 +444,14 @@ pmap_steal_memory(vsize_t size, vaddr_t *vstartp, vaddr_t *vendp)
 			*vendp = virtual_end;
 
 #ifdef __sgi__
+#ifndef CPU_R8000
 		/*
 		 * Return a CKSEG0 address whenever possible.
 		 */
 		if (pa + size < CKSEG_SIZE)
 			va = PHYS_TO_CKSEG0(pa);
 		else
+#endif
 			va = PHYS_TO_XKPHYS(pa, CCA_CACHED);
 #else
 		va = PHYS_TO_XKPHYS(pa, CCA_CACHED);
@@ -503,10 +514,10 @@ extern struct user *proc0paddr;
 	if (pmap == vmspace0.vm_map.pmap) {
 		/*
 		 * The initial process has already been allocated a TLBPID
-		 * in mach_init().
+		 * in mips_init().
 		 */
 		for (i = 0; i < ncpusfound; i++) {
-			pmap->pm_asid[i].pma_asid = 1;
+			pmap->pm_asid[i].pma_asid = MIN_USER_ASID;
 			pmap->pm_asid[i].pma_asidgen =
 				pmap_asid_info[i].pma_asidgen;
 		}
@@ -554,7 +565,7 @@ pmap_destroy(pmap_t pmap)
 #ifdef PARANOIA
 			for (j = 0; j < NPTEPG; j++) {
 				if (pte[j] != PG_NV)
-					panic("pmap_destroy: segmap not empty");
+					panic("pmap_destroy: segmap %p not empty at index %d", pte, j);
 			}
 #endif
 			pool_put(&pmap_pg_pool, pte);
@@ -597,10 +608,13 @@ pmap_activate(struct proc *p)
 {
 	pmap_t pmap = p->p_vmspace->vm_map.pmap;
 	struct cpu_info *ci = curcpu();
+	uint id;
 
 	ci->ci_curpmap = pmap;
 	p->p_addr->u_pcb.pcb_segtab = pmap->pm_segtab;
-	pmap_alloc_tlbpid(p);
+	id = pmap_alloc_tlbpid(p);
+	if (p == ci->ci_curproc)
+		tlb_set_pid(id);
 }
 
 /*
@@ -625,6 +639,8 @@ pmap_remove(pmap_t pmap, vaddr_t sva, vaddr_t eva)
 {
 	vaddr_t nssva;
 	pt_entry_t *pte, entry;
+	paddr_t pa;
+	struct cpu_info *ci = curcpu();
 
 	DPRINTF(PDB_FOLLOW|PDB_REMOVE|PDB_PROTECT,
 		("pmap_remove(%p, %p, %p)\n", pmap, sva, eva));
@@ -642,12 +658,17 @@ pmap_remove(pmap_t pmap, vaddr_t sva, vaddr_t eva)
 			panic("pmap_remove(%p, %p): not in range", sva, eva);
 #endif
 		pte = kvtopte(sva);
-		for(; sva < eva; sva += NBPG, pte++) {
+		for(; sva < eva; sva += PAGE_SIZE, pte++) {
 			entry = *pte;
 			if (!(entry & PG_V))
 				continue;
+			if (entry & PG_WIRED)
+				pmap->pm_stats.wired_count--;
 			pmap->pm_stats.resident_count--;
-			pmap_remove_pv(pmap, sva, pfn_to_pad(entry));
+			pa = pfn_to_pad(entry);
+			if ((entry & PG_CACHEMODE) == PG_CACHED)
+				Mips_HitSyncDCache(ci, sva, PAGE_SIZE);
+			pmap_remove_pv(pmap, sva, pa);
 			*pte = PG_NV | PG_G;
 			/*
 			 * Flush the TLB for the given address.
@@ -678,12 +699,17 @@ pmap_remove(pmap_t pmap, vaddr_t sva, vaddr_t eva)
 		 * Invalidate every valid mapping within this segment.
 		 */
 		pte += uvtopte(sva);
-		for (; sva < nssva; sva += NBPG, pte++) {
+		for (; sva < nssva; sva += PAGE_SIZE, pte++) {
 			entry = *pte;
 			if (!(entry & PG_V))
 				continue;
+			if (entry & PG_WIRED)
+				pmap->pm_stats.wired_count--;
 			pmap->pm_stats.resident_count--;
-			pmap_remove_pv(pmap, sva, pfn_to_pad(entry));
+			pa = pfn_to_pad(entry);
+			if ((entry & PG_CACHEMODE) == PG_CACHED)
+				Mips_SyncDCachePage(ci, sva, pa);
+			pmap_remove_pv(pmap, sva, pa);
 			*pte = PG_NV;
 			/*
 			 * Flush the TLB for the given address.
@@ -756,8 +782,7 @@ void
 pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 {
 	vaddr_t nssva;
-	pt_entry_t *pte, entry;
-	u_int p;
+	pt_entry_t *pte, entry, p;
 	struct cpu_info *ci = curcpu();
 
 	DPRINTF(PDB_FOLLOW|PDB_PROTECT,
@@ -785,14 +810,13 @@ pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 			panic("pmap_protect(%p, %p): not in range", sva, eva);
 #endif
 		pte = kvtopte(sva);
-		for (; sva < eva; sva += NBPG, pte++) {
+		for (; sva < eva; sva += PAGE_SIZE, pte++) {
 			entry = *pte;
 			if (!(entry & PG_V))
 				continue;
 			if ((entry & PG_M) != 0 /* && p != PG_M */)
 				if ((entry & PG_CACHEMODE) == PG_CACHED)
-					Mips_HitSyncDCache(ci, sva,
-					    pfn_to_pad(entry), PAGE_SIZE);
+					Mips_HitSyncDCache(ci, sva, PAGE_SIZE);
 			entry = (entry & ~(PG_M | PG_RO)) | p;
 			*pte = entry;
 			/*
@@ -823,7 +847,7 @@ pmap_protect(pmap_t pmap, vaddr_t sva, vaddr_t eva, vm_prot_t prot)
 		 * Change protection on every valid mapping within this segment.
 		 */
 		pte += uvtopte(sva);
-		for (; sva < nssva; sva += NBPG, pte++) {
+		for (; sva < nssva; sva += PAGE_SIZE, pte++) {
 			entry = *pte;
 			if (!(entry & PG_V))
 				continue;
@@ -854,6 +878,7 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	vm_page_t pg;
 	struct cpu_info *ci = curcpu();
 	u_long cpuid = ci->ci_cpuid;
+	boolean_t wired = (flags & PMAP_WIRED) != 0;
 
 	DPRINTF(PDB_FOLLOW|PDB_ENTER,
 		("pmap_enter(%p, %p, %p, %p, %p)\n", pmap, va, pa, prot, flags));
@@ -923,14 +948,23 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 		}
 
 		pte = kvtopte(va);
-		npte |= vad_to_pfn(pa) | PG_G;
-		if ((*pte & PG_V) == 0) {
-			pmap->pm_stats.resident_count++;
-		}
 		if ((*pte & PG_V) && pa != pfn_to_pad(*pte)) {
-			pmap_remove(pmap, va, va + NBPG);
+			pmap_remove(pmap, va, va + PAGE_SIZE);
 			stat_count(enter_stats.mchange);
 		}
+		if ((*pte & PG_V) == 0) {
+			pmap->pm_stats.resident_count++;
+			if (wired)
+				pmap->pm_stats.wired_count++;
+		} else {
+			if ((*pte & PG_WIRED) != 0 && wired == 0)
+				pmap->pm_stats.wired_count--;
+			else if ((*pte & PG_WIRED) == 0 && wired != 0)
+				pmap->pm_stats.wired_count++;
+		}
+		npte |= vad_to_pfn(pa) | PG_G;
+		if (wired)
+			npte |= PG_WIRED;
 
 		/*
 		 * Update the same virtual address entry.
@@ -972,7 +1006,25 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 	 * Assume uniform modified and referenced status for all
 	 * MIPS pages in a OpenBSD page.
 	 */
+	if ((*pte & PG_V) && pa != pfn_to_pad(*pte)) {
+		pmap_remove(pmap, va, va + PAGE_SIZE);
+		stat_count(enter_stats.mchange);
+	}
+	if ((*pte & PG_V) == 0) {
+		pmap->pm_stats.resident_count++;
+		if (wired)
+			pmap->pm_stats.wired_count++;
+	} else {
+		if ((*pte & PG_WIRED) != 0 && wired == 0)
+			pmap->pm_stats.wired_count--;
+		else if ((*pte & PG_WIRED) == 0 && wired != 0)
+			pmap->pm_stats.wired_count++;
+	}
+
 	npte |= vad_to_pfn(pa);
+	if (wired)
+		npte |= PG_WIRED;
+
 	if (pmap->pm_asid[cpuid].pma_asidgen == 
 	    pmap_asid_info[cpuid].pma_asidgen) {
 		DPRINTF(PDB_ENTER, ("pmap_enter: new pte 0x%08x tlbpid %u\n",
@@ -981,14 +1033,6 @@ pmap_enter(pmap_t pmap, vaddr_t va, paddr_t pa, vm_prot_t prot, int flags)
 		DPRINTF(PDB_ENTER, ("pmap_enter: new pte 0x%08x\n", npte));
 	}
 
-	if ((*pte & PG_V) && pa != pfn_to_pad(*pte)) {
-		pmap_remove(pmap, va, va + NBPG);
-		stat_count(enter_stats.mchange);
-	}
-
-	if ((*pte & PG_V) == 0) {
-		pmap->pm_stats.resident_count++;
-	}
 	*pte = npte;
 	pmap_update_user_page(pmap, va, npte);
 
@@ -1015,12 +1059,19 @@ pmap_kenter_pa(vaddr_t va, paddr_t pa, vm_prot_t prot)
 		panic("pmap_kenter_pa: kva %p", va);
 #endif
 
-	npte = vad_to_pfn(pa) | PG_G;
+	npte = vad_to_pfn(pa) | PG_G | PG_WIRED;
 	if (prot & VM_PROT_WRITE)
 		npte |= PG_RWPAGE;
 	else
 		npte |= PG_ROPAGE;
 	pte = kvtopte(va);
+	if ((*pte & PG_V) == 0) {
+		pmap_kernel()->pm_stats.resident_count++;
+		pmap_kernel()->pm_stats.wired_count++;
+	} else {
+		if ((*pte & PG_WIRED) == 0)
+			pmap_kernel()->pm_stats.wired_count++;
+	}
 	*pte = npte;
 	pmap_update_kernel_page(va, npte);
 }
@@ -1050,16 +1101,34 @@ pmap_kremove(vaddr_t va, vsize_t len)
 		entry = *pte;
 		if (!(entry & PG_V))
 			continue;
-		Mips_HitSyncDCache(ci, va, pfn_to_pad(entry), PAGE_SIZE);
+		if ((entry & PG_CACHEMODE) == PG_CACHED)
+			Mips_HitSyncDCache(ci, va, PAGE_SIZE);
 		*pte = PG_NV | PG_G;
 		pmap_invalidate_kernel_page(va);
+		pmap_kernel()->pm_stats.wired_count--;
+		pmap_kernel()->pm_stats.resident_count--;
 	}
 }
 
 void
 pmap_unwire(pmap_t pmap, vaddr_t va)
 {
-	/* XXX this pmap does not handle wired mappings yet... */
+	pt_entry_t *pte;
+
+	if (pmap == pmap_kernel())
+		pte = kvtopte(va);
+	else {
+		if ((pte = pmap_segmap(pmap, va)) == NULL) 
+			return;
+		pte += uvtopte(va);
+	}
+
+	if (*pte & PG_V) {
+		if (*pte & PG_WIRED) {
+			*pte &= ~PG_WIRED;
+			pmap->pm_stats.wired_count--;
+		}
+	}
 }
 
 /*
@@ -1078,12 +1147,14 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 	if (pmap == pmap_kernel()) {
 		if (IS_XKPHYS(va))
 			pa = XKPHYS_TO_PHYS(va);
+#ifndef CPU_R8000
 		else if (va >= (vaddr_t)CKSEG0_BASE &&
 		    va < (vaddr_t)CKSEG0_BASE + CKSEG_SIZE)
 			pa = CKSEG0_TO_PHYS(va);
 		else if (va >= (vaddr_t)CKSEG1_BASE &&
 		    va < (vaddr_t)CKSEG1_BASE + CKSEG_SIZE)
 			pa = CKSEG1_TO_PHYS(va);
+#endif
 		else {
 #ifdef DIAGNOSTIC
 			if (va < VM_MIN_KERNEL_ADDRESS ||
@@ -1119,8 +1190,8 @@ pmap_extract(pmap_t pmap, vaddr_t va, paddr_t *pap)
 vaddr_t
 pmap_prefer(paddr_t foff, vaddr_t va)
 {
-	if (CpuCacheAliasMask != 0)
-		va += (foff - va) & CpuCacheAliasMask;
+	if (pmap_prefer_mask != 0)
+		va += (foff - va) & pmap_prefer_mask;
 
 	return va;
 }
@@ -1155,17 +1226,22 @@ pmap_zero_page(struct vm_page *pg)
 	vaddr_t va;
 	pv_entry_t pv;
 	struct cpu_info *ci = curcpu();
+	int df = 0;
 
 	DPRINTF(PDB_FOLLOW, ("pmap_zero_page(%p)\n", phys));
 
 	va = (vaddr_t)PHYS_TO_XKPHYS(phys, CCA_CACHED);
 	pv = pg_to_pvh(pg);
-	if ((pg->pg_flags & PV_CACHED) &&
-	    ((pv->pv_va ^ va) & CpuCacheAliasMask) != 0) {
-		Mips_SyncDCachePage(ci, pv->pv_va, phys);
+	if (pg->pg_flags & PV_UNCACHED)
+		df = 1;
+	else if (pg->pg_flags & PV_CACHED) {
+		df = ((pv->pv_va ^ va) & cache_valias_mask) != 0;
+		if (df)
+			Mips_SyncDCachePage(ci, pv->pv_va, phys);
 	}
 	mem_zero_page(va);
-	Mips_HitSyncDCache(ci, va, phys, PAGE_SIZE);
+	if (df || cache_valias_mask != 0)
+		Mips_HitSyncDCache(ci, va, PAGE_SIZE);
 }
 
 /*
@@ -1180,11 +1256,11 @@ pmap_copy_page(struct vm_page *srcpg, struct vm_page *dstpg)
 {
 	paddr_t src, dst;
 	vaddr_t s, d;
-	int df = 1;
-	int sf = 1;
+	int sf, df;
 	pv_entry_t pv;
 	struct cpu_info *ci = curcpu();
 
+	sf = df = 0;
 	src = VM_PAGE_TO_PHYS(srcpg);
 	dst = VM_PAGE_TO_PHYS(dstpg);
 	s = (vaddr_t)PHYS_TO_XKPHYS(src, CCA_CACHED);
@@ -1193,22 +1269,28 @@ pmap_copy_page(struct vm_page *srcpg, struct vm_page *dstpg)
 	DPRINTF(PDB_FOLLOW, ("pmap_copy_page(%p, %p)\n", src, dst));
 
 	pv = pg_to_pvh(srcpg);
-	if ((srcpg->pg_flags & PV_CACHED) &&
-	    (sf = ((pv->pv_va ^ s) & CpuCacheAliasMask) != 0)) {
-		Mips_SyncDCachePage(ci, pv->pv_va, src);
+	if (srcpg->pg_flags & PV_UNCACHED)
+		sf = 1;
+	else if (srcpg->pg_flags & PV_CACHED) {
+		sf = ((pv->pv_va ^ s) & cache_valias_mask) != 0;
+		if (sf)
+			Mips_SyncDCachePage(ci, pv->pv_va, src);
 	}
 	pv = pg_to_pvh(dstpg);
-	if ((dstpg->pg_flags & PV_CACHED) &&
-	    (df = ((pv->pv_va ^ d) & CpuCacheAliasMask) != 0)) {
-		Mips_SyncDCachePage(ci, pv->pv_va, dst);
+	if (dstpg->pg_flags & PV_UNCACHED)
+		df = 1;
+	else if (dstpg->pg_flags & PV_CACHED) {
+		df = ((pv->pv_va ^ s) & cache_valias_mask) != 0;
+		if (df)
+			Mips_SyncDCachePage(ci, pv->pv_va, dst);
 	}
 
 	memcpy((void *)d, (void *)s, PAGE_SIZE);
 
-	if (sf) {
-		Mips_HitSyncDCache(ci, s, src, PAGE_SIZE);
-	}
-	Mips_HitSyncDCache(ci, d, dst, PAGE_SIZE);
+	if (sf)
+		Mips_HitInvalidateDCache(ci, s, PAGE_SIZE);
+	if (df || cache_valias_mask != 0)
+		Mips_HitSyncDCache(ci, d, PAGE_SIZE);
 }
 
 /*
@@ -1222,17 +1304,18 @@ pmap_clear_modify(struct vm_page *pg)
 	pt_entry_t *pte, entry;
 	boolean_t rv = FALSE;
 	int s;
+	paddr_t pa;
+	struct cpu_info *ci = curcpu();
 
 	DPRINTF(PDB_FOLLOW, ("pmap_clear_modify(%p)\n", VM_PAGE_TO_PHYS(pg)));
 
+	pa = VM_PAGE_TO_PHYS(pg);
 	pv = pg_to_pvh(pg);
 	s = splvm();
 	if (pg->pg_flags & PV_ATTR_MOD) {
 		atomic_clearbits_int(&pg->pg_flags, PV_ATTR_MOD);
 		rv = TRUE;
 	}
-	if (pg->pg_flags & PV_CACHED)
-		Mips_SyncDCachePage(curcpu(), pv->pv_va, VM_PAGE_TO_PHYS(pg));
 
 	for (; pv != NULL; pv = pv->pv_next) {
 		if (pv->pv_pmap == pmap_kernel()) {
@@ -1244,6 +1327,9 @@ pmap_clear_modify(struct vm_page *pg)
 			pte = kvtopte(pv->pv_va);
 			entry = *pte;
 			if ((entry & PG_V) != 0 && (entry & PG_M) != 0) {
+				if (pg->pg_flags & PV_CACHED)
+					Mips_HitSyncDCache(ci, pv->pv_va,
+					    PAGE_SIZE);
 				rv = TRUE;
 				entry &= ~PG_M;
 				*pte = entry;
@@ -1255,6 +1341,8 @@ pmap_clear_modify(struct vm_page *pg)
 			pte += uvtopte(pv->pv_va);
 			entry = *pte;
 			if ((entry & PG_V) != 0 && (entry & PG_M) != 0) {
+				if (pg->pg_flags & PV_CACHED)
+					Mips_SyncDCachePage(ci, pv->pv_va, pa);
 				rv = TRUE;
 				entry &= ~PG_M;
 				*pte = entry;
@@ -1340,9 +1428,9 @@ pmap_page_cache(vm_page_t pg, int mode)
 	pt_entry_t newmode;
 	int s;
 
-	DPRINTF(PDB_FOLLOW|PDB_ENTER, ("pmap_page_uncache(%p)\n", pg));
+	DPRINTF(PDB_FOLLOW|PDB_ENTER, ("pmap_page_cache(%p)\n", pg));
 
-	newmode = mode & PV_UNCACHED ? PG_UNCACHED : PG_CACHED;
+	newmode = mode & PV_CACHED ? PG_CACHED : PG_UNCACHED;
 	pv = pg_to_pvh(pg);
 
 	s = splvm();
@@ -1360,7 +1448,7 @@ pmap_page_cache(vm_page_t pg, int mode)
 				*pte = entry;
 				pmap_update_kernel_page(pv->pv_va, entry);
 			}
-		} else {
+		} else if (pv->pv_pmap != NULL) {
 			if ((pte = pmap_segmap(pv->pv_pmap, pv->pv_va))) {
 				pte += uvtopte(pv->pv_va);
 				entry = *pte;
@@ -1398,12 +1486,12 @@ pmap_alloc_tlbpid(struct proc *p)
 	if (pmap->pm_asid[cpuid].pma_asidgen != 
 	    pmap_asid_info[cpuid].pma_asidgen) {
 		id = pmap_asid_info[cpuid].pma_asid;
-		if (id >= VMNUM_PIDS) {
-			tlb_flush(ci->ci_hw.tlbsize);
+		if (id >= PG_ASID_COUNT) {
+			tlb_asid_wrap(ci);
 			/* reserve tlbpid_gen == 0 to alway mean invalid */
 			if (++pmap_asid_info[cpuid].pma_asidgen == 0)
 				pmap_asid_info[cpuid].pma_asidgen = 1;
-			id = 1;
+			id = MIN_USER_ASID;
 		}
 		pmap_asid_info[cpuid].pma_asid = id + 1;
 		pmap->pm_asid[cpuid].pma_asid = id;
@@ -1455,40 +1543,23 @@ pmap_enter_pv(pmap_t pmap, vaddr_t va, vm_page_t pg, pt_entry_t *npte)
 		pv->pv_pmap = pmap;
 		pv->pv_next = NULL;
 	} else {
-		if (pg->pg_flags & PV_UNCACHED) {
+		/*
+		 * There is at least one other VA mapping this page.
+		 * We'll place this entry after the header.
+		 */
+
+		if ((pg->pg_flags & PV_CACHED) == 0) {
 			/*
-			 * If page is mapped uncached it's either because
-			 * an uncached mapping was requested or we have a
-			 * VAC situation. Map this page uncached as well.
+			 * If page is not mapped cached it's either because
+			 * an uncached mapping was explicitely requested or
+			 * we have a VAC situation.
+			 * Map this page uncached as well.
 			 */
 			*npte = (*npte & ~PG_CACHEMODE) | PG_UNCACHED;
-		} else if (CpuCacheAliasMask != 0) {
-			/*
-			 * We have a VAC possibility.  Check if virtual
-			 * address of current mappings are compatible
-			 * with this new mapping. Only need to check first
-			 * since all others have been checked compatible
-			 * when added. If they are incompatible, remove
-			 * all mappings, flush the cache and set page
-			 * to be mapped uncached.
-			 */
-			if (((pv->pv_va ^ va) & CpuCacheAliasMask) != 0) {
-#ifdef PMAP_DEBUG
-				printf("pmap_enter: VAC for pa %p, %p !=  %p\n",
-				    VM_PAGE_TO_PHYS(pg), npv->pv_va, va);
-#endif
-				pmap_page_cache(pg, PV_UNCACHED);
-				Mips_SyncDCachePage(curcpu(), pv->pv_va,
-				    VM_PAGE_TO_PHYS(pg));
-				*npte = (*npte & ~PG_CACHEMODE) | PG_UNCACHED;
-			}
 		}
 
 		/*
-		 * There is at least one other VA mapping this page.
-		 * Place this entry after the header.
-		 *
-		 * Note: the entry may already be in the table if
+		 * The entry may already be in the list if
 		 * we are only changing the protection bits.
 		 */
 		for (npv = pv; npv; npv = npv->pv_next) {
@@ -1506,6 +1577,30 @@ pmap_enter_pv(pmap_t pmap, vaddr_t va, vm_page_t pg, pt_entry_t *npte)
 			splx(s);
 			return ENOMEM;
 		}
+
+		if ((pg->pg_flags & PV_CACHED) != 0 && cache_valias_mask != 0) {
+			/*
+			 * We have a VAC possibility.  Check if virtual
+			 * address of current mappings are compatible
+			 * with this new mapping. Only need to check first
+			 * since all others have been checked compatible
+			 * when added. If they are incompatible, update
+			 * all mappings to be mapped uncached, flush the
+			 * cache and set page to not be mapped cached.
+			 */
+			if (((pv->pv_va ^ va) & cache_valias_mask) != 0) {
+#ifdef PMAP_DEBUG
+				printf("%s: uncaching page pa %p, va %p/%p\n",
+				    __func__, VM_PAGE_TO_PHYS(pg),
+				    pv->pv_va, va);
+#endif
+				pmap_page_cache(pg, 0);
+				Mips_SyncDCachePage(curcpu(), pv->pv_va,
+				    VM_PAGE_TO_PHYS(pg));
+				*npte = (*npte & ~PG_CACHEMODE) | PG_UNCACHED;
+			}
+		}
+
 		npv->pv_va = va;
 		npv->pv_pmap = pmap;
 		npv->pv_next = pv->pv_next;
@@ -1528,7 +1623,6 @@ pmap_remove_pv(pmap_t pmap, vaddr_t va, paddr_t pa)
 	pv_entry_t pv, npv;
 	vm_page_t pg;
 	int s;
-	struct cpu_info *ci = curcpu();
 
 	DPRINTF(PDB_FOLLOW|PDB_PVENTRY,
 		("pmap_remove_pv(%p, %p, %p)\n", pmap, va, pa));
@@ -1548,8 +1642,6 @@ pmap_remove_pv(pmap_t pmap, vaddr_t va, paddr_t pa)
 	 * first root item can't be freed. Else walk the list.
 	 */
 	if (pmap == pv->pv_pmap && va == pv->pv_va) {
-		if (pg->pg_flags & PV_CACHED)
-			Mips_SyncDCachePage(ci, va, pa);
 		npv = pv->pv_next;
 		if (npv) {
 			*pv = *npv;
@@ -1568,8 +1660,6 @@ pmap_remove_pv(pmap_t pmap, vaddr_t va, paddr_t pa)
 				break;
 		}
 		if (npv != NULL) {
-			if (pg->pg_flags & PV_CACHED)
-				Mips_SyncDCachePage(ci, va, pa);
 			pv->pv_next = npv->pv_next;
 			pmap_pv_free(npv);
 		} else {
@@ -1579,6 +1669,30 @@ pmap_remove_pv(pmap_t pmap, vaddr_t va, paddr_t pa)
 #endif
 		}
 	}
+
+	if ((pg->pg_flags & (PV_CACHED | PV_UNCACHED)) == 0 &&
+	    cache_valias_mask != 0 && pv->pv_pmap != NULL) {
+		/*
+		 * If this page had been mapped uncached due to aliasing,
+		 * check if it can be mapped cached again after the current
+		 * entry's removal.
+		 */
+		pv = pg_to_pvh(pg);
+		va = pv->pv_va;
+		for (pv = pv->pv_next; pv != NULL; pv = pv->pv_next) {
+			if (((pv->pv_va ^ va) & cache_valias_mask) != 0)
+				break;
+		}
+
+		if (pv == NULL) {
+#ifdef PMAP_DEBUG
+			printf("%s: caching page pa %p, va %p again\n",
+			    __func__, VM_PAGE_TO_PHYS(pg), va);
+#endif
+			pmap_page_cache(pg, PV_CACHED);
+		}
+	}
+
 	splx(s);
 }
 
@@ -1620,7 +1734,8 @@ pmap_pg_free(struct pool *pp, void *item)
 	paddr_t pa = XKPHYS_TO_PHYS(va);
 	vm_page_t pg = PHYS_TO_VM_PAGE(pa);
 
-	Mips_HitInvalidateDCache(curcpu(), va, pa, PAGE_SIZE);
+	if (cache_valias_mask)
+		Mips_HitSyncDCache(curcpu(), va, PAGE_SIZE);
 	uvm_pagefree(pg);
 }
 
@@ -1651,12 +1766,14 @@ pmap_map_direct(vm_page_t pg)
 	vaddr_t va;
 
 #ifdef __sgi__
+#ifndef CPU_R8000
 	/*
 	 * Return a CKSEG0 address whenever possible.
 	 */
 	if (pa < CKSEG_SIZE)
 		va = PHYS_TO_CKSEG0(pa);
 	else
+#endif
 		va = PHYS_TO_XKPHYS(pa, CCA_CACHED);
 #else
 	va = PHYS_TO_XKPHYS(pa, CCA_CACHED);
@@ -1672,17 +1789,19 @@ pmap_unmap_direct(vaddr_t va)
 	vm_page_t pg;
 
 #ifdef __sgi__
+#ifndef CPU_R8000
 	if (va >= CKSEG0_BASE)
 		pa = CKSEG0_TO_PHYS(va);
 	else
+#endif
 		pa = XKPHYS_TO_PHYS(va);
 #else
 	pa = XKPHYS_TO_PHYS(va);
 #endif
 
 	pg = PHYS_TO_VM_PAGE(pa);
-	if (CpuCacheAliasMask)
-		Mips_HitInvalidateDCache(curcpu(), va, pa, PAGE_SIZE);
+	if (cache_valias_mask)
+		Mips_HitSyncDCache(curcpu(), va, PAGE_SIZE);
 
 	return pg;
 }

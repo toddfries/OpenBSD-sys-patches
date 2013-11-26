@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK_CD,v 1.120 2011/10/06 20:49:28 deraadt Exp $
+#	$OpenBSD: RAMDISK_CD,v 1.132 2013/11/15 19:42:20 sasano Exp $
 
 machine		amd64		# architecture, used by config; REQUIRED
 
@@ -105,17 +105,19 @@ umass*	at uhub?		# USB Mass Storage devices
 #ums*	at uhidev?
 #wsmouse* at ums? mux 0
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
+atu*	at uhub?		# Atmel AT76c50x based 802.11b
 axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
+smsc*	at uhub?		# SMSC LAN95xx Ethernet
 cdce*	at uhub?		# CDC Ethernet
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 #urio*	at uhub?		# Diamond Multimedia Rio 500
-#uscanner* at uhub?		# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 #ugen*	at uhub?		# USB Generic driver
 ural*	at uhub?		# Ralink RT2500
@@ -124,6 +126,11 @@ run*	at uhub?		# Ralink RT2700U/RT2800U/RT3000U
 zyd*	at uhub?		# Zydas ZD1211/ZD1211B
 upgt*	at uhub?		# Conexant/Intersil PrismGT SoftMAC USB
 urtw*	at uhub?		# RealTek 8187
+urtwn*	at uhub?		# RealTek RTL8188CU/RTL8192CU
+rsu*	at uhub?		# RealTek RTL8188SU/RTL8191SU/RTL8192SU
+uath*	at uhub?		# Atheros AR5005UG/AR5005UX
+otus*	at uhub?		# Atheros AR9001U
+athn*	at uhub?		# Atheros AR9002U
 
 pckbc0	at isa?			# PC keyboard controller
 pckbd*	at pckbc?		# PC keyboard
@@ -168,6 +175,7 @@ gdt*	at pci?			# ICP Vortex GDT RAID controllers
 #aac*	at pci?			# Adaptec FSA RAID controllers
 ami*	at pci?			# AMI MegaRAID controllers
 mfi*	at pci?			# LSI MegaRAID SAS controllers
+mfii*	at pci?			# LSI MegaRAID SAS Fusion controllers
 #cac*	at pci?			# Compaq Smart ARRAY [234]* RAID controllers
 ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
 twe*	at pci?			# 3ware Escalade RAID controllers
@@ -180,12 +188,8 @@ siop*	at pci?			# NCR 538XX SCSI controllers(new)
 adw*	at pci?			# AdvanSys ULTRA WIDE SCSI
 pcscp*	at pci?			# AMD 53c974 PCscsi-PCI SCSI
 #trm*	at pci?			# Tekram DC-3x5U SCSI Controllers
+vmwpvs*	at pci?			# VMware ParaVirtual SCSI
 softraid0	at root		# Software RAID
-
-# I2O
-iop*	at pci?			# I2O processor
-ioprbs*	at iop?			# I2O arrays
-iopsp*	at iop?			# I2O SCSI pass-through
 
 scsibus* at scsi?
 sd*	at scsibus?		# SCSI disk drives
@@ -222,7 +226,6 @@ ne*	at pcmcia?		# PCMCIA based NE2000 ethernet
 ep*	at pcmcia?		# PCMCIA based 3C5xx ethernet
 sm*	at pcmcia?		# PCMCIA based sm ethernet
 xe*	at pcmcia?		# Xircom ethernet
-#fpa*	at pci?			# DEC DEFPA FDDI
 xl*	at pci?			# 3C9xx ethernet
 xl*	at cardbus?		# 3C575 ethernet
 rl*	at pci?			# RealTek 81[23]9 ethernet
@@ -244,6 +247,7 @@ msk*	at mskc?		#  each port of above
 em*	at pci?			# Intel Pro/1000 ethernet
 ixgb*	at pci?			# Intel Pro/10Gb ethernet
 ix*	at pci?			# Intel 82598EB 10Gb ethernet
+oce*	at pci?			# Emulex OneConnect 10Gb ethernet
 #txp*	at pci?			# 3com 3CR990
 #nge*	at pci?			# NS DP83820/DP83821 GigE
 sf*	at pci?			# Adaptec AIC-6915 ethernet
@@ -260,6 +264,7 @@ nfe*	at pci?			# NVIDIA nForce Ethernet
 xge*	at pci?			# Neterion Xframe-I/II 10Gb ethernet
 bce*	at pci?			# Broadcom BCM4401
 vic*	at pci?			# VMware VMXnet virtual interface
+vmx*	at pci?			# VMware VMXNET3 virtual interface
 et*	at pci?			# Agere/LSI ET1310
 age*	at pci?			# Attansic L1 Ethernet
 alc*	at pci?			# Attansic L1C/L1D/L2C Ethernet
@@ -282,7 +287,6 @@ wi*	at pci?			# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?		# WaveLAN IEEE 802.11DS
 an*	at pcmcia?		# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?		# Xircom Netwave
-#ray*	at pcmcia?		# Raylink Aviator2.4/Pro 802.11FH
 ipw*	at pci?			# Intel PRO/Wireless 2100
 iwi*	at pci?			# Intel PRO/Wireless 2200BG/2915ABG
 wpi*	at pci?			# Intel PRO/Wireless 3945ABG
@@ -335,3 +339,8 @@ pseudo-device	bpfilter 1	# packet filter
 pseudo-device	rd	1	# ramdisk
 pseudo-device	wsmux	2
 pseudo-device	bio	1	# ioctl multiplexing device
+
+# Virtio devices
+virtio*	at pci?			# Virtio PCI device
+vioblk*	at virtio?		# Virtio block device
+vio*	at virtio?		# Virtio network device

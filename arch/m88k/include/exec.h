@@ -1,21 +1,8 @@
-/*	$OpenBSD: exec.h,v 1.2 2011/03/23 16:54:35 pirofti Exp $ */
+/*	$OpenBSD: exec.h,v 1.5 2013/10/17 08:02:16 deraadt Exp $ */
 #ifndef _M88K_EXEC_H_
 #define _M88K_EXEC_H_
 
 #define __LDPGSZ        4096
-
-struct relocation_info_m88k {
-        unsigned int r_address;         /* offset in text or data segment */
-        unsigned int r_symbolnum : 24,  /* ordinal number of add symbol */
-                        r_extern :  1,  /* 1 if need to add symbol to value */
-                        r_baserel : 1,
-                        r_pcrel : 1,
-                        r_jmptable : 1,
-                        r_type : 4;
-
-        int r_addend;
-};
-#define relocation_info relocation_info_m88k
 
 #define ARCH_ELFSIZE		32
 
@@ -23,10 +10,15 @@ struct relocation_info_m88k {
 #define ELF_TARG_DATA		ELFDATA2MSB
 #define ELF_TARG_MACH		EM_88K
 
-#define _NLIST_DO_AOUT
 #define _NLIST_DO_ELF
-
-#define _KERN_DO_AOUT
 #define _KERN_DO_ELF
+
+/* Processor specific dynamic tag values.  */
+#define	DT_88K_ADDRBASE	0x70000001
+#define	DT_88K_PLTSTART	0x70000002
+#define	DT_88K_PLTEND	0x70000003
+#define	DT_88K_TDESC	0x70000004
+
+#define	DT_PROCNUM	(DT_88K_TDESC + 1 - DT_LOPROC)
 
 #endif /* _M88K_EXEC_H_ */

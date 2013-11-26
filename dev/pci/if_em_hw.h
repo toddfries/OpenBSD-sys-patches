@@ -31,7 +31,7 @@
 
 *******************************************************************************/
 
-/* $OpenBSD: if_em_hw.h,v 1.52 2011/10/05 02:52:10 jsg Exp $ */
+/* $OpenBSD: if_em_hw.h,v 1.55 2013/11/21 14:44:37 jsg Exp $ */
 /* $FreeBSD: if_em_hw.h,v 1.15 2005/05/26 23:32:02 tackerman Exp $ */
 
 /* if_em_hw.h
@@ -71,12 +71,14 @@ typedef enum {
     em_82574,
     em_82575,
     em_82580,
+    em_i350,
     em_80003es2lan,
     em_ich8lan,
     em_ich9lan,
     em_ich10lan,
     em_pchlan,
     em_pch2lan,
+    em_pch_lpt,
     em_num_macs
 } em_mac_type;
 
@@ -241,6 +243,7 @@ typedef enum {
     em_phy_82577,
     em_phy_82578,
     em_phy_82579,
+    em_phy_i217,
     em_phy_82580,
     em_phy_undefined = 0xFF
 } em_phy_type;
@@ -535,6 +538,10 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_PCH_D_HV_DC         0x10F0
 #define E1000_DEV_ID_PCH2_LV_LM          0x1502
 #define E1000_DEV_ID_PCH2_LV_V           0x1503
+#define E1000_DEV_ID_PCH_LPT_I217_LM     0x153A
+#define E1000_DEV_ID_PCH_LPT_I217_V      0x153B
+#define E1000_DEV_ID_PCH_LPTLP_I218_LM   0x155A
+#define E1000_DEV_ID_PCH_LPTLP_I218_V    0x1559
 #define E1000_DEV_ID_82575EB_PT          0x10A7
 #define E1000_DEV_ID_82575EB_PF          0x10A9
 #define E1000_DEV_ID_82575GB_QP          0x10D6
@@ -554,7 +561,12 @@ int32_t em_check_phy_reset_block(struct em_hw *hw);
 #define E1000_DEV_ID_82580_SERDES        0x1510
 #define E1000_DEV_ID_82580_SGMII         0x1511
 #define E1000_DEV_ID_82580_COPPER_DUAL   0x1516
+#define E1000_DEV_ID_I350_COPPER         0x1521
+#define E1000_DEV_ID_I350_FIBER          0x1522
+#define E1000_DEV_ID_I350_SERDES         0x1523
+#define E1000_DEV_ID_I350_SGMII          0x1524
 #define E1000_DEV_ID_82576_QUAD_CU_ET2   0x1526
+#define E1000_DEV_ID_I350_DA4            0x1546
 #define E1000_DEV_ID_82574L              0x10D3
 #define E1000_DEV_ID_EP80579_LAN_1       0x5040
 #define E1000_DEV_ID_EP80579_LAN_2       0x5044
@@ -731,6 +743,7 @@ union em_rx_desc_packet_split {
 #define E1000_RXD_STAT_IPIDV    0x200   /* IP identification valid */
 #define E1000_RXD_STAT_UDPV     0x400   /* Valid UDP checksum */
 #define E1000_RXD_STAT_ACK      0x8000  /* ACK Packet indication */
+#define E1000_RXD_STAT_STRIPCRC 0x1000  /* CRC has been stripped */
 #define E1000_RXD_ERR_CE        0x01    /* CRC Error */
 #define E1000_RXD_ERR_SE        0x02    /* Symbol Error */
 #define E1000_RXD_ERR_SEQ       0x04    /* Sequence Error */
@@ -1155,6 +1168,15 @@ struct em_ffvt_entry {
 #define E1000_RSSRK     0x05C80 /* RSS Random Key - RW Array */
 #define E1000_RSSIM     0x05864 /* RSS Interrupt Mask */
 #define E1000_RSSIR     0x05868 /* RSS Interrupt Request */
+
+/* Energy Efficient Ethernet "EEE" registers */
+#define E1000_IPCNFG    0x0E38 /* Internal PHY Configuration */
+#define E1000_LTRC      0x01A0 /* Latency Tolerance Reporting Control */
+#define E1000_EEER      0x0E30 /* Energy Efficient Ethernet "EEE" */
+#define E1000_EEE_SU    0x0E34 /* EEE Setup */
+#define E1000_TLPIC     0x4148 /* EEE Tx LPI Count - TLPIC */
+#define E1000_RLPIC     0x414C /* EEE Rx LPI Count - RLPIC */
+
 /* Register Set (82542)
  *
  * Some of the 82542 registers are located at different offsets than they are
@@ -1546,6 +1568,7 @@ struct em_hw {
     struct gcu_softc * gcu;
     uint8_t bus_func;
     uint16_t swfw;
+    boolean_t eee_enable;
 };
 
 #define E1000_EEPROM_SWDPIN0   0x0001   /* SWDPIN 0 EEPROM Value */
@@ -1681,13 +1704,16 @@ struct em_hw {
 #define E1000_EECD_AUPDEN    0x00100000 /* Enable Autonomous FLASH update */
 #define E1000_EECD_SHADV     0x00200000 /* Shadow RAM Data Valid */
 #define E1000_EECD_SEC1VAL   0x00400000 /* Sector One Valid */
+#define E1000_EECD_SEC1VAL_VALID_MASK   (E1000_EECD_AUTO_RD | E1000_EECD_PRES)
 #define E1000_EECD_SECVAL_SHIFT      22
 #define E1000_STM_OPCODE     0xDB00
 #define E1000_HICR_FW_RESET  0xC0
 
-#define E1000_SHADOW_RAM_WORDS     2048
-#define E1000_ICH_NVM_SIG_WORD     0x13
-#define E1000_ICH_NVM_SIG_MASK     0xC0
+#define E1000_SHADOW_RAM_WORDS		2048
+#define E1000_ICH_NVM_SIG_WORD		0x13
+#define E1000_ICH_NVM_SIG_MASK		0xC000
+#define E1000_ICH_NVM_VALID_SIG_MASK	0xC0
+#define E1000_ICH_NVM_SIG_VALUE		0x80
 
 /* EEPROM Read */
 #define E1000_EERD_START      0x00000001 /* Start Read */
@@ -1737,6 +1763,7 @@ struct em_hw {
 #define E1000_CTRL_EXT_WR_WMARK_320   0x01000000
 #define E1000_CTRL_EXT_WR_WMARK_384   0x02000000
 #define E1000_CTRL_EXT_WR_WMARK_448   0x03000000
+#define E1000_CTRL_EXT_EXT_VLAN       0x04000000
 #define E1000_CTRL_EXT_DRV_LOAD       0x10000000 /* Driver loaded bit for FW */
 #define E1000_CTRL_EXT_IAME           0x08000000 /* Interrupt acknowledge Auto-mask */
 #define E1000_CTRL_EXT_INT_TIMER_CLR  0x20000000 /* Clear Interrupt timers after IMS clear */
@@ -2314,6 +2341,17 @@ struct em_host_command_info {
 #define E1000_MDICNFG_PHY_MASK    0x03E00000 
 #define E1000_MDICNFG_PHY_SHIFT   21   
 
+/* I350 EEE defines */
+#define E1000_IPCNFG_EEE_1G_AN    0x00000008 /* IPCNFG EEE Ena 1G AN */
+#define E1000_IPCNFG_EEE_100M_AN  0x00000004 /* IPCNFG EEE Ena 100M AN */
+#define E1000_EEER_TX_LPI_EN      0x00010000 /* EEER Tx LPI Enable */
+#define E1000_EEER_RX_LPI_EN      0x00020000 /* EEER Rx LPI Enable */
+#define E1000_EEER_LPI_FC         0x00040000 /* EEER Ena on Flow Cntrl */
+/* EEE status */
+#define E1000_EEER_EEE_NEG        0x20000000 /* EEE capability nego */
+#define E1000_EEER_RX_LPI_STATUS  0x40000000 /* Rx in LPI state */
+#define E1000_EEER_TX_LPI_STATUS  0x80000000 /* Tx in LPI state */
+
 /* PCI-Ex registers*/
 
 /* PCI-Ex Control Register */
@@ -2413,6 +2451,10 @@ struct em_host_command_info {
 #define EEPROM_CFG                    0x0012
 #define EEPROM_FLASH_VERSION          0x0032
 #define EEPROM_CHECKSUM_REG           0x003F
+
+#define EEPROM_COMPAT_VALID_CSUM      0x0001
+#define EEPROM_FUTURE_INIT_WORD1      0x0019
+#define EEPROM_FUTURE_INIT_WORD1_VALID_CSUM     0x0040
 
 #define E1000_NVM_CFG_DONE_PORT_0  0x040000 /* MNG config cycle done */
 #define E1000_NVM_CFG_DONE_PORT_1  0x080000 /* ...for second port */
@@ -2557,6 +2599,7 @@ struct em_host_command_info {
 #define E1000_EXTCNF_SIZE_EXT_PCIE_LENGTH   0x00FF0000
 #define E1000_EXTCNF_CTRL_LCD_WRITE_ENABLE  0x00000001
 #define E1000_EXTCNF_CTRL_SWFLAG            0x00000020
+#define E1000_EXTCNF_CTRL_GATE_PHY_CFG      0x00000080
 
 /* PBA constants */
 #define E1000_PBA_8K 0x0008    /* 8KB, default Rx allocation */
@@ -3330,6 +3373,7 @@ struct em_host_command_info {
 #define I82577_E_PHY_ID      0x01540050
 #define I82578_E_PHY_ID      0x004DD040
 #define I82579_E_PHY_ID      0x01540090
+#define I217_E_PHY_ID        0x015400A0
 #define I82580_I_PHY_ID      0x015403A0
 #define I350_I_PHY_ID        0x015403B0
 #define IGP04E1000_E_PHY_ID  0x02A80391
@@ -3648,6 +3692,18 @@ union ich8_hws_flash_regacc {
 #define HV_M_STATUS_SPEED_MASK            0x0300
 #define HV_M_STATUS_SPEED_1000            0x0200
 #define HV_M_STATUS_LINK_UP               0x0040
+
+/* PHY Low Power Idle Control */
+#define I82579_LPI_CTRL				PHY_REG(772, 20)
+#define I82579_LPI_CTRL_ENABLE_MASK		0x6000
+#define I82579_LPI_CTRL_FORCE_PLL_LOCK_COUNT	0x80
+
+/* EMI Registers */
+#define I82579_EMI_ADDR         0x10
+#define I82579_EMI_DATA         0x11
+#define I82579_LPI_UPDATE_TIMER 0x4805	/* in 40ns units + 40 ns base value */
+#define I82579_MSE_THRESHOLD	0x084F	/* Mean Square Error Threshold */
+#define I82579_MSE_LINK_DOWN	0x2411	/* MSE count before dropping link */
 
 #define PHY_UPPER_SHIFT                   21
 #define BM_PHY_REG(page, reg) \

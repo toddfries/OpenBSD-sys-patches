@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmt.c,v 1.11 2011/01/27 21:29:25 dtucker Exp $ */
+/*	$OpenBSD: vmt.c,v 1.16 2013/11/11 09:15:34 mpi Exp $ */
 
 /*
  * Copyright (c) 2007 David Crawshaw <david@zentus.com>
@@ -158,6 +158,7 @@ struct vm_rpc {
 
 int	vmt_match(struct device *, void *, void *);
 void	vmt_attach(struct device *, struct device *, void *);
+int	vmt_activate(struct device *, int);
 
 struct vmt_softc {
 	struct device		sc_dev;
@@ -181,7 +182,9 @@ struct vmt_softc {
 struct cfattach vmt_ca = {
 	sizeof(struct vmt_softc),
 	vmt_match,
-	vmt_attach
+	vmt_attach,
+	NULL,
+	vmt_activate
 };
 
 struct cfdriver vmt_cd = {
@@ -206,37 +209,47 @@ int vm_rpc_send_rpci_tx(struct vmt_softc *, const char *, ...)
 	__attribute__((__format__(__kprintf__,2,3)));
 int vm_rpci_response_successful(struct vmt_softc *);
 
+void vmt_probe_cmd(struct vm_backdoor *, uint16_t);
 void vmt_tclo_state_change_success(struct vmt_softc *, int, char);
 void vmt_do_reboot(struct vmt_softc *);
 void vmt_do_shutdown(struct vmt_softc *);
+void vmt_shutdown(void *);
 
 void vmt_update_guest_info(struct vmt_softc *);
 void vmt_update_guest_uptime(struct vmt_softc *);
 
 void vmt_tick(void *);
 void vmt_tclo_tick(void *);
-void vmt_shutdown_hook(void *);
 
 extern char hostname[MAXHOSTNAMELEN];
+
+void
+vmt_probe_cmd(struct vm_backdoor *frame, uint16_t cmd)
+{
+	bzero(frame, sizeof(*frame));
+
+	(frame->eax).word = VM_MAGIC;
+	(frame->ebx).word = ~VM_MAGIC;
+	(frame->ecx).part.low = cmd;
+	(frame->ecx).part.high = 0xffff;
+	(frame->edx).part.low  = VM_PORT_CMD;
+	(frame->edx).part.high = 0;
+
+	vm_cmd(frame);
+}
 
 int
 vmt_probe(void)
 {
 	struct vm_backdoor frame;
 
-	bzero(&frame, sizeof(frame));
-
-	frame.eax.word = VM_MAGIC;
-	frame.ebx.word = ~VM_MAGIC;
-	frame.ecx.part.low = VM_CMD_GET_VERSION;
-	frame.ecx.part.high = 0xffff;
-	frame.edx.part.low  = VM_PORT_CMD;
-	frame.edx.part.high = 0;
-
-	vm_cmd(&frame);
-
+	vmt_probe_cmd(&frame, VM_CMD_GET_VERSION);
 	if (frame.eax.word == 0xffffffff ||
 	    frame.ebx.word != VM_MAGIC)
+		return (0);
+
+	vmt_probe_cmd(&frame, VM_CMD_GET_SPEED);
+	if (frame.eax.word == VM_MAGIC)
 		return (0);
 
 	return (1);
@@ -275,8 +288,6 @@ vmt_attach(struct device *parent, struct device *self, void *aux)
 		goto free;
 	}
 
-	shutdownhook_establish(vmt_shutdown_hook, sc);
-
 	strlcpy(sc->sc_sensordev.xname, sc->sc_dev.dv_xname,
 	    sizeof(sc->sc_sensordev.xname));
 
@@ -287,7 +298,8 @@ vmt_attach(struct device *parent, struct device *self, void *aux)
 	sensordev_install(&sc->sc_sensordev);
 
 	timeout_set(&sc->sc_tick, vmt_tick, sc);
-	timeout_add_sec(&sc->sc_tick, 1);
+	if (mountroothook_establish(vmt_tick, sc) == NULL)
+		printf("%s: unable to establish tick\n", DEVNAME(sc));
 
 	timeout_set(&sc->sc_tclo_tick, vmt_tclo_tick, sc);
 	timeout_add_sec(&sc->sc_tclo_tick, 1);
@@ -299,12 +311,26 @@ free:
 	free(sc->sc_rpc_buf, M_DEVBUF);
 }
 
+int
+vmt_activate(struct device *self, int act)
+{
+	int rv = 0;
+
+	switch (act) {
+	case DVACT_POWERDOWN:
+		vmt_shutdown(self);
+		break;
+	}
+	return (rv);
+}
+
+
 void
 vmt_update_guest_uptime(struct vmt_softc *sc)
 {
 	/* host wants uptime in hundredths of a second */
-	if (vm_rpc_send_rpci_tx(sc, "SetGuestInfo  %d %lu00",
-	    VM_GUEST_INFO_UPTIME, time_uptime) != 0) {
+	if (vm_rpc_send_rpci_tx(sc, "SetGuestInfo  %d %lld00",
+	    VM_GUEST_INFO_UPTIME, (long long)time_uptime) != 0) {
 		printf("%s: unable to set guest uptime", DEVNAME(sc));
 		sc->sc_rpc_error = 1;
 	}
@@ -415,7 +441,7 @@ vmt_do_reboot(struct vmt_softc *sc)
 }
 
 void
-vmt_shutdown_hook(void *arg)
+vmt_shutdown(void *arg)
 {
 	struct vmt_softc *sc = arg;
 
@@ -595,8 +621,11 @@ vmt_tclo_tick(void *xarg)
 		}
 
 		if (guest_ip != NULL) {
+			char ip[INET_ADDRSTRLEN];
+
+			inet_ntop(AF_INET, &guest_ip->sin_addr, ip, sizeof(ip));
 			if (vm_rpc_send_rpci_tx(sc, "info-set guestinfo.ip %s",
-			    inet_ntoa(guest_ip->sin_addr)) != 0) {
+			    ip) != 0) {
 				printf("%s: unable to send guest IP address\n", DEVNAME(sc));
 				sc->sc_rpc_error = 1;
 			}

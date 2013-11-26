@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.67 2011/05/25 07:42:15 mpi Exp $ */
+/*	$OpenBSD: cpu.c,v 1.74 2013/10/31 08:26:12 mpi Exp $ */
 
 /*
  * Copyright (c) 1997 Per Fogelstrom
@@ -45,18 +45,10 @@
 
 #include <machine/autoconf.h>
 #include <machine/bat.h>
+#include <machine/cpu.h>
 #include <machine/trap.h>
+#include <powerpc/hid.h>
 
-/* only valid on 603(e,ev) and G3, G4 */
-#define HID0_DOZE	(1 << (31-8))
-#define HID0_NAP	(1 << (31-9))
-#define HID0_SLEEP	(1 << (31-10))
-#define HID0_DPM	(1 << (31-11))
-#define HID0_SGE	(1 << (31-24))
-#define HID0_BTIC	(1 << (31-26))
-#define HID0_LRSTK	(1 << (31-27))
-#define HID0_FOLD	(1 << (31-28))
-#define HID0_BHT	(1 << (31-29))
 extern u_int32_t	hid0_idle;
 
 /* SCOM addresses (24-bit) */
@@ -208,6 +200,7 @@ ppc_check_procid()
 	cpu = pvr >> 16;
 
 	switch (cpu) {
+	case PPC_CPU_IBM970:
 	case PPC_CPU_IBM970FX:
 	case PPC_CPU_IBM970MP:
 		ppc_proc_is_64b = 1;
@@ -240,8 +233,8 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	int *reg = ca->ca_reg;
 	u_int32_t cpu, pvr, hid0;
 	char name[32];
-	int qhandle, phandle;
-	u_int32_t clock_freq = 0;
+	int qhandle, phandle, len;
+	u_int32_t clock_freq = 0, timebase = 0;
 	struct cpu_info *ci;
 
 	ci = &cpu_info[reg[0]];
@@ -282,9 +275,21 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		ppc_altivec = 1;
 		snprintf(cpu_model, sizeof(cpu_model), "7447A");
 		break;
+	case PPC_CPU_MPC7448:
+		ppc_altivec = 1;
+		snprintf(cpu_model, sizeof(cpu_model), "7448");
+		break;
+	case PPC_CPU_IBM970:
+		ppc_altivec = 1;
+		snprintf(cpu_model, sizeof(cpu_model), "970");
+		break;
 	case PPC_CPU_IBM970FX:
 		ppc_altivec = 1;
 		snprintf(cpu_model, sizeof(cpu_model), "970FX");
+		break;
+	case PPC_CPU_IBM970MP:
+		ppc_altivec = 1;
+		snprintf(cpu_model, sizeof(cpu_model), "970MP");
 		break;
 	case PPC_CPU_IBM750FX:
 		snprintf(cpu_model, sizeof(cpu_model), "750FX");
@@ -317,14 +322,13 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	    " (Revision 0x%x)", pvr & 0xffff);
 	printf(": %s", cpu_model);
 
-	/* This should only be executed on openfirmware systems... */
-
 	for (qhandle = OF_peer(0); qhandle; qhandle = phandle) {
-                if (OF_getprop(qhandle, "device_type", name, sizeof name) >= 0
-                    && !strcmp(name, "cpu")
-                    && OF_getprop(qhandle, "clock-frequency",
-                        &clock_freq, sizeof clock_freq) >= 0)
-		{
+                len = OF_getprop(qhandle, "device_type", name, sizeof(name));
+                if (len >= 0 && strcmp(name, "cpu") == 0) {
+			OF_getprop(qhandle, "clock-frequency", &clock_freq,
+			    sizeof(clock_freq));
+			OF_getprop(qhandle, "timebase-frequency", &timebase,
+			    sizeof(timebase));
 			break;
 		}
                 if ((phandle = OF_child(qhandle)))
@@ -335,6 +339,12 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
                         qhandle = OF_parent(qhandle);
                 }
 	}
+
+	if (timebase != 0) {
+		ticks_per_sec = timebase;
+		ns_per_tick = 1000000000 / ticks_per_sec;
+	}
+
 
 	if (clock_freq != 0) {
 		/* Openfirmware stores clock in Hz, not MHz */
@@ -380,6 +390,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		hid0 |= HID0_DPM;
 		break;
 	case PPC_CPU_MPC7447A:
+	case PPC_CPU_MPC7448:
 	case PPC_CPU_MPC7450:
 	case PPC_CPU_MPC7455:
 	case PPC_CPU_MPC7457:
@@ -394,7 +405,9 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		if (cpu == PPC_CPU_MPC7450 && (pvr & 0xffff) < 0x0200)
 			hid0 &= ~HID0_BTIC;
 		break;
+	case PPC_CPU_IBM970:
 	case PPC_CPU_IBM970FX:
+	case PPC_CPU_IBM970MP:
 		/* select NAP mode */
 		hid0 &= ~(HID0_NAP | HID0_DOZE | HID0_SLEEP);
 		hid0 |= HID0_DPM;
@@ -403,12 +416,19 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	if (ppc_proc_is_64b == 0)
 		ppc_mthid0(hid0);
 
-	/* if processor is G3 or G4, configure l2 cache */
-	if (cpu == PPC_CPU_MPC750 || cpu == PPC_CPU_MPC7400 ||
-	    cpu == PPC_CPU_IBM750FX || cpu == PPC_CPU_MPC7410 ||
-	    cpu == PPC_CPU_MPC7447A || cpu == PPC_CPU_MPC7450 ||
-	    cpu == PPC_CPU_MPC7455 || cpu == PPC_CPU_MPC7457) {
+	/* if processor is G3 or G4, configure L2 cache */
+	switch (cpu) {
+	case PPC_CPU_MPC750:
+	case PPC_CPU_MPC7400:
+	case PPC_CPU_IBM750FX:
+	case PPC_CPU_MPC7410:
+	case PPC_CPU_MPC7447A:
+	case PPC_CPU_MPC7448:
+	case PPC_CPU_MPC7450:
+	case PPC_CPU_MPC7455:
+	case PPC_CPU_MPC7457:
 		config_l2cr(cpu);
+		break;
 	}
 	printf("\n");
 }
@@ -500,6 +520,8 @@ config_l2cr(int cpu)
 		} else if (cpu == PPC_CPU_IBM750FX ||
 			   cpu == PPC_CPU_MPC7447A || cpu == PPC_CPU_MPC7457)
 			printf(": 512KB L2 cache");
+		else if (cpu == PPC_CPU_MPC7448)                                                                                                 
+			printf(": 1MB L2 cache");
 		else {
 			switch (l2cr & L2CR_L2SIZ) {
 			case L2SIZ_256K:
@@ -779,7 +801,7 @@ cpu_hatch(void)
 	curcpu()->ci_cpl = 0;
 
 	s = splhigh();
-	microuptime(&curcpu()->ci_schedstate.spc_runtime);
+	nanouptime(&curcpu()->ci_schedstate.spc_runtime);
 	splx(s);
 
 	intrstate = ppc_intr_disable();

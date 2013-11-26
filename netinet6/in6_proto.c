@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_proto.c,v 1.63 2012/03/15 14:11:57 mikeb Exp $	*/
+/*	$OpenBSD: in6_proto.c,v 1.69 2013/10/21 12:27:15 deraadt Exp $	*/
 /*	$KAME: in6_proto.c,v 1.66 2000/10/10 15:35:47 itojun Exp $	*/
 
 /*
@@ -77,7 +77,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/in_pcb.h>
@@ -99,8 +98,8 @@
 #include <netinet6/pim6_var.h>
 #endif
 
+#include <netinet6/in6_var.h>
 #include <netinet6/nd6.h>
-
 #include <netinet6/ip6protosw.h>
 
 #include "gif.h"
@@ -122,8 +121,7 @@
 /*
  * TCP/IP protocol family: IP6, ICMP6, UDP, TCP.
  */
-
-extern	struct domain inet6domain;
+u_char ip6_protox[IPPROTO_MAX];
 
 struct ip6protosw inet6sw[] = {
 { 0,		&inet6domain,	IPPROTO_IPV6,	0,
@@ -132,7 +130,7 @@ struct ip6protosw inet6sw[] = {
   ip6_init,	0,		frag6_slowtimo,	frag6_drain,
   ip6_sysctl,
 },
-{ SOCK_DGRAM,	&inet6domain,	IPPROTO_UDP,	PR_ATOMIC|PR_ADDR,
+{ SOCK_DGRAM,	&inet6domain,	IPPROTO_UDP,	PR_ATOMIC|PR_ADDR|PR_SPLICE,
   udp6_input,	0,		udp6_ctlinput,	ip6_ctloutput,
   udp_usrreq,	0,
   0,		0,		0,
@@ -176,20 +174,20 @@ struct ip6protosw inet6sw[] = {
 },
 #ifdef IPSEC
 { SOCK_RAW,	&inet6domain,	IPPROTO_AH,	PR_ATOMIC|PR_ADDR,
-  ah6_input,	0,	 	0,		0,
-  0,
+  ah6_input,	rip6_output, 	0,		rip6_ctloutput,
+  rip6_usrreq,
   0,		0,		0,		0,
   ah_sysctl,
 },
 { SOCK_RAW,	&inet6domain,	IPPROTO_ESP,	PR_ATOMIC|PR_ADDR,
-  esp6_input,	0,	 	0,		0,
-  0,
+  esp6_input,	rip6_output,	0,		rip6_ctloutput,
+  rip6_usrreq,
   0,		0,		0,		0,
   esp_sysctl,
 },
 { SOCK_RAW,	&inet6domain,	IPPROTO_IPCOMP,	PR_ATOMIC|PR_ADDR,
-  ipcomp6_input, 0,	 	0,		0,
-  0,
+  ipcomp6_input, rip6_output,	0,		rip6_ctloutput,
+  rip6_usrreq,
   0,		0,		0,		0,
   ipcomp_sysctl,
 },
@@ -294,16 +292,7 @@ int	ip6_neighborgcthresh = 2048; /* Threshold # of NDP entries for GC */
 int	ip6_maxifprefixes = 16; /* Max acceptable prefixes via RA per IF */
 int	ip6_maxifdefrouters = 16; /* Max acceptable def routers via RA */
 int	ip6_maxdynroutes = 4096; /* Max # of routes created via redirect */
-int	ip6_keepfaith = 0;
 time_t	ip6_log_time = (time_t)0L;
-
-/* icmp6 */
-/*
- * BSDI4 defines these variables in in_proto.c...
- * XXX: what if we don't define INET? Should we define pmtu6_expire
- * or so? (jinmei@kame.net 19990310)
- */
-int pmtu_expire = 60*10;
 
 /* raw IP6 parameters */
 /*
@@ -320,3 +309,4 @@ int	icmp6_rediraccept = 0;		/* don't process redirects by default */
 int	icmp6_redirtimeout = 10 * 60;	/* 10 minutes */
 int	icmp6errppslim = 100;		/* 100pps */
 int	icmp6_nodeinfo = 1;		/* enable/disable NI response */
+int	ip6_mtudisc_timeout = IPMTUDISCTIMEOUT;

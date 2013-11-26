@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.226 2011/10/10 12:34:23 jsg Exp $
+#	$OpenBSD: GENERIC,v 1.235 2013/11/15 19:42:19 sasano Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -19,6 +19,7 @@ option		DEC_3000_300	# Pelican etc:	3000/300*
 option		DEC_2100_A50	# Avanti etc:	AlphaStation 400, 200, etc.
 option		DEC_KN20AA	# KN20AA:	AlphaStation 600
 option		DEC_KN300	# KN300:	AlphaServer 4100 and 1200
+option		DEC_ALPHABOOK1	# AlphaBook1:	Tadpole/DEC AlphaBook
 option		DEC_AXPPCI_33	# NoName:	AXPpci33, etc.
 option		DEC_EB164	# EB164:	AlphaPC 164
 option		DEC_EB64PLUS	# EB64+:	AlphaPC 64, etc.
@@ -103,14 +104,15 @@ aue*	at uhub?			# ADMtek AN986 Pegasus Ethernet
 axe*	at uhub?			# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?			# CATC USB-EL1201A based Ethernet
 kue*	at uhub?			# Kawasaki KL5KUSB101B based Ethernet
+smsc*	at uhub?			# SMSC LAN95xx Ethernet
 cdce*	at uhub?			# CDC Ethernet
 urndis*	at uhub?			# Remote NDIS Ethernet
 udav*	at uhub?			# Davicom DM9601 based Ethernet
 upl*	at uhub?			# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?			# Genesys Logic GL620USB-A host-to-host `network'
 url*	at uhub?			# Realtek RTL8150L based adapters
 wi*	at uhub?			# WaveLAN IEEE 802.11DS
 urio*	at uhub?			# Diamond Multimedia Rio 500
-uscanner* at uhub? disable		# USB Scanners
 #uyap*	at uhub?			# Y@P firmware loader
 udsbr*	at uhub?			# D-Link DSB-R100 radio
 radio*	at udsbr?			# USB radio
@@ -122,6 +124,7 @@ run*	at uhub?			# Ralink RT2700U/RT2800U/RT3000U
 uow*	at uhub?			# Maxim/Dallas DS2490 1-Wire adapter
 onewire* at uow?
 uthum*	at uhidev?			# TEMPerHUM sensor
+ugold*	at uhidev?			# gold TEMPer sensor
 utwitch* at uhidev?			# yurex BBU sensor
 
 # USB Video
@@ -165,7 +168,6 @@ asc*	at	tc?
 #cfb*	at	tc?
 #sfb*	at	tc?
 le*	at	tc?
-fta*	at	tc?			# DEC DEFTA FDDI cards
 
 # PCI host bus adapter support
 apecs*	at	mainbus?
@@ -218,7 +220,6 @@ fxp*	at pci?				# EtherExpress 10/100B ethernet
 ep*	at pci?				# 3COM 3c59x
 xl*	at pci?				# 3COM 3c9xx
 txp*	at pci?				# 3COM 3CR990
-fpa*	at pci?				# DEC DEFPA FDDI cards
 bge*	at pci?				# Broadcom BCM57xx (aka Tigon3)
 vge*	at pci?				# VIA VT612x
 re*	at pci?				# Realtek 8169/8169S/8110S
@@ -336,6 +337,11 @@ ep*	at isapnp?			# 3C509 ethernet cards
 #wss*	at isa? port 0x530 irq 9 drq 0	# Windows Sound System
 lc0	at isa? port 0x200		# DEC EtherWorks
 lc1	at isa? port 0x280		# DEC EtherWorks
+pcic0	at isa? port 0x3e0 iomem 0xd0000 iosiz 0x10000
+pcic1	at isa? port 0x3e2 iomem 0xcc000 iosiz 0x10000
+
+pcmcia*	at pcic? controller ? socket ?
+ep*	at pcmcia? function ?		# 3Com 3c589 and 3c562 Eth.
 
 cy0	at isa? iomem 0xd4000 irq 12	# ISA cyclom card
 fdc0	at isa? port 0x3f0 irq 6 drq 2	# floppy controller
@@ -349,7 +355,6 @@ fd*	at fdc?
 #ahc0	at isa?				# Adaptec 284x SCSI controllers
 
 # EISA devices
-fea*	at eisa?			# DEC DEFEA FDDI cards
 ahc*	at eisa?			# Adaptec 274x, aic7770 SCSI
 
 # SCSI devices
@@ -429,8 +434,6 @@ owsbm*	at onewire?			# Smart Battery Monitor
 owtemp* at onewire?			# Temperature
 owctr*	at onewire?			# Counter device
 
-#pseudo-device	raid		4	# RAIDframe disk driver
 pseudo-device	crypto		1
-pseudo-device	sequencer	1
 pseudo-device	hotplug		1	# devices hot plugging
 pseudo-device	wsmux		2	# mouse & keyboard multiplexor

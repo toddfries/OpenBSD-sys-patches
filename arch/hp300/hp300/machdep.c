@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.135 2011/11/01 21:20:55 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.140 2013/11/20 23:57:07 miod Exp $	*/
 /*	$NetBSD: machdep.c,v 1.121 1999/03/26 23:41:29 mycroft Exp $	*/
 
 /*
@@ -191,7 +191,7 @@ consinit()
 	conscode = CONSCODE_INVALID;
 
 	/*
-	 * Initialize the bus resource map.
+	 * Initialize the bus extent.
 	 */
 	extio = extent_create("extio",
 	    (u_long)extiobase, (u_long)extiobase + ptoa(eiomapsize),
@@ -615,8 +615,9 @@ boot(howto)
 		dumpsys();
 
 haltsys:
-	/* Run any shutdown hooks. */
 	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	/* Finally, halt/reboot the system. */
 	if (howto & RB_HALT) {
@@ -689,9 +690,9 @@ dumpconf(void)
 void
 dumpsys()
 {
-	daddr64_t blkno;	/* current block to write */
+	daddr_t blkno;	/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -986,9 +987,6 @@ parityerrorfind()
 	int i;
 	int found;
 
-#ifdef lint
-	i = o = pg = 0; if (i) return(0);
-#endif
 	/*
 	 * If looking is true we are searching for a known parity error
 	 * and it has just occurred.  All we do is return to the higher

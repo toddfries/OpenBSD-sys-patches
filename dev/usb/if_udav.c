@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_udav.c,v 1.58 2011/09/04 18:34:02 jsg Exp $ */
+/*	$OpenBSD: if_udav.c,v 1.64 2013/11/15 10:17:39 pirofti Exp $ */
 /*	$NetBSD: if_udav.c,v 1.3 2004/04/23 17:25:25 itojun Exp $	*/
 /*	$nabe: if_udav.c,v 1.3 2003/08/21 16:57:19 nabe Exp $	*/
 /*
@@ -43,8 +43,6 @@
  *	External PHYs
  */
 
-#include <sys/cdefs.h>
-
 #include "bpfilter.h"
 
 #include <sys/param.h>
@@ -52,7 +50,6 @@
 #include <sys/rwlock.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 
 #include <sys/device.h>
@@ -69,7 +66,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -109,8 +105,8 @@ int udav_tx_list_init(struct udav_softc *);
 int udav_newbuf(struct udav_softc *, struct udav_chain *, struct mbuf *);
 void udav_start(struct ifnet *);
 int udav_send(struct udav_softc *, struct mbuf *, int);
-void udav_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void udav_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void udav_txeof(struct usbd_xfer *, void *, usbd_status);
+void udav_rxeof(struct usbd_xfer *, void *, usbd_status);
 void udav_tick(void *);
 void udav_tick_task(void *);
 int udav_ioctl(struct ifnet *, u_long, caddr_t);
@@ -125,7 +121,7 @@ int udav_miibus_readreg(struct device *, int, int);
 void udav_miibus_writereg(struct device *, int, int, int);
 void udav_miibus_statchg(struct device *);
 int udav_init(struct ifnet *);
-void udav_setmulti(struct udav_softc *);
+void udav_iff(struct udav_softc *);
 void udav_reset(struct udav_softc *);
 
 int udav_csr_read(struct udav_softc *, int, void *, int);
@@ -192,8 +188,8 @@ udav_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct udav_softc *sc = (struct udav_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	usbd_device_handle dev = uaa->device;
-	usbd_interface_handle iface;
+	struct usbd_device *dev = uaa->device;
+	struct usbd_interface *iface;
 	usbd_status err;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
@@ -630,12 +626,6 @@ udav_init(struct ifnet *ifp)
 	/* Initialize RX control register */
 	UDAV_SETBIT(sc, UDAV_RCR, UDAV_RCR_DIS_LONG | UDAV_RCR_DIS_CRC);
 
-	/* If we want promiscuous mode, accept all physical frames. */
-	if (ifp->if_flags & IFF_PROMISC)
-		UDAV_SETBIT(sc, UDAV_RCR, UDAV_RCR_ALL|UDAV_RCR_PRMSC);
-	else
-		UDAV_CLRBIT(sc, UDAV_RCR, UDAV_RCR_ALL|UDAV_RCR_PRMSC);
-
 	/* Initialize transmit ring */
 	if (udav_tx_list_init(sc) == ENOBUFS) {
 		printf("%s: tx list init failed\n", sc->sc_dev.dv_xname);
@@ -650,8 +640,8 @@ udav_init(struct ifnet *ifp)
 		return (EIO);
 	}
 
-	/* Load the multicast filter */
-	udav_setmulti(sc);
+	/* Program promiscuous mode and multicast filters */
+	udav_iff(sc);
 
 	/* Enable RX */
 	UDAV_SETBIT(sc, UDAV_RCR, UDAV_RCR_RXEN);
@@ -731,13 +721,11 @@ udav_activate(struct device *self, int act)
 
 #define UDAV_BITS	6
 
-#define UDAV_CALCHASH(addr) \
-	(ether_crc32_le((addr), ETHER_ADDR_LEN) & ((1 << UDAV_BITS) - 1))
-
 void
-udav_setmulti(struct udav_softc *sc)
+udav_iff(struct udav_softc *sc)
 {
-	struct ifnet *ifp;
+	struct ifnet *ifp = GET_IFP(sc);
+	struct arpcom *ac = &sc->sc_ac;
 	struct ether_multi *enm;
 	struct ether_multistep step;
 	u_int8_t hashes[8];
@@ -748,41 +736,30 @@ udav_setmulti(struct udav_softc *sc)
 	if (usbd_is_dying(sc->sc_udev))
 		return;
 
-	ifp = GET_IFP(sc);
+	UDAV_CLRBIT(sc, UDAV_RCR, UDAV_RCR_ALL | UDAV_RCR_PRMSC);
+	memset(hashes, 0x00, sizeof(hashes));
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	if (ifp->if_flags & IFF_PROMISC) {
-		UDAV_SETBIT(sc, UDAV_RCR, UDAV_RCR_ALL|UDAV_RCR_PRMSC);
-		return;
-	} else if (ifp->if_flags & IFF_ALLMULTI) {
-	allmulti:
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
 		ifp->if_flags |= IFF_ALLMULTI;
 		UDAV_SETBIT(sc, UDAV_RCR, UDAV_RCR_ALL);
-		UDAV_CLRBIT(sc, UDAV_RCR, UDAV_RCR_PRMSC);
-		return;
+		if (ifp->if_flags & IFF_PROMISC)
+			UDAV_SETBIT(sc, UDAV_RCR, UDAV_RCR_PRMSC);
+	} else {
+		hashes[7] |= 0x80;	/* broadcast address */
+
+		/* now program new ones */
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = ether_crc32_le(enm->enm_addrlo, ETHER_ADDR_LEN) &
+			    ((1 << UDAV_BITS) - 1);
+
+			hashes[h>>3] |= 1 << (h & 0x7);
+
+			ETHER_NEXT_MULTI(step, enm);
+		}
 	}
 
-	/* first, zot all the existing hash bits */
-	memset(hashes, 0x00, sizeof(hashes));
-	hashes[7] |= 0x80;	/* broadcast address */
-	udav_csr_write(sc, UDAV_MAR, hashes, sizeof(hashes));
-
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, &sc->sc_ac, enm);
-	while (enm != NULL) {
-		if (memcmp(enm->enm_addrlo, enm->enm_addrhi,
-			   ETHER_ADDR_LEN) != 0)
-			goto allmulti;
-
-		h = UDAV_CALCHASH(enm->enm_addrlo);
-		hashes[h>>3] |= 1 << (h & 0x7);
-		ETHER_NEXT_MULTI(step, enm);
-	}
-
-	/* disable all multicast */
-	ifp->if_flags &= ~IFF_ALLMULTI;
-	UDAV_CLRBIT(sc, UDAV_RCR, UDAV_RCR_ALL);
-
-	/* write hash value to the register */
 	udav_csr_write(sc, UDAV_MAR, hashes, sizeof(hashes));
 }
 
@@ -1043,7 +1020,7 @@ udav_send(struct udav_softc *sc, struct mbuf *m, int idx)
 }
 
 void
-udav_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+udav_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct udav_chain *c = priv;
 	struct udav_softc *sc = c->udav_sc;
@@ -1090,7 +1067,7 @@ udav_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 }
 
 void
-udav_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+udav_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct udav_chain *c = priv;
 	struct udav_softc *sc = c->udav_sc;
@@ -1196,7 +1173,6 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	struct udav_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
 	struct ifreq *ifr = (struct ifreq *)data;
-	struct mii_data *mii;
 	int s, error = 0;
 
 	DPRINTF(("%s: %s: enter\n", sc->sc_dev.dv_xname, __func__));
@@ -1207,42 +1183,32 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	s = splnet();
 
 	switch (cmd) {
-	case SIOCGIFMEDIA:
-	case SIOCSIFMEDIA:
-		mii = GET_MII(sc);
-		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
-		break;
-
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		udav_init(ifp);
+		if (!(ifp->if_flags & IFF_RUNNING))
+			udav_init(ifp);
 
-		switch (ifa->ifa_addr->sa_family) {
 #ifdef INET
-		case AF_INET:
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->sc_ac, ifa);
-			break;
-#endif /* INET */
-		}
+#endif
 		break;
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (ifp->if_flags & IFF_RUNNING &&
-			    ifp->if_flags & IFF_PROMISC) {
-				UDAV_SETBIT(sc, UDAV_RCR,
-				    UDAV_RCR_ALL|UDAV_RCR_PRMSC);
-			} else if (ifp->if_flags & IFF_RUNNING &&
-			    !(ifp->if_flags & IFF_PROMISC)) {
-				UDAV_CLRBIT(sc, UDAV_RCR,
-				    UDAV_RCR_PRMSC);
-			} else if (!(ifp->if_flags & IFF_RUNNING))
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
 				udav_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				udav_stop(ifp, 1);
 		}
-		error = 0;
+		break;
+
+	case SIOCGIFMEDIA:
+	case SIOCSIFMEDIA:
+		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, cmd);
 		break;
 
 	default:
@@ -1251,7 +1217,7 @@ udav_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			udav_setmulti(sc);
+			udav_iff(sc);
 		error = 0;
 	}
 
@@ -1308,10 +1274,7 @@ udav_stop(struct ifnet *ifp, int disable)
 	/* Stop transfers */
 	/* RX endpoint */
 	if (sc->sc_pipe_rx != NULL) {
-		err = usbd_abort_pipe(sc->sc_pipe_rx);
-		if (err)
-			printf("%s: abort rx pipe failed: %s\n",
-			       sc->sc_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_pipe_rx);
 		err = usbd_close_pipe(sc->sc_pipe_rx);
 		if (err)
 			printf("%s: close rx pipe failed: %s\n",
@@ -1321,10 +1284,7 @@ udav_stop(struct ifnet *ifp, int disable)
 
 	/* TX endpoint */
 	if (sc->sc_pipe_tx != NULL) {
-		err = usbd_abort_pipe(sc->sc_pipe_tx);
-		if (err)
-			printf("%s: abort tx pipe failed: %s\n",
-			       sc->sc_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_pipe_tx);
 		err = usbd_close_pipe(sc->sc_pipe_tx);
 		if (err)
 			printf("%s: close tx pipe failed: %s\n",
@@ -1336,10 +1296,7 @@ udav_stop(struct ifnet *ifp, int disable)
 	/* XXX: Interrupt endpoint is not yet supported!! */
 	/* Interrupt endpoint */
 	if (sc->sc_pipe_intr != NULL) {
-		err = usbd_abort_pipe(sc->sc_pipe_intr);
-		if (err)
-			printf("%s: abort intr pipe failed: %s\n",
-			       sc->sc_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_pipe_intr);
 		err = usbd_close_pipe(sc->sc_pipe_intr);
 		if (err)
 			printf("%s: close intr pipe failed: %s\n",

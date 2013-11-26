@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.6 2010/09/23 14:12:05 pirofti Exp $ */
+/*	$OpenBSD: mainbus.c,v 1.8 2013/05/30 16:15:01 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -37,8 +37,7 @@ void	mainbus_attach(struct device *, struct device *, void *);
 int	mainbus_print(void *, const char *);
 
 const struct cfattach mainbus_ca = {
-	sizeof(struct device), mainbus_match, mainbus_attach,
-	NULL, config_activate_children
+	sizeof(struct device), mainbus_match, mainbus_attach
 };
 
 struct cfdriver mainbus_cd = {
@@ -71,8 +70,10 @@ mainbus_attach(struct device *parent, struct device *self, void *aux)
 	caa.caa_maa.maa_name = "bonito";
 	config_found(self, &caa.caa_maa, mainbus_print);
 
-	caa.caa_maa.maa_name = "clock";
-	config_found(self, &caa.caa_maa, mainbus_print);
+	if (md_startclock == NULL) {
+		caa.caa_maa.maa_name = "clock";
+		config_found(self, &caa.caa_maa, mainbus_print);
+	}
 
 	caa.caa_maa.maa_name = "apm";
 	config_found(self, &caa.caa_maa, mainbus_print);

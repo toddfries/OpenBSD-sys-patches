@@ -1,4 +1,4 @@
-/*	$OpenBSD: mfs_vfsops.c,v 1.42 2010/12/21 20:14:44 thib Exp $	*/
+/*	$OpenBSD: mfs_vfsops.c,v 1.46 2013/04/15 15:32:19 jsing Exp $	*/
 /*	$NetBSD: mfs_vfsops.c,v 1.10 1996/02/09 22:31:28 christos Exp $	*/
 
 /*
@@ -91,10 +91,10 @@ mfs_mount(struct mount *mp, const char *path, void *data,
 	struct ufsmount *ump;
 	struct fs *fs;
 	struct mfsnode *mfsp;
-	size_t size;
+	char fspec[MNAMELEN];
 	int flags, error;
 
-	error = copyin(data, (caddr_t)&args, sizeof (struct mfs_args));
+	error = copyin(data, &args, sizeof(struct mfs_args));
 	if (error)
 		return (error);
 
@@ -116,12 +116,15 @@ mfs_mount(struct mount *mp, const char *path, void *data,
 		if (fs->fs_ronly && (mp->mnt_flag & MNT_WANTRDWR))
 			fs->fs_ronly = 0;
 #ifdef EXPORTMFS
-		if (args.fspec == 0)
+		if (args.fspec == NULL)
 			return (vfs_export(mp, &ump->um_export, 
 			    &args.export_info));
 #endif
 		return (0);
 	}
+	error = copyinstr(args.fspec, fspec, sizeof(fspec), NULL);
+	if (error)
+		return (error);
 	error = getnewvnode(VT_MFS, NULL, &mfs_vops, &devvp);
 	if (error)
 		return (error);
@@ -129,27 +132,30 @@ mfs_mount(struct mount *mp, const char *path, void *data,
 	if (checkalias(devvp, makedev(255, mfs_minor), (struct mount *)0))
 		panic("mfs_mount: dup dev");
 	mfs_minor++;
-	mfsp = malloc(sizeof *mfsp, M_MFSNODE, M_WAITOK);
+	mfsp = malloc(sizeof *mfsp, M_MFSNODE, M_WAITOK | M_ZERO);
 	devvp->v_data = mfsp;
 	mfsp->mfs_baseoff = args.base;
 	mfsp->mfs_size = args.size;
 	mfsp->mfs_vnode = devvp;
 	mfsp->mfs_pid = p->p_pid;
-	mfsp->mfs_buflist = (struct buf *)0;
+	bufq_init(&mfsp->mfs_bufq, BUFQ_FIFO);
 	if ((error = ffs_mountfs(devvp, mp, p)) != 0) {
-		mfsp->mfs_buflist = (struct buf *)-1;
+		mfsp->mfs_shutdown = 1;
 		vrele(devvp);
 		return (error);
 	}
 	ump = VFSTOUFS(mp);
 	fs = ump->um_fs;
-	(void) copyinstr(path, fs->fs_fsmnt, sizeof(fs->fs_fsmnt) - 1, &size);
-	bzero(fs->fs_fsmnt + size, sizeof(fs->fs_fsmnt) - size);
+
+	bzero(fs->fs_fsmnt, sizeof(fs->fs_fsmnt));
+	strlcpy(fs->fs_fsmnt, path, sizeof(fs->fs_fsmnt));
 	bcopy(fs->fs_fsmnt, mp->mnt_stat.f_mntonname, MNAMELEN);
-	(void) copyinstr(args.fspec, mp->mnt_stat.f_mntfromname, MNAMELEN - 1,
-	    &size);
-	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
+	bzero(mp->mnt_stat.f_mntfromname, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntfromname, fspec, MNAMELEN);
+	bzero(mp->mnt_stat.f_mntfromspec, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntfromspec, fspec, MNAMELEN);
 	bcopy(&args, &mp->mnt_stat.mount_info.mfs_args, sizeof(args));
+
 	return (0);
 }
 
@@ -170,23 +176,21 @@ mfs_start(struct mount *mp, int flags, struct proc *p)
 	struct vnode *vp = VFSTOUFS(mp)->um_devvp;
 	struct mfsnode *mfsp = VTOMFS(vp);
 	struct buf *bp;
-	int sleepreturn = 0, s;
+	int sleepreturn = 0;
 
 	while (1) {
 		while (1) {
-			s = splbio();
-			bp = mfsp->mfs_buflist;
-			if (bp == NULL || bp == (struct buf *)-1) {
-				splx(s);
+			if (mfsp->mfs_shutdown == 1)
 				break;
-			}
-			mfsp->mfs_buflist = bp->b_actf;
-			splx(s);
+			bp = bufq_dequeue(&mfsp->mfs_bufq);
+			if (bp == NULL)
+				break;
 			mfs_doio(mfsp, bp);
-			wakeup((caddr_t)bp);
+			wakeup(bp);
 		}
-		if (bp == (struct buf *)-1)
+		if (mfsp->mfs_shutdown == 1)
 			break;
+
 		/*
 		 * If a non-ignored signal is received, try to unmount.
 		 * If that fails, clear the signal (it has been "processed"),

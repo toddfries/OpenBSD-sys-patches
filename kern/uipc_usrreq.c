@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_usrreq.c,v 1.55 2011/07/06 06:31:38 matthew Exp $	*/
+/*	$OpenBSD: uipc_usrreq.c,v 1.71 2013/04/05 08:25:30 tedu Exp $	*/
 /*	$NetBSD: uipc_usrreq.c,v 1.18 1996/02/09 19:00:50 christos Exp $	*/
 
 /*
@@ -48,6 +48,8 @@
 #include <sys/stat.h>
 #include <sys/mbuf.h>
 
+void	uipc_setaddr(const struct unpcb *, struct mbuf *);
+
 /*
  * Unix communications domain.
  *
@@ -58,6 +60,20 @@
  */
 struct	sockaddr sun_noname = { sizeof(sun_noname), AF_UNIX };
 ino_t	unp_ino;			/* prototype for fake inode numbers */
+
+void
+uipc_setaddr(const struct unpcb *unp, struct mbuf *nam)
+{
+	if (unp != NULL && unp->unp_addr != NULL) {
+		nam->m_len = unp->unp_addr->m_len;
+		bcopy(mtod(unp->unp_addr, caddr_t), mtod(nam, caddr_t),
+		    nam->m_len);
+	} else {
+		nam->m_len = sizeof(sun_noname);
+		bcopy(&sun_noname, mtod(nam, struct sockaddr *),
+		    nam->m_len);
+	}
+}
 
 /*ARGSUSED*/
 int
@@ -119,14 +135,7 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		 * if it was bound and we are still connected
 		 * (our peer may have closed already!).
 		 */
-		if (unp->unp_conn && unp->unp_conn->unp_addr) {
-			nam->m_len = unp->unp_conn->unp_addr->m_len;
-			bcopy(mtod(unp->unp_conn->unp_addr, caddr_t),
-			    mtod(nam, caddr_t), (unsigned)nam->m_len);
-		} else {
-			nam->m_len = sizeof(sun_noname);
-			*(mtod(nam, struct sockaddr *)) = sun_noname;
-		}
+		uipc_setaddr(unp->unp_conn, nam);
 		break;
 
 	case PRU_SHUTDOWN:
@@ -283,21 +292,11 @@ uipc_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 		break;
 
 	case PRU_SOCKADDR:
-		if (unp->unp_addr) {
-			nam->m_len = unp->unp_addr->m_len;
-			bcopy(mtod(unp->unp_addr, caddr_t),
-			    mtod(nam, caddr_t), (unsigned)nam->m_len);
-		} else
-			nam->m_len = 0;
+		uipc_setaddr(unp, nam);
 		break;
 
 	case PRU_PEERADDR:
-		if (unp->unp_conn && unp->unp_conn->unp_addr) {
-			nam->m_len = unp->unp_conn->unp_addr->m_len;
-			bcopy(mtod(unp->unp_conn->unp_addr, caddr_t),
-			    mtod(nam, caddr_t), (unsigned)nam->m_len);
-		} else
-			nam->m_len = 0;
+		uipc_setaddr(unp->unp_conn, nam);
 		break;
 
 	case PRU_SLOWTIMO:
@@ -366,11 +365,13 @@ unp_attach(struct socket *so)
 void
 unp_detach(struct unpcb *unp)
 {
+	struct vnode *vp;
 	
 	if (unp->unp_vnode) {
 		unp->unp_vnode->v_socket = NULL;
-		vrele(unp->unp_vnode);
+		vp = unp->unp_vnode;
 		unp->unp_vnode = NULL;
+		vrele(vp);
 	}
 	if (unp->unp_conn)
 		unp_disconnect(unp);
@@ -398,37 +399,45 @@ int
 unp_bind(struct unpcb *unp, struct mbuf *nam, struct proc *p)
 {
 	struct sockaddr_un *soun = mtod(nam, struct sockaddr_un *);
+	struct mbuf *nam2;
 	struct vnode *vp;
 	struct vattr vattr;
-	int error, namelen;
+	int error;
 	struct nameidata nd;
+	size_t pathlen;
 
 	if (unp->unp_vnode != NULL)
 		return (EINVAL);
-	namelen = soun->sun_len - offsetof(struct sockaddr_un, sun_path);
-	if (namelen <= 0 || namelen > sizeof(soun->sun_path))
-		return EINVAL;
-	if (namelen == sizeof(soun->sun_path) &&
-	    memchr(soun->sun_path, '\0', namelen) == NULL)
-		return EINVAL;
-	/*
-	 * if namelen < sizeof(sun_path) then the strncpy below
-	 * will NUL terminate it
-	 */
 
-	unp->unp_addr = m_getclr(M_WAITOK, MT_SONAME);
-	unp->unp_addr->m_len = soun->sun_len;
-	memcpy(mtod(unp->unp_addr, caddr_t *), soun,
+	if (soun->sun_len > sizeof(struct sockaddr_un) ||
+	    soun->sun_len < offsetof(struct sockaddr_un, sun_path))
+		return (EINVAL);
+	if (soun->sun_family != AF_UNIX)
+		return (EAFNOSUPPORT);
+
+	pathlen = strnlen(soun->sun_path, soun->sun_len -
 	    offsetof(struct sockaddr_un, sun_path));
-	strncpy(mtod(unp->unp_addr, caddr_t) +
-	    offsetof(struct sockaddr_un, sun_path), soun->sun_path, namelen);
+	if (pathlen == sizeof(soun->sun_path))
+		return (EINVAL);
 
-	soun = mtod(unp->unp_addr, struct sockaddr_un *);
+	nam2 = m_getclr(M_WAITOK, MT_SONAME);
+	nam2->m_len = sizeof(struct sockaddr_un);
+	memcpy(mtod(nam2, struct sockaddr_un *), soun,
+	    offsetof(struct sockaddr_un, sun_path) + pathlen);
+	/* No need to NUL terminate: m_getclr() returns bzero'd mbufs. */
+
+	soun = mtod(nam2, struct sockaddr_un *);
+
+	/* Fixup sun_len to keep it in sync with m_len. */
+	soun->sun_len = nam2->m_len;
+
 	NDINIT(&nd, CREATE, NOFOLLOW | LOCKPARENT, UIO_SYSSPACE,
 	    soun->sun_path, p);
 /* SHOULD BE ABLE TO ADOPT EXISTING AND wakeup() ALA FIFO's */
-	if ((error = namei(&nd)) != 0)
+	if ((error = namei(&nd)) != 0) {
+		m_freem(nam2);
 		return (error);
+	}
 	vp = nd.ni_vp;
 	if (vp != NULL) {
 		VOP_ABORTOP(nd.ni_dvp, &nd.ni_cnd);
@@ -437,14 +446,18 @@ unp_bind(struct unpcb *unp, struct mbuf *nam, struct proc *p)
 		else
 			vput(nd.ni_dvp);
 		vrele(vp);
+		m_freem(nam2);
 		return (EADDRINUSE);
 	}
 	VATTR_NULL(&vattr);
 	vattr.va_type = VSOCK;
 	vattr.va_mode = ACCESSPERMS &~ p->p_fd->fd_cmask;
 	error = VOP_CREATE(nd.ni_dvp, &nd.ni_vp, &nd.ni_cnd, &vattr);
-	if (error)
+	if (error) {
+		m_freem(nam2);
 		return (error);
+	}
+	unp->unp_addr = nam2;
 	vp = nd.ni_vp;
 	vp->v_socket = unp->unp_socket;
 	unp->unp_vnode = vp;
@@ -465,6 +478,9 @@ unp_connect(struct socket *so, struct mbuf *nam, struct proc *p)
 	struct unpcb *unp, *unp2, *unp3;
 	int error;
 	struct nameidata nd;
+
+	if (soun->sun_family != AF_UNIX)
+		return (EAFNOSUPPORT);
 
 	if (nam->m_len < sizeof(struct sockaddr_un))
 		*(mtod(nam, caddr_t) + nam->m_len) = 0;
@@ -588,13 +604,6 @@ unp_disconnect(struct unpcb *unp)
 	}
 }
 
-#ifdef notdef
-unp_abort(struct unpcb *unp)
-{
-	unp_detach(unp);
-}
-#endif
-
 void
 unp_shutdown(struct unpcb *unp)
 {
@@ -638,7 +647,7 @@ unp_externalize(struct mbuf *rights, socklen_t controllen)
 {
 	struct proc *p = curproc;		/* XXX */
 	struct cmsghdr *cm = mtod(rights, struct cmsghdr *);
-	int i, *fdp;
+	int i, *fdp = NULL;
 	struct file **rp;
 	struct file *fp;
 	int nfds, error = 0;
@@ -649,8 +658,10 @@ unp_externalize(struct mbuf *rights, socklen_t controllen)
 		controllen = 0;
 	else
 		controllen -= CMSG_ALIGN(sizeof(struct cmsghdr));
-	if (nfds > controllen / sizeof(int))
-		nfds = controllen / sizeof(int);
+	if (nfds > controllen / sizeof(int)) {
+		error = EMSGSIZE;
+		goto restart;
+	}
 
 	rp = (struct file **)CMSG_DATA(cm);
 
@@ -700,8 +711,6 @@ restart:
 	 */
 	rp = ((struct file **)CMSG_DATA(cm));
 	for (i = 0; i < nfds; i++) {
-		bcopy(rp, &fp, sizeof(fp));
-		rp++;
 		if ((error = fdalloc(p, 0, &fdp[i])) != 0) {
 			/*
 			 * Back out what we've done so far.
@@ -729,7 +738,7 @@ restart:
 		 * fdalloc() works properly.. We finalize it all
 		 * in the loop below.
 		 */
-		p->p_fd->fd_ofiles[fdp[i]] = fp;
+		p->p_fd->fd_ofiles[fdp[i]] = *rp++;
 	}
 
 	/*
@@ -752,7 +761,8 @@ restart:
 	rights->m_len = CMSG_LEN(nfds * sizeof(int));
  out:
 	fdpunlock(p->p_fd);
-	free(fdp, M_TEMP);
+	if (fdp)
+		free(fdp, M_TEMP);
 	return (error);
 }
 
@@ -775,23 +785,34 @@ unp_internalize(struct mbuf *control, struct proc *p)
 		return (EINVAL);
 	nfds = (cm->cmsg_len - CMSG_ALIGN(sizeof(*cm))) / sizeof (int);
 
+	if (unp_rights + nfds > maxfiles / 10)
+		return (EMFILE);
+
 	/* Make sure we have room for the struct file pointers */
 morespace:
 	neededspace = CMSG_SPACE(nfds * sizeof(struct file *)) -
 	    control->m_len;
 	if (neededspace > M_TRAILINGSPACE(control)) {
+		char *tmp;
 		/* if we already have a cluster, the message is just too big */
 		if (control->m_flags & M_EXT)
 			return (E2BIG);
 
+		/* copy cmsg data temporarily out of the mbuf */
+		tmp = malloc(control->m_len, M_TEMP, M_WAITOK);
+		memcpy(tmp, mtod(control, caddr_t), control->m_len);
+
 		/* allocate a cluster and try again */
 		MCLGET(control, M_WAIT);
-		if ((control->m_flags & M_EXT) == 0)
+		if ((control->m_flags & M_EXT) == 0) {
+			free(tmp, M_TEMP);
 			return (ENOBUFS);       /* allocation failed */
+		}
 
-		/* copy the data to the cluster */
-		memcpy(mtod(control, char *), cm, cm->cmsg_len);
+		/* copy the data back into the cluster */
 		cm = mtod(control, struct cmsghdr *);
+		memcpy(cm, tmp, control->m_len);
+		free(tmp, M_TEMP);
 		goto morespace;
 	}
 
@@ -813,8 +834,9 @@ morespace:
 			error = EDEADLK;
 			goto fail;
 		}
-		/* kq descriptors cannot be copied */
-		if (fp->f_type == DTYPE_KQUEUE) {
+		/* kq and systrace descriptors cannot be copied */
+		if (fp->f_type == DTYPE_KQUEUE ||
+		    fp->f_type == DTYPE_SYSTRACE) {
 			error = EINVAL;
 			goto fail;
 		}
@@ -871,7 +893,7 @@ unp_gc(void)
 			fp->f_iflags |= FIF_MARK;
 
 			if (fp->f_type != DTYPE_SOCKET ||
-			    (so = (struct socket *)fp->f_data) == NULL)
+			    (so = fp->f_data) == NULL)
 				continue;
 			if (so->so_proto->pr_domain != &unixdomain ||
 			    (so->so_proto->pr_flags&PR_RIGHTS) == 0)
@@ -950,10 +972,10 @@ unp_gc(void)
 	}
 	for (i = nunref, fpp = extra_ref; --i >= 0; ++fpp)
 	        if ((*fpp)->f_type == DTYPE_SOCKET && (*fpp)->f_data != NULL)
-		        sorflush((struct socket *)(*fpp)->f_data);
+		        sorflush((*fpp)->f_data);
 	for (i = nunref, fpp = extra_ref; --i >= 0; ++fpp)
 		(void) closef(*fpp, NULL);
-	free((caddr_t)extra_ref, M_FILE);
+	free(extra_ref, M_FILE);
 	unp_gcing = 0;
 }
 

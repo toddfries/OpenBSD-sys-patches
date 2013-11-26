@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.1 1997/09/17 10:46:13 downsj Exp $
+#	$OpenBSD: Makefile,v 1.3 2012/09/02 23:23:51 pascal Exp $
 
 NOMAN=	noman
 

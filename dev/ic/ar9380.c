@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar9380.c,v 1.14 2011/04/07 14:19:53 miod Exp $	*/
+/*	$OpenBSD: ar9380.c,v 1.18 2013/08/07 01:06:28 bluhm Exp $	*/
 
 /*-
  * Copyright (c) 2011 Damien Bergamini <damien.bergamini@free.fr>
@@ -49,7 +49,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 
 #include <net80211/ieee80211_var.h>
@@ -117,10 +116,13 @@ ar9380_attach(struct athn_softc *sc)
 	sc->cca_max_2g = AR9380_PHY_CCA_MAX_GOOD_VAL_2GHZ;
 	sc->cca_min_5g = AR9380_PHY_CCA_MIN_GOOD_VAL_5GHZ;
 	sc->cca_max_5g = AR9380_PHY_CCA_MAX_GOOD_VAL_5GHZ;
-	if (AR_SREV_9485(sc))
-		sc->ini = &ar9485_1_0_ini;
-	else
+	if (AR_SREV_9485(sc)) {
+		sc->ini = &ar9485_1_1_ini;
+		sc->serdes = &ar9485_1_1_serdes;
+	} else {
 		sc->ini = &ar9380_2_2_ini;
+		sc->serdes = &ar9380_2_2_serdes;
+	}
 
 	return (ar9003_attach(sc));
 }
@@ -147,7 +149,11 @@ ar9380_setup(struct athn_softc *sc)
 	if (base->rfSilent & AR_EEP_RFSILENT_ENABLED) {
 		sc->flags |= ATHN_FLAG_RFSILENT;
 		/* Get GPIO pin used by hardware radio switch. */
-		sc->rfsilent_pin = base->wlanDisableGpio;
+		sc->rfsilent_pin = MS(base->rfSilent,
+		    AR_EEP_RFSILENT_GPIO_SEL);
+		/* Get polarity of hardware radio switch. */
+		if (base->rfSilent & AR_EEP_RFSILENT_POLARITY)
+			sc->flags |= ATHN_FLAG_RFSILENT_REVERSED;
 	}
 
 	/* Set the number of HW key cache entries. */
@@ -178,7 +184,7 @@ ar9380_setup(struct athn_softc *sc)
 		else
 			sc->rx_gain = &ar9380_2_2_rx_gain;
 	} else
-		sc->rx_gain = &ar9485_1_0_rx_gain;
+		sc->rx_gain = &ar9485_1_1_rx_gain;
 
 	/* Select initialization values based on ROM. */
 	type = MS(eep->baseEepHeader.txrxgain, AR_EEP_TX_GAIN);
@@ -192,7 +198,7 @@ ar9380_setup(struct athn_softc *sc)
 		else
 			sc->tx_gain = &ar9380_2_2_tx_gain;
 	} else
-		sc->tx_gain = &ar9485_1_0_tx_gain;
+		sc->tx_gain = &ar9485_1_1_tx_gain;
 }
 
 const uint8_t *

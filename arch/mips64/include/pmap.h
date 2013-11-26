@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.26 2011/04/28 20:46:30 ariane Exp $ */
+/*      $OpenBSD: pmap.h,v 1.29 2013/05/29 20:36:12 pirofti Exp $ */
 
 /*
  * Copyright (c) 1987 Carnegie-Mellon University
@@ -109,8 +109,8 @@ typedef struct pmap {
 
 
 /* flags for pv_entry */
-#define	PV_UNCACHED	PG_PMAP0	/* Page is mapped unchached */
-#define	PV_CACHED	PG_PMAP1	/* Page has been cached */
+#define	PV_UNCACHED	PG_PMAP0	/* Page is explicitely uncached */
+#define	PV_CACHED	PG_PMAP1	/* Page is currently cached */
 #define	PV_ATTR_MOD	PG_PMAP2
 #define	PV_ATTR_REF	PG_PMAP3
 #define	PV_PRESERVE	(PV_ATTR_MOD | PV_ATTR_REF)
@@ -125,12 +125,12 @@ extern	struct pmap *const kernel_pmap_ptr;
 
 #define PMAP_PREFER(pa, va)		pmap_prefer(pa, va)
 
-extern vaddr_t CpuCacheAliasMask;	/* from mips64/mips64/cpu.c */
+extern vaddr_t pmap_prefer_mask;
 /* pmap prefer alignment */
 #define PMAP_PREFER_ALIGN()						\
-	(CpuCacheAliasMask ? CpuCacheAliasMask + 1 : 0)
+	(pmap_prefer_mask ? pmap_prefer_mask + 1 : 0)
 /* pmap prefer offset in alignment */
-#define PMAP_PREFER_OFFSET(of)		((of) & CpuCacheAliasMask)
+#define PMAP_PREFER_OFFSET(of)		((of) & pmap_prefer_mask)
 
 #define	pmap_update(x)			do { /* nothing */ } while (0)
 
@@ -167,6 +167,12 @@ void pmap_update_kernel_page(vaddr_t, pt_entry_t);
 vaddr_t	pmap_map_direct(vm_page_t);
 vm_page_t pmap_unmap_direct(vaddr_t);
 #endif
+
+/*
+ * MD flags to pmap_enter:
+ */
+
+#define PMAP_PA_MASK	~((paddr_t)PAGE_MASK)
 
 #endif	/* _KERNEL */
 

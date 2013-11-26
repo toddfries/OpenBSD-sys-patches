@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_jme.c,v 1.27 2012/02/28 03:58:16 jsg Exp $	*/
+/*	$OpenBSD: if_jme.c,v 1.32 2013/11/03 23:27:33 brad Exp $	*/
 /*-
  * Copyright (c) 2008, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -53,7 +53,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -155,13 +154,8 @@ jme_miibus_readreg(struct device *dev, int phy, int reg)
 	int i;
 
 	/* For FPGA version, PHY address 0 should be ignored. */
-	if (sc->jme_caps & JME_CAP_FPGA) {
-		if (phy == 0)
-			return (0);
-	} else {
-		if (sc->jme_phyaddr != phy)
-			return (0);
-	}
+	if ((sc->jme_caps & JME_CAP_FPGA) && phy == 0)
+		return (0);
 
 	CSR_WRITE_4(sc, JME_SMI, SMI_OP_READ | SMI_OP_EXECUTE |
 	    SMI_PHY_ADDR(phy) | SMI_REG_ADDR(reg));
@@ -190,13 +184,8 @@ jme_miibus_writereg(struct device *dev, int phy, int reg, int val)
 	int i;
 
 	/* For FPGA version, PHY address 0 should be ignored. */
-	if (sc->jme_caps & JME_CAP_FPGA) {
-		if (phy == 0)
-			return;
-	} else {
-		if (sc->jme_phyaddr != phy)
-			return;
-	}
+	if ((sc->jme_caps & JME_CAP_FPGA) && phy == 0)
+		return;
 
 	CSR_WRITE_4(sc, JME_SMI, SMI_OP_WRITE | SMI_OP_EXECUTE |
 	    ((val << SMI_DATA_SHIFT) & SMI_DATA_MASK) |
@@ -609,17 +598,12 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = jme_ioctl;
 	ifp->if_start = jme_start;
 	ifp->if_watchdog = jme_watchdog;
-	ifp->if_baudrate = IF_Gbps(1);
 	IFQ_SET_MAXLEN(&ifp->if_snd, JME_TX_RING_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	strlcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU;
-
-#ifdef JME_CHECKSUM
-	ifp->if_capabilities |= IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 |
-				IFCAP_CSUM_UDPv4;
-#endif
+	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_IPv4 |
+	    IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
 
 #if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
@@ -633,8 +617,9 @@ jme_attach(struct device *parent, struct device *self, void *aux)
 
 	ifmedia_init(&sc->sc_miibus.mii_media, 0, jme_mediachange,
 	    jme_mediastatus);
-	mii_attach(self, &sc->sc_miibus, 0xffffffff, MII_PHY_ANY,
-	    MII_OFFSET_ANY, 0);
+	mii_attach(self, &sc->sc_miibus, 0xffffffff,
+	    sc->jme_caps & JME_CAP_FPGA ? MII_PHY_ANY : sc->jme_phyaddr,
+	    MII_OFFSET_ANY, MIIF_DOPAUSE);
 
 	if (LIST_FIRST(&sc->sc_miibus.mii_phys) == NULL) {
 		printf("%s: no PHY found!\n", sc->sc_dev.dv_xname);
@@ -1343,12 +1328,10 @@ jme_mac_config(struct jme_softc *sc)
 		txmac &= ~(TXMAC_COLL_ENB | TXMAC_CARRIER_SENSE |
 		    TXMAC_BACKOFF | TXMAC_CARRIER_EXT |
 		    TXMAC_FRAME_BURST);
-#ifdef notyet
 		if ((IFM_OPTIONS(mii->mii_media_active) & IFM_ETH_TXPAUSE) != 0)
 			txpause |= TXPFC_PAUSE_ENB;
 		if ((IFM_OPTIONS(mii->mii_media_active) & IFM_ETH_RXPAUSE) != 0)
 			rxmac |= RXMAC_FC_ENB;
-#endif
 		/* Disable retry transmit timer/retry limit. */
 		CSR_WRITE_4(sc, JME_TXTRHD, CSR_READ_4(sc, JME_TXTRHD) &
 		    ~(TXTRHD_RT_PERIOD_ENB | TXTRHD_RT_LIMIT_ENB));

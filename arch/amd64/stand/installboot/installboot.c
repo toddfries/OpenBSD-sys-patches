@@ -1,4 +1,4 @@
-/*	$OpenBSD: installboot.c,v 1.24 2011/11/13 14:52:30 jsing Exp $	*/
+/*	$OpenBSD: installboot.c,v 1.27 2013/11/13 04:11:34 krw Exp $	*/
 /*	$NetBSD: installboot.c,v 1.5 1995/11/17 23:23:50 gwr Exp $ */
 
 /*
@@ -103,7 +103,7 @@ struct sym_data pbr_symbols[] = {
 
 static char	*loadproto(char *, long *);
 static int	getbootparams(char *, int, struct disklabel *);
-static void	devread(int, void *, daddr64_t, size_t, char *);
+static void	devread(int, void *, daddr_t, size_t, char *);
 static void	sym_set_value(struct sym_data *, char *, u_int32_t);
 static void	pbr_set_symbols(char *, char *, struct sym_data *);
 static void	usage(void);
@@ -235,7 +235,7 @@ write_bootblocks(int devfd, struct disklabel *dl)
 
 	/*
 	 * Find OpenBSD partition. Floppies are special, getting an
-	 * everything-in-one /boot starting at sector 0.
+	 * everything-in-one biosboot starting at sector 0.
 	 */
 	if (dl->d_type != DTYPE_FLOPPY) {
 		start = findopenbsd(devfd, dl);
@@ -244,11 +244,12 @@ write_bootblocks(int devfd, struct disklabel *dl)
 	}
 
 	if (verbose)
-		fprintf(stderr, "/boot will be written at sector %u\n", start);
+		fprintf(stderr, "%s will be written at sector %u\n", proto,
+		    start);
 
 	if (start + (protosize / dl->d_secsize) > BOOTBIOS_MAXSEC)
-		warnx("/boot extends beyond sector %u. OpenBSD might not boot.",
-		    BOOTBIOS_MAXSEC);
+		warnx("%s extends beyond sector %u. OpenBSD might not boot.",
+		    proto, BOOTBIOS_MAXSEC);
 
 	if (!nowrite) {
 		if (lseek(devfd, (off_t)start * dl->d_secsize, SEEK_SET) < 0)
@@ -352,7 +353,7 @@ loadproto(char *fname, long *size)
 
 	if (!IS_ELF(eh))
 		errx(1, "%s: bad magic: 0x%02x%02x%02x%02x",
-		    boot,
+		    fname,
 		    eh.e_ident[EI_MAG0], eh.e_ident[EI_MAG1],
 		    eh.e_ident[EI_MAG2], eh.e_ident[EI_MAG3]);
 
@@ -365,7 +366,7 @@ loadproto(char *fname, long *size)
 	/* Program load header. */
 	if (eh.e_phnum != 1)
 		errx(1, "%s: %u ELF load sections (only support 1)",
-		    boot, eh.e_phnum);
+		    fname, eh.e_phnum);
 
 	phsize = eh.e_phnum * sizeof(Elf_Phdr);
 	ph = malloc(phsize);
@@ -375,7 +376,7 @@ loadproto(char *fname, long *size)
 	lseek(fd, eh.e_phoff, SEEK_SET);
 
 	if (read(fd, ph, phsize) != phsize)
-		errx(1, "%s: can't read header", boot);
+		errx(1, "%s: can't read header", fname);
 
 	tdsize = ph->p_filesz;
 
@@ -401,7 +402,7 @@ loadproto(char *fname, long *size)
 }
 
 static void
-devread(int fd, void *buf, daddr64_t blk, size_t size, char *msg)
+devread(int fd, void *buf, daddr_t blk, size_t size, char *msg)
 {
 	if (lseek(fd, dbtob((off_t)blk), SEEK_SET) != dbtob((off_t)blk))
 		err(1, "%s: devread: lseek", msg);
@@ -488,7 +489,7 @@ getbootparams(char *boot, int devfd, struct disklabel *dl)
 	close(fd);
 
 	/* Read superblock. */
-	devread(devfd, sblock, DL_SECTOBLK(dl, pp->p_offset) + SBLOCK,
+	devread(devfd, sblock, DL_SECTOBLK(dl, DL_GETPOFFSET(pp)) + SBLOCK,
 	    SBSIZE, "superblock");
 	fs = (struct fs *)sblock;
 
@@ -504,7 +505,7 @@ getbootparams(char *boot, int devfd, struct disklabel *dl)
 
 	blk = fsbtodb(fs, ino_to_fsba(fs, statbuf.st_ino));
 
-	devread(devfd, buf, DL_SECTOBLK(dl, pp->p_offset) + blk,
+	devread(devfd, buf, DL_SECTOBLK(dl, DL_GETPOFFSET(pp)) + blk,
 	    fs->fs_bsize, "inode");
 	ip = (struct ufs1_dinode *)(buf) + ino_to_fsbo(fs, statbuf.st_ino);
 
@@ -536,6 +537,8 @@ getbootparams(char *boot, int devfd, struct disklabel *dl)
 	sym_set_value(pbr_symbols, "_fsbtodb",
 	    ffs(fs->fs_fsize / dl->d_secsize) - 1);
 
+	if (pp->p_offseth != 0)
+		errx(1, "partition offset too high");
 	sym_set_value(pbr_symbols, "_p_offset", pp->p_offset);
 	sym_set_value(pbr_symbols, "_inodeblk",
 	    ino_to_fsba(fs, statbuf.st_ino));
@@ -547,11 +550,10 @@ getbootparams(char *boot, int devfd, struct disklabel *dl)
 	if (verbose) {
 		fprintf(stderr, "%s is %d blocks x %d bytes\n",
 		    boot, ndb, fs->fs_bsize);
-		fprintf(stderr, "fs block shift %u; part offset %u; "
+		fprintf(stderr, "fs block shift %u; part offset %llu; "
 		    "inode block %lld, offset %u\n",
 		    ffs(fs->fs_fsize / dl->d_secsize) - 1,
-		    pp->p_offset,
-		    ino_to_fsba(fs, statbuf.st_ino),
+		    DL_GETPOFFSET(pp), ino_to_fsba(fs, statbuf.st_ino),
 		    (unsigned int)((((char *)ap) - buf) + INODEOFF));
 	}
 

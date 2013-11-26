@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.81 2012/02/28 13:40:53 aoyama Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.93 2013/11/02 23:10:29 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -65,6 +65,7 @@
 #include <sys/buf.h>
 #include <sys/reboot.h>
 #include <sys/conf.h>
+#include <sys/device.h>
 #include <sys/malloc.h>
 #include <sys/mount.h>
 #include <sys/msgbuf.h>
@@ -117,6 +118,7 @@ void	luna88k_bootstrap(void);
 #ifdef MULTIPROCESSOR
 void	luna88k_ipi_handler(struct trapframe *);
 #endif
+void	luna88k_vector_init(uint32_t *, uint32_t *);
 char	*nvram_by_symbol(char *);
 void	powerdown(void);
 void	savectx(struct pcb *);
@@ -192,6 +194,7 @@ struct nvram_t {
 	char value[NVVALLEN];
 } nvram[NNVSYM];
 
+register_t kernel_vbr;
 int physmem;	  /* available physical memory, in pages */
 
 struct vm_map *exec_map = NULL;
@@ -218,7 +221,6 @@ extern char *esym;
 
 int machtype = LUNA_88K;	/* may be overwritten in cpu_startup() */
 int cputyp = CPU_88100;
-int boothowto;			/* XXX: should be set in boot loader and locore.S */
 int bootdev;			/* XXX: should be set in boot loader and locore.S */
 int cpuspeed = 33;		/* safe guess */
 int sysconsole = 1;		/* 0 = ttya, 1 = keyboard/mouse, used in dev/sio.c */
@@ -233,9 +235,6 @@ extern void ws_cnattach(void);	/* in dev/lunaws.c */
 
 vaddr_t first_addr;
 vaddr_t last_addr;
-
-vaddr_t avail_start, avail_end;
-vaddr_t virtual_avail, virtual_end;
 
 extern struct user *proc0paddr;
 
@@ -295,9 +294,6 @@ size_memory()
 {
 	unsigned int *volatile look;
 	unsigned int *max;
-#if 0
-	extern char *end;
-#endif
 #define PATTERN   0x5a5a5a5a
 #define STRIDE    (4*1024) 	/* 4k at a time */
 #define Roundup(value, stride) (((unsigned)(value) + (stride) - 1) & ~((stride)-1))
@@ -507,8 +503,9 @@ boot(howto)
 		dumpsys();
 
 haltsys:
-	/* Run any shutdown hooks. */
 	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	/* Luna88k supports automatic powerdown */
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
@@ -582,9 +579,9 @@ dumpsys()
 {
 	int maj;
 	int psize;
-	daddr64_t blkno;	/* current block to write */
+	daddr_t blkno;	/* current block to write */
 				/* dump routine */
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int pg;			/* page being dumped */
 	paddr_t maddr;		/* PA being dumped */
 	int error;		/* error code from (*dump)() */
@@ -780,7 +777,7 @@ secondary_main()
 	ncpus++;
 
 	sched_init_cpu(ci);
-	microuptime(&ci->ci_schedstate.spc_runtime);
+	nanouptime(&ci->ci_schedstate.spc_runtime);
 	ci->ci_curproc = NULL;
 	ci->ci_randseed = random();
 
@@ -794,6 +791,8 @@ secondary_main()
 	/* wait for cpu_boot_secondary_processors() */
 	__cpu_simple_lock(&cpu_boot_mutex);
 	__cpu_simple_unlock(&cpu_boot_mutex);
+
+	set_vbr(kernel_vbr);
 
 	spl0();
 	SCHED_LOCK(s);
@@ -922,15 +921,6 @@ out:
 }
 
 int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-
-	return (ENOEXEC);
-}
-
-int
 sys_sysarch(p, v, retval)
 	struct proc *p;
 	void *v;
@@ -982,6 +972,26 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 	/*NOTREACHED*/
 }
 
+void
+luna88k_vector_init(uint32_t *bootvbr, uint32_t *vectors)
+{
+	extern vaddr_t vector_init(uint32_t *, uint32_t *, int); /* gross */
+	extern int kernelstart;
+
+	/*
+	 * Set up bootstrap vectors, overwriting the existing PROM vbr
+	 * page.
+	 */
+	vector_init(bootvbr, vectors, 1);
+
+	/*
+	 * Set up final vectors. These will be used by all processors,
+	 * once autoconf is over.
+	 */
+	kernel_vbr = trunc_page((vaddr_t)&kernelstart);
+	vector_init((uint32_t *)kernel_vbr, vectors, 0);
+}
+
 /*
  * Called from locore.S during boot,
  * this is the first C code that's run.
@@ -989,8 +999,9 @@ cpu_sysctl(name, namelen, oldp, oldlenp, newp, newlen, p)
 void
 luna88k_bootstrap()
 {
-	extern struct cmmu_p cmmu8820x;
-	extern char *end;
+	extern const struct cmmu_p cmmu8820x;
+	extern vaddr_t avail_start;
+	extern vaddr_t avail_end;
 #ifndef MULTIPROCESSOR
 	cpuid_t master_cpu;
 #endif
@@ -1002,13 +1013,15 @@ luna88k_bootstrap()
 	*int_mask_reg[2] = *int_mask_reg[3] = 0;
 
 	/* clear software interrupts; just read registers */
-	*swi_reg[0]; *swi_reg[1];
-	*swi_reg[2]; *swi_reg[3];
+	*(volatile uint32_t *)swi_reg[0];
+	*(volatile uint32_t *)swi_reg[1];
+	*(volatile uint32_t *)swi_reg[2];
+	*(volatile uint32_t *)swi_reg[3];
 
 	uvmexp.pagesize = PAGE_SIZE;
 	uvm_setpagesize();
 
-	first_addr = round_page((vaddr_t)&end);	/* XXX temp until symbols */
+	first_addr = round_page(first_addr);
 	last_addr = size_memory();
 	physmem = atop(last_addr);
 
@@ -1120,32 +1133,6 @@ romttycnputc(dev, c)
 	s = splhigh();
 	ROMPUTC(c);
 	splx(s);
-}
-
-/* taken from NetBSD/luna68k */
-void
-microtime(tvp)
-        register struct timeval *tvp;
-{
-        int s = splclock();
-        static struct timeval lasttime;
-
-        *tvp = time;
-#ifdef notdef
-        tvp->tv_usec += clkread();
-        while (tvp->tv_usec >= 1000000) {
-                tvp->tv_sec++;
-                tvp->tv_usec -= 1000000;
-        }
-#endif
-        if (tvp->tv_sec == lasttime.tv_sec &&
-            tvp->tv_usec <= lasttime.tv_usec &&
-            (tvp->tv_usec = lasttime.tv_usec + 1) >= 1000000) {
-                tvp->tv_sec++;
-                tvp->tv_usec -= 1000000;
-        }
-        lasttime = *tvp;
-        splx(s);
 }
 
 /* powerdown */

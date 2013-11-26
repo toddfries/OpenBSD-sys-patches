@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic79xx_openbsd.c,v 1.38 2012/02/24 06:19:00 guenther Exp $	*/
+/*	$OpenBSD: aic79xx_openbsd.c,v 1.40 2013/05/30 16:15:02 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -59,11 +59,6 @@
  * SUCH DAMAGE.
  *
  */
-
-#include <sys/cdefs.h>
-/*
-__FBSDID("$FreeBSD: src/sys/dev/aic7xxx/aic79xx_osm.c,v 1.16 2003/12/17 00:02:09 gibbs Exp $");
-*/
 
 #include <dev/ic/aic79xx_openbsd.h>
 #include <dev/ic/aic79xx_inline.h>
@@ -616,9 +611,6 @@ ahd_detach(struct device *self, int flags)
 
 	if (ahd->sc_child != NULL)
 		rv = config_detach((void *)ahd->sc_child, flags);
-
-	if (ahd->shutdown_hook != NULL)
-		shutdownhook_disestablish(ahd->shutdown_hook);
 
 	ahd_free(ahd);
 

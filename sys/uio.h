@@ -1,4 +1,4 @@
-/*	$OpenBSD: uio.h,v 1.15 2010/07/26 01:56:27 guenther Exp $	*/
+/*	$OpenBSD: uio.h,v 1.17 2013/04/02 21:32:06 kettenis Exp $	*/
 /*	$NetBSD: uio.h,v 1.12 1996/02/09 18:25:45 christos Exp $	*/
 
 /*
@@ -35,11 +35,25 @@
 #ifndef _SYS_UIO_H_
 #define	_SYS_UIO_H_
 
+#include <sys/cdefs.h>
+#include <sys/_types.h>
+
+#ifndef	_SIZE_T_DEFINED_
+#define	_SIZE_T_DEFINED_
+typedef	__size_t	size_t;
+#endif
+
+#ifndef	_SSIZE_T_DEFINED_
+#define	_SSIZE_T_DEFINED_
+typedef	__ssize_t	ssize_t;
+#endif
+
 struct iovec {
 	void	*iov_base;	/* Base address. */
 	size_t	 iov_len;	/* Length. */
 };
 
+#if __BSD_VISIBLE	/* needed by kdump */
 enum	uio_rw { UIO_READ, UIO_WRITE };
 
 /* Segment flag values. */
@@ -47,6 +61,7 @@ enum uio_seg {
 	UIO_USERSPACE,		/* from user data space */
 	UIO_SYSSPACE		/* from system space */
 };
+#endif /* __BSD_VISIBLE */
 
 #ifdef _KERNEL
 struct uio {
@@ -65,15 +80,15 @@ struct uio {
 #define UIO_SMALLIOV	8		/* 8 on stack, else malloc */
 #endif /* _KERNEL */
 
+#if __BSD_VISIBLE
 #define UIO_MAXIOV	1024		/* Deprecated, use IOV_MAX instead */
+#endif
 
 #ifndef	_KERNEL
-#include <sys/cdefs.h>
-
 __BEGIN_DECLS
 #if __BSD_VISIBLE
-ssize_t preadv(int, const struct iovec *, int, off_t);
-ssize_t pwritev(int, const struct iovec *, int, off_t);
+ssize_t preadv(int, const struct iovec *, int, __off_t);
+ssize_t pwritev(int, const struct iovec *, int, __off_t);
 #endif /* __BSD_VISIBLE */
 ssize_t	readv(int, const struct iovec *, int);
 ssize_t	writev(int, const struct iovec *, int);

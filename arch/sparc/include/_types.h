@@ -1,4 +1,4 @@
-/*	$OpenBSD: _types.h,v 1.16 2011/11/15 17:12:14 deraadt Exp $	*/
+/*	$OpenBSD: _types.h,v 1.23 2013/07/13 17:28:36 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1990, 1993
@@ -37,7 +37,8 @@
 
 #if defined(_KERNEL)
 typedef struct label_t {
-	long val[3];
+	unsigned long long sp_pc;
+	unsigned long fp;
 } label_t;
 #endif
 
@@ -108,7 +109,7 @@ typedef	__int64_t		__intmax_t;
 typedef	__uint64_t		__uintmax_t;
 
 /* Register size */
-typedef __int32_t		__register_t;
+typedef long			__register_t;
 
 /* VM system types */
 typedef unsigned long		__vaddr_t;
@@ -117,16 +118,11 @@ typedef unsigned long		__vsize_t;
 typedef unsigned long		__psize_t;
 
 /* Standard system types */
-typedef int			__clock_t;
-typedef int			__clockid_t;
 typedef double			__double_t;
 typedef float			__float_t;
-typedef long long		__off_t;
 typedef long			__ptrdiff_t;
 typedef	unsigned long		__size_t;
 typedef	long			__ssize_t;
-typedef	int			__time_t;
-typedef int			__timer_t;
 #if defined(__GNUC__) && __GNUC__ >= 3
 typedef	__builtin_va_list	__va_list;
 #else

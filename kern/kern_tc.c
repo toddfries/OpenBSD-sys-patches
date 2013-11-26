@@ -6,7 +6,7 @@
  * this stuff is worth it, you can buy me a beer in return.   Poul-Henning Kamp
  * ----------------------------------------------------------------------------
  *
- * $OpenBSD: kern_tc.c,v 1.16 2010/09/24 07:29:30 deraadt Exp $
+ * $OpenBSD: kern_tc.c,v 1.21 2013/10/06 01:27:49 guenther Exp $
  * $FreeBSD: src/sys/kern/kern_tc.c,v 1.148 2003/03/18 08:45:23 phk Exp $
  */
 
@@ -20,7 +20,6 @@
 #include <sys/malloc.h>
 #include <dev/rndvar.h>
 
-#ifdef __HAVE_TIMECOUNTER
 /*
  * A large step happens on boot.  This constant detects such steps.
  * It is relatively small so that ntp_update_second gets called enough
@@ -96,7 +95,7 @@ static struct timecounter *timecounters = &dummy_timecounter;
 volatile time_t time_second = 1;
 volatile time_t time_uptime = 0;
 
-extern struct timeval adjtimedelta;
+struct bintime naptime;
 static struct bintime boottimebin;
 static int timestepwarnings;
 
@@ -258,7 +257,7 @@ tc_init(struct timecounter *tc)
 	/*
 	 * Never automatically use a timecounter with negative quality.
 	 * Even though we run on the dummy counter, switching here may be
-	 * worse since this timecounter may not be monotonous.
+	 * worse since this timecounter may not be monotonic.
 	 */
 	if (tc->tc_quality < 0)
 		return;
@@ -282,12 +281,12 @@ tc_getfrequency(void)
 }
 
 /*
- * Step our concept of UTC.  This is done by modifying our estimate of
- * when we booted.
+ * Step our concept of UTC, aka the realtime clock.
+ * This is done by modifying our estimate of when we booted.
  * XXX: not locked.
  */
 void
-tc_setclock(struct timespec *ts)
+tc_setrealtimeclock(struct timespec *ts)
 {
 	struct timespec ts2;
 	struct bintime bt, bt2;
@@ -297,17 +296,64 @@ tc_setclock(struct timespec *ts)
 	bintime_sub(&bt, &bt2);
 	bintime_add(&bt2, &boottimebin);
 	boottimebin = bt;
-	bintime2timeval(&bt, &boottime);
+	bintime2timespec(&bt, &boottime);
 	add_timer_randomness(ts->tv_sec);
 
 	/* XXX fiddle all the little crinkly bits around the fiords... */
 	tc_windup();
 	if (timestepwarnings) {
 		bintime2timespec(&bt2, &ts2);
-		log(LOG_INFO, "Time stepped from %ld.%09ld to %ld.%09ld\n",
-		    (long)ts2.tv_sec, ts2.tv_nsec,
-		    (long)ts->tv_sec, ts->tv_nsec);
+		log(LOG_INFO, "Time stepped from %lld.%09ld to %lld.%09ld\n",
+		    (long long)ts2.tv_sec, ts2.tv_nsec,
+		    (long long)ts->tv_sec, ts->tv_nsec);
 	}
+}
+
+/*
+ * Step the monotonic and realtime clocks, triggering any timeouts that
+ * should have occurred across the interval.
+ * XXX: not locked.
+ */
+void
+tc_setclock(struct timespec *ts)
+{
+	struct bintime bt, bt2;
+#ifndef SMALL_KERNEL
+	long long adj_ticks;
+#endif
+
+	/*
+	 * When we're called for the first time, during boot when
+	 * the root partition is mounted, boottime is still zero:
+	 * we just need to set it.
+	 */
+	if (boottimebin.sec == 0) {
+		tc_setrealtimeclock(ts);
+		return;
+	}
+
+	add_timer_randomness(ts->tv_sec);
+
+	timespec2bintime(ts, &bt);
+	bintime_sub(&bt, &boottimebin);
+	bt2 = timehands->th_offset;
+	timehands->th_offset = bt;
+
+	/* XXX fiddle all the little crinkly bits around the fiords... */
+	tc_windup();
+
+#ifndef SMALL_KERNEL
+	/* convert the bintime to ticks */
+	bintime_sub(&bt, &bt2);
+	bintime_add(&naptime, &bt);
+	adj_ticks = (long long)hz * bt.sec +
+	    (((uint64_t)1000000 * (uint32_t)(bt.frac >> 32)) >> 32) / tick;
+	if (adj_ticks > 0) {
+		if (adj_ticks > INT_MAX)
+			adj_ticks = INT_MAX;
+		timeout_adjust_ticks(adj_ticks);
+	}
+#endif
 }
 
 /*
@@ -593,4 +639,3 @@ tc_adjfreq(int64_t *old, int64_t *new)
 	}
 	return 0;
 }
-#endif /* __HAVE_TIMECOUNTER */

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 2007/11/26 10:26:03 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.9 2013/01/01 18:49:33 miod Exp $
 
 LIB=	sa
 
@@ -7,6 +7,7 @@ LIB=	sa
 CLEANFILES += machine
 
 CFLAGS= ${CEXTRAFLAGS} ${AFLAGS} -O2 -D__INTERNAL_LIBSA_CREAD -nostdinc \
+	-fno-pie \
 	-I${.CURDIR} -I${.CURDIR}/../include -I${.CURDIR}/../.. \
 	-I${.CURDIR}/../../.. -I${.CURDIR}/../../../.. \
 	-I${.CURDIR}/../../../../lib/libsa \
@@ -15,7 +16,7 @@ CFLAGS= ${CEXTRAFLAGS} ${AFLAGS} -O2 -D__INTERNAL_LIBSA_CREAD -nostdinc \
 CPPFLAGS+= -D__INTERNAL_LIBSA_CREAD
 
 # stand routines
-SRCS=	alloc.c exit.c exec.c getfile.c gets.c globals.c \
+SRCS=	alloc.c exit.c getfile.c gets.c globals.c \
 	memcmp.c memcpy.c memset.c printf.c snprintf.c strerror.c strncpy.c
 
 # io routines

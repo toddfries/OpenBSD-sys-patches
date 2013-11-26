@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar5416.c,v 1.11 2010/08/12 16:34:53 damien Exp $	*/
+/*	$OpenBSD: ar5416.c,v 1.13 2013/08/07 01:06:28 bluhm Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -51,7 +51,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -132,7 +131,7 @@ ar5416_attach(struct athn_softc *sc)
 		sc->ini = &ar9160_ini;
 	else
 		sc->ini = &ar5416_ini;
-	sc->serdes = ar5416_serdes;
+	sc->serdes = &ar5416_serdes;
 
 	return (ar5008_attach(sc));
 }

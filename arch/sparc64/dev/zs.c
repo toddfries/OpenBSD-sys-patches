@@ -1,4 +1,4 @@
-/*	$OpenBSD: zs.c,v 1.23 2009/09/10 21:30:00 kettenis Exp $	*/
+/*	$OpenBSD: zs.c,v 1.26 2013/11/01 21:22:31 miod Exp $	*/
 /*	$NetBSD: zs.c,v 1.29 2001/05/30 15:24:24 lukem Exp $	*/
 
 /*-
@@ -34,8 +34,8 @@
  * Zilog Z8530 Dual UART driver (machine-dependent part)
  *
  * Runs two serial lines per chip using slave drivers.
- * Plain tty/async lines use the zs_async slave.
- * Sun keyboard/mouse uses the zs_kbd/zs_ms slaves.
+ * Plain tty/async lines use the zstty slave.
+ * Sun keyboard/mouse uses the zskbd/zsms slaves.
  */
 
 #include <sys/param.h>
@@ -58,23 +58,15 @@
 #include <machine/z8530var.h>
 
 #include <dev/cons.h>
-#include <sparc64/dev/z8530reg.h>
+#include <dev/ic/z8530reg.h>
 #include <sparc64/dev/fhcvar.h>
 #include <ddb/db_output.h>
 
 #include <sparc64/dev/cons.h>
 
-#include "zs.h" 	/* NZS */
-
 struct cfdriver zs_cd = {
 	NULL, "zs", DV_TTY
 };
-
-/* Make life easier for the initialized arrays here. */
-#if NZS < 3
-#undef  NZS
-#define NZS 3
-#endif
 
 /*
  * Some warts needed by z8530tty.c -
@@ -106,9 +98,6 @@ struct zsdevice {
 
 /* ZS channel used as the console device (if any) */
 void *zs_conschan_get, *zs_conschan_put;
-
-/* Saved PROM mappings */
-static struct zsdevice *zsaddr[NZS];
 
 static u_char zs_init_reg[16] = {
 	0,	/* 0: CMD (reset, etc.) */
@@ -170,7 +159,6 @@ extern int stdinnode;
 extern int fbnode;
 
 /* Interrupt handlers. */
-int zscheckintr(void *);
 static int zshard(void *);
 static void zssoft(void *);
 
@@ -178,10 +166,6 @@ static int zs_get_speed(struct zs_chanstate *);
 
 /* Console device support */
 static int zs_console_flags(int, int, int);
-
-/* Power management hooks */
-int  zs_enable(struct zs_chanstate *);
-void zs_disable(struct zs_chanstate *);
 
 /*
  * Is the zs chip present?
@@ -223,51 +207,45 @@ zs_attach_sbus(parent, self, aux)
 {
 	struct zsc_softc *zsc = (void *) self;
 	struct sbus_attach_args *sa = aux;
-	int zs_unit = zsc->zsc_dev.dv_unit;
+	struct zsdevice *zsaddr;
+	bus_space_handle_t kvaddr;
 
 	if (sa->sa_nintr == 0) {
 		printf(" no interrupt lines\n");
 		return;
 	}
 
-	/* Use the mapping setup by the Sun PROM. */
-	if (zsaddr[zs_unit] == NULL) {
-		/* Only map registers once. */
-		if (sa->sa_npromvaddrs) {
-			/*
-			 * We're converting from a 32-bit pointer to a 64-bit
-			 * pointer.  Since the 32-bit entity is negative, but
-			 * the kernel is still mapped into the lower 4GB
-			 * range, this needs to be zero-extended.
-			 *
-			 * XXXXX If we map the kernel and devices into the
-			 * high 4GB range, this needs to be changed to
-			 * sign-extend the address.
-			 */
-			zsaddr[zs_unit] = 
-				(struct zsdevice *)
-				(unsigned long int)sa->sa_promvaddrs[0];
-		} else {
-			bus_space_handle_t kvaddr;
-
-			if (sbus_bus_map(sa->sa_bustag, sa->sa_slot,
-					 sa->sa_offset,
-					 sa->sa_size,
-					 BUS_SPACE_MAP_LINEAR,
-					 0, &kvaddr) != 0) {
-				printf("%s @ sbus: cannot map registers\n",
-				       self->dv_xname);
-				return;
-			}
-			zsaddr[zs_unit] = (struct zsdevice *)
-				bus_space_vaddr(sa->sa_bustag, kvaddr);
+	/* Only map registers once. */
+	if (sa->sa_npromvaddrs) {
+		/*
+		 * We're converting from a 32-bit pointer to a 64-bit
+		 * pointer.  Since the 32-bit entity is negative, but
+		 * the kernel is still mapped into the lower 4GB
+		 * range, this needs to be zero-extended.
+		 *
+		 * XXXXX If we map the kernel and devices into the
+		 * high 4GB range, this needs to be changed to
+		 * sign-extend the address.
+		 */
+		zsaddr = (struct zsdevice *)
+		    (unsigned long int)sa->sa_promvaddrs[0];
+	} else {
+		if (sbus_bus_map(sa->sa_bustag, sa->sa_slot, sa->sa_offset,
+		    sa->sa_size, BUS_SPACE_MAP_LINEAR, 0, &kvaddr) != 0) {
+			printf("%s @ sbus: cannot map registers\n",
+			       self->dv_xname);
+			return;
 		}
+		zsaddr = (struct zsdevice *)
+		    bus_space_vaddr(sa->sa_bustag, kvaddr);
 	}
+
 	zsc->zsc_bustag = sa->sa_bustag;
 	zsc->zsc_dmatag = sa->sa_dmatag;
 	zsc->zsc_promunit = getpropint(sa->sa_node, "slave", -2);
 	zsc->zsc_node = sa->sa_node;
-	zs_attach(zsc, zsaddr[zs_unit], sa->sa_pri);
+
+	zs_attach(zsc, zsaddr, sa->sa_pri);
 }
 
 static void
@@ -278,7 +256,7 @@ zs_attach_fhc(parent, self, aux)
 {
 	struct zsc_softc *zsc = (void *) self;
 	struct fhc_attach_args *fa = aux;
-	int zs_unit = zsc->zsc_dev.dv_unit;
+	struct zsdevice *zsaddr;
 	bus_space_handle_t kvaddr;
 
 	if (fa->fa_nreg < 1 && fa->fa_npromvaddrs < 1) {
@@ -291,31 +269,29 @@ zs_attach_fhc(parent, self, aux)
 		return;
 	}
 
-	if (zsaddr[zs_unit] == NULL) {
-		if (fa->fa_npromvaddrs) {
-			/*
-			 * We're converting from a 32-bit pointer to a 64-bit
-			 * pointer.  Since the 32-bit entity is negative, but
-			 * the kernel is still mapped into the lower 4GB
-			 * range, this needs to be zero-extended.
-			 *
-			 * XXXXX If we map the kernel and devices into the
-			 * high 4GB range, this needs to be changed to
-			 * sign-extend the address.
-			 */
-			zsaddr[zs_unit] = (struct zsdevice *)
-			    (unsigned long int)fa->fa_promvaddrs[0];
-		} else {
-			if (fhc_bus_map(fa->fa_bustag, fa->fa_reg[0].fbr_slot,
-			    fa->fa_reg[0].fbr_offset, fa->fa_reg[0].fbr_size,
-			    BUS_SPACE_MAP_LINEAR, &kvaddr) != 0) {
-				printf("%s @ fhc: cannot map registers\n",
-				    self->dv_xname);
-				return;
-			}
-			zsaddr[zs_unit] = (struct zsdevice *)
-			    bus_space_vaddr(fa->fa_bustag, kvaddr);
+	if (fa->fa_npromvaddrs) {
+		/*
+		 * We're converting from a 32-bit pointer to a 64-bit
+		 * pointer.  Since the 32-bit entity is negative, but
+		 * the kernel is still mapped into the lower 4GB
+		 * range, this needs to be zero-extended.
+		 *
+		 * XXXXX If we map the kernel and devices into the
+		 * high 4GB range, this needs to be changed to
+		 * sign-extend the address.
+		 */
+		zsaddr = (struct zsdevice *)
+		    (unsigned long int)fa->fa_promvaddrs[0];
+	} else {
+		if (fhc_bus_map(fa->fa_bustag, fa->fa_reg[0].fbr_slot,
+		    fa->fa_reg[0].fbr_offset, fa->fa_reg[0].fbr_size,
+		    BUS_SPACE_MAP_LINEAR, &kvaddr) != 0) {
+			printf("%s @ fhc: cannot map registers\n",
+			    self->dv_xname);
+			return;
 		}
+		zsaddr = (struct zsdevice *)
+		    bus_space_vaddr(fa->fa_bustag, kvaddr);
 	}
 
 	zsc->zsc_bustag = fa->fa_bustag;
@@ -323,7 +299,7 @@ zs_attach_fhc(parent, self, aux)
 	zsc->zsc_promunit = getpropint(fa->fa_node, "slave", -2);
 	zsc->zsc_node = fa->fa_node;
 
-	zs_attach(zsc, zsaddr[zs_unit], fa->fa_intr[0]);
+	zs_attach(zsc, zsaddr, fa->fa_intr[0]);
 }
 
 /*
@@ -434,9 +410,7 @@ zs_attach(zsc, zsd, pri)
 	}
 
 	/*
-	 * Now safe to install interrupt handlers.  Note the arguments
-	 * to the interrupt handlers aren't used.  Note, we only do this
-	 * once since both SCCs interrupt at the same level and vector.
+	 * Now safe to install interrupt handlers.
 	 */
 	if (bus_intr_establish(zsc->zsc_bustag, pri, IPL_SERIAL, 0, zshard,
 	    zsc, zsc->zsc_dev.dv_xname) == NULL)
@@ -479,39 +453,15 @@ zshard(arg)
 	void *arg;
 {
 	struct zsc_softc *zsc = (struct zsc_softc *)arg;
-	int rr3, rval;
+	int rval = 0;
 
-	rval = 0;
-	while ((rr3 = zsc_intr_hard(zsc))) {
-		/* Count up the interrupts. */
-		rval |= rr3;
-	}
-	if (((zsc->zsc_cs[0] && zsc->zsc_cs[0]->cs_softreq) ||
-	     (zsc->zsc_cs[1] && zsc->zsc_cs[1]->cs_softreq)) &&
-	    zsc->zsc_softintr) {
+	while (zsc_intr_hard(zsc))
+		rval = 1;
+	if ((zsc->zsc_cs[0] && zsc->zsc_cs[0]->cs_softreq) ||
+	    (zsc->zsc_cs[1] && zsc->zsc_cs[1]->cs_softreq))
 		softintr_schedule(zsc->zsc_softintr);
-	}
 	return (rval);
 }
-
-int
-zscheckintr(arg)
-	void *arg;
-{
-	struct zsc_softc *zsc;
-	int unit, rval;
-
-	rval = 0;
-	for (unit = 0; unit < zs_cd.cd_ndevs; unit++) {
-
-		zsc = zs_cd.cd_devs[unit];
-		if (zsc == NULL)
-			continue;
-		rval = (zshard((void *)zsc) || rval);
-	}
-	return (rval);
-}
-
 
 /*
  * We need this only for TTY_DEBUG purposes.
@@ -595,7 +545,7 @@ zs_set_speed(cs, bps)
 int
 zs_set_modes(cs, cflag)
 	struct zs_chanstate *cs;
-	int cflag;	/* bits per second */
+	int cflag;
 {
 	int s;
 
@@ -680,7 +630,8 @@ zs_read_csr(cs)
 	return (val);
 }
 
-void  zs_write_csr(cs, val)
+void
+zs_write_csr(cs, val)
 	struct zs_chanstate *cs;
 	u_char val;
 {
@@ -688,7 +639,8 @@ void  zs_write_csr(cs, val)
 	ZS_DELAY();
 }
 
-u_char zs_read_data(cs)
+u_char
+zs_read_data(cs)
 	struct zs_chanstate *cs;
 {
 	u_char val;
@@ -698,7 +650,8 @@ u_char zs_read_data(cs)
 	return (val);
 }
 
-void  zs_write_data(cs, val)
+void
+zs_write_data(cs, val)
 	struct zs_chanstate *cs;
 	u_char val;
 {
@@ -849,8 +802,10 @@ zscnpollc(dev, on)
 	 * being generated.
 	 */
 
-	if (on) swallow_zsintrs++;
-	else swallow_zsintrs--;
+	if (on)
+		swallow_zsintrs++;
+	else
+		swallow_zsintrs--;
 }
 
 int
@@ -896,4 +851,3 @@ zs_console_flags(promunit, node, channel)
 
 	return (flags);
 }
-

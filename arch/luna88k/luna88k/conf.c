@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.17 2011/10/06 20:49:28 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.20 2013/06/13 13:42:12 aoyama Exp $	*/
 
 /*-
  * Copyright (c) 1991 The Regents of the University of California.
@@ -52,10 +52,6 @@
 #include "st.h"
 #include "uk.h"
 
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 #include "ksyms.h"
 
 #include "lcd.h"
@@ -70,6 +66,7 @@ cdev_decl(nnpfs_dev);
 #include "systrace.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -144,17 +141,13 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 42 */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 43: Kernel symbols device */
 	cdev_ch_init(NCH,ch),		/* 44: SCSI autochanger */
-	cdev_notdef(),			/* 45 */
+	cdev_fuse_init(NFUSE,fuse),	/* 45: fuse */
 	cdev_notdef(),			/* 46 */
 	cdev_notdef(),			/* 47 */
 	cdev_notdef(),			/* 48 */
 	cdev_bio_init(NBIO,bio),	/* 49: ioctl tunnel */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 	cdev_ptm_init(NPTY,ptm),	/* 52: pseudo-tty ptm device */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 53: vscsi */
 	cdev_disk_init(1,diskmap),	/* 54: disk mapper */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.120 2012/01/07 05:38:12 guenther Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.139 2013/10/22 16:40:26 guenther Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -37,11 +37,6 @@
 
 #ifndef _SYS_SYSCTL_H_
 #define	_SYS_SYSCTL_H_
-
-#ifndef _KERNEL
-#include <sys/proc.h>		/* for SRUN, SIDL, etc */
-#include <sys/resource.h>	/* for struct loadavg */
-#endif
 
 #include <uvm/uvm_extern.h>
 
@@ -84,7 +79,7 @@ struct ctlname {
 #define	CTL_DEBUG	5		/* debugging parameters */
 #define	CTL_HW		6		/* generic cpu/io */
 #define	CTL_MACHDEP	7		/* machine dependent */
-#define	CTL_USER	8		/* user-level */
+/*define gap		8		   was CTL_USER: removed 2013-04 */
 #define	CTL_DDB		9		/* DDB user interface, see db_var.h */
 #define	CTL_VFS		10		/* VFS sysctl's */
 #define	CTL_MAXID	11		/* number of valid top-level ids */
@@ -98,7 +93,7 @@ struct ctlname {
 	{ "debug", CTLTYPE_NODE }, \
 	{ "hw", CTLTYPE_NODE }, \
 	{ "machdep", CTLTYPE_NODE }, \
-	{ "user", CTLTYPE_NODE }, \
+	{ "gap", 0 }, \
 	{ "ddb", CTLTYPE_NODE }, \
 	{ "vfs", CTLTYPE_NODE }, \
 }
@@ -120,7 +115,7 @@ struct ctlname {
 #define	KERN_CLOCKRATE		12	/* struct: struct clockinfo */
 #define	KERN_VNODE		13	/* struct: vnode structures */
 /*define gap: was KERN_PROC	14	*/
-#define	KERN_FILE		15	/* struct: file entries */
+/*define gap: was KERN_FILE	15	*/
 #define	KERN_PROF		16	/* node: kernel profiling info */
 #define	KERN_POSIX1		17	/* int: POSIX.1 version */
 #define	KERN_NGROUPS		18	/* int: # of supplemental group ids */
@@ -130,8 +125,8 @@ struct ctlname {
 #define	KERN_DOMAINNAME		22	/* string: (YP) domainname */
 #define	KERN_MAXPARTITIONS	23	/* int: number of partitions/disk */
 #define	KERN_RAWPARTITION	24	/* int: raw partition number */
-/*define gap			25	*/
-/*define gap			26	*/
+#define	KERN_MAXTHREAD	 	25	/* int: max threads */
+#define	KERN_NTHREADS		26	/* int: number of threads */
 #define	KERN_OSVERSION		27	/* string: kernel build version */
 #define	KERN_SOMAXCONN		28	/* int: listen queue maximum */
 #define	KERN_SOMINCONN		29	/* int: half-open controllable param */
@@ -178,8 +173,8 @@ struct ctlname {
 #define	KERN_MAXLOCKSPERUID	70	/* int: locks per uid */
 #define	KERN_CPTIME2		71	/* array: cp_time2 */
 #define	KERN_CACHEPCT		72	/* buffer cache % of physmem */
-#define	KERN_FILE2		73	/* struct: file entries */
-#define	KERN_RTHREADS		74	/* kernel rthreads support enabled */
+#define	KERN_FILE		73	/* struct: file entries */
+/* was define KERN_RTHREADS	74	*/
 #define	KERN_CONSDEV		75	/* dev_t: console terminal device */
 #define	KERN_NETLIVELOCKS	76	/* int: number of network livelocks */
 #define	KERN_POOL_DEBUG		77	/* int: enable pool_debug */
@@ -202,7 +197,7 @@ struct ctlname {
 	{ "clockrate", CTLTYPE_STRUCT }, \
 	{ "vnode", CTLTYPE_STRUCT }, \
 	{ "gap", 0 }, \
-	{ "file", CTLTYPE_STRUCT }, \
+	{ "gap", 0 }, \
 	{ "profiling", CTLTYPE_NODE }, \
 	{ "posix1version", CTLTYPE_INT }, \
 	{ "ngroups", CTLTYPE_INT }, \
@@ -212,8 +207,8 @@ struct ctlname {
 	{ "domainname", CTLTYPE_STRING }, \
 	{ "maxpartitions", CTLTYPE_INT }, \
 	{ "rawpartition", CTLTYPE_INT }, \
-	{ "gap", 0 }, \
-	{ "gap", 0 }, \
+	{ "maxthread", CTLTYPE_INT }, \
+	{ "nthreads", CTLTYPE_INT }, \
 	{ "osversion", CTLTYPE_STRING }, \
 	{ "somaxconn", CTLTYPE_INT }, \
 	{ "sominconn", CTLTYPE_INT }, \
@@ -260,8 +255,8 @@ struct ctlname {
  	{ "maxlocksperuid", CTLTYPE_INT }, \
  	{ "cp_time2", CTLTYPE_STRUCT }, \
 	{ "bufcachepercent", CTLTYPE_INT }, \
-	{ "file2", CTLTYPE_STRUCT }, \
-	{ "rthreads", CTLTYPE_INT }, \
+	{ "file", CTLTYPE_STRUCT }, \
+	{ "gap", 0 }, \
 	{ "consdev", CTLTYPE_STRUCT }, \
 	{ "netlivelocks", CTLTYPE_INT }, \
 	{ "pool_debug", CTLTYPE_INT }, \
@@ -288,6 +283,7 @@ struct ctlname {
 #define	KERN_PROC_UID		5	/* by effective uid */
 #define	KERN_PROC_RUID		6	/* by real uid */
 #define	KERN_PROC_KTHREAD	7	/* also return kernel threads */
+#define	KERN_PROC_SHOW_THREADS	0x40000000/* also return normal threads */
 
 /*
  * KERN_SYSVIPC_INFO subtypes
@@ -325,7 +321,7 @@ struct kinfo_proc {
 
 	u_int64_t p_addr;		/* PTR: Kernel virtual addr of u-area */
 	u_int64_t p_fd;			/* PTR: Ptr to open files structure. */
-	u_int64_t p_stats;		/* PTR: Accounting/statistics */
+	u_int64_t p_stats;		/* unused, always zero. */
 	u_int64_t p_limit;		/* PTR: Process limits. */
 	u_int64_t p_vmspace;		/* PTR: Address space. */
 	u_int64_t p_sigacts;		/* PTR: Signal actions, state */
@@ -402,7 +398,7 @@ struct kinfo_proc {
 
 	int64_t	p_uvalid;		/* CHAR: following p_u* members from struct user are valid */
 					/* XXX 64 bits for alignment */
-	u_int32_t p_ustart_sec;		/* STRUCT TIMEVAL: starting time. */
+	u_int64_t p_ustart_sec;		/* STRUCT TIMEVAL: starting time. */
 	u_int32_t p_ustart_usec;	/* STRUCT TIMEVAL: starting time. */
 
 	u_int32_t p_uutime_sec;		/* STRUCT TIMEVAL: user time. */
@@ -427,7 +423,8 @@ struct kinfo_proc {
 
 	u_int32_t p_uctime_sec;		/* STRUCT TIMEVAL: child u+s time. */
 	u_int32_t p_uctime_usec;	/* STRUCT TIMEVAL: child u+s time. */
-	u_int64_t p_realflag;		/* INT: P_* flags (not including LWPs). */
+	int32_t p_psflags;		/* INT: PS_* flags on the process. */
+	int32_t p_spare;		/* INT: unused. */
 	u_int32_t p_svuid;		/* UID_T: saved user id */
 	u_int32_t p_svgid;		/* GID_T: saved group id */
 	char    p_emul[KI_EMULNAMELEN];	/* syscall emulation name */
@@ -458,7 +455,6 @@ struct kinfo_proc {
  *	sess - source struct session
  *	vm - source struct vmspace
  *	lim - source struct plimits
- *	ps - source struct pstats
  *	sa - source struct sigacts
  * There are some members that are not handled by these macros
  * because they're too painful to generalize: p_pid, p_ppid, p_sid, p_tdev,
@@ -467,21 +463,24 @@ struct kinfo_proc {
 
 #define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
-#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, praddr, sess, vm, lim, ps, sa) \
+#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, \
+    praddr, sess, vm, lim, sa, isthread, show_addresses) \
 do {									\
 	memset((kp), 0, sizeof(*(kp)));					\
 									\
-	(kp)->p_paddr = PTRTOINT64(paddr);				\
-	(kp)->p_fd = PTRTOINT64((p)->p_fd);				\
-	(kp)->p_stats = PTRTOINT64((p)->p_stats);			\
-	(kp)->p_limit = PTRTOINT64((pr)->ps_limit);			\
-	(kp)->p_vmspace = PTRTOINT64((p)->p_vmspace);			\
-	(kp)->p_sigacts = PTRTOINT64((p)->p_sigacts);			\
-	(kp)->p_sess = PTRTOINT64((pg)->pg_session);			\
-	(kp)->p_ru = PTRTOINT64((p)->p_ru);				\
-									\
+	if (show_addresses) {						\
+		(kp)->p_paddr = PTRTOINT64(paddr);			\
+		(kp)->p_fd = PTRTOINT64((p)->p_fd);			\
+		(kp)->p_limit = PTRTOINT64((pr)->ps_limit);		\
+		(kp)->p_vmspace = PTRTOINT64((p)->p_vmspace);		\
+		(kp)->p_sigacts = PTRTOINT64((p)->p_sigacts);		\
+		(kp)->p_sess = PTRTOINT64((pg)->pg_session);		\
+		(kp)->p_ru = PTRTOINT64((pr)->ps_ru);			\
+	}								\
+	(kp)->p_stats = 0;						\
 	(kp)->p_exitsig = (p)->p_exitsig;				\
-	(kp)->p_flag = (p)->p_flag | (pr)->ps_flags | P_INMEM;		\
+	(kp)->p_flag = (p)->p_flag;					\
+	(kp)->p_psflags = (pr)->ps_flags;				\
 									\
 	(kp)->p__pgid = (pg)->pg_id;					\
 									\
@@ -499,16 +498,26 @@ do {									\
 	(kp)->p_jobc = (pg)->pg_jobc;					\
 									\
 	(kp)->p_estcpu = (p)->p_estcpu;					\
-	(kp)->p_rtime_sec = (p)->p_rtime.tv_sec;			\
-	(kp)->p_rtime_usec = (p)->p_rtime.tv_usec;			\
+	if (isthread) {							\
+		(kp)->p_rtime_sec = (p)->p_tu.tu_runtime.tv_sec;	\
+		(kp)->p_rtime_usec = (p)->p_tu.tu_runtime.tv_nsec/1000;	\
+		(kp)->p_tid = (p)->p_pid + THREAD_PID_OFFSET;		\
+		(kp)->p_uticks = (p)->p_tu.tu_uticks;			\
+		(kp)->p_sticks = (p)->p_tu.tu_sticks;			\
+		(kp)->p_iticks = (p)->p_tu.tu_iticks;			\
+	} else {							\
+		(kp)->p_rtime_sec = (pr)->ps_tu.tu_runtime.tv_sec;	\
+		(kp)->p_rtime_usec = (pr)->ps_tu.tu_runtime.tv_nsec/1000; \
+		(kp)->p_tid = -1;					\
+		(kp)->p_uticks = (pr)->ps_tu.tu_uticks;			\
+		(kp)->p_sticks = (pr)->ps_tu.tu_sticks;			\
+		(kp)->p_iticks = (pr)->ps_tu.tu_iticks;			\
+	}								\
 	(kp)->p_cpticks = (p)->p_cpticks;				\
 	(kp)->p_pctcpu = (p)->p_pctcpu;					\
 									\
-	(kp)->p_uticks = (p)->p_uticks;					\
-	(kp)->p_sticks = (p)->p_sticks;					\
-	(kp)->p_iticks = (p)->p_iticks;					\
-									\
-	(kp)->p_tracep = PTRTOINT64((pr)->ps_tracevp);			\
+	if (show_addresses)						\
+		(kp)->p_tracep = PTRTOINT64((pr)->ps_tracevp);		\
 	(kp)->p_traceflag = (pr)->ps_traceflag;				\
 									\
 	(kp)->p_siglist = (p)->p_siglist;				\
@@ -520,7 +529,7 @@ do {									\
 	(kp)->p_nice = (pr)->ps_nice;					\
 									\
 	(kp)->p_xstat = (p)->p_xstat;					\
-	(kp)->p_acflag = (p)->p_acflag;					\
+	(kp)->p_acflag = (pr)->ps_acflag;				\
 									\
 	/* XXX depends on e_name being an array and not a pointer */	\
 	copy_str((kp)->p_emul, (char *)(p)->p_emul +			\
@@ -551,44 +560,47 @@ do {									\
 		if ((p)->p_wmesg)					\
 			copy_str((kp)->p_wmesg, (p)->p_wmesg,		\
 			    sizeof((kp)->p_wmesg));			\
-		(kp)->p_wchan = PTRTOINT64((p)->p_wchan);		\
+		else							\
+			copy_str((kp)->p_wmesg, "",			\
+			    sizeof((kp)->p_wmesg));			\
+		if (show_addresses)					\
+			(kp)->p_wchan = PTRTOINT64((p)->p_wchan);	\
 	}								\
 									\
 	if (lim)							\
 		(kp)->p_rlim_rss_cur =					\
 		    (lim)->pl_rlimit[RLIMIT_RSS].rlim_cur;		\
 									\
-	if (!P_ZOMBIE(p) && (ps) != NULL) {				\
+	if (!P_ZOMBIE(p)) {						\
 		struct timeval tv;					\
 									\
 		(kp)->p_uvalid = 1;					\
 									\
-		(kp)->p_ustart_sec = (ps)->p_start.tv_sec;		\
-		(kp)->p_ustart_usec = (ps)->p_start.tv_usec;		\
+		(kp)->p_ustart_sec = (pr)->ps_start.tv_sec;		\
+		(kp)->p_ustart_usec = (pr)->ps_start.tv_nsec/1000;	\
 									\
-		(kp)->p_uru_maxrss = (ps)->p_ru.ru_maxrss;		\
-		(kp)->p_uru_ixrss = (ps)->p_ru.ru_ixrss;		\
-		(kp)->p_uru_idrss = (ps)->p_ru.ru_idrss;		\
-		(kp)->p_uru_isrss = (ps)->p_ru.ru_isrss;		\
-		(kp)->p_uru_minflt = (ps)->p_ru.ru_minflt;		\
-		(kp)->p_uru_majflt = (ps)->p_ru.ru_majflt;		\
-		(kp)->p_uru_nswap = (ps)->p_ru.ru_nswap;		\
-		(kp)->p_uru_inblock = (ps)->p_ru.ru_inblock;		\
-		(kp)->p_uru_oublock = (ps)->p_ru.ru_oublock;		\
-		(kp)->p_uru_msgsnd = (ps)->p_ru.ru_msgsnd;		\
-		(kp)->p_uru_msgrcv = (ps)->p_ru.ru_msgrcv;		\
-		(kp)->p_uru_nsignals = (ps)->p_ru.ru_nsignals;		\
-		(kp)->p_uru_nvcsw = (ps)->p_ru.ru_nvcsw;		\
-		(kp)->p_uru_nivcsw = (ps)->p_ru.ru_nivcsw;		\
+		(kp)->p_uru_maxrss = (p)->p_ru.ru_maxrss;		\
+		(kp)->p_uru_ixrss = (p)->p_ru.ru_ixrss;			\
+		(kp)->p_uru_idrss = (p)->p_ru.ru_idrss;			\
+		(kp)->p_uru_isrss = (p)->p_ru.ru_isrss;			\
+		(kp)->p_uru_minflt = (p)->p_ru.ru_minflt;		\
+		(kp)->p_uru_majflt = (p)->p_ru.ru_majflt;		\
+		(kp)->p_uru_nswap = (p)->p_ru.ru_nswap;			\
+		(kp)->p_uru_inblock = (p)->p_ru.ru_inblock;		\
+		(kp)->p_uru_oublock = (p)->p_ru.ru_oublock;		\
+		(kp)->p_uru_msgsnd = (p)->p_ru.ru_msgsnd;		\
+		(kp)->p_uru_msgrcv = (p)->p_ru.ru_msgrcv;		\
+		(kp)->p_uru_nsignals = (p)->p_ru.ru_nsignals;		\
+		(kp)->p_uru_nvcsw = (p)->p_ru.ru_nvcsw;			\
+		(kp)->p_uru_nivcsw = (p)->p_ru.ru_nivcsw;		\
 									\
-		timeradd(&(ps)->p_cru.ru_utime,				\
-			 &(ps)->p_cru.ru_stime, &tv);			\
+		timeradd(&(pr)->ps_cru.ru_utime,			\
+			 &(pr)->ps_cru.ru_stime, &tv);			\
 		(kp)->p_uctime_sec = tv.tv_sec;				\
 		(kp)->p_uctime_usec = tv.tv_usec;			\
 	}								\
 									\
 	(kp)->p_cpuid = KI_NOCPU;					\
-	(kp)->p_tid = (p)->p_pid + THREAD_PID_OFFSET;			\
 	(kp)->p_rtableid = (pr)->ps_rtableid;				\
 } while (0)
 
@@ -596,7 +608,7 @@ do {									\
 
 
 /*
- * kern.file2 returns an array of these structures, which are designed
+ * kern.file returns an array of these structures, which are designed
  * both to be immune to 32/64 bit emulation issues and to
  * provide backwards compatibility.  The order differs slightly from
  * that of the real struct file, and some fields are taken from other
@@ -614,8 +626,9 @@ do {									\
 #define KERN_FILE_TRACE		-4
 
 #define KI_MNAMELEN		96	/* rounded up from 90 */
+#define KI_UNPPATHLEN		104
 
-struct kinfo_file2 {
+struct kinfo_file {
 	uint64_t	f_fileaddr;	/* PTR: address of struct file */
 	uint32_t	f_flag;		/* SHORT: flags (see fcntl.h) */
 	uint32_t	f_iflags;	/* INT: internal flags */
@@ -653,6 +666,7 @@ struct kinfo_file2 {
 	uint32_t	so_type;	/* SHORT: socket type */
 	uint32_t	so_state;	/* SHORT: socket state */
 	uint64_t	so_pcb;		/* PTR: socket pcb */
+					/* for non-root: -1 if not NULL */
 	uint32_t	so_protocol;	/* SHORT: socket protocol type */
 	uint32_t	so_family;	/* INT: socket domain family */
 	uint64_t	inp_ppcb;	/* PTR: pointer to per-protocol pcb */
@@ -687,6 +701,12 @@ struct kinfo_file2 {
 	uint64_t	so_splice;	/* PTR: f_data of spliced socket */
 	int64_t		so_splicelen;	/* OFF_T: already spliced count or */
 					/* -1 if this is target of splice */
+	uint64_t	so_rcv_cc;	/* LONG: chars in receive buf */
+	uint64_t	so_snd_cc;	/* LONG: chars in send buf */
+	uint64_t	unp_refs;	/* PTR: connected sockets */
+	uint64_t	unp_nextref;	/* PTR: link to next connected socket */
+	uint64_t	unp_addr;	/* PTR: address of the socket address */
+	char		unp_path[KI_UNPPATHLEN];
 };
 
 /*
@@ -811,55 +831,6 @@ struct kinfo_file2 {
 }
 
 /*
- * CTL_USER definitions
- */
-#define	USER_CS_PATH		 1	/* string: _CS_PATH */
-#define	USER_BC_BASE_MAX	 2	/* int: BC_BASE_MAX */
-#define	USER_BC_DIM_MAX		 3	/* int: BC_DIM_MAX */
-#define	USER_BC_SCALE_MAX	 4	/* int: BC_SCALE_MAX */
-#define	USER_BC_STRING_MAX	 5	/* int: BC_STRING_MAX */
-#define	USER_COLL_WEIGHTS_MAX	 6	/* int: COLL_WEIGHTS_MAX */
-#define	USER_EXPR_NEST_MAX	 7	/* int: EXPR_NEST_MAX */
-#define	USER_LINE_MAX		 8	/* int: LINE_MAX */
-#define	USER_RE_DUP_MAX		 9	/* int: RE_DUP_MAX */
-#define	USER_POSIX2_VERSION	10	/* int: POSIX2_VERSION */
-#define	USER_POSIX2_C_BIND	11	/* int: POSIX2_C_BIND */
-#define	USER_POSIX2_C_DEV	12	/* int: POSIX2_C_DEV */
-#define	USER_POSIX2_CHAR_TERM	13	/* int: POSIX2_CHAR_TERM */
-#define	USER_POSIX2_FORT_DEV	14	/* int: POSIX2_FORT_DEV */
-#define	USER_POSIX2_FORT_RUN	15	/* int: POSIX2_FORT_RUN */
-#define	USER_POSIX2_LOCALEDEF	16	/* int: POSIX2_LOCALEDEF */
-#define	USER_POSIX2_SW_DEV	17	/* int: POSIX2_SW_DEV */
-#define	USER_POSIX2_UPE		18	/* int: POSIX2_UPE */
-#define	USER_STREAM_MAX		19	/* int: POSIX2_STREAM_MAX */
-#define	USER_TZNAME_MAX		20	/* int: POSIX2_TZNAME_MAX */
-#define	USER_MAXID		21	/* number of valid user ids */
-
-#define	CTL_USER_NAMES { \
-	{ 0, 0 }, \
-	{ "cs_path", CTLTYPE_STRING }, \
-	{ "bc_base_max", CTLTYPE_INT }, \
-	{ "bc_dim_max", CTLTYPE_INT }, \
-	{ "bc_scale_max", CTLTYPE_INT }, \
-	{ "bc_string_max", CTLTYPE_INT }, \
-	{ "coll_weights_max", CTLTYPE_INT }, \
-	{ "expr_nest_max", CTLTYPE_INT }, \
-	{ "line_max", CTLTYPE_INT }, \
-	{ "re_dup_max", CTLTYPE_INT }, \
-	{ "posix2_version", CTLTYPE_INT }, \
-	{ "posix2_c_bind", CTLTYPE_INT }, \
-	{ "posix2_c_dev", CTLTYPE_INT }, \
-	{ "posix2_char_term", CTLTYPE_INT }, \
-	{ "posix2_fort_dev", CTLTYPE_INT }, \
-	{ "posix2_fort_run", CTLTYPE_INT }, \
-	{ "posix2_localedef", CTLTYPE_INT }, \
-	{ "posix2_sw_dev", CTLTYPE_INT }, \
-	{ "posix2_upe", CTLTYPE_INT }, \
-	{ "stream_max", CTLTYPE_INT }, \
-	{ "tzname_max", CTLTYPE_INT }, \
-}
-
-/*
  * CTL_DEBUG definitions
  *
  * Second level identifier specifies which debug variable.
@@ -916,8 +887,7 @@ int sysctl__string(void *, size_t *, void *, size_t, char *, int, int);
 int sysctl_rdstring(void *, size_t *, void *, const char *);
 int sysctl_rdstruct(void *, size_t *, void *, const void *, int);
 int sysctl_struct(void *, size_t *, void *, size_t, void *, int);
-int sysctl_file(char *, size_t *, struct proc *);
-int sysctl_file2(int *, u_int, char *, size_t *, struct proc *);
+int sysctl_file(int *, u_int, char *, size_t *, struct proc *);
 int sysctl_doproc(int *, u_int, char *, size_t *);
 struct radix_node;
 struct walkarg;
@@ -930,11 +900,6 @@ int sysctl_vnode(char *, size_t *, struct proc *);
 int sysctl_doprof(int *, u_int, void *, size_t *, void *, size_t);
 #endif
 int sysctl_dopool(int *, u_int, char *, size_t *);
-
-void fill_file2(struct kinfo_file2 *, struct file *, struct filedesc *,
-    int, struct vnode *, struct proc *, struct proc *);
-
-void fill_kproc(struct proc *, struct kinfo_proc *);
 
 int kern_sysctl(int *, u_int, void *, size_t *, void *, size_t,
 		     struct proc *);
@@ -967,10 +932,9 @@ int pflow_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 int pipex_sysctl(int *, u_int, void *, size_t *, void *, size_t);
 
 #else	/* !_KERNEL */
-#include <sys/cdefs.h>
 
 __BEGIN_DECLS
-int	sysctl(int *, u_int, void *, size_t *, void *, size_t);
+int	sysctl(const int *, u_int, void *, size_t *, void *, size_t);
 __END_DECLS
 #endif	/* _KERNEL */
 #endif	/* !_SYS_SYSCTL_H_ */

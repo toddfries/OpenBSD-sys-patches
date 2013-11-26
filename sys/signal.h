@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.23 2011/11/22 21:13:30 guenther Exp $	*/
+/*	$OpenBSD: signal.h,v 1.26 2013/04/29 17:06:20 matthew Exp $	*/
 /*	$NetBSD: signal.h,v 1.21 1996/02/09 18:25:32 christos Exp $	*/
 
 /*
@@ -40,7 +40,6 @@
 #ifndef	_SYS_SIGNAL_H_
 #define	_SYS_SIGNAL_H_
 
-#include <sys/cdefs.h>
 #include <machine/signal.h>	/* sigcontext; codes for SIGILL, SIGFPE */
 
 #define _NSIG	33		/* counting 0 (mask is 1-32) */
@@ -100,7 +99,10 @@
 #define	SIG_ERR		(void (*)(int))-1
 
 #if __POSIX_VISIBLE || __XPG_VISIBLE
+#ifndef _SIGSET_T_DEFINED_
+#define _SIGSET_T_DEFINED_
 typedef unsigned int sigset_t;
+#endif
 
 #include <sys/siginfo.h>
 
@@ -184,6 +186,7 @@ typedef struct sigaltstack {
 typedef struct sigcontext ucontext_t;
 #endif /* __BSD_VISIBLE || __XPG_VISIBLE >= 420 */
 
+#ifndef _KERNEL
 /*
  * For historical reasons; programs expect signal's return value to be
  * defined by <sys/signal.h>.
@@ -191,4 +194,5 @@ typedef struct sigcontext ucontext_t;
 __BEGIN_DECLS
 void	(*signal(int, void (*)(int)))(int);
 __END_DECLS
+#endif /* !_KERNEL */
 #endif	/* !_SYS_SIGNAL_H_ */

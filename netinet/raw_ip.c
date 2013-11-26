@@ -1,4 +1,4 @@
-/*	$OpenBSD: raw_ip.c,v 1.61 2012/03/17 10:16:41 dlg Exp $	*/
+/*	$OpenBSD: raw_ip.c,v 1.66 2013/04/10 08:50:59 mpi Exp $	*/
 /*	$NetBSD: raw_ip.c,v 1.25 1996/02/18 18:58:33 christos Exp $	*/
 
 /*
@@ -292,7 +292,8 @@ rip_ctloutput(int op, struct socket *so, int level, int optname,
     struct mbuf **m)
 {
 	struct inpcb *inp = sotoinpcb(so);
-	int error;
+	int error = 0;
+	int dir;
 
 	if (level != IPPROTO_IP) {
 		if (op == PRCO_SETOPT && *m)
@@ -318,6 +319,39 @@ rip_ctloutput(int op, struct socket *so, int level, int optname,
 			(*m)->m_len = sizeof(int);
 			*mtod(*m, int *) = inp->inp_flags & INP_HDRINCL;
 		}
+		return (error);
+
+	case IP_DIVERTFL:
+		switch (op) {
+		case PRCO_SETOPT:
+			if (*m == 0 || (*m)->m_len < sizeof (int)) {
+				error = EINVAL;
+				break;
+			}
+			dir = *mtod(*m, int *);
+			if (inp->inp_divertfl > 0)
+				error = ENOTSUP;
+			else if ((dir & IPPROTO_DIVERT_RESP) ||
+				   (dir & IPPROTO_DIVERT_INIT))
+				inp->inp_divertfl = dir;
+			else 
+				error = EINVAL;
+
+			break;
+
+		case PRCO_GETOPT:
+			*m = m_get(M_WAIT, M_SOOPTS);
+			(*m)->m_len = sizeof(int);
+			*mtod(*m, int *) = inp->inp_divertfl;
+			break;
+
+		default:
+			error = EINVAL;
+			break;
+		}
+
+		if (op == PRCO_SETOPT && *m)
+			(void)m_free(*m);
 		return (error);
 
 	case MRT_INIT:
@@ -362,11 +396,10 @@ int
 rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
     struct mbuf *control, struct proc *p)
 {
-	int error = 0;
 	struct inpcb *inp = sotoinpcb(so);
-#ifdef MROUTING
-	extern struct socket *ip_mrouter;
-#endif
+	int error = 0;
+	int s;
+
 	if (req == PRU_CONTROL)
 		return (in_control(so, (u_long)m, (caddr_t)nam,
 		    (struct ifnet *)control));
@@ -385,10 +418,18 @@ rip_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *nam,
 			error = EACCES;
 			break;
 		}
-		if ((error = soreserve(so, rip_sendspace, rip_recvspace)) ||
-		    (error = in_pcballoc(so, &rawcbtable)))
+		if ((long)nam < 0 || (long)nam >= IPPROTO_MAX) {
+			error = EPROTONOSUPPORT;
 			break;
-		inp = (struct inpcb *)so->so_pcb;
+		}
+		s = splsoftnet();
+		if ((error = soreserve(so, rip_sendspace, rip_recvspace)) ||
+		    (error = in_pcballoc(so, &rawcbtable))) {
+			splx(s);
+			break;
+		}
+		splx(s);
+		inp = sotoinpcb(so);
 		inp->inp_ip.ip_p = (long)nam;
 		break;
 

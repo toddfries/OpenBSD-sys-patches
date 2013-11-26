@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_trunk.c,v 1.78 2011/10/28 12:49:43 krw Exp $	*/
+/*	$OpenBSD: if_trunk.c,v 1.86 2013/11/21 16:16:08 mpi Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, 2007 Reyk Floeter <reyk@openbsd.org>
@@ -27,7 +27,7 @@
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
+#include <sys/timeout.h>
 #include <sys/hash.h>
 
 #include <dev/rndvar.h>
@@ -35,7 +35,6 @@
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <net/if_dl.h>
-#include <net/if_llc.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
 #if NBPFILTER > 0
@@ -60,8 +59,6 @@
 
 SLIST_HEAD(__trhead, trunk_softc) trunk_list;	/* list of trunks */
 
-extern struct ifaddr **ifnet_addrs;
-
 void	 trunkattach(int);
 int	 trunk_clone_create(struct if_clone *, int);
 int	 trunk_clone_destroy(struct ifnet *);
@@ -72,6 +69,7 @@ int	 trunk_port_create(struct trunk_softc *, struct ifnet *);
 int	 trunk_port_destroy(struct trunk_port *);
 void	 trunk_port_watchdog(struct ifnet *);
 void	 trunk_port_state(void *);
+void	 trunk_port_ifdetach(void *);
 int	 trunk_port_ioctl(struct ifnet *, u_long, caddr_t);
 struct trunk_port *trunk_port_get(struct trunk_softc *, struct ifnet *);
 int	 trunk_port_checkstacking(struct trunk_softc *);
@@ -251,7 +249,7 @@ trunk_lladdr(struct arpcom *ac, u_int8_t *lladdr)
 	struct ifaddr *ifa;
 	struct sockaddr_dl *sdl;
 
-	ifa = ifnet_addrs[ifp->if_index];
+	ifa = ifp->if_lladdr;
 	sdl = (struct sockaddr_dl *)ifa->ifa_addr;
 	sdl->sdl_type = IFT_ETHER;
 	sdl->sdl_alen = ETHER_ADDR_LEN;
@@ -315,6 +313,19 @@ trunk_port_create(struct trunk_softc *tr, struct ifnet *ifp)
 	if (ifp->if_type != IFT_ETHER)
 		return (EPROTONOSUPPORT);
 
+	/* Take MTU from the first member port */
+	if (SLIST_EMPTY(&tr->tr_ports)) {
+		if (tr->tr_ifflags & IFF_DEBUG)
+			printf("%s: first port, setting trunk mtu %u\n",
+			    tr->tr_ifname, ifp->if_mtu);
+		tr->tr_ac.ac_if.if_mtu = ifp->if_mtu;
+		tr->tr_ac.ac_if.if_hardmtu = ifp->if_mtu;
+	} else if (tr->tr_ac.ac_if.if_mtu != ifp->if_mtu) {
+		printf("%s: adding %s failed, MTU %u != %u\n", tr->tr_ifname,
+		    ifp->if_xname, ifp->if_mtu, tr->tr_ac.ac_if.if_mtu);
+		return (EINVAL);
+	}
+
 	if ((error = ifpromisc(ifp, 1)) != 0)
 		return (error);
 
@@ -370,9 +381,12 @@ trunk_port_create(struct trunk_softc *tr, struct ifnet *ifp)
 	trunk_ether_cmdmulti(tp, SIOCADDMULTI);
 
 	/* Register callback for physical link state changes */
-	if (ifp->if_linkstatehooks != NULL)
-		tp->lh_cookie = hook_establish(ifp->if_linkstatehooks, 1,
-		    trunk_port_state, tp);
+	tp->lh_cookie = hook_establish(ifp->if_linkstatehooks, 1,
+	    trunk_port_state, tp);
+
+	/* Register callback if parent wants to unregister */
+	tp->dh_cookie = hook_establish(ifp->if_detachhooks, 0,
+	    trunk_port_ifdetach, tp);
 
 	if (tr->tr_port_create != NULL)
 		error = (*tr->tr_port_create)(tp);
@@ -422,8 +436,8 @@ trunk_port_destroy(struct trunk_port *tp)
 	ifp->if_ioctl = tp->tp_ioctl;
 	ifp->if_tp = NULL;
 
-	if (ifp->if_linkstatehooks != NULL)
-		hook_disestablish(ifp->if_linkstatehooks, tp->lh_cookie);
+	hook_disestablish(ifp->if_linkstatehooks, tp->lh_cookie);
+	hook_disestablish(ifp->if_detachhooks, tp->dh_cookie);
 
 	/* Finally, remove the port from the trunk */
 	SLIST_REMOVE(&tr->tr_ports, tp, trunk_port, tp_entries);
@@ -511,6 +525,10 @@ trunk_port_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 		trunk_port2req(tp, rp);
 		break;
+	case SIOCSIFMTU:
+		/* Do not allow the MTU to be changed once joined */
+		error = EINVAL;
+		break;
 	default:
 		error = ENOTTY;
 		goto fallback;
@@ -529,12 +547,9 @@ trunk_port_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 }
 
 void
-trunk_port_ifdetach(struct ifnet *ifp)
+trunk_port_ifdetach(void *arg)
 {
-	struct trunk_port *tp;
-
-	if ((tp = (struct trunk_port *)ifp->if_tp) == NULL)
-		return;
+	struct trunk_port *tp = (struct trunk_port *)arg;
 
 	trunk_port_destroy(tp);
 }
@@ -1505,35 +1520,46 @@ trunk_bcast_detach(struct trunk_softc *tr)
 }
 
 int
-trunk_bcast_start(struct trunk_softc *tr, struct mbuf *m)
+trunk_bcast_start(struct trunk_softc *tr, struct mbuf *m0)
 {
 	int			 active_ports = 0;
 	int			 errors = 0;
 	int			 ret;
-	struct trunk_port	*tp;
-	struct mbuf		*n;
+	struct trunk_port	*tp, *last = NULL;
+	struct mbuf		*m;
 
 	SLIST_FOREACH(tp, &tr->tr_ports, tp_entries) {
-		if (TRUNK_PORTACTIVE(tp)) {
-			if (active_ports) {
-				n = m_copym(m, 0, M_COPYALL, M_DONTWAIT);
-				if (n == NULL) {
-					m_freem(m);
-					return (ENOBUFS);
-				}
-			} else
-				n = m;
-			active_ports++;
-			if ((ret = trunk_enqueue(tp->tp_if, n)))
+		if (!TRUNK_PORTACTIVE(tp))
+			continue;
+
+		active_ports++;
+
+		if (last != NULL) {
+			m = m_copym(m0, 0, M_COPYALL, M_DONTWAIT);
+			if (m == NULL) {
+				ret = ENOBUFS;
+				errors++;
+				break;
+			}
+
+			ret = trunk_enqueue(last->tp_if, m);
+			if (ret != 0)
 				errors++;
 		}
+		last = tp;
 	}
-	if (active_ports == 0) {
-		m_freem(m);
+	if (last == NULL) {
+		m_freem(m0);
 		return (ENOENT);
 	}
+
+	ret = trunk_enqueue(last->tp_if, m0);
+	if (ret != 0)
+		errors++;
+
 	if (errors == active_ports)
 		return (ret);
+
 	return (0);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.27 2011/01/13 21:19:42 kettenis Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.29 2013/01/16 19:04:43 miod Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.38 2001/06/30 00:02:20 eeh Exp $ */
 
 /*
@@ -241,10 +241,14 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	*tf2 = *(struct trapframe *)((long)opcb + USPACE - sizeof(*tf2));
 
 	/*
-	 * If specified, give the child a different stack.
+	 * If specified, give the child a different stack, offset and
+	 * with space reserved for the frame, and zero the frame pointer.
 	 */
-	if (stack != NULL)
-		tf2->tf_out[6] = (u_int64_t)(u_long)stack + stacksize;
+	if (stack != NULL) {
+		tf2->tf_out[6] = (u_int64_t)(u_long)stack + stacksize
+		    - (BIAS + CC64FSZ);
+		tf2->tf_in[6] = 0;
+	}
 
 	/* Duplicate efforts of syscall(), but slightly differently */
 	if (tf2->tf_global[1] & SYSCALL_G2RFLAG) {
@@ -403,14 +407,13 @@ cpu_coredump(p, vp, cred, chdr)
 	cseg.c_addr = 0;
 	cseg.c_size = chdr->c_cpusize;
 	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&cseg, chdr->c_seghdrsize,
-	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
+	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE, IO_UNIT, cred, NULL, p);
 	if (error)
 		return error;
 
 	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&md_core, sizeof(md_core),
 	    (off_t)(chdr->c_hdrsize + chdr->c_seghdrsize), UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
+	    IO_UNIT, cred, NULL, p);
 	if (!error)
 		chdr->c_nseg++;
 

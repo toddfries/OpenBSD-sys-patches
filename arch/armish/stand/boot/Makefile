@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.7 2008/06/09 15:01:56 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.9 2012/09/11 17:11:35 deraadt Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
@@ -14,7 +14,7 @@ S=		${.CURDIR}/../../../..
 
 CPPFLAGS+=	-D_STANDALONE
 CPPFLAGS+= 	-nostdinc -I../.. -I. -I${.CURDIR} -I${S}
-CPPFLAGS+=	-DCONADDR=0xfe800000UL -DCONSPEED=115200
+CPPFLAGS+=	-DCONADDR=0xfe800000UL -DCONSPEED=115200 -fno-pie
 
 COPTS+=		-ffreestanding -fno-stack-protector
 

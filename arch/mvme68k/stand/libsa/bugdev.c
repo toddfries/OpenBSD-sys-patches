@@ -1,4 +1,4 @@
-/*	$OpenBSD: bugdev.c,v 1.7 2011/03/13 00:13:53 deraadt Exp $ */
+/*	$OpenBSD: bugdev.c,v 1.9 2013/11/05 00:51:58 krw Exp $ */
 
 /*
  * Copyright (c) 1993 Paul Kranenburg
@@ -53,7 +53,8 @@ int
 devopen(struct open_file *f, const char *fname, char **file)
 {
 	register struct bugsc_softc *pp = &bugsc_softc[0];
-	int	error, i, dn = 0, pn = 0;
+	size_t i;
+	int error, pn = 0;
 	char	*dev, *cp;
 	static	char iobuf[MAXBSIZE];
 	struct disklabel sdlabel;
@@ -102,7 +103,7 @@ bugscstrategy(void *devdata, int func, daddr32_t dblk, size_t size, void *buf,
 {
 	struct mvmeprom_dskio dio;
 	register struct bugsc_softc *pp = (struct bugsc_softc *)devdata;
-	daddr32_t	blk = dblk + pp->poff;
+	daddr32_t blk = dblk + pp->poff;
 
 	twiddle();
 
@@ -122,7 +123,7 @@ bugscstrategy(void *devdata, int func, daddr32_t dblk, size_t size, void *buf,
 
 	*rsize = dio.blk_cnt * BUG_BLOCK_SIZE;
 #ifdef DEBUG
-printf("rsize %d status %x\n", *rsize, dio.status);
+	printf("rsize %d status %x\n", *rsize, dio.status);
 #endif
 
 	if (dio.status)
@@ -131,7 +132,7 @@ printf("rsize %d status %x\n", *rsize, dio.status);
 }
 
 int
-bugscopen(struct open_file *f)
+bugscopen(struct open_file *f, ...)
 {
 #ifdef DEBUG
 	printf("bugscopen:\n");
@@ -175,9 +176,7 @@ cputobsdlabel(struct disklabel *lp, struct mvmedisklabel *clp)
 	lp->d_ntracks = clp->cfg_hds;
 
 	lp->d_secpercyl = clp->secpercyl;
-	lp->d_secperunit = clp->secperunit;
-	lp->d_secpercyl = clp->secpercyl;
-	lp->d_secperunit = clp->secperunit;
+	DL_SETDSIZE(lp, clp->secperunit);
 	lp->d_acylinders = clp->acylinders;
 	lp->d_flags = clp->flags;
 	for (i = 0; i < NDDATA; i++)

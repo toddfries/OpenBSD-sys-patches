@@ -1,4 +1,4 @@
-/*	$OpenBSD: bpf.c,v 1.79 2012/01/16 03:34:58 guenther Exp $	*/
+/*	$OpenBSD: bpf.c,v 1.88 2013/11/17 08:58:35 dlg Exp $	*/
 /*	$NetBSD: bpf.c,v 1.33 1997/02/21 23:59:35 thorpej Exp $	*/
 
 /*
@@ -89,7 +89,7 @@ int bpf_maxbufsize = BPF_MAXBUFSIZE;
 struct bpf_if	*bpf_iflist;
 LIST_HEAD(, bpf_d) bpf_d_list;
 
-int	bpf_allocbufs(struct bpf_d *);
+void	bpf_allocbufs(struct bpf_d *);
 void	bpf_freed(struct bpf_d *);
 void	bpf_ifname(struct ifnet *, struct ifreq *);
 void	bpf_mcopy(const void *, void *, size_t);
@@ -102,7 +102,7 @@ int	bpfpoll(dev_t, int, struct proc *);
 int	bpfkqfilter(dev_t, struct knote *);
 void	bpf_wakeup(struct bpf_d *);
 void	bpf_catchpacket(struct bpf_d *, u_char *, size_t, size_t,
-	    void (*)(const void *, void *, size_t));
+	    void (*)(const void *, void *, size_t), struct timeval *);
 void	bpf_reset_d(struct bpf_d *);
 int	bpf_getdltlist(struct bpf_d *, struct bpf_dltlist *);
 int	bpf_setdlt(struct bpf_d *, u_int);
@@ -172,8 +172,8 @@ bpf_movein(struct uio *uio, u_int linktype, struct mbuf **mp,
 
 	case DLT_ATM_RFC1483:
 		/*
-		 * en atm driver requires 4-byte atm pseudo header.
-		 * though it isn't standard, vpi:vci needs to be
+		 * An ATM driver requires 4-byte ATM pseudo header.
+		 * Though it isn't standard, vpi:vci needs to be
 		 * specified anyway.
 		 */
 		sockp->sa_family = AF_UNSPEC;
@@ -401,7 +401,7 @@ bpfread(dev_t dev, struct uio *uio, int ioflag)
 	D_GET(d);
 
 	/*
-	 * bd_rdStart is tagged when we start the read, iff there's a timeout.
+	 * If there's a timeout, bd_rdStart is tagged when we start the read.
 	 * we can then figure out when we're done reading.
 	 */
 	if (d->bd_rtout != -1 && d->bd_rdStart == 0)
@@ -956,7 +956,7 @@ int
 bpf_setif(struct bpf_d *d, struct ifreq *ifr)
 {
 	struct bpf_if *bp, *candidate = NULL;
-	int s, error;
+	int s;
 
 	/*
 	 * Look through attached interfaces for the named one.
@@ -981,11 +981,8 @@ bpf_setif(struct bpf_d *d, struct ifreq *ifr)
 		 * If we're already attached to requested interface,
 		 * just flush the buffer.
 		 */
-		if (d->bd_sbuf == 0) {
-			error = bpf_allocbufs(d);
-			if (error != 0)
-				return (error);
-		}
+		if (d->bd_sbuf == 0)
+			bpf_allocbufs(d);
 		s = splnet();
 		if (candidate != d->bd_bif) {
 			if (d->bd_bif)
@@ -1127,7 +1124,8 @@ bpf_tap(caddr_t arg, u_char *pkt, u_int pktlen, u_int direction)
 	struct bpf_if *bp;
 	struct bpf_d *d;
 	size_t slen;
-	int drop = 0;
+	struct timeval tv;
+	int drop = 0, gottime = 0;
 
 	/*
 	 * Note that the ipl does not have to be raised at this point.
@@ -1142,7 +1140,9 @@ bpf_tap(caddr_t arg, u_char *pkt, u_int pktlen, u_int direction)
 		else
 			slen = bpf_filter(d->bd_rfilter, pkt, pktlen, pktlen);
 		if (slen != 0) {
-			bpf_catchpacket(d, pkt, pktlen, slen, bcopy);
+			if (!gottime++)
+				microtime(&tv);
+			bpf_catchpacket(d, pkt, pktlen, slen, bcopy, &tv);
 			if (d->bd_fildrop)
 				drop++;
 		}
@@ -1185,6 +1185,8 @@ bpf_mtap(caddr_t arg, struct mbuf *m, u_int direction)
 	struct bpf_d *d;
 	size_t pktlen, slen;
 	struct mbuf *m0;
+	struct timeval tv;
+	int gottime = 0;
 
 	if (m == NULL)
 		return;
@@ -1202,9 +1204,11 @@ bpf_mtap(caddr_t arg, struct mbuf *m, u_int direction)
 			    pktlen, 0);
 
 		if (slen == 0)
-		    continue;
+			continue;
 
-		bpf_catchpacket(d, (u_char *)m, pktlen, slen, bpf_mcopy);
+		if (!gottime++)
+			microtime(&tv);
+		bpf_catchpacket(d, (u_char *)m, pktlen, slen, bpf_mcopy, &tv);
 		if (d->bd_fildrop)
 			m->m_flags |= M_FILDROP;
 	}
@@ -1247,11 +1251,13 @@ void
 bpf_mtap_af(caddr_t arg, u_int32_t af, struct mbuf *m, u_int direction)
 {
 	struct m_hdr mh;
+	u_int32_t    afh;
 
 	mh.mh_flags = 0;
 	mh.mh_next = m;
 	mh.mh_len = 4;
-	mh.mh_data = (caddr_t)&af;
+	afh = htonl(af);
+	mh.mh_data = (caddr_t)&afh;
 
 	bpf_mtap(arg, (struct mbuf *) &mh, direction);
 	m->m_flags |= mh.mh_flags & M_FILDROP;
@@ -1310,6 +1316,8 @@ bpf_mtap_pflog(caddr_t arg, caddr_t data, struct mbuf *m)
 	struct bpf_d *d;
 	size_t pktlen, slen;
 	struct mbuf *m0;
+	struct timeval tv;
+	int gottime = 0;
 
 	if (m == NULL)
 		return;
@@ -1332,9 +1340,12 @@ bpf_mtap_pflog(caddr_t arg, caddr_t data, struct mbuf *m)
 			    pktlen, 0);
 
 		if (slen == 0)
-		    continue;
+			continue;
 
-		bpf_catchpacket(d, (u_char *)&mh, pktlen, slen, pflog_bpfcopy);
+		if (!gottime++)
+			microtime(&tv);
+		bpf_catchpacket(d, (u_char *)&mh, pktlen, slen, pflog_bpfcopy,
+		    &tv);
 	}
 #endif
 }
@@ -1350,12 +1361,11 @@ bpf_mtap_pflog(caddr_t arg, caddr_t data, struct mbuf *m)
  */
 void
 bpf_catchpacket(struct bpf_d *d, u_char *pkt, size_t pktlen, size_t snaplen,
-    void (*cpfn)(const void *, void *, size_t))
+    void (*cpfn)(const void *, void *, size_t), struct timeval *tv)
 {
 	struct bpf_hdr *hp;
 	int totlen, curlen;
 	int hdrlen = d->bd_bif->bif_hdrlen;
-	struct timeval tv;
 
 	/*
 	 * Figure out how many bytes to move.  If the packet is
@@ -1394,9 +1404,8 @@ bpf_catchpacket(struct bpf_d *d, u_char *pkt, size_t pktlen, size_t snaplen,
 	 * Append the bpf header.
 	 */
 	hp = (struct bpf_hdr *)(d->bd_sbuf + curlen);
-	microtime(&tv);
-	hp->bh_tstamp.tv_sec = tv.tv_sec;
-	hp->bh_tstamp.tv_usec = tv.tv_usec;
+	hp->bh_tstamp.tv_sec = tv->tv_sec;
+	hp->bh_tstamp.tv_usec = tv->tv_usec;
 	hp->bh_datalen = pktlen;
 	hp->bh_hdrlen = hdrlen;
 	/*
@@ -1413,37 +1422,29 @@ bpf_catchpacket(struct bpf_d *d, u_char *pkt, size_t pktlen, size_t snaplen,
 		bpf_wakeup(d);
 	}
 
-	if (d->bd_rdStart && (d->bd_rtout + d->bd_rdStart < ticks)) {
+	if (d->bd_fbuf && d->bd_rdStart &&
+	    (ticks - (d->bd_rtout + d->bd_rdStart) > 0)) {
 		/*
 		 * we could be selecting on the bpf, and we
 		 * may have timeouts set.  We got here by getting
 		 * a packet, so wake up the reader.
 		 */
-		if (d->bd_fbuf) {
-			d->bd_rdStart = 0;
-			ROTATE_BUFFERS(d);
-			bpf_wakeup(d);
-		}
+		d->bd_rdStart = 0;
+		ROTATE_BUFFERS(d);
+		bpf_wakeup(d);
 	}
 }
 
 /*
  * Initialize all nonzero fields of a descriptor.
  */
-int
+void
 bpf_allocbufs(struct bpf_d *d)
 {
-	d->bd_fbuf = (caddr_t)malloc(d->bd_bufsize, M_DEVBUF, M_NOWAIT);
-	if (d->bd_fbuf == NULL)
-		return (ENOBUFS);
-	d->bd_sbuf = (caddr_t)malloc(d->bd_bufsize, M_DEVBUF, M_NOWAIT);
-	if (d->bd_sbuf == NULL) {
-		free(d->bd_fbuf, M_DEVBUF);
-		return (ENOBUFS);
-	}
+	d->bd_fbuf = malloc(d->bd_bufsize, M_DEVBUF, M_WAITOK);
+	d->bd_sbuf = malloc(d->bd_bufsize, M_DEVBUF, M_WAITOK);
 	d->bd_slen = 0;
 	d->bd_hlen = 0;
-	return (0);
 }
 
 /*
@@ -1480,7 +1481,7 @@ void
 bpfattach(caddr_t *driverp, struct ifnet *ifp, u_int dlt, u_int hdrlen)
 {
 	struct bpf_if *bp;
-	bp = (struct bpf_if *)malloc(sizeof(*bp), M_DEVBUF, M_DONTWAIT);
+	bp = (struct bpf_if *)malloc(sizeof(*bp), M_DEVBUF, M_NOWAIT);
 
 	if (bp == 0)
 		panic("bpfattach");

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vnode.h,v 1.110 2011/12/09 16:14:54 nicm Exp $	*/
+/*	$OpenBSD: vnode.h,v 1.122 2013/11/01 17:17:25 deraadt Exp $	*/
 /*	$NetBSD: vnode.h,v 1.38 1996/02/29 20:59:05 cgd Exp $	*/
 
 /*
@@ -32,11 +32,12 @@
  *	@(#)vnode.h	8.11 (Berkeley) 11/21/94
  */
 
+#ifndef _SYS_VNODE_H_
+#define _SYS_VNODE_H_
+
 #include <sys/buf.h>
 #include <sys/types.h>
 #include <sys/queue.h>
-#include <sys/lock.h>
-#include <sys/namei.h>
 #include <sys/selinfo.h>
 #include <sys/tree.h>
 
@@ -68,13 +69,13 @@ enum vtype	{ VNON, VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD };
 enum vtagtype	{
 	VT_NON, VT_UFS, VT_NFS, VT_MFS, VT_MSDOSFS,
 	VT_PORTAL, VT_PROCFS, VT_AFS, VT_ISOFS, VT_ADOSFS,
-	VT_EXT2FS, VT_VFS, VT_NNPFS, VT_NTFS, VT_UDF, VT_XFS = VT_NNPFS
+	VT_EXT2FS, VT_VFS, VT_NTFS, VT_UDF, VT_FUSEFS, VT_TMPFS,
 };
 
 #define	VTAG_NAMES \
     "NON", "UFS", "NFS", "MFS", "MSDOSFS",			\
     "PORTAL", "PROCFS", "AFS", "ISOFS", "ADOSFS",		\
-    "EXT2FS", "VFS", "NNPFS", "NTFS", "UDF"
+    "EXT2FS", "VFS", "NTFS", "UDF", "FUSEFS", "TMPFS"
 
 /*
  * Each underlying filesystem allocates its own private area and hangs
@@ -160,7 +161,7 @@ struct vattr {
 	uid_t		va_uid;		/* owner user id */
 	gid_t		va_gid;		/* owner group id */
 	long		va_fsid;	/* file system id (dev for now) */
-	long		va_fileid;	/* file id */
+	u_quad_t	va_fileid;	/* file id */
 	u_quad_t	va_size;	/* file size in bytes */
 	long		va_blocksize;	/* blocksize preferred for i/o */
 	struct timespec	va_atime;	/* time of last access */
@@ -252,11 +253,10 @@ extern struct freelst vnode_free_list;	/* vnode free list */
 extern	struct vnode *rootvnode;	/* root (i.e. "/") vnode */
 extern	int desiredvnodes;		/* XXX number of vnodes desired */
 extern	int maxvnodes;			/* XXX number of vnodes to allocate */
-extern	time_t syncdelay;		/* time to delay syncing vnodes */
+extern	int syncdelay;			/* seconds to delay syncing vnodes */
 extern	int rushjob;			/* # of slots syncer should run ASAP */
 extern void    vhold(struct vnode *);
 extern void    vdrop(struct vnode *);
-#endif /* _KERNEL */
 
 /* vnode operations */
 struct vops {
@@ -298,7 +298,6 @@ struct vops {
 	int	(*vop_kqfilter)(void *);
 };
 
-#ifdef _KERNEL
 extern struct vops dead_vops;
 extern struct vops spec_vops;
  
@@ -487,11 +486,8 @@ struct vop_readdir_args {
 	struct uio *a_uio;
 	struct ucred *a_cred;
 	int *a_eofflag;
-	int *a_ncookies;
-	u_long **a_cookies;
 };
-int VOP_READDIR(struct vnode *, struct uio *, struct ucred *, int *, int *, 
-    u_long **);
+int VOP_READDIR(struct vnode *, struct uio *, struct ucred *, int *);
 
 struct vop_readlink_args {
 	struct vnode *a_vp;
@@ -534,12 +530,12 @@ int VOP_UNLOCK(struct vnode *, int, struct proc *);
 
 struct vop_bmap_args {
 	struct vnode *a_vp;
-	daddr64_t a_bn;
+	daddr_t a_bn;
 	struct vnode **a_vpp;
-	daddr64_t *a_bnp;
+	daddr_t *a_bnp;
 	int *a_runp;
 };
-int VOP_BMAP(struct vnode *, daddr64_t, struct vnode **, daddr64_t *, int *);
+int VOP_BMAP(struct vnode *, daddr_t, struct vnode **, daddr_t *, int *);
 
 struct vop_print_args {
 	struct vnode *a_vp;
@@ -651,6 +647,7 @@ int	vn_stat(struct vnode *, struct stat *, struct proc *);
 int	vn_statfile(struct file *, struct stat *, struct proc *);
 int	vn_lock(struct vnode *, int, struct proc *);
 int	vn_writechk(struct vnode *);
+int	vn_fsizechk(struct vnode *, struct uio *, int, ssize_t *);
 int	vn_ioctl(struct file *, u_long, caddr_t, struct proc *);
 void	vn_marktext(struct vnode *);
 
@@ -665,3 +662,4 @@ int	softdep_fsync(struct vnode *);
 int 	getvnode(struct filedesc *, int, struct file **);
 
 #endif /* _KERNEL */
+#endif /* _SYS_VNODE_H_ */

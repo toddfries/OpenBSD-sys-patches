@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipaq.c,v 1.20 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: uipaq.c,v 1.23 2013/11/15 08:25:31 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -75,15 +75,13 @@ int uipaqdebug = 0;
 
 struct uipaq_softc {
 	struct device		 sc_dev;	/* base device */
-	usbd_device_handle	 sc_udev;	/* device */
-	usbd_interface_handle	 sc_iface;	/* interface */
+	struct usbd_device	*sc_udev;	/* device */
+	struct usbd_interface	*sc_iface;	/* interface */
 
 	struct device		*sc_subdev;	/* ucom uses that */
 	u_int16_t		 sc_lcr;	/* state for DTR/RTS */
 
 	u_int16_t		 sc_flags;
-
-	u_char			 sc_dying;
 };
 
 /* Callback routines */
@@ -162,8 +160,8 @@ uipaq_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct uipaq_softc *sc = (struct uipaq_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	usbd_device_handle dev = uaa->device;
-	usbd_interface_handle iface;
+	struct usbd_device *dev = uaa->device;
+	struct usbd_interface *iface;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	char *devname = sc->sc_dev.dv_xname;
@@ -240,7 +238,7 @@ uipaq_attach(struct device *parent, struct device *self, void *aux)
 
 bad:
 	DPRINTF(("uipaq_attach: ATTACH ERROR\n"));
-	sc->sc_dying = 1;
+	usbd_deactivate(sc->sc_udev);
 }
 
 
@@ -358,16 +356,13 @@ int
 uipaq_activate(struct device *self, int act)
 {
 	struct uipaq_softc *sc = (struct uipaq_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 int

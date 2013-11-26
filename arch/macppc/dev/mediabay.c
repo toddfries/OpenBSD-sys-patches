@@ -1,4 +1,4 @@
-/*	$OpenBSD: mediabay.c,v 1.4 2010/04/09 17:01:30 jasper Exp $	*/
+/*	$OpenBSD: mediabay.c,v 1.6 2013/11/18 20:21:51 deraadt Exp $	*/
 /*	$NetBSD: mediabay.c,v 1.9 2003/07/15 02:43:29 lukem Exp $	*/
 
 /*-
@@ -26,8 +26,6 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -225,7 +223,8 @@ mediabay_create_kthread(v)
 {
 	struct mediabay_softc *sc = v;
 
-	kthread_create(mediabay_kthread, sc, &sc->sc_kthread, "media-bay");
+	kthread_create(mediabay_kthread, sc, &sc->sc_kthread,
+	    sc->sc_dev.dv_xname);
 }
 
 void

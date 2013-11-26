@@ -1,4 +1,4 @@
-/*      $OpenBSD: ip6_divert.c,v 1.5 2010/07/03 04:44:51 guenther Exp $ */
+/*      $OpenBSD: ip6_divert.c,v 1.16 2013/11/22 07:59:09 mpi Exp $ */
 
 /*
  * Copyright (c) 2009 Michele Marchetto <michele@openbsd.org>
@@ -22,7 +22,6 @@
 #include <sys/protosw.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 
 #include <net/if.h>
@@ -32,14 +31,15 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/in_pcb.h>
 #include <netinet/ip6.h>
 #include <netinet6/in6_var.h>
-#include <netinet6/in6_var.h>
 #include <netinet6/ip6_divert.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+#include <netinet/icmp6.h>
 
 struct	inpcbtable	divb6table;
 struct	div6stat	div6stat;
@@ -88,8 +88,11 @@ divert6_output(struct mbuf *m, ...)
 	struct sockaddr_in6 *sin6;
 	struct socket *so;
 	struct ifaddr *ifa;
-	int s, error = 0;
+	int s, error = 0, p_hdrlen = 0, nxt = 0, off;
 	va_list ap;
+	struct ip6_hdr *ip6;
+	u_int16_t csum = 0;
+	size_t p_off = 0;
 
 	va_start(ap, m);
 	inp = va_arg(ap, struct inpcb *);
@@ -107,15 +110,65 @@ divert6_output(struct mbuf *m, ...)
 	sin6 = mtod(nam, struct sockaddr_in6 *);
 	so = inp->inp_socket;
 
+	/* Do basic sanity checks. */
+	if (m->m_pkthdr.len < sizeof(struct ip6_hdr))
+		goto fail;
+	if ((m = m_pullup(m, sizeof(struct ip6_hdr))) == NULL) {
+		/* m_pullup() has freed the mbuf, so just return. */
+		div6stat.divs_errors++;
+		return (ENOBUFS);
+	}
+	ip6 = mtod(m, struct ip6_hdr *);
+	if ((ip6->ip6_vfc & IPV6_VERSION_MASK) != IPV6_VERSION)
+		goto fail;
+	if (m->m_pkthdr.len < sizeof(struct ip6_hdr) + ntohs(ip6->ip6_plen))
+		goto fail;
+
+	/*
+	 * Recalculate the protocol checksum since the userspace application
+	 * may have modified the packet prior to reinjection.
+	 */
+	off = ip6_lasthdr(m, 0, IPPROTO_IPV6, &nxt);
+	if (off < sizeof(struct ip6_hdr))
+		goto fail;
+	switch (nxt) {
+	case IPPROTO_TCP:
+		p_hdrlen = sizeof(struct tcphdr);
+		p_off = offsetof(struct tcphdr, th_sum);
+		break;
+	case IPPROTO_UDP:
+		p_hdrlen = sizeof(struct udphdr);
+		p_off = offsetof(struct udphdr, uh_sum);
+		break;
+	case IPPROTO_ICMPV6:
+		p_hdrlen = sizeof(struct icmp6_hdr);
+		p_off = offsetof(struct icmp6_hdr, icmp6_cksum);
+		break;
+	default:
+		/* nothing */
+		break;
+	}
+	if (p_hdrlen) {
+		if (m->m_pkthdr.len < off + p_hdrlen)
+			goto fail;
+
+		if ((error = m_copyback(m, off + p_off, sizeof(csum), &csum, M_NOWAIT)))
+			goto fail;
+		csum = in6_cksum(m, nxt, off, m->m_pkthdr.len - off);
+		if (nxt == IPPROTO_UDP && csum == 0)
+			csum = 0xffff;
+		if ((error = m_copyback(m, off + p_off, sizeof(csum), &csum, M_NOWAIT)))
+			goto fail;
+	}
+
 	m->m_pkthdr.pf.flags |= PF_TAG_DIVERTED_PACKET;
 
 	if (!IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr)) {
 		ip6addr.sin6_addr = sin6->sin6_addr;
 		ifa = ifa_ifwithaddr(sin6tosa(&ip6addr), m->m_pkthdr.rdomain);
 		if (ifa == NULL) {
-			div6stat.divs_errors++;
-			m_freem(m);
-			return (EADDRNOTAVAIL);
+			error = EADDRNOTAVAIL;
+			goto fail;
 		}
 		m->m_pkthdr.rcvif = ifa->ifa_ifp;
 
@@ -133,29 +186,47 @@ divert6_output(struct mbuf *m, ...)
 
 	div6stat.divs_opackets++;
 	return (error);
+
+fail:
+	div6stat.divs_errors++;
+	m_freem(m);
+	return (error ? error : EINVAL);
 }
 
-void
+int
 divert6_packet(struct mbuf *m, int dir)
 {
 	struct inpcb *inp;
 	struct socket *sa = NULL;
 	struct sockaddr_in6 addr;
-	struct pf_divert *pd;
+	struct pf_divert *divert;
 
+	inp = NULL;
 	div6stat.divs_ipackets++;
 	
 	if (m->m_len < sizeof(struct ip6_hdr) &&
 	    (m = m_pullup(m, sizeof(struct ip6_hdr))) == NULL) {
 		div6stat.divs_errors++;
-		return;
+		return (0);
 	}
 
-	pd = pf_find_divert(m);
-	if (pd == NULL) {
+	divert = pf_find_divert(m);
+	if (divert == NULL) {
 		div6stat.divs_errors++;
 		m_freem(m);
-		return;
+		return (0);
+	}
+
+	CIRCLEQ_FOREACH(inp, &divb6table.inpt_queue, inp_queue) {
+		if (inp->inp_lport != divert->port)
+			continue;
+		if (inp->inp_divertfl == 0)
+			break;
+		if (dir == PF_IN && !(inp->inp_divertfl & IPPROTO_DIVERT_RESP))
+			return (-1);
+		if (dir == PF_OUT && !(inp->inp_divertfl & IPPROTO_DIVERT_INIT))
+			return (-1);
+		break;
 	}
 
 	bzero(&addr, sizeof(addr));
@@ -170,31 +241,29 @@ divert6_packet(struct mbuf *m, int dir)
 		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
-			addr.sin6_addr = ((struct sockaddr_in6 *)
-			    ifa->ifa_addr)->sin6_addr;
+			addr.sin6_addr = satosin6(ifa->ifa_addr)->sin6_addr;
 			break;
 		}
 	}
+	/* force checksum calculation */
+	if (dir == PF_OUT)
+		in6_proto_cksum_out(m, NULL);
 
-	CIRCLEQ_FOREACH(inp, &divb6table.inpt_queue, inp_queue) {
-		if (inp->inp_lport != pd->port)
-			continue;
-
+	if (inp != CIRCLEQ_END(&divb6table.inpt_queue)) {
 		sa = inp->inp_socket;
-		if (sbappendaddr(&sa->so_rcv, (struct sockaddr *)&addr, 
-		    m, NULL) == 0) {
+		if (sbappendaddr(&sa->so_rcv, sin6tosa(&addr), m, NULL) == 0) {
 			div6stat.divs_fullsock++;
 			m_freem(m);
-			return;
+			return (0);
 		} else
 			sorwakeup(inp->inp_socket);
-		break;
 	}
 
 	if (sa == NULL) {
 		div6stat.divs_noport++;
 		m_freem(m);
 	}
+	return (0);
 }
 
 /*ARGSUSED*/
@@ -208,7 +277,7 @@ divert6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 
 	if (req == PRU_CONTROL) {
 		return (in6_control(so, (u_long)m, (caddr_t)addr,
-		    (struct ifnet *)control, p));
+		    (struct ifnet *)control));
 	}
 	if (inp == NULL && req != PRU_ATTACH) {
 		error = EINVAL;
@@ -234,7 +303,7 @@ divert6_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 		error = soreserve(so, divert6_sendspace, divert6_recvspace);
 		if (error)
 			break;
-		((struct inpcb *) so->so_pcb)->inp_flags |= INP_HDRINCL;
+		sotoinpcb(so)->inp_flags |= INP_HDRINCL;
 		break;
 
 	case PRU_DETACH:

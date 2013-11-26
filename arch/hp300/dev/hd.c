@@ -1,4 +1,4 @@
-/*	$OpenBSD: hd.c,v 1.69 2011/07/06 04:49:35 matthew Exp $	*/
+/*	$OpenBSD: hd.c,v 1.75 2013/11/20 05:19:29 miod Exp $	*/
 /*	$NetBSD: rd.c,v 1.33 1997/07/10 18:14:08 kleink Exp $	*/
 
 /*
@@ -294,6 +294,7 @@ hdattach(parent, self, aux)
 	 */
 	sc->sc_dkdev.dk_name = sc->sc_dev.dv_xname;
 	disk_attach(&sc->sc_dev, &sc->sc_dkdev);
+	bufq_init(&sc->sc_bufq, BUFQ_DEFAULT);
 
 	sc->sc_slave = ha->ha_slave;
 	sc->sc_punit = ha->ha_punit;
@@ -541,7 +542,7 @@ hdopen(dev, flags, mode, p)
 	 */
 	if (!ISSET(rs->sc_dkdev.dk_flags, DKF_CONSTRUCTED)) {
 		device_unref(&rs->sc_dev);
-		return (error);
+		return (ENXIO);
 	}
 
 	if ((error = disk_lock(&rs->sc_dkdev)) != 0) {
@@ -630,9 +631,9 @@ hdclose(dev, flag, mode, p)
 	if (dk->dk_openmask == 0) {
 		rs->sc_flags |= HDF_CLOSING;
 		s = splbio();
-		while (rs->sc_tab.b_active) {
+		while (rs->sc_bp == NULL) {
 			rs->sc_flags |= HDF_WANTED;
-			tsleep((caddr_t)&rs->sc_tab, PRIBIO, "hdclose", 0);
+			tsleep((caddr_t)&rs->sc_bp, PRIBIO, "hdclose", 0);
 		}
 		splx(s);
 		rs->sc_flags &= ~(HDF_CLOSING);
@@ -649,7 +650,6 @@ hdstrategy(bp)
 {
 	int unit = DISKUNIT(bp->b_dev);
 	struct hd_softc *rs;
-	struct buf *dp;
 	int s;
 
 	rs = hdlookup(unit);
@@ -669,11 +669,11 @@ hdstrategy(bp)
 	if (bounds_check_with_label(bp, rs->sc_dkdev.dk_label) == -1)
 		goto done;
 
+	bufq_queue(&rs->sc_bufq, bp);
+
 	s = splbio();
- 	dp = &rs->sc_tab;
-	disksort(dp, bp);
-	if (dp->b_active == 0) {
-		dp->b_active = 1;
+	if (rs->sc_bp == NULL) {
+		rs->sc_bp = bufq_dequeue(&rs->sc_bufq);
 		hdustart(rs);
 	}
 	splx(s);
@@ -710,7 +710,7 @@ hdustart(rs)
 {
 	struct buf *bp;
 
-	bp = rs->sc_tab.b_actf;
+	bp = rs->sc_bp;
 	rs->sc_addr = bp->b_data;
 	rs->sc_resid = bp->b_bcount;
 	if (hpibreq(rs->sc_dev.dv_parent, &rs->sc_hq))
@@ -722,24 +722,23 @@ hdfinish(rs, bp)
 	struct hd_softc *rs;
 	struct buf *bp;
 {
-	struct buf *dp = &rs->sc_tab;
 	int s;
 
 	rs->sc_errcnt = 0;
-	dp->b_actf = bp->b_actf;
 	bp->b_resid = 0;
 	s = splbio();
 	biodone(bp);
 	splx(s);
+
 	hpibfree(rs->sc_dev.dv_parent, &rs->sc_hq);
-	if (dp->b_actf)
-		return (dp->b_actf);
-	dp->b_active = 0;
-	if (rs->sc_flags & HDF_WANTED) {
+	rs->sc_bp = bufq_dequeue(&rs->sc_bufq);
+
+	if (rs->sc_bp == NULL && rs->sc_flags & HDF_WANTED) {
 		rs->sc_flags &= ~HDF_WANTED;
-		wakeup((caddr_t)dp);
+		wakeup((caddr_t)&rs->sc_bp);
 	}
-	return (NULL);
+
+	return (rs->sc_bp);
 }
 
 void
@@ -748,9 +747,9 @@ hdstart(arg)
 {
 	struct hd_softc *rs = arg;
 	struct disklabel *lp;
-	struct buf *bp = rs->sc_tab.b_actf;
+	struct buf *bp = rs->sc_bp;
 	int ctlr, slave;
-	daddr64_t bn;
+	daddr_t bn;
 
 	ctlr = rs->sc_dev.dv_parent->dv_unit;
 	slave = rs->sc_slave;
@@ -831,7 +830,7 @@ hdgo(arg)
 	void *arg;
 {
 	struct hd_softc *rs = arg;
-	struct buf *bp = rs->sc_tab.b_actf;
+	struct buf *bp = rs->sc_bp;
 	int rw, ctlr, slave;
 
 	ctlr = rs->sc_dev.dv_parent->dv_unit;
@@ -855,7 +854,7 @@ hdinterrupt(arg)
 {
 	struct hd_softc *rs = arg;
 	int unit = rs->sc_dev.dv_unit;
-	struct buf *bp = rs->sc_tab.b_actf;
+	struct buf *bp = rs->sc_bp;
 	u_char stat = 13;	/* in case hpibrecv fails */
 	int rv, restart, ctlr, slave;
 
@@ -976,7 +975,7 @@ hderror(unit)
 	struct hd_softc *rs = hd_cd.cd_devs[unit];
 	struct hd_stat *sp;
 	struct buf *bp;
-	daddr64_t hwbn, pbn;
+	daddr_t hwbn, pbn;
 
 	if (hdstatus(rs)) {
 #ifdef DEBUG
@@ -1025,7 +1024,7 @@ hderror(unit)
 	 * Note that not all errors report a block number, in that case
 	 * we just use b_blkno.
  	 */
-	bp = rs->sc_tab.b_actf;
+	bp = rs->sc_bp;
 	pbn = DL_GETPOFFSET(&rs->sc_dkdev.dk_label->d_partitions[DISKPART(bp->b_dev)]);
 	if ((sp->c_fef & FEF_CU) || (sp->c_fef & FEF_DR) ||
 	    (sp->c_ief & IEF_RRMASK)) {
@@ -1049,7 +1048,7 @@ hderror(unit)
 		hdprinterr("fault", sp->c_fef, err_fault);
 		hdprinterr("access", sp->c_aef, err_access);
 		hdprinterr("info", sp->c_ief, err_info);
-		printf("    block: %lld, P1-P10: ", hwbn);
+		printf("    block: %lld, P1-P10: ", (long long)hwbn);
 		printf("0x%04x", *(u_int *)&sp->c_raw[0]);
 		printf("%04x", *(u_int *)&sp->c_raw[4]);
 		printf("%02x\n", *(u_short *)&sp->c_raw[8]);
@@ -1164,14 +1163,14 @@ exit:
 	return (error);
 }
 
-daddr64_t
+daddr_t
 hdsize(dev)
 	dev_t dev;
 {
 	struct hd_softc *rs;
 	int unit = DISKUNIT(dev);
 	int part, omask;
-	int size;
+	daddr_t size;
 
 	rs = hdlookup(unit);
 	if (rs == NULL)
@@ -1233,13 +1232,13 @@ static int hddoingadump;	/* simple mutex */
 int
 hddump(dev, blkno, va, size)
 	dev_t dev;
-	daddr64_t blkno;
+	daddr_t blkno;
 	caddr_t va;
 	size_t size;
 {
 	int sectorsize;		/* size of a disk sector */
-	daddr64_t nsects;	/* number of sectors in partition */
-	daddr64_t sectoff;	/* sector offset of partition */
+	daddr_t nsects;	/* number of sectors in partition */
+	daddr_t sectoff;	/* sector offset of partition */
 	int totwrt;		/* total number of sectors left to write */
 	int nwrt;		/* current number of sectors to write */
 	int unit, part;

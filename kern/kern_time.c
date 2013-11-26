@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_time.c,v 1.73 2012/03/19 09:05:39 guenther Exp $	*/
+/*	$OpenBSD: kern_time.c,v 1.85 2013/10/25 04:42:48 guenther Exp $	*/
 /*	$NetBSD: kern_time.c,v 1.20 1996/02/18 11:57:06 fvdl Exp $	*/
 
 /*
@@ -40,26 +40,13 @@
 #include <sys/ktrace.h>
 #include <sys/vnode.h>
 #include <sys/signalvar.h>
-#ifdef __HAVE_TIMECOUNTER
 #include <sys/timetc.h>
-#endif
 
 #include <sys/mount.h>
 #include <sys/syscallargs.h>
 
-#include <machine/cpu.h>
 
-#ifdef __HAVE_TIMECOUNTER
 struct timeval adjtimedelta;		/* unapplied time correction */
-#else
-int	tickdelta;			/* current clock skew, us. per tick */
-long	timedelta;			/* unapplied time correction, us. */
-long	bigadj = 1000000;		/* use 10x skew above bigadj us. */
-int64_t	ntp_tick_permanent;
-int64_t	ntp_tick_acc;
-#endif
-
-void	itimerround(struct timeval *);
 
 /* 
  * Time of day and interval timer support.
@@ -72,7 +59,6 @@ void	itimerround(struct timeval *);
  */
 
 /* This function is used by clock_settime and settimeofday */
-#ifdef __HAVE_TIMECOUNTER
 int
 settime(struct timespec *ts)
 {
@@ -93,13 +79,12 @@ settime(struct timespec *ts)
 	 * the time past the cutoff, it will take a very long time
 	 * to get to the wrap point.
 	 *
-	 * XXX: we check against INT_MAX since on 64-bit
-	 *	platforms, sizeof(int) != sizeof(long) and
-	 *	time_t is 32 bits even when atv.tv_sec is 64 bits.
+	 * XXX: we check against UINT_MAX until we can figure out
+	 *	how to deal with the hardware RTCs.
 	 */
-	if (ts->tv_sec > INT_MAX - 365*24*60*60) {
-		printf("denied attempt to set clock forward to %ld\n",
-		    ts->tv_sec);
+	if (ts->tv_sec > UINT_MAX - 365*24*60*60) {
+		printf("denied attempt to set clock forward to %lld\n",
+		    (long long)ts->tv_sec);
 		return (EPERM);
 	}
 	/*
@@ -110,98 +95,56 @@ settime(struct timespec *ts)
 	 */
 	nanotime(&now);
 	if (securelevel > 1 && timespeccmp(ts, &now, <)) {
-		printf("denied attempt to set clock back %ld seconds\n",
-		    now.tv_sec - ts->tv_sec);
+		printf("denied attempt to set clock back %lld seconds\n",
+		    (long long)now.tv_sec - ts->tv_sec);
 		return (EPERM);
 	}
 
-	tc_setclock(ts);
+	tc_setrealtimeclock(ts);
 	resettodr();
 
 	return (0);
 }
-#else
-int
-settime(struct timespec *ts)
-{
-	struct timeval delta, tvv, *tv;
-	int s;
-
-	/* XXX - Ugh. */
-	tv = &tvv;
-	tvv.tv_sec = ts->tv_sec;
-	tvv.tv_usec = ts->tv_nsec / 1000;
-
-	/*
-	 * Don't allow the time to be set forward so far it will wrap
-	 * and become negative, thus allowing an attacker to bypass
-	 * the next check below.  The cutoff is 1 year before rollover
-	 * occurs, so even if the attacker uses adjtime(2) to move
-	 * the time past the cutoff, it will take a very long time
-	 * to get to the wrap point.
-	 *
-	 * XXX: we check against INT_MAX since on 64-bit
-	 *	platforms, sizeof(int) != sizeof(long) and
-	 *	time_t is 32 bits even when atv.tv_sec is 64 bits.
-	 */
-	if (tv->tv_sec > INT_MAX - 365*24*60*60) {
-		printf("denied attempt to set clock forward to %ld\n",
-		    tv->tv_sec);
-		return (EPERM);
-	}
-	/*
-	 * If the system is secure, we do not allow the time to be
-	 * set to an earlier value (it may be slowed using adjtime,
-	 * but not set back). This feature prevent interlopers from
-	 * setting arbitrary time stamps on files.
-	 */
-	if (securelevel > 1 && timercmp(tv, &time, <)) {
-		printf("denied attempt to set clock back %ld seconds\n",
-		    time_second - tv->tv_sec);
-		return (EPERM);
-	}
-
-	/* WHAT DO WE DO ABOUT PENDING REAL-TIME TIMEOUTS??? */
-	s = splclock();
-	timersub(tv, &time, &delta);
-	time = *tv;
-	timeradd(&boottime, &delta, &boottime);
-
-	/*
-	 * Adjtime in progress is meaningless or harmful after
-	 * setting the clock.
-	 */
-	tickdelta = 0;
-	timedelta = 0;
-
-	splx(s);
-	resettodr();
-
-	return (0);
-}
-#endif
 
 int
 clock_gettime(struct proc *p, clockid_t clock_id, struct timespec *tp)
 {
-	struct timeval tv;
+	struct bintime bt;
+	struct proc *q;
 
 	switch (clock_id) {
 	case CLOCK_REALTIME:
 		nanotime(tp);
 		break;
+	case CLOCK_UPTIME:
+		binuptime(&bt);
+		bintime_sub(&bt, &naptime);
+		bintime2timespec(&bt, tp);
+		break;
 	case CLOCK_MONOTONIC:
 		nanouptime(tp);
 		break;
-	case CLOCK_PROF:
-		microuptime(&tv);
-		timersub(&tv, &curcpu()->ci_schedstate.spc_runtime, &tv);
-		timeradd(&tv, &p->p_rtime, &tv);
-		tp->tv_sec = tv.tv_sec;
-		tp->tv_nsec = tv.tv_usec * 1000;
+	case CLOCK_PROCESS_CPUTIME_ID:
+		nanouptime(tp);
+		timespecsub(tp, &curcpu()->ci_schedstate.spc_runtime, tp);
+		timespecadd(tp, &p->p_p->ps_tu.tu_runtime, tp);
+		timespecadd(tp, &p->p_rtime, tp);
+		break;
+	case CLOCK_THREAD_CPUTIME_ID:
+		nanouptime(tp);
+		timespecsub(tp, &curcpu()->ci_schedstate.spc_runtime, tp);
+		timespecadd(tp, &p->p_tu.tu_runtime, tp);
+		timespecadd(tp, &p->p_rtime, tp);
 		break;
 	default:
-		return (EINVAL);
+		/* check for clock from pthread_getcpuclockid() */
+		if (__CLOCK_TYPE(clock_id) == CLOCK_THREAD_CPUTIME_ID) {
+			q = pfind(__CLOCK_PTID(clock_id) - THREAD_PID_OFFSET);
+			if (q == NULL || q->p_p != p->p_p)
+				return (ESRCH);
+			*tp = q->p_tu.tu_runtime;
+		} else
+			return (EINVAL);
 	}
 	return (0);
 }
@@ -271,17 +214,29 @@ sys_clock_getres(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	clockid_t clock_id;
 	struct timespec ts;
+	struct proc *q;
 	int error = 0;
 
 	clock_id = SCARG(uap, clock_id);
 	switch (clock_id) {
 	case CLOCK_REALTIME:
 	case CLOCK_MONOTONIC:
+	case CLOCK_UPTIME:
+	case CLOCK_PROCESS_CPUTIME_ID:
+	case CLOCK_THREAD_CPUTIME_ID:
 		ts.tv_sec = 0;
 		ts.tv_nsec = 1000000000 / hz;
 		break;
 	default:
-		return (EINVAL);
+		/* check for clock from pthread_getcpuclockid() */
+		if (__CLOCK_TYPE(clock_id) == CLOCK_THREAD_CPUTIME_ID) {
+			q = pfind(__CLOCK_PTID(clock_id) - THREAD_PID_OFFSET);
+			if (q == NULL || q->p_p != p->p_p)
+				return (ESRCH);
+			ts.tv_sec = 0;
+			ts.tv_nsec = 1000000000 / hz;
+		} else
+			return (EINVAL);
 	}
 
 	if (SCARG(uap, tp)) {
@@ -444,24 +399,6 @@ sys_adjfreq(struct proc *p, void *v, register_t *retval)
 	int64_t f;
 	const int64_t *freq = SCARG(uap, freq);
 	int64_t *oldfreq = SCARG(uap, oldfreq);
-#ifndef __HAVE_TIMECOUNTER
-	int s;
-
-	if (oldfreq) {
-		f = ntp_tick_permanent * hz;
-		if ((error = copyout(&f, oldfreq, sizeof(int64_t))))
-			return (error);
-	}
-	if (freq) {
-		if ((error = suser(p, 0)))
-			return (error);
-		if ((error = copyin(freq, &f, sizeof(int64_t))))
-			return (error);
-		s = splclock();
-		ntp_tick_permanent = f / hz;
-		splx(s);
-	}
-#else
 	if (oldfreq) {
 		if ((error = tc_adjfreq(&f, NULL)))
 			return (error);
@@ -476,7 +413,6 @@ sys_adjfreq(struct proc *p, void *v, register_t *retval)
 		if ((error = tc_adjfreq(NULL, &f)))
 			return (error);
 	}
-#endif
 	return (0);
 }
 
@@ -490,7 +426,6 @@ sys_adjtime(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 	const struct timeval *delta = SCARG(uap, delta);
 	struct timeval *olddelta = SCARG(uap, olddelta);
-#ifdef __HAVE_TIMECOUNTER
 	int error;
 
 	if (olddelta)
@@ -517,83 +452,15 @@ sys_adjtime(struct proc *p, void *v, register_t *retval)
 		adjtimedelta.tv_sec -= 1;
 	}
 	return (0);
-#else
-	struct timeval atv;
-	long ndelta, ntickdelta, odelta;
-	int s, error;
-
-	if (!delta) {
-		s = splclock();
-		odelta = timedelta;
-		splx(s);
-		goto out;
-	}
-	if ((error = suser(p, 0)))
-		return (error);
-	if ((error = copyin(delta, &atv, sizeof(struct timeval))))
-		return (error);
-
-	/*
-	 * Compute the total correction and the rate at which to apply it.
-	 * Round the adjustment down to a whole multiple of the per-tick
-	 * delta, so that after some number of incremental changes in
-	 * hardclock(), tickdelta will become zero, lest the correction
-	 * overshoot and start taking us away from the desired final time.
-	 */
-	if (atv.tv_sec > LONG_MAX / 1000000L)
-		ndelta = LONG_MAX;
-	else if (atv.tv_sec < LONG_MIN / 1000000L)
-		ndelta = LONG_MIN;
-	else {
-		ndelta = atv.tv_sec * 1000000L;
-		odelta = ndelta;
-		ndelta += atv.tv_usec;
-		if (atv.tv_usec > 0 && ndelta <= odelta)
-			ndelta = LONG_MAX;
-		else if (atv.tv_usec < 0 && ndelta >= odelta)
-			ndelta = LONG_MIN;
-	}
-
-	if (ndelta > bigadj || ndelta < -bigadj)
-		ntickdelta = 10 * tickadj;
-	else
-		ntickdelta = tickadj;
-	if (ndelta % ntickdelta)
-		ndelta = ndelta / ntickdelta * ntickdelta;
-
-	/*
-	 * To make hardclock()'s job easier, make the per-tick delta negative
-	 * if we want time to run slower; then hardclock can simply compute
-	 * tick + tickdelta, and subtract tickdelta from timedelta.
-	 */
-	if (ndelta < 0)
-		ntickdelta = -ntickdelta;
-	s = splclock();
-	odelta = timedelta;
-	timedelta = ndelta;
-	tickdelta = ntickdelta;
-	splx(s);
-
-out:
-	if (olddelta) {
-		atv.tv_sec = odelta / 1000000;
-		atv.tv_usec = odelta % 1000000;
-		if ((error = copyout(&atv, olddelta, sizeof(struct timeval))))
-			return (error);
-	}
-	return (0);
-#endif
 }
 
 
 /*
  * Get value of an interval timer.  The process virtual and
- * profiling virtual time timers are kept in the p_stats area, since
- * they can be swapped out.  These are kept internally in the
+ * profiling virtual time timers are kept internally in the
  * way they are specified externally: in time until they expire.
  *
- * The real time interval timer is kept in the process table slot
- * for the process, and its value (it_value) is kept as an
+ * The real time interval timer's it_value, in contast, is kept as an 
  * absolute time rather than as a delta, so that it is easy to keep
  * periodic real-time signals from drifting.
  *
@@ -624,6 +491,8 @@ sys_getitimer(struct proc *p, void *v, register_t *retval)
 	if (which < ITIMER_REAL || which > ITIMER_PROF)
 		return (EINVAL);
 	s = splclock();
+	aitv = p->p_p->ps_timer[which];
+
 	if (which == ITIMER_REAL) {
 		struct timeval now;
 
@@ -634,7 +503,6 @@ sys_getitimer(struct proc *p, void *v, register_t *retval)
 		 * has passed return 0, else return difference between
 		 * current time and time for the timer to go off.
 		 */
-		aitv = p->p_realtimer;
 		if (timerisset(&aitv.it_value)) {
 			if (timercmp(&aitv.it_value, &now, <))
 				timerclear(&aitv.it_value);
@@ -642,8 +510,7 @@ sys_getitimer(struct proc *p, void *v, register_t *retval)
 				timersub(&aitv.it_value, &now,
 				    &aitv.it_value);
 		}
-	} else
-		aitv = p->p_stats->p_timer[which];
+	}
 	splx(s);
 	return (copyout(&aitv, SCARG(uap, itv), sizeof (struct itimerval)));
 }
@@ -661,6 +528,7 @@ sys_setitimer(struct proc *p, void *v, register_t *retval)
 	struct itimerval aitv;
 	const struct itimerval *itvp;
 	struct itimerval *oitv;
+	struct process *pr = p->p_p;
 	int error;
 	int timo;
 	int which;
@@ -687,24 +555,20 @@ sys_setitimer(struct proc *p, void *v, register_t *retval)
 	if (which == ITIMER_REAL) {
 		struct timeval ctv;
 
-		timeout_del(&p->p_realit_to);
+		timeout_del(&pr->ps_realit_to);
 		getmicrouptime(&ctv);
 		if (timerisset(&aitv.it_value)) {
 			timo = tvtohz(&aitv.it_value);
-			timeout_add(&p->p_realit_to, timo);
+			timeout_add(&pr->ps_realit_to, timo);
 			timeradd(&aitv.it_value, &ctv, &aitv.it_value);
 		}
-		p->p_realtimer = aitv;
+		pr->ps_timer[ITIMER_REAL] = aitv;
 	} else {
 		int s;
 
 		itimerround(&aitv.it_interval);
 		s = splclock();
-		p->p_stats->p_timer[which] = aitv;
-		if (which == ITIMER_VIRTUAL)
-			timeout_del(&p->p_stats->p_virt_to);
-		if (which == ITIMER_PROF)
-			timeout_del(&p->p_stats->p_prof_to);
+		pr->ps_timer[which] = aitv;
 		splx(s);
 	}
 
@@ -722,29 +586,28 @@ sys_setitimer(struct proc *p, void *v, register_t *retval)
 void
 realitexpire(void *arg)
 {
-	struct proc *p;
+	struct process *pr = arg;
+	struct itimerval *tp = &pr->ps_timer[ITIMER_REAL];
 
-	p = (struct proc *)arg;
-	psignal(p, SIGALRM);
-	if (!timerisset(&p->p_realtimer.it_interval)) {
-		timerclear(&p->p_realtimer.it_value);
+	psignal(pr->ps_mainproc, SIGALRM);
+	if (!timerisset(&tp->it_interval)) {
+		timerclear(&tp->it_value);
 		return;
 	}
 	for (;;) {
 		struct timeval ctv, ntv;
 		int timo;
 
-		timeradd(&p->p_realtimer.it_value,
-		    &p->p_realtimer.it_interval, &p->p_realtimer.it_value);
+		timeradd(&tp->it_value, &tp->it_interval, &tp->it_value);
 		getmicrouptime(&ctv);
-		if (timercmp(&p->p_realtimer.it_value, &ctv, >)) {
-			ntv = p->p_realtimer.it_value;
+		if (timercmp(&tp->it_value, &ctv, >)) {
+			ntv = tp->it_value;
 			timersub(&ntv, &ctv, &ntv);
 			timo = tvtohz(&ntv) - 1;
 			if (timo <= 0)
 				timo = 1;
-			if ((p->p_p->ps_flags & PS_EXITING) == 0)
-				timeout_add(&p->p_realit_to, timo);
+			if ((pr->ps_flags & PS_EXITING) == 0)
+				timeout_add(&pr->ps_realit_to, timo);
 			return;
 		}
 	}
@@ -911,3 +774,4 @@ ppsratecheck(struct timeval *lasttime, int *curpps, int maxpps)
 
 	return (rv);
 }
+

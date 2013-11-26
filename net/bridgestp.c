@@ -1,4 +1,4 @@
-/*	$OpenBSD: bridgestp.c,v 1.40 2011/07/09 04:53:33 henning Exp $	*/
+/*	$OpenBSD: bridgestp.c,v 1.46 2013/10/20 08:48:39 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2000 Jason L. Wright (jason@thought.net)
@@ -32,10 +32,6 @@
  * ISO/IEC 802.1D-2004, June 9, 2004.
  */
 
-#if 0
-__FBSDID("$FreeBSD: /repoman/r/ncvs/src/sys/net/bridgestp.c,v 1.25 2006/11/03 03:34:04 thompsa Exp $");
-#endif
-
 #include "bridge.h"
 
 #if NBRIDGE > 0
@@ -60,7 +56,6 @@ __FBSDID("$FreeBSD: /repoman/r/ncvs/src/sys/net/bridgestp.c,v 1.25 2006/11/03 03
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -594,7 +589,7 @@ bstp_pdu_flags(struct bstp_port *bp)
 	return (flags);
 }
 
-void
+struct mbuf *
 bstp_input(struct bstp_state *bs, struct bstp_port *bp,
     struct ether_header *eh, struct mbuf *m)
 {
@@ -602,7 +597,7 @@ bstp_input(struct bstp_state *bs, struct bstp_port *bp,
 	u_int16_t len;
 
 	if (bs == NULL || bp == NULL || bp->bp_active == 0)
-		goto out;
+		return (m);
 
 	len = ntohs(eh->ether_type);
 	if (len < sizeof(tpdu))
@@ -654,6 +649,7 @@ bstp_input(struct bstp_state *bs, struct bstp_port *bp,
  out:
 	if (m)
 		m_freem(m);
+	return (NULL);
 }
 
 void
@@ -1640,7 +1636,6 @@ void
 bstp_ifstate(void *arg)
 {
 	struct ifnet *ifp = (struct ifnet *)arg;
-	struct bridge_softc *sc;
 	struct bridge_iflist *p;
 	struct bstp_port *bp;
 	struct bstp_state *bs;
@@ -1648,16 +1643,11 @@ bstp_ifstate(void *arg)
 
 	if (ifp->if_type == IFT_BRIDGE)
 		return;
-	sc = (struct bridge_softc *)ifp->if_bridge;
 
 	s = splnet();
-	LIST_FOREACH(p, &sc->sc_iflist, next) {
-		if ((p->bif_flags & IFBIF_STP) == 0)
-			continue;
-		if (p->ifp == ifp)
-			break;
-	}
-	if (p == LIST_END(&sc->sc_iflist))
+	if ((p = (struct bridge_iflist *)ifp->if_bridgeport) == NULL)
+		goto done;
+	if ((p->bif_flags & IFBIF_STP) == 0)
 		goto done;
 	if ((bp = p->bif_stp) == NULL)
 		goto done;
@@ -2120,7 +2110,7 @@ bstp_ifsflags(struct bstp_port *bp, u_int flags)
 int
 bstp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
-	struct bridge_softc *sc = (struct bridge_softc *)ifp;
+	struct bridge_softc *sc = (struct bridge_softc *)ifp->if_softc;
 	struct bstp_state *bs = sc->sc_stp;
 	struct ifbrparam *ifbp = (struct ifbrparam *)data;
 	struct ifbreq *ifbr = (struct ifbreq *)data;
@@ -2137,15 +2127,8 @@ bstp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			err = ENOENT;
 			break;
 		}
-		if ((caddr_t)sc != ifs->if_bridge) {
-			err = ESRCH;
-			break;
-		}
-		LIST_FOREACH(p, &sc->sc_iflist, next) {
-			if (p->ifp == ifs)
-				break;
-		}
-		if (p == LIST_END(&sc->sc_iflist)) {
+		p = (struct bridge_iflist *)ifs->if_bridgeport;
+		if (p == NULL || p->bridge_sc != sc) {
 			err = ESRCH;
 			break;
 		}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: azalia.c,v 1.199 2011/09/19 07:36:59 kettenis Exp $	*/
+/*	$OpenBSD: azalia.c,v 1.207 2013/11/09 05:51:11 jsg Exp $	*/
 /*	$NetBSD: azalia.c,v 1.20 2006/05/07 08:31:44 kent Exp $	*/
 
 /*-
@@ -397,6 +397,7 @@ azalia_configure_pci(azalia_t *az)
 	switch (PCI_PRODUCT(az->pciid)) {
 	case PCI_PRODUCT_ATI_SB450_HDA:
 	case PCI_PRODUCT_ATI_SBX00_HDA:
+	case PCI_PRODUCT_AMD_HUDSON2_HDA:
 		reg = azalia_pci_read(az->pc, az->tag, ATI_PCIE_SNOOP_REG);
 		reg &= ATI_PCIE_SNOOP_MASK;
 		reg |= ATI_PCIE_SNOOP_ENABLE;
@@ -460,6 +461,8 @@ azalia_configure_pci(azalia_t *az)
 	case PCI_PRODUCT_INTEL_3400_HDA:
 	case PCI_PRODUCT_INTEL_QS57_HDA:
 	case PCI_PRODUCT_INTEL_6SERIES_HDA:
+	case PCI_PRODUCT_INTEL_7SERIES_HDA:
+	case PCI_PRODUCT_INTEL_8SERIES_HDA:
 		reg = azalia_pci_read(az->pc, az->tag,
 		    INTEL_PCIE_NOSNOOP_REG);
 		reg &= INTEL_PCIE_NOSNOOP_MASK;
@@ -496,6 +499,8 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->dmat = pa->pa_dmat;
 
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
+
 	v = pci_conf_read(pa->pa_pc, pa->pa_tag, ICH_PCI_HDBARL);
 	v &= PCI_MAPREG_TYPE_MASK | PCI_MAPREG_MEM_TYPE_MASK;
 	if (pci_mapreg_map(pa, ICH_PCI_HDBARL, v, 0,
@@ -524,8 +529,8 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	interrupt_str = pci_intr_string(pa->pa_pc, ih);
-	sc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO, azalia_intr,
-	    sc, sc->dev.dv_xname);
+	sc->ih = pci_intr_establish(pa->pa_pc, ih, IPL_AUDIO | IPL_MPSAFE,
+	    azalia_intr, sc, sc->dev.dv_xname);
 	if (sc->ih == NULL) {
 		printf(": can't establish interrupt");
 		if (interrupt_str != NULL)
@@ -546,8 +551,6 @@ azalia_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	sc->audiodev = audio_attach_mi(&azalia_hw_if, sc, &sc->dev);
 
-	shutdownhook_establish(azalia_shutdown, sc);
-
 	return;
 
 err_exit:
@@ -567,6 +570,9 @@ azalia_pci_activate(struct device *self, int act)
 		break;
 	case DVACT_SUSPEND:
 		azalia_suspend(sc);
+		break;
+	case DVACT_POWERDOWN:
+		azalia_shutdown(sc);
 		break;
 	case DVACT_RESUME:
 		azalia_resume(sc);
@@ -661,16 +667,39 @@ azalia_pci_detach(struct device *self, int flags)
 	return 0;
 }
 
+/*
+#define AZALIA_LOG_MP
+*/
+#ifdef AZALIA_LOG_MP
+#include <machine/lock.h>
+#include <machine/cpufunc.h>
+#endif
+
 int
 azalia_intr(void *v)
 {
+#ifdef AZALIA_LOG_MP
+	volatile struct cpu_info *ci;
+#endif
 	azalia_t *az = v;
 	uint32_t intsts;
 	int ret = 0;
 
+#ifdef AZALIA_LOG_MP
+	ci = kernel_lock.mpl_cpu;
+	if (ci == NULL)
+		printf("azalia_intr: mp not held\n");
+	else {
+		printf("azalia_intr: lock held by %p, id = %u\n",
+		    ci, ci->ci_cpuid);
+	}
+#endif
+	mtx_enter(&audio_lock);
 	intsts = AZ_READ_4(az, INTSTS);
-	if (intsts == 0 || intsts == 0xffffffff)
+	if (intsts == 0 || intsts == 0xffffffff) {
+		mtx_leave(&audio_lock);
 		return (ret);
+	}
 
 	AZ_WRITE_4(az, INTSTS, intsts);
 
@@ -690,7 +719,7 @@ azalia_intr(void *v)
 		azalia_rirb_intr(az);
 		ret = 1;
 	}
-
+	mtx_leave(&audio_lock);
 	return (ret);
 }
 
@@ -1139,17 +1168,16 @@ int
 azalia_comresp(const codec_t *codec, nid_t nid, uint32_t control,
     uint32_t param, uint32_t* result)
 {
-	int err, s;
+	int err;
 
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	err = azalia_set_command(codec->az, codec->address, nid, control,
 	    param);
 	if (err)
 		goto exit;
 	err = azalia_get_response(codec->az, result);
 exit:
-	splx(s);
-
+	mtx_leave(&audio_lock);
 	return(err);
 }
 
@@ -3759,7 +3787,6 @@ azalia_stream_start(stream_t *this)
 	STR_WRITE_1(this, CTL, STR_READ_1(this, CTL) |
 	    HDA_SD_CTL_DEIE | HDA_SD_CTL_FEIE | HDA_SD_CTL_IOCE |
 	    HDA_SD_CTL_RUN);
-
 	return (0);
 }
 
@@ -4321,36 +4348,45 @@ azalia_params2fmt(const audio_params_t *param, uint16_t *fmt)
 		break;
 	}
 
-	if (param->sample_rate == 384000) {
-		printf("%s: invalid sample_rate: %u\n", __func__,
+	switch (param->sample_rate) {
+	default:
+	case 384000:
+		printf("%s: invalid sample_rate: %lu\n", __func__,
 		    param->sample_rate);
 		return EINVAL;
-	} else if (param->sample_rate == 192000) {
+	case 192000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X4 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 176400) {
+		break;
+	case 176400:
 		ret |= HDA_SD_FMT_BASE_44 | HDA_SD_FMT_MULT_X4 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 96000) {
+		break;
+	case 96000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X2 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 88200) {
+		break;
+	case 88200:
 		ret |= HDA_SD_FMT_BASE_44 | HDA_SD_FMT_MULT_X2 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 48000) {
+		break;
+	case 48000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 44100) {
+		break;
+	case 44100:
 		ret |= HDA_SD_FMT_BASE_44 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY1;
-	} else if (param->sample_rate == 32000) {
+		break;
+	case 32000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X2 | HDA_SD_FMT_DIV_BY3;
-	} else if (param->sample_rate == 22050) {
+		break;
+	case 22050:
 		ret |= HDA_SD_FMT_BASE_44 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY2;
-	} else if (param->sample_rate == 16000) {
+		break;
+	case 16000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY3;
-	} else if (param->sample_rate == 11025) {
+		break;
+	case 11025:
 		ret |= HDA_SD_FMT_BASE_44 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY4;
-	} else if (param->sample_rate == 8000) {
+		break;
+	case 8000:
 		ret |= HDA_SD_FMT_BASE_48 | HDA_SD_FMT_MULT_X1 | HDA_SD_FMT_DIV_BY6;
-	} else {
-		printf("%s: invalid sample_rate: %u\n", __func__,
-		    param->sample_rate);
-		return EINVAL;
+		break;
 	}
 	*fmt = ret;
 	return 0;

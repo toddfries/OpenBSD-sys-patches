@@ -1,4 +1,4 @@
-/*	$OpenBSD: bios.c,v 1.93 2012/01/13 12:55:52 jsing Exp $	*/
+/*	$OpenBSD: bios.c,v 1.103 2013/11/02 15:02:27 kettenis Exp $	*/
 
 /*
  * Copyright (c) 1997-2001 Michael Shalayeff
@@ -63,6 +63,8 @@
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
 
+#include <dev/rndvar.h>
+
 #include "apm.h"
 #include "acpi.h"
 #include "mpbios.h"
@@ -74,6 +76,11 @@
 #include <sys/tty.h>
 #include <dev/ic/comvar.h>
 #include <dev/ic/comreg.h>
+#endif
+
+#include "softraid.h"
+#if NSOFTRAID > 0
+#include <dev/softraidvar.h>
 #endif
 
 struct bios_softc {
@@ -162,7 +169,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	struct smbtable bios;
 	volatile u_int8_t *va;
 	char scratch[64], *str;
-	int flags, smbiosrev = 0, ncpu = 0;
+	int flags, smbiosrev = 0, ncpu = 0, usingacpi = 0;
 
 	/* remember flags */
 	flags = sc->sc_dev.dv_cfdata->cf_flags;
@@ -231,7 +238,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 
 			bios32_entry.segment = GSEL(GCODE_SEL, SEL_KPL);
 			bios32_entry.offset = (u_int32_t)ISA_HOLE_VADDR(h->entry);
-			printf(", BIOS32 rev. %d @ 0x%lx", h->rev, h->entry);
+			printf(", BIOS32 rev. %d @ 0x%x", h->rev, h->entry);
 			break;
 		}
 	}
@@ -257,7 +264,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 			if (va[0] != '_' && va[1] != 'D' && va[2] != 'M' &&
 			    va[3] != 'I' && va[4] != '_')
 				continue;
-			for (chksum = 0, i = 0xf; i--; chksum += va[i]);
+			for (chksum = 0, i = 0xf; i--; chksum += va[i])
 				;
 			if (chksum != 0)
 				continue;
@@ -278,7 +285,7 @@ biosattach(struct device *parent, struct device *self, void *aux)
 			for (; pa < end; pa+= NBPG, eva+= NBPG)
 				pmap_kenter_pa(eva, pa, VM_PROT_READ);
 
-			printf(", SMBIOS rev. %d.%d @ 0x%lx (%d entries)",
+			printf(", SMBIOS rev. %d.%d @ 0x%x (%hd entries)",
 			    sh->majrev, sh->minrev, sh->addr, sh->count);
 			/*
 			 * Unbelievably the SMBIOS version number
@@ -330,8 +337,64 @@ biosattach(struct device *parent, struct device *self, void *aux)
 
 	printf("\n");
 
+	/* No SMBIOS extensions, go looking for Soekris comBIOS */
+	if (!(flags & BIOSF_SMBIOS) && smbiosrev == 0) {
+		const char *signature = "Soekris Engineering";
+
+		for (va = ISA_HOLE_VADDR(SMBIOS_START);
+		    va <= (u_int8_t *)ISA_HOLE_VADDR(SMBIOS_END -
+		    (strlen(signature) - 1)); va++)
+			if (!memcmp((u_int8_t *)va, signature,
+			    strlen(signature))) {
+				hw_vendor = malloc(strlen(signature) + 1,
+				    M_DEVBUF, M_NOWAIT);
+				if (hw_vendor)
+					strlcpy(hw_vendor, signature,
+					    strlen(signature) + 1);
+				va += strlen(signature);
+				break;
+			}
+
+		for (; hw_vendor &&
+		    va <= (u_int8_t *)ISA_HOLE_VADDR(SMBIOS_END - 6); va++)
+			/*
+			 * Search for "net(4(5xx|801)|[56]501)" which matches
+			 * the strings found in the comBIOS images
+			 */
+			if (!memcmp((u_int8_t *)va, "net45xx", 7) ||
+			    !memcmp((u_int8_t *)va, "net4801", 7) ||
+			    !memcmp((u_int8_t *)va, "net5501", 7) ||
+			    !memcmp((u_int8_t *)va, "net6501", 7)) {
+				hw_prod = malloc(8, M_DEVBUF, M_NOWAIT);
+				if (hw_prod) {
+					memcpy(hw_prod, (u_int8_t *)va, 7);
+					hw_prod[7] = '\0';
+				}
+				break;
+			}
+	}
+
+#if NACPI > 0
+#if NPCI > 0
+	if (smbiosrev >= 210 && pci_mode_detect() != 0)
+#endif
+	{
+		struct bios_attach_args ba;
+
+		memset(&ba, 0, sizeof(ba));
+		ba.ba_name = "acpi";
+		ba.ba_func = 0x00;		/* XXX ? */
+		ba.ba_iot = I386_BUS_SPACE_IO;
+		ba.ba_memt = I386_BUS_SPACE_MEM;
+		if (config_found(self, &ba, bios_print)) {
+			flags |= BIOSF_PCIBIOS;
+			usingacpi = 1;
+		}
+	}
+#endif
+
 #if NAPM > 0
-	if (apm && ncpu < 2 && smbiosrev < 240) {
+	if (usingacpi == 0 && apm && ncpu < 2 && smbiosrev < 240) {
 		struct bios_attach_args ba;
 
 #if defined(DEBUG) || defined(APMDEBUG)
@@ -350,22 +413,6 @@ biosattach(struct device *parent, struct device *self, void *aux)
 	}
 #endif
 
-#if NACPI > 0
-#if NPCI > 0
-	if (smbiosrev && pci_mode_detect() != 0)
-#endif
-	{
-		struct bios_attach_args ba;
-
-		memset(&ba, 0, sizeof(ba));
-		ba.ba_name = "acpi";
-		ba.ba_func = 0x00;		/* XXX ? */
-		ba.ba_iot = I386_BUS_SPACE_IO;
-		ba.ba_memt = I386_BUS_SPACE_MEM;
-		if (config_found(self, &ba, bios_print))
-			flags |= BIOSF_PCIBIOS;
-	}
-#endif
 
 #if NMPBIOS > 0
 	if (mpbios_probe(self)) {
@@ -456,6 +503,7 @@ bios_getopt()
 	bootarg_t *q;
 	bios_ddb_t *bios_ddb;
 	bios_bootduid_t *bios_bootduid;
+	bios_bootsr_t *bios_bootsr;
 
 #ifdef BIOS_DEBUG
 	printf("bootargv:");
@@ -499,17 +547,22 @@ bios_getopt()
 			break;
 #endif
 		case BOOTARG_CONSDEV:
-			if (q->ba_size >= sizeof(bios_consdev_t)) {
+			if (q->ba_size >= sizeof(bios_consdev_t) +
+			    offsetof(bootarg_t, ba_arg)) {
 				bios_consdev_t *cdp =
 				    (bios_consdev_t*)q->ba_arg;
 #if NCOM > 0
 				static const int ports[] =
 				    { 0x3f8, 0x2f8, 0x3e8, 0x2e8 };
 				int unit = minor(cdp->consdev);
-				if (major(cdp->consdev) == 8 && unit >= 0 &&
-				    unit < (sizeof(ports)/sizeof(ports[0]))) {
+				int consaddr = cdp->consaddr;
+				if (consaddr == -1 && unit >=0 &&
+				    unit < (sizeof(ports)/sizeof(ports[0])))
+					consaddr = ports[unit];
+				if (major(cdp->consdev) == 8 &&
+				    consaddr != -1) {
 					comconsunit = unit;
-					comconsaddr = ports[unit];
+					comconsaddr = consaddr;
 					comconsrate = cdp->conspeed;
 
 					/* Probe the serial port this time. */
@@ -520,7 +573,6 @@ bios_getopt()
 				printf(" console 0x%x:%d",
 				    cdp->consdev, cdp->conspeed);
 #endif
-				cnset(cdp->consdev);
 			}
 			break;
 #ifdef MULTIPROCESSOR
@@ -544,6 +596,17 @@ bios_getopt()
 		case BOOTARG_BOOTDUID:
 			bios_bootduid = (bios_bootduid_t *)q->ba_arg;
 			bcopy(bios_bootduid, bootduid, sizeof(bootduid));
+			break;
+
+		case BOOTARG_BOOTSR:
+			bios_bootsr = (bios_bootsr_t *)q->ba_arg;
+#if NSOFTRAID > 0
+			bcopy(&bios_bootsr->uuid, &sr_bootuuid,
+			    sizeof(sr_bootuuid));
+			bcopy(&bios_bootsr->maskkey, &sr_bootkey,
+			    sizeof(sr_bootkey));
+#endif
+			explicit_bzero(bios_bootsr, sizeof(bios_bootsr_t));
 			break;
 
 		default:
@@ -928,6 +991,8 @@ smbios_info(char * str)
 		sminfop = fixstring(p);
 	if (sminfop) {
 		infolen = strlen(sminfop) + 1;
+		for (i = 0; i < infolen - 1; i++)
+			add_timer_randomness(sminfop[i]);
 		hw_serial = malloc(infolen, M_DEVBUF, M_NOWAIT);
 		if (hw_serial)
 			strlcpy(hw_serial, sminfop, infolen);
@@ -951,6 +1016,8 @@ smbios_info(char * str)
 		else if (uuidf & SMBIOS_UUID_NSET)
 			hw_uuid = "Not Set";
 		else {
+			for (i = 0; i < sizeof(sys->uuid); i++)
+				add_timer_randomness(sys->uuid[i]);
 			hw_uuid = malloc(SMBIOS_UUID_REPLEN, M_DEVBUF,
 			    M_NOWAIT);
 			if (hw_uuid) {

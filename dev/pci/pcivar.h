@@ -1,4 +1,4 @@
-/*	$OpenBSD: pcivar.h,v 1.66 2011/05/30 19:09:46 kettenis Exp $	*/
+/*	$OpenBSD: pcivar.h,v 1.69 2013/08/08 17:54:11 kettenis Exp $	*/
 /*	$NetBSD: pcivar.h,v 1.23 1997/06/06 23:48:05 thorpej Exp $	*/
 
 /*
@@ -73,8 +73,6 @@ struct pci_softc;
 #include <alpha/pci/pci_machdep.h>
 #elif defined(__i386__)
 #include <i386/pci/pci_machdep.h>
-#elif defined(__powerpc__)
-#include <powerpc/pci/pci_machdep.h>
 #elif defined(__sgi__)
 #include <sgi/pci/pci_machdep.h>
 #else
@@ -95,6 +93,7 @@ struct pcibus_attach_args {
 	struct extent	*pba_ioex;
 	struct extent	*pba_memex;
 	struct extent	*pba_pmemex;
+	struct extent	*pba_busex;
 
 	int		pba_domain;	/* PCI domain */
 	int		pba_bus;	/* PCI bus number */
@@ -127,6 +126,7 @@ struct pci_attach_args {
 	struct extent	*pa_ioex;
 	struct extent	*pa_memex;
 	struct extent	*pa_pmemex;
+	struct extent	*pa_busex;
 
 	u_int           pa_domain;
 	u_int           pa_bus;
@@ -187,6 +187,7 @@ struct pci_softc {
 	struct extent *sc_ioex;
 	struct extent *sc_memex;
 	struct extent *sc_pmemex;
+	struct extent *sc_busex;
 	LIST_HEAD(, pci_dev) sc_devs;
 	int sc_domain, sc_bus, sc_maxndevs;
 	pcitag_t *sc_bridgetag;
@@ -244,6 +245,7 @@ struct pci_matchid {
 int pci_matchbyid(struct pci_attach_args *, const struct pci_matchid *, int);
 int pci_get_powerstate(pci_chipset_tag_t, pcitag_t);
 int pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int);
+void pci_disable_legacy_vga(struct device *);
 
 /*
  * Vital Product Data (PCI 2.2)

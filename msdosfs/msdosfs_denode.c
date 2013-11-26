@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_denode.c,v 1.43 2011/07/04 04:30:41 tedu Exp $	*/
+/*	$OpenBSD: msdosfs_denode.c,v 1.46 2013/10/01 20:22:13 sf Exp $	*/
 /*	$NetBSD: msdosfs_denode.c,v 1.23 1997/10/17 11:23:58 ws Exp $	*/
 
 /*-
@@ -367,14 +367,15 @@ detrunc(struct denode *dep, uint32_t length, int flags, struct ucred *cred,
 	int vflags;
 	uint32_t eofentry;
 	uint32_t chaintofree = 0;
-	daddr64_t bn;
+	daddr_t bn;
 	int boff;
 	int isadir = dep->de_Attributes & ATTR_DIRECTORY;
 	struct buf *bp;
 	struct msdosfsmount *pmp = dep->de_pmp;
 
 #ifdef MSDOSFS_DEBUG
-	printf("detrunc(): file %s, length %ld, flags %d\n", dep->de_Name, length, flags);
+	printf("detrunc(): file %.11s, length %ld, flags %d\n",
+	    dep->de_Name, length, flags);
 #endif
 
 	/*
@@ -386,7 +387,7 @@ detrunc(struct denode *dep, uint32_t length, int flags, struct ucred *cred,
 	 * directory's life.
 	 */
 	if ((DETOV(dep)->v_flag & VROOT) && !FAT32(pmp)) {
-		printf("detrunc(): can't truncate root directory, clust %ld, offset %ld\n",
+		printf("detrunc(): can't truncate root directory, clust %u, offset %u\n",
 		    dep->de_dirclust, dep->de_diroffset);
 		return (EINVAL);
 	}
@@ -575,7 +576,7 @@ msdosfs_reclaim(void *v)
 #endif
 	
 #ifdef MSDOSFS_DEBUG
-	printf("msdosfs_reclaim(): dep %08x, file %s, refcnt %d\n",
+	printf("msdosfs_reclaim(): dep %08x, file %.11s, refcnt %d\n",
 	    dep, dep->de_Name, dep->de_refcnt);
 #endif
 
@@ -615,7 +616,8 @@ msdosfs_inactive(void *v)
 #endif
 	
 #ifdef MSDOSFS_DEBUG
-	printf("msdosfs_inactive(): dep %08x, de_Name[0] %x\n", dep, dep->de_Name[0]);
+	printf("msdosfs_inactive(): dep %08x, de_Name[0] %x\n", dep,
+	    dep->de_Name[0]);
 #endif
 
 	error = 0;
@@ -648,8 +650,8 @@ out:
 	 * so that it can be reused immediately.
 	 */
 #ifdef MSDOSFS_DEBUG
-	printf("msdosfs_inactive(): v_usecount %d, de_Name[0] %x\n", vp->v_usecount,
-	       dep->de_Name[0]);
+	printf("msdosfs_inactive(): v_usecount %d, de_Name[0] %x\n",
+	    vp->v_usecount, dep->de_Name[0]);
 #endif
 	if (dep->de_Name[0] == SLOT_DELETED)
 		vrecycle(vp, p);

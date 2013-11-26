@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.4 2007/11/25 18:25:32 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.6 2012/09/02 16:21:05 deraadt Exp $
 
 MAN=	xxboot.8
 
@@ -7,7 +7,7 @@ PROG=	xxboot
 LINKS=	${BINDIR}/xxboot ${BINDIR}/sdboot 
 LINKS+=	${BINDIR}/xxboot ${BINDIR}/wdboot 
 SRCS=	pbr.S xxboot.S boot1.c
-LDFLAGS=-nostdlib -Ttext 0x8c201000 -N -x -Bstatic -e start
+LDFLAGS=-nostdlib -Ttext 0x8c201000 -N -x -Bstatic -e start -nopie
 
 INSTALL_STRIP=
 
@@ -17,7 +17,7 @@ XXBOOT_MAXSIZE?= (( ${XXBOOT_SECTORS} * 512 ))
 CPPFLAGS+=-D_STANDALONE
 CPPFLAGS+=-nostdinc -I${.OBJDIR} -I${.CURDIR}/.. -I${.CURDIR}/../../../..
 CPPFLAGS+=-DLOADADDRESS=0x8ff00000 -DXXBOOT_SECTORS=${XXBOOT_SECTORS}
-CFLAGS+=-m4-nofpu
+CFLAGS+=-m4-nofpu -fno-pie
 
 OBJCOPY?=objcopy
 

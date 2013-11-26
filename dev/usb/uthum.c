@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthum.c,v 1.17 2011/07/03 15:47:17 matthew Exp $   */
+/*	$OpenBSD: uthum.c,v 1.24 2013/09/28 11:22:09 sasano Exp $   */
 
 /*
  * Copyright (c) 2009, 2010 Yojiro UO <yuo@nui.org>
@@ -19,7 +19,6 @@
 /* Driver for HID base TEMPer seriese Temperature(/Humidity) sensors */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
@@ -40,13 +39,10 @@
 #endif
 
 #ifdef UTHUM_DEBUG
-int	uthumdebug = 0;
-#define DPRINTFN(n, x)	do { if (uthumdebug > (n)) printf x; } while (0)
+#define DPRINTF(x)	do { printf x; } while (0)
 #else
-#define DPRINTFN(n, x)
+#define DPRINTF(x)
 #endif
-
-#define DPRINTF(x) DPRINTFN(0, x)
 
 /* Device types */
 #define UTHUM_TYPE_TEMPERHUM	0x535a
@@ -116,9 +112,7 @@ struct uthum_sensor {
 
 struct uthum_softc {
 	struct uhidev		 sc_hdev;
-	usbd_device_handle	 sc_udev;
-	u_char			 sc_dying;
-	uint16_t		 sc_flag;
+	struct usbd_device	*sc_udev;
 	int			 sc_device_type;
 	int			 sc_num_sensors;
 
@@ -142,11 +136,11 @@ const struct usb_devno uthum_devs[] = {
 int  uthum_match(struct device *, void *, void *);
 void uthum_attach(struct device *, struct device *, void *);
 int  uthum_detach(struct device *, int);
-int  uthum_activate(struct device *, int);
 
 int  uthum_issue_cmd(struct uthum_softc *, uint8_t, int);
 int  uthum_read_data(struct uthum_softc *, uint8_t, uint8_t *, size_t, int);
 int  uthum_check_device_info(struct uthum_softc *);
+void uthum_reset_device(struct uthum_softc *);
 void uthum_setup_sensors(struct uthum_softc *);
 
 void uthum_intr(struct uhidev *, void *, u_int);
@@ -171,8 +165,7 @@ const struct cfattach uthum_ca = {
 	sizeof(struct uthum_softc),
 	uthum_match,
 	uthum_attach,
-	uthum_detach,
-	uthum_activate,
+	uthum_detach
 };
 
 int
@@ -204,7 +197,7 @@ uthum_attach(struct device *parent, struct device *self, void *aux)
 	struct uthum_softc *sc = (struct uthum_softc *)self;
 	struct usb_attach_arg *uaa = aux;
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
-	usbd_device_handle dev = uha->parent->sc_udev;
+	struct usbd_device *dev = uha->parent->sc_udev;
 	int i, size, repid;
 	void *desc;
 
@@ -280,20 +273,9 @@ uthum_detach(struct device *self, int flags)
 			sensor_task_unregister(sc->sc_sensortask);
 	}
 
+	uthum_reset_device(sc);
+
 	return (rv);
-}
-
-int
-uthum_activate(struct device *self, int act)
-{
-	struct uthum_softc *sc = (struct uthum_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
-		break;
-	}
-	return (0);
 }
 
 void
@@ -424,6 +406,20 @@ uthum_check_device_info(struct uthum_softc *sc)
 
 	/* device specific init process */
 	switch (dev_type) {
+	case UTHUM_TYPE_TEMPERHUM:
+		sc->sc_sensor[UTHUM_TEMPER_NTC].cur_state = 0;
+		break;
+	};
+
+	uthum_reset_device(sc);
+
+	return 0;
+};
+
+void
+uthum_reset_device(struct uthum_softc *sc)
+{
+	switch (sc->sc_device_type) {
 	case UTHUM_TYPE_TEMPER1:
 	case UTHUM_TYPE_TEMPERNTC:
 		uthum_issue_cmd(sc, CMD_RESET0, 200);
@@ -432,13 +428,8 @@ uthum_check_device_info(struct uthum_softc *sc)
 		uthum_issue_cmd(sc, CMD_RESET0, 200);
 		uthum_issue_cmd(sc, CMD_RESET1, 200);
 		break;
-	case UTHUM_TYPE_TEMPERHUM:
-		sc->sc_sensor[UTHUM_TEMPER_NTC].cur_state = 0;
-		break;
-	};
-
-	return 0;
-};
+	}
+}
 
 void
 uthum_setup_sensors(struct uthum_softc *sc)
@@ -829,15 +820,19 @@ uthum_print_sensorinfo(struct uthum_softc *sc, int num)
 		printf("type %s (temperature)",
 		    uthum_sensor_type_s[s->dev_type]);
 		if (s->cal_offset)
-			printf(", calibration offset %d.%d degC",
-			    s->cal_offset / 100, abs(s->cal_offset % 100));
+			printf(", calibration offset %c%d.%d degC",
+			    (s->cal_offset < 0) ? '-' : '+',
+			    abs(s->cal_offset / 100),
+			    abs(s->cal_offset % 100));
 		break;
 	case SENSOR_HUMIDITY:
 		printf("type %s (humidity)",
 		    uthum_sensor_type_s[s->dev_type]);
 		if (s->cal_offset)
-			printf("calibration offset %d.%d %%RH",
-			    s->cal_offset / 100, abs(s->cal_offset % 100));
+			printf("calibration offset %c%d.%d %%RH",
+			    (s->cal_offset < 0) ? '-' : '+',
+			    abs(s->cal_offset / 100),
+			    abs(s->cal_offset % 100));
 		break;
 	default:
 		printf("unknown");

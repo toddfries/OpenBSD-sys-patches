@@ -1,4 +1,4 @@
-/*	$OpenBSD: utwitch.c,v 1.5 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: utwitch.c,v 1.8 2013/08/17 08:34:45 sthen Exp $ */
 
 /*
  * Copyright (c) 2010 Yojiro UO <yuo@nui.org>
@@ -20,7 +20,6 @@
 /* this driver was previously known as uyurex(4). */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
@@ -52,19 +51,14 @@
 #define UPDATE_TICK	5 /* sec */
 
 #ifdef UYUREX_DEBUG
-int	utwitchdebug = 0;
-#define DPRINTFN(n, x)	do { if (utwitchdebug > (n)) printf x; } while (0)
+#define DPRINTF(x)	do { printf x; } while (0)
 #else
-#define DPRINTFN(n, x)
+#define DPRINTF(x)
 #endif
-
-#define DPRINTF(x) DPRINTFN(0, x)
 
 struct utwitch_softc {
 	struct uhidev		 sc_hdev;
-	usbd_device_handle	 sc_udev;
-	u_char			 sc_dying;
-	uint16_t		 sc_flag;
+	struct usbd_device	*sc_udev;
 
 	/* uhidev parameters */
 	size_t			 sc_flen;	/* feature report length */
@@ -95,7 +89,6 @@ const struct usb_devno utwitch_devs[] = {
 int utwitch_match(struct device *, void *, void *);
 void utwitch_attach(struct device *, struct device *, void *);
 int utwitch_detach(struct device *, int);
-int utwitch_activate(struct device *, int);
 
 void utwitch_set_mode(struct utwitch_softc *, uint8_t);
 void utwitch_read_value_request(struct utwitch_softc *);
@@ -112,8 +105,7 @@ const struct cfattach utwitch_ca = {
 	sizeof(struct utwitch_softc),
 	utwitch_match,
 	utwitch_attach,
-	utwitch_detach,
-	utwitch_activate,
+	utwitch_detach
 };
 
 int
@@ -132,7 +124,7 @@ utwitch_attach(struct device *parent, struct device *self, void *aux)
 	struct utwitch_softc *sc = (struct utwitch_softc *)self;
 	struct usb_attach_arg *uaa = aux;
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
-	usbd_device_handle dev = uha->parent->sc_udev;
+	struct usbd_device *dev = uha->parent->sc_udev;
 	int size, repid, err;
 	void *desc;
 
@@ -192,8 +184,6 @@ utwitch_detach(struct device *self, int flags)
 	struct utwitch_softc *sc = (struct utwitch_softc *)self;
 	int rv = 0;
 
-	sc->sc_dying = 1;
-
 	wakeup(&sc->sc_sensortask);
 	sensordev_deinstall(&sc->sc_sensordev);
 	sensor_detach(&sc->sc_sensordev, &sc->sc_sensor_val);
@@ -207,19 +197,6 @@ utwitch_detach(struct device *self, int flags)
 	}
 
 	return (rv);
-}
-
-int
-utwitch_activate(struct device *self, int act)
-{
-	struct utwitch_softc *sc = (struct utwitch_softc *)self;
-
-	switch (act) {
-	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
-		break;
-	}
-	return (0);
 }
 
 void

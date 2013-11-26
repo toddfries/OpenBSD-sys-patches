@@ -1,4 +1,4 @@
-/*	$OpenBSD: samachdep.h,v 1.7 2011/08/18 20:02:58 miod Exp $	*/
+/*	$OpenBSD: samachdep.h,v 1.9 2013/04/01 12:55:27 miod Exp $	*/
 /*	$NetBSD: samachdep.h,v 1.3 1997/05/12 07:54:45 thorpej Exp $	*/
 
 /*
@@ -44,7 +44,7 @@
 #define NITE		4
 
 /* from cpu.h */
-#undef	IIOV
+#define	INTIOBASE	(0x00400000)
 #define IIOV(x)		(x)
 
 #define MHZ_8		1
@@ -61,6 +61,7 @@ extern	int userom;
 
 int	badaddr(char *);
 void	call_req_reboot(void);
+void	exec(char *, void *, int);
 char	*getmachineid(void);
 void	hpibinit(void);
 void	romout(int, char *);

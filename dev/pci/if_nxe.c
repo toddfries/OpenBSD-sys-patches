@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nxe.c,v 1.62 2011/02/15 12:37:59 claudio Exp $ */
+/*	$OpenBSD: if_nxe.c,v 1.64 2013/11/21 19:08:14 gsoares Exp $ */
 
 /*
  * Copyright (c) 2007 David Gwynne <dlg@openbsd.org>
@@ -1258,13 +1258,14 @@ nxe_iff(struct nxe_softc *sc)
 	DASSERT(sc->sc_window == 0);
 
 	CLR(ifp->if_flags, IFF_ALLMULTI);
-	if (sc->sc_ac.ac_multirangecnt > 0 || sc->sc_ac.ac_multicnt > 0) {
-		cfg1 |= NXE_0_XG_CFG1_MULTICAST;
-		SET(ifp->if_flags, IFF_ALLMULTI);
-	}
 
-	if (ISSET(ifp->if_flags, IFF_PROMISC))
-		cfg1 |= NXE_0_XG_CFG1_PROMISC;
+	if (ISSET(ifp->if_flags, IFF_PROMISC) || sc->sc_ac.ac_multicnt > 0) {
+		SET(ifp->if_flags, IFF_ALLMULTI);
+		if (ISSET(ifp->if_flags, IFF_PROMISC))
+			cfg1 |= NXE_0_XG_CFG1_PROMISC;
+		else
+			cfg1 |= NXE_0_XG_CFG1_MULTICAST;
+	}
 
 	nxe_crb_write(sc, NXE_0_XG_CFG0(sc->sc_port),
 	    NXE_0_XG_CFG0_TX_EN | NXE_0_XG_CFG0_RX_EN);
@@ -2087,7 +2088,7 @@ nxe_crb_set(struct nxe_softc *sc, int window)
 		nxe_write(sc, NXE_WIN_CRB(sc->sc_function), r);
 
 		if (nxe_read(sc, NXE_WIN_CRB(sc->sc_function)) != r)
-			printf("%s: crb window hasnt moved\n");
+			printf("%s: crb window hasnt moved\n", DEVNAME(sc));
 	}
 
 	return (oldwindow);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.38 2008/08/18 23:19:29 miod Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.41 2013/11/24 22:08:25 miod Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.67 2000/06/29 07:14:34 mrg Exp $	     */
 
 /*
@@ -111,11 +111,24 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 #endif
 
 	/*
+	 * Clear new pcb
+	 */
+	pcb = &p2->p_addr->u_pcb;
+	bzero(pcb, sizeof (*pcb));
+
+	/*
 	 * Copy the trap frame.
 	 */
 	tf = (struct trapframe *)((u_int)p2->p_addr + USPACE) - 1;
 	p2->p_addr->u_pcb.framep = tf;
 	bcopy(p1->p_addr->u_pcb.framep, tf, sizeof(*tf));
+
+	/*
+	 * Activate address space for the new process.
+	 * This writes the page table registers to the PCB.
+	 */
+	pcb->pcb_pm = NULL;
+	pmap_activate(p2);
 
 	/* Mark guard page invalid in kernel stack */
 	*kvtopte((u_int)p2->p_addr + REDZONEADDR) &= ~PG_V;
@@ -137,12 +150,12 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	 * Set up internal defs in PCB. This matches the "fake" CALLS frame
 	 * that we constructed earlier.
 	 */
-	pcb = &p2->p_addr->u_pcb;
 	pcb->iftrap = NULL;
 	pcb->KSP = (long)cf;
 	pcb->FP = (long)cf;
 	pcb->AP = (long)&cf->ca_argno;
 	pcb->PC = (int)func + 2;	/* Skip save mask */
+	pcb->pcb_paddr = kvtophys((vaddr_t)pcb);
 
 	/*
 	 * If specified, give the child a different stack.
@@ -153,14 +166,6 @@ cpu_fork(p1, p2, stack, stacksize, func, arg)
 	tf->r0 = p1->p_pid; /* parent pid. (shouldn't be needed) */
 	tf->r1 = 1;
 	tf->psl = PSL_U|PSL_PREVU;
-}
-
-int
-cpu_exec_aout_makecmds(p, epp)
-	struct proc *p;
-	struct exec_package *epp;
-{
-	return ENOEXEC;
 }
 
 int
@@ -209,14 +214,13 @@ cpu_coredump(p, vp, cred, chdr)
 	cseg.c_size = chdr->c_cpusize;
 
 	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&cseg, chdr->c_seghdrsize,
-	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
+	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE, IO_UNIT, cred, NULL, p);
 	if (error)
 		return error;
 
 	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&state, sizeof(state),
 	    (off_t)(chdr->c_hdrsize + chdr->c_seghdrsize), UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
+	    IO_UNIT, cred, NULL, p);
 
 	if (!error)
 		chdr->c_nseg++;

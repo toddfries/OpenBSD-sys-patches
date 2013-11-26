@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_atu.c,v 1.101 2012/02/24 06:19:00 guenther Exp $ */
+/*	$OpenBSD: if_atu.c,v 1.104 2013/11/15 10:17:39 pirofti Exp $ */
 /*
  * Copyright (c) 2003, 2004
  *	Daan Vreeken <Danovitsch@Vitsch.net>.  All rights reserved.
@@ -251,8 +251,8 @@ struct atu_radfirm {
 };
 
 int	atu_newbuf(struct atu_softc *, struct atu_chain *, struct mbuf *);
-void	atu_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void	atu_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void	atu_rxeof(struct usbd_xfer *, void *, usbd_status);
+void	atu_txeof(struct usbd_xfer *, void *, usbd_status);
 void	atu_start(struct ifnet *);
 int	atu_ioctl(struct ifnet *, u_long, caddr_t);
 int	atu_init(struct ifnet *);
@@ -302,7 +302,7 @@ atu_usb_request(struct atu_softc *sc, u_int8_t type,
     u_int8_t *data)
 {
 	usb_device_request_t	req;
-	usbd_xfer_handle	xfer;
+	struct usbd_xfer	*xfer;
 	usbd_status		err;
 	int			total_len = 0, s;
 
@@ -330,9 +330,9 @@ atu_usb_request(struct atu_softc *sc, u_int8_t type,
 
 	xfer = usbd_alloc_xfer(sc->atu_udev);
 	usbd_setup_default_xfer(xfer, sc->atu_udev, 0, 500000, &req, data,
-	    length, USBD_SHORT_XFER_OK, 0);
+	    length, USBD_SHORT_XFER_OK | USBD_SYNCHRONOUS, 0);
 
-	err = usbd_sync_transfer(xfer);
+	err = usbd_transfer(xfer);
 
 	usbd_get_xfer_status(xfer, NULL, NULL, &total_len, NULL);
 
@@ -1258,7 +1258,7 @@ atu_attach(struct device *parent, struct device *self, void *aux)
 	struct atu_softc		*sc = (struct atu_softc *)self;
 	struct usb_attach_arg		*uaa = aux;
 	usbd_status			err;
-	usbd_device_handle		dev = uaa->device;
+	struct usbd_device		*dev = uaa->device;
 	u_int8_t			mode, channel;
 	int i;
 
@@ -1648,7 +1648,7 @@ atu_xfer_list_free(struct atu_softc *sc, struct atu_chain *ch,
  * the higher level protocols.
  */
 void
-atu_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+atu_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct atu_chain	*c = (struct atu_chain *)priv;
 	struct atu_softc	*sc = c->atu_sc;
@@ -1786,7 +1786,7 @@ done:
  * the list buffers.
  */
 void
-atu_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+atu_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct atu_chain	*c = (struct atu_chain *)priv;
 	struct atu_softc	*sc = c->atu_sc;
@@ -2301,11 +2301,7 @@ atu_stop(struct ifnet *ifp, int disable)
 
 	/* Stop transfers. */
 	if (sc->atu_ep[ATU_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->atu_ep[ATU_ENDPT_RX]);
-		if (err) {
-			DPRINTF(("%s: abort rx pipe failed: %s\n",
-			    sc->atu_dev.dv_xname, usbd_errstr(err)));
-		}
+		usbd_abort_pipe(sc->atu_ep[ATU_ENDPT_RX]);
 		err = usbd_close_pipe(sc->atu_ep[ATU_ENDPT_RX]);
 		if (err) {
 			DPRINTF(("%s: close rx pipe failed: %s\n",
@@ -2315,11 +2311,7 @@ atu_stop(struct ifnet *ifp, int disable)
 	}
 
 	if (sc->atu_ep[ATU_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->atu_ep[ATU_ENDPT_TX]);
-		if (err) {
-			DPRINTF(("%s: abort tx pipe failed: %s\n",
-			    sc->atu_dev.dv_xname, usbd_errstr(err)));
-		}
+		usbd_abort_pipe(sc->atu_ep[ATU_ENDPT_TX]);
 		err = usbd_close_pipe(sc->atu_ep[ATU_ENDPT_TX]);
 		if (err) {
 			DPRINTF(("%s: close tx pipe failed: %s\n",

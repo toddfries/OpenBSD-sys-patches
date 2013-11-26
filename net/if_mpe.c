@@ -1,4 +1,4 @@
-/* $OpenBSD: if_mpe.c,v 1.26 2011/08/20 06:21:32 mcbride Exp $ */
+/* $OpenBSD: if_mpe.c,v 1.32 2013/10/24 11:31:43 mpi Exp $ */
 
 /*
  * Copyright (c) 2008 Pierre-Yves Ritschard <pyr@spootnik.org>
@@ -20,7 +20,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/ioctl.h>
@@ -32,7 +31,6 @@
 
 #ifdef	INET
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #endif
@@ -105,12 +103,12 @@ mpe_clone_create(struct if_clone *ifc, int unit)
 	ifp->if_start = mpestart;
 	ifp->if_type = IFT_MPLS;
 	ifp->if_hdrlen = MPE_HDRLEN;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 	if_attach(ifp);
 	if_alloc_sadl(ifp);
 #if NBPFILTER > 0
-	bpfattach(&ifp->if_bpf, ifp, DLT_NULL, sizeof(u_int32_t));
+	bpfattach(&ifp->if_bpf, ifp, DLT_LOOP, sizeof(u_int32_t));
 #endif
 
 	s = splnet();

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.i386,v 1.209 2011/11/15 22:27:52 deraadt Exp $
+#	$OpenBSD: files.i386,v 1.214 2013/11/04 14:07:16 deraadt Exp $
 #
 # new style config file for i386 architecture
 #
@@ -71,11 +71,6 @@ major	{cd = 6}
 major	{rd = 17}
 
 #
-# I2O
-#
-include "dev/i2o/files.i2o"
-
-#
 # Machine-independent ATAPI drivers
 #
 
@@ -116,7 +111,6 @@ attach  amas at pci
 file    dev/pci/amas.c			amas
 
 # AGP bridge support. most attach at pchb
-include "dev/pci/files.agp"
 file	arch/i386/pci/agp_machdep.c	agp
 
 # AMD Elan SC520 System Controller (PCI-Host bridge)
@@ -147,7 +141,7 @@ file	arch/i386/i386/amdmsr.c		amdmsr	needs-flag
 # PCI-ISA bridge chipsets
 device	pcib: isabus
 attach	pcib at pci
-file	arch/i386/pci/pcib.c		pcib | ichpcib | gscpcib | glxpcib | piixpcib | amdpcib
+file	arch/i386/pci/pcib.c		pcib | ichpcib | gscpcib | glxpcib | piixpcib | amdpcib | tcpcib
 
 # Intel ICHx/ICHx-M LPC bridges
 device	ichpcib: isabus
@@ -168,6 +162,11 @@ file	arch/i386/pci/gscpcib.c		gscpcib
 device	amdpcib: isabus
 attach	amdpcib at pci
 file	dev/pci/amdpcib.c		amdpcib
+
+# Intel Atom E600 LPC bridge
+device	tcpcib: isabus
+attach	tcpcib at pci
+file	dev/pci/tcpcib.c		tcpcib
 
 device	hme: ether, ifnet, mii, ifmedia
 file	dev/ic/hme.c			hme
@@ -264,9 +263,6 @@ file	arch/i386/i386/vm86.c			vm86
 # VM86 in kernel
 file	arch/i386/i386/kvm86.c			kvm86
 file	arch/i386/i386/kvm86call.S		kvm86
-
-# a.out binary compatibility (COMPAT_AOUT)
-include "compat/aout/files.aout"
 
 # Linux binary compatibility (COMPAT_LINUX)
 include "compat/linux/files.linux"

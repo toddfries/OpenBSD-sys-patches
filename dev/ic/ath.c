@@ -1,4 +1,4 @@
-/*      $OpenBSD: ath.c,v 1.95 2012/01/29 12:33:36 stsp Exp $  */
+/*      $OpenBSD: ath.c,v 1.98 2013/11/26 09:50:32 mpi Exp $  */
 /*	$NetBSD: ath.c,v 1.37 2004/08/18 21:59:39 dyoung Exp $	*/
 
 /*-
@@ -63,7 +63,6 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_arp.h>
-#include <net/if_llc.h>
 #if NBPFILTER > 0
 #include <net/bpf.h>
 #endif
@@ -1148,18 +1147,20 @@ ath_mcastfilter_accum(caddr_t dl, u_int32_t (*mfilt)[2])
 void
 ath_mcastfilter_compute(struct ath_softc *sc, u_int32_t (*mfilt)[2])
 {
+	struct arpcom *ac = &sc->sc_ic.ic_ac;
 	struct ifnet *ifp = &sc->sc_ic.ic_if;
 	struct ether_multi *enm;
 	struct ether_multistep estep;
 
-	ETHER_FIRST_MULTI(estep, &sc->sc_ic.ic_ac, enm);
-	while (enm != NULL) {
+	if (ac->ac_multirangecnt > 0) {
 		/* XXX Punt on ranges. */
-		if (!IEEE80211_ADDR_EQ(enm->enm_addrlo, enm->enm_addrhi)) {
-			(*mfilt)[0] = (*mfilt)[1] = ~((u_int32_t)0);
-			ifp->if_flags |= IFF_ALLMULTI;
-			return;
-		}
+		(*mfilt)[0] = (*mfilt)[1] = ~((u_int32_t)0);
+		ifp->if_flags |= IFF_ALLMULTI;
+		return;
+	}
+
+	ETHER_FIRST_MULTI(estep, ac, enm);
+	while (enm != NULL) {
 		ath_mcastfilter_accum(enm->enm_addrlo, mfilt);
 		ETHER_NEXT_MULTI(estep, enm);
 	}
@@ -2138,7 +2139,7 @@ ath_tx_start(struct ath_softc *sc, struct ieee80211_node *ni,
 		 * NB: Preserve byte order of IV for packet
 		 *     sniffers; it doesn't matter otherwise.
 		 */
-#if AH_BYTE_ORDER == AH_BIG_ENDIAN
+#if _BYTE_ORDER == _BIG_ENDIAN
 		ivp[0] = iv >> 0;
 		ivp[1] = iv >> 8;
 		ivp[2] = iv >> 16;

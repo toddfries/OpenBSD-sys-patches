@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_alc.c,v 1.21 2011/10/19 05:23:44 kevlo Exp $	*/
+/*	$OpenBSD: if_alc.c,v 1.24 2013/11/21 16:16:08 mpi Exp $	*/
 /*-
  * Copyright (c) 2009, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -47,13 +47,11 @@
 
 #include <net/if.h>
 #include <net/if_dl.h>
-#include <net/if_llc.h>
 #include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -847,7 +845,6 @@ alc_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = alc_ioctl;
 	ifp->if_start = alc_start;
 	ifp->if_watchdog = alc_watchdog;
-	ifp->if_baudrate = IF_Gbps(1);
 	IFQ_SET_MAXLEN(&ifp->if_snd, ALC_TX_RING_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->alc_eaddr, sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);

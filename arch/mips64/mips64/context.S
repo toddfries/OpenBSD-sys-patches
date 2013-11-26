@@ -1,4 +1,4 @@
-/*	$OpenBSD: context.S,v 1.45 2010/04/28 16:20:28 syuu Exp $ */
+/*	$OpenBSD: context.S,v 1.51 2012/10/03 11:18:23 miod Exp $ */
 
 /*
  * Copyright (c) 2002-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -31,7 +31,9 @@
 #include <machine/param.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
+#include <machine/pte.h>
 #include <machine/regnum.h>
+#include <mips64/mips_cpu.h>
 #include <machine/cpustate.h>
 #ifdef CPU_LOONGSON2
 #include <machine/loongson2.h>
@@ -40,7 +42,6 @@
 #include "assym.h"
 
 	.set	mips3
-
 	.set	noreorder		# Noreorder is default style!
 
 /*
@@ -51,7 +52,8 @@ LEAF(savectx, 0)
 	REG_S	s1, PCB_CONTEXT+1*REGSZ(a0)
 	REG_S	s2, PCB_CONTEXT+2*REGSZ(a0)
 	REG_S	s3, PCB_CONTEXT+3*REGSZ(a0)
-	mfc0	v0, COP_0_STATUS_REG
+	MFC0	v0, COP_0_STATUS_REG
+	MFC0_HAZARD
 	REG_S	s4, PCB_CONTEXT+4*REGSZ(a0)
 	REG_S	s5, PCB_CONTEXT+5*REGSZ(a0)
 	REG_S	s6, PCB_CONTEXT+6*REGSZ(a0)
@@ -65,22 +67,22 @@ LEAF(savectx, 0)
 	REG_S	t1, PCB_CONTEXT+12*REGSZ(a0)	# save status register
 #endif
 	j	ra
-	move	v0, zero
+	 move	v0, zero
 END(savectx)
 
 LEAF(cpu_idle_enter, 0)
 	j	ra
-	nop
+	 NOP
 END(cpu_idle_enter)
 
 LEAF(cpu_idle_leave, 0)
 	j	ra
-	nop
+	 NOP
 END(cpu_idle_leave)
 
 LEAF(cpu_idle_cycle, 0)
 	j	ra
-	nop
+	 NOP
 END(cpu_idle_cycle)
 
 /*
@@ -95,8 +97,15 @@ NON_LEAF(cpu_switchto_asm, FRAMESZ(CF_SZ), ra)
 	REG_S	ra, CF_RA_OFFS(sp)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
 
+#ifdef CPU_R8000	/* XXX everywhere where MFC0_HAZARD is not empty */
+	MFC0	v0, COP_0_STATUS_REG
+	MFC0_HAZARD
 	beqz	a0, 1f
-	mfc0	v0, COP_0_STATUS_REG
+	 NOP
+#else
+	beqz	a0, 1f
+	 MFC0	v0, COP_0_STATUS_REG
+#endif
 
 	REG_S	s0, PCB_CONTEXT+0*REGSZ(t3)	# do a 'savectx()'
 	REG_S	s1, PCB_CONTEXT+1*REGSZ(t3)
@@ -118,10 +127,10 @@ NON_LEAF(cpu_switchto_asm, FRAMESZ(CF_SZ), ra)
 	/*
 	 * Disable interrupts
 	 */
-	li	v1, ~SR_INT_ENAB
-	and	v0, v0, v1
-	mtc0	v0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	ori	v0, SR_INT_ENAB
+	xori	v0, SR_INT_ENAB
+	MTC0	v0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 
 	/*
 	 * Switch to new context
@@ -151,8 +160,16 @@ NON_LEAF(cpu_switchto_asm, FRAMESZ(CF_SZ), ra)
 	PTR_ADDU t1, t1, v0
 #endif
 	lw	v0, PM_ASID(t1)			# ->pm_asid[cpuid].pma_asid
+#ifdef CPU_R8000
+	PTR_L	t0, PCB_SEGTAB(t3)		# save pcb_segtab for
+	DMTC0	t0, COP_0_UBASE			# Utlbmiss handler
+	MTC0_HAZARD
+#endif
 
-#if UPAGES > 1
+#if UPAGES > 1	/* { */
+#ifdef CPU_R8000
+#error Your processor has just been eaten by a grue.
+#endif
 	or	v0, t3
 	dmtc0	v0, COP_0_TLB_HI		# init high entry (tlbid)
 
@@ -171,7 +188,9 @@ NON_LEAF(cpu_switchto_asm, FRAMESZ(CF_SZ), ra)
 	bltz	t2, ctx3			# not mapped.
 	PTR_SRL	t2, PGSHIFT+1
 	PTR_L	t1, Sysmap
+	TLB_HAZARD
 	tlbp
+	TLB_HAZARD			# necessary?
 	PTR_SLL	t2, 3
 	PTR_ADDU t1, t2				# t1 now points at ptes.
 	mfc0	t0, COP_0_TLB_INDEX
@@ -182,42 +201,37 @@ NON_LEAF(cpu_switchto_asm, FRAMESZ(CF_SZ), ra)
 	dmtc0	t2, COP_0_TLB_HI		# invalidate it.
 	dmtc0	zero, COP_0_TLB_LO0
 	dmtc0	zero, COP_0_TLB_LO1
-	nop
-	nop
-	nop
-	nop
+	TLB_HAZARD
 	tlbwi
-	nop
-	nop
-	nop
+	TLB_HAZARD
 
 ctx1:
 	mtc0	zero, COP_0_TLB_INDEX
 	dmtc0	v0, COP_0_TLB_HI
 	lw	ta0, 0(t1)
 	lw	ta1, 4(t1)
-	dsll	ta0, ta0, 34
-	dsrl	ta0, ta0, 34
-	dsll	ta1, ta1, 34
-	dsrl	ta1, ta1, 34
+	dsll	ta0, ta0, (64 - PG_FRAMEBITS)	# clear bits left of PG_FRAME
+	dsrl	ta0, ta0, (64 - PG_FRAMEBITS)
+	dsll	ta1, ta1, (64 - PG_FRAMEBITS)
+	dsrl	ta1, ta1, (64 - PG_FRAMEBITS)
 	dmtc0	ta0, COP_0_TLB_LO0
 	dmtc0	ta1, COP_0_TLB_LO1
-	nop
-	PTR_ADDU v0, 2*NBPG
-	nop
-	nop
+	PTR_ADDU v0, 2*PAGE_SIZE
+	TLB_HAZARD
 	tlbwi
+	TLB_HAZARD
 
-#if UPAGES > 2
+#if UPAGES > 2	/* { */
 	dmtc0	v0, COP_0_TLB_HI		# init high entry (tlbid)
 	lw	ta0, 8(t1)
 	lw	ta1, 12(t1)
-	dsll	ta0, ta0, 34
-	dsrl	ta0, ta0, 34
+	dsll	ta0, ta0, (64 - PG_FRAMEBITS)	# clear bits left of PG_FRAME
+	dsrl	ta0, ta0, (64 - PG_FRAMEBITS)
+	TLB_HAZARD
 	tlbp
-	nop
-	dsll	ta1, ta1, 34
-	dsrl	ta1, ta1, 34
+	TLB_HAZARD			# necessary?
+	dsll	ta1, ta1, (64 - PG_FRAMEBITS)
+	dsrl	ta1, ta1, (64 - PG_FRAMEBITS)
 	mfc0	t0, COP_0_TLB_INDEX
 	nop
 	bltz	t0, ctx2			# not in tlb
@@ -226,33 +240,25 @@ ctx1:
 	dmtc0	t2, COP_0_TLB_HI		# invalidate it.
 	dmtc0	zero, COP_0_TLB_LO0
 	dmtc0	zero, COP_0_TLB_LO1
-	nop
-	nop
-	nop
-	nop
+	TLB_HAZARD
 	tlbwi
-	nop
-	nop
-	nop
+	TLB_HAZARD
 
 ctx2:
 	mtc0	t2, COP_0_TLB_INDEX
 	dmtc0	v0, COP_0_TLB_HI
 	dmtc0	ta0, COP_0_TLB_LO0
 	dmtc0	ta1, COP_0_TLB_LO1
-	nop
-	nop
-	nop
-	nop
+	TLB_HAZARD
 	tlbwi
-#endif	/* UPAGES > 2 */
-	nop
-	nop
-	nop
-	nop
-#else	/* UPAGES > 1 */
+	TLB_HAZARD
+#endif	/* } UPAGES > 2 */
+#else	/* } UPAGES > 1 { */
+#if PG_ASID_SHIFT != 0
+	dsll	v0, PG_ASID_SHIFT
+#endif
 	dmtc0	v0, COP_0_TLB_HI		# init high entry (tlbid)
-#endif	/* UPAGES > 1 */
+#endif	/* } UPAGES > 1 */
 
 ctx3:
 
@@ -282,8 +288,87 @@ ctx3:
 	ctc0	v1, COP_0_ICR		# XXX RM7000
 #endif
 	ori	v0, v0, SR_INT_ENAB
-	mtc0	v0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	v0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 	j	ra
-	nop
+	 NOP
 END(cpu_switchto_asm)
+
+/*-------------------------------------------------------------- proc_trampoline
+ *	Setup for and return to user.
+ */
+LEAF(proc_trampoline, 0)
+#ifdef DDB
+	move	zero, ra
+#endif
+#ifdef MULTIPROCESSOR
+	jal	_C_LABEL(proc_trampoline_mp)
+	 NOP
+#endif
+	/*
+	 * Enable interrupts, since we want kernel threads to
+	 * start at spl0 and with interrupts enabled, and these
+	 * won't ``return to userland''.
+	 */
+#ifndef MULTIPROCESSOR	/* done by proc_trampoline_mp() */
+	jal	splx
+	 xor	a0, a0
+#endif
+	jal	updateimask		# Make sure SR imask is updated
+	 xor	a0, a0			# and interrupts enabled
+
+	jal	s0
+	 move	a0,s1			# invoke callback.
+
+#if 0	/* && defined(RM7000_ICR) */
+	lw	t0, cpu_is_rm7k
+	beqz	t0, 1f			# not an RM7K. Don't do IC reg.
+	 NOP
+	
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROC(t1)	# set up rm7k.
+	ld	v0, P_WATCH_1(t0)
+	dmtc0	v0, COP_0_WATCH_1
+	ld	v0, P_WATCH_2(t0)
+	dmtc0	v0, COP_0_WATCH_2
+	lw	v0, P_WATCH_M(t0)
+	mtc0	v0, COP_0_WATCH_M
+	lw	v0, P_PC_CTRL(t0)
+	lw	v1, P_PC_COUNT(t0)
+	nop;nop
+	mtc0	v0, COP_0_PC_CTRL
+	nop;nop;nop;nop
+	mtc0	v1, COP_0_PC_COUNT
+	nop;nop;nop;nop
+	li	v0, IC_INT_PERF
+	ctc0	v0, COP_0_ICR		# enable perfcntr interrupt.
+1:
+#endif
+
+	MFC0	t0, COP_0_STATUS_REG
+	MFC0_HAZARD
+	LI	t1, ~SR_INT_ENAB
+	and	t0, t0, t1
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
+
+	ori	t0, SR_EXL		# restoring to user mode.
+	MTC0	t0, COP_0_STATUS_REG	# must set exception level bit.
+	MTC0_SR_IE_HAZARD
+
+	.set	noat
+	GET_CPU_INFO(k1, k0)
+	PTR_L	k0, CI_CURPROCPADDR(k1)
+	RESTORE_CPU_SREG(k0, 0)
+	RESTORE_REG(a0, PC, k0, 0)
+#ifdef RM7000_ICR
+	RESTORE_REG(t0, IC, k0, 0)
+	ctc0	t0, COP_0_ICR
+#endif
+	RESTORE_CPU(k0, 0)
+	RESTORE_REG(sp, SP, k0, 0)
+	LI	k0, 0
+	LI	k1, 0
+	ERET
+	.set	at
+END(proc_trampoline)

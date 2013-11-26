@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_axereg.h,v 1.21 2012/03/01 04:33:15 jsg Exp $	*/
+/*	$OpenBSD: if_axereg.h,v 1.24 2013/05/31 15:20:49 yuo Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999, 2000-2003
@@ -149,6 +149,24 @@
 
 #define        AXE_PHY_NO_AX772_EPHY   0x10    /* Embedded 10/100 PHY of AX88772 */
 
+#define AXE_GPIO0_EN		0x01
+#define AXE_GPIO0		0x02
+#define AXE_GPIO1_EN		0x04
+#define AXE_GPIO1		0x08
+#define AXE_GPIO2_EN		0x10
+#define AXE_GPIO2		0x20
+#define AXE_GPIO_RELOAD_EEPROM	0x80
+
+#define AXE_PHY_MODE_MARVELL		0x00
+#define AXE_PHY_MODE_CICADA		0x01
+#define AXE_PHY_MODE_AGERE		0x02
+#define AXE_PHY_MODE_CICADA_V2		0x05
+#define AXE_PHY_MODE_CICADA_V2_ASIX	0x09
+#define AXE_PHY_MODE_REALTEK_8211CL	0x0c
+#define AXE_PHY_MODE_REALTEK_8211BN	0x0d
+#define AXE_PHY_MODE_REALTEK_8251CL	0x0e
+#define AXE_PHY_MODE_ATTANSIC		0x40
+
 #define AXE_772B_RXCMD_RH1M	0x0100
 #define AXE_772B_RXCMD_RH2M	0x0200
 #define AXE_772B_RXCMD_RH3M	0x0400
@@ -190,7 +208,7 @@ struct axe_softc;
 
 struct axe_chain {
 	struct axe_softc	*axe_sc;
-	usbd_xfer_handle	axe_xfer;
+	struct usbd_xfer	*axe_xfer;
 	char			*axe_buf;
 	struct mbuf		*axe_mbuf;
 	int			axe_accum;
@@ -217,8 +235,8 @@ struct axe_softc {
 	struct arpcom		arpcom;
 #define GET_IFP(sc) (&(sc)->arpcom.ac_if)
 	struct mii_data		axe_mii;
-	usbd_device_handle	axe_udev;
-	usbd_interface_handle	axe_iface;
+	struct usbd_device	*axe_udev;
+	struct usbd_interface	*axe_iface;
 
 	u_int16_t		axe_vendor;
 	u_int16_t		axe_product;
@@ -226,9 +244,8 @@ struct axe_softc {
 	u_int16_t		axe_flags;
 
 	int			axe_ed[AXE_ENDPT_MAX];
-	usbd_pipe_handle	axe_ep[AXE_ENDPT_MAX];
+	struct usbd_pipe	*axe_ep[AXE_ENDPT_MAX];
 	int			axe_unit;
-	int			axe_if_flags;
 	struct axe_cdata	axe_cdata;
 	struct timeout		axe_stat_ch;
 

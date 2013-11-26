@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88k_machdep.c,v 1.51 2010/12/23 20:05:08 miod Exp $	*/
+/*	$OpenBSD: m88k_machdep.c,v 1.58 2013/10/07 19:10:49 miod Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -83,7 +83,7 @@ typedef struct {
 void	dumpconf(void);
 void	dumpsys(void);
 void	regdump(struct trapframe *f);
-void	vector_init(m88k_exception_vector_area *, u_int32_t *, int);
+void	*vector_init(m88k_exception_vector_area *, u_int32_t *, int);
 void	atomic_init(void);
 
 /*
@@ -95,8 +95,12 @@ cpuid_t	master_cpu;
 __cpu_simple_lock_t cmmu_cpu_lock = __SIMPLELOCK_UNLOCKED;
 #endif
 
-struct cpu_info m88k_cpus[MAX_CPUS];
-struct cmmu_p *cmmu;
+struct cpu_info m88k_cpus[MAX_CPUS] = {
+#ifndef MULTIPROCESSOR
+	{ .ci_flags = CIF_ALIVE | CIF_PRIMARY }
+#endif
+};
+const struct cmmu_p *cmmu;
 
 /*
  * safepri is a safe priority for sleep to set for a spin-wait
@@ -113,9 +117,20 @@ setregs(p, pack, stack, retval)
 	struct proc *p;
 	struct exec_package *pack;
 	u_long stack;
-	int retval[2];
+	register_t retval[2];
 {
 	struct trapframe *tf = (struct trapframe *)USER_REGS(p);
+
+	/*
+	 * Setup proper floating-point settings. This is necessary because
+	 * we will return through the exception path, which only saves the
+	 * integer registers, and not through cpu_switchto() (which saves
+	 * fcr62 and fcr63 in the pcb).  This is safe to do here since the
+	 * FPU is enabled and the kernel doesn't use it.
+	 */
+	__asm__ __volatile__ ("fstcr %r0, %fcr0");
+	__asm__ __volatile__ ("fstcr %r0, %fcr62");
+	__asm__ __volatile__ ("fstcr %r0, %fcr63");
 
 	/*
 	 * The syscall will ``return'' to snip; set it.
@@ -303,7 +318,7 @@ set_cpu_number(cpuid_t number)
 #endif
 	ci->ci_cpuid = number;
 
-	__asm__ __volatile__ ("stcr %0, cr17" :: "r" (ci));
+	__asm__ __volatile__ ("stcr %0, %%cr17" :: "r" (ci));
 	flush_pipeline();
 }
 
@@ -423,7 +438,7 @@ spl0()
  * more detail. And since the MVME BUG does not add an extra NOP after its
  * VBR page, I'll assume this is safe for now -- miod
  */
-void
+void *
 vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list,
     int bootstrap)
 {
@@ -493,6 +508,8 @@ vector_init(m88k_exception_vector_area *vbr, u_int32_t *vector_init_list,
 		break;
 #endif
 	}
+
+	return vbr;
 }
 
 #ifdef MULTIPROCESSOR
@@ -560,7 +577,7 @@ cpu_emergency_disable()
 		p->p_priority = p->p_usrpri;
 		p->p_stat = SRUN;
 		setrunqueue(p);
-		p->p_stats->p_ru.ru_nvcsw++;
+		p->p_ru.ru_nvcsw++;
 		SCHED_UNLOCK(s);
 	}
 

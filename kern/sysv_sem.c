@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysv_sem.c,v 1.42 2012/01/10 23:12:13 bluhm Exp $	*/
+/*	$OpenBSD: sysv_sem.c,v 1.45 2013/11/25 23:15:58 matthew Exp $	*/
 /*	$NetBSD: sysv_sem.c,v 1.26 1996/02/09 19:00:25 christos Exp $	*/
 
 /*
@@ -210,7 +210,7 @@ semundo_clear(int semid, int semnum)
 			if (suptr == SLIST_FIRST(&semu_list))
 				SLIST_REMOVE_HEAD(&semu_list, un_next);
 			else
-				SLIST_REMOVE_NEXT(&semu_list, suprev, un_next);
+				SLIST_REMOVE_AFTER(suprev, un_next);
 			suptr = SLIST_NEXT(suptr, un_next);
 			pool_put(&semu_pool, sutmp);
 			semutot--;
@@ -594,7 +594,7 @@ sys_semop(struct proc *p, void *v, register_t *retval)
 						do_wakeup = 1;
 				}
 				if (sopptr->sem_flg & SEM_UNDO)
-					do_undos = 1;
+					do_undos++;
 			} else if (sopptr->sem_op == 0) {
 				if (semptr->semval > 0) {
 					DPRINTF(("semop:  not zero now\n"));
@@ -605,14 +605,14 @@ sys_semop(struct proc *p, void *v, register_t *retval)
 					do_wakeup = 1;
 				semptr->semval += sopptr->sem_op;
 				if (sopptr->sem_flg & SEM_UNDO)
-					do_undos = 1;
+					do_undos++;
 			}
 		}
 
 		/*
-		 * Did we get through the entire vector?
+		 * Did we get through the entire vector and can we undo it?
 		 */
-		if (i >= nsops)
+		if (i >= nsops && do_undos <= SEMUME)
 			goto done;
 
 		/*
@@ -622,6 +622,14 @@ sys_semop(struct proc *p, void *v, register_t *retval)
 		for (j = 0; j < i; j++)
 			semaptr->sem_base[sops[j].sem_num].semval -=
 			    sops[j].sem_op;
+
+		/*
+		 * Did we have too many SEM_UNDO's
+		 */
+		if (do_undos > SEMUME) {
+			error = ENOSPC;
+			goto done2;
+		}
 
 		/*
 		 * If the request that we couldn't satisfy has the
@@ -705,17 +713,16 @@ done:
 			 * we applied them.  This guarantees that we won't run
 			 * out of space as we roll things back out.
 			 */
-			if (i != 0) {
-				for (j = i - 1; j >= 0; j--) {
-					if ((sops[j].sem_flg & SEM_UNDO) == 0)
-						continue;
-					adjval = sops[j].sem_op;
-					if (adjval == 0)
-						continue;
-					if (semundo_adjust(p, &suptr, semid,
-					    sops[j].sem_num, adjval) != 0)
-						panic("semop - can't undo undos");
-				}
+			for (j = i; j > 0;) {
+				j--;
+				if ((sops[j].sem_flg & SEM_UNDO) == 0)
+					continue;
+				adjval = sops[j].sem_op;
+				if (adjval == 0)
+					continue;
+				if (semundo_adjust(p, &suptr, semid,
+				    sops[j].sem_num, adjval) != 0)
+					panic("semop - can't undo undos");
 			}
 
 			for (j = 0; j < nsops; j++)

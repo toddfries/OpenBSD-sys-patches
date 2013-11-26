@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipsec_input.c,v 1.106 2011/12/22 13:36:06 sperreault Exp $	*/
+/*	$OpenBSD: ipsec_input.c,v 1.118 2013/11/11 09:15:35 mpi Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -42,9 +42,9 @@
 #include <sys/protosw.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
-#include <sys/proc.h>
 #include <sys/sysctl.h>
 #include <sys/kernel.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -59,7 +59,6 @@
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
-#include <netinet/in_var.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/tcp.h>
 #include <netinet/udp.h>
@@ -68,6 +67,7 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/ip6protosw.h>
@@ -83,6 +83,17 @@
 #include "bpfilter.h"
 
 void *ipsec_common_ctlinput(u_int, int, struct sockaddr *, void *, int);
+#ifdef INET
+int ah4_input_cb(struct mbuf *, ...);
+int esp4_input_cb(struct mbuf *, ...);
+int ipcomp4_input_cb(struct mbuf *, ...);
+#endif
+
+#ifdef INET6
+int ah6_input_cb(struct mbuf *, int, int);
+int esp6_input_cb(struct mbuf *, int, int);
+int ipcomp6_input_cb(struct mbuf *, int, int);
+#endif
 
 #ifdef ENCDEBUG
 #define DPRINTF(x)	if (encdebug) printf x
@@ -98,11 +109,6 @@ int ipcomp_enable = 0;
 int *espctl_vars[ESPCTL_MAXID] = ESPCTL_VARS;
 int *ahctl_vars[AHCTL_MAXID] = AHCTL_VARS;
 int *ipcompctl_vars[IPCOMPCTL_MAXID] = IPCOMPCTL_VARS;
-
-#ifdef INET6
-extern struct ip6protosw inet6sw[];
-extern u_char ip6_protox[];
-#endif
 
 /*
  * ipsec_common_input() gets called when we receive an IPsec-protected packet
@@ -137,6 +143,9 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 
 	if ((sproto == IPPROTO_ESP && !esp_enable) ||
 	    (sproto == IPPROTO_AH && !ah_enable) ||
+#if NPF > 0
+	    (m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) ||
+#endif
 	    (sproto == IPPROTO_IPCOMP && !ipcomp_enable)) {
 		switch (af) {
 #ifdef INET
@@ -225,7 +234,7 @@ ipsec_common_input(struct mbuf *m, int skip, int protoff, int af, int sproto,
 		return EPFNOSUPPORT;
 	}
 
-	s = spltdb();
+	s = splsoftnet();
 	tdbp = gettdb(rtable_l2(m->m_pkthdr.rdomain),
 	    spi, &dst_address, sproto);
 	if (tdbp == NULL) {
@@ -389,11 +398,15 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 			    tdbp->tdb_proxy.sin.sin_addr.s_addr) ||
 			    (tdbp->tdb_proxy.sa.sa_family != AF_INET &&
 				tdbp->tdb_proxy.sa.sa_family != 0)) {
+#if ENCDEBUG
+				char addr[INET_ADDRSTRLEN];
+#endif
 
 				DPRINTF(("ipsec_common_input_cb(): inner "
 				    "source address %s doesn't correspond to "
 				    "expected proxy source %s, SA %s/%08x\n",
-				    inet_ntoa4(ipn.ip_src),
+				    inet_ntop(AF_INET, &ipn.ip_src,
+					addr, sizeof(addr)),
 				    ipsp_address(tdbp->tdb_proxy),
 				    ipsp_address(tdbp->tdb_dst),
 				    ntohl(tdbp->tdb_spi)));
@@ -430,11 +443,15 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 				&tdbp->tdb_proxy.sin6.sin6_addr)) ||
 			    (tdbp->tdb_proxy.sa.sa_family != AF_INET6 &&
 				tdbp->tdb_proxy.sa.sa_family != 0)) {
+#if ENCDEBUG
+				char addr[INET6_ADDRSTRLEN];
+#endif
 
 				DPRINTF(("ipsec_common_input_cb(): inner "
 				    "source address %s doesn't correspond to "
 				    "expected proxy source %s, SA %s/%08x\n",
-				    ip6_sprintf(&ip6n.ip6_src),
+				    inet_ntop(AF_INET6, &ip6n.ip6_src,
+					addr, sizeof(addr)),
 				    ipsp_address(tdbp->tdb_proxy),
 				    ipsp_address(tdbp->tdb_dst),
 				    ntohl(tdbp->tdb_spi)));
@@ -496,11 +513,15 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 				tdbp->tdb_proxy.sin.sin_addr.s_addr) ||
 			    (tdbp->tdb_proxy.sa.sa_family != AF_INET &&
 				tdbp->tdb_proxy.sa.sa_family != 0)) {
+#if ENCDEBUG
+				char addr[INET_ADDRSTRLEN];
+#endif
 
 				DPRINTF(("ipsec_common_input_cb(): inner "
 				    "source address %s doesn't correspond to "
 				    "expected proxy source %s, SA %s/%08x\n",
-				    inet_ntoa4(ipn.ip_src),
+				    inet_ntop(AF_INET, &ipn.ip_src,
+					addr, sizeof(addr)),
 				    ipsp_address(tdbp->tdb_proxy),
 				    ipsp_address(tdbp->tdb_dst),
 				    ntohl(tdbp->tdb_spi)));
@@ -537,11 +558,15 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 				&tdbp->tdb_proxy.sin6.sin6_addr)) ||
 			    (tdbp->tdb_proxy.sa.sa_family != AF_INET6 &&
 				tdbp->tdb_proxy.sa.sa_family != 0)) {
+#if ENCDEBUG
+				char addr[INET6_ADDRSTRLEN];
+#endif
 
 				DPRINTF(("ipsec_common_input_cb(): inner "
 				    "source address %s doesn't correspond to "
 				    "expected proxy source %s, SA %s/%08x\n",
-				    ip6_sprintf(&ip6n.ip6_src),
+				    inet_ntop(AF_INET6, &ip6n.ip6_src,
+					addr, sizeof(addr)),
 				    ipsp_address(tdbp->tdb_proxy),
 				    ipsp_address(tdbp->tdb_dst),
 				    ntohl(tdbp->tdb_spi)));
@@ -650,7 +675,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 		if (tdbp->tdb_authalgxform)
 			m->m_flags |= M_AUTH;
 	} else if (sproto == IPPROTO_AH) {
-		m->m_flags |= M_AUTH | M_AUTH_AH;
+		m->m_flags |= M_AUTH;
 	} else if (sproto == IPPROTO_IPCOMP) {
 		m->m_flags |= M_COMP;
 	}
@@ -674,7 +699,7 @@ ipsec_common_input_cb(struct mbuf *m, struct tdb *tdbp, int skip, int protoff,
 
 			hdr.af = af;
 			hdr.spi = tdbp->tdb_spi;
-			hdr.flags = m->m_flags & (M_AUTH|M_CONF|M_AUTH_AH);
+			hdr.flags = m->m_flags & (M_AUTH|M_CONF);
 
 			bpf_mtap_hdr(encif->if_bpf, (char *)&hdr,
 			    ENC_HDRLEN, m, BPF_DIRECTION_IN);
@@ -949,7 +974,6 @@ void *
 ipsec_common_ctlinput(u_int rdomain, int cmd, struct sockaddr *sa,
     void *v, int proto)
 {
-	extern u_int ip_mtudisc_timeout;
 	struct ip *ip = v;
 	int s;
 
@@ -980,7 +1004,7 @@ ipsec_common_ctlinput(u_int rdomain, int cmd, struct sockaddr *sa,
 
 		bcopy((caddr_t)ip + hlen, &spi, sizeof(u_int32_t));
 
-		s = spltdb();
+		s = splsoftnet();
 		tdbp = gettdb(rdomain, spi, (union sockaddr_union *)&dst,
 		    proto);
 		if (tdbp == NULL || tdbp->tdb_flags & TDBF_INVALID) {
@@ -988,7 +1012,7 @@ ipsec_common_ctlinput(u_int rdomain, int cmd, struct sockaddr *sa,
 			return (NULL);
 		}
 
-		/* Walk the chain backswards to the first tdb */
+		/* Walk the chain backwards to the first tdb */
 		for (; tdbp; tdbp = tdbp->tdb_inext) {
 			if (tdbp->tdb_flags & TDBF_INVALID ||
 			    (adjust = ipsec_hdrsz(tdbp)) == -1) {
@@ -1047,7 +1071,7 @@ udpencap_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 	src.sin_addr.s_addr = ip->ip_src.s_addr;
 	su_src = (union sockaddr_union *)&src;
 
-	s = spltdb();
+	s = splsoftnet();
 	tdbp = gettdbbysrcdst(rdomain, 0, su_src, su_dst, IPPROTO_ESP);
 
 	for (; tdbp != NULL; tdbp = tdbp->tdb_snext) {

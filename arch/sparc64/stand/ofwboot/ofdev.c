@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofdev.c,v 1.17 2011/03/13 00:13:53 deraadt Exp $	*/
+/*	$OpenBSD: ofdev.c,v 1.20 2013/11/05 00:51:58 krw Exp $	*/
 /*	$NetBSD: ofdev.c,v 1.1 2000/08/20 14:58:41 mrg Exp $	*/
 
 /*
@@ -272,7 +272,7 @@ disklabel_sun_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 	secpercyl = sl->sl_nsectors * sl->sl_ntracks;
 	lp->d_secpercyl = secpercyl;
 	if (DL_GETDSIZE(lp) == 0)
-		DL_SETDSIZE(lp, (daddr64_t)secpercyl * sl->sl_ncylinders);
+		DL_SETDSIZE(lp, (u_int64_t)secpercyl * sl->sl_ncylinders);
 	lp->d_version = 1;
 
 	memcpy(&lp->d_uid, &sl->sl_uid, sizeof(lp->d_uid));
@@ -416,12 +416,12 @@ search_label(struct of_dev *devp, u_long off, char *buf, struct disklabel *lp,
 	int error;
 	
 	/* minimal requirements for archetypal disk label */
-	if (lp->d_secperunit == 0)
-		lp->d_secperunit = 0x1fffffff;
+	if (DL_GETDSIZE(lp) == 0)
+		DL_SETDSIZE(lp, 0x1fffffff);
 	lp->d_npartitions = MAXPARTITIONS;
-	if (lp->d_partitions[0].p_size == 0)
-		lp->d_partitions[0].p_size = 0x1fffffff;
-	lp->d_partitions[0].p_offset = 0;
+	if (DL_GETPSIZE(&lp->d_partitions[0]) == 0)
+		DL_SETPSIZE(&lp->d_partitions[0], 0x1fffffff);
+	DL_SETPOFFSET(&lp->d_partitions[0], 0);
 
 	if (strategy(devp, F_READ, off, DEV_BSIZE, buf, &read)
 	    || read != DEV_BSIZE)

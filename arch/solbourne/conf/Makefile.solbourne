@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile.solbourne,v 1.37 2011/11/08 18:41:34 matthieu Exp $
+#	$OpenBSD: Makefile.solbourne,v 1.42 2013/10/15 19:23:30 guenther Exp $
 
 # For instructions on building kernels consult the config(8) and options(4)
 # manual pages.
@@ -21,7 +21,7 @@ S!=	cd ../../../..; pwd
 _machdir?=	$S/arch/${_mach}
 _archdir?=	$S/arch/${_arch}
 
-INCLUDES=	-nostdinc -I. -I$S -I$S/arch
+INCLUDES=	-nostdinc -I$S -I. -I$S/arch
 CPPFLAGS=	${INCLUDES} ${IDENT} ${PARAM} -D_KERNEL -D__${_mach}__ -MD -MP
 CWARNFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
 		-Wno-main -Wno-uninitialized -Wno-format \
@@ -30,15 +30,16 @@ CWARNFLAGS=	-Werror -Wall -Wstrict-prototypes -Wmissing-prototypes \
 CMACHFLAGS=	-mno-fpu
 CMACHFLAGS+=	-fno-builtin-printf -fno-builtin-snprintf \
 		-fno-builtin-vsnprintf -fno-builtin-log \
-		-fno-builtin-log2 -fno-builtin-malloc 
+		-fno-builtin-log2 -fno-builtin-malloc ${NOPIE_FLAGS}
 .if ${IDENT:M-DNO_PROPOLICE}
 CMACHFLAGS+=	-fno-stack-protector
 .endif
 
 COPTS?=		-O2
 CFLAGS=		${DEBUG} ${CWARNFLAGS} ${CMACHFLAGS} ${COPTS} ${PIPE}
-AFLAGS=		-D_LOCORE -x assembler-with-cpp -traditional-cpp ${CMACHFLAGS}
-LINKFLAGS=	-N -e start -T ${_machdir}/conf/ld.script -Ttext FD084000 --warn-common
+AFLAGS=		-D_LOCORE -x assembler-with-cpp ${CWARNFLAGS} ${CMACHFLAGS}
+LINKFLAGS=	-N -e start -T ${_machdir}/conf/ld.script -Ttext FD084000 \
+		--warn-common -nopie
 
 .if ${IDENT:M-DDDB_STRUCT}
 DB_STRUCTINFO=	db_structinfo.h
@@ -132,9 +133,9 @@ depend:
 tags:
 	@echo "see $S/kern/Makefile for tags"
 
-db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.awk
+db_structinfo.h: $S/ddb/db_structinfo.c $S/ddb/parse_structinfo.pl
 	${CC} ${CFLAGS} ${CPPFLAGS} -MT $@ -gstabs -c $S/ddb/db_structinfo.c
-	objdump -g db_structinfo.o | awk -f $S/ddb/parse_structinfo.awk > $@
+	objdump -g db_structinfo.o | perl $S/ddb/parse_structinfo.pl > $@
 	rm -f db_structinfo.o
 
 locore.o: ${_machdir}/${_mach}/locore.s assym.h

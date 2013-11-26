@@ -1,10 +1,13 @@
-#	$OpenBSD: Makefile,v 1.5 2007/11/26 10:01:42 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.8 2013/02/02 13:34:29 miod Exp $
 
 PROG=	cdboot
+OBJCOPY?=objcopy
+SIZE?=	size
 
 NOMAN=
+NOPIE=
 
-.include "${.CURDIR}/../Makefile.inc"
+CPPFLAGS+=	${SA_CPPFLAGS}
 
 .PATH:	${.CURDIR}/../uboot
 
@@ -20,14 +23,15 @@ SRCS=	srt0.S cdboot.c clock.c conf.c cons.c devopen.c
 
 LIBS=	${LIBCOMMON} ${LIBSA} ${LIBZ}
 
-CLEANFILES+=	cdboot.lif
+CLEANFILES+=	${PROG}.bin ${PROG}.lif
 
-cdboot.lif:	cdboot
-	${MKBOOT_PROG} cdboot $@
+cdboot.lif:	${PROG}
+	${OBJCOPY} -S -O binary ${PROG} ${PROG}.bin
+	${MKBOOT_PROG} -l 0x${RELOC} ${PROG}.bin $@
 
 cdboot:	${OBJS} ${LIBS}
-	${LD} -N -T ${RELOC} -e begin ${OBJS} ${LIBS} -o $@
-	@size $@
+	${LD} -N -Ttext ${RELOC} -e begin --warn-common ${OBJS} ${LIBS} -o $@
+	@${SIZE} $@
 	@echo $@ total size may not exceed 30000 bytes
 
 install:	cdboot.lif ${MKBOOT_PROG}

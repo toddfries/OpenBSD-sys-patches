@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wpi.c,v 1.110 2011/06/02 18:36:53 mk Exp $	*/
+/*	$OpenBSD: if_wpi.c,v 1.115 2013/11/16 12:46:29 kettenis Exp $	*/
 
 /*-
  * Copyright (c) 2006-2008
@@ -32,7 +32,7 @@
 #include <sys/malloc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -53,7 +53,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -189,6 +188,8 @@ wpi_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_pct = pa->pa_pc;
 	sc->sc_pcitag = pa->pa_tag;
 	sc->sc_dmat = pa->pa_dmat;
+
+	task_set(&sc->sc_resume_t, wpi_resume, sc, NULL);
 
 	/*
 	 * Get the offset of the PCI Express Capability Structure in PCI
@@ -395,8 +396,7 @@ wpi_activate(struct device *self, int act)
 			wpi_stop(ifp, 0);
 		break;
 	case DVACT_RESUME:
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    wpi_resume, sc, NULL);
+		task_add(systq, &sc->sc_resume_t);
 		break;
 	}
 
@@ -922,6 +922,8 @@ wpi_read_eeprom_channels(struct wpi_softc *sc, int n)
 			ic->ic_channels[chan].ic_freq =
 			    ieee80211_ieee2mhz(chan, IEEE80211_CHAN_5GHZ);
 			ic->ic_channels[chan].ic_flags = IEEE80211_CHAN_A;
+			/* We have at least one valid 5GHz channel. */
+			sc->sc_flags |= WPI_FLAG_HAS_5GHZ;
 		}
 
 		/* Is active scan allowed on this channel? */
@@ -1155,7 +1157,7 @@ wpi_ccmp_decap(struct wpi_softc *sc, struct mbuf *m, struct ieee80211_key *k)
 
 	/* Clear Protected bit and strip IV. */
 	wh->i_fc[1] &= ~IEEE80211_FC1_PROTECTED;
-	ovbcopy(wh, mtod(m, caddr_t) + IEEE80211_CCMP_HDRLEN, hdrlen);
+	memmove(mtod(m, caddr_t) + IEEE80211_CCMP_HDRLEN, wh, hdrlen);
 	m_adj(m, IEEE80211_CCMP_HDRLEN);
 	/* Strip MIC. */
 	m_adj(m, -IEEE80211_CCMP_MICLEN);
@@ -2988,7 +2990,7 @@ wpi_read_firmware(struct wpi_softc *sc)
 		return error;
 	}
 	if (size < sizeof (*hdr)) {
-		printf("%s: truncated firmware header: %d bytes\n",
+		printf("%s: truncated firmware header: %zu bytes\n",
 		    sc->sc_dev.dv_xname, size);
 		free(fw->data, M_DEVBUF);
 		return EINVAL;
@@ -3017,7 +3019,7 @@ wpi_read_firmware(struct wpi_softc *sc)
 	/* Check that all firmware sections fit. */
 	if (size < sizeof (*hdr) + fw->main.textsz + fw->main.datasz +
 	    fw->init.textsz + fw->init.datasz + fw->boot.textsz) {
-		printf("%s: firmware file too short: %d bytes\n",
+		printf("%s: firmware file too short: %zu bytes\n",
 		    sc->sc_dev.dv_xname, size);
 		free(fw->data, M_DEVBUF);
 		return EINVAL;

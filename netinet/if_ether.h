@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.h,v 1.47 2010/02/08 13:32:50 claudio Exp $	*/
+/*	$OpenBSD: if_ether.h,v 1.52 2013/11/21 16:34:33 mikeb Exp $	*/
 /*	$NetBSD: if_ether.h,v 1.22 1996/05/11 13:00:00 mycroft Exp $	*/
 
 /*
@@ -146,6 +146,7 @@ struct	ether_arp {
 #define	arp_pln	ea_hdr.ar_pln
 #define	arp_op	ea_hdr.ar_op
 
+#ifdef _KERNEL
 /*
  * Structure shared between the ethernet driver modules and
  * the address resolution code.  For example, each ec_softc or il_softc
@@ -171,6 +172,7 @@ struct llinfo_arp {
 };
 #define MAX_HOLD_QUEUE 10
 #define MAX_HOLD_TOTAL 100
+#endif
 
 struct sockaddr_inarp {
 	u_int8_t  sin_len;
@@ -201,12 +203,11 @@ void	arpintr(void);
 int	arpresolve(struct arpcom *,
 	    struct rtentry *, struct mbuf *, struct sockaddr *, u_char *);
 void	arp_ifinit(struct arpcom *, struct ifaddr *);
-void	arp_rtrequest(int, struct rtentry *, struct rt_addrinfo *);
+void	arp_rtrequest(int, struct rtentry *);
 
 int	ether_addmulti(struct ifreq *, struct arpcom *);
 int	ether_delmulti(struct ifreq *, struct arpcom *);
 int	ether_multiaddr(struct sockaddr *, u_int8_t[], u_int8_t[]);
-#endif /* _KERNEL */
 
 /*
  * Ethernet multicast address structure.  There is one of these for each
@@ -244,7 +245,7 @@ struct ether_multistep {
 	/* struct ether_multi *enm; */					\
 do {									\
 	for ((enm) = LIST_FIRST(&(ac)->ac_multiaddrs);			\
-	    (enm) != LIST_END(&(ac)->ac_multiaddrs) &&			\
+	    (enm) != NULL &&			\
 	    (bcmp((enm)->enm_addrlo, (addrlo), ETHER_ADDR_LEN) != 0 ||	\
 	     bcmp((enm)->enm_addrhi, (addrhi), ETHER_ADDR_LEN) != 0);	\
 		(enm) = LIST_NEXT((enm), enm_list));			\
@@ -274,11 +275,12 @@ do {									\
 	ETHER_NEXT_MULTI((step), (enm));				\
 } while (/* CONSTCOND */ 0)
 
-#ifdef _KERNEL
-
-extern struct ifnet *myip_ifp;
+#ifdef NFSCLIENT
+extern struct ifnet *revarp_ifp;
+#endif /* NFSCLIENT */
 
 void arprequest(struct ifnet *, u_int32_t *, u_int32_t *, u_int8_t *);
+int arpproxy(struct in_addr, u_int);
 void revarpinput(struct mbuf *);
 void in_revarpinput(struct mbuf *);
 void revarprequest(struct ifnet *);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_re_pci.c,v 1.34 2011/06/09 19:34:42 kettenis Exp $	*/
+/*	$OpenBSD: if_re_pci.c,v 1.40 2013/11/18 22:21:27 brad Exp $	*/
 
 /*
  * Copyright (c) 2005 Peter Valchev <pvalchev@openbsd.org>
@@ -38,7 +38,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -66,14 +65,15 @@ struct re_pci_softc {
 };
 
 const struct pci_matchid re_pci_devices[] = {
+	{ PCI_VENDOR_COREGA, PCI_PRODUCT_COREGA_CGLAPCIGT },
+	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE528T },
+	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE530T_C1 },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8101E },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8168 },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8169 },
 	{ PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8169SC },
-	{ PCI_VENDOR_COREGA, PCI_PRODUCT_COREGA_CGLAPCIGT },
-	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DGE528T },
-	{ PCI_VENDOR_USR2, PCI_PRODUCT_USR2_USR997902 },
-	{ PCI_VENDOR_TTTECH, PCI_PRODUCT_TTTECH_MC322 }
+	{ PCI_VENDOR_TTTECH, PCI_PRODUCT_TTTECH_MC322 },
+	{ PCI_VENDOR_USR2, PCI_PRODUCT_USR2_USR997902 }
 };
 
 #define RE_LINKSYS_EG1032_SUBID 0x00241737
@@ -134,34 +134,8 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 	pci_chipset_tag_t	pc = pa->pa_pc;
 	pci_intr_handle_t	ih;
 	const char		*intrstr = NULL;
-	pcireg_t		command;
 
-	/*
-	 * Handle power management nonsense.
-	 */
-
-	command = pci_conf_read(pc, pa->pa_tag, RL_PCI_CAPID) & 0x000000FF;
-
-	if (command == 0x01) {
-		u_int32_t		iobase, membase, irq;
-
-		/* Save important PCI config data. */
-		iobase = pci_conf_read(pc, pa->pa_tag,  RL_PCI_LOIO);
-		membase = pci_conf_read(pc, pa->pa_tag, RL_PCI_LOMEM);
-		irq = pci_conf_read(pc, pa->pa_tag, RL_PCI_INTLINE);
-
-#if 0
-		/* Reset the power state. */
-		printf(": chip is in D%d power mode "
-		    "-- setting to D0", command & RL_PSTATE_MASK);
-#endif
-		command &= 0xFFFFFFFC;
-
-		/* Restore PCI config data. */
-		pci_conf_write(pc, pa->pa_tag, RL_PCI_LOIO, iobase);
-		pci_conf_write(pc, pa->pa_tag, RL_PCI_LOMEM, membase);
-		pci_conf_write(pc, pa->pa_tag, RL_PCI_INTLINE, irq);
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 #ifndef SMALL_KERNEL
 	/* Enable power management for wake on lan. */
@@ -181,7 +155,9 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Allocate interrupt */
-	if (pci_intr_map(pa, &ih)) {
+	if (pci_intr_map_msi(pa, &ih) == 0)
+		sc->rl_flags |= RL_FLAG_MSI;
+	else if (pci_intr_map(pa, &ih) != 0) {
 		printf(": couldn't map interrupt\n");
 		return;
 	}
@@ -204,6 +180,24 @@ re_pci_attach(struct device *parent, struct device *self, void *aux)
 	if (pci_get_capability(pc, pa->pa_tag, PCI_CAP_PCIEXPRESS,
 	    NULL, NULL))
 		sc->rl_flags |= RL_FLAG_PCIE;
+
+	if (!(PCI_VENDOR(pa->pa_id) == PCI_VENDOR_REALTEK &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_REALTEK_RT8139)) {
+		u_int8_t	cfg;
+
+		CSR_WRITE_1(sc, RL_EECMD, RL_EE_MODE);
+		cfg = CSR_READ_1(sc, RL_CFG2);
+		if (sc->rl_flags & RL_FLAG_MSI) {
+			cfg |= RL_CFG2_MSI;
+			CSR_WRITE_1(sc, RL_CFG2, cfg);
+		} else {
+			if ((cfg & RL_CFG2_MSI) != 0) {
+				cfg &= ~RL_CFG2_MSI;
+				CSR_WRITE_1(sc, RL_CFG2, cfg);
+			}
+		}
+		CSR_WRITE_1(sc, RL_EECMD, RL_EEMODE_OFF);
+	}
 
 	/* Call bus-independent attach routine */
 	if (re_attach(sc, intrstr)) {

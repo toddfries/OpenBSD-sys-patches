@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec.h,v 1.10 2011/03/23 16:54:35 pirofti Exp $	*/
+/*	$OpenBSD: exec.h,v 1.12 2013/10/17 08:02:16 deraadt Exp $	*/
 /*	$NetBSD: exec.h,v 1.6 1994/10/27 04:16:05 cgd Exp $	*/
 
 /*
@@ -33,8 +33,6 @@
 
 #define __LDPGSZ	4096
 
-#define NATIVE_EXEC_ELF
-
 #define ARCH_ELFSIZE		32
 
 #define ELF_TARG_CLASS		ELFCLASS32
@@ -42,10 +40,7 @@
 #define ELF_TARG_MACH		EM_386 /* XXX - EM_486 is currently unused
                                           by all OSs/compilers/linkers */
 
-#define _NLIST_DO_AOUT
 #define _NLIST_DO_ELF
-
-#define _KERN_DO_AOUT
 #define _KERN_DO_ELF
 
 #endif  /* _MACHINE_EXEC_H_ */

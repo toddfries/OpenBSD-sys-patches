@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vte.c,v 1.5 2011/05/28 08:31:51 kevlo Exp $	*/
+/*	$OpenBSD: if_vte.c,v 1.8 2013/11/21 16:16:08 mpi Exp $	*/
 /*-
  * Copyright (c) 2010, Pyun YongHyeon <yongari@FreeBSD.org>
  * All rights reserved.
@@ -47,13 +47,11 @@
 
 #include <net/if.h>
 #include <net/if_dl.h>
-#include <net/if_llc.h>
 #include <net/if_media.h>
 
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -342,7 +340,6 @@ vte_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = vte_ioctl;
 	ifp->if_start = vte_start;
 	ifp->if_watchdog = vte_watchdog;
-	ifp->if_baudrate = IF_Mbps(100);
 	IFQ_SET_MAXLEN(&ifp->if_snd, VTE_TX_RING_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->vte_eaddr, sc->sc_arpcom.ac_enaddr, ETHER_ADDR_LEN);

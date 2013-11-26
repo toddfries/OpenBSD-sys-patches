@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipmi.c,v 1.65 2010/05/24 14:25:20 deraadt Exp $ */
+/*	$OpenBSD: ipmi.c,v 1.69 2013/07/03 15:10:57 bluhm Exp $ */
 
 /*
  * Copyright (c) 2005 Jordan Hargrave
@@ -139,7 +139,7 @@ long signextend(unsigned long, int);
 
 SLIST_HEAD(ipmi_sensors_head, ipmi_sensor);
 struct ipmi_sensors_head ipmi_sensor_list =
-    SLIST_HEAD_INITIALIZER(&ipmi_sensor_list);
+    SLIST_HEAD_INITIALIZER(ipmi_sensor_list);
 
 struct timeout ipmi_timeout;
 
@@ -186,7 +186,7 @@ void	ipmi_unmap_regs(struct ipmi_softc *);
 
 void	*scan_sig(long, long, int, int, const void *);
 
-int	ipmi_test_threshold(u_int8_t, u_int8_t, u_int8_t, u_int8_t);
+int	ipmi_test_threshold(u_int8_t, u_int8_t, u_int8_t, u_int8_t, int);
 int	ipmi_sensor_status(struct ipmi_softc *, struct ipmi_sensor *,
     u_int8_t *);
 
@@ -947,7 +947,7 @@ bt_buildmsg(struct ipmi_softc *sc, int nfLun, int cmd, int len,
 
 	/* Block transfer needs 4 extra bytes: length/netfn/seq/cmd + data */
 	*txlen = len + 4;
-	buf = malloc(*txlen, M_DEVBUF, M_NOWAIT|M_CANFAIL);
+	buf = malloc(*txlen, M_DEVBUF, M_NOWAIT);
 	if (buf == NULL)
 		return (NULL);
 
@@ -976,7 +976,7 @@ cmn_buildmsg(struct ipmi_softc *sc, int nfLun, int cmd, int len,
 
 	/* Common needs two extra bytes: nfLun/cmd + data */
 	*txlen = len + 2;
-	buf = malloc(*txlen, M_DEVBUF, M_NOWAIT|M_CANFAIL);
+	buf = malloc(*txlen, M_DEVBUF, M_NOWAIT);
 	if (buf == NULL)
 		return (NULL);
 
@@ -1043,7 +1043,7 @@ ipmi_recvcmd(struct ipmi_softc *sc, int maxlen, int *rxlen, void *data)
 	int		rawlen;
 
 	/* Need three extra bytes: netfn/cmd/ccode + data */
-	buf = malloc(maxlen + 3, M_DEVBUF, M_NOWAIT|M_CANFAIL);
+	buf = malloc(maxlen + 3, M_DEVBUF, M_NOWAIT);
 	if (buf == NULL) {
 		printf("%s: ipmi_recvcmd: malloc fails\n", DEVNAME(sc));
 		return (-1);
@@ -1142,7 +1142,7 @@ get_sdr(struct ipmi_softc *sc, u_int16_t recid, u_int16_t *nxtrec)
 	/* Allocate space for entire SDR Length of SDR in header does not
 	 * include header length */
 	sdrlen = sizeof(shdr) + shdr.record_length;
-	psdr = malloc(sdrlen, M_DEVBUF, M_NOWAIT|M_CANFAIL);
+	psdr = malloc(sdrlen, M_DEVBUF, M_NOWAIT);
 	if (psdr == NULL)
 		return (1);
 
@@ -1287,9 +1287,14 @@ ipmi_convert(u_int8_t v, struct sdrtype1 *s1, long adj)
 }
 
 int
-ipmi_test_threshold(u_int8_t v, u_int8_t valid, u_int8_t hi, u_int8_t lo)
+ipmi_test_threshold(u_int8_t v, u_int8_t valid, u_int8_t hi, u_int8_t lo,
+    int sign)
 {
-	dbg_printf(10, "thresh: %.2x %.2x %.2x %d\n", v, lo, hi,valid);
+	dbg_printf(10, "thresh: %.2x %.2x %.2x %d %d\n", v, lo, hi,valid, sign);
+	if (sign)
+		return ((valid & 1 && lo != 0x00 && (int8_t)v <= (int8_t)lo) ||
+		    (valid & 8 && hi != 0xFF && (int8_t)v >= (int8_t)hi));
+
 	return ((valid & 1 && lo != 0x00 && v <= lo) ||
 	    (valid & 8 && hi != 0xFF && v >= hi));
 }
@@ -1301,6 +1306,7 @@ ipmi_sensor_status(struct ipmi_softc *sc, struct ipmi_sensor *psensor,
 	u_int8_t	data[32];
 	struct sdrtype1	*s1 = (struct sdrtype1 *)psensor->i_sdr;
 	int		rxlen, etype;
+	int		sign = s1->units1 >> 7 & 1;
 
 	/* Get reading of sensor */
 	switch (psensor->i_sensor.type) {
@@ -1339,15 +1345,15 @@ ipmi_sensor_status(struct ipmi_softc *sc, struct ipmi_sensor *psensor,
 		    data[6]);
 
 		if (ipmi_test_threshold(*reading, data[0] >> 2 ,
-		    data[6], data[3]))
+		    data[6], data[3], sign))
 			return (SENSOR_S_CRIT);
 
 		if (ipmi_test_threshold(*reading, data[0] >> 1,
-		    data[5], data[2]))
+		    data[5], data[2], sign))
 			return (SENSOR_S_CRIT);
 
 		if (ipmi_test_threshold(*reading, data[0] ,
-		    data[4], data[1]))
+		    data[4], data[1], sign))
 			return (SENSOR_S_WARN);
 
 		break;
@@ -1486,8 +1492,7 @@ add_child_sensors(struct ipmi_softc *sc, u_int8_t *psdr, int count,
 		return 0;
 	}
 	for (idx = 0; idx < count; idx++) {
-		psensor = malloc(sizeof(*psensor), M_DEVBUF,
-		    M_NOWAIT | M_CANFAIL | M_ZERO);
+		psensor = malloc(sizeof(*psensor), M_DEVBUF, M_NOWAIT | M_ZERO);
 		if (psensor == NULL)
 			break;
 
@@ -1719,8 +1724,7 @@ ipmi_attach(struct device *parent, struct device *self, void *aux)
 	/* Map registers */
 	ipmi_map_regs(sc, ia);
 
-	sc->sc_thread = malloc(sizeof(struct ipmi_thread), M_DEVBUF,
-	    M_NOWAIT|M_CANFAIL);
+	sc->sc_thread = malloc(sizeof(struct ipmi_thread), M_DEVBUF, M_NOWAIT);
 	if (sc->sc_thread == NULL) {
 		printf(": unable to allocate thread\n");
 		return;
@@ -1744,7 +1748,7 @@ ipmi_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Setup Watchdog timer */
 	sc->sc_wdog_period = 0;
-	wdog_register(sc, ipmi_watchdog);
+	wdog_register(ipmi_watchdog, sc);
 
 	/* lock around read_sensor so that no one messes with the bmc regs */
 	rw_init(&sc->sc_lock, DEVNAME(sc));

@@ -1,4 +1,4 @@
-/*	$OpenBSD: domain.h,v 1.9 2009/02/22 07:47:22 otto Exp $	*/
+/*	$OpenBSD: domain.h,v 1.11 2013/04/24 10:17:08 mpi Exp $	*/
 /*	$NetBSD: domain.h,v 1.10 1996/02/09 18:25:07 christos Exp $	*/
 
 /*
@@ -36,6 +36,11 @@
  * Structure per communications domain.
  */
 
+#ifndef	_SOCKLEN_T_DEFINED_
+#define	_SOCKLEN_T_DEFINED_
+typedef	__socklen_t	socklen_t;	/* length type for network syscalls */
+#endif
+
 /*
  * Forward structure declarations for function prototypes [sic].
  */
@@ -64,4 +69,13 @@ struct	domain {
 #ifdef _KERNEL
 extern struct	domain *domains;
 void domaininit(void);
+
+#ifdef INET
+extern struct domain inetdomain;
 #endif
+
+#ifdef INET6
+extern struct domain inet6domain;
+#endif
+
+#endif /* _KERNEL */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: crypto.c,v 1.59 2011/01/11 15:42:05 deraadt Exp $	*/
+/*	$OpenBSD: crypto.c,v 1.61 2013/10/31 10:32:38 mikeb Exp $	*/
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
  *
@@ -36,7 +36,7 @@ int crypto_drivers_num = 0;
 struct pool cryptop_pool;
 struct pool cryptodesc_pool;
 
-struct workq *crypto_workq;
+struct taskq *crypto_taskq;
 
 /*
  * Create a new session.
@@ -245,8 +245,7 @@ crypto_get_driverid(u_int8_t flags)
 
 	/* Out of entries, allocate some more. */
 	if (i == crypto_drivers_num) {
-		/* Be careful about wrap-around. */
-		if (2 * crypto_drivers_num <= crypto_drivers_num) {
+		if (crypto_drivers_num >= CRYPTO_DRIVERS_MAX) {
 			splx(s);
 			return -1;
 		}
@@ -417,9 +416,9 @@ crypto_dispatch(struct cryptop *crp)
 		crypto_drivers[hid].cc_queued++;
 	splx(s);
 
-	if (crypto_workq) {
-		workq_queue_task(crypto_workq, &crp->crp_wqt, 0,
-		    (workq_fn)crypto_invoke, crp, NULL);
+	if (crypto_taskq) {
+		task_set(&crp->crp_task, (void (*))crypto_invoke, crp, NULL);
+		task_add(crypto_taskq, &crp->crp_task);
 	} else {
 		crypto_invoke(crp);
 	}
@@ -430,9 +429,9 @@ crypto_dispatch(struct cryptop *crp)
 int
 crypto_kdispatch(struct cryptkop *krp)
 {
-	if (crypto_workq) {
-		workq_queue_task(crypto_workq, &krp->krp_wqt, 0,
-		    (workq_fn)crypto_kinvoke, krp, NULL);
+	if (crypto_taskq) {
+		task_set(&krp->krp_task, (void (*))crypto_kinvoke, krp, NULL);
+		task_add(crypto_taskq, &krp->krp_task);
 	} else {
 		crypto_kinvoke(krp);
 	}
@@ -619,7 +618,7 @@ crypto_getreq(int num)
 void
 crypto_init(void)
 {
-	crypto_workq = workq_create("crypto", 1, IPL_HIGH);
+	crypto_taskq = taskq_create("crypto", 1, IPL_HIGH);
 
 	pool_init(&cryptop_pool, sizeof(struct cryptop), 0, 0,
 	    0, "cryptop", NULL);
@@ -638,8 +637,9 @@ crypto_done(struct cryptop *crp)
 		/* not from the crypto queue, wakeup the userland process */
 		crp->crp_callback(crp);
 	} else {
-		workq_queue_task(crypto_workq, &crp->crp_wqt, 0,
-		    (workq_fn)crp->crp_callback, crp, NULL);
+		task_set(&crp->crp_task, (void (*))crp->crp_callback,
+		    crp, NULL);
+		task_add(crypto_taskq, &crp->crp_task);
 	}
 }
 
@@ -649,8 +649,8 @@ crypto_done(struct cryptop *crp)
 void
 crypto_kdone(struct cryptkop *krp)
 {
-	workq_queue_task(crypto_workq, &krp->krp_wqt, 0,
-	    (workq_fn)krp->krp_callback, krp, NULL);
+	task_set(&krp->krp_task, (void (*))krp->krp_callback, krp, NULL);
+	task_add(crypto_taskq, &krp->krp_task);
 }
 
 int

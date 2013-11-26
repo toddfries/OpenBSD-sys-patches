@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_var.h,v 1.44 2012/01/09 14:47:53 bluhm Exp $	*/
+/*	$OpenBSD: ip6_var.h,v 1.47 2013/10/21 12:27:16 deraadt Exp $	*/
 /*	$KAME: ip6_var.h,v 1.33 2000/06/11 14:59:20 jinmei Exp $	*/
 
 /*
@@ -219,6 +219,9 @@ struct	ip6stat {
 #define	IPV6_FORWARDING		0x02	/* most of IPv6 header exists */
 #define	IPV6_MINMTU		0x04	/* use minimum MTU (IPV6_USE_MIN_MTU) */
 
+extern int ip6_mtudisc_timeout;		/* mtu discovery */
+extern struct rttimer_queue *icmp6_mtudisc_timeout_q;
+
 extern struct	ip6stat ip6stat;	/* statistics */
 extern int	ip6_defhlim;		/* default hop limit */
 extern int	ip6_defmcasthlim;	/* default multicast hop limit */
@@ -241,7 +244,6 @@ extern int	ip6_sendredirects;	/* send IP redirects when forwarding? */
 extern int	ip6_maxfragpackets; /* Maximum packets in reassembly queue */
 extern int	ip6_maxfrags;	/* Maximum fragments in reassembly queue */
 extern int	ip6_accept_rtadv;	/* Acts as a host not a router */
-extern int	ip6_keepfaith;		/* Firewall Aided Internet Translator */
 extern int	ip6_log_interval;
 extern time_t	ip6_log_time;
 extern int	ip6_hdrnestlimit; /* upper limit of # of extension headers */
@@ -296,7 +298,7 @@ void	frag6_drain(void);
 
 void	rip6_init(void);
 int	rip6_input(struct mbuf **mp, int *offp, int proto);
-void	rip6_ctlinput(int, struct sockaddr *, void *);
+void	rip6_ctlinput(int, struct sockaddr *, u_int, void *);
 int	rip6_ctloutput(int, struct socket *, int, int, struct mbuf **);
 int	rip6_output(struct mbuf *, ...);
 int	rip6_usrreq(struct socket *,

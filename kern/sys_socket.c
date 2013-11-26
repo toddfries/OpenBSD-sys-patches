@@ -1,4 +1,4 @@
-/*	$OpenBSD: sys_socket.c,v 1.14 2009/02/22 07:47:22 otto Exp $	*/
+/*	$OpenBSD: sys_socket.c,v 1.17 2013/09/28 15:21:55 millert Exp $	*/
 /*	$NetBSD: sys_socket.c,v 1.13 1995/08/12 23:59:09 mycroft Exp $	*/
 
 /*
@@ -131,7 +131,7 @@ soo_ioctl(struct file *fp, u_long cmd, caddr_t data, struct proc *p)
 int
 soo_poll(struct file *fp, int events, struct proc *p)
 {
-	struct socket *so = (struct socket *)fp->f_data;
+	struct socket *so = fp->f_data;
 	int revents = 0;
 	int s = splsoftnet();
 
@@ -139,7 +139,10 @@ soo_poll(struct file *fp, int events, struct proc *p)
 		if (soreadable(so))
 			revents |= events & (POLLIN | POLLRDNORM);
 	}
-	if (events & (POLLOUT | POLLWRNORM)) {
+	/* NOTE: POLLHUP and POLLOUT/POLLWRNORM are mutually exclusive */
+	if (so->so_state & SS_ISDISCONNECTED) {
+		revents |= POLLHUP;
+	} else if (events & (POLLOUT | POLLWRNORM)) {
 		if (sowriteable(so))
 			revents |= events & (POLLOUT | POLLWRNORM);
 	}
@@ -150,11 +153,11 @@ soo_poll(struct file *fp, int events, struct proc *p)
 	if (revents == 0) {
 		if (events & (POLLIN | POLLPRI | POLLRDNORM | POLLRDBAND)) {
 			selrecord(p, &so->so_rcv.sb_sel);
-			so->so_rcv.sb_flags |= SB_SEL;
+			so->so_rcv.sb_flagsintr |= SB_SEL;
 		}
 		if (events & (POLLOUT | POLLWRNORM)) {
 			selrecord(p, &so->so_snd.sb_sel);
-			so->so_snd.sb_flags |= SB_SEL;
+			so->so_snd.sb_flagsintr |= SB_SEL;
 		}
 	}
 	splx(s);
@@ -164,9 +167,9 @@ soo_poll(struct file *fp, int events, struct proc *p)
 int
 soo_stat(struct file *fp, struct stat *ub, struct proc *p)
 {
-	struct socket *so = (struct socket *)fp->f_data;
+	struct socket *so = fp->f_data;
 
-	bzero((caddr_t)ub, sizeof (*ub));
+	bzero(ub, sizeof (*ub));
 	ub->st_mode = S_IFSOCK;
 	if ((so->so_state & SS_CANTRCVMORE) == 0 ||
 	    so->so_rcv.sb_cc != 0)
@@ -176,8 +179,7 @@ soo_stat(struct file *fp, struct stat *ub, struct proc *p)
 	ub->st_uid = so->so_euid;
 	ub->st_gid = so->so_egid;
 	(void) ((*so->so_proto->pr_usrreq)(so, PRU_SENSE,
-	    (struct mbuf *)ub, (struct mbuf *)0, 
-	    (struct mbuf *)0, p));
+	    (struct mbuf *)ub, NULL, NULL, p));
 	return (0);
 }
 
@@ -188,7 +190,7 @@ soo_close(struct file *fp, struct proc *p)
 	int error = 0;
 
 	if (fp->f_data)
-		error = soclose((struct socket *)fp->f_data);
+		error = soclose(fp->f_data);
 	fp->f_data = 0;
 	return (error);
 }

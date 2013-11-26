@@ -1,4 +1,4 @@
-/* $OpenBSD: disksubr.c,v 1.53 2011/10/26 04:17:23 miod Exp $ */
+/* $OpenBSD: disksubr.c,v 1.56 2013/10/20 10:11:16 krw Exp $ */
 /* $NetBSD: disksubr.c,v 1.12 2002/02/19 17:09:44 wiz Exp $ */
 
 /*
@@ -275,7 +275,7 @@ disklabel_om_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 	secpercyl = sl->sl_nsectors * sl->sl_ntracks;
 	lp->d_secpercyl = secpercyl;
 	if (DL_GETDSIZE(lp) == 0)
-		DL_SETDSIZE(lp, (daddr64_t)secpercyl * sl->sl_ncylinders);
+		DL_SETDSIZE(lp, (u_int64_t)secpercyl * sl->sl_ncylinders);
 	lp->d_version = 1;
 
 	memcpy(&lp->d_uid, &sl->sl_uid, sizeof(sl->sl_uid));
@@ -291,10 +291,7 @@ disklabel_om_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 		spp = &sl->sl_part[i];
 		npp = &lp->d_partitions[i];
 		/* UniOS label uses blkoffset, not cyloffset */
-		if (sl->sl_rpm == 0)
-			DL_SETPOFFSET(npp, spp->sdkp_cyloffset);
-		else
-			DL_SETPOFFSET(npp, spp->sdkp_cyloffset * secpercyl);
+		DL_SETPOFFSET(npp, spp->sdkp_cyloffset);
 		DL_SETPSIZE(npp, spp->sdkp_nsectors);
 		if (DL_GETPSIZE(npp) == 0) {
 			npp->p_fstype = FS_UNUSED;
@@ -347,8 +344,7 @@ disklabel_om_to_bsd(struct sun_disklabel *sl, struct disklabel *lp)
 		for (i = 0; i < SUNXPART; i++) {
 			spp = &sl->sl_xpart[i];
 			npp = &lp->d_partitions[i+8];
-			/* no need to be UniOS compatible here */
-			DL_SETPOFFSET(npp, spp->sdkp_cyloffset * secpercyl);
+			DL_SETPOFFSET(npp, spp->sdkp_cyloffset);
 			DL_SETPSIZE(npp, spp->sdkp_nsectors);
 			if (DL_GETPSIZE(npp) == 0) {
 				npp->p_fstype = FS_UNUSED;
@@ -427,10 +423,7 @@ disklabel_bsd_to_om(struct disklabel *lp, struct sun_disklabel *sl)
 		spp->sdkp_cyloffset = 0;
 		spp->sdkp_nsectors = 0;
 		if (DL_GETPSIZE(npp)) {
-			/* no need to be UniOS compatible here */
-			if (DL_GETPOFFSET(npp) % secpercyl)
-				return (EINVAL);
-			spp->sdkp_cyloffset = DL_GETPOFFSET(npp) / secpercyl;
+			spp->sdkp_cyloffset = DL_GETPOFFSET(npp);
 			spp->sdkp_nsectors = DL_GETPSIZE(npp);
 		}
 	}

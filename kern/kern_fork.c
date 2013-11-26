@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.134 2012/02/20 22:23:39 guenther Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.154 2013/10/08 03:50:07 guenther Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -69,9 +69,9 @@
 # include <machine/tcb.h>
 #endif
 
-int	nprocs = 1;		/* process 0 */
+int	nprocesses = 1;		/* process 0 */
+int	nthreads = 1;		/* proc 0 */
 int	randompid;		/* when set to 1, pid's go random */
-pid_t	lastpid;
 struct	forkstat forkstat;
 
 void fork_return(void *);
@@ -113,68 +113,31 @@ sys_vfork(struct proc *p, void *v, register_t *retval)
 }
 
 int
-sys_rfork(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_rfork_args /* {
-		syscallarg(int) flags;
-	} */ *uap = v;
-
-	int rforkflags;
-	int flags;
-
-	flags = FORK_RFORK;
-	rforkflags = SCARG(uap, flags);
-
-	if ((rforkflags & RFPROC) == 0)
-		return (EINVAL);
-
-	switch(rforkflags & (RFFDG|RFCFDG)) {
-	case (RFFDG|RFCFDG):
-		return EINVAL;
-	case RFCFDG:
-		flags |= FORK_CLEANFILES;
-		break;
-	case RFFDG:
-		break;
-	default:
-		flags |= FORK_SHAREFILES;
-		break;
-	}
-
-	if (rforkflags & RFNOWAIT)
-		flags |= FORK_NOZOMBIE;
-
-	if (rforkflags & RFMEM)
-		flags |= FORK_SHAREVM;
-
-	if (rforkflags & RFTHREAD)
-		flags |= FORK_THREAD | FORK_SIGHAND | FORK_NOZOMBIE;
-
-	return (fork1(p, SIGCHLD, flags, NULL, 0, NULL, NULL, retval, NULL));
-}
-
-int
 sys___tfork(struct proc *p, void *v, register_t *retval)
 {
 	struct sys___tfork_args /* {
-		syscallarg(struct __tfork) *param;
+		syscallarg(const struct __tfork) *param;
+		syscallarg(size_t) psize;
 	} */ *uap = v;
-	struct __tfork param;
+	size_t psize = SCARG(uap, psize);
+	struct __tfork param = { 0 };
 	int flags;
 	int error;
 
-	if ((error = copyin(SCARG(uap, param), &param, sizeof(param))))
-		return (error);
-
-	/* XXX will supersede rfork at some point... */
-	if (param.tf_flags != 0)
+	if (psize == 0 || psize > sizeof(param))
 		return (EINVAL);
+	if ((error = copyin(SCARG(uap, param), &param, psize)))
+		return (error);
+#ifdef KTRACE
+	if (KTRPOINT(p, KTR_STRUCT))
+		ktrstruct(p, "tfork", &param, sizeof(param));
+#endif
 
 	flags = FORK_TFORK | FORK_THREAD | FORK_SIGHAND | FORK_SHAREVM
 	    | FORK_NOZOMBIE | FORK_SHAREFILES;
 
-	return (fork1(p, 0, flags, NULL, param.tf_tid, tfork_child_return,
-	    param.tf_tcb, retval, NULL));
+	return (fork1(p, 0, flags, param.tf_stack, param.tf_tid,
+	    tfork_child_return, param.tf_tcb, retval, NULL));
 }
 
 void
@@ -208,16 +171,18 @@ process_new(struct proc *p, struct process *parent)
 	 * Start by zeroing the section of proc that is zero-initialized,
 	 * then copy the section that is copied directly from the parent.
 	 */
-	bzero(&pr->ps_startzero,
-	    (unsigned) ((caddr_t)&pr->ps_endzero - (caddr_t)&pr->ps_startzero));
-	bcopy(&parent->ps_startcopy, &pr->ps_startcopy,
-	    (unsigned) ((caddr_t)&pr->ps_endcopy - (caddr_t)&pr->ps_startcopy));
+	memset(&pr->ps_startzero, 0,
+	    (caddr_t)&pr->ps_endzero - (caddr_t)&pr->ps_startzero);
+	memcpy(&pr->ps_startcopy, &parent->ps_startcopy,
+	    (caddr_t)&pr->ps_endcopy - (caddr_t)&pr->ps_startcopy);
 
 	/* post-copy fixups */
 	pr->ps_cred = pool_get(&pcred_pool, PR_WAITOK);
-	bcopy(parent->ps_cred, pr->ps_cred, sizeof(*pr->ps_cred));
+	memcpy(pr->ps_cred, parent->ps_cred, sizeof(*pr->ps_cred));
 	crhold(parent->ps_cred->pc_ucred);
 	pr->ps_limit->p_refcnt++;
+
+	timeout_set(&pr->ps_realit_to, realitexpire, pr);
 
 	pr->ps_flags = parent->ps_flags & (PS_SUGID | PS_SUGIDEXEC);
 	if (parent->ps_session->s_ttyvp != NULL &&
@@ -250,8 +215,6 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 
 	/* sanity check some flag combinations */
 	if (flags & FORK_THREAD) {
-		if (!rthreads_enabled)
-			return (ENOTSUP);
 		if ((flags & (FORK_SIGHAND | FORK_NOZOMBIE)) !=
 		    (FORK_SIGHAND | FORK_NOZOMBIE))
 			return (EINVAL);
@@ -262,28 +225,46 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	/*
 	 * Although process entries are dynamically created, we still keep
 	 * a global limit on the maximum number we will create. We reserve
-	 * the last 5 processes to root. The variable nprocs is the current
-	 * number of processes, maxproc is the limit.
+	 * the last 5 processes to root. The variable nprocesses is the
+	 * current number of processes, maxprocess is the limit.  Similar
+	 * rules for threads (struct proc): we reserve the last 5 to root;
+	 * the variable nthreads is the current number of procs, maxthread is
+	 * the limit.
 	 */
 	uid = curp->p_cred->p_ruid;
-	if ((nprocs >= maxproc - 5 && uid != 0) || nprocs >= maxproc) {
+	if ((nthreads >= maxthread - 5 && uid != 0) || nthreads >= maxthread) {
 		static struct timeval lasttfm;
 
 		if (ratecheck(&lasttfm, &fork_tfmrate))
 			tablefull("proc");
 		return (EAGAIN);
 	}
-	nprocs++;
+	nthreads++;
 
-	/*
-	 * Increment the count of procs running with this uid. Don't allow
-	 * a nonprivileged user to exceed their current limit.
-	 */
-	count = chgproccnt(uid, 1);
-	if (uid != 0 && count > curp->p_rlimit[RLIMIT_NPROC].rlim_cur) {
-		(void)chgproccnt(uid, -1);
-		nprocs--;
-		return (EAGAIN);
+	if ((flags & FORK_THREAD) == 0) {
+		if ((nprocesses >= maxprocess - 5 && uid != 0) ||
+		    nprocesses >= maxprocess) {
+			static struct timeval lasttfm;
+
+			if (ratecheck(&lasttfm, &fork_tfmrate))
+				tablefull("process");
+			nthreads--;
+			return (EAGAIN);
+		}
+		nprocesses++;
+
+		/*
+		 * Increment the count of processes running with
+		 * this uid.  Don't allow a nonprivileged user to
+		 * exceed their current limit.
+		 */
+		count = chgproccnt(uid, 1);
+		if (uid != 0 && count > curp->p_rlimit[RLIMIT_NPROC].rlim_cur) {
+			(void)chgproccnt(uid, -1);
+			nprocesses--;
+			nthreads--;
+			return (EAGAIN);
+		}
 	}
 
 	uaddr = uvm_km_kmemalloc_pla(kernel_map, uvm.kernel_object, USPACE,
@@ -291,8 +272,11 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	    no_constraint.ucr_low, no_constraint.ucr_high,
 	    0, 0, USPACE/PAGE_SIZE);
 	if (uaddr == 0) {
-		chgproccnt(uid, -1);
-		nprocs--;
+		if ((flags & FORK_THREAD) == 0) {
+			(void)chgproccnt(uid, -1);
+			nprocesses--;
+		}
+		nthreads--;
 		return (ENOMEM);
 	}
 
@@ -306,11 +290,11 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	p->p_stat = SIDL;			/* protect against others */
 	p->p_exitsig = exitsig;
 	p->p_flag = 0;
+	p->p_xstat = 0;
 
 	if (flags & FORK_THREAD) {
 		atomic_setbits_int(&p->p_flag, P_THREAD);
 		p->p_p = pr = curpr;
-		TAILQ_INSERT_TAIL(&pr->ps_threads, p, p_thr_link);
 		pr->ps_refcnt++;
 	} else {
 		process_new(p, curpr);
@@ -322,35 +306,33 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	 * Start by zeroing the section of proc that is zero-initialized,
 	 * then copy the section that is copied directly from the parent.
 	 */
-	bzero(&p->p_startzero,
-	    (unsigned) ((caddr_t)&p->p_endzero - (caddr_t)&p->p_startzero));
-	bcopy(&curp->p_startcopy, &p->p_startcopy,
-	    (unsigned) ((caddr_t)&p->p_endcopy - (caddr_t)&p->p_startcopy));
+	memset(&p->p_startzero, 0,
+	    (caddr_t)&p->p_endzero - (caddr_t)&p->p_startzero);
+	memcpy(&p->p_startcopy, &curp->p_startcopy,
+	    (caddr_t)&p->p_endcopy - (caddr_t)&p->p_startcopy);
 
 	/*
 	 * Initialize the timeouts.
 	 */
 	timeout_set(&p->p_sleep_to, endtsleep, p);
-	timeout_set(&p->p_realit_to, realitexpire, p);
 
 	/*
 	 * Duplicate sub-structures as needed.
 	 * Increase reference counts on shared objects.
-	 * The p_stats and p_sigacts substructs are set in vm_fork.
 	 */
-	if (curp->p_flag & P_PROFIL)
-		startprofclock(p);
-	if (flags & FORK_PTRACE)
-		atomic_setbits_int(&pr->ps_flags, curpr->ps_flags & PS_TRACED);
+	if ((flags & FORK_THREAD) == 0) {
+		if (curpr->ps_flags & PS_PROFIL)
+			startprofclock(pr);
+		if ((flags & FORK_PTRACE) && (curpr->ps_flags & PS_TRACED))
+			atomic_setbits_int(&pr->ps_flags, PS_TRACED);
+	}
 
 	/* bump references to the text vnode (for procfs) */
 	p->p_textvp = curp->p_textvp;
 	if (p->p_textvp)
 		vref(p->p_textvp);
 
-	if (flags & FORK_CLEANFILES)
-		p->p_fd = fdinit(curp);
-	else if (flags & FORK_SHAREFILES)
+	if (flags & FORK_SHAREFILES)
 		p->p_fd = fdshare(curp);
 	else
 		p->p_fd = fdcopy(curp);
@@ -404,9 +386,6 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	uvm_fork(curp, p, ((flags & FORK_SHAREVM) ? TRUE : FALSE), stack,
 	    0, func ? func : child_return, arg ? arg : p);
 
-	timeout_set(&p->p_stats->p_virt_to, virttimer_trampoline, p);
-	timeout_set(&p->p_stats->p_prof_to, proftimer_trampoline, p);
-
 	vm = p->p_vmspace;
 
 	if (flags & FORK_FORK) {
@@ -415,13 +394,8 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	} else if (flags & FORK_VFORK) {
 		forkstat.cntvfork++;
 		forkstat.sizvfork += vm->vm_dsize + vm->vm_ssize;
-#if 0
 	} else if (flags & FORK_TFORK) {
 		forkstat.cnttfork++;
-#endif
-	} else if (flags & FORK_RFORK) {
-		forkstat.cntrfork++;
-		forkstat.sizrfork += vm->vm_dsize + vm->vm_ssize;
 	} else {
 		forkstat.cntkthread++;
 		forkstat.sizkthread += vm->vm_dsize + vm->vm_ssize;
@@ -434,11 +408,7 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 		newstrp = systrace_getproc();
 #endif
 
-	/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
-	do {
-		lastpid = 1 + (randompid ? arc4random() : lastpid) % PID_MAX;
-	} while (pidtaken(lastpid));
-	p->p_pid = lastpid;
+	p->p_pid = allocpid();
 
 	LIST_INSERT_HEAD(&allproc, p, p_list);
 	LIST_INSERT_HEAD(PIDHASH(p->p_pid), p, p_hash);
@@ -463,6 +433,16 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 				pr->ps_ptstat->pe_other_pid = curpr->ps_pid;
 			}
 		}
+	} else {
+		TAILQ_INSERT_TAIL(&pr->ps_threads, p, p_thr_link);
+		/*
+		 * if somebody else wants to take us to single threaded mode,
+		 * count ourselves in.
+		 */
+		if (pr->ps_single) {
+			curpr->ps_singlecount++;
+			atomic_setbits_int(&p->p_flag, P_SUSPSINGLE);
+		}
 	}
 
 #if NSYSTRACE > 0
@@ -478,15 +458,24 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 	}
 
 	/*
-	 * Make child runnable, set start time, and add to run queue.
+	 * For new processes, set accounting bits
 	 */
-	SCHED_LOCK(s);
- 	getmicrotime(&p->p_stats->p_start);
-	p->p_acflag = AFORK;
-	p->p_stat = SRUN;
-	p->p_cpu = sched_choosecpu_fork(curp, flags);
-	setrunqueue(p);
-	SCHED_UNLOCK(s);
+	if ((flags & FORK_THREAD) == 0) {
+		getnanotime(&pr->ps_start);
+		pr->ps_acflag = AFORK;
+	}
+
+	/*
+	 * Make child runnable and add to run queue.
+	 */
+	if ((flags & FORK_IDLE) == 0) {
+		SCHED_LOCK(s);
+		p->p_stat = SRUN;
+		p->p_cpu = sched_choosecpu_fork(curp, flags);
+		setrunqueue(p);
+		SCHED_UNLOCK(s);
+	} else
+		p->p_cpu = arg;
 
 	if (newptstat)
 		free(newptstat, M_SUBPROC);
@@ -544,20 +533,54 @@ fork1(struct proc *curp, int exitsig, int flags, void *stack, pid_t *tidptr,
 /*
  * Checks for current use of a pid, either as a pid or pgid.
  */
+pid_t oldpids[100];
 int
-pidtaken(pid_t pid)
+ispidtaken(pid_t pid)
 {
+	uint32_t i;
 	struct proc *p;
+
+	for (i = 0; i < nitems(oldpids); i++)
+		if (pid == oldpids[i])
+			return (1);
 
 	if (pfind(pid) != NULL)
 		return (1);
 	if (pgfind(pid) != NULL)
 		return (1);
 	LIST_FOREACH(p, &zombproc, p_list) {
-		if (p->p_pid == pid || (p->p_p->ps_pgrp && p->p_p->ps_pgrp->pg_id == pid))
+		if (p->p_pid == pid ||
+		    (p->p_p->ps_pgrp && p->p_p->ps_pgrp->pg_id == pid))
 			return (1);
 	}
 	return (0);
+}
+
+/* Find an unused pid satisfying 1 <= lastpid <= PID_MAX */
+pid_t
+allocpid(void)
+{
+	static pid_t lastpid;
+	pid_t pid;
+
+	if (!randompid) {
+		/* only used early on for system processes */
+		pid = ++lastpid;
+	} else {
+		do {
+			pid = 1 + arc4random_uniform(PID_MAX - 1);
+		} while (ispidtaken(pid));
+	}
+
+	return pid;
+}
+
+void
+freepid(pid_t pid)
+{
+	static uint32_t idx;
+
+	oldpids[idx++ % nitems(oldpids)] = pid;
 }
 
 #if defined(MULTIPROCESSOR)

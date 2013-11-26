@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmmu.h,v 1.27 2011/10/25 18:38:06 miod Exp $ */
+/*	$OpenBSD: cmmu.h,v 1.32 2013/11/16 18:45:20 miod Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1993-1992 Carnegie Mellon University
@@ -33,15 +33,20 @@
  */
 #if defined(_KERNEL) && !defined(_LOCORE)
 
+#include <machine/mmu.h>
+
 /* machine dependent cmmu function pointer structure */
 struct cmmu_p {
 	cpuid_t (*init)(void);
+	void (*batc_setup)(cpuid_t, apr_t);
 	void (*setup_board_config)(void);
 	void (*cpu_configuration_print)(int);
 	void (*shutdown)(void);
 
 	cpuid_t (*cpu_number)(void);
 
+	apr_t (*apr_cmode)(void);
+	apr_t (*pte_cmode)(void);
 	void (*set_sapr)(apr_t);
 	void (*set_uapr)(apr_t);
 
@@ -60,7 +65,7 @@ struct cmmu_p {
 #endif
 };
 
-extern struct cmmu_p *cmmu;
+extern const struct cmmu_p *cmmu;
 
 #ifdef MULTIPROCESSOR
 /*
@@ -78,10 +83,13 @@ extern __cpu_simple_lock_t cmmu_cpu_lock;
 #endif	/* MULTIPROCESSOR */
 
 #define cmmu_init			(cmmu->init)
+#define cmmu_batc_setup			(cmmu->batc_setup)
 #define setup_board_config		(cmmu->setup_board_config)
 #define	cpu_configuration_print(cpu)	(cmmu->cpu_configuration_print)(cpu)
 #define	cmmu_shutdown			(cmmu->shutdown)
 #define	cmmu_cpu_number			(cmmu->cpu_number)
+#define	cmmu_apr_cmode			(cmmu->apr_cmode)
+#define	cmmu_pte_cmode			(cmmu->pte_cmode)
 #define	cmmu_set_sapr(apr)		(cmmu->set_sapr)(apr)
 #define	cmmu_set_uapr(apr)		(cmmu->set_uapr)(apr)
 #define	cmmu_tlbis(cpu, va, pte) 	(cmmu->tlb_inv_s)(cpu, va, pte)
@@ -100,6 +108,12 @@ extern __cpu_simple_lock_t cmmu_cpu_lock;
 #define DMA_CACHE_INV		0x00
 #define DMA_CACHE_SYNC_INVAL	0x01
 #define DMA_CACHE_SYNC		0x02
+
+/*
+ * Current BATC values.
+ */
+
+extern batc_t global_dbatc[BATC_MAX], global_ibatc[BATC_MAX];
 
 #endif	/* _KERNEL && !_LOCORE */
 

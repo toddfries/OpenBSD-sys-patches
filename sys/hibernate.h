@@ -1,4 +1,4 @@
-/*	$OpenBSD: hibernate.h,v 1.19 2011/11/29 05:21:10 deraadt Exp $	*/
+/*	$OpenBSD: hibernate.h,v 1.30 2013/11/09 06:54:00 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -27,6 +27,9 @@
 #define HIBERNATE_CHUNK_USED 1
 #define HIBERNATE_CHUNK_CONFLICT 2
 #define HIBERNATE_CHUNK_PLACED 4
+
+/* Magic number used to indicate hibernate signature block */
+#define HIBERNATE_MAGIC 0x0B5D0B5D
 
 struct hiballoc_entry;
 
@@ -66,6 +69,7 @@ struct hibernate_disk_chunk {
 };
 
 #define HIB_INIT	-1
+#define HIB_DONE	-2
 #define HIB_R		0
 #define HIB_W		1
 typedef	int (*hibio_fn)(dev_t, daddr_t, vaddr_t, size_t, int, void *);
@@ -77,14 +81,14 @@ typedef	int (*hibio_fn)(dev_t, daddr_t, vaddr_t, size_t, int, void *);
  */
 union hibernate_info {
 	struct {
+		u_int32_t			magic;	
 		size_t				nranges;
 		struct hibernate_memory_range	ranges[VM_PHYSSEG_MAX];
 		size_t				image_size;
 		size_t				chunk_ctr;
-		u_int32_t			secsize;
-		dev_t				device;
-		daddr_t				swap_offset;
+		dev_t				dev;
 		daddr_t				sig_offset;
+		daddr_t				chunktable_offset;
 		daddr_t				image_offset;
 		paddr_t				piglet_pa;
 		vaddr_t				piglet_va;
@@ -105,7 +109,7 @@ void	 uvm_pmr_dirty_everything(void);
 int	 uvm_pmr_alloc_pig(paddr_t*, psize_t);
 int	 uvm_pmr_alloc_piglet(vaddr_t*, paddr_t*, vsize_t, paddr_t);
 void	 uvm_pmr_free_piglet(vaddr_t, vsize_t);
-u_char	 uvm_page_rle(paddr_t);
+int	 uvm_page_rle(paddr_t);
 
 hibio_fn get_hibernate_io_function(void);
 int	get_hibernate_info(union hibernate_info *, int);
@@ -113,10 +117,14 @@ int	get_hibernate_info(union hibernate_info *, int);
 int	hibernate_zlib_reset(union hibernate_info *, int);
 void	*hibernate_zlib_alloc(void *, int, int);
 void	hibernate_zlib_free(void *, void *);
-void	hibernate_inflate(union hibernate_info *, paddr_t, paddr_t, size_t);
+void	hibernate_inflate_region(union hibernate_info *, paddr_t, paddr_t,
+	    size_t);
 size_t	hibernate_deflate(union hibernate_info *, paddr_t, size_t *);
+void	hibernate_process_chunk(union hibernate_info *,
+	    struct hibernate_disk_chunk *, paddr_t);
+int	hibernate_inflate_page(void);
 
-int	hibernate_read_block(union hibernate_info *, daddr_t, size_t, vaddr_t);
+int	hibernate_block_io(union hibernate_info *, daddr_t, size_t, vaddr_t, int);
 int	hibernate_write_signature(union hibernate_info *);
 int	hibernate_write_chunktable(union hibernate_info *);
 int	hibernate_write_chunks(union hibernate_info *);

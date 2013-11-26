@@ -1,4 +1,4 @@
-/*	$OpenBSD: av530_machdep.c,v 1.6 2011/01/02 13:40:05 miod Exp $	*/
+/*	$OpenBSD: av530_machdep.c,v 1.12 2013/10/23 10:07:14 miod Exp $	*/
 /*
  * Copyright (c) 2006, 2007, 2010 Miodrag Vallat.
  *
@@ -82,6 +82,7 @@ const struct board board_av530 = {
 	av530_bootstrap,
 	av530_memsize,
 	av530_startup,
+	av530_get_boot_device,
 	av530_intr,
 	rtc_init_clocks,
 	av530_getipl,
@@ -92,15 +93,15 @@ const struct board board_av530 = {
 	m88100_smp_setup,
 #endif
 	av530_intsrc,
+	av530_exintsrc,
 	av530_get_vme_ranges,
 
 	av530_ptable
 };
 
 /*
- * The MVME188 interrupt arbiter has 25 orthogonal interrupt sources.
- * On the AViiON 530 machines, there are even more interrupt sources in use,
- * requiring the use of two arbiters.
+ * The AViiON 530 machines have two interrupt arbiter for 32 orthognal
+ * interrupt sources each.
  * We fold this model in the 8-level spl model this port uses, enforcing
  * priorities manually with the interrupt masks.
  */
@@ -148,13 +149,10 @@ av530_startup()
 {
 }
 
-void
+u_int
 av530_bootstrap()
 {
-	extern struct cmmu_p cmmu8820x;
-#if 0
-	extern u_char hostaddr[6];
-#endif
+	extern const struct cmmu_p cmmu8820x;
 	uint32_t whoami;
 
 	/*
@@ -192,13 +190,43 @@ av530_bootstrap()
 	*(volatile u_int32_t *)AV_IENALL = 0;
 	*(volatile u_int32_t *)AV_EXIENALL = 0;
 
-#if 0
 	/*
-	 * Get all the information we'll need later from the PROM, while
-	 * we can still use it.
+	 * Return the delay const value to use (which matches the CPU speed).
 	 */
-	scm_getenaddr(hostaddr);
-#endif
+	return 33;
+}
+
+/*
+ * Return the address of the boot device, providing the default boot device
+ * if none is requested.
+ */
+paddr_t
+av530_get_boot_device(uint32_t *name, u_int unit)
+{
+	/* default boot device is on-board ncsc() */
+	if (*name == 0)
+		*name = SCM_NCSC;
+
+	switch (*name) {
+	case SCM_DGEN:
+		switch (unit) {
+		case 0:
+			return AV530_LAN1;
+		case 1:
+			return AV530_LAN2;
+		}
+		break;
+	case SCM_NCSC:
+		switch (unit) {
+		case 0:
+			return AV530_SCSI1;
+		case 1:
+			return AV530_SCSI1;
+		}
+		break;
+	}
+
+	return 0;
 }
 
 /*
@@ -385,7 +413,7 @@ av530_clock_ipi_handler(struct trapframe *eframe)
 /*
  * Provide the interrupt masks for a given logical interrupt source.
  */
-u_int64_t
+u_int32_t
 av530_intsrc(int i)
 {
 	static const u_int32_t intsrc[] = {
@@ -400,6 +428,7 @@ av530_intsrc(int i)
 		0,
 		0,
 		0,
+		0,
 		AV530_IRQ_VME1,
 		AV530_IRQ_VME2,
 		AV530_IRQ_VME3,
@@ -407,7 +436,15 @@ av530_intsrc(int i)
 		AV530_IRQ_VME5,
 		AV530_IRQ_VME6,
 		AV530_IRQ_VME7
-	}, ext_intsrc[] = {
+	};
+
+	return intsrc[i];
+}
+
+u_int32_t
+av530_exintsrc(int i)
+{
+	static const u_int32_t exintsrc[] = {
 		0,
 		0,
 		0,
@@ -425,13 +462,11 @@ av530_intsrc(int i)
 		0,
 		0,
 		0,
+		0,
 		0
 	};
-	uint64_t isrc;
 
-	isrc = ext_intsrc[i];
-	isrc = (isrc << 32) | intsrc[i];
-	return isrc;
+	return exintsrc[i];
 }
 
 /*

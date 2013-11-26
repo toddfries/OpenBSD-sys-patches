@@ -1,4 +1,4 @@
-/*	$OpenBSD: bioscons.c,v 1.5 2008/04/20 01:46:35 dlg Exp $	*/
+/*	$OpenBSD: bioscons.c,v 1.9 2013/01/17 12:07:19 jsing Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff
@@ -27,15 +27,18 @@
  */
 
 #include <sys/types.h>
+
 #include <machine/biosvar.h>
 #include <machine/pio.h>
-#include <dev/isa/isareg.h>
+
+#include <dev/cons.h>
 #include <dev/ic/mc146818reg.h>
 #include <dev/ic/comreg.h>
 #include <dev/ic/ns16450reg.h>
-/* #include <i386/isa/nvram.h> */
-#include <dev/cons.h>
+#include <dev/isa/isareg.h>
+
 #include <lib/libsa/stand.h>
+
 #include "biosdev.h"
 
 /* XXX cannot trust NVRAM on this.  Maybe later we make a real probe.  */
@@ -90,6 +93,7 @@ pc_getc(dev_t dev)
 
 	__asm __volatile(DOINT(0x16) : "=a" (rv) : "0" (0x000) :
 	    "%ecx", "%edx", "cc" );
+
 	return (rv & 0xff);
 }
 
@@ -124,23 +128,23 @@ com_probe(struct consdev *cn)
 	n &= 7;
 	for (i = 0; i < n; i++)
 		printf(" com%d", i);
-	if (n) {
-		cn->cn_pri = CN_LOWPRI;
-		/* XXX from i386/conf.c */
-		cn->cn_dev = makedev(8, 0);
-	}
+
+	cn->cn_pri = CN_LOWPRI;
+	/* XXX from i386/conf.c */
+	cn->cn_dev = makedev(8, 0);
 }
 
-int com_speed = -1;  /* default speed is 9600 baud */
+int com_speed = -1;
+int com_addr = -1;
 
 void
 com_init(struct consdev *cn)
 {
-	int port = comports[minor(cn->cn_dev)];
+	int port = (com_addr == -1) ? comports[minor(cn->cn_dev)] : com_addr;
 
 	outb(port + com_ier, 0);
 	if (com_speed == -1)
-		comspeed(cn->cn_dev, 9600);
+		comspeed(cn->cn_dev, 9600); /* default speed is 9600 baud */
 	outb(port + com_mcr, MCR_DTR | MCR_RTS);
 	outb(port + com_fifo, FIFO_ENABLE | FIFO_RCV_RST | FIFO_XMT_RST |
 	    FIFO_TRIGGER_1);
@@ -153,7 +157,7 @@ com_init(struct consdev *cn)
 int
 com_getc(dev_t dev)
 {
-	int port = comports[minor(dev & 0x7f)];
+	int port = (com_addr == -1) ? comports[minor(dev & 0x7f)] : com_addr;
 
 	if (dev & 0x80)
 		return (inb(port + com_lsr) & LSR_RXRDY);
@@ -168,8 +172,9 @@ com_getc(dev_t dev)
 int
 comspeed(dev_t dev, int sp)
 {
+	int port = (com_addr == -1) ? comports[minor(dev)] : com_addr;
 	int i, newsp;
-        int err;
+	int err;
 
 	if (sp <= 0)
 		return com_speed;
@@ -206,10 +211,10 @@ comspeed(dev_t dev, int sp)
 		sleep(5);
 	}
 
-	outb(comports[minor(dev)] + com_cfcr, LCR_DLAB);
-	outb(comports[minor(dev)] + com_dlbl, newsp);
-	outb(comports[minor(dev)] + com_dlbh, newsp>>8);
-	outb(comports[minor(dev)] + com_cfcr, LCR_8BITS);
+	outb(port + com_cfcr, LCR_DLAB);
+	outb(port + com_dlbl, newsp);
+	outb(port + com_dlbh, newsp>>8);
+	outb(port + com_cfcr, LCR_8BITS);
 	if (com_speed != -1)
 		printf("\ncom%d: %d baud\n", minor(dev), sp);
 
@@ -221,11 +226,10 @@ comspeed(dev_t dev, int sp)
 void
 com_putc(dev_t dev, int c)
 {
-	int port = comports[minor(dev)];
+	int port = (com_addr == -1) ? comports[minor(dev)] : com_addr;
 
 	while ((inb(port + com_lsr) & LSR_TXRDY) == 0)
 		;
 
 	outb(port + com_data, c);
 }
-

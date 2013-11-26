@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.3 2010/11/23 22:06:57 syuu Exp $ */
+/*	$OpenBSD: locore.S,v 1.5 2012/10/03 11:18:23 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -31,6 +31,7 @@
 #include <machine/param.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
 
@@ -89,13 +90,13 @@ start:
 	 * Initialize stack and call machine startup.
 	 */
 	LA	t0, start - FRAMESZ(CF_SZ)
-	PTR_S	ra, CF_RA_OFFS(t0)		# save pmon return address
+	PTR_S	ra, CF_RA_OFFS(t0)		# save uboot return address
 	PTR_S	sp, 0(t0)			# and stack
 	move	sp, t0
 	jal	mips_init			# mips_init(argc, argv, envp,
 	nop					#    callvec, esym)
 
-	beqz	v0, 1f				# upon failure, return to pmon
+	beqz	v0, 1f				# upon failure, return to uboot
 	nop
 
 	PTR_S	zero, CF_RA_OFFS(sp)		# Zero out old ra for debugger

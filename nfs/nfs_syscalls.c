@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_syscalls.c,v 1.92 2010/12/05 12:18:00 kettenis Exp $	*/
+/*	$OpenBSD: nfs_syscalls.c,v 1.96 2013/11/03 13:50:24 miod Exp $	*/
 /*	$NetBSD: nfs_syscalls.c,v 1.19 1996/02/18 11:53:52 fvdl Exp $	*/
 
 /*
@@ -180,12 +180,12 @@ sys_nfssvc(struct proc *p, void *v, register_t *retval)
 			error = sockargs(&nam, nfsdarg.name, nfsdarg.namelen,
 				MT_SONAME);
 			if (error) {
-				FRELE(fp);
+				FRELE(fp, p);
 				return (error);
 			}
 		}
 		error = nfssvc_addsock(fp, nam);
-		FRELE(fp);
+		FRELE(fp, p);
 		break;
 	case NFSSVC_NFSD:
 		error = copyin(SCARG(uap, argp), nsd, sizeof(*nsd));
@@ -564,13 +564,14 @@ nfsrv_init(int terminating)
 void
 nfssvc_iod(void *arg)
 {
-	struct proc *p = (struct proc *)arg;
+	struct proc *p = curproc;
 	struct buf *bp, *nbp;
 	int i, myiod;
 	struct vnode *vp;
 	int error = 0, s, bufcount;
 
-	bufcount = 256;	/* XXX: Big enough? sysctl, constant ? */
+	bufcount = MIN(256, bcstats.kvaslots / 8);
+	bufcount = MIN(bufcount, bcstats.numbufs / 8);
 
 	/* Assign my position or return error if too many already running. */
 	myiod = -1;
@@ -587,8 +588,12 @@ nfssvc_iod(void *arg)
 	nfs_numasync++;
 
 	/* Upper limit on how many bufs we'll queue up for this iod. */
+	if (nfs_bufqmax > bcstats.kvaslots / 4) {
+		nfs_bufqmax = bcstats.kvaslots / 4;
+		bufcount = 0;
+	} 
 	if (nfs_bufqmax > bcstats.numbufs / 4) {
-		nfs_bufqmax = bcstats.numbufs / 4; /* limit to 1/4 of bufs */
+		nfs_bufqmax = bcstats.numbufs / 4;
 		bufcount = 0;
 	}
 
@@ -605,6 +610,7 @@ nfssvc_iod(void *arg)
 		/* Take one off the front of the list */
 		TAILQ_REMOVE(&nfs_bufq, bp, b_freelist);
 		nfs_bufqlen--;
+		wakeup_one(&nfs_bufqlen);
 		if (bp->b_flags & B_READ)
 		    (void) nfs_doio(bp, NULL);
 		else do {
@@ -638,7 +644,6 @@ nfssvc_iod(void *arg)
 
 		    (void) nfs_doio(bp, NULL);
 		} while ((bp = nbp) != NULL);
-		wakeup_one(&nfs_bufqlen); /* wake up anyone waiting for room to enqueue IO */
 	    }
 	    if (error) {
 		nfs_asyncdaemon[myiod] = NULL;
@@ -652,7 +657,6 @@ nfssvc_iod(void *arg)
 void
 nfs_getset_niothreads(int set)
 {
-	struct proc *p;
 	int i, have, start;
 	
 	for (have = 0, i = 0; i < NFS_MAXASYNCDAEMON; i++)
@@ -666,7 +670,7 @@ nfs_getset_niothreads(int set)
 		start = nfs_niothreads - have;
 
 		while (start > 0) {
-			kthread_create(nfssvc_iod, p, &p, "nfsio");
+			kthread_create(nfssvc_iod, NULL, NULL, "nfsio");
 			start--;
 		}
 

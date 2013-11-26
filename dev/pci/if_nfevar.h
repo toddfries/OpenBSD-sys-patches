@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nfevar.h,v 1.14 2010/09/07 16:21:45 deraadt Exp $	*/
+/*	$OpenBSD: if_nfevar.h,v 1.16 2013/04/01 06:40:40 brad Exp $	*/
 
 /*-
  * Copyright (c) 2005 Jonathan Gray <jsg@openbsd.org>
@@ -74,7 +74,6 @@ struct nfe_softc {
 	struct mii_data		sc_mii;
 	struct timeout		sc_tick_ch;
 
-	int			sc_if_flags;
 	u_int			sc_flags;
 #define NFE_JUMBO_SUP		0x01
 #define NFE_40BIT_ADDR		0x02
@@ -83,6 +82,7 @@ struct nfe_softc {
 #define NFE_USE_JUMBO		0x10
 #define NFE_CORRECT_MACADDR	0x20
 #define NFE_PWR_MGMT		0x40
+#define NFE_WOL			0x80
 
 	uint32_t		rxtxctl;
 	uint8_t			mii_phyaddr;

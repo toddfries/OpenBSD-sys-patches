@@ -1,4 +1,4 @@
-/*	$OpenBSD: urio.c,v 1.39 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: urio.c,v 1.44 2013/11/07 13:10:43 pirofti Exp $	*/
 /*	$NetBSD: urio.c,v 1.15 2002/10/23 09:14:02 jdolecek Exp $	*/
 
 /*
@@ -45,7 +45,6 @@
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/selinfo.h>
-#include <sys/proc.h>
 #include <sys/vnode.h>
 #include <sys/poll.h>
 
@@ -72,16 +71,15 @@ int	uriodebug = 0;
 
 struct urio_softc {
  	struct device		sc_dev;
-	usbd_device_handle	sc_udev;
-	usbd_interface_handle	sc_iface;
+	struct usbd_device	*sc_udev;
+	struct usbd_interface	*sc_iface;
 
 	int			sc_in_addr;
-	usbd_pipe_handle	sc_in_pipe;
+	struct usbd_pipe	*sc_in_pipe;
 	int			sc_out_addr;
-	usbd_pipe_handle	sc_out_pipe;
+	struct usbd_pipe	*sc_out_pipe;
 
 	int			sc_refcnt;
-	char			sc_dying;
 };
 
 #define URIOUNIT(n) (minor(n))
@@ -131,8 +129,8 @@ urio_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct urio_softc	*sc = (struct urio_softc *)self;
 	struct usb_attach_arg	*uaa = aux;
-	usbd_device_handle	dev = uaa->device;
-	usbd_interface_handle	iface;
+	struct usbd_device	*dev = uaa->device;
+	struct usbd_interface	*iface;
 	usbd_status		err;
 	usb_endpoint_descriptor_t *ed;
 	u_int8_t		epcount;
@@ -232,7 +230,7 @@ urio_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 	return (0);
@@ -253,7 +251,7 @@ urioopen(dev_t dev, int flag, int mode, struct proc *p)
 	DPRINTFN(5, ("urioopen: flag=%d, mode=%d, unit=%d\n",
 		     flag, mode, URIOUNIT(dev)));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	if (sc->sc_in_pipe != NULL)
@@ -302,17 +300,17 @@ int
 urioread(dev_t dev, struct uio *uio, int flag)
 {
 	struct urio_softc *sc;
-	usbd_xfer_handle xfer;
+	struct usbd_xfer *xfer;
 	usbd_status err;
 	void *bufp;
-	u_int32_t n, tn;
+	u_int32_t n;
 	int error = 0;
 
 	sc = urio_cd.cd_devs[URIOUNIT(dev)];
 
 	DPRINTFN(5, ("urioread: %d\n", URIOUNIT(dev)));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	xfer = usbd_alloc_xfer(sc->sc_udev);
@@ -328,23 +326,22 @@ urioread(dev_t dev, struct uio *uio, int flag)
 
 	while ((n = min(URIO_BSIZE, uio->uio_resid)) != 0) {
 		DPRINTFN(1, ("urioread: start transfer %d bytes\n", n));
-		tn = n;
-		err = usbd_bulk_transfer(xfer, sc->sc_in_pipe, USBD_NO_COPY,
-			  URIO_RW_TIMEOUT, bufp, &tn, "uriors");
+		usbd_setup_xfer(xfer, sc->sc_in_pipe, 0, bufp, n,
+		    USBD_NO_COPY | USBD_SYNCHRONOUS, URIO_RW_TIMEOUT, NULL);
+		err = usbd_transfer(xfer);
 		if (err) {
-			if (err == USBD_INTERRUPTED)
-				error = EINTR;
-			else if (err == USBD_TIMEOUT)
+			usbd_clear_endpoint_stall(sc->sc_in_pipe);
+			if (err == USBD_TIMEOUT)
 				error = ETIMEDOUT;
 			else
 				error = EIO;
 			break;
 		}
 
-		DPRINTFN(1, ("urioread: got %d bytes\n", tn));
+		DPRINTFN(1, ("urioread: got %d bytes\n", n));
 
-		error = uiomove(bufp, tn, uio);
-		if (error || tn < n)
+		error = uiomove(bufp, n, uio);
+		if (error)
 			break;
 	}
 	usbd_free_xfer(xfer);
@@ -359,7 +356,7 @@ int
 uriowrite(dev_t dev, struct uio *uio, int flag)
 {
 	struct urio_softc *sc;
-	usbd_xfer_handle xfer;
+	struct usbd_xfer *xfer;
 	usbd_status err;
 	void *bufp;
 	u_int32_t n;
@@ -370,7 +367,7 @@ uriowrite(dev_t dev, struct uio *uio, int flag)
 	DPRINTFN(5, ("uriowrite: unit=%d, len=%ld\n", URIOUNIT(dev),
 		     (long)uio->uio_resid));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	xfer = usbd_alloc_xfer(sc->sc_udev);
@@ -391,13 +388,13 @@ uriowrite(dev_t dev, struct uio *uio, int flag)
 
 		DPRINTFN(1, ("uriowrite: transfer %d bytes\n", n));
 
-		err = usbd_bulk_transfer(xfer, sc->sc_out_pipe, USBD_NO_COPY,
-			  URIO_RW_TIMEOUT, bufp, &n, "uriowr");
+		usbd_setup_xfer(xfer, sc->sc_out_pipe, 0, bufp, n,
+		    USBD_NO_COPY | USBD_SYNCHRONOUS, URIO_RW_TIMEOUT, NULL);
+		err = usbd_transfer(xfer);
 		DPRINTFN(2, ("uriowrite: err=%d\n", err));
 		if (err) {
-			if (err == USBD_INTERRUPTED)
-				error = EINTR;
-			else if (err == USBD_TIMEOUT)
+			usbd_clear_endpoint_stall(sc->sc_out_pipe);
+			if (err == USBD_TIMEOUT)
 				error = ETIMEDOUT;
 			else
 				error = EIO;
@@ -428,14 +425,13 @@ urioioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	struct uio uio;
 	usb_device_request_t req;
 	usbd_status err;
-	int req_flags = 0;
 	u_int32_t req_actlen = 0;
 	void *ptr = NULL;
 	int error = 0;
 
 	sc = urio_cd.cd_devs[unit];
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	rcmd = (struct urio_command *)addr;
@@ -493,7 +489,7 @@ urioioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 
 	sc->sc_refcnt++;
 
-	err = usbd_do_request_flags(sc->sc_udev, &req, ptr, req_flags,
+	err = usbd_do_request_flags(sc->sc_udev, &req, ptr, 0,
 		  &req_actlen, USBD_DEFAULT_TIMEOUT);
 
 	if (--sc->sc_refcnt < 0)
@@ -502,8 +498,8 @@ urioioctl(dev_t dev, u_long cmd, caddr_t addr, int flag, struct proc *p)
 	if (err) {
 		error = EIO;
 	} else {
-		if (len != 0 && uio.uio_rw == UIO_READ)
-			error = uiomove(ptr, len, &uio);
+		if (req_actlen != 0 && uio.uio_rw == UIO_READ)
+			error = uiomove(ptr, req_actlen, &uio);
 	}
 
 ret:

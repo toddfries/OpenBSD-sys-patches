@@ -1,4 +1,4 @@
-/*	$OpenBSD: socket.h,v 1.79 2012/03/17 10:16:41 dlg Exp $	*/
+/*	$OpenBSD: socket.h,v 1.83 2013/04/02 03:38:24 guenther Exp $	*/
 /*	$NetBSD: socket.h,v 1.14 1996/02/09 18:25:36 christos Exp $	*/
 
 /*
@@ -35,7 +35,34 @@
 #ifndef _SYS_SOCKET_H_
 #define	_SYS_SOCKET_H_
 
+#include <sys/cdefs.h>
+
+#if __BSD_VISIBLE
+#include <sys/types.h>			/* for off_t, uid_t, and gid_t */
+#else
 #include <sys/_types.h>
+#endif
+
+#ifndef	_SOCKLEN_T_DEFINED_
+#define	_SOCKLEN_T_DEFINED_
+typedef	__socklen_t	socklen_t;	/* length type for network syscalls */
+#endif
+
+#ifndef	_SA_FAMILY_T_DEFINED_
+#define	_SA_FAMILY_T_DEFINED_
+typedef	__sa_family_t	sa_family_t;	/* sockaddr address family type */
+#endif
+
+#ifndef	_SIZE_T_DEFINED_
+#define	_SIZE_T_DEFINED_
+typedef	__size_t	size_t;
+#endif
+
+#ifndef	_SSIZE_T_DEFINED_
+#define	_SSIZE_T_DEFINED_
+typedef	__ssize_t	ssize_t;
+#endif
+
 
 /*
  * Definitions related to sockets: types, address families, options.
@@ -159,7 +186,7 @@ struct	splice {
  * addresses.
  */
 struct sockaddr {
-	u_int8_t    sa_len;		/* total length */
+	__uint8_t    sa_len;		/* total length */
 	sa_family_t sa_family;		/* address family */
 	char	    sa_data[14];	/* actually longer; address value */
 };
@@ -177,13 +204,14 @@ struct sockaddr {
  * occurrences (including header file) to __ss_len.
  */
 struct sockaddr_storage {
-	u_int8_t	ss_len;		/* total length */
+	__uint8_t	ss_len;		/* total length */
 	sa_family_t	ss_family;	/* address family */
 	unsigned char	__ss_pad1[6];	/* align to quad */
-	u_int64_t	__ss_pad2;	/* force alignment for stupid compilers */
+	__uint64_t	__ss_pad2;	/* force alignment for stupid compilers */
 	unsigned char	__ss_pad3[240];	/* pad to a total of 256 bytes */
 };
 
+#ifdef _KERNEL
 /*
  * Structure used by kernel to pass protocol
  * information in raw sockets.
@@ -192,6 +220,7 @@ struct sockproto {
 	unsigned short	sp_family;	/* address family */
 	unsigned short	sp_protocol;	/* protocol */
 };
+#endif /* _KERNEL */
 
 /*
  * Protocol families, same as address families for now.
@@ -243,32 +272,15 @@ struct sockproto {
 #define	SHUT_WR		1
 #define	SHUT_RDWR	2
 
-/*
- * Socket credentials.
- */
-struct sockcred {
-	uid_t	sc_uid;			/* real user id */
-	uid_t	sc_euid;		/* effective user id */
-	gid_t	sc_gid;			/* real group id */
-	gid_t	sc_egid;		/* effective group id */
-	int	sc_ngroups;		/* number of supplemental groups */
-	gid_t	sc_groups[1];		/* variable length */
-};
-
 #if __BSD_VISIBLE
+#define SA_LEN(x) ((x)->sa_len)
+
 /* Read using getsockopt() with SOL_SOCKET, SO_PEERCRED */
 struct sockpeercred {
 	uid_t		uid;		/* effective user id */
 	gid_t		gid;		/* effective group id */
 	pid_t		pid;
 };
-#endif /* __BSD_VISIBLE */
-
-/*
- * Compute size of a sockcred structure with groups.
- */
-#define SOCKCREDSIZE(ngrps) \
-	(sizeof(struct sockcred) + (sizeof(gid_t) * ((ngrps) - 1)))
 
 /*
  * Definitions for network related sysctl, CTL_NET.
@@ -381,6 +393,7 @@ struct sockpeercred {
 	{ 0, 0 }, \
 	{ "stats", CTLTYPE_STRUCT }, \
 }
+#endif /* __BSD_VISIBLE */
 
 /*
  * Maximum queue length specifiable by listen(2).
@@ -428,15 +441,15 @@ struct cmsghdr {
 
 /* given pointer to struct cmsghdr, return pointer to data */
 #define	CMSG_DATA(cmsg) \
-	((u_char *)(cmsg) + _ALIGN(sizeof(struct cmsghdr)))
+	((unsigned char *)(cmsg) + _ALIGN(sizeof(struct cmsghdr)))
 
 /* given pointer to struct cmsghdr, return pointer to next cmsghdr */
 #define	CMSG_NXTHDR(mhdr, cmsg)	\
-	(((caddr_t)(cmsg) + _ALIGN((cmsg)->cmsg_len) + \
+	(((char *)(cmsg) + _ALIGN((cmsg)->cmsg_len) + \
 			    _ALIGN(sizeof(struct cmsghdr)) > \
-	    ((caddr_t)(mhdr)->msg_control) + (mhdr)->msg_controllen) ? \
+	    ((char *)(mhdr)->msg_control) + (mhdr)->msg_controllen) ? \
 	    (struct cmsghdr *)NULL : \
-	    (struct cmsghdr *)((caddr_t)(cmsg) + _ALIGN((cmsg)->cmsg_len)))
+	    (struct cmsghdr *)((char *)(cmsg) + _ALIGN((cmsg)->cmsg_len)))
 
 /*
  * RFC 2292 requires to check msg_controllen, in case that the kernel returns
@@ -460,40 +473,25 @@ struct cmsghdr {
 
 /* "Socket"-level control message types: */
 #define	SCM_RIGHTS	0x01		/* access rights (array of int) */
-#define SCM_CREDS	0x02		/* credentials (struct sockcred) */
 #define	SCM_TIMESTAMP	0x04		/* timestamp (struct timeval) */
 
+#if __BSD_VISIBLE
 /*
  * 4.3 compat sockaddr, move to compat file later
+ * XXX Needed by protocols/talkd.h
  */
 struct osockaddr {
 	unsigned short	sa_family;	/* address family */
 	char		sa_data[14];	/* up to 14 bytes of direct address */
 };
+#endif /* __BSD_VISIBLE */
 
-/*
- * 4.3-compat message header (move to compat file later).
- */
-struct omsghdr {
-	caddr_t	msg_name;		/* optional address */
-	int	msg_namelen;		/* size of address */
-	struct	iovec *msg_iov;		/* scatter/gather array */
-	int	msg_iovlen;		/* # elements in msg_iov */
-	caddr_t	msg_accrights;		/* access rights sent/received */
-	int	msg_accrightslen;
-};
-
-#define SA_LEN(x) ((x)->sa_len)
-
-#ifndef	_KERNEL
-
-#include <sys/cdefs.h>
+#ifndef _KERNEL
 
 __BEGIN_DECLS
 int	accept(int, struct sockaddr *, socklen_t *);
 int	bind(int, const struct sockaddr *, socklen_t);
 int	connect(int, const struct sockaddr *, socklen_t);
-int	getpeereid(int, uid_t *, gid_t *);
 int	getpeername(int, struct sockaddr *, socklen_t *);
 int	getsockname(int, struct sockaddr *, socklen_t *);
 int	getsockopt(int, int, int, void *, socklen_t *);
@@ -509,8 +507,13 @@ int	setsockopt(int, int, int, const void *, socklen_t);
 int	shutdown(int, int);
 int	socket(int, int, int);
 int	socketpair(int, int, int, int *);
+
+#if __BSD_VISIBLE
+int	getpeereid(int, uid_t *, gid_t *);
 int	getrtable(void);
 int	setrtable(int);
+#endif /* __BSD_VISIBLE */
+
 __END_DECLS
 
 #else

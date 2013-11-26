@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.139 2011/10/06 20:49:28 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.145 2013/11/04 14:11:29 deraadt Exp $	*/
 /*	$NetBSD: conf.c,v 1.75 1996/05/03 19:40:20 christos Exp $	*/
 
 /*
@@ -53,7 +53,6 @@ bdev_decl(fd);
 #include "cd.h"
 #include "uk.h"
 #include "vnd.h"
-#include "raid.h"
 #include "rd.h"
 
 struct bdevsw	bdevsw[] =
@@ -77,7 +76,7 @@ struct bdevsw	bdevsw[] =
 	bdev_notdef(),			/* 16: was: concatenated disk driver */
 	bdev_disk_init(NRD,rd),		/* 17: ram disk driver */
 	bdev_notdef(),			/* 18 */
-	bdev_disk_init(NRAID,raid),	/* 19: RAIDframe disk driver */
+	bdev_notdef(),			/* 19 was: RAIDframe disk driver */
 };
 int	nblkdev = nitems(bdevsw);
 
@@ -143,17 +142,9 @@ cdev_decl(cy);
 #include "audio.h"
 #include "video.h"
 #include "midi.h"
-#include "sequencer.h"
-cdev_decl(music);
 #include "joy.h"
-#include "bthub.h"
 #include "pctr.h"
 #include "bios.h"
-#include "iop.h"
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 #include "bktr.h"
 #include "ksyms.h"
 #include "usb.h"
@@ -162,7 +153,6 @@ cdev_decl(nnpfs_dev);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
-#include "uscanner.h"
 #include "cz.h"
 cdev_decl(cztty);
 #include "radio.h"
@@ -190,6 +180,7 @@ cdev_decl(pci);
 #include "amdmsr.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -249,14 +240,10 @@ struct cdevsw	cdevsw[] =
 	cdev_ocis_init(NBIOS,bios),	/* 48: onboard BIOS PROM */
 	cdev_bktr_init(NBKTR,bktr),     /* 49: Bt848 video capture device */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 50: Kernel symbols device */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 	cdev_midi_init(NMIDI,midi),	/* 52: MIDI I/O */
-	cdev_midi_init(NSEQUENCER,sequencer),	/* 53: sequencer I/O */
-	cdev_disk_init(NRAID,raid),	/* 54: RAIDframe disk driver */
+	cdev_notdef(),			/* 53 was: sequencer I/O */
+	cdev_notdef(),			/* 54 was: RAIDframe disk driver */
 	cdev_notdef(),			/* 55: */
 	/* The following slots are reserved for isdn4bsd. */
 	cdev_notdef(),			/* 56: i4b main device */
@@ -284,9 +271,9 @@ struct cdevsw	cdevsw[] =
 #endif
 	cdev_pf_init(NPF,pf),		/* 73: packet filter */
 	cdev_notdef(),			/* 74: ALTQ (deprecated) */
-	cdev_iop_init(NIOP,iop),	/* 75: I2O IOP control interface */
+	cdev_notdef(),
 	cdev_radio_init(NRADIO, radio), /* 76: generic radio I/O */
-	cdev_usbdev_init(NUSCANNER,uscanner),	/* 77: USB scanners */
+	cdev_notdef(),			/* 77: was USB scanners */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 78: system call tracing */
  	cdev_bio_init(NBIO,bio),	/* 79: ioctl tunnel */
 	cdev_ch_init(NGPR,gpr),		/* 80: GPR400 SmartCard reader */
@@ -295,13 +282,14 @@ struct cdevsw	cdevsw[] =
 	cdev_gpio_init(NGPIO,gpio),	/* 83: GPIO interface */
 	cdev_nvram_init(NNVRAM,nvram),	/* 84: NVRAM interface */
 	cdev_notdef(),			/* 85: ACPI (deprecated) */
-	cdev_bthub_init(NBTHUB,bthub),	/* 86: bthub */
+	cdev_notdef(),
 	cdev_agp_init(NAGP,agp),	/* 87: agp */
 	cdev_drm_init(NDRM,drm),	/* 88: drm */
 	cdev_amdmsr_init(NAMDMSR,amdmsr),	/* 89: amdmsr */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 90: vscsi */
 	cdev_disk_init(1,diskmap),	/* 91: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),     /* 92: pppx */
+	cdev_fuse_init(NFUSE,fuse),	/* 93: fuse */ 
 };
 int	nchrdev = nitems(cdevsw);
 

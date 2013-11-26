@@ -1,4 +1,4 @@
-/*	$OpenBSD: quota.h,v 1.9 2008/01/05 19:49:26 otto Exp $	*/
+/*	$OpenBSD: quota.h,v 1.12 2013/07/03 04:58:40 guenther Exp $	*/
 /*	$NetBSD: quota.h,v 1.6 1995/03/26 20:38:17 jtc Exp $	*/
 
 /*
@@ -102,8 +102,9 @@ struct dqblk {
 	u_int32_t dqb_ihardlimit;	/* maximum # allocated inodes + 1 */
 	u_int32_t dqb_isoftlimit;	/* preferred inode limit */
 	u_int32_t dqb_curinodes;	/* current # allocated inodes */
-	time_t	  dqb_btime;		/* time limit for excessive disk use */
-	time_t	  dqb_itime;		/* time limit for excessive files */
+					/* XXX 2038 */
+	u_int32_t dqb_btime;		/* time limit for excessive disk use */
+	u_int32_t dqb_itime;		/* time limit for excessive files */
 };
 
 #ifdef _KERNEL
@@ -115,8 +116,6 @@ enum ufs_quota_flags {
 	UFS_QUOTA_NOGID = 0x2,		/* Don't change GID quota */
 	UFS_QUOTA_FORCE = 0x1000	/* don't check limits - just change it */
 };     /* Change GID */
-
-#include <sys/cdefs.h>
 
 struct dquot;
 struct inode;
@@ -130,8 +129,8 @@ __BEGIN_DECLS
 #define ufs_quota_free_blocks(i, c, cr) ufs_quota_free_blocks2(i, c, cr, 0)
 #define ufs_quota_alloc_inode(i, cr) ufs_quota_alloc_inode2(i, cr, 0)
 #define ufs_quota_free_inode(i, cr) ufs_quota_free_inode2(i, cr, 0)
-int     ufs_quota_alloc_blocks2(struct inode *, daddr64_t, struct ucred *, enum ufs_quota_flags);
-int     ufs_quota_free_blocks2(struct inode *, daddr64_t, struct ucred *, enum ufs_quota_flags);
+int     ufs_quota_alloc_blocks2(struct inode *, daddr_t, struct ucred *, enum ufs_quota_flags);
+int     ufs_quota_free_blocks2(struct inode *, daddr_t, struct ucred *, enum ufs_quota_flags);
 int     ufs_quota_alloc_inode2(struct inode *, struct ucred *, enum ufs_quota_flags);
 int     ufs_quota_free_inode2(struct inode *, struct ucred *, enum ufs_quota_flags);
 

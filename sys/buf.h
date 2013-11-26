@@ -1,4 +1,4 @@
-/*	$OpenBSD: buf.h,v 1.78 2011/07/04 04:30:41 tedu Exp $	*/
+/*	$OpenBSD: buf.h,v 1.93 2013/11/21 01:16:52 dlg Exp $	*/
 /*	$NetBSD: buf.h,v 1.25 1997/04/09 21:12:17 mycroft Exp $	*/
 
 /*
@@ -42,7 +42,6 @@
 #include <sys/queue.h>
 #include <sys/tree.h>
 #include <sys/mutex.h>
-#include <sys/workq.h>
 
 #define NOLIST ((struct buf *)0x87654321)
 
@@ -63,10 +62,19 @@ LIST_HEAD(workhead, worklist);
 /*
  * Buffer queues
  */
-#define BUFQ_DISKSORT	0
-#define	BUFQ_FIFO	1
-#define BUFQ_DEFAULT	BUFQ_DISKSORT
+#define BUFQ_NSCAN_N	128
+#define BUFQ_FIFO	0
+#define BUFQ_NSCAN	1
+#define BUFQ_DEFAULT	BUFQ_NSCAN
 #define BUFQ_HOWMANY	2
+
+/*
+ * Write limits for bufq - defines high and low water marks for how
+ * many kva slots are allowed to be consumed to parallelize writes from
+ * the buffer cache from any individual bufq.
+ */
+#define BUFQ_HI		128
+#define BUFQ_LOW	64
 
 struct bufq_impl;
 
@@ -75,6 +83,9 @@ struct bufq {
 	struct mutex	 	 bufq_mtx;
 	void			*bufq_data;
 	u_int			 bufq_outstanding;
+	u_int			 bufq_hi;
+	u_int			 bufq_low;
+	int			 bufq_waiting;
 	int			 bufq_stop;
 	int			 bufq_type;
 	const struct bufq_impl	*bufq_impl;
@@ -90,6 +101,7 @@ void		 bufq_requeue(struct bufq *, struct buf *);
 int		 bufq_peek(struct bufq *);
 void		 bufq_drain(struct bufq *);
 
+void		 bufq_wait(struct bufq *, struct buf *);
 void		 bufq_done(struct bufq *, struct buf *);
 void		 bufq_quiesce(void);
 void		 bufq_restart(void);
@@ -106,18 +118,17 @@ struct bufq_fifo {
 	SIMPLEQ_ENTRY(buf)	bqf_entries;
 };
 
-/* Abuse bufq_fifo, for swapping to regular files. */
-struct bufq_swapreg {
+/* nscan */
+SIMPLEQ_HEAD(bufq_nscan_head, buf);
+struct bufq_nscan {
 	SIMPLEQ_ENTRY(buf)	bqf_entries;
-	struct workq_task	bqf_wqtask;
-
 };
 
 /* bufq link in struct buf */
 union bufq_data {
 	struct bufq_disksort	bufq_data_disksort;
 	struct bufq_fifo	bufq_data_fifo;
-	struct bufq_swapreg	bufq_swapreg;
+	struct bufq_nscan	bufq_data_nscan;
 };
 
 /*
@@ -163,8 +174,8 @@ struct buf {
 	struct uvm_object *b_pobj;	/* Object containing the pages */
 	off_t	b_poffs;		/* Offset within object */
 
-	daddr64_t	b_lblkno;	/* Logical block number. */
-	daddr64_t	b_blkno;	/* Underlying physical block number. */
+	daddr_t	b_lblkno;		/* Logical block number. */
+	daddr_t	b_blkno;		/* Underlying physical block number. */
 					/* Function to call upon completion.
 					 * Will be called at splbio(). */
 	void	(*b_iodone)(struct buf *);
@@ -176,15 +187,8 @@ struct buf {
  	struct	workhead b_dep;		/* List of filesystem dependencies. */
 };
 
-/*
- * For portability with historic industry practice, the cylinder number has
- * to be maintained in the `b_resid' field.
- */
-#define	b_cylinder b_resid		/* Cylinder number for disksort(). */
-
 /* Device driver compatibility definitions. */
 #define	b_active b_bcount		/* Driver queue head: drive active. */
-#define	b_errcnt b_resid		/* Retry count while I/O in progress. */
 
 /*
  * These flags are kept in b_flags.
@@ -213,13 +217,12 @@ struct buf {
 #define	B_SCANNED	0x00100000	/* Block already pushed during sync */
 #define	B_PDAEMON	0x00200000	/* I/O started by pagedaemon */
 #define	B_RELEASED	0x00400000	/* free this buffer after its kvm */
-#define	B_NOTMAPPED	0x00800000	/* BUSY, but not necessarily mapped */
 
 #define	B_BITS	"\20\001AGE\002NEEDCOMMIT\003ASYNC\004BAD\005BUSY" \
     "\006CACHE\007CALL\010DELWRI\011DONE\012EINTR\013ERROR" \
     "\014INVAL\015NOCACHE\016PHYS\017RAW\020READ" \
     "\021WANTED\022WRITEINPROG\023XXX(FORMAT)\024DEFERRED" \
-    "\025SCANNED\026DAEMON\027RELEASED\030NOTMAPPED"
+    "\025SCANNED\026DAEMON\027RELEASED"
 
 /*
  * This structure describes a clustered I/O.  It is stored in the b_saveaddr
@@ -249,17 +252,26 @@ struct cluster_save {
 #define B_SYNC		0x02	/* Do all allocations synchronously. */
 
 struct cluster_info {
-	daddr64_t	ci_lastr;	/* last read (read-ahead) */
-	daddr64_t	ci_lastw;	/* last write (write cluster) */
-	daddr64_t	ci_cstart;	/* start block of cluster */
-	daddr64_t	ci_lasta;	/* last allocation */
-	int		ci_clen; 	/* length of current cluster */
-	int		ci_ralen;	/* Read-ahead length */
-	daddr64_t	ci_maxra;	/* last readahead block */
+	daddr_t	ci_lastr;	/* last read (read-ahead) */
+	daddr_t	ci_lastw;	/* last write (write cluster) */
+	daddr_t	ci_cstart;	/* start block of cluster */
+	daddr_t	ci_lasta;	/* last allocation */
+	int	ci_clen; 	/* length of current cluster */
+	int	ci_ralen;	/* Read-ahead length */
+	daddr_t	ci_maxra;	/* last readahead block */
 };
 
 #ifdef _KERNEL
 __BEGIN_DECLS
+/* Kva slots (of size MAXPHYS) reserved for syncer and cleaner. */
+#define RESERVE_SLOTS 4
+/* Buffer cache pages reserved for syncer and cleaner. */
+#define RESERVE_PAGES (RESERVE_SLOTS * MAXPHYS / PAGE_SIZE)
+/* Minimum size of the buffer cache, in pages. */
+#define BCACHE_MIN (RESERVE_PAGES * 2)
+#define UNCLEAN_PAGES (bcstats.numbufpages - bcstats.numcleanpages)
+
+extern struct proc *cleanerproc;
 extern long bufpages;		/* Max number of pages for buffers' data */
 extern struct pool bufpool;
 extern struct bufhead bufhead;
@@ -268,8 +280,8 @@ void	bawrite(struct buf *);
 void	bdwrite(struct buf *);
 void	biodone(struct buf *);
 int	biowait(struct buf *);
-int bread(struct vnode *, daddr64_t, int, struct buf **);
-int breadn(struct vnode *, daddr64_t, int, daddr64_t *, int *, int,
+int bread(struct vnode *, daddr_t, int, struct buf **);
+int breadn(struct vnode *, daddr_t, int, daddr_t *, int *, int,
     struct buf **);
 void	brelse(struct buf *);
 void	bremfree(struct buf *);
@@ -277,9 +289,9 @@ void	bufinit(void);
 void	buf_dirty(struct buf *);
 void    buf_undirty(struct buf *);
 int	bwrite(struct buf *);
-struct buf *getblk(struct vnode *, daddr64_t, int, int, int);
+struct buf *getblk(struct vnode *, daddr_t, int, int, int);
 struct buf *geteblk(int);
-struct buf *incore(struct vnode *, daddr64_t);
+struct buf *incore(struct vnode *, daddr_t);
 
 /*
  * buf_kvm_init initializes the kvm handling for buffers.
@@ -292,6 +304,7 @@ struct buf *incore(struct vnode *, daddr64_t);
 void	buf_mem_init(vsize_t);
 void	buf_acquire(struct buf *);
 void	buf_acquire_unmapped(struct buf *);
+void	buf_acquire_nomap(struct buf *);
 void	buf_map(struct buf *);
 void	buf_release(struct buf *);
 int	buf_dealloc_mem(struct buf *);
@@ -311,7 +324,7 @@ void  buf_replacevnode(struct buf *, struct vnode *);
 void  buf_daemon(struct proc *);
 void  buf_replacevnode(struct buf *, struct vnode *);
 void  buf_daemon(struct proc *);
-int bread_cluster(struct vnode *, daddr64_t, int, struct buf **);
+int bread_cluster(struct vnode *, daddr_t, int, struct buf **);
 
 #ifdef DEBUG
 void buf_print(struct buf *);
@@ -357,5 +370,5 @@ buf_countdeps(struct buf *bp, int i, int islocked)
 void	cluster_write(struct buf *, struct cluster_info *, u_quad_t);
 
 __END_DECLS
-#endif
+#endif /* _KERNEL */
 #endif /* !_SYS_BUF_H_ */

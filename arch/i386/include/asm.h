@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.11 2011/03/23 16:54:35 pirofti Exp $	*/
+/*	$OpenBSD: asm.h,v 1.13 2013/03/28 17:41:04 martynas Exp $	*/
 /*	$NetBSD: asm.h,v 1.7 1994/10/27 04:15:56 cgd Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #ifndef _MACHINE_ASM_H_
 #define _MACHINE_ASM_H_
 
-#ifdef PIC
+#ifdef __PIC__
 #define PIC_PROLOGUE	\
 	pushl	%ebx;	\
 	call	666f;	\
@@ -72,8 +72,12 @@
 #endif
 
 /*
- * WEAK ALIAS: create a weak alias
+ * STRONG_ALIAS, WEAK_ALIAS
+ *	Create a strong or weak alias.
  */
+#define STRONG_ALIAS(alias,sym) \
+	.global alias; \
+	alias = sym
 #define WEAK_ALIAS(alias,sym) \
 	.weak alias; \
 	alias = sym

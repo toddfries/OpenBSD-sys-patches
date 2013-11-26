@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_inode.c,v 1.60 2011/08/16 14:36:39 thib Exp $	*/
+/*	$OpenBSD: ffs_inode.c,v 1.65 2013/11/02 00:08:17 krw Exp $	*/
 /*	$NetBSD: ffs_inode.c,v 1.10 1996/05/11 18:27:19 mycroft Exp $	*/
 
 /*
@@ -53,7 +53,7 @@
 #include <ufs/ffs/fs.h>
 #include <ufs/ffs/ffs_extern.h>
 
-int ffs_indirtrunc(struct inode *, daddr64_t, daddr64_t, daddr64_t, int, long *);
+int ffs_indirtrunc(struct inode *, daddr_t, daddr_t, daddr_t, int, long *);
 
 /*
  * Update the access, modified, and inode change times as specified by the
@@ -157,17 +157,15 @@ int
 ffs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 {
 	struct vnode *ovp;
-	daddr64_t lastblock;
-	daddr64_t bn, lbn, lastiblock[NIADDR], indir_lbn[NIADDR];
-	daddr64_t oldblks[NDADDR + NIADDR], newblks[NDADDR + NIADDR];
+	daddr_t lastblock;
+	daddr_t bn, lbn, lastiblock[NIADDR], indir_lbn[NIADDR];
+	daddr_t oldblks[NDADDR + NIADDR], newblks[NDADDR + NIADDR];
 	struct fs *fs;
 	struct buf *bp;
 	int offset, size, level;
 	long count, nblocks, vflags, blocksreleased = 0;
-	int i, aflags, error, allerror, indirect = 0;
+	int i, aflags, error, allerror;
 	off_t osize;
-	extern int num_indirdep;
-	extern int max_indirdep;
 
 	if (length < 0)
 		return (EINVAL);
@@ -243,8 +241,6 @@ ffs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 				   cred, aflags, &bp);
 		if (error)
 			return (error);
-		if (bp->b_lblkno >= NDADDR)
-			indirect = 1;
 		DIP_ASSIGN(oip, size, length);
 		uvm_vnp_setsize(ovp, length);
 		(void) uvm_vnp_uncache(ovp);
@@ -253,20 +249,7 @@ ffs_truncate(struct inode *oip, off_t length, int flags, struct ucred *cred)
 		else
 			bawrite(bp);
 		oip->i_flag |= IN_CHANGE | IN_UPDATE;
-		error = UFS_UPDATE(oip, MNT_WAIT);
-		if (DOINGSOFTDEP(ovp) && num_indirdep > max_indirdep)
-			if (indirect) {
-				/*
-				 * If the number of pending indirect block
-				 * dependencies is sufficiently close to the
-				 * maximum number of simultaneously mappable
-				 * buffers force a sync on the vnode to prevent
-				 * buffer cache exhaustion.
-				 */
-				VOP_FSYNC(ovp, curproc->p_ucred, MNT_WAIT,
-				    curproc);
-			}
-		return (error);
+		return (UFS_UPDATE(oip, MNT_WAIT));
 	}
 	uvm_vnp_setsize(ovp, length);
 
@@ -453,8 +436,9 @@ done:
 	 * Put back the real size.
 	 */
 	DIP_ASSIGN(oip, size, length);
-	DIP_ADD(oip, blocks, -blocksreleased);
-	if (DIP(oip, blocks) < 0)	/* Sanity */
+	if (DIP(oip, blocks) >= blocksreleased)
+		DIP_ADD(oip, blocks, -blocksreleased);
+	else	/* sanity */
 		DIP_ASSIGN(oip, blocks, 0);
 	oip->i_flag |= IN_CHANGE;
 	(void)ufs_quota_free_blocks(oip, blocksreleased, NOCRED);
@@ -485,15 +469,15 @@ done:
  * NB: triple indirect blocks are untested.
  */
 int
-ffs_indirtrunc(struct inode *ip, daddr64_t lbn, daddr64_t dbn,
-    daddr64_t lastbn, int level, long *countp)
+ffs_indirtrunc(struct inode *ip, daddr_t lbn, daddr_t dbn,
+    daddr_t lastbn, int level, long *countp)
 {
 	int i;
 	struct buf *bp;
 	struct fs *fs = ip->i_fs;
 	struct vnode *vp;
 	void *copy = NULL;
-	daddr64_t nb, nlbn, last;
+	daddr_t nb, nlbn, last;
 	long blkcount, factor;
 	int nblocks, blocksreleased = 0;
 	int error = 0, allerror = 0;
@@ -525,7 +509,7 @@ ffs_indirtrunc(struct inode *ip, daddr64_t lbn, daddr64_t dbn,
 	vp = ITOV(ip);
 	bp = getblk(vp, lbn, (int)fs->fs_bsize, 0, 0);
 	if (!(bp->b_flags & (B_DONE | B_DELWRI))) {
-		curproc->p_stats->p_ru.ru_inblock++;	/* pay for read */
+		curproc->p_ru.ru_inblock++;		/* pay for read */
 		bcstats.pendingreads++;
 		bcstats.numreads++;
 		bp->b_flags |= B_READ;
@@ -581,8 +565,7 @@ ffs_indirtrunc(struct inode *ip, daddr64_t lbn, daddr64_t dbn,
 			continue;
 		if (level > SINGLE) {
 			error = ffs_indirtrunc(ip, nlbn, fsbtodb(fs, nb),
-					       (daddr64_t)-1, level - 1,
-					       &blkcount);
+					       -1, level - 1, &blkcount);
 			if (error)
 				allerror = error;
 			blocksreleased += blkcount;

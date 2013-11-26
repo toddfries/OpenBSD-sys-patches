@@ -1,21 +1,29 @@
-#	$OpenBSD: files.mvme88k,v 1.45 2010/12/31 21:38:08 miod Exp $
+#	$OpenBSD: files.mvme88k,v 1.51 2013/09/24 20:10:47 miod Exp $
 #
 maxpartitions 16
 
 device	mainbus {[addr = -1]}
 attach	mainbus at root
 
+# MVME180/181 base logic
+device	angelfire {[offset = -1], [ipl = 0]}
+attach	angelfire at mainbus
+file	arch/mvme88k/dev/angelfire.c			angelfire
+
+# MVME197 BusSwitch system bus
 device	bussw {[offset = -1], [ipl = 0]}
 attach	bussw at mainbus
 file	arch/mvme88k/dev/bussw.c			bussw needs-count
 
+# MVME187 PCC2 system bus
 device	pcctwo {[offset = -1], [ipl = 0]}
 attach	pcctwo at bussw, mainbus
-file	arch/mvme88k/dev/pcctwo.c			pcctwo needs-count
+file	arch/mvme88k/dev/pcctwo.c			pcctwo
 
+# MVME188 base logic
 device	syscon {[offset = -1], [ipl = 0]}
 attach	syscon at mainbus
-file	arch/mvme88k/dev/syscon.c			syscon needs-count
+file	arch/mvme88k/dev/syscon.c			syscon
 
 device	memc
 attach	memc at pcctwo
@@ -29,12 +37,17 @@ device	nvram
 attach	nvram at pcctwo, syscon
 file	arch/mvme88k/dev/nvram.c			nvram needs-count
 
+device	dsrtc
+attach	dsrtc at angelfire
+file	arch/mvme88k/dev/ds1216.c			dsrtc
+
 device	cl: tty
 attach	cl at pcctwo
 file	arch/mvme88k/dev/cl.c				cl needs-count
 
 device	dart: tty
-attach	dart at syscon
+file	dev/ic/mc68681.c				dart
+attach	dart at angelfire, syscon
 file	arch/mvme88k/dev/dart.c				dart needs-count
 
 include	"scsi/files.scsi"
@@ -49,7 +62,7 @@ attach	osiop at pcctwo with osiop_pcctwo
 file	arch/mvme88k/dev/osiop_pcctwo.c			osiop_pcctwo
 
 device	vme {}
-attach	vme at pcctwo, syscon
+attach	vme at angelfire, pcctwo, syscon
 device	vmes {[addr = -1], [vec = -1], [ipl = 0]}
 attach	vmes at vme
 device	vmel {[addr = -1], [vec = -1], [ipl = 0]}
@@ -63,11 +76,13 @@ file	dev/cninit.c
 
 file	arch/mvme88k/mvme88k/autoconf.c
 file	arch/mvme88k/mvme88k/bus_dma.c
+file	arch/mvme88k/mvme88k/clock.c
 file	arch/mvme88k/mvme88k/conf.c
 file	arch/mvme88k/mvme88k/db_machdep.c		ddb
 file	arch/mvme88k/mvme88k/disksubr.c
 file	arch/mvme88k/mvme88k/eh.S
 file	arch/mvme88k/mvme88k/machdep.c
+file	arch/mvme88k/mvme88k/m181_machdep.c		mvme181
 file	arch/mvme88k/mvme88k/m187_machdep.c		mvme187
 file	arch/mvme88k/mvme88k/m188_machdep.c		mvme188
 file	arch/mvme88k/mvme88k/m197_machdep.c		mvme197
@@ -87,7 +102,7 @@ attach	ie at pcctwo: ifnet, ether
 file	arch/mvme88k/dev/if_ie.c			ie
 
 # MVME376
-attach	le at vmes
+attach	le at vmes: le24
 file	arch/mvme88k/dev/if_le.c			le
 
 # MVME374

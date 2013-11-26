@@ -1,4 +1,4 @@
-/*	$OpenBSD: mainbus.c,v 1.8 2010/01/09 20:33:16 miod Exp $ */
+/*	$OpenBSD: mainbus.c,v 1.13 2012/09/29 21:46:02 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -89,9 +89,9 @@ mbattach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/*
-	 * On other systems, attach the CPU we are running on early;
-	 * other processors, if any, will get attached as they are
-	 * discovered.
+	 * On other systems, attach the CPU, its clock, and the
+	 * mainbus here.
+	 * XXX Would be worth doing as ipXX_autoconf() too.
 	 */
 
 	bzero(&caa, sizeof caa);
@@ -99,12 +99,39 @@ mbattach(struct device *parent, struct device *self, void *aux)
 	caa.caa_hw = &bootcpu_hwinfo;
 	config_found(self, &caa, mbprint);
 
-	caa.caa_maa.maa_name = "clock";
-	config_found(self, &caa.caa_maa, mbprint);
-
 	switch (sys_config.system_type) {
+#if defined(TGT_INDIGO) || defined(TGT_INDY) || defined(TGT_INDIGO2)
+	case SGI_IP20:
+	case SGI_IP22:
+	case SGI_IP26:
+	case SGI_IP28:
+		/* Interrupt Controller */
+		caa.caa_maa.maa_name = "int";
+		config_found(self, &caa.caa_maa, mbprint);
+#ifdef TGT_INDIGO2
+		if (sys_config.system_type == SGI_IP26) {
+			/* Streaming Cache Controller */
+			caa.caa_maa.maa_name = "tcc";
+			config_found(self, &caa.caa_maa, mbprint);
+		}
+#endif
+		/* Memory Controller */
+		caa.caa_maa.maa_name = "imc";
+		config_found(self, &caa.caa_maa, mbprint);
+
+		if (md_startclock == NULL) {
+			caa.caa_maa.maa_name = "clock";
+			config_found(self, &caa.caa_maa, mbprint);
+		}
+
+		ip22_post_autoconf();
+
+		break;
+#endif
 #ifdef TGT_O2
 	case SGI_O2:
+		caa.caa_maa.maa_name = "clock";
+		config_found(self, &caa.caa_maa, mbprint);
 		caa.caa_maa.maa_name = "macebus";
 		config_found(self, &caa.caa_maa, mbprint);
 		caa.caa_maa.maa_name = "gbe";

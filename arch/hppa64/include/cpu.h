@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.27 2011/08/16 17:36:37 kettenis Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.33 2013/05/31 17:00:58 tedu Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -97,10 +97,6 @@ struct cpu_info {
 	struct schedstate_percpu ci_schedstate;	/* scheduler state */
 	u_int32_t	ci_randseed;
 
-	/* DEBUG/DIAGNOSTIC stuff */
-	u_long		ci_spin_locks;  /* # of spin locks held */
-	u_long		ci_simple_locks;/* # of simple locks held */
-
 	/* Spinning up the CPU */
 	void		(*ci_spinup)(void); /* spinup routine */
 	void		*ci_initstack;
@@ -108,6 +104,9 @@ struct cpu_info {
 	u_long		ci_itmr;
 #ifdef DIAGNOSTIC
 	int		ci_mutex_level;
+#endif
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
 #endif
 };
 
@@ -162,6 +161,9 @@ extern int cpu_hvers;
 #define	need_resched(ci)	(want_resched = 1, setsoftast())
 #define clear_resched(ci) 	want_resched = 0
 #define	need_proftick(p)	setsoftast()
+
+#define	PROC_PC(p)		((p)->p_md.md_regs->tf_iioq[0])
+#define	PROC_STACK(p)		((p)->p_md.md_regs->tf_sp)
 
 #ifndef _LOCORE
 #ifdef _KERNEL
@@ -247,7 +249,7 @@ void sync_caches(void);
  * Boot arguments stuff
  */
 
-#define	BOOTARG_LEN	(NBPG)
+#define	BOOTARG_LEN	(PAGE_SIZE)
 #define	BOOTARG_OFF	(0x10000)
 
 /*

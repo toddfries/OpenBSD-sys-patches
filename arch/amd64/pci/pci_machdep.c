@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.53 2011/10/29 19:17:30 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.58 2013/11/06 10:40:36 mpi Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.3 2003/05/07 21:33:58 fvdl Exp $	*/
 
 /*-
@@ -595,6 +595,7 @@ pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 
 struct extent *pciio_ex;
 struct extent *pcimem_ex;
+struct extent *pcibus_ex;
 
 void
 pci_init_extents(void)
@@ -623,10 +624,12 @@ pci_init_extents(void)
 		 * 32-bit operating systems, we should never see BARs
 		 * outside that region.
 		 */
-		pcimem_ex = extent_create("pcimem", 0, 0xfffffffff, M_DEVBUF,
-		    NULL, 0, EX_NOWAIT);
+		pcimem_ex = extent_create("pcimem", 0, 0xffffffffffffffffUL,
+		    M_DEVBUF, NULL, 0, EX_NOWAIT);
 		if (pcimem_ex == NULL)
 			return;
+		extent_alloc_region(pcimem_ex, 0x1000000000UL,
+		    0xfffffff000000000UL, EX_NOWAIT);
 
 		for (bmp = bios_memmap; bmp->type != BIOS_MAP_END; bmp++) {
 			/*
@@ -652,11 +655,18 @@ pci_init_extents(void)
 		extent_alloc_region(pcimem_ex, IOM_BEGIN, IOM_SIZE,
 		    EX_CONFLICTOK | EX_NOWAIT);
 	}
+
+	if (pcibus_ex == NULL) {
+		pcibus_ex = extent_create("pcibus", 0, 0xff, M_DEVBUF,
+		    NULL, 0, EX_NOWAIT);
+	}
 }
 
 #include "acpi.h"
 #if NACPI > 0
 void acpi_pci_match(struct device *, struct pci_attach_args *);
+pcireg_t acpi_pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
+void acpi_pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int, int);
 #endif
 
 void
@@ -664,5 +674,23 @@ pci_dev_postattach(struct device *dev, struct pci_attach_args *pa)
 {
 #if NACPI > 0
 	acpi_pci_match(dev, pa);
+#endif
+}
+
+pcireg_t
+pci_min_powerstate(pci_chipset_tag_t pc, pcitag_t tag)
+{
+#if NACPI > 0
+	return acpi_pci_min_powerstate(pc, tag);
+#else
+	return pci_get_powerstate(pc, tag);
+#endif
+}
+
+void
+pci_set_powerstate_md(pci_chipset_tag_t pc, pcitag_t tag, int state, int pre)
+{
+#if NACPI > 0
+	acpi_pci_set_powerstate(pc, tag, state, pre);
 #endif
 }

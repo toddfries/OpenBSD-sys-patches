@@ -1,1 +1,1 @@
-/* No code here since kernel impliments this itself */
+/* Implemented in memmove.S */

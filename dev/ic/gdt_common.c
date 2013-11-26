@@ -1,4 +1,4 @@
-/*	$OpenBSD: gdt_common.c,v 1.60 2011/07/17 22:46:48 matthew Exp $	*/
+/*	$OpenBSD: gdt_common.c,v 1.62 2013/03/04 00:41:54 dlg Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000, 2003 Niklas Hallqvist.  All rights reserved.
@@ -129,7 +129,7 @@ gdt_attach(struct gdt_softc *sc)
 	TAILQ_INIT(&sc->sc_free_ccb);
 	TAILQ_INIT(&sc->sc_ccbq);
 	TAILQ_INIT(&sc->sc_ucmdq);
-	LIST_INIT(&sc->sc_queue);
+	SIMPLEQ_INIT(&sc->sc_queue);
 
 	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 	scsi_iopool_init(&sc->sc_iopool, sc, gdt_ccb_alloc, gdt_ccb_free);
@@ -517,14 +517,10 @@ gdt_eval_mapping(u_int32_t size, int *cyls, int *heads, int *secs)
 void
 gdt_enqueue(struct gdt_softc *sc, struct scsi_xfer *xs, int infront)
 {
-	if (infront || LIST_FIRST(&sc->sc_queue) == NULL) {
-		if (LIST_FIRST(&sc->sc_queue) == NULL)
-			sc->sc_queuelast = xs;
-		LIST_INSERT_HEAD(&sc->sc_queue, xs, free_list);
-		return;
-	}
-	LIST_INSERT_AFTER(sc->sc_queuelast, xs, free_list);
-	sc->sc_queuelast = xs;
+	if (infront)
+		SIMPLEQ_INSERT_HEAD(&sc->sc_queue, xs, xfer_list);
+	else
+		SIMPLEQ_INSERT_TAIL(&sc->sc_queue, xs, xfer_list);
 }
 
 /*
@@ -535,13 +531,9 @@ gdt_dequeue(struct gdt_softc *sc)
 {
 	struct scsi_xfer *xs;
 
-	xs = LIST_FIRST(&sc->sc_queue);
-	if (xs == NULL)
-		return (NULL);
-	LIST_REMOVE(xs, free_list);
-
-	if (LIST_FIRST(&sc->sc_queue) == NULL)
-		sc->sc_queuelast = NULL;
+	xs = SIMPLEQ_FIRST(&sc->sc_queue);
+	if (xs != NULL)
+		SIMPLEQ_REMOVE_HEAD(&sc->sc_queue, xfer_list);
 
 	return (xs);
 }
@@ -557,9 +549,6 @@ gdt_scsi_cmd(struct scsi_xfer *xs)
 	struct gdt_softc *sc = link->adapter_softc;
 	u_int8_t target = link->target;
 	struct gdt_ccb *ccb;
-#if 0
-	struct gdt_ucmd *ucmd;
-#endif
 	u_int32_t blockno, blockcnt;
 	struct scsi_rw *rw;
 	struct scsi_rw_big *rwb;
@@ -587,7 +576,7 @@ gdt_scsi_cmd(struct scsi_xfer *xs)
 	}
 
 	/* Don't double enqueue if we came from gdt_chain. */
-	if (xs != LIST_FIRST(&sc->sc_queue))
+	if (xs != SIMPLEQ_FIRST(&sc->sc_queue))
 		gdt_enqueue(sc, xs, 0);
 
 	while ((xs = gdt_dequeue(sc)) != NULL) {
@@ -1310,8 +1299,8 @@ gdt_chain(struct gdt_softc *sc)
 {
 	GDT_DPRINTF(GDT_D_INTR, ("gdt_chain(%p) ", sc));
 
-	if (LIST_FIRST(&sc->sc_queue))
-		gdt_scsi_cmd(LIST_FIRST(&sc->sc_queue));
+	if (!SIMPLEQ_EMPTY(&sc->sc_queue))
+		gdt_scsi_cmd(SIMPLEQ_FIRST(&sc->sc_queue));
 }
 
 void
@@ -1424,128 +1413,4 @@ gdt_ioctl_setstate(struct gdt_softc *sc, struct bioc_setstate *bs)
 {
 	return (1); /* XXX not yet */
 }
-
-#if 0
-int
-gdt_ioctl(struct device *dev, u_long cmd, caddr_t addr)
-{
-	int error = 0;
-	struct gdt_dummy *dummy;
-
-	switch (cmd) {
-	case GDT_IOCTL_DUMMY:
-		dummy = (struct gdt_dummy *)addr;
-		printf("%s: GDT_IOCTL_DUMMY %d\n", dev->dv_xname, dummy->x++);
-		break;
-
-	case GDT_IOCTL_GENERAL: {
-		gdt_ucmd_t *ucmd;
-		struct gdt_softc *sc = (struct gdt_softc *)dev;
-		int s;
-
-		ucmd = (gdt_ucmd_t *)addr;
-		s = splbio();
-		TAILQ_INSERT_TAIL(&sc->sc_ucmdq, ucmd, links);
-		ucmd->complete_flag = FALSE;
-		splx(s);
-		gdt_chain(sc);
-		if (!ucmd->complete_flag)
-			(void)tsleep((void *)ucmd, PCATCH | PRIBIO, "gdtucw",
-			    0);
-		break;
-	}
-
-	case GDT_IOCTL_DRVERS:
-		((gdt_drvers_t *)addr)->vers = 
-		    (GDT_DRIVER_VERSION << 8) | GDT_DRIVER_SUBVERSION;
-		break;
-
-	case GDT_IOCTL_CTRCNT:
-		((gdt_ctrcnt_t *)addr)->cnt = gdt_cnt;
-		break;
-
-#ifdef notyet
-	case GDT_IOCTL_CTRTYPE: {
-		gdt_ctrt_t *p;
-		struct gdt_softc *sc = (struct gdt_softc *)dev;
-	    
-		p = (gdt_ctrt_t *)addr;
-		p->oem_id = 0x8000;
-		p->type = 0xfd;
-		p->info = (sc->sc_bus << 8) | (sc->sc_slot << 3);
-		p->ext_type = 0x6000 | sc->sc_subdevice;
-		p->device_id = sc->sc_device;
-		p->sub_device_id = sc->sc_subdevice;
-		break;
-	}
-#endif
-
-	case GDT_IOCTL_OSVERS: {
-		gdt_osv_t *p;
-
-		p = (gdt_osv_t *)addr;
-		p->oscode = 10;
-		p->version = osrelease[0] - '0';
-		if (osrelease[1] == '.')
-			p->subversion = osrelease[2] - '0';
-		else
-			p->subversion = 0;
-		if (osrelease[3] == '.')
-			p->revision = osrelease[4] - '0';
-		else
-			p->revision = 0;
-		strlcpy(p->name, ostype, sizeof p->name);
-		break;
-	}
-
-#ifdef notyet
-	case GDT_IOCTL_EVENT: {
-		gdt_event_t *p;
-		int s;
-
-		p = (gdt_event_t *)addr;
-		if (p->erase == 0xff) {
-			if (p->dvr.event_source == GDT_ES_TEST)
-				p->dvr.event_data.size =
-				    sizeof(p->dvr.event_data.eu.test);
-			else if (p->dvr.event_source == GDT_ES_DRIVER)
-				p->dvr.event_data.size =
-				    sizeof(p->dvr.event_data.eu.driver);
-			else if (p->dvr.event_source == GDT_ES_SYNC)
-				p->dvr.event_data.size =
-				    sizeof(p->dvr.event_data.eu.sync);
-			else
-				p->dvr.event_data.size =
-				    sizeof(p->dvr.event_data.eu.async);
-			s = splbio();
-			gdt_store_event(p->dvr.event_source, p->dvr.event_idx,
-			    &p->dvr.event_data);
-			splx(s);
-		} else if (p->erase == 0xfe) {
-			s = splbio();
-			gdt_clear_events();
-			splx(s);
-		} else if (p->erase == 0) {
-			p->handle = gdt_read_event(p->handle, &p->dvr);
-		} else {
-			gdt_readapp_event((u_int8_t)p->erase, &p->dvr);
-		}
-		break;
-	}
-#endif
-
-	case GDT_IOCTL_STATIST:
-#if 0
-		bcopy(&gdt_stat, (gdt_statist_t *)addr, sizeof gdt_stat);
-#else
-		error = EOPNOTSUPP;
-#endif
-		break;
-
-	default:
-		error = EINVAL;
-	}
-	return (error);
-}
-#endif /* 0 */
 #endif /* NBIO > 0 */

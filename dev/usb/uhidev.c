@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.c,v 1.42 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: uhidev.c,v 1.51 2013/11/19 14:04:07 pirofti Exp $	*/
 /*	$NetBSD: uhidev.c,v 1.14 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -55,8 +55,10 @@
 
 #include <dev/usb/uhidev.h>
 
-/* Report descriptor for broken Wacom Graphire */
-#include <dev/usb/ugraphire_rdesc.h>
+#ifndef SMALL_KERNEL
+/* Replacement report descriptors for devices shipped with broken ones */
+#include <dev/usb/uhid_rdesc.h>
+#endif /* !SMALL_KERNEL */
 
 #ifdef UHIDEV_DEBUG
 #define DPRINTF(x)	do { if (uhidevdebug) printf x; } while (0)
@@ -67,27 +69,24 @@ int	uhidevdebug = 0;
 #define DPRINTFN(n,x)
 #endif
 
-void uhidev_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void uhidev_intr(struct usbd_xfer *, void *, usbd_status);
 
 int uhidev_maxrepid(void *buf, int len);
 int uhidevprint(void *aux, const char *pnp);
 int uhidevsubmatch(struct device *parent, void *cf, void *aux);
 
-int uhidev_match(struct device *, void *, void *); 
-void uhidev_attach(struct device *, struct device *, void *); 
-int uhidev_detach(struct device *, int); 
-int uhidev_activate(struct device *, int); 
+int uhidev_match(struct device *, void *, void *);
+void uhidev_attach(struct device *, struct device *, void *);
+int uhidev_detach(struct device *, int);
+int uhidev_activate(struct device *, int);
 
-struct cfdriver uhidev_cd = { 
-	NULL, "uhidev", DV_DULL 
-}; 
+struct cfdriver uhidev_cd = {
+	NULL, "uhidev", DV_DULL
+};
 
-const struct cfattach uhidev_ca = { 
-	sizeof(struct uhidev_softc), 
-	uhidev_match, 
-	uhidev_attach, 
-	uhidev_detach, 
-	uhidev_activate, 
+const struct cfattach uhidev_ca = {
+	sizeof(struct uhidev_softc), uhidev_match, uhidev_attach,
+	uhidev_detach, uhidev_activate,
 };
 
 int
@@ -99,12 +98,18 @@ uhidev_match(struct device *parent, void *match, void *aux)
 	if (uaa->iface == NULL)
 		return (UMATCH_NONE);
 	id = usbd_get_interface_descriptor(uaa->iface);
-	if (id == NULL || id->bInterfaceClass != UICLASS_HID)
+	if (id == NULL)
+		return (UMATCH_NONE);
+#ifndef SMALL_KERNEL
+	if (uaa->vendor == USB_VENDOR_MICROSOFT &&
+	    uaa->product == USB_PRODUCT_MICROSOFT_XBOX360_CONTROLLER &&
+	    id->bInterfaceNumber == 0)
+		return (UMATCH_VENDOR_PRODUCT);
+#endif /* !SMALL_KERNEL */
+	if (id->bInterfaceClass != UICLASS_HID)
 		return (UMATCH_NONE);
 	if (usbd_get_quirks(uaa->device)->uq_flags & UQ_BAD_HID)
 		return (UMATCH_NONE);
-	if (uaa->matchlvl)
-		return (uaa->matchlvl);
 
 	return (UMATCH_IFACECLASS_GENERIC);
 }
@@ -114,7 +119,7 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct uhidev_softc *sc = (struct uhidev_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	usbd_interface_handle iface = uaa->iface;
+	struct usbd_interface *iface = uaa->iface;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	struct uhidev_attach_arg uha;
@@ -145,7 +150,6 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 		if (ed == NULL) {
 			printf("%s: could not read endpoint descriptor\n",
 			    sc->sc_dev.dv_xname);
-			sc->sc_dying = 1;
 			return;
 		}
 
@@ -166,23 +170,22 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 			sc->sc_oep_addr = ed->bEndpointAddress;
 		} else {
 			printf("%s: unexpected endpoint\n", sc->sc_dev.dv_xname);
-			sc->sc_dying = 1;
 			return;
 		}
 	}
 
 	/*
-	 * Check that we found an input interrupt endpoint. The output interrupt
-	 * endpoint is optional
+	 * Check that we found an input interrupt endpoint.
+	 * The output interrupt endpoint is optional
 	 */
 	if (sc->sc_iep_addr == -1) {
 		printf("%s: no input interrupt endpoint\n", sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
 		return;
 	}
 
 	/* XXX need to extend this */
 	descptr = NULL;
+#ifndef SMALL_KERNEL
 	if (uaa->vendor == USB_VENDOR_WACOM) {
 		static uByte reportbuf[] = {2, 2, 2};
 
@@ -203,7 +206,13 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 			/* Keep descriptor */
 			break;
 		}
+	} else if (uaa->vendor == USB_VENDOR_MICROSOFT &&
+	    uaa->product == USB_PRODUCT_MICROSOFT_XBOX360_CONTROLLER) {
+		/* The Xbox 360 gamepad has no report descriptor. */
+		size = sizeof uhid_xb360gp_report_descr;
+		descptr = uhid_xb360gp_report_descr;
 	}
+#endif /* !SMALL_KERNEL */
 
 	if (descptr) {
 		desc = malloc(size, M_USBDEV, M_NOWAIT);
@@ -219,7 +228,6 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 	}
 	if (err) {
 		printf("%s: no report descriptor\n", sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
 		return;
 	}
 
@@ -322,10 +330,6 @@ int uhidevsubmatch(struct device *parent, void *match, void *aux)
 	if (cf->uhidevcf_reportid != UHIDEV_UNK_REPORTID &&
 	    cf->uhidevcf_reportid != uha->reportid)
 		return (0);
-	if (cf->uhidevcf_reportid == uha->reportid)
-		uha->matchlvl = UMATCH_VENDOR_PRODUCT;
-	else
-		uha->matchlvl = 0;
 	return ((*cf->cf_attach->ca_match)(parent, cf, aux));
 }
 
@@ -341,10 +345,10 @@ uhidev_activate(struct device *self, int act)
 			if (sc->sc_subdevs[i] != NULL) {
 				r = config_deactivate(
 				    &sc->sc_subdevs[i]->sc_dev);
-				if (r)
+				if (r && r != EOPNOTSUPP)
 					rv = r;
 			}
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 	return (rv);
@@ -376,13 +380,16 @@ uhidev_detach(struct device *self, int flags)
 }
 
 void
-uhidev_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
+uhidev_intr(struct usbd_xfer *xfer, void *addr, usbd_status status)
 {
 	struct uhidev_softc *sc = addr;
 	struct uhidev *scd;
 	u_char *p;
 	u_int rep;
 	u_int32_t cc;
+
+	if (usbd_is_dying(sc->sc_udev))
+		return;
 
 	usbd_get_xfer_status(xfer, NULL, NULL, &cc, NULL);
 
@@ -398,7 +405,7 @@ uhidev_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
 	}
 #endif
 
-	if (status == USBD_CANCELLED)
+	if (status == USBD_CANCELLED || status == USBD_IOERROR)
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -461,7 +468,7 @@ uhidev_open(struct uhidev *scd)
 	/* Set up input interrupt pipe. */
 	DPRINTF(("uhidev_open: isize=%d, ep=0x%02x\n", sc->sc_isize,
 	    sc->sc_iep_addr));
-		
+
 	err = usbd_open_pipe_intr(sc->sc_iface, sc->sc_iep_addr,
 		  USBD_SHORT_XFER_OK, &sc->sc_ipipe, sc, sc->sc_ibuf,
 		  sc->sc_isize, uhidev_intr, USBD_DEFAULT_INTERVAL);
@@ -513,7 +520,7 @@ uhidev_open(struct uhidev *scd)
 			goto out3;
 		}
 	}
-	
+
 	return (0);
 
 out3:
@@ -599,27 +606,33 @@ uhidev_set_report(struct uhidev *scd, int type, void *data, int len)
 	return retstat;
 }
 
-void
+usbd_status
 uhidev_set_report_async(struct uhidev *scd, int type, void *data, int len)
 {
-	/* XXX */
-	char buf[100];
-	if (scd->sc_report_id) {
-		buf[0] = scd->sc_report_id;
-		if ((uint)len > sizeof(buf) - 1) {
-#ifdef DIAGNOSTIC
-			printf("%s: report length too large (%d)\n",
-			    scd->sc_dev.dv_xname, len);
-#endif
-			return;
-		}
-		memcpy(buf+1, data, len);
-		len++;
-		data = buf;
-	}
+	char *buf;
+	usbd_status retstat;
 
-	usbd_set_report_async(scd->sc_parent->sc_iface, type,
-			      scd->sc_report_id, data, len);
+	if (scd->sc_report_id == 0)
+		return usbd_set_report_async(scd->sc_parent->sc_iface, type,
+					     scd->sc_report_id, data, len);
+
+	buf = malloc(len + 1, M_TEMP, M_NOWAIT);
+	if (buf == NULL)
+		return (USBD_NOMEM);
+	buf[0] = scd->sc_report_id;
+	memcpy(buf+1, data, len);
+
+	retstat = usbd_set_report_async(scd->sc_parent->sc_iface, type,
+					scd->sc_report_id, buf, len + 1);
+
+	/*
+	 * Since report requests are write-only it is safe to free
+	 * the buffer right after submitting the transfer because
+	 * it won't be used afterward.
+	 */
+	free(buf, M_TEMP);
+
+	return retstat;
 }
 
 usbd_status
@@ -632,6 +645,7 @@ uhidev_get_report(struct uhidev *scd, int type, void *data, int len)
 usbd_status
 uhidev_write(struct uhidev_softc *sc, void *data, int len)
 {
+	usbd_status error;
 
 	DPRINTF(("uhidev_write: data=%p, len=%d\n", data, len));
 
@@ -650,8 +664,13 @@ uhidev_write(struct uhidev_softc *sc, void *data, int len)
 		DPRINTF(("\n"));
 	}
 #endif
-	return usbd_intr_transfer(sc->sc_owxfer, sc->sc_opipe, 0,
-	    USBD_NO_TIMEOUT, data, &len, "uhidevwi");
+	usbd_setup_xfer(sc->sc_owxfer, sc->sc_opipe, 0, data, len,
+	    USBD_SYNCHRONOUS | USBD_CATCH, 0, NULL);
+	error = usbd_transfer(sc->sc_owxfer);
+	if (error)
+		usbd_clear_endpoint_stall(sc->sc_opipe);
+
+	return (error);
 }
 
 int

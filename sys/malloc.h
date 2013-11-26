@@ -1,4 +1,4 @@
-/*	$OpenBSD: malloc.h,v 1.99 2010/12/25 00:13:21 tedu Exp $	*/
+/*	$OpenBSD: malloc.h,v 1.107 2013/06/03 15:56:01 tedu Exp $	*/
 /*	$NetBSD: malloc.h,v 1.39 1998/07/12 19:52:01 augustss Exp $	*/
 
 /*
@@ -34,6 +34,8 @@
 
 #ifndef _SYS_MALLOC_H_
 #define	_SYS_MALLOC_H_
+
+#include <sys/queue.h>
 
 #define KERN_MALLOC_BUCKETS	1
 #define KERN_MALLOC_BUCKET	2
@@ -118,7 +120,8 @@
 #define	M_TTYS		62	/* allocated tty structures */
 #define	M_EXEC		63	/* argument lists & other mem used by exec */
 #define	M_MISCFSMNT	64	/* miscfs mount structures */
-/* 65-73 - free */
+#define	M_FUSEFS	65	/* fusefs mount structures */
+/* 66-73 - free */
 #define	M_PFKEY		74	/* pfkey data */
 #define	M_TDB		75	/* Transforms database */
 #define	M_XDATA		76	/* IPsec data */
@@ -130,8 +133,7 @@
 #define	M_INDIRDEP	83	/* Indirect block dependencies */
 /* 84-91 - free */
 #define M_VMSWAP	92	/* VM swap structures */
-/* 93-96 - free */
-#define	M_RAIDFRAME	97	/* RAIDframe data */
+/* 93-97 - free */
 #define M_UVMAMAP	98	/* UVM amap and related */
 #define M_UVMAOBJ	99	/* UVM aobj and related */
 /* 100 - free */
@@ -144,8 +146,7 @@
 #define M_CRYPTO_DATA	108	/* Crypto framework data buffers (keys etc.) */
 /* 109 - free */
 #define M_CREDENTIALS	110	/* IPsec-related credentials and ID info */
-#define M_PACKET_TAGS	111	/* Packet-attached information */
-/* 112-113 - free */
+/* 111-113 - free */
 #define	M_EMULDATA	114	/* Per-process emulation data */
 /* 115-122 - free */
 
@@ -249,7 +250,7 @@
 	"ttys",		/* 62 M_TTYS */ \
 	"exec",		/* 63 M_EXEC */ \
 	"miscfs mount",	/* 64 M_MISCFSMNT */ \
-	NULL, \
+	"fusefs mount", /* 65 M_FUSEFS */ \
 	NULL, \
 	NULL, \
 	NULL, \
@@ -271,8 +272,7 @@
 	NULL, NULL, NULL, NULL, \
 	NULL, NULL, NULL, NULL, \
 	"VM swap",	/* 92 M_VMSWAP */ \
-	NULL, NULL, NULL, NULL, \
-	"RAIDframe data", /* 97 M_RAIDFRAME */ \
+	NULL, NULL, NULL, NULL, NULL, \
 	"UVM amap",	/* 98 M_UVMAMAP */ \
 	"UVM aobj",	/* 99 M_UVMAOBJ */ \
 	NULL, \
@@ -286,7 +286,7 @@
 	"crypto data",	/* 108 M_CRYPTO_DATA */ \
 	NULL, \
 	"IPsec creds",	/* 110 M_CREDENTIALS */ \
-	"packet tags",	/* 111 M_PACKET_TAGS */ \
+	NULL, \
 	NULL, \
 	NULL, \
 	"emuldata",	/* 114 M_EMULDATA */ \
@@ -342,12 +342,13 @@ struct kmemusage {
 #define	ku_freecnt ku_un.freecnt
 #define	ku_pagecnt ku_un.pagecnt
 
+struct kmem_freelist;
+
 /*
  * Set of buckets for each size of memory block that is retained
  */
 struct kmembuckets {
-	caddr_t   kb_next;	/* list of free blocks */
-	caddr_t   kb_last;	/* last free block */
+	XSIMPLEQ_HEAD(, kmem_freelist) kb_freelist; /* list of free blocks */
 	u_int64_t kb_calls;	/* total calls to allocate this size */
 	u_int64_t kb_total;	/* total number of blocks allocated */
 	u_int64_t kb_totalfree;	/* # of free elements in this bucket */
@@ -356,15 +357,33 @@ struct kmembuckets {
 	u_int64_t kb_couldfree;	/* over high water mark and could free */
 };
 
+/*
+ * Constants for setting the parameters of the kernel memory allocator.
+ *
+ * 2 ** MINBUCKET is the smallest unit of memory that will be
+ * allocated. It must be at least large enough to hold a pointer.
+ *
+ * Units of memory less or equal to MAXALLOCSAVE will permanently
+ * allocate physical memory; requests for these size pieces of
+ * memory are quite fast. Allocations greater than MAXALLOCSAVE must
+ * always allocate and free physical memory; requests for these
+ * size allocations should be done infrequently as they will be slow.
+ *
+ * Constraints: PAGE_SIZE <= MAXALLOCSAVE <= 2 ** (MINBUCKET + 14), and
+ * MAXALLOCSIZE must be a power of two.
+ */
+#define MINBUCKET	4		/* 4 => min allocation of 16 bytes */
+
 #ifdef _KERNEL
 
 #define	MINALLOCSIZE	(1 << MINBUCKET)
+#define	MAXALLOCSAVE	(2 * PAGE_SIZE)
 
 /*
  * Turn virtual addresses into kmem map indices
  */
-#define	kmemxtob(alloc)	(kmembase + (alloc) * NBPG)
-#define	btokmemx(addr)	(((caddr_t)(addr) - kmembase) / NBPG)
+#define	kmemxtob(alloc)	(kmembase + (alloc) * PAGE_SIZE)
+#define	btokmemx(addr)	(((caddr_t)(addr) - kmembase) / PAGE_SIZE)
 #define	btokup(addr)	(&kmemusage[((caddr_t)(addr) - kmembase) >> PAGE_SHIFT])
 
 extern struct kmemstats kmemstats[];
@@ -379,6 +398,10 @@ extern int sysctl_malloc(int *, u_int, void *, size_t *, void *, size_t,
 
 size_t malloc_roundup(size_t);
 void	malloc_printit(int (*)(const char *, ...));
+
+void	poison_mem(void *, size_t);
+int	poison_check(void *, size_t, size_t *, int *);
+int32_t poison_value(void *);
 
 #ifdef MALLOC_DEBUG
 int	debug_malloc(unsigned long, int, int, void **);

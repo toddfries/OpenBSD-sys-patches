@@ -1,4 +1,4 @@
-/* $OpenBSD: asm.h,v 1.10 2002/04/26 19:57:11 fgsch Exp $ */
+/* $OpenBSD: asm.h,v 1.12 2013/03/28 17:41:03 martynas Exp $ */
 /* $NetBSD: asm.h,v 1.23 2000/06/23 12:18:45 kleink Exp $ */
 
 /* 
@@ -127,8 +127,10 @@
 
 
 /* Other DEC standard names */
+#define fp	$15	/* (S)		frame pointer		*/
 #define ai	$25	/* (T)		argument information	*/
 #define pv	$27	/* (T)		procedure value		*/
+#define AT	$28	/* (T)		assembler scratch	*/
 
 
 /*
@@ -612,9 +614,13 @@ label:	ASCIZ msg;						\
 	ldgp	gp, 0(reg)
 
 /*
- * WEAK_ALIAS: create a weak alias (ELF only).
+ * STRONG_ALIAS, WEAK_ALIAS
+ *	Create a strong or weak alias.
  */
 #ifdef __ELF__
+#define STRONG_ALIAS(alias,sym)					\
+	.global alias;						\
+	alias = sym
 #define WEAK_ALIAS(alias,sym)					\
 	.weak alias;						\
 	alias = sym

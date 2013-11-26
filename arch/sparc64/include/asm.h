@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.5 2011/03/23 16:54:37 pirofti Exp $	*/
+/*	$OpenBSD: asm.h,v 1.8 2013/03/28 17:41:04 martynas Exp $	*/
 /*	$NetBSD: asm.h,v 1.15 2000/08/02 22:24:39 eeh Exp $ */
 
 /*
@@ -63,7 +63,7 @@
 #endif
 #define	_ASM_LABEL(name)	name
 
-#ifdef PIC
+#ifdef __PIC__
 /*
  * PIC_PROLOGUE() is akin to the compiler generated function prologue for
  * PIC code. It leaves the address of the Global Offset Table in DEST,
@@ -104,6 +104,7 @@
 #endif
 
 #define ENTRY(name)		_ENTRY(_C_LABEL(name)); _PROF_PROLOGUE
+#define NENTRY(name)		_ENTRY(_C_LABEL(name))
 #define	ASENTRY(name)		_ENTRY(_ASM_LABEL(name)); _PROF_PROLOGUE
 #define	FUNC(name)		ASENTRY(name)
 #define RODATA(name)		.align 4; .text; .globl _C_LABEL(name); \
@@ -115,6 +116,9 @@
 #define RCSID(name)		.asciz name
 
 #ifdef __ELF__
+#define	STRONG_ALIAS(alias,sym)						\
+	.global alias;							\
+	alias = sym
 #define	WEAK_ALIAS(alias,sym)						\
 	.weak alias;							\
 	alias = sym

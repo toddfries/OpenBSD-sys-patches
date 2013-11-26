@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.12 2010/09/11 11:29:50 syuu Exp $ */
+/*	$OpenBSD: locore.S,v 1.15 2012/10/03 11:18:23 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -31,11 +31,13 @@
 #include <machine/param.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
 
 #include "assym.h"
 
+	.set	mips3
 	.set	noreorder		# Noreorder is default style!
 
 	.globl	start
@@ -50,14 +52,16 @@ start:
 	 */
 	LA	v0, 1f
 	jr	v0
-	nop
+	 NOP
 1:
 
-	mfc0	v0, COP_0_STATUS_REG
-	li	v1, ~SR_INT_ENAB
+	MFC0	v0, COP_0_STATUS_REG
+	LI	v1, ~SR_INT_ENAB
 	and	v0, v1
-	mtc0	v0, COP_0_STATUS_REG		# disable all interrupts
-	mtc0	zero, COP_0_CAUSE_REG		# Clear soft interrupts
+	MTC0	v0, COP_0_STATUS_REG		# disable all interrupts
+	MTC0_SR_IE_HAZARD
+	MTC0	zero, COP_0_CAUSE_REG		# Clear soft interrupts
+	MTC0_HAZARD
 
 	/*
 	 * Initialize stack and call machine startup.
@@ -65,35 +69,48 @@ start:
 	LA	sp, start - FRAMESZ(CF_SZ)
 	LA	gp, _gp
 	jal	mips_init			# mips_init(argc, argv, envp)
-	sw	zero, CF_RA_OFFS(sp)		# Zero out old ra for debugger
+	PTR_S	zero, CF_RA_OFFS(sp)		# Zero out old ra for debugger
 
 	move	sp, v0				# switch to new stack
 	jal	main				# main(regs)
-	move	a0, zero
+	 move	a0, zero
 	PANIC("Startup failed!")
 
 #if defined(MULTIPROCESSOR)
 LEAF(hw_cpu_spinup_trampoline, 0)
-	mfc0	v0, COP_0_STATUS_REG
-	li	v1, ~SR_INT_ENAB
+	MFC0	v0, COP_0_STATUS_REG
+	LI	v1, ~SR_INT_ENAB
 	and	v0, v1
 	ori	v0, SR_KX | SR_UX
-	mtc0	v0, COP_0_STATUS_REG		# disable all interrupts
-	mtc0	zero, COP_0_CAUSE_REG		# Clear soft interrupts
+	MTC0	v0, COP_0_STATUS_REG		# disable all interrupts
+	MTC0	zero, COP_0_CAUSE_REG		# Clear soft interrupts
 	LA	gp, _gp
 	jal	hw_cpu_hatch
-	nop
+	 NOP
 END(hw_cpu_spinup_trampoline)
+
+#ifdef TGT_OCTANE
 
 LEAF(hw_getcurcpu, 0)
 	GET_CPU_INFO(v0, v1)
-	jr	ra
-	nop
+	j	ra
+	 NOP
 END(hw_getcurcpu)
 
+/*
+ * There does not seem to be any fast way to store the curcpu pointer on
+ * Octane. We used to abuse the LLAddr register, but this is a 32-bit register,
+ * not suitable for allocation over 2GB physical.
+ * Instead, we will use an unused field of the MPCONF structure.
+ */
 LEAF(hw_setcurcpu, 0)
-	mtc0	a0, COP_0_LLADDR
+	HW_GET_CPU_PRID(v0, v1)			# get physical processor ID
+	LOAD_XKPHYS(v1, CCA_COHERENT_EXCLWRITE)
+	PTR_SLL	v0, MPCONF_SHIFT
+	PTR_ADD	v0, MPCONF_BASE
+	or	v1, v0
 	j	ra
-	nop
+	 PTR_S	a0, (MPCONF_LEN - REGSZ)(v1)
 END(hw_setcurcpu)
+#endif
 #endif /* MULTIPROCESSOR */

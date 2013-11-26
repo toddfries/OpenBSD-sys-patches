@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.h,v 1.11 2010/08/02 23:17:34 miod Exp $	*/
+/*	$OpenBSD: uhidev.h,v 1.16 2013/11/19 14:04:07 pirofti Exp $	*/
 /*	$NetBSD: uhidev.h,v 1.3 2002/10/08 09:56:17 dan Exp $	*/
 
 /*
@@ -39,18 +39,18 @@
 
 struct uhidev_softc {
 	struct device sc_dev;		/* base device */
-	usbd_device_handle sc_udev;
-	usbd_interface_handle sc_iface;	/* interface */
-	usbd_pipe_handle sc_ipipe;	/* input interrupt pipe */
-	usbd_xfer_handle sc_ixfer;	/* read request */
+	struct usbd_device *sc_udev;
+	struct usbd_interface *sc_iface;/* interface */
+	struct usbd_pipe *sc_ipipe;	/* input interrupt pipe */
+	struct usbd_xfer *sc_ixfer;	/* read request */
 	int sc_iep_addr;
 
 	u_char *sc_ibuf;
 	u_int sc_isize;
 
-	usbd_pipe_handle sc_opipe;	/* output interrupt pipe */
-	usbd_xfer_handle sc_oxfer;	/* write request */
-	usbd_xfer_handle sc_owxfer;	/* internal write request */
+	struct usbd_pipe *sc_opipe;	/* output interrupt pipe */
+	struct usbd_xfer *sc_oxfer;	/* write request */
+	struct usbd_xfer *sc_owxfer;	/* internal write request */
 	int sc_oep_addr;
 
 	void *sc_repdesc;
@@ -60,11 +60,11 @@ struct uhidev_softc {
 	struct uhidev **sc_subdevs;
 
 	int sc_refcnt;
-	u_char sc_dying;
 };
 
 struct uhidev {
 	struct device sc_dev;		/* base device */
+	struct usbd_device *sc_udev;	/* USB device */
 	struct uhidev_softc *sc_parent;
 	uByte sc_report_id;
 	u_int8_t sc_state;
@@ -82,14 +82,13 @@ struct uhidev_attach_arg {
 	struct uhidev_softc *parent;
 	int reportid;
 	int reportsize;
-	int matchlvl;
 };
 
 void uhidev_get_report_desc(struct uhidev_softc *, void **, int *);
 int uhidev_open(struct uhidev *);
 void uhidev_close(struct uhidev *);
 int uhidev_ioctl(struct uhidev *, u_long, caddr_t, int, struct proc *);
-usbd_status uhidev_set_report(struct uhidev *scd, int type, void *data,int len);
-void uhidev_set_report_async(struct uhidev *scd, int type, void *data, int len);
+usbd_status uhidev_set_report(struct uhidev *, int, void *, int);
+usbd_status uhidev_set_report_async(struct uhidev *, int, void *, int);
 usbd_status uhidev_get_report(struct uhidev *scd, int type, void *data,int len);
 usbd_status uhidev_write(struct uhidev_softc *, void *, int);

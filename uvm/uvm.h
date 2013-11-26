@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm.h,v 1.47 2012/03/09 13:01:29 ariane Exp $	*/
+/*	$OpenBSD: uvm.h,v 1.52 2013/11/09 06:52:15 guenther Exp $	*/
 /*	$NetBSD: uvm.h,v 1.24 2000/11/27 08:40:02 chs Exp $	*/
 
 /*
@@ -49,7 +49,6 @@
 #include <uvm/uvm_fault.h>
 #include <uvm/uvm_glue.h>
 #include <uvm/uvm_km.h>
-#include <uvm/uvm_loan.h>
 #include <uvm/uvm_map.h>
 #include <uvm/uvm_object.h>
 #include <uvm/uvm_page.h>
@@ -80,8 +79,7 @@ struct uvm {
 	struct pglist page_active;	/* allocated pages, in use */
 	struct pglist page_inactive_swp;/* pages inactive (reclaim or free) */
 	struct pglist page_inactive_obj;/* pages inactive (reclaim or free) */
-	/* Lock order: object lock,  pageqlock, then fpageqlock. */
-	simple_lock_data_t pageqlock;	/* lock for active/inactive page q */
+	/* Lock order: pageqlock, then fpageqlock. */
 	struct mutex fpageqlock;	/* lock for free page q  + pdaemon */
 	boolean_t page_init_done;	/* TRUE if uvm_page_init() finished */
 	boolean_t page_idle_zero;	/* TRUE if we should try to zero
@@ -99,13 +97,9 @@ struct uvm {
 
 	/* static kernel map entry pool */
 	vm_map_entry_t kentry_free;	/* free page pool */
-	simple_lock_data_t kentry_lock;
 
 	/* aio_done is locked by uvm.aiodoned_lock. */
 	TAILQ_HEAD(, buf) aio_done;		/* done async i/o reqs */
-
-	/* swap-related items */
-	simple_lock_data_t swap_data_lock;
 
 	/* kernel object: to support anonymous pageable kernel memory */
 	struct uvm_object *kernel_object;
@@ -136,13 +130,12 @@ struct uvm {
 extern struct uvm uvm;
 
 /*
- * UVM_UNLOCK_AND_WAIT: atomic unlock+wait... wrapper around the
- * interlocked tsleep() function.
+ * UVM_WAIT: wait... wrapper around the tsleep() function.
  */
 
-#define	UVM_UNLOCK_AND_WAIT(event, slock, intr, msg, timo)		\
+#define	UVM_WAIT(event, intr, msg, timo)				\
 do {									\
-	tsleep(event, PVM|PNORELOCK|(intr ? PCATCH : 0), msg, timo);	\
+	tsleep(event, PVM|(intr ? PCATCH : 0), msg, timo);		\
 } while (0)
 
 /*

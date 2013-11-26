@@ -1,4 +1,4 @@
-#	$OpenBSD: files.octeon,v 1.11 2011/07/03 20:40:17 yasuoka Exp $
+#	$OpenBSD: files.octeon,v 1.16 2013/11/04 14:07:16 deraadt Exp $
 
 # Standard stanzas config(8) can't run without
 maxpartitions 16
@@ -18,18 +18,17 @@ file	arch/octeon/octeon/conf.c
 file	arch/octeon/octeon/disksubr.c		disk
 file	arch/octeon/octeon/lock_machdep.c	multiprocessor
 file	arch/octeon/octeon/machdep.c
+file	arch/mips64/mips64/mips64r2.S
 file	arch/octeon/octeon/mutex.c
 
 include "dev/ata/files.ata"
 include "dev/atapiscsi/files.atapiscsi"
 include	"dev/i2c/files.i2c"
 include	"dev/gpio/files.gpio"
-include	"dev/i2o/files.i2o"
 include	"dev/isa/files.isa"
 include	"dev/isa/files.isapnp"
 include	"dev/mii/files.mii"
 include	"dev/pci/files.pci"
-include	"dev/pci/files.agp"
 include	"dev/pckbc/files.pckbc"
 include	"dev/usb/files.usb"
 include "dev/bluetooth/files.bluetooth"
@@ -65,6 +64,13 @@ file	arch/octeon/dev/cn30xxsmi.c			iobus
 
 # On-board CF
 device	octcf: disk
+attach	octcf at iobus
+file	arch/octeon/dev/octcf.c				octcf
+
+# On-board RNG
+device	octrng
+attach	octrng at iobus
+file	arch/octeon/dev/octrng.c			octrng
 
 device	cn30xxgmx {}
 attach	cn30xxgmx at iobus
@@ -73,9 +79,6 @@ file	arch/octeon/dev/cn30xxgmx.c			cn30xxgmx
 device	cnmac: ether, ifnet, mii, ifmedia
 attach	cnmac at cn30xxgmx
 file	arch/octeon/dev/if_cnmac.c			cnmac
-
-attach	octcf at iobus
-file	arch/octeon/dev/octcf.c				octcf
 
 define	uartbus {[base = -1]}
 device	uartbus

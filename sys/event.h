@@ -1,4 +1,4 @@
-/*	$OpenBSD: event.h,v 1.15 2010/08/02 19:54:07 guenther Exp $	*/
+/*	$OpenBSD: event.h,v 1.19 2013/08/13 05:52:26 guenther Exp $	*/
 
 /*-
  * Copyright (c) 1999,2000,2001 Jonathan Lemon <jlemon@FreeBSD.org>
@@ -35,8 +35,8 @@
 #define EVFILT_WRITE		(-2)
 #define EVFILT_AIO		(-3)	/* attached to aio requests */
 #define EVFILT_VNODE		(-4)	/* attached to vnodes */
-#define EVFILT_PROC		(-5)	/* attached to struct proc */
-#define EVFILT_SIGNAL		(-6)	/* attached to struct proc */
+#define EVFILT_PROC		(-5)	/* attached to struct process */
+#define EVFILT_SIGNAL		(-6)	/* attached to struct process */
 #define EVFILT_TIMER		(-7)	/* timers */
 
 #define EVFILT_SYSCOUNT		7
@@ -51,11 +51,11 @@
 } while(0)
 
 struct kevent {
-	u_int		ident;		/* identifier for this event */
+	__uintptr_t	ident;		/* identifier for this event */
 	short		filter;		/* filter for event */
 	u_short		flags;
 	u_int		fflags;
-	int		data;
+	quad_t		data;
 	void		*udata;		/* opaque user data identifier */
 };
 
@@ -147,7 +147,7 @@ struct knote {
 	int			kn_sdata;	/* saved data field */
 	union {
 		struct		file *p_fp;	/* file data pointer */
-		struct		proc *p_proc;	/* proc pointer */
+		struct		process *p_process;	/* process pointer */
 	} kn_ptr;
 	const struct		filterops *kn_fop;
 	void			*kn_hook;
@@ -167,6 +167,7 @@ struct knote {
 struct proc;
 
 extern void	knote(struct klist *list, long hint);
+extern void	knote_activate(struct knote *);
 extern void	knote_remove(struct proc *p, struct klist *list);
 extern void	knote_fdclose(struct proc *p, int fd);
 extern void	knote_processexit(struct process *);

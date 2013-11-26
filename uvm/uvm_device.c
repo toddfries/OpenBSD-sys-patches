@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_device.c,v 1.40 2011/07/03 18:34:14 oga Exp $	*/
+/*	$OpenBSD: uvm_device.c,v 1.44 2013/08/13 06:56:41 kettenis Exp $	*/
 /*	$NetBSD: uvm_device.c,v 1.30 2000/11/25 06:27:59 chs Exp $	*/
 
 /*
@@ -50,6 +50,11 @@
 #include <uvm/uvm.h>
 #include <uvm/uvm_device.h>
 
+#if defined(__amd64__) || defined(__i386__) || \
+    defined(__macppc__) || defined(__sparc64__)
+#include "drm.h"
+#endif
+
 /*
  * private global data structure
  *
@@ -94,8 +99,7 @@ struct uvm_pagerops uvm_deviceops = {
  * get a VM object that is associated with a device.   allocate a new
  * one if needed.
  *
- * => caller must _not_ already be holding the lock on the uvm_object.
- * => in fact, nothing should be locked so that we can sleep here.
+ * => nothing should be locked so that we can sleep here.
  *
  * The last two arguments (off and size) are only used for access checking.
  */
@@ -105,6 +109,9 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 	dev_t device = *((dev_t *)arg);
 	struct uvm_device *udv, *lcv;
 	paddr_t (*mapfn)(dev_t, off_t, int);
+#if NDRM > 0
+	struct uvm_object *obj;
+#endif
 
 	/*
 	 * before we do anything, ensure this device supports mmap
@@ -122,6 +129,12 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 
 	if (off < 0)
 		return(NULL);
+
+#if NDRM > 0
+	obj = udv_attach_drm(arg, accessprot, off, size);
+	if (obj)
+		return(obj);
+#endif
 
 	/*
 	 * Check that the specified range of the device allows the
@@ -180,9 +193,7 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 			 * bump reference count, unhold, return.
 			 */
 
-			simple_lock(&lcv->u_obj.vmobjlock);
 			lcv->u_obj.uo_refs++;
-			simple_unlock(&lcv->u_obj.vmobjlock);
 
 			mtx_enter(&udv_lock);
 			if (lcv->u_flags & UVM_DEVICE_WANTED)
@@ -243,25 +254,19 @@ udv_attach(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
  * add a reference to a VM object.   Note that the reference count must
  * already be one (the passed in reference) so there is no chance of the
  * udv being released or locked out here.
- *
- * => caller must call with object unlocked.
  */
 
 static void
 udv_reference(struct uvm_object *uobj)
 {
 
-	simple_lock(&uobj->vmobjlock);
 	uobj->uo_refs++;
-	simple_unlock(&uobj->vmobjlock);
 }
 
 /*
  * udv_detach
  *
  * remove a reference to a VM object.
- *
- * => caller must call with object unlocked and map locked.
  */
 
 static void
@@ -273,10 +278,8 @@ udv_detach(struct uvm_object *uobj)
 	 * loop until done
 	 */
 again:
-	simple_lock(&uobj->vmobjlock);
 	if (uobj->uo_refs > 1) {
 		uobj->uo_refs--;
-		simple_unlock(&uobj->vmobjlock);
 		return;
 	}
 	KASSERT(uobj->uo_npages == 0 && RB_EMPTY(&uobj->memt));
@@ -292,7 +295,6 @@ again:
 		 * lock interleaving. -- this is ok in this case since the
 		 * locks are both IPL_NONE
 		 */
-		simple_unlock(&uobj->vmobjlock);
 		msleep(udv, &udv_lock, PVM | PNORELOCK, "udv_detach", 0);
 		goto again;
 	}
@@ -305,7 +307,6 @@ again:
 	if (udv->u_flags & UVM_DEVICE_WANTED)
 		wakeup(udv);
 	mtx_leave(&udv_lock);
-	simple_unlock(&uobj->vmobjlock);
 	free(udv, M_TEMP);
 }
 
@@ -329,8 +330,6 @@ udv_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
  * => rather than having a "get" function, we have a fault routine
  *	since we don't return vm_pages we need full control over the
  *	pmap_enter map in
- * => all the usual fault data structured are locked by the caller
- *	(i.e. maps(read), amap (if any), uobj)
  * => on return, we unlock all fault data structures
  * => flags: PGO_ALLPAGES: get all of the pages
  *	     PGO_LOCKED: fault data structures are locked

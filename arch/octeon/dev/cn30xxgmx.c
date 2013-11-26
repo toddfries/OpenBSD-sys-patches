@@ -1,4 +1,4 @@
-/*	$OpenBSD: cn30xxgmx.c,v 1.3 2011/07/03 20:31:39 yasuoka Exp $	*/
+/*	$OpenBSD: cn30xxgmx.c,v 1.11 2013/10/30 20:48:04 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -31,19 +31,17 @@
  *  take no thought for other GMX interface
  */
 
-#include <sys/cdefs.h>
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/types.h>
 #include <sys/device.h>
 #include <sys/lock.h>
-#include <sys/cdefs.h>
 #include <sys/malloc.h>
 #include <sys/syslog.h>
 
 #include <machine/bus.h>
 #include <machine/octeon_model.h>
+#include <machine/octeonvar.h>
 
 #include <octeon/dev/iobusvar.h>
 #include <octeon/dev/cn30xxciureg.h>
@@ -98,8 +96,6 @@ static int	cn30xxgmx_rgmii_enable(struct cn30xxgmx_port_softc *, int);
 static int	cn30xxgmx_rgmii_speed(struct cn30xxgmx_port_softc *);
 static int	cn30xxgmx_rgmii_speed_newlink(struct cn30xxgmx_port_softc *,
 		    uint64_t *);
-static int	cn30xxgmx_rgmii_speed_newlink_log(
-		    struct cn30xxgmx_port_softc *, uint64_t);
 static int	cn30xxgmx_rgmii_speed_speed(struct cn30xxgmx_port_softc *);
 static int	cn30xxgmx_rgmii_timing(struct cn30xxgmx_port_softc *);
 static int	cn30xxgmx_rgmii_set_mac_addr(struct cn30xxgmx_port_softc *,
@@ -111,6 +107,8 @@ void		cn30xxgmx_intr_evcnt_attach(struct cn30xxgmx_softc *);
 void		cn30xxgmx_dump(void);
 void		cn30xxgmx_debug_reset(void);
 int		cn30xxgmx_intr_drop(void *);
+static int	cn30xxgmx_rgmii_speed_newlink_log(
+		    struct cn30xxgmx_port_softc *, uint64_t);
 #endif
 
 static const int	cn30xxgmx_rx_adr_cam_regs[] = {
@@ -149,6 +147,15 @@ struct cn30xxgmx_port_ops *cn30xxgmx_port_ops[] = {
 	[GMX_SPI42_PORT] = &cn30xxgmx_port_ops_spi42
 };
 
+int octeon_eth_phy_table[] = {
+#if defined __seil5__
+	0x04, 0x01, 0x02
+#else
+	/* portwell cam-0100 */
+	0x02, 0x03, 0x22
+#endif
+};
+
 #ifdef OCTEON_ETH_DEBUG
 static void		*cn30xxgmx_intr_drop_ih;
 struct evcnt		cn30xxgmx_intr_drop_evcnt =
@@ -179,6 +186,24 @@ cn30xxgmx_match(struct device *parent, void *match, void *aux)
 	if (cf->cf_unit != aa->aa_unitno)
 		return 0;
 	return 1;
+}
+
+static int
+cn30xxgmx_port_phy_addr(int port)
+{
+	extern struct boot_info *octeon_boot_info;
+
+	switch (octeon_boot_info->board_type) {
+	case BOARD_TYPE_UBIQUITI_E100:
+		if (port > 2)
+			return -1;
+		return 7 - port;
+
+	default:
+		if (port >= nitems(octeon_eth_phy_table))
+			return -1;
+		return octeon_eth_phy_table[port];
+	}
 }
 
 static void
@@ -226,6 +251,9 @@ cn30xxgmx_attach(struct device *parent, struct device *self, void *aux)
 		gmx_aa.ga_port_type = sc->sc_port_types[i];
 		gmx_aa.ga_gmx = sc;
 		gmx_aa.ga_gmx_port = port_sc;
+		gmx_aa.ga_phy_addr = cn30xxgmx_port_phy_addr(i);
+		if (gmx_aa.ga_phy_addr == -1)
+			panic(": don't know phy address for port %d", i);
 
 		config_found_sm(self, &gmx_aa,
 		    cn30xxgmx_print, cn30xxgmx_submatch);
@@ -259,8 +287,7 @@ cn30xxgmx_print(void *aux, const char *pnp)
 		printf("%s at %s", ga->ga_name, pnp);
 #endif
 
-	printf(" address=0x%016llx: %s", ga->ga_addr,
-	    types[ga->ga_port_type]);
+	printf(": %s", types[ga->ga_port_type]);
 
 	return UNCONF;
 }
@@ -661,7 +688,9 @@ cn30xxgmx_rgmii_speed(struct cn30xxgmx_port_softc *sc)
 	if (sc->sc_link == newlink) {
 		return 0;
 	}
+#ifdef OCTEON_ETH_DEBUG
 	cn30xxgmx_rgmii_speed_newlink_log(sc, newlink);
+#endif
 	sc->sc_link = newlink;
 
 	switch (sc->sc_link & RXN_RX_INBND_SPEED) {
@@ -672,7 +701,7 @@ cn30xxgmx_rgmii_speed(struct cn30xxgmx_port_softc *sc)
 		baudrate = IF_Mbps(100);
 		break;
 	case RXN_RX_INBND_SPEED_125:
-		baudrate = IF_Mbps(1000);
+		baudrate = IF_Gbps(1);
 		break;
 	default:
 		baudrate = 0/* XXX */;
@@ -751,6 +780,7 @@ cn30xxgmx_rgmii_speed_newlink(struct cn30xxgmx_port_softc *sc,
 	return 0;
 }
 
+#ifdef OCTEON_ETH_DEBUG
 static int
 cn30xxgmx_rgmii_speed_newlink_log(struct cn30xxgmx_port_softc *sc,
     uint64_t newlink)
@@ -822,6 +852,7 @@ cn30xxgmx_rgmii_speed_newlink_log(struct cn30xxgmx_port_softc *sc,
 
 	return 0;
 }
+#endif
 
 static int
 cn30xxgmx_rgmii_speed_speed(struct cn30xxgmx_port_softc *sc)
@@ -960,7 +991,9 @@ cn30xxgmx_rgmii_speed_speed(struct cn30xxgmx_port_softc *sc)
 static int
 cn30xxgmx_rgmii_timing(struct cn30xxgmx_port_softc *sc)
 {
-	int clk_set_setting;
+	extern struct boot_info *octeon_boot_info;
+	int clk_tx_setting;
+	int clk_rx_setting;
 	uint64_t rx_frm_ctl;
 
 	/* RGMII TX Threshold Registers, CN30XX-HM-1.0;
@@ -1005,15 +1038,25 @@ cn30xxgmx_rgmii_timing(struct cn30xxgmx_port_softc *sc)
 		/*
 		 * Table.4-6, Summary of ASX Registers, SEIL_HS_v03;
 		 */
-		clk_set_setting = 0;
+		clk_tx_setting = 0;
+		clk_rx_setting = 0;
 		break;
 	default:
 		/* Default parameter of CN30XX */
-		clk_set_setting = 24;
+		clk_tx_setting = 24;
+		clk_rx_setting = 24;
+		break;
+	}
+	
+	/* board specific overrides */
+	switch (octeon_boot_info->board_type) {
+	case BOARD_TYPE_UBIQUITI_E100:
+		clk_tx_setting = 16;
+		clk_rx_setting = 0;
 		break;
 	}
 
-	cn30xxasx_clk_set(sc->sc_port_asx, clk_set_setting);
+	cn30xxasx_clk_set(sc->sc_port_asx, clk_tx_setting, clk_rx_setting);
 
 	return 0;
 }
@@ -1080,15 +1123,11 @@ cn30xxgmx_rgmii_set_filter(struct cn30xxgmx_port_softc *sc)
 		while (enm != NULL) {
 			int i;
 
-			dprintf("%d: lo(%02x:%02x:%02x:%02x:%02x:%02x) - "
-			    "hi(%02x:%02x:%02x:%02x:%02x:%02x)\n",
+			dprintf("%d: %02x:%02x:%02x:%02x:%02x:%02x\n"
 			    multi + 1,
 			    enm->enm_addrlo[0], enm->enm_addrlo[1],
 			    enm->enm_addrlo[2], enm->enm_addrlo[3],
-			    enm->enm_addrlo[4], enm->enm_addrlo[5],
-			    enm->enm_addrhi[0], enm->enm_addrhi[1],
-			    enm->enm_addrhi[2], enm->enm_addrhi[3],
-			    enm->enm_addrhi[4], enm->enm_addrhi[5]);
+			    enm->enm_addrlo[4], enm->enm_addrlo[5]);
 			multi++;
 
 			SET(cam_en, 1ULL << multi); /* XXX */
@@ -1391,7 +1430,7 @@ cn30xxgmx_intr_rml_gmx1(void)
 int
 cn30xxgmx_intr_drop(void *arg)
 {
-	octeon_write_csr(CIU_INT0_SUM0, CIU_INTX_SUM0_GMX_DRP);
+	octeon_xkphys_write_8(CIU_INT0_SUM0, CIU_INTX_SUM0_GMX_DRP);
 	cn30xxgmx_intr_drop_evcnt.ev_count++;
 	return (1);
 }

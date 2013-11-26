@@ -1,5 +1,4 @@
-/*	$OpenBSD: param.h,v 1.26 2011/09/08 03:40:32 guenther Exp $	*/
-/*	$NetBSD: param.h,v 1.2 1997/06/10 18:21:23 veego Exp $	*/
+/*	$OpenBSD: param.h,v 1.31 2013/03/26 05:04:10 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -33,91 +32,42 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * from: Utah $Hdr: machparam.h 1.16 92/12/20$
- *
- *	@(#)param.h	8.1 (Berkeley) 6/10/93
  */
-#ifndef _M68K_PARAM_H_
-#define _M68K_PARAM_H_
 
-/*
- * Machine independent constants for m68k
- */
+#ifndef	_M68K_PARAM_H_
+#define	_M68K_PARAM_H_
+
 #define	_MACHINE_ARCH	m68k
 #define	MACHINE_ARCH	"m68k"
 #define	MID_MACHINE	MID_M68K
 
-#define	ALIGNBYTES		_ALIGNBYTES
-#define	ALIGN(p)		_ALIGN(p)
-#define	ALIGNED_POINTER(p,t)	_ALIGNED_POINTER(p,t)
-
 #define	PAGE_SIZE	(1 << PAGE_SHIFT)
 #define	PAGE_MASK	(PAGE_SIZE - 1)
 
-#define	PGSHIFT		PAGE_SHIFT
-#define	NBPG		(1 << PGSHIFT)	/* bytes/page */
-#define	PGOFSET		(NBPG-1)	/* byte offset into page */
+#ifdef _KERNEL
 
 #define	NPTEPG		(PAGE_SIZE / (sizeof(pt_entry_t)))
 
 #define	BTOPKERNBASE	((u_long)KERNBASE >> PAGE_SHIFT)
 
-#define	DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
-#define	DEV_BSIZE	(1 << DEV_BSHIFT)
-#define BLKDEV_IOSIZE	2048
-#define	MAXPHYS		(64 * 1024)	/* max raw I/O transfer size */
+#define	NBPG		PAGE_SIZE
+#define	PGSHIFT		PAGE_SHIFT
+#define	PGOFSET		PAGE_MASK
 
-#define	SEGSHIFT020	(34 - PAGE_SHIFT)
-#define	SEGSHIFT040	(18)
-#ifndef	SEGSHIFT
-#if defined(M68040) || defined(M68060)
-#if defined(M68020) || defined(M68030)
-#define	SEGSHIFT	((mmutype <= MMU_68040) ? SEGSHIFT040 : SEGSHIFT020)
-#else
-#define	SEGSHIFT	SEGSHIFT040
-#endif
-#else
-#define	SEGSHIFT	SEGSHIFT020
-#endif
-#define	NBSEG		(1 << SEGSHIFT)
-#define	SEGOFSET	(NBSEG - 1)
-#endif
+#define	UPAGES		2			/* pages of u-area */
+#define	USPACE		(UPAGES * PAGE_SIZE)	/* total size of u-area */
+#define	USPACE_ALIGN	0			/* u-area alignment 0-none */
 
-/* mac68k use 3 pages of u-area */
-#ifndef	UPAGES
-#define UPAGES		2		/* pages of u-area */
-#endif
-#define	USPACE		(UPAGES * PAGE_SIZE)
-#define	USPACE_ALIGN	(0)		/* u-area alignment 0-none */
+#define	NMBCLUSTERS	4096		/* map size, max cluster allocation */
 
 /*
- * Minimum and maximum sizes of the kernel malloc arena in PAGE_SIZE-sized
+ * Maximum size of the kernel malloc arena in PAGE_SIZE-sized
  * logical pages.
  */
-#define	NKMEMPAGES_MIN_DEFAULT	((4 * 1024 * 1024) >> PAGE_SHIFT)
 #define	NKMEMPAGES_MAX_DEFAULT	((64 * 1024 * 1024) >> PAGE_SHIFT)
-
-/*
- * Constants related to network buffer management.
- */
-#define	NMBCLUSTERS	1024		/* map size, max cluster allocation */
-
-/* pages ("clicks") to disk blocks */
-#define	ctod(x)		((x) << (PAGE_SHIFT - DEV_BSHIFT))
-#define	dtoc(x)		((x) >> (PAGE_SHIFT - DEV_BSHIFT))
-
-/* bytes to disk blocks */
-#define	btodb(x)	((x) >> DEV_BSHIFT)
-#define	dbtob(x)	((x) << DEV_BSHIFT)
-
-/*
- * Mach derived conversion macros
- */
-#define	m68k_round_seg(x)	((((unsigned)(x)) + SEGOFSET) & ~SEGOFSET)
-#define	m68k_trunc_seg(x)	((unsigned)(x) & ~SEGOFSET)
-#define	m68k_page_offset(x)	((unsigned)(x) & PGOFSET)
 
 #include <machine/cpu.h>
 
-#endif	/* !_M68K_PARAM_H_ */
+#endif /* _KERNEL */
+
+#endif /* _M68K_PARAM_H_ */

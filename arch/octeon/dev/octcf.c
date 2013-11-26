@@ -1,4 +1,4 @@
-/*	$OpenBSD: octcf.c,v 1.7 2011/07/06 04:49:35 matthew Exp $ */
+/*	$OpenBSD: octcf.c,v 1.13 2013/11/01 01:06:03 dlg Exp $ */
 /*	$NetBSD: wd.c,v 1.193 1999/02/28 17:15:27 explorer Exp $ */
 
 /*
@@ -84,7 +84,8 @@
 #include <dev/ic/wdcvar.h>
 
 #include <octeon/dev/iobusvar.h>
-#include <octeon/dev/octeonreg.h>
+#include <machine/octeonreg.h>
+#include <machine/octeonvar.h>
 
 #define OCTCF_REG_SIZE	8
 #define ATAPARAMS_SIZE	512
@@ -110,7 +111,7 @@ struct octcf_softc {
 	/* General disk infos */
 	struct device sc_dev;
 	struct disk sc_dk;
-	struct buf sc_q;
+	struct bufq sc_bufq;
 	struct buf *sc_bp;
 	struct ataparams sc_params;/* drive characteristics found */
 	int sc_flags;
@@ -159,8 +160,15 @@ int 	octcf_get_params(struct octcf_softc *, struct ataparams *);
 	bus_space_write_2(wd->sc_iot, wd->sc_ioh, reg & 0x6, val)
 
 int
-octcfprobe(struct device *parent, void *match_, void *aux)
+octcfprobe(struct device *parent, void *match, void *aux)
 {
+	extern struct boot_info *octeon_boot_info;
+
+	if (octeon_boot_info->cf_common_addr == 0) {
+		OCTCFDEBUG_PRINT(("%s: No cf bus found\n", __func__), DEBUG_FUNCS | DEBUG_PROBE);
+		return 0;
+	}
+
 	return 1;
 }
 
@@ -171,7 +179,7 @@ octcfattach(struct device *parent, struct device *self, void *aux)
 	struct iobus_attach_args *aa = aux;
 	int i, blank;
 	char buf[41], c, *p, *q;
-	OCTCFDEBUG_PRINT(("octcfattach\n"), DEBUG_FUNCS | DEBUG_PROBE);
+	OCTCFDEBUG_PRINT(("%s\n", __func__), DEBUG_FUNCS | DEBUG_PROBE);
 	uint8_t status;
 
 	wd->sc_iot = aa->aa_bust;
@@ -252,6 +260,7 @@ octcfattach(struct device *parent, struct device *self, void *aux)
 	 * Initialize disk structures.
 	 */
 	wd->sc_dk.dk_name = wd->sc_dev.dv_xname;
+	bufq_init(&wd->sc_bufq, BUFQ_DEFAULT);
 
 	/* Attach disk. */
 	disk_attach(&wd->sc_dev, &wd->sc_dk);
@@ -300,7 +309,7 @@ octcfstrategy(struct buf *bp)
 		bp->b_error = ENXIO;
 		goto bad;
 	}
-	OCTCFDEBUG_PRINT(("octcfstrategy (%s)\n", wd->sc_dev.dv_xname),
+	OCTCFDEBUG_PRINT(("%s (%s)\n", __func__, wd->sc_dev.dv_xname),
 	    DEBUG_XFERS);
 	/* If device invalidated (e.g. media change, door open), error. */
 	if ((wd->sc_flags & OCTCFF_LOADED) == 0) {
@@ -318,9 +327,11 @@ octcfstrategy(struct buf *bp)
 		goto bad;
 	}
 
+	/* Queue the I/O */
+	bufq_queue(&wd->sc_bufq, bp);
+
 	/* Queue transfer on drive, activate drive and controller if idle. */
 	s = splbio();
-	disksort(&wd->sc_q, bp);
 	octcfstart(wd);
 	splx(s);
 	device_unref(&wd->sc_dev);
@@ -344,18 +355,11 @@ void
 octcfstart(void *arg)
 {
 	struct octcf_softc *wd = arg;
-	struct buf *dp, *bp;
+	struct buf *bp;
 
-	OCTCFDEBUG_PRINT(("octcfstart %s\n", wd->sc_dev.dv_xname),
+	OCTCFDEBUG_PRINT(("%s %s\n", __func__, wd->sc_dev.dv_xname),
 	    DEBUG_XFERS);
-	while (1) {
-		/* Remove the next buffer from the queue or stop. */
-		dp = &wd->sc_q;
-		bp = dp->b_actf;
-		if (bp == NULL)
-			return;
-		dp->b_actf = bp->b_actf;
-
+	while ((bp = bufq_dequeue(&wd->sc_bufq)) != NULL) {
 		/* Transfer this buffer now. */
 		_octcfstart(wd, bp);
 	}
@@ -405,7 +409,7 @@ int
 octcfread(dev_t dev, struct uio *uio, int flags)
 {
 
-	OCTCFDEBUG_PRINT(("wdread\n"), DEBUG_XFERS);
+	OCTCFDEBUG_PRINT(("%s\n", __func__), DEBUG_XFERS);
 	return (physio(octcfstrategy, dev, B_READ, minphys, uio));
 }
 
@@ -413,7 +417,7 @@ int
 octcfwrite(dev_t dev, struct uio *uio, int flags)
 {
 
-	OCTCFDEBUG_PRINT(("octcfwrite\n"), DEBUG_XFERS);
+	OCTCFDEBUG_PRINT(("%s\n", __func__), DEBUG_XFERS);
 	return (physio(octcfstrategy, dev, B_WRITE, minphys, uio));
 }
 
@@ -424,7 +428,7 @@ octcfopen(dev_t dev, int flag, int fmt, struct proc *p)
 	int unit, part;
 	int error;
 
-	OCTCFDEBUG_PRINT(("octcfopen\n"), DEBUG_FUNCS);
+	OCTCFDEBUG_PRINT(("%s\n", __func__), DEBUG_FUNCS);
 
 	unit = DISKUNIT(dev);
 	wd = octcflookup(unit);
@@ -510,7 +514,7 @@ octcfclose(dev_t dev, int flag, int fmt, struct proc *p)
 	if (wd == NULL)
 		return ENXIO;
 
-	OCTCFDEBUG_PRINT(("octcfclose\n"), DEBUG_FUNCS);
+	OCTCFDEBUG_PRINT(("%s\n", __func__), DEBUG_FUNCS);
 
 	disk_lock_nointr(&wd->sc_dk);
 
@@ -534,7 +538,7 @@ octcfclose(dev_t dev, int flag, int fmt, struct proc *p)
 void
 octcfgetdefaultlabel(struct octcf_softc *wd, struct disklabel *lp)
 {
-	OCTCFDEBUG_PRINT(("octcfgetdefaultlabel\n"), DEBUG_FUNCS);
+	OCTCFDEBUG_PRINT(("%s\n", __func__), DEBUG_FUNCS);
 	bzero(lp, sizeof(struct disklabel));
 
 	lp->d_secsize = DEV_BSIZE;
@@ -565,7 +569,7 @@ octcfgetdisklabel(dev_t dev, struct octcf_softc *wd, struct disklabel *lp,
 {
 	int error;
 
-	OCTCFDEBUG_PRINT(("octcfgetdisklabel\n"), DEBUG_FUNCS);
+	OCTCFDEBUG_PRINT(("%s\n", __func__), DEBUG_FUNCS);
 
 	octcfgetdefaultlabel(wd, lp);
 	error = readdisklabel(DISKLABELDEV(dev), octcfstrategy, lp,
@@ -580,7 +584,7 @@ octcfioctl(dev_t dev, u_long xfer, caddr_t addr, int flag, struct proc *p)
 	struct disklabel *lp;
 	int error = 0;
 
-	OCTCFDEBUG_PRINT(("octcfioctl\n"), DEBUG_FUNCS);
+	OCTCFDEBUG_PRINT(("%s\n", __func__), DEBUG_FUNCS);
 
 	wd = octcflookup(DISKUNIT(dev));
 	if (wd == NULL)
@@ -685,14 +689,14 @@ wdformat(struct buf *bp)
 }
 #endif
 
-daddr64_t
+daddr_t
 octcfsize(dev_t dev)
 {
 	struct octcf_softc *wd;
 	int part, omask;
 	int64_t size;
 
-	OCTCFDEBUG_PRINT(("wdsize\n"), DEBUG_FUNCS);
+	OCTCFDEBUG_PRINT(("%s\n", __func__), DEBUG_FUNCS);
 
 	wd = octcflookup(DISKUNIT(dev));
 	if (wd == NULL)
@@ -720,7 +724,7 @@ octcfsize(dev_t dev)
  * Dump core after a system crash.
  */
 int
-octcfdump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
+octcfdump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 {
 	return ENXIO;
 }
@@ -821,7 +825,7 @@ octcf_get_params(struct octcf_softc *wd, struct ataparams *prms)
 	uint8_t status;
 	int error;
 
-	OCTCFDEBUG_PRINT(("octcf_get_parms\n"), DEBUG_FUNCS);
+	OCTCFDEBUG_PRINT(("%s\n", __func__), DEBUG_FUNCS);
 
 	tb = malloc(ATAPARAMS_SIZE, M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (tb == NULL)

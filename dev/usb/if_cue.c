@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cue.c,v 1.60 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: if_cue.c,v 1.64 2013/11/15 10:17:39 pirofti Exp $ */
 /*	$NetBSD: if_cue.c,v 1.40 2002/07/11 21:14:26 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -77,7 +77,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -130,8 +129,8 @@ int cue_tx_list_init(struct cue_softc *);
 int cue_rx_list_init(struct cue_softc *);
 int cue_newbuf(struct cue_softc *, struct cue_chain *, struct mbuf *);
 int cue_send(struct cue_softc *, struct mbuf *, int);
-void cue_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void cue_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void cue_rxeof(struct usbd_xfer *, void *, usbd_status);
+void cue_txeof(struct usbd_xfer *, void *, usbd_status);
 void cue_tick(void *);
 void cue_tick_task(void *);
 void cue_start(struct ifnet *);
@@ -343,6 +342,7 @@ cue_getmac(struct cue_softc *sc, void *buf)
 void
 cue_setmulti(struct cue_softc *sc)
 {
+	struct arpcom		*ac = &sc->arpcom;
 	struct ifnet		*ifp;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
@@ -353,8 +353,7 @@ cue_setmulti(struct cue_softc *sc)
 	DPRINTFN(2,("%s: cue_setmulti if_flags=0x%x\n",
 		    sc->cue_dev.dv_xname, ifp->if_flags));
 
-	if (ifp->if_flags & IFF_PROMISC) {
-allmulti:
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
 		ifp->if_flags |= IFF_ALLMULTI;
 		for (i = 0; i < CUE_MCAST_TABLE_LEN; i++)
 			sc->cue_mctab[i] = 0xFF;
@@ -368,12 +367,8 @@ allmulti:
 		sc->cue_mctab[i] = 0;
 
 	/* now program new ones */
-	ETHER_FIRST_MULTI(step, &sc->arpcom, enm);
+	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (memcmp(enm->enm_addrlo,
-		    enm->enm_addrhi, ETHER_ADDR_LEN) != 0)
-			goto allmulti;
-
 		h = ether_crc32_le(enm->enm_addrlo, ETHER_ADDR_LEN) &
 		    ((1 << CUE_BITS) - 1);
 		sc->cue_mctab[h >> 3] |= 1 << (h & 0x7);
@@ -448,8 +443,8 @@ cue_attach(struct device *parent, struct device *self, void *aux)
 	struct usb_attach_arg	*uaa = aux;
 	int			s;
 	u_char			eaddr[ETHER_ADDR_LEN];
-	usbd_device_handle	dev = uaa->device;
-	usbd_interface_handle	iface;
+	struct usbd_device	*dev = uaa->device;
+	struct usbd_interface	*iface;
 	usbd_status		err;
 	struct ifnet		*ifp;
 	usb_interface_descriptor_t	*id;
@@ -699,7 +694,7 @@ cue_tx_list_init(struct cue_softc *sc)
  * the higher level protocols.
  */
 void
-cue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+cue_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct cue_chain	*c = priv;
 	struct cue_softc	*sc = c->cue_sc;
@@ -795,7 +790,7 @@ done:
  * the list buffers.
  */
 void
-cue_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+cue_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct cue_chain	*c = priv;
 	struct cue_softc	*sc = c->cue_sc;
@@ -1195,11 +1190,7 @@ cue_stop(struct cue_softc *sc)
 
 	/* Stop transfers. */
 	if (sc->cue_ep[CUE_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->cue_ep[CUE_ENDPT_RX]);
-		if (err) {
-			printf("%s: abort rx pipe failed: %s\n",
-			sc->cue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->cue_ep[CUE_ENDPT_RX]);
 		err = usbd_close_pipe(sc->cue_ep[CUE_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
@@ -1209,11 +1200,7 @@ cue_stop(struct cue_softc *sc)
 	}
 
 	if (sc->cue_ep[CUE_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->cue_ep[CUE_ENDPT_TX]);
-		if (err) {
-			printf("%s: abort tx pipe failed: %s\n",
-			sc->cue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->cue_ep[CUE_ENDPT_TX]);
 		err = usbd_close_pipe(sc->cue_ep[CUE_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
@@ -1223,11 +1210,7 @@ cue_stop(struct cue_softc *sc)
 	}
 
 	if (sc->cue_ep[CUE_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->cue_ep[CUE_ENDPT_INTR]);
-		if (err) {
-			printf("%s: abort intr pipe failed: %s\n",
-			sc->cue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->cue_ep[CUE_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->cue_ep[CUE_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",

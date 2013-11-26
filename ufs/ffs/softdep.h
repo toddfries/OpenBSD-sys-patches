@@ -1,4 +1,4 @@
-/*	$OpenBSD: softdep.h,v 1.15 2008/01/05 19:49:26 otto Exp $	*/
+/*	$OpenBSD: softdep.h,v 1.17 2013/06/11 16:42:18 deraadt Exp $	*/
 
 /*
  * Copyright 1998, 2000 Marshall Kirk McKusick. All Rights Reserved.
@@ -191,8 +191,8 @@ struct pagedep {
 #	define	pd_state pd_list.wk_state /* check for multiple I/O starts */
 	LIST_ENTRY(pagedep) pd_hash;	/* hashed lookup */
 	struct	mount *pd_mnt;		/* associated mount point */
-	ino_t	pd_ino;			/* associated file */
-	daddr64_t pd_lbn;		/* block within file */
+	ufsino_t	pd_ino;		/* associated file */
+	daddr_t pd_lbn;		/* block within file */
 	struct	dirremhd pd_dirremhd;	/* dirrem's waiting for page */
 	struct	diraddhd pd_diraddhd[DAHASHSZ]; /* diradd dir entry updates */
 	struct	diraddhd pd_pendinghd;	/* directory entries awaiting write */
@@ -250,7 +250,7 @@ struct inodedep {
 #	define	id_state id_list.wk_state /* inode dependency state */
 	LIST_ENTRY(inodedep) id_hash;	/* hashed lookup */
 	struct	fs *id_fs;		/* associated filesystem */
-	ino_t	id_ino;			/* dependent inode */
+	ufsino_t	id_ino;		/* dependent inode */
 	nlink_t	id_nlinkdelta;		/* saved effective link count */
 	union { /* Saved UFS1/UFS2 dinode contents */
 		struct ufs1_dinode *idu_savedino1;
@@ -280,7 +280,7 @@ struct inodedep {
 struct newblk {
 	LIST_ENTRY(newblk) nb_hash;	/* hashed lookup */
 	struct	fs *nb_fs;		/* associated filesystem */
-	daddr64_t nb_newblkno;		/* allocated block number */
+	daddr_t nb_newblkno;		/* allocated block number */
 	int	nb_state;		/* state of bitmap dependency */
 	LIST_ENTRY(newblk) nb_deps;	/* bmsafemap's list of newblk's */
 	struct	bmsafemap *nb_bmsafemap; /* associated bmsafemap */
@@ -336,9 +336,9 @@ struct allocdirect {
 	struct	worklist ad_list;	/* buffer holding block */
 #	define	ad_state ad_list.wk_state /* block pointer state */
 	TAILQ_ENTRY(allocdirect) ad_next; /* inodedep's list of allocdirect's */
-	daddr64_t ad_lbn;		/* block within file */
-	daddr64_t ad_newblkno;		/* new value of block pointer */
-	daddr64_t ad_oldblkno;		/* old value of block pointer */
+	daddr_t ad_lbn;		/* block within file */
+	daddr_t ad_newblkno;		/* new value of block pointer */
+	daddr_t ad_oldblkno;		/* old value of block pointer */
 	long	ad_newsize;		/* size of new block */
 	long	ad_oldsize;		/* size of old block */
 	LIST_ENTRY(allocdirect) ad_deps; /* bmsafemap's list of allocdirect's */
@@ -392,8 +392,8 @@ struct allocindir {
 #	define	ai_state ai_list.wk_state /* indirect block pointer state */
 	LIST_ENTRY(allocindir) ai_next;	/* indirdep's list of allocindir's */
 	int	ai_offset;		/* pointer offset in indirect block */
-	daddr64_t ai_newblkno;		/* new block pointer value */
-	daddr64_t ai_oldblkno;		/* old block pointer value */
+	daddr_t ai_newblkno;		/* new block pointer value */
+	daddr_t ai_oldblkno;		/* old block pointer value */
 	struct	freefrag *ai_freefrag;	/* block to be freed when complete */
 	struct	indirdep *ai_indirdep;	/* address of associated indirdep */
 	LIST_ENTRY(allocindir) ai_deps;	/* bmsafemap's list of allocindir's */
@@ -415,9 +415,9 @@ struct freefrag {
 #	define	ff_state ff_list.wk_state /* owning user; should be uid_t */
 	struct	vnode *ff_devvp;	/* filesystem device vnode */
 	struct	mount *ff_mnt;		/* associated mount point */
-	daddr64_t ff_blkno;		/* fragment physical block number */
+	daddr_t ff_blkno;		/* fragment physical block number */
 	long	ff_fragsize;		/* size of fragment being deleted */
-	ino_t	ff_inum;		/* owning inode number */
+	ufsino_t	ff_inum;	/* owning inode number */
 };
 
 /*
@@ -429,15 +429,15 @@ struct freefrag {
 struct freeblks {
 	struct	worklist fb_list;	/* id_inowait or delayed worklist */
 #	define	fb_state fb_list.wk_state /* inode and dirty block state */
-	ino_t	fb_previousinum;	/* inode of previous owner of blocks */
+	ufsino_t	fb_previousinum; /* inode of previous owner of blocks */
 	struct	vnode *fb_devvp;	/* filesystem device vnode */
 	struct	mount *fb_mnt;		/* associated mount point */
 	off_t	fb_oldsize;		/* previous file size */
 	off_t	fb_newsize;		/* new file size */
 	int	fb_chkcnt;		/* used to check cnt of blks released */
 	uid_t	fb_uid;			/* uid of previous owner of blocks */
-	daddr64_t fb_dblks[NDADDR];	/* direct blk ptrs to deallocate */
-	daddr64_t fb_iblks[NIADDR];	/* indirect blk ptrs to deallocate */
+	daddr_t fb_dblks[NDADDR];	/* direct blk ptrs to deallocate */
+	daddr_t fb_iblks[NIADDR];	/* indirect blk ptrs to deallocate */
 };
 
 /*
@@ -449,7 +449,7 @@ struct freeblks {
 struct freefile {
 	struct	worklist fx_list;	/* id_inowait or delayed worklist */
 	mode_t	fx_mode;		/* mode of inode */
-	ino_t	fx_oldinum;		/* inum of the unlinked file */
+	ufsino_t	fx_oldinum;	/* inum of the unlinked file */
 	struct	vnode *fx_devvp;	/* filesystem device vnode */
 	struct	mount *fx_mnt;		/* associated mount point */
 };
@@ -496,7 +496,7 @@ struct diradd {
 #	define	da_state da_list.wk_state /* state of the new directory entry */
 	LIST_ENTRY(diradd) da_pdlist;	/* pagedep holding directory block */
 	doff_t	da_offset;		/* offset of new dir entry in dir blk */
-	ino_t	da_newinum;		/* inode number for the new dir entry */
+	ufsino_t	da_newinum;	/* inode number for the new dir entry */
 	union {
 	struct	dirrem *dau_previous;	/* entry being replaced in dir change */
 	struct	pagedep *dau_pagedep;	/* pagedep dependency for addition */
@@ -554,10 +554,10 @@ struct dirrem {
 #	define	dm_state dm_list.wk_state /* state of the old directory entry */
 	LIST_ENTRY(dirrem) dm_next;	/* pagedep's list of dirrem's */
 	struct	mount *dm_mnt;		/* associated mount point */
-	ino_t	dm_oldinum;		/* inum of the removed dir entry */
+	ufsino_t	dm_oldinum;	/* inum of the removed dir entry */
 	union {
 	struct	pagedep *dmu_pagedep;	/* pagedep dependency for remove */
-	ino_t	dmu_dirinum;		/* parent inode number (for rmdir) */
+	ufsino_t	dmu_dirinum;	/* parent inode number (for rmdir) */
 	} dm_un;
 };
 #define dm_pagedep dm_un.dmu_pagedep

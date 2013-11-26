@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.c,v 1.126 2012/03/06 12:44:17 claudio Exp $	*/
+/*	$OpenBSD: in_pcb.c,v 1.145 2013/10/23 19:57:49 deraadt Exp $	*/
 /*	$NetBSD: in_pcb.c,v 1.25 1996/02/13 23:41:53 christos Exp $	*/
 
 /*
@@ -96,6 +96,7 @@
 #include <nfs/nfsproto.h>
 
 #ifdef INET6
+#include <netinet6/in6_var.h>
 #include <netinet6/ip6_var.h>
 #endif /* INET6 */
 #ifdef IPSEC
@@ -103,11 +104,6 @@
 #endif /* IPSEC */
 
 struct	in_addr zeroin_addr;
-
-extern int ipsec_auth_default_level;
-extern int ipsec_esp_trans_default_level;
-extern int ipsec_esp_network_default_level;
-extern int ipsec_ipcomp_default_level;
 
 /*
  * These configure the range of local port addresses assigned to
@@ -126,9 +122,9 @@ int inpcb_pool_initialized = 0;
 	&(table)->inpt_hashtbl[(ntohl((faddr)->s_addr) + \
 	ntohs((fport)) + ntohs((lport)) + (rdom)) & (table->inpt_hash)]
 
-#define	IN6PCBHASH(table, faddr, fport, laddr, lport) \
+#define	IN6PCBHASH(table, faddr, fport, laddr, lport, rdom) \
 	&(table)->inpt_hashtbl[(ntohl((faddr)->s6_addr32[0] ^ \
-	(faddr)->s6_addr32[3]) + ntohs((fport)) + ntohs((lport))) & \
+	(faddr)->s6_addr32[3]) + ntohs((fport)) + ntohs((lport)) + (rdom)) & \
 	(table->inpt_hash)]
 
 #define	INPCBLHASH(table, lport, rdom) \
@@ -172,11 +168,12 @@ in_baddynamic(u_int16_t port, u_int16_t proto)
 }
 
 int
-in_pcballoc(struct socket *so, void *v)
+in_pcballoc(struct socket *so, struct inpcbtable *table)
 {
-	struct inpcbtable *table = v;
 	struct inpcb *inp;
 	int s;
+
+	splsoftassert(IPL_SOFTNET);
 
 	if (inpcb_pool_initialized == 0) {
 		pool_init(&inpcb_pool, sizeof(struct inpcb), 0, 0, 0,
@@ -188,10 +185,10 @@ in_pcballoc(struct socket *so, void *v)
 		return (ENOBUFS);
 	inp->inp_table = table;
 	inp->inp_socket = so;
-	inp->inp_seclevel[SL_AUTH] = ipsec_auth_default_level;
-	inp->inp_seclevel[SL_ESP_TRANS] = ipsec_esp_trans_default_level;
-	inp->inp_seclevel[SL_ESP_NETWORK] = ipsec_esp_network_default_level;
-	inp->inp_seclevel[SL_IPCOMP] = ipsec_ipcomp_default_level;
+	inp->inp_seclevel[SL_AUTH] = IPSEC_AUTH_LEVEL_DEFAULT;
+	inp->inp_seclevel[SL_ESP_TRANS] = IPSEC_ESP_TRANS_LEVEL_DEFAULT;
+	inp->inp_seclevel[SL_ESP_NETWORK] = IPSEC_ESP_NETWORK_LEVEL_DEFAULT;
+	inp->inp_seclevel[SL_IPCOMP] = IPSEC_IPCOMP_LEVEL_DEFAULT;
 	inp->inp_rtableid = curproc->p_p->ps_rtableid;
 	s = splnet();
 	CIRCLEQ_INSERT_HEAD(&table->inpt_queue, inp, inp_queue);
@@ -212,15 +209,14 @@ in_pcballoc(struct socket *so, void *v)
 	 */
 	if (sotopf(so) == PF_INET6)
 		inp->inp_flags = INP_IPV6;
-	inp->in6p_cksum = -1;
+	inp->inp_cksum6 = -1;
 #endif /* INET6 */
 	return (0);
 }
 
 int
-in_pcbbind(void *v, struct mbuf *nam, struct proc *p)
+in_pcbbind(struct inpcb *inp, struct mbuf *nam, struct proc *p)
 {
-	struct inpcb *inp = v;
 	struct socket *so = inp->inp_socket;
 	struct inpcbtable *table = inp->inp_table;
 	u_int16_t *lastport = &inp->inp_table->inpt_lastport;
@@ -372,9 +368,8 @@ in_pcbbind(void *v, struct mbuf *nam, struct proc *p)
  * then pick one.
  */
 int
-in_pcbconnect(void *v, struct mbuf *nam)
+in_pcbconnect(struct inpcb *inp, struct mbuf *nam)
 {
-	struct inpcb *inp = v;
 	struct sockaddr_in *ifaddr = NULL;
 	struct sockaddr_in *sin = mtod(nam, struct sockaddr_in *);
 
@@ -444,10 +439,8 @@ in_pcbconnect(void *v, struct mbuf *nam)
 }
 
 void
-in_pcbdisconnect(void *v)
+in_pcbdisconnect(struct inpcb *inp)
 {
-	struct inpcb *inp = v;
-
 	switch (sotopf(inp->inp_socket)) {
 #ifdef INET6
 	case PF_INET6:
@@ -466,9 +459,8 @@ in_pcbdisconnect(void *v)
 }
 
 void
-in_pcbdetach(void *v)
+in_pcbdetach(struct inpcb *inp)
 {
-	struct inpcb *inp = v;
 	struct socket *so = inp->inp_socket;
 	int s;
 
@@ -489,12 +481,11 @@ in_pcbdetach(void *v)
 		ip_freemoptions(inp->inp_moptions);
 #ifdef IPSEC
 	/* IPsec cleanup here */
-	s = spltdb();
 	if (inp->inp_tdb_in)
 		TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in,
 			     inp, inp_tdb_in_next);
 	if (inp->inp_tdb_out)
-	        TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out, inp,
+		TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out, inp,
 			     inp_tdb_out_next);
 	if (inp->inp_ipsec_remotecred)
 		ipsp_reffree(inp->inp_ipsec_remotecred);
@@ -502,11 +493,10 @@ in_pcbdetach(void *v)
 		ipsp_reffree(inp->inp_ipsec_remoteauth);
 	if (inp->inp_ipo)
 		ipsec_delete_policy(inp->inp_ipo);
-	splx(s);
 #endif
 #if NPF > 0
 	if (inp->inp_pf_sk)
-		((struct pf_state_key *)inp->inp_pf_sk)->inp = NULL;
+		inp->inp_pf_sk->inp = NULL;
 #endif
 	s = splnet();
 	LIST_REMOVE(inp, inp_lhash);
@@ -661,15 +651,14 @@ struct inpcb *
 in_pcblookup(struct inpcbtable *table, void *faddrp, u_int fport_arg,
     void *laddrp, u_int lport_arg, int flags, u_int rdomain)
 {
-	struct inpcb *inp, *match = 0;
+	struct inpcb *inp, *match = NULL;
 	int matchwild = 3, wildcard;
 	u_int16_t fport = fport_arg, lport = lport_arg;
 	struct in_addr faddr = *(struct in_addr *)faddrp;
 	struct in_addr laddr = *(struct in_addr *)laddrp;
 
 	rdomain = rtable_l2(rdomain);	/* convert passed rtableid to rdomain */
-	for (inp = LIST_FIRST(INPCBLHASH(table, lport, rdomain)); inp;
-	    inp = LIST_NEXT(inp, inp_lhash)) {
+	LIST_FOREACH(inp, INPCBLHASH(table, lport, rdomain), inp_lhash) {
 		if (rtable_l2(inp->inp_rtableid) != rdomain)
 			continue;
 		if (inp->inp_lport != lport)
@@ -707,8 +696,8 @@ in_pcblookup(struct inpcbtable *table, void *faddrp, u_int fport_arg,
 #endif /* INET6 */
 		{
 #ifdef INET6
-		        if (inp->inp_flags & INP_IPV6)
-			        continue;
+			if (inp->inp_flags & INP_IPV6)
+				continue;
 #endif /* INET6 */
 
 			if (inp->inp_faddr.s_addr != INADDR_ANY) {
@@ -771,8 +760,7 @@ in_pcbrtentry(struct inpcb *inp)
 				break;
 			ro->ro_dst.sa_family = AF_INET6;
 			ro->ro_dst.sa_len = sizeof(struct sockaddr_in6);
-			((struct sockaddr_in6 *) &ro->ro_dst)->sin6_addr =
-			    inp->inp_faddr6;
+			satosin6(&ro->ro_dst)->sin6_addr = inp->inp_faddr6;
 			ro->ro_tableid = inp->inp_rtableid;
 			rtalloc_mpath(ro, &inp->inp_laddr6.s6_addr32[0]);
 			break;
@@ -781,9 +769,9 @@ in_pcbrtentry(struct inpcb *inp)
 			if (inp->inp_faddr.s_addr == INADDR_ANY)
 				break;
 			ro->ro_dst.sa_family = AF_INET;
-			ro->ro_dst.sa_len = sizeof(ro->ro_dst);
-			ro->ro_tableid = inp->inp_rtableid;
+			ro->ro_dst.sa_len = sizeof(struct sockaddr_in);
 			satosin(&ro->ro_dst)->sin_addr = inp->inp_faddr;
+			ro->ro_tableid = inp->inp_rtableid;
 			rtalloc_mpath(ro, &inp->inp_laddr.s_addr);
 			break;
 		}
@@ -796,9 +784,8 @@ in_selectsrc(struct sockaddr_in *sin, struct route *ro, int soopts,
     struct ip_moptions *mopts, int *errorp, u_int rtableid)
 {
 	struct sockaddr_in *sin2;
-	struct in_ifaddr *ia;
+	struct in_ifaddr *ia = NULL;
 
-	ia = (struct in_ifaddr *)0;
 	/*
 	 * If the destination address is multicast and an outgoing
 	 * interface has been set as a multicast option, use the
@@ -807,33 +794,30 @@ in_selectsrc(struct sockaddr_in *sin, struct route *ro, int soopts,
 	if (IN_MULTICAST(sin->sin_addr.s_addr) && mopts != NULL) {
 		struct ifnet *ifp;
 
-		if (mopts->imo_multicast_ifp != NULL) {
-			ifp = mopts->imo_multicast_ifp;
-			TAILQ_FOREACH(ia, &in_ifaddr, ia_list)
-				if (ia->ia_ifp == ifp &&
-				    rtable_l2(rtableid) == ifp->if_rdomain)
-					break;
-			if (ia == 0) {
+		ifp = mopts->imo_multicast_ifp;
+		if (ifp != NULL) {
+			if (ifp->if_rdomain == rtable_l2(rtableid))
+				IFP_TO_IA(ifp, ia);
+
+			if (ia == NULL) {
 				*errorp = EADDRNOTAVAIL;
 				return NULL;
 			}
-			return satosin(&ia->ia_addr);
+			return (&ia->ia_addr);
 		}
 	}
 	/*
 	 * If route is known or can be allocated now,
 	 * our src addr is taken from the i/f, else punt.
 	 */
-	if (ro->ro_rt &&
-	    (satosin(&ro->ro_dst)->sin_addr.s_addr !=
-		sin->sin_addr.s_addr ||
-	    soopts & SO_DONTROUTE)) {
+	if (ro->ro_rt && (!(ro->ro_rt->rt_flags & RTF_UP) ||
+	    (satosin(&ro->ro_dst)->sin_addr.s_addr != sin->sin_addr.s_addr ||
+	    soopts & SO_DONTROUTE))) {
 		RTFREE(ro->ro_rt);
-		ro->ro_rt = (struct rtentry *)0;
+		ro->ro_rt = NULL;
 	}
 	if ((soopts & SO_DONTROUTE) == 0 && /*XXX*/
-	    (ro->ro_rt == (struct rtentry *)0 ||
-	    ro->ro_rt->rt_ifp == (struct ifnet *)0)) {
+	    (ro->ro_rt == NULL || ro->ro_rt->rt_ifp == NULL)) {
 		/* No route yet, so try to acquire one */
 		ro->ro_dst.sa_family = AF_INET;
 		ro->ro_dst.sa_len = sizeof(struct sockaddr_in);
@@ -854,7 +838,8 @@ in_selectsrc(struct sockaddr_in *sin, struct route *ro, int soopts,
 	 * unless it is the loopback (in case a route
 	 * to our address on another net goes to loopback).
 	 */
-	if (ro->ro_rt && !(ro->ro_rt->rt_ifp->if_flags & IFF_LOOPBACK))
+	if (ro->ro_rt && ro->ro_rt->rt_ifp &&
+	    !(ro->ro_rt->rt_ifp->if_flags & IFF_LOOPBACK))
 		ia = ifatoia(ro->ro_rt->rt_ifa);
 	if (ia == 0) {
 		u_int16_t fport = sin->sin_port;
@@ -871,7 +856,7 @@ in_selectsrc(struct sockaddr_in *sin, struct route *ro, int soopts,
 			return NULL;
 		}
 	}
-	return satosin(&ia->ia_addr);
+	return (&ia->ia_addr);
 }
 
 void
@@ -888,8 +873,8 @@ in_pcbrehash(struct inpcb *inp)
 #ifdef INET6
 	if (inp->inp_flags & INP_IPV6) {
 		LIST_INSERT_HEAD(IN6PCBHASH(table, &inp->inp_faddr6,
-		    inp->inp_fport, &inp->inp_laddr6, inp->inp_lport),
-		    inp, inp_hash);
+		    inp->inp_fport, &inp->inp_laddr6, inp->inp_lport,
+		    rtable_l2(inp->inp_rtableid)), inp, inp_hash);
 	} else {
 #endif /* INET6 */
 		LIST_INSERT_HEAD(INPCBHASH(table, &inp->inp_faddr,
@@ -930,8 +915,7 @@ in_pcbhashlookup(struct inpcbtable *table, struct in_addr faddr,
 			continue;	/*XXX*/
 #endif
 		if (inp->inp_faddr.s_addr == faddr.s_addr &&
-		    inp->inp_fport == fport &&
-		    inp->inp_lport == lport &&
+		    inp->inp_fport == fport && inp->inp_lport == lport &&
 		    inp->inp_laddr.s_addr == laddr.s_addr &&
 		    rtable_l2(inp->inp_rtableid) == rdomain) {
 			/*
@@ -958,20 +942,23 @@ in_pcbhashlookup(struct inpcbtable *table, struct in_addr faddr,
 
 #ifdef INET6
 struct inpcb *
-in6_pcbhashlookup(struct inpcbtable *table, struct in6_addr *faddr,
-    u_int fport_arg, struct in6_addr *laddr, u_int lport_arg)
+in6_pcbhashlookup(struct inpcbtable *table, const struct in6_addr *faddr,
+    u_int fport_arg, const struct in6_addr *laddr, u_int lport_arg,
+    u_int rtable)
 {
 	struct inpcbhead *head;
 	struct inpcb *inp;
 	u_int16_t fport = fport_arg, lport = lport_arg;
 
-	head = IN6PCBHASH(table, faddr, fport, laddr, lport);
+	rtable = rtable_l2(rtable);	/* convert passed rtableid to rdomain */
+	head = IN6PCBHASH(table, faddr, fport, laddr, lport, rtable);
 	LIST_FOREACH(inp, head, inp_hash) {
 		if (!(inp->inp_flags & INP_IPV6))
 			continue;
 		if (IN6_ARE_ADDR_EQUAL(&inp->inp_faddr6, faddr) &&
 		    inp->inp_fport == fport && inp->inp_lport == lport &&
-		    IN6_ARE_ADDR_EQUAL(&inp->inp_laddr6, laddr)) {
+		    IN6_ARE_ADDR_EQUAL(&inp->inp_laddr6, laddr) &&
+		    rtable_l2(inp->inp_rtableid) == rtable) {
 			/*
 			 * Move this PCB to the head of hash chain so that
 			 * repeated accesses are quicker.  This is analogous to
@@ -1077,13 +1064,14 @@ in_pcblookup_listen(struct inpcbtable *table, struct in_addr laddr,
 #ifdef INET6
 struct inpcb *
 in6_pcblookup_listen(struct inpcbtable *table, struct in6_addr *laddr,
-    u_int lport_arg, int reverse, struct mbuf *m)
+    u_int lport_arg, int reverse, struct mbuf *m, u_int rtable)
 {
 	struct inpcbhead *head;
 	struct in6_addr *key1, *key2;
 	struct inpcb *inp;
 	u_int16_t lport = lport_arg;
 
+	rtable = rtable_l2(rtable);	/* convert passed rtableid to rdomain */
 #if NPF > 0
 	if (m && m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) {
 		struct pf_divert *divert;
@@ -1102,23 +1090,25 @@ in6_pcblookup_listen(struct inpcbtable *table, struct in6_addr *laddr,
 		key2 = &zeroin6_addr;
 	}
 
-	head = IN6PCBHASH(table, &zeroin6_addr, 0, key1, lport);
+	head = IN6PCBHASH(table, &zeroin6_addr, 0, key1, lport, rtable);
 	LIST_FOREACH(inp, head, inp_hash) {
 		if (!(inp->inp_flags & INP_IPV6))
 			continue;
 		if (inp->inp_lport == lport && inp->inp_fport == 0 &&
 		    IN6_ARE_ADDR_EQUAL(&inp->inp_laddr6, key1) &&
-		    IN6_IS_ADDR_UNSPECIFIED(&inp->inp_faddr6))
+		    IN6_IS_ADDR_UNSPECIFIED(&inp->inp_faddr6) &&
+		    rtable_l2(inp->inp_rtableid) == rtable)
 			break;
 	}
 	if (inp == NULL && ! IN6_ARE_ADDR_EQUAL(key1, key2)) {
-		head = IN6PCBHASH(table, &zeroin6_addr, 0, key2, lport);
+		head = IN6PCBHASH(table, &zeroin6_addr, 0, key2, lport, rtable);
 		LIST_FOREACH(inp, head, inp_hash) {
 			if (!(inp->inp_flags & INP_IPV6))
 				continue;
 			if (inp->inp_lport == lport && inp->inp_fport == 0 &&
-		    	    IN6_ARE_ADDR_EQUAL(&inp->inp_laddr6, key2) &&
-			    IN6_IS_ADDR_UNSPECIFIED(&inp->inp_faddr6))
+			    IN6_ARE_ADDR_EQUAL(&inp->inp_laddr6, key2) &&
+			    IN6_IS_ADDR_UNSPECIFIED(&inp->inp_faddr6) &&
+			    rtable_l2(inp->inp_rtableid) == rtable)
 				break;
 		}
 	}

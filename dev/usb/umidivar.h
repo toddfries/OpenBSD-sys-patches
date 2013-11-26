@@ -1,4 +1,4 @@
-/*	$OpenBSD: umidivar.h,v 1.12 2008/06/26 05:42:19 ray Exp $ */
+/*	$OpenBSD: umidivar.h,v 1.16 2013/11/10 10:22:39 pirofti Exp $ */
 /*	$NetBSD: umidivar.h,v 1.5 2002/09/12 21:00:42 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -68,9 +68,7 @@ struct umidi_jack {
 	int			binded;
 	int			opened;
 	SIMPLEQ_ENTRY(umidi_jack) intrq_entry;	
-#ifdef DIAGNOSTIC
-	unsigned 		wait;
-#endif
+	unsigned 		intr;
 	union {
 		struct {
 			void				(*intr)(void *);
@@ -87,8 +85,8 @@ struct umidi_endpoint {
 	struct umidi_softc	*sc;
 	/* */
 	int			addr;
-	usbd_pipe_handle	pipe;
-	usbd_xfer_handle	xfer;
+	struct usbd_pipe	*pipe;
+	struct usbd_xfer	*xfer;
 	unsigned char		*buffer;
 	unsigned		packetsize;
 	int			num_open;
@@ -103,11 +101,9 @@ struct umidi_endpoint {
 /* software context */
 struct umidi_softc {
 	struct device		sc_dev;
-	usbd_device_handle	sc_udev;
-	usbd_interface_handle	sc_iface;
+	struct usbd_device	*sc_udev;
+	struct usbd_interface	*sc_iface;
 	struct umidi_quirk	*sc_quirk;
-
-	int			sc_dying;
 
 	int			sc_out_num_jacks;
 	struct umidi_jack	*sc_out_jacks;

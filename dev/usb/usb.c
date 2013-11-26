@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb.c,v 1.79 2012/01/28 00:40:23 deraadt Exp $	*/
+/*	$OpenBSD: usb.c,v 1.92 2013/05/30 16:15:02 deraadt Exp $	*/
 /*	$NetBSD: usb.c,v 1.77 2003/01/01 00:10:26 thorpej Exp $	*/
 
 /*
@@ -48,14 +48,13 @@
 #include <sys/device.h>
 #include <sys/timeout.h>
 #include <sys/kthread.h>
-#include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/fcntl.h>
 #include <sys/poll.h>
 #include <sys/selinfo.h>
-#include <sys/vnode.h>
 #include <sys/signalvar.h>
 #include <sys/time.h>
+#include <sys/rwlock.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -91,7 +90,7 @@ int	usb_noexplore = 0;
 
 struct usb_softc {
 	struct device	 sc_dev;	/* base device */
-	usbd_bus_handle  sc_bus;	/* USB controller */
+	struct usbd_bus  *sc_bus;	/* USB controller */
 	struct usbd_port sc_port;	/* dummy port for root hub */
 
 	struct usb_task	 sc_explore_task;
@@ -99,26 +98,32 @@ struct usb_softc {
 	struct timeval	 sc_ptime;
 };
 
+struct rwlock usbpalock;
+
 TAILQ_HEAD(, usb_task) usb_abort_tasks;
 TAILQ_HEAD(, usb_task) usb_explore_tasks;
 TAILQ_HEAD(, usb_task) usb_generic_tasks;
 
-int usb_run_tasks, usb_run_abort_tasks;
+static int usb_nbuses = 0;
+static int usb_run_tasks, usb_run_abort_tasks;
 int explore_pending;
-
-void	usb_explore(void *);
-void	usb_create_task_threads(void *);
-void	usb_task_thread(void *);
-struct proc *usb_task_thread_proc = NULL;
-void	usb_abort_task_thread(void *);
-struct proc *usb_abort_task_thread_proc = NULL;
-
 const char *usbrev_str[] = USBREV_STR;
 
-int usb_match(struct device *, void *, void *); 
-void usb_attach(struct device *, struct device *, void *); 
-int usb_detach(struct device *, int); 
-int usb_activate(struct device *, int); 
+void		 usb_explore(void *);
+void		 usb_create_task_threads(void *);
+void		 usb_task_thread(void *);
+struct proc	*usb_task_thread_proc = NULL;
+void		 usb_abort_task_thread(void *);
+struct proc	*usb_abort_task_thread_proc = NULL;
+
+void		 usb_fill_di_task(void *);
+void		 usb_fill_udc_task(void *);
+void		 usb_fill_udf_task(void *);
+
+int		 usb_match(struct device *, void *, void *); 
+void		 usb_attach(struct device *, struct device *, void *); 
+int		 usb_detach(struct device *, int); 
+int		 usb_activate(struct device *, int); 
 
 struct cfdriver usb_cd = { 
 	NULL, "usb", DV_DULL 
@@ -143,16 +148,25 @@ void
 usb_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct usb_softc *sc = (struct usb_softc *)self;
-	usbd_device_handle dev;
+	struct usbd_device *dev;
 	usbd_status err;
 	int usbrev;
 	int speed;
 
 	DPRINTF(("usbd_attach\n"));
 
-	usbd_init();
+	if (usb_nbuses == 0) {
+		rw_init(&usbpalock, "usbpalock");
+		TAILQ_INIT(&usb_abort_tasks);
+		TAILQ_INIT(&usb_explore_tasks);
+		TAILQ_INIT(&usb_generic_tasks);
+		usb_run_tasks = usb_run_abort_tasks = 1;
+		kthread_create_deferred(usb_create_task_threads, NULL);
+	}
+	usb_nbuses++;
+
 	sc->sc_bus = aux;
-	sc->sc_bus->usbctl = sc;
+	sc->sc_bus->usbctl = self;
 	sc->sc_port.power = USB_MAX_POWER;
 
 	usbrev = sc->sc_bus->usbrev;
@@ -229,30 +243,6 @@ usb_attach(struct device *parent, struct device *self, void *aux)
 	}
 }
 
-/*
- * Called by usbd_init when first usb is attached.
- */
-void
-usb_begin_tasks(void)
-{
-	TAILQ_INIT(&usb_abort_tasks);
-	TAILQ_INIT(&usb_explore_tasks);
-	TAILQ_INIT(&usb_generic_tasks);
-	usb_run_tasks = usb_run_abort_tasks = 1;
-	kthread_create_deferred(usb_create_task_threads, NULL);
-}
-
-/*
- * Called by usbd_finish when last usb is detached.
- */
-void
-usb_end_tasks(void)
-{
-	usb_run_tasks = usb_run_abort_tasks = 0;
-	wakeup(&usb_run_abort_tasks);
-	wakeup(&usb_run_tasks);
-}
-
 void
 usb_create_task_threads(void *arg)
 {
@@ -271,7 +261,7 @@ usb_create_task_threads(void *arg)
  * context ASAP.
  */
 void
-usb_add_task(usbd_device_handle dev, struct usb_task *task)
+usb_add_task(struct usbd_device *dev, struct usb_task *task)
 {
 	int s;
 
@@ -306,7 +296,7 @@ usb_add_task(usbd_device_handle dev, struct usb_task *task)
 }
 
 void
-usb_rem_task(usbd_device_handle dev, struct usb_task *task)
+usb_rem_task(struct usbd_device *dev, struct usb_task *task)
 {
 	int s;
 
@@ -337,7 +327,7 @@ usb_rem_task(usbd_device_handle dev, struct usb_task *task)
 }
 
 void
-usb_wait_task(usbd_device_handle dev, struct usb_task *task)
+usb_wait_task(struct usbd_device *dev, struct usb_task *task)
 {
 	int s;
 
@@ -356,7 +346,7 @@ usb_wait_task(usbd_device_handle dev, struct usb_task *task)
 }
 
 void
-usb_rem_wait_task(usbd_device_handle dev, struct usb_task *task)
+usb_rem_wait_task(struct usbd_device *dev, struct usb_task *task)
 {
 	usb_rem_task(dev, task);
 	usb_wait_task(dev, task);
@@ -482,11 +472,11 @@ usbclose(dev_t dev, int flag, int mode, struct proc *p)
 }
 
 void
-usbd_fill_di_task(void *arg)
+usb_fill_di_task(void *arg)
 {
 	struct usb_device_info *di = (struct usb_device_info *)arg;
 	struct usb_softc *sc;
-	usbd_device_handle dev;
+	struct usbd_device *dev;
 
 	/* check that the bus and device are still present */
 	if (di->udi_bus >= usb_cd.cd_ndevs)
@@ -499,6 +489,57 @@ usbd_fill_di_task(void *arg)
 		return;
 
 	usbd_fill_deviceinfo(dev, di, 1);
+}
+
+void
+usb_fill_udc_task(void *arg)
+{
+	struct usb_device_cdesc *udc = (struct usb_device_cdesc *)arg;
+	struct usb_softc *sc;
+	struct usbd_device *dev;
+	int addr = udc->udc_addr;
+	usb_config_descriptor_t *cdesc;
+
+	/* check that the bus and device are still present */
+	if (udc->udc_bus >= usb_cd.cd_ndevs)
+		return;
+	sc = usb_cd.cd_devs[udc->udc_bus];
+	if (sc == NULL)
+		return;
+	dev = sc->sc_bus->devices[udc->udc_addr];
+	if (dev == NULL)
+		return;
+
+	cdesc = usbd_get_cdesc(sc->sc_bus->devices[addr],
+	    udc->udc_config_index, 0);
+	if (cdesc == NULL)
+		return;
+	udc->udc_desc = *cdesc;
+	free(cdesc, M_TEMP);
+}
+
+void
+usb_fill_udf_task(void *arg)
+{
+	struct usb_device_fdesc *udf = (struct usb_device_fdesc *)arg;
+	struct usb_softc *sc;
+	struct usbd_device *dev;
+	int addr = udf->udf_addr;
+	usb_config_descriptor_t *cdesc;
+
+	/* check that the bus and device are still present */
+	if (udf->udf_bus >= usb_cd.cd_ndevs)
+		return;
+	sc = usb_cd.cd_devs[udf->udf_bus];
+	if (sc == NULL)
+		return;
+	dev = sc->sc_bus->devices[udf->udf_addr];
+	if (dev == NULL)
+		return;
+
+	cdesc = usbd_get_cdesc(sc->sc_bus->devices[addr],
+	    udf->udf_config_index, &udf->udf_size);
+	udf->udf_data = (char *)cdesc;
 }
 
 int
@@ -551,9 +592,10 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 		DPRINTF(("usbioctl: USB_REQUEST addr=%d len=%d\n", addr, len));
 		if (len < 0 || len > 32768)
 			return (EINVAL);
-		if (addr < 0 || addr >= USB_MAX_DEVICES ||
-		    sc->sc_bus->devices[addr] == 0)
+		if (addr < 0 || addr >= USB_MAX_DEVICES)
 			return (EINVAL);
+		if (sc->sc_bus->devices[addr] == NULL)
+			return (ENXIO);
 		if (len != 0) {
 			iov.iov_base = (caddr_t)ur->ucr_data;
 			iov.iov_len = len;
@@ -580,6 +622,9 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 			error = EIO;
 			goto ret;
 		}
+		/* Only if USBD_SHORT_XFER_OK is set. */
+		if (len > ur->ucr_actlen)
+			len = ur->ucr_actlen;
 		if (len != 0) {
 			if (uio.uio_rw == UIO_READ) {
 				error = uiomove(ptr, len, &uio);
@@ -598,7 +643,7 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 		struct usb_device_info *di = (void *)data;
 		int addr = di->udi_addr;
 		struct usb_task di_task;
-		usbd_device_handle dev;
+		struct usbd_device *dev;
 
 		if (addr < 1 || addr >= USB_MAX_DEVICES)
 			return (EINVAL);
@@ -614,7 +659,7 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 		 */
 		di->udi_devnames[0][0] = '\0';
 
-		usb_init_task(&di_task, usbd_fill_di_task, di,
+		usb_init_task(&di_task, usb_fill_di_task, di,
 		    USB_TASK_TYPE_GENERIC);
 		usb_add_task(sc->sc_bus->root_hub, &di_task);
 		usb_wait_task(sc->sc_bus->root_hub, &di_task);
@@ -625,29 +670,95 @@ usbioctl(dev_t devt, u_long cmd, caddr_t data, int flag, struct proc *p)
 		break;
 	}
 
-	case USB_DEVICEINFO_48:
+	case USB_DEVICESTATS:
+		*(struct usb_device_stats *)data = sc->sc_bus->stats;
+		break;
+
+	case USB_DEVICE_GET_DDESC:
 	{
-		struct usb_device_info_48 *di_48 = (void *)data;
-		struct usb_device_info di_tmp;
-		int addr = di_48->udi_addr;
-		usbd_device_handle dev;
+		struct usb_device_ddesc *udd = (struct usb_device_ddesc *)data;
+		int addr = udd->udd_addr;
+		struct usbd_device *dev;
 
 		if (addr < 1 || addr >= USB_MAX_DEVICES)
 			return (EINVAL);
+
 		dev = sc->sc_bus->devices[addr];
 		if (dev == NULL)
 			return (ENXIO);
 
-		bzero(&di_tmp, sizeof(struct usb_device_info));
-		bcopy(di_48, &di_tmp, sizeof(struct usb_device_info_48));
-		usbd_fill_deviceinfo(dev, &di_tmp, 1);
-		bcopy(&di_tmp, di_48, sizeof(struct usb_device_info_48));
+		udd->udd_bus = unit;
+
+		udd->udd_desc = *usbd_get_device_descriptor(dev);
 		break;
 	}
 
-	case USB_DEVICESTATS:
-		*(struct usb_device_stats *)data = sc->sc_bus->stats;
+	case USB_DEVICE_GET_CDESC:
+	{
+		struct usb_device_cdesc *udc = (struct usb_device_cdesc *)data;
+		int addr = udc->udc_addr;
+		struct usb_task udc_task;
+
+		if (addr < 1 || addr >= USB_MAX_DEVICES)
+			return (EINVAL);
+		if (sc->sc_bus->devices[addr] == NULL)
+			return (ENXIO);
+
+		udc->udc_bus = unit;
+
+		udc->udc_desc.bLength = 0;
+		usb_init_task(&udc_task, usb_fill_udc_task, udc,
+		    USB_TASK_TYPE_GENERIC);
+		usb_add_task(sc->sc_bus->root_hub, &udc_task);
+		usb_wait_task(sc->sc_bus->root_hub, &udc_task);
+		if (udc->udc_desc.bLength == 0)
+			return (EINVAL);
 		break;
+	}
+
+	case USB_DEVICE_GET_FDESC:
+	{
+		struct usb_device_fdesc *udf = (struct usb_device_fdesc *)data;
+		int addr = udf->udf_addr;
+		struct usb_task udf_task;
+		struct usb_device_fdesc save_udf;
+		usb_config_descriptor_t *cdesc;
+		struct iovec iov;
+		struct uio uio;
+		int len, error;
+
+		if (addr < 1 || addr >= USB_MAX_DEVICES)
+			return (EINVAL);
+		if (sc->sc_bus->devices[addr] == NULL)
+			return (ENXIO);
+
+		udf->udf_bus = unit;
+
+		save_udf = *udf;
+		usb_init_task(&udf_task, usb_fill_udf_task, udf,
+		    USB_TASK_TYPE_GENERIC);
+		usb_add_task(sc->sc_bus->root_hub, &udf_task);
+		usb_wait_task(sc->sc_bus->root_hub, &udf_task);
+		len = udf->udf_size;
+		cdesc = (usb_config_descriptor_t *)udf->udf_data;
+		*udf = save_udf;
+		if (cdesc == NULL)
+			return (EINVAL);
+		if (len > udf->udf_size)
+			len = udf->udf_size;
+		iov.iov_base = (caddr_t)udf->udf_data;
+		iov.iov_len = len;
+		uio.uio_iov = &iov;
+		uio.uio_iovcnt = 1;
+		uio.uio_resid = len;
+		uio.uio_offset = 0;
+		uio.uio_segflg = UIO_USERSPACE;
+		uio.uio_rw = UIO_READ;
+		uio.uio_procp = p;
+		error = uiomove((void *)cdesc, len, &uio);
+		free(cdesc, M_TEMP);
+		return (error);
+	}
 
 	default:
 		return (EINVAL);
@@ -716,22 +827,23 @@ usb_explore(void *v)
 }
 
 void
-usb_needs_explore(usbd_device_handle dev, int first_explore)
+usb_needs_explore(struct usbd_device *dev, int first_explore)
 {
-	DPRINTFN(3,("%s: %s\n", dev->bus->usbctl->sc_dev.dv_xname, __func__));
+	struct usb_softc *usbctl = (struct usb_softc *)dev->bus->usbctl;
 
-	if (!first_explore &&
-	    (dev->bus->flags & USB_BUS_CONFIG_PENDING)) {
+	DPRINTFN(3,("%s: %s\n", usbctl->sc_dev.dv_xname, __func__));
+
+	if (!first_explore && (dev->bus->flags & USB_BUS_CONFIG_PENDING)) {
 		DPRINTF(("%s: %s: not exploring before first explore\n",
-		    __func__, dev->bus->usbctl->sc_dev.dv_xname));
+		    __func__, usbctl->sc_dev.dv_xname));
 		return;
 	}
 
-	usb_add_task(dev, &dev->bus->usbctl->sc_explore_task);
+	usb_add_task(dev, &usbctl->sc_explore_task);
 }
 
 void
-usb_needs_reattach(usbd_device_handle dev)
+usb_needs_reattach(struct usbd_device *dev)
 {
 	DPRINTFN(2,("usb_needs_reattach\n"));
 	dev->powersrc->reattach = 1;
@@ -739,7 +851,7 @@ usb_needs_reattach(usbd_device_handle dev)
 }
 
 void
-usb_schedsoftintr(usbd_bus_handle bus)
+usb_schedsoftintr(struct usbd_bus *bus)
 {
 	DPRINTFN(10,("usb_schedsoftintr: polling=%d\n", bus->use_polling));
 
@@ -754,7 +866,7 @@ int
 usb_activate(struct device *self, int act)
 {
 	struct usb_softc *sc = (struct usb_softc *)self;
-	usbd_device_handle dev = sc->sc_port.device;
+	struct usbd_device *dev = sc->sc_port.device;
 	int i, rv = 0, r;
 
 	switch (act) {
@@ -768,6 +880,13 @@ usb_activate(struct device *self, int act)
 					rv = r;
 			}
 		}
+		break;
+	case DVACT_QUIESCE:
+		rv = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		break;
+	case DVACT_POWERDOWN:
 		break;
 	case DVACT_RESUME:
 		usb_needs_explore(sc->sc_bus->root_hub, 0);
@@ -792,7 +911,11 @@ usb_detach(struct device *self, int flags)
 
 		usb_rem_wait_task(sc->sc_bus->root_hub, &sc->sc_explore_task);
 
-		usbd_finish();
+		if (--usb_nbuses == 0) {
+			usb_run_tasks = usb_run_abort_tasks = 0;
+			wakeup(&usb_run_abort_tasks);
+			wakeup(&usb_run_tasks);
+		}
 	}
 
 	if (sc->sc_bus->soft != NULL) {

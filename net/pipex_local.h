@@ -1,4 +1,4 @@
-/*	$OpenBSD: pipex_local.h,v 1.14 2011/11/25 13:05:06 yasuoka Exp $	*/
+/*	$OpenBSD: pipex_local.h,v 1.19 2013/04/20 07:54:28 yasuoka Exp $	*/
 
 /*
  * Copyright (c) 2009 Internet Initiative Japan Inc.
@@ -40,10 +40,6 @@
 #define PIPEX_REWIND_LIMIT		64
 
 #define PIPEX_ENABLED			0x0001
-
-#ifndef	LOG_PPPAC
-#define	LOG_PPPAC	LOG_KERN
-#endif
 
 /* compile time option constants */
 #ifndef	PIPEX_MAX_SESSION
@@ -149,6 +145,7 @@ struct pipex_l2tp_session {
 
 	uint16_t nr_nxt;	/* next sequence number to recv */
 	uint16_t nr_acked;	/* acked sequence number to recv */
+	uint32_t ipsecflowinfo;	/* IPsec SA flow id for NAT-T */
 };
 #endif /* PIPEX_L2TP */
 
@@ -165,7 +162,8 @@ struct pipex_session {
 #define PIPEX_STATE_INITIAL		0x0000
 #define PIPEX_STATE_OPENED		0x0001
 #define PIPEX_STATE_CLOSE_WAIT		0x0002
-#define PIPEX_STATE_CLOSED		0x0003
+#define PIPEX_STATE_CLOSE_WAIT2		0x0003
+#define PIPEX_STATE_CLOSED		0x0004
 
 	uint16_t	ip_forward:1,		/* {en|dis}ableIP forwarding */
 			ip6_forward:1,		/* {en|dis}able IPv6 forwarding */
@@ -349,7 +347,6 @@ extern struct pipex_hash_head	pipex_id_hashtable[];
 #define SEQ16_GE(a,b)	((int)((a) - (b)) >= 0)
 #define SEQ16_SUB(a,b)	((int16_t)((a) - (b)))
 
-#define RUPDIV(n,d)     (((n) + (d) - ((n) % (d))) / (d))
 #define	pipex_session_is_acfc_accepted(s)				\
     (((s)->ppp_flags & PIPEX_PPP_ACFC_ACCEPTED)? 1 : 0)
 #define	pipex_session_is_pfc_accepted(s)				\
@@ -406,7 +403,6 @@ Static struct pipex_session  *pipex_pptp_userland_lookup_session(struct mbuf *, 
 
 #ifdef PIPEX_L2TP
 Static void                  pipex_l2tp_output (struct mbuf *, struct pipex_session *);
-Static struct pipex_session  *pipex_l2tp_userland_lookup_session(struct mbuf *, struct sockaddr *);
 #endif
 
 #ifdef PIPEX_MPPE

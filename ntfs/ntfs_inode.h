@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs_inode.h,v 1.5 2009/08/13 16:00:53 jasper Exp $	*/
+/*	$OpenBSD: ntfs_inode.h,v 1.7 2013/05/30 20:11:06 guenther Exp $	*/
 /*	$NetBSD: ntfs_inode.h,v 1.1 2002/12/23 17:38:33 jdolecek Exp $	*/
 
 /*-
@@ -38,10 +38,13 @@ struct ntnode {
 	dev_t           i_dev;		/* Device associated with the inode. */
 
 	LIST_ENTRY(ntnode)	i_hash;
+	TAILQ_ENTRY(ntnode)	i_loaded;
+
 	struct ntnode  *i_next;
 	struct ntnode **i_prev;
+
 	struct ntfsmount       *i_mp;
-	ino_t           i_number;
+	ntfsino_t       i_number;
 	u_int32_t       i_flag;
 
 	/* locking */
@@ -52,7 +55,7 @@ struct ntnode {
 	LIST_HEAD(,ntvattr)	i_valist;
 
 	long		i_nlink;	/* MFR */
-	ino_t		i_mainrec;	/* MFR */
+	u_int64_t	i_mainrec;	/* MFR */
 	u_int32_t	i_frflag;	/* MFR */
 };
 
@@ -66,7 +69,7 @@ struct fnode {
 	u_long		f_flag;
 
 	ntfs_times_t	f_times;	/* $NAME/dirinfo */
-	ino_t		f_pnumber;	/* $NAME/dirinfo */
+	u_int32_t	f_pnumber;	/* $NAME/dirinfo */
 	u_int32_t       f_fflag;	/* $NAME/dirinfo */
 	u_int64_t	f_size;		/* defattr/dirinfo: */
 	u_int64_t	f_allocated;	/* defattr/dirinfo */
@@ -87,7 +90,7 @@ struct fnode {
 struct ntfid {
 	u_int16_t ntfid_len;	/* Length of structure. */
 	u_int16_t ntfid_pad;	/* Force 32-bit alignment. */
-	ino_t     ntfid_ino;	/* File number (ino). */
+	ntfsino_t ntfid_ino;	/* File number (ino). */
 	u_int8_t  ntfid_attr;	/* Attribute identifier */
 #ifdef notyet
 	int32_t   ntfid_gen;	/* Generation number. */

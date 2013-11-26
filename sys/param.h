@@ -1,5 +1,4 @@
-/*	$OpenBSD: param.h,v 1.94 2012/01/11 22:11:34 deraadt Exp $	*/
-/*	$NetBSD: param.h,v 1.23 1996/03/17 01:02:29 thorpej Exp $	*/
+/*	$OpenBSD: param.h,v 1.104 2013/07/07 18:11:49 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1982, 1986, 1989, 1993
@@ -33,16 +32,17 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- *	@(#)param.h	8.2 (Berkeley) 1/21/94
  */
+
+#ifndef _SYS_PARAM_H_
+#define	_SYS_PARAM_H_
 
 #define	BSD	199306		/* System version (year & month). */
 #define BSD4_3	1
 #define BSD4_4	1
 
-#define OpenBSD	201205		/* OpenBSD version (year & month). */
-#define OpenBSD5_1 1		/* OpenBSD 5.1 */
+#define OpenBSD	201311		/* OpenBSD version (year & month). */
+#define OpenBSD5_4 1		/* OpenBSD 5.4 */
 
 #ifndef NULL
 #ifdef 	__GNUG__
@@ -78,7 +78,6 @@
 
 /* More types and definitions used throughout the kernel. */
 #ifdef _KERNEL
-#include <sys/cdefs.h>
 #include <sys/errno.h>
 #include <sys/time.h>
 #include <sys/resource.h>
@@ -93,6 +92,7 @@
 #include <sys/limits.h>
 #include <machine/param.h>
 
+#ifdef _KERNEL
 /*
  * Priorities.  Note that with 32 run queues, differences less than 4 are
  * insignificant.
@@ -102,7 +102,9 @@
 #define	PINOD	8
 #define	PRIBIO	16
 #define	PVFS	20
+#endif /* _KERNEL */
 #define	PZERO	22		/* No longer magic, shouldn't be here.  XXX */
+#ifdef _KERNEL
 #define	PSOCK	24
 #define	PWAIT	32
 #define	PLOCK	36
@@ -114,31 +116,31 @@
 #define	PCATCH		0x100	/* OR'd with pri for tsleep to check signals */
 #define PNORELOCK	0x200	/* OR'd with pri for msleep to not reaquire
 				   the mutex */
+#endif /* _KERNEL */
+
+#define	NODEV	(dev_t)(-1)	/* non-existent device */
 
 #define	CMASK	022		/* default file mask: S_IWGRP|S_IWOTH */
-#define	NODEV	(dev_t)(-1)	/* non-existent device */
-#define NETDEV	(dev_t)(-2)	/* network device (for nfs swap) */
-	
-#define	CBLOCK	64		/* Clist block size, must be a power of 2. */
-#define CBQSIZE	(CBLOCK/NBBY)	/* Quote bytes/cblock - can do better. */
-				/* Data chars/clist. */
-#define	CBSIZE	(CBLOCK - sizeof(struct cblock *) - CBQSIZE)
-#define	CROUND	(CBLOCK - 1)	/* Clist rounding. */
 
 /*
  * Constants related to network buffer management.
- * MCLBYTES must be no larger than NBPG (the software page size), and,
+ * MCLBYTES must be no larger than PAGE_SIZE (the software page size) and,
  * on machines that exchange pages of input or output buffers with mbuf
  * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
  * of the hardware page size.
  */
 #define	MSIZE		256		/* size of an mbuf */
+
+#ifdef _KERNEL
 #define	MCLSHIFT	11		/* convert bytes to m_buf clusters */
 					/* 2K cluster can hold Ether frame */
 #define	MCLBYTES	(1 << MCLSHIFT)	/* size of a m_buf cluster */
 #define	MCLOFSET	(MCLBYTES - 1)
+#endif /* _KERNEL */
 
-#define MAXMCLBYTES	(64 * 1024)	/* largest cluster from the stack */
+#define	ALIGNBYTES		_ALIGNBYTES
+#define	ALIGN(p)		_ALIGN(p)
+#define	ALIGNED_POINTER(p,t)	_ALIGNED_POINTER(p,t)
 
 /*
  * File system parameters and macros.
@@ -149,10 +151,34 @@
  * made larger without any effect on existing file systems; however making
  * it smaller makes some file systems unmountable.
  */
-#ifndef MAXBSIZE	/* XXX temp until sun3 DMA chaining */
-#define	MAXBSIZE	MAXPHYS
-#endif
+#ifdef _KERNEL
+#define MAXPHYS		(64 * 1024)	/* max raw I/O transfer size */
+#endif /* _KERNEL */
+#define	MAXBSIZE	(64 * 1024)
 #define MAXFRAG 	8
+
+#define	_DEV_BSHIFT	9		/* log2(DEV_BSIZE) */
+#define	DEV_BSIZE	(1 << _DEV_BSHIFT)
+#ifdef _KERNEL
+#define	DEV_BSHIFT	_DEV_BSHIFT
+#define	BLKDEV_IOSIZE	2048
+#endif /* _KERNEL */
+
+/* pages to disk blocks */
+#ifndef ctod
+#define ctod(x)         ((x) << (PAGE_SHIFT - _DEV_BSHIFT))
+#endif
+#ifndef dtoc
+#define dtoc(x)         ((x) >> (PAGE_SHIFT - _DEV_BSHIFT))
+#endif
+
+/* bytes to disk blocks */
+#ifndef btodb
+#define btodb(x)        ((x) >> _DEV_BSHIFT)
+#endif
+#ifndef dbtob
+#define dbtob(x)        ((x) << _DEV_BSHIFT)
+#endif
 
 /*
  * MAXPATHLEN defines the longest permissible path length after expanding
@@ -171,7 +197,7 @@
 #define SET(t, f)	((t) |= (f))
 #define CLR(t, f)	((t) &= ~(f))
 #define ISSET(t, f)	((t) & (f))
-#endif
+#endif /* _KERNEL */
 
 /* Bit map related macros. */
 #define	setbit(a,i)	((a)[(i)>>3] |= 1<<((i)&(NBBY-1)))
@@ -198,24 +224,6 @@
 #define nitems(_a)	(sizeof((_a)) / sizeof((_a)[0]))
 
 /*
- * Constants for setting the parameters of the kernel memory allocator.
- *
- * 2 ** MINBUCKET is the smallest unit of memory that will be
- * allocated. It must be at least large enough to hold a pointer.
- *
- * Units of memory less or equal to MAXALLOCSAVE will permanently
- * allocate physical memory; requests for these size pieces of
- * memory are quite fast. Allocations greater than MAXALLOCSAVE must
- * always allocate and free physical memory; requests for these
- * size allocations should be done infrequently as they will be slow.
- *
- * Constraints: PAGE_SIZE <= MAXALLOCSAVE <= 2 ** (MINBUCKET + 14), and
- * MAXALLOCSIZE must be a power of two.
- */
-#define MINBUCKET	4		/* 4 => min allocation of 16 bytes */
-#define MAXALLOCSAVE	(2 * PAGE_SIZE)
-
-/*
  * Scale factor for scaled integers used to count %cpu time and load avgs.
  *
  * The number of CPU `tick's that map to a unique `%age' can be expressed
@@ -229,30 +237,4 @@
 #define	FSHIFT	11		/* bits to right of fixed binary point */
 #define FSCALE	(1<<FSHIFT)
 
-/*
- * The time for a process to be blocked before being very swappable.
- * This is a number of seconds which the system takes as being a non-trivial
- * amount of real time.  You probably shouldn't change this;
- * it is used in subtle ways (fractions and multiples of it are, that is, like
- * half of a ``long time'', almost a long time, etc.)
- * It is related to human patience and other factors which don't really
- * change over time.
- */
-#define	MAXSLP	20
-
-/*
- * rfork() options.
- *
- * XXX currently, operations without RFPROC set are not supported.
- */
-#define RFNAMEG		(1<<0)	/* UNIMPL new plan9 `name space' */
-#define RFENVG		(1<<1)	/* UNIMPL copy plan9 `env space' */
-#define RFFDG		(1<<2)	/* copy fd table */
-#define RFNOTEG		(1<<3)	/* UNIMPL create new plan9 `note group' */
-#define RFPROC		(1<<4)	/* change child (else changes curproc) */
-#define RFMEM		(1<<5)	/* share `address space' */
-#define RFNOWAIT	(1<<6)	/* parent need not wait() on child */ 
-#define RFCNAMEG	(1<<10) /* UNIMPL zero plan9 `name space' */
-#define RFCENVG		(1<<11) /* UNIMPL zero plan9 `env space' */
-#define RFCFDG		(1<<12)	/* zero fd table */
-#define RFTHREAD	(1<<13)	/* create a thread, not a process */
+#endif /* !_SYS_PARAM_H_ */

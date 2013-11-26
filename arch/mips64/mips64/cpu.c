@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.c,v 1.39 2011/04/10 17:16:51 miod Exp $ */
+/*	$OpenBSD: cpu.c,v 1.50 2013/05/09 19:45:19 miod Exp $ */
 
 /*
  * Copyright (c) 1997-2004 Opsycon AB (www.opsycon.se)
@@ -35,6 +35,7 @@
 #include <uvm/uvm_extern.h>
 
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/autoconf.h>
 
 int	cpumatch(struct device *, void *, void *);
@@ -47,9 +48,8 @@ struct cpu_info *cpu_info_secondaries;
 struct cpuset cpus_running;
 #endif
 
-vaddr_t	CpuCacheAliasMask;
-
-int cpu_is_rm7k = 0;
+vaddr_t	cache_valias_mask;
+int	cpu_is_rm7k = 0;
 
 struct cfattach cpu_ca = {
 	sizeof(struct device), cpumatch, cpuattach
@@ -86,10 +86,13 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 #ifdef MULTIPROCESSOR
 		ci->ci_flags |= CPUF_RUNNING | CPUF_PRESENT | CPUF_PRIMARY;
 		cpuset_add(&cpus_running, ci);
-		cpu_info_secondaries = (struct cpu_info *)alloc_contiguous_pages(
-			sizeof(struct cpu_info) * ncpusfound - 1);
-		if (cpu_info_secondaries == NULL)
-			panic("unable to allocate cpu_info");
+		if (ncpusfound > 1) {
+			cpu_info_secondaries = (struct cpu_info *)
+			    alloc_contiguous_pages(sizeof(struct cpu_info) *
+			      (ncpusfound - 1));
+			if (cpu_info_secondaries == NULL)
+				panic("unable to allocate cpu_info");
+		}
 #endif
 	}
 #ifdef MULTIPROCESSOR
@@ -112,17 +115,56 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	printf(": ");
 
 	displayver = 1;
+	fptype = (ch->c1prid >> 8) & 0xff;
 	vers_maj = (ch->c0prid >> 4) & 0x0f;
 	vers_min = ch->c0prid & 0x0f;
 	switch (ch->type) {
 	case MIPS_R4000:
-		if (ci->ci_l1instcachesize == 16384)
-			printf("MIPS R4400 CPU");
-		else
+		if (vers_maj < 4)
 			printf("MIPS R4000 CPU");
+		else {
+			vers_maj -= 3;
+			printf("MIPS R4400 CPU");
+		}
+		fptype = MIPS_R4000;
 		break;
+#if 0
+	case MIPS_R4100:
+		printf("NEC VR41xx CPU");
+		break;
+	case MIPS_R4200:
+		printf("NEC VR4200 CPU (ICE)");
+		break;
+	case MIPS_R4300:
+		printf("NEC VR4300 CPU");
+		break;
+#endif
+	case MIPS_R4600:
+		printf("QED R4600 Orion CPU");
+		break;
+#if 0
+	case MIPS_R4700:
+		printf("QED R4700 Orion CPU");
+		break;
+#endif
 	case MIPS_R5000:
 		printf("MIPS R5000 CPU");
+		break;
+	case MIPS_RM52X0:
+		printf("PMC-Sierra RM52X0 CPU");
+		break;
+	case MIPS_RM7000:
+		if (vers_maj < 2)
+			printf("PMC-Sierra RM7000 CPU");
+		else
+			printf("PMC-Sierra RM7000A CPU");
+		cpu_is_rm7k++;
+		break;
+	case MIPS_R8000:
+		printf("MIPS R8000 CPU");
+		break;
+	case MIPS_RM9000:
+		printf("PMC-Sierra RM9000 CPU");
 		break;
 	case MIPS_R10000:
 		printf("MIPS R10000 CPU");
@@ -136,34 +178,6 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 			isr16k = 1;
 		}
 		printf("R1%d000 CPU", isr16k ? 6 : 4);
-		break;
-	case MIPS_R4200:
-		printf("NEC VR4200 CPU (ICE)");
-		break;
-	case MIPS_R4300:
-		printf("NEC VR4300 CPU");
-		break;
-	case MIPS_R4100:
-		printf("NEC VR41xx CPU");
-		break;
-	case MIPS_R4600:
-		printf("QED R4600 Orion CPU");
-		break;
-	case MIPS_R4700:
-		printf("QED R4700 Orion CPU");
-		break;
-	case MIPS_RM52X0:
-		printf("PMC-Sierra RM52X0 CPU");
-		break;
-	case MIPS_RM7000:
-		if (vers_maj < 2)
-			printf("PMC-Sierra RM7000 CPU");
-		else
-			printf("PMC-Sierra RM7000A CPU");
-		cpu_is_rm7k++;
-		break;
-	case MIPS_RM9000:
-		printf("PMC-Sierra RM9000 CPU");
 		break;
 	case MIPS_LOONGSON2:
 		switch (ch->c0prid & 0xff) {
@@ -184,6 +198,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		break;
 	case MIPS_OCTEON:
 		printf("Cavium OCTEON CPU");
+		fptype = MIPS_SOFT;
 		break;
 	default:
 		printf("Unknown CPU type (0x%x)", ch->type);
@@ -194,20 +209,47 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	printf(" %d MHz, ", ch->clock / 1000000);
 
 	displayver = 1;
-	if (ch->type == MIPS_OCTEON)
-		fptype = MIPS_SOFT;
-	else {
-		fptype = (ch->c1prid >> 8) & 0xff;
-		vers_maj = (ch->c1prid >> 4) & 0x0f;
-		vers_min = ch->c1prid & 0x0f;
-	}
+	vers_maj = (ch->c1prid >> 4) & 0x0f;
+	vers_min = ch->c1prid & 0x0f;
 	switch (fptype) {
 	case MIPS_SOFT:
+#ifdef FPUEMUL
 		printf("Software FP emulation");
+#else
+		printf("no FPU");
+#endif
 		displayver = 0;
 		break;
 	case MIPS_R4000:
 		printf("R4010 FPC");
+		break;
+#if 0
+	case MIPS_R4200:
+		printf("VR4200 FPC (ICE)");
+		break;
+#endif
+	case MIPS_R4600:
+		printf("R4600 Orion FPC");
+		break;
+#if 0
+	case MIPS_R4700:
+		printf("R4700 Orion FPC");
+		break;
+#endif
+	case MIPS_R5000:
+		printf("R5000 based FPC");
+		break;
+	case MIPS_RM52X0:
+		printf("RM52X0 FPC");
+		break;
+	case MIPS_RM7000:
+		printf("RM7000 FPC");
+		break;
+	case MIPS_R8000:
+		printf("R8010 FPU");
+		break;
+	case MIPS_RM9000:
+		printf("RM9000 FPC");
 		break;
 	case MIPS_R10000:
 		printf("R10000 FPU");
@@ -222,27 +264,6 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 			printf("R16000 FPU");
 		} else
 			printf("R14000 FPU");
-		break;
-	case MIPS_R4200:
-		printf("VR4200 FPC (ICE)");
-		break;
-	case MIPS_R4600:
-		printf("R4600 Orion FPC");
-		break;
-	case MIPS_R4700:
-		printf("R4700 Orion FPC");
-		break;
-	case MIPS_R5000:
-		printf("R5000 based FPC");
-		break;
-	case MIPS_RM52X0:
-		printf("RM52X0 FPC");
-		break;
-	case MIPS_RM7000:
-		printf("RM7000 FPC");
-		break;
-	case MIPS_RM9000:
-		printf("RM9000 FPC");
 		break;
 	case MIPS_LOONGSON2:
 		printf("STC Loongson2%c FPU", 'C' + vers_min);
@@ -267,7 +288,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 		printf("4 way");
 		break;
 	default:
-		printf("1 way");
+		printf("direct");
 		break;
 	}
 
@@ -279,6 +300,7 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 			printf(", L2 %dKB 2 way", ci->ci_l2size / 1024);
 			break;
 		case MIPS_RM7000:
+		case MIPS_R8000:
 		case MIPS_RM9000:
 		case MIPS_LOONGSON2:
 			printf(", L2 %dKB 4 way", ci->ci_l2size / 1024);
@@ -293,45 +315,18 @@ cpuattach(struct device *parent, struct device *dev, void *aux)
 	printf("\n");
 
 #ifdef DEBUG
-	printf("cpu%d: Setsize %d:%d\n", cpuno,
+	printf("cpu%d: L1 set size %d:%d\n", cpuno,
 	    ci->ci_l1instcacheset, ci->ci_l1datacacheset);
-	printf("cpu%d: Alias mask %p\n", cpuno, CpuCacheAliasMask);
-	printf("cpu%d: Config Register %08x\n", cpuno, cp0_get_config());
-	printf("cpu%d: Cache configuration %x\n",
+	printf("cpu%d: L1 line size %d:%d\n", cpuno,
+	    ci->ci_l1instcacheline, ci->ci_l1datacacheline);
+	printf("cpu%d: L2 line size %d\n", cpuno, ci->ci_l2line);
+	printf("cpu%d: cache configuration %x\n",
 	    cpuno, ci->ci_cacheconfiguration);
-	if (ch->type == MIPS_RM7000) {
-		uint32_t tmp = cp0_get_config();
-
-		printf("cpu%d: ", cpuno);
-		printf("K0 = %1d  ", 0x7 & tmp);
-		printf("SE = %1d  ", 0x1 & (tmp>>3));
-		printf("DB = %1d  ", 0x1 & (tmp>>4));
-		printf("IB = %1d\n", 0x1 & (tmp>>5));
-		printf("cpu%d: ", cpuno);
-		printf("DC = %1d  ", 0x7 & (tmp>>6));
-		printf("IC = %1d  ", 0x7 & (tmp>>9));
-		printf("TE = %1d  ", 0x1 & (tmp>>12));
-		printf("EB = %1d\n", 0x1 & (tmp>>13));
-		printf("cpu%d: ", cpuno);
-		printf("EM = %1d  ", 0x1 & (tmp>>14));
-		printf("BE = %1d  ", 0x1 & (tmp>>15));
-		printf("TC = %1d  ", 0x1 & (tmp>>17));
-		printf("EW = %1d\n", 0x3 & (tmp>>18));
-		printf("cpu%d: ", cpuno);
-		printf("TS = %1d  ", 0x3 & (tmp>>20));
-		printf("EP = %1d  ", 0xf & (tmp>>24));
-		printf("EC = %1d  ", 0x7 & (tmp>>28));
-		printf("SC = %1d\n", 0x1 & (tmp>>31));
-	}
-	printf("cpu%d: Status Register %08x\n", cpuno, getsr());
+	printf("cpu%d: virtual alias mask %p\n", cpuno, cache_valias_mask);
+	printf("cpu%d: config register %016x, status register %016x\n",
+	    cpuno, cp0_get_config(), getsr());
 #endif
 }
-
-extern void cpu_switchto_asm(struct proc *, struct proc *);
-extern void MipsSaveCurFPState(struct proc *);
-extern void MipsSaveCurFPState16(struct proc *);
-extern void MipsSwitchFPState(struct proc *, struct trap_frame *);
-extern void MipsSwitchFPState16(struct proc *, struct trap_frame *);
 
 void
 cpu_switchto(struct proc *oldproc, struct proc *newproc)
@@ -355,6 +350,7 @@ enable_fpu(struct proc *p)
 		MipsSwitchFPState(ci->ci_fpuproc, p->p_md.md_regs);
 	else
 		MipsSwitchFPState16(ci->ci_fpuproc, p->p_md.md_regs);
+	atomic_add_int(&uvmexp.fpswtch, 1);
 
 	ci->ci_fpuproc = p;
 	p->p_md.md_regs->sr |= SR_COP_1_BIT;
@@ -395,18 +391,18 @@ get_cpu_info(int cpuno)
 void
 cpu_boot_secondary_processors(void)
 {
-       struct cpu_info *ci;
+	struct cpu_info *ci;
 	CPU_INFO_ITERATOR cii;
 
 	CPU_INFO_FOREACH(cii, ci) {
-               if ((ci->ci_flags & CPUF_PRESENT) == 0)
-                       continue;
-               if (ci->ci_flags & CPUF_PRIMARY)
-                       continue;
+		if ((ci->ci_flags & CPUF_PRESENT) == 0)
+			continue;
+		if (ci->ci_flags & CPUF_PRIMARY)
+			continue;
 
-               sched_init_cpu(ci);
-               ci->ci_randseed = random();
-               cpu_boot_secondary(ci);
+		ci->ci_randseed = random();
+		sched_init_cpu(ci);
+		cpu_boot_secondary(ci);
 	}
 
        /* This must called after xheart0 has initialized, so here is 
@@ -431,7 +427,7 @@ alloc_contiguous_pages(size_t size)
 	paddr_t pa;
 
 	TAILQ_INIT(&mlist);
-	error = uvm_pglistalloc(roundup(size, USPACE), 0, 0xffffffff, 0, 0,
+	error = uvm_pglistalloc(roundup(size, USPACE), 0, (paddr_t)-1, 0, 0,
 		&mlist, 1, UVM_PLA_NOWAIT | UVM_PLA_ZERO);
 	if (error)
 		return 0;

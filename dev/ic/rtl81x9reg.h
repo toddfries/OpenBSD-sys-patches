@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9reg.h,v 1.74 2011/04/14 21:06:38 jsg Exp $	*/
+/*	$OpenBSD: rtl81x9reg.h,v 1.78 2013/11/18 22:21:27 brad Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -184,6 +184,16 @@
 #define RL_HWREV_8168C_SPIN2	0x3c400000
 #define RL_HWREV_8168CP		0x3c800000
 #define RL_HWREV_8105E		0x40800000
+#define RL_HWREV_8105E_SPIN1	0x40C00000
+#define RL_HWREV_8402		0x44000000
+#define RL_HWREV_8106E		0x44800000
+#define RL_HWREV_8106E_SPIN1	0x44900000
+#define RL_HWREV_8168F		0x48000000
+#define RL_HWREV_8411		0x48800000
+#define RL_HWREV_8168G		0x4c000000
+#define RL_HWREV_8168G_SPIN1	0x4c100000
+#define RL_HWREV_8168G_SPIN2	0x50900000
+#define RL_HWREV_8168G_SPIN4	0x5c800000	
 #define RL_HWREV_8139		0x60000000
 #define RL_HWREV_8139A		0x70000000
 #define RL_HWREV_8139AG		0x70800000
@@ -273,6 +283,7 @@
 #define RL_RXCFG_RX_RUNT	0x00000010
 #define RL_RXCFG_RX_ERRPKT	0x00000020
 #define RL_RXCFG_WRAP		0x00000080
+#define RL_RXCFG_EARLYOFF	0x00000100
 #define RL_RXCFG_MAXDMA		0x00000700
 #define RL_RXCFG_BURSZ		0x00001800
 #define	RL_RXCFG_FIFOTHRESH	0x0000E000
@@ -414,6 +425,7 @@
 #define RL_CFG2_PCI_66MHZ	0x01
 #define RL_CFG2_PCI_64BIT	0x08
 #define RL_CFG2_AUXPWR		0x10
+#define RL_CFG2_MSI		0x20
 
 /*
  * Config 3 register
@@ -681,7 +693,7 @@ struct rl_stats {
 
 #define RL_TX_QLEN		64
 
-#define RL_NTXDESC_RSVD		4
+#define RL_NTXSEGS		32
 
 #define RL_RX_LIST_SZ		(RL_RX_DESC_CNT * sizeof(struct rl_desc))
 #define RL_RING_ALIGN		256
@@ -843,6 +855,7 @@ struct rl_softc {
 #define	RL_FLAG_AUTOPAD		0x00004000
 #define	RL_FLAG_LINK		0x00008000
 #define	RL_FLAG_PHYWAKE_PM	0x00010000
+#define	RL_FLAG_EARLYOFF	0x00020000
 
 	u_int16_t		rl_intrs;
 	u_int16_t		rl_tx_ack;

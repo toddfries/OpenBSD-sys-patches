@@ -1,4 +1,4 @@
-/*	$OpenBSD: board.h,v 1.9 2011/01/02 13:40:07 miod Exp $	*/
+/*	$OpenBSD: board.h,v 1.14 2013/10/23 10:07:14 miod Exp $	*/
 /*
  * Copyright (c) 2006, 2007, Miodrag Vallat
  *
@@ -75,9 +75,10 @@ struct pmap_table;
 struct vme_range;
 
 struct board {
-	void		(*bootstrap)(void);
+	u_int		(*bootstrap)(void);
 	vaddr_t		(*memsize)(void);
 	void		(*startup)(void);
+	paddr_t		(*get_boot_device)(uint32_t *, u_int);
 
 	void		(*intr)(struct trapframe *);
 	void		(*init_clocks)(void);
@@ -89,7 +90,8 @@ struct board {
 	void		(*smp_setup)(struct cpu_info *);
 #endif
 
-	u_int64_t	(*intsrc)(int);
+	u_int32_t	(*intsrc)(int);
+	u_int32_t	(*exintsrc)(int);
 	const struct vme_range *(*get_vme_ranges)(void);
 
 	const struct pmap_table *ptable;
@@ -99,9 +101,10 @@ struct board {
 
 #define	DECLARE_BOARD(b) \
 extern const struct board board_av##b; \
-void	av##b##_bootstrap(void); \
+u_int	av##b##_bootstrap(void); \
 vaddr_t	av##b##_memsize(void); \
 void	av##b##_startup(void); \
+paddr_t	av##b##_get_boot_device(uint32_t *, u_int); \
 void	av##b##_intr(struct trapframe *); \
 void	av##b##_init_clocks(void); \
 u_int	av##b##_getipl(void); \
@@ -109,7 +112,8 @@ u_int	av##b##_setipl(u_int); \
 u_int	av##b##_raiseipl(u_int); \
 void	av##b##_send_ipi(int, cpuid_t); \
 void	av##b##_smp_setup(struct cpu_info *); \
-u_int64_t av##b##_intsrc(int); \
+u_int32_t av##b##_intsrc(int); \
+u_int32_t av##b##_exintsrc(int); \
 const struct vme_range *av##b##_get_vme_ranges(void);
 
 DECLARE_BOARD(400);
@@ -135,7 +139,8 @@ extern const struct board *platform;/* just to have people confuse both names */
 #define	INTSRC_ETHERNET2	8	/* second on-board Ethernet */
 #define	INTSRC_SCSI1		9	/* first on-board SCSI controller */
 #define	INTSRC_SCSI2		10	/* second on-board SCSI controller */
-#define	NINTSRC_SYSCON		11	/* total number of non-VME sources */
+#define	INTSRC_DMA		11	/* DMA completion interrupt */
+#define	NINTSRC_SYSCON		12	/* total number of non-VME sources */
 #define	INTSRC_VME(lvl)	(NINTSRC_SYSCON + (lvl) - 1)	/* seven VME levels */
 
 #define	IS_VME_INTSRC(intsrc)		((intsrc) >= NINTSRC_SYSCON)

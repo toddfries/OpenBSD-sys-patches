@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.59 2011/10/06 20:49:28 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.62 2013/06/03 15:54:47 tedu Exp $	*/
 /*	$NetBSD: conf.c,v 1.40 1996/04/11 19:20:03 thorpej Exp $ */
 
 /*
@@ -57,7 +57,6 @@
 #include "tun.h"
 #include "audio.h"
 #include "vnd.h"
-#include "raid.h"
 #include "ch.h"
 #include "uk.h"
 #include "sd.h"
@@ -85,10 +84,6 @@
 #include "wsmouse.h"
 #include "wsmux.h"
 
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 #include "ksyms.h"
 
 struct bdevsw	bdevsw[] =
@@ -118,7 +113,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 22 */
 	bdev_lkm_dummy(),		/* 23 */
 	bdev_lkm_dummy(),		/* 24 */
-	bdev_disk_init(NRAID,raid),	/* 25: RAIDframe disk driver */
+	bdev_notdef(),			/* 25 was: RAIDframe disk driver */
 	bdev_disk_init(NPRESTO,presto),	/* 26: Prestoserve NVRAM */
 };
 int	nblkdev = nitems(bdevsw);
@@ -129,6 +124,7 @@ int	nblkdev = nitems(bdevsw);
 #include "vscsi.h"
 #include "pppx.h"
 #include "hotplug.h"
+#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -183,11 +179,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 	cdev_notdef(),			/* 52 */
 	cdev_notdef(),			/* 53 */
 	cdev_disk_init(NFD,fd),		/* 54: floppy disk */
@@ -223,7 +215,7 @@ struct cdevsw	cdevsw[] =
 	cdev_mouse_init(NWSKBD, wskbd),	/* 79: keyboards */
 	cdev_mouse_init(NWSMOUSE, wsmouse), /* 80: mice */
 	cdev_mouse_init(NWSMUX, wsmux),	/* 81: ws multiplexer */
-	cdev_notdef(),			/* 82 */
+	cdev_fuse_init(NFUSE, fuse),	/* 82: fuse */
 	cdev_notdef(),			/* 83 */
 	cdev_notdef(),			/* 84 */
 	cdev_notdef(),			/* 85 */
@@ -264,7 +256,7 @@ struct cdevsw	cdevsw[] =
 	cdev_uk_init(NUK,uk),		/* 120: unknown SCSI */
 	cdev_notdef(),			/* 121 */
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 122: Kernel symbols device */
-	cdev_disk_init(NRAID,raid),     /* 123: RAIDframe disk driver */
+	cdev_notdef(),			/* 123 was: RAIDframe disk driver */
 	cdev_bio_init(NBIO,bio),	/* 124: ioctl tunnel */
 	cdev_ptm_init(NPTY,ptm),	/* 125: pseudo-tty ptm device */
 	cdev_notdef(),			/* 126 */

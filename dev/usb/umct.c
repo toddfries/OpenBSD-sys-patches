@@ -1,4 +1,4 @@
-/*	$OpenBSD: umct.c,v 1.33 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: umct.c,v 1.39 2013/11/15 10:17:39 pirofti Exp $	*/
 /*	$NetBSD: umct.c,v 1.10 2003/02/23 04:20:07 simonb Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -44,8 +44,6 @@
 #include <sys/tty.h>
 #include <sys/file.h>
 #include <sys/selinfo.h>
-#include <sys/proc.h>
-#include <sys/vnode.h>
 #include <sys/device.h>
 #include <sys/poll.h>
 
@@ -75,17 +73,17 @@ int	umctdebug = 0;
 
 struct	umct_softc {
 	struct device		 sc_dev;	/* base device */
-	usbd_device_handle	sc_udev;	/* USB device */
-	usbd_interface_handle	 sc_iface;	/* interface */
+	struct usbd_device	*sc_udev;	/* USB device */
+	struct usbd_interface	*sc_iface;	/* interface */
 	int			 sc_iface_number;	/* interface number */
 	u_int16_t		 sc_product;
 
 	int			 sc_intr_number;	/* interrupt number */
-	usbd_pipe_handle	 sc_intr_pipe;	/* interrupt pipe */
+	struct usbd_pipe	*sc_intr_pipe;	/* interrupt pipe */
 	u_char			*sc_intr_buf;	/* interrupt buffer */
 	int			 sc_isize;
 
-	usb_cdc_line_state_t	 sc_line_state;	/* current line state */
+	struct usb_cdc_line_state sc_line_state;	/* current line state */
 	u_char			 sc_dtr;	/* current DTR state */
 	u_char			 sc_rts;	/* current RTS state */
 	u_char			 sc_break;	/* set break */
@@ -93,8 +91,6 @@ struct	umct_softc {
 	u_char			 sc_status;
 
 	struct device		*sc_subdev;	/* ucom device */
-
-	u_char			 sc_dying;	/* disconnecting */
 
 	u_char			 sc_lsr;	/* Local status register */
 	u_char			 sc_msr;	/* umct status register */
@@ -112,7 +108,7 @@ struct	umct_softc {
 void umct_init(struct umct_softc *);
 void umct_set_baudrate(struct umct_softc *, u_int);
 void umct_set_lcr(struct umct_softc *, u_int);
-void umct_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void umct_intr(struct usbd_xfer *, void *, usbd_status);
 
 void umct_set(void *, int, int, int);
 void umct_dtr(struct umct_softc *, int);
@@ -182,7 +178,7 @@ umct_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct umct_softc *sc = (struct umct_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	usbd_device_handle dev = uaa->device;
+	struct usbd_device *dev = uaa->device;
 	usb_config_descriptor_t *cdesc;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
@@ -207,7 +203,7 @@ umct_attach(struct device *parent, struct device *self, void *aux)
 	if (err) {
 		printf("\n%s: failed to set configuration, err=%s\n",
 			devname, usbd_errstr(err));
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -217,7 +213,7 @@ umct_attach(struct device *parent, struct device *self, void *aux)
 	if (cdesc == NULL) {
 		printf("%s: failed to get configuration descriptor\n",
 			sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -227,7 +223,7 @@ umct_attach(struct device *parent, struct device *self, void *aux)
 	if (err) {
 		printf("\n%s: failed to get interface, err=%s\n",
 			devname, usbd_errstr(err));
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -241,7 +237,7 @@ umct_attach(struct device *parent, struct device *self, void *aux)
 		if (ed == NULL) {
 			printf("%s: no endpoint descriptor for %d\n",
 				sc->sc_dev.dv_xname, i);
-			sc->sc_dying = 1;
+			usbd_deactivate(sc->sc_udev);
 			return;
 		}
 
@@ -267,21 +263,21 @@ umct_attach(struct device *parent, struct device *self, void *aux)
 	if (uca.bulkin == -1) {
 		printf("%s: Could not find data bulk in\n",
 			sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
 	if (uca.bulkout == -1) {
 		printf("%s: Could not find data bulk out\n",
 			sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
 	if (sc->sc_intr_number== -1) {
 		printf("%s: Could not find interrupt in\n",
 			sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -335,16 +331,13 @@ int
 umct_activate(struct device *self, int act)
 {
 	struct umct_softc *sc = (struct umct_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 void
@@ -533,7 +526,7 @@ umct_open(void *addr, int portno)
 	struct umct_softc *sc = addr;
 	int err, lcr_data;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	DPRINTF(("umct_open: sc=%p\n", sc));
@@ -566,16 +559,13 @@ umct_close(void *addr, int portno)
 	struct umct_softc *sc = addr;
 	int err;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	DPRINTF(("umct_close: close\n"));
 
 	if (sc->sc_intr_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_intr_pipe);
-		if (err)
-			printf("%s: abort interrupt pipe failed: %s\n",
-				sc->sc_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_intr_pipe);
 		err = usbd_close_pipe(sc->sc_intr_pipe);
 		if (err)
 			printf("%s: close interrupt pipe failed: %s\n",
@@ -586,13 +576,13 @@ umct_close(void *addr, int portno)
 }
 
 void
-umct_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+umct_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct umct_softc *sc = priv;
 	u_char *buf = sc->sc_intr_buf;
 	u_char mstatus;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {

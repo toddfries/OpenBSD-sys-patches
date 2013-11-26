@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ethersubr.c,v 1.151 2011/07/09 00:47:18 henning Exp $	*/
+/*	$OpenBSD: if_ethersubr.c,v 1.159 2013/11/18 20:22:23 deraadt Exp $	*/
 /*	$NetBSD: if_ethersubr.c,v 1.19 1996/05/07 02:40:30 thorpej Exp $	*/
 
 /*
@@ -87,7 +87,6 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <sys/syslog.h>
 #include <sys/timeout.h>
 
-#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -98,9 +97,6 @@ didn't get a copy, you may request one from <license@ipv6.nrl.navy.mil>.
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#ifdef INET
-#include <netinet/in_var.h>
-#endif
 #include <netinet/if_ether.h>
 #include <netinet/ip_ipsp.h>
 
@@ -200,11 +196,8 @@ ether_ioctl(struct ifnet *ifp, struct arpcom *arp, u_long cmd, caddr_t data)
  * Assumes that ifp is actually pointer to arpcom structure.
  */
 int
-ether_output(ifp0, m0, dst, rt0)
-	struct ifnet *ifp0;
-	struct mbuf *m0;
-	struct sockaddr *dst;
-	struct rtentry *rt0;
+ether_output(struct ifnet *ifp0, struct mbuf *m0, struct sockaddr *dst,
+    struct rtentry *rt0)
 {
 	u_int16_t etype;
 	int s, len, error = 0, hdrcmplt = 0;
@@ -227,7 +220,9 @@ ether_output(ifp0, m0, dst, rt0)
 #endif
 
 #if NTRUNK > 0
-	if (ifp->if_type == IFT_IEEE8023ADLAG)
+	/* restrict transmission on trunk members to bpf only */
+	if (ifp->if_type == IFT_IEEE8023ADLAG &&
+	    (m_tag_find(m, PACKET_TAG_DLT, NULL) == NULL))
 		senderr(EBUSY);
 #endif
 
@@ -362,14 +357,13 @@ ether_output(ifp0, m0, dst, rt0)
 	if (m == 0)
 		senderr(ENOBUFS);
 	eh = mtod(m, struct ether_header *);
-	bcopy((caddr_t)&etype,(caddr_t)&eh->ether_type,
-		sizeof(eh->ether_type));
-	bcopy((caddr_t)edst, (caddr_t)eh->ether_dhost, sizeof(edst));
+	eh->ether_type = etype;
+	memcpy(eh->ether_dhost, edst, sizeof(edst));
 	if (hdrcmplt)
-		bcopy((caddr_t)esrc, (caddr_t)eh->ether_shost,
+		memcpy(eh->ether_shost, esrc,
 		    sizeof(eh->ether_shost));
 	else
-		bcopy((caddr_t)ac->ac_enaddr, (caddr_t)eh->ether_shost,
+		memcpy(eh->ether_shost, ac->ac_enaddr, 
 		    sizeof(eh->ether_shost));
 
 #if NCARP > 0
@@ -379,15 +373,14 @@ ether_output(ifp0, m0, dst, rt0)
 
 #if NBRIDGE > 0
 	/*
-	 * Interfaces that are bridge members need special handling
-	 * for output.
+	 * Interfaces that are bridgeports need special handling for output.
 	 */
-	if (ifp->if_bridge) {
+	if (ifp->if_bridgeport) {
 		struct m_tag *mtag;
 
 		/*
 		 * Check if this packet has already been sent out through
-		 * this bridge, in which case we simply send it out
+		 * this bridgeport, in which case we simply send it out
 		 * without further bridge processing.
 		 */
 		for (mtag = m_tag_find(m, PACKET_TAG_BRIDGE, NULL); mtag;
@@ -399,7 +392,7 @@ ether_output(ifp0, m0, dst, rt0)
 				goto bad;
 			}
 #endif
-			if (!bcmp(&ifp->if_bridge, mtag + 1, sizeof(caddr_t)))
+			if (!bcmp(&ifp->if_bridgeport, mtag + 1, sizeof(caddr_t)))
 				break;
 		}
 		if (mtag == NULL) {
@@ -410,7 +403,7 @@ ether_output(ifp0, m0, dst, rt0)
 				error = ENOBUFS;
 				goto bad;
 			}
-			bcopy(&ifp->if_bridge, mtag + 1, sizeof(caddr_t));
+			bcopy(&ifp->if_bridgeport, mtag + 1, sizeof(caddr_t));
 			m_tag_prepend(m, mtag);
 			error = bridge_output(ifp, m, NULL, NULL);
 			return (error);
@@ -453,10 +446,7 @@ bad:
  * the ether header, which is provided separately.
  */
 void
-ether_input(ifp0, eh, m)
-	struct ifnet *ifp0;
-	struct ether_header *eh;
-	struct mbuf *m;
+ether_input(struct ifnet *ifp0, struct ether_header *eh, struct mbuf *m)
 {
 	struct ifqueue *inq;
 	u_int16_t etype;
@@ -560,7 +550,7 @@ ether_input(ifp0, eh, m)
 	 * NULL if it has consumed the packet, otherwise, it
 	 * gets processed as normal.
 	 */
-	if (ifp->if_bridge) {
+	if (ifp->if_bridgeport) {
 		if (m->m_flags & M_PROTO1)
 			m->m_flags &= ~M_PROTO1;
 		else {
@@ -739,8 +729,7 @@ done:
  */
 static char digits[] = "0123456789abcdef";
 char *
-ether_sprintf(ap)
-	u_char *ap;
+ether_sprintf(u_char *ap)
 {
 	int i;
 	static char etherbuf[ETHER_ADDR_LEN * 3];
@@ -762,14 +751,13 @@ void
 ether_fakeaddr(struct ifnet *ifp)
 {
 	static int unit;
-	int rng;
+	int rng = arc4random();
 
 	/* Non-multicast; locally administered address */
 	((struct arpcom *)ifp)->ac_enaddr[0] = 0xfe;
 	((struct arpcom *)ifp)->ac_enaddr[1] = 0xe1;
 	((struct arpcom *)ifp)->ac_enaddr[2] = 0xba;
 	((struct arpcom *)ifp)->ac_enaddr[3] = 0xd0 | (unit++ & 0xf);
-	rng = cold ? random() ^ (long)ifp : arc4random();
 	((struct arpcom *)ifp)->ac_enaddr[4] = rng;
 	((struct arpcom *)ifp)->ac_enaddr[5] = rng >> 8;
 }
@@ -778,8 +766,7 @@ ether_fakeaddr(struct ifnet *ifp)
  * Perform common duties while attaching to interface list
  */
 void
-ether_ifattach(ifp)
-	struct ifnet *ifp;
+ether_ifattach(struct ifnet *ifp)
 {
 	/*
 	 * Any interface which provides a MAC address which is obviously
@@ -807,14 +794,13 @@ ether_ifattach(ifp)
 }
 
 void
-ether_ifdetach(ifp)
-	struct ifnet *ifp;
+ether_ifdetach(struct ifnet *ifp)
 {
 	struct arpcom *ac = (struct arpcom *)ifp;
 	struct ether_multi *enm;
 
 	for (enm = LIST_FIRST(&ac->ac_multiaddrs);
-	    enm != LIST_END(&ac->ac_multiaddrs);
+	    enm != NULL;
 	    enm = LIST_FIRST(&ac->ac_multiaddrs)) {
 		LIST_REMOVE(enm, enm_list);
 		free(enm, M_IFMADDR);
@@ -1019,9 +1005,7 @@ ether_multiaddr(struct sockaddr *sa, u_int8_t addrlo[ETHER_ADDR_LEN],
  * given interface.
  */
 int
-ether_addmulti(ifr, ac)
-	struct ifreq *ifr;
-	struct arpcom *ac;
+ether_addmulti(struct ifreq *ifr, struct arpcom *ac)
 {
 	struct ether_multi *enm;
 	u_char addrlo[ETHER_ADDR_LEN];
@@ -1082,9 +1066,7 @@ ether_addmulti(ifr, ac)
  * Delete a multicast address record.
  */
 int
-ether_delmulti(ifr, ac)
-	struct ifreq *ifr;
-	struct arpcom *ac;
+ether_delmulti(struct ifreq *ifr, struct arpcom *ac)
 {
 	struct ether_multi *enm;
 	u_char addrlo[ETHER_ADDR_LEN];

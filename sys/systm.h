@@ -1,4 +1,4 @@
-/*	$OpenBSD: systm.h,v 1.90 2012/01/13 12:55:52 jsing Exp $	*/
+/*	$OpenBSD: systm.h,v 1.100 2013/06/11 18:15:54 deraadt Exp $	*/
 /*	$NetBSD: systm.h,v 1.50 1996/06/09 04:55:09 briggs Exp $	*/
 
 /*-
@@ -107,9 +107,8 @@ extern dev_t swapdev;		/* swapping device */
 extern struct vnode *swapdev_vp;/* vnode equivalent to above */
 
 struct proc;
+struct process;
 #define curproc curcpu()->ci_curproc
-
-extern int rthreads_enabled;
 
 typedef int	sy_call_t(struct proc *, void *, register_t *);
 
@@ -132,8 +131,9 @@ extern struct sysent {		/* system call table */
 #endif
 
 #if defined(_KERNEL) && defined(SYSCALL_DEBUG)
-void scdebug_call(struct proc *p, register_t code, register_t retval[]);
-void scdebug_ret(struct proc *p, register_t code, int error, register_t retval[]);
+void scdebug_call(struct proc *p, register_t code, const register_t retval[]);
+void scdebug_ret(struct proc *p, register_t code, int error,
+    const register_t retval[]);
 #endif /* _KERNEL && SYSCALL_DEBUG */
 
 extern int boothowto;		/* reboot flags, from console subsystem */
@@ -170,8 +170,10 @@ int	printf(const char *, ...)
     __attribute__((__format__(__kprintf__,1,2)));
 void	uprintf(const char *, ...)
     __attribute__((__format__(__kprintf__,1,2)));
-int	vprintf(const char *, va_list);
-int	vsnprintf(char *, size_t, const char *, va_list);
+int	vprintf(const char *, va_list)
+    __attribute__((__format__(__kprintf__,1,0)));
+int	vsnprintf(char *, size_t, const char *, va_list)
+    __attribute__((__format__(__kprintf__,3,0)));
 int	snprintf(char *buf, size_t, const char *, ...)
     __attribute__((__format__(__kprintf__,3,4)));
 struct tty;
@@ -190,9 +192,6 @@ int	kcopy(const void *, void *, size_t)
 		__attribute__ ((__bounded__(__buffer__,2,3)));
 
 void	bcopy(const void *, void *, size_t)
-		__attribute__ ((__bounded__(__buffer__,1,3)))
-		__attribute__ ((__bounded__(__buffer__,2,3)));
-void	ovbcopy(const void *, void *, size_t)
 		__attribute__ ((__bounded__(__buffer__,1,3)))
 		__attribute__ ((__bounded__(__buffer__,2,3)));
 void	bzero(void *, size_t)
@@ -219,8 +218,10 @@ int	copyin(const void *, void *, size_t)
 int	copyout(const void *, void *, size_t);
 
 struct timeval;
+struct timespec;
 int	hzto(const struct timeval *);
 int	tvtohz(const struct timeval *);
+int	tstohz(const struct timespec *);
 void	realitexpire(void *);
 
 struct clockframe;
@@ -233,8 +234,8 @@ void	inittodr(time_t);
 void	resettodr(void);
 void	cpu_initclocks(void);
 
-void	startprofclock(struct proc *);
-void	stopprofclock(struct proc *);
+void	startprofclock(struct process *);
+void	stopprofclock(struct process *);
 void	setstatclockrate(int);
 
 struct sleep_state;
@@ -255,7 +256,8 @@ int	tsleep(const volatile void *, int, const char *, int);
 int	msleep(const volatile void *, struct mutex *, int,  const char*, int);
 void	yield(void);
 
-void	wdog_register(void *, int (*)(void *, int));
+void	wdog_register(int (*)(void *, int), void *);
+void	wdog_shutdown(int (*)(void *, int), void *);
 
 /*
  * Startup/shutdown hooks.  Startup hooks are functions running after
@@ -304,8 +306,8 @@ struct uio;
 int	uiomove(void *, int, struct uio *);
 
 #if defined(_KERNEL)
-int	setjmp(label_t *);
-void	longjmp(label_t *);
+__returns_twice int	setjmp(label_t *);
+__dead void	longjmp(label_t *);
 #endif
 
 void	consinit(void);

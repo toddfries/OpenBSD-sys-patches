@@ -1,4 +1,4 @@
-/*	$OpenBSD: select.h,v 1.9 2006/03/21 08:17:33 otto Exp $	*/
+/*	$OpenBSD: select.h,v 1.13 2013/10/29 02:44:52 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -34,8 +34,18 @@
 #ifndef _SYS_SELECT_H_
 #define	_SYS_SELECT_H_
 
-#include <sys/cdefs.h>
 #include <sys/time.h>		/* for types and struct timeval */
+
+/*
+ * Currently, <sys/time.h> includes <sys/types.h> before defining timeval and
+ * timespec, and <sys/types.h> in turn includes <sys/select.h>.  So even though
+ * we include <sys/time.h> above, the compiler might not see the timeval and
+ * timespec definitions until after this header's contents have been processed.
+ *
+ * As a workaround, we forward declare timeval and timespec as structs here.
+ */
+struct timeval;
+struct timespec;
 
 /*
  * Select uses bit masks of file descriptors in longs.  These macros
@@ -52,7 +62,7 @@
  * Non-underscore versions are exposed later #if __BSD_VISIBLE
  */
 #define	__NBBY	8				/* number of bits in a byte */
-typedef int32_t	__fd_mask;
+typedef uint32_t __fd_mask;
 #define __NFDBITS ((unsigned)(sizeof(__fd_mask) * __NBBY)) /* bits per mask */
 #define	__howmany(x, y)	(((x) + ((y) - 1)) / (y))
 
@@ -61,18 +71,13 @@ typedef	struct fd_set {
 } fd_set;
 
 #define	FD_SET(n, p) \
-	((p)->fds_bits[(n) / __NFDBITS] |= (1 << ((n) % __NFDBITS)))
+	((p)->fds_bits[(n) / __NFDBITS] |= (1U << ((n) % __NFDBITS)))
 #define	FD_CLR(n, p) \
-	((p)->fds_bits[(n) / __NFDBITS] &= ~(1 << ((n) % __NFDBITS)))
+	((p)->fds_bits[(n) / __NFDBITS] &= ~(1U << ((n) % __NFDBITS)))
 #define	FD_ISSET(n, p) \
-	((p)->fds_bits[(n) / __NFDBITS] & (1 << ((n) % __NFDBITS)))
-#ifdef _KERNEL
-#define	FD_COPY(f, t)	bcopy(f, t, sizeof(*(f)))
-#define	FD_ZERO(p)	bzero(p, sizeof(*(p)))
-#else
+	((p)->fds_bits[(n) / __NFDBITS] & (1U << ((n) % __NFDBITS)))
 #define	FD_COPY(f, t)	memcpy(t, f, sizeof(*(f)))
 #define	FD_ZERO(p)	memset(p, 0, sizeof(*(p)))
-#endif
 
 #if __BSD_VISIBLE
 #define	NBBY	__NBBY
@@ -84,11 +89,19 @@ typedef	struct fd_set {
 #endif /* __BSD_VISIBLE */
 
 #ifndef _KERNEL
+#ifndef _SIGSET_T_DEFINED_
+#define _SIGSET_T_DEFINED_
+typedef unsigned int sigset_t;
+#endif
+
 #ifndef _SELECT_DEFINED_
 #define _SELECT_DEFINED_
 __BEGIN_DECLS
-struct timeval;
-int	select(int, fd_set *, fd_set *, fd_set *, struct timeval *);
+int	select(int, fd_set * __restrict, fd_set * __restrict,
+	    fd_set * __restrict, struct timeval * __restrict);
+int	pselect(int, fd_set * __restrict, fd_set * __restrict,
+	    fd_set * __restrict, const struct timespec * __restrict,
+	    const sigset_t * __restrict);
 __END_DECLS
 #endif
 #endif /* !_KERNEL */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: in_pcb.h,v 1.71 2011/06/15 09:11:01 mikeb Exp $	*/
+/*	$OpenBSD: in_pcb.h,v 1.81 2013/10/23 19:57:50 deraadt Exp $	*/
 /*	$NetBSD: in_pcb.h,v 1.14 1996/02/13 23:42:00 christos Exp $	*/
 
 /*
@@ -70,6 +70,8 @@
 #include <netinet/icmp6.h>
 #include <netinet/ip_ipsp.h>
 
+struct pf_state_key;
+
 union inpaddru {
 	struct in6_addr iau_addr6;
 	struct {
@@ -140,14 +142,15 @@ struct inpcb {
 	struct ipsec_ref *inp_ipsec_remoteauth;
 #define	inp_flowinfo	inp_hu.hu_ipv6.ip6_flow
 
-	int	in6p_cksum;
+	int	inp_cksum6;
 #ifndef _KERNEL
-#define inp_csumoffset	in6p_cksum
+#define inp_csumoffset	inp_cksum6
 #endif
 	struct	icmp6_filter *inp_icmp6filt;
-	void	*inp_pf_sk;
+	struct	pf_state_key *inp_pf_sk;
 	u_int	inp_rtableid;
 	int	inp_pipex;		/* pipex indication */
+	int	inp_divertfl;		/* divert flags */
 };
 
 struct inpcbtable {
@@ -175,6 +178,7 @@ struct inpcbtable {
 #define	INP_RECVTTL	0x040	/* receive incoming IP TTL */
 #define	INP_RECVDSTPORT	0x200	/* receive IP dst addr before rdr */
 #define	INP_RECVRTABLE	0x400	/* receive routing table */
+#define	INP_IPSECFLOWINFO 0x800	/* receive IPsec flow info */
 
 #define	INP_CONTROLOPTS	(INP_RECVOPTS|INP_RECVRETOPTS|INP_RECVDSTADDR| \
 	    INP_RXSRCRT|INP_HOPLIMIT|INP_RECVIF|INP_RECVTTL|INP_RECVDSTPORT| \
@@ -186,15 +190,12 @@ struct inpcbtable {
  */
 #define	INP_IPV6	0x100	/* sotopf(inp->inp_socket) == PF_INET6 */
 
-#if 1	/*KAME*/
 /*
- * Flags in in6p_flags
- * We define KAME's original flags in higher 16 bits as much as possible
- * for compatibility with *bsd*s.
- * XXX: Should IN6P_HIGHPORT and IN6P_LOWPORT be moved as well?
+ * Flags in inp_flags for IPV6
  */
 #define IN6P_HIGHPORT		INP_HIGHPORT	/* user wants "high" port */
 #define IN6P_LOWPORT		INP_LOWPORT	/* user wants "low" port */
+#define IN6P_RECVDSTPORT	INP_RECVDSTPORT	/* receive IP dst addr before rdr */
 #define IN6P_PKTINFO		0x010000 /* receive IP6 dst and I/F */
 #define IN6P_HOPLIMIT		0x020000 /* receive hoplimit */
 #define IN6P_HOPOPTS		0x040000 /* receive hop-by-hop options */
@@ -205,7 +206,6 @@ struct inpcbtable {
 #define IN6P_AUTOFLOWLABEL	0x800000 /* attach flowlabel automatically */
 
 #define IN6P_ANONPORT		0x4000000 /* port chosen for user */
-#define IN6P_FAITH		0x8000000 /* accept FAITH'ed connections */
 #define IN6P_RFC2292		0x40000000 /* used RFC2292 API on the socket */
 #define IN6P_MTU		0x80000000 /* receive path MTU */
 
@@ -214,8 +214,7 @@ struct inpcbtable {
 #define IN6P_CONTROLOPTS	(IN6P_PKTINFO|IN6P_HOPLIMIT|IN6P_HOPOPTS|\
 				 IN6P_DSTOPTS|IN6P_RTHDR|IN6P_RTHDRDSTOPTS|\
 				 IN6P_TCLASS|IN6P_AUTOFLOWLABEL|IN6P_RFC2292|\
-				 IN6P_MTU)
-#endif
+				 IN6P_MTU|IN6P_RECVDSTPORT)
 
 #define	INPLOOKUP_WILDCARD	1
 #define	INPLOOKUP_SETLOCAL	2
@@ -244,14 +243,16 @@ struct baddynamicports {
 
 #ifdef _KERNEL
 
+extern struct baddynamicports baddynamicports;
+
 #define sotopf(so)  (so->so_proto->pr_domain->dom_family)
 
 void	 in_losing(struct inpcb *);
-int	 in_pcballoc(struct socket *, void *);
-int	 in_pcbbind(void *, struct mbuf *, struct proc *);
-int	 in_pcbconnect(void *, struct mbuf *);
-void	 in_pcbdetach(void *);
-void	 in_pcbdisconnect(void *);
+int	 in_pcballoc(struct socket *, struct inpcbtable *);
+int	 in_pcbbind(struct inpcb *, struct mbuf *, struct proc *);
+int	 in_pcbconnect(struct inpcb *, struct mbuf *);
+void	 in_pcbdetach(struct inpcb *);
+void	 in_pcbdisconnect(struct inpcb *);
 struct inpcb *
 	 in_pcbhashlookup(struct inpcbtable *, struct in_addr,
 			       u_int, struct in_addr, u_int, u_int);
@@ -260,11 +261,12 @@ struct inpcb *
 	    struct mbuf *, u_int);
 #ifdef INET6
 struct inpcb *
-	 in6_pcbhashlookup(struct inpcbtable *, struct in6_addr *,
-			       u_int, struct in6_addr *, u_int);
+	 in6_pcbhashlookup(struct inpcbtable *, const struct in6_addr *,
+			       u_int, const struct in6_addr *, u_int, u_int);
 struct inpcb *
 	 in6_pcblookup_listen(struct inpcbtable *,
-			       struct in6_addr *, u_int, int, struct mbuf *);
+			       struct in6_addr *, u_int, int, struct mbuf *,
+			       u_int);
 int	 in6_pcbbind(struct inpcb *, struct mbuf *, struct proc *);
 int	 in6_pcbconnect(struct inpcb *, struct mbuf *);
 int	 in6_setsockaddr(struct inpcb *, struct mbuf *);
@@ -287,8 +289,8 @@ struct rtentry *
 	in_pcbrtentry(struct inpcb *);
 
 /* INET6 stuff */
-int	in6_pcbnotify(struct inpcbtable *, struct sockaddr *,
-	u_int, struct sockaddr *, u_int, int, void *,
+int	in6_pcbnotify(struct inpcbtable *, struct sockaddr_in6 *,
+	u_int, const struct sockaddr_in6 *, u_int, u_int, int, void *,
 	void (*)(struct inpcb *, int));
 int	in6_selecthlim(struct inpcb *, struct ifnet *);
 int	in6_pcbsetport(struct in6_addr *, struct inpcb *, struct proc *);

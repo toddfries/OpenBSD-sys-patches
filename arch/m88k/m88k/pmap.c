@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.68 2011/10/25 18:38:06 miod Exp $	*/
+/*	$OpenBSD: pmap.c,v 1.75 2013/11/16 18:45:20 miod Exp $	*/
 
 /*
  * Copyright (c) 2001-2004, 2010, Miodrag Vallat.
@@ -83,6 +83,7 @@
  * VM externals
  */
 extern paddr_t last_addr;
+vaddr_t avail_start;
 vaddr_t avail_end;
 vaddr_t virtual_avail = VM_MIN_KERNEL_ADDRESS;
 vaddr_t virtual_end = VM_MAX_KERNEL_ADDRESS;
@@ -133,25 +134,34 @@ struct pmap kernel_pmap_store;
  * Cacheability settings for page tables and kernel data.
  */
 
-/* #define	CACHE_PT	(CPU_IS88100 ? CACHE_INH : CACHE_WT) */
-#define	CACHE_PT	CACHE_WT
+apr_t	pte_cmode = CACHE_WT;
+apr_t	kernel_apr = CACHE_GLOBAL | CACHE_DFL | APR_V;
+apr_t	userland_apr = CACHE_GLOBAL | CACHE_DFL | APR_V;
 
-#if defined(M88110) && defined(MULTIPROCESSOR)
-apr_t	kernel_apr_cmode = CACHE_DFL;		/* might be downgraded to WT */
-#define	KERNEL_APR_CMODE	kernel_apr_cmode
-#else
-#define	KERNEL_APR_CMODE	CACHE_DFL
-#endif
-#define	USERLAND_APR_CMODE	CACHE_DFL
-apr_t	default_apr = CACHE_GLOBAL | APR_V;
+#define	KERNEL_APR_CMODE	(kernel_apr & (CACHE_MASK & ~CACHE_GLOBAL))
+#define	USERLAND_APR_CMODE	(userland_apr & (CACHE_MASK & ~CACHE_GLOBAL))
+
+/*
+ * Address and size of the temporary firmware mapping
+ */
+paddr_t	s_firmware;
+psize_t	l_firmware;
+
+/*
+ * Current BATC values.
+ */
+
+batc_t global_dbatc[BATC_MAX];
+batc_t global_ibatc[BATC_MAX];
 
 /*
  * Internal routines
  */
 void		 pmap_changebit(struct vm_page *, int, int);
+void		 pmap_clean_page(paddr_t);
 pt_entry_t	*pmap_expand(pmap_t, vaddr_t, int);
 pt_entry_t	*pmap_expand_kmap(vaddr_t, int);
-void		 pmap_map(paddr_t, psize_t, vm_prot_t, u_int);
+void		 pmap_map(paddr_t, psize_t, vm_prot_t, u_int, boolean_t);
 pt_entry_t	*pmap_pte(pmap_t, vaddr_t);
 void		 pmap_remove_page(struct vm_page *);
 void		 pmap_remove_pte(pmap_t, vaddr_t, pt_entry_t *,
@@ -239,29 +249,91 @@ int
 pmap_translation_info(pmap_t pmap, vaddr_t va, paddr_t *pap, uint32_t *ti)
 {
 	pt_entry_t *pte;
+	vaddr_t var;
+	uint batcno;
 	int s;
 	int rv;
 
 	/*
 	 * Check for a BATC translation first.
-	 * Even though we do not use BATC yet, 88100-based designs (with
-	 * 8820x CMMUs) have two hardwired BATC entries which map the
-	 * upper 1MB (so-called `utility space') 1:1 in supervisor space.
+	 * We only use BATC for supervisor mappings (i.e. pmap_kernel()).
 	 */
+
+	if (pmap == pmap_kernel()) {
+		/*
+		 * 88100-based designs (with 8820x CMMUs) have two hardwired
+		 * BATC entries which map the upper 1MB (so-called
+		 * `utility space') 1:1 in supervisor space.
+		 */
 #ifdef M88100
-	if (CPU_IS88100 && pmap == pmap_kernel()) {
-		if (va >= BATC9_VA) {
-			*pap = va;
-			*ti = BATC9 & CACHE_MASK;
-			return PTI_BATC;
+		if (CPU_IS88100) {
+			if (va >= BATC9_VA) {
+				*pap = va;
+				*ti = 0;
+				if (BATC9 & BATC_INH)
+					*ti |= CACHE_INH;
+				if (BATC9 & BATC_GLOBAL)
+					*ti |= CACHE_GLOBAL;
+				if (BATC9 & BATC_WT)
+					*ti |= CACHE_WT;
+				return PTI_BATC;
+			}
+			if (va >= BATC8_VA) {
+				*pap = va;
+				*ti = 0;
+				if (BATC8 & BATC_INH)
+					*ti |= CACHE_INH;
+				if (BATC8 & BATC_GLOBAL)
+					*ti |= CACHE_GLOBAL;
+				if (BATC8 & BATC_WT)
+					*ti |= CACHE_WT;
+				return PTI_BATC;
+			}
 		}
-		if (va >= BATC8_VA) {
-			*pap = va;
-			*ti = BATC8 & CACHE_MASK;
-			return PTI_BATC;
+#endif
+
+		/*
+		 * Now try all DBATC entries.
+		 * Note that pmap_translation_info() might be invoked (via
+		 * pmap_extract() ) for instruction faults; we *rely* upon
+		 * the fact that all executable mappings covered by IBATC
+		 * will be:
+		 * - read-only, with no RO->RW upgrade allowed
+		 * - dual mapped by ptes, so that pmap_extract() can still
+		 *   return a meaningful result.
+		 * Should this ever change, some kernel interfaces will need
+		 * to be made aware of (and carry on to callees) whether the
+		 * address should be resolved as an instruction or data
+		 * address.
+		 */
+		var = trunc_batc(va);
+		for (batcno = 0; batcno < BATC_MAX; batcno++) {
+			vaddr_t batcva;
+			paddr_t batcpa;
+			batc_t batc;
+
+			batc = global_dbatc[batcno];
+			if ((batc & BATC_V) == 0)
+				continue;
+
+			batcva = (batc << (BATC_BLKSHIFT - BATC_VSHIFT)) &
+			    ~BATC_BLKMASK;
+			if (batcva == var) {
+				batcpa = (batc <<
+				    (BATC_BLKSHIFT - BATC_PSHIFT)) &
+				    ~BATC_BLKMASK;
+				*pap = batcpa + (va - var);
+				*ti = 0;
+				if (batc & BATC_INH)
+					*ti |= CACHE_INH;
+				if (batc & BATC_GLOBAL)
+					*ti |= CACHE_GLOBAL;
+				if (batc & BATC_WT)
+					*ti |= CACHE_WT;
+				return PTI_BATC;
+			}
 		}
 	}
-#endif
 
 	/*
 	 * Check for a regular PTE translation.
@@ -413,8 +485,7 @@ pmap_expand_kmap(vaddr_t va, int canfail)
 		bzero((void *)pa, PAGE_SIZE);
 	}
 
-	/* memory for page tables should not be writeback */
-	pmap_cache_ctrl(pa, pa + PAGE_SIZE, CACHE_PT);
+	pmap_cache_ctrl(pa, pa + PAGE_SIZE, pte_cmode);
 	sdt = SDTENT(pmap_kernel(), va);
 	*sdt = pa | SG_SO | SG_RW | PG_M | SG_V;
 	return sdt_pte(sdt, va);
@@ -449,8 +520,7 @@ pmap_expand(pmap_t pmap, vaddr_t va, int canfail)
 	}
 
 	pa = VM_PAGE_TO_PHYS(pg);
-	/* memory for page tables should not be writeback */
-	pmap_cache_ctrl(pa, pa + PAGE_SIZE, CACHE_PT);
+	pmap_cache_ctrl(pa, pa + PAGE_SIZE, pte_cmode);
 
 	*sdt = pa | SG_RW | PG_M | SG_V;
 
@@ -499,11 +569,19 @@ pmap_steal_memory(vsize_t size, vaddr_t *vstartp, vaddr_t *vendp)
  * [INTERNAL]
  * Setup a wired mapping in pmap_kernel(). Similar to pmap_kenter_pa(),
  * but allows explicit cacheability control.
+ * This is only used at bootstrap time. Mappings may also be backed up
+ * by a BATC entry if requested and possible; but note that the BATC
+ * entries set up here may be overwritten by cmmu_batc_setup() later on
+ * (which is harmless since we are creating proper ptes anyway).
  */
 void
-pmap_map(paddr_t pa, psize_t sz, vm_prot_t prot, u_int cmode)
+pmap_map(paddr_t pa, psize_t sz, vm_prot_t prot, u_int cmode,
+    boolean_t may_use_batc)
 {
 	pt_entry_t *pte, npte;
+	batc_t batc;
+	uint npg, batcno;
+	paddr_t curpa;
 
 	DPRINTF(CD_MAP, ("pmap_map(%p, %p, %x, %x)\n",
 	    pa, sz, prot, cmode));
@@ -513,22 +591,70 @@ pmap_map(paddr_t pa, psize_t sz, vm_prot_t prot, u_int cmode)
 		    pa, pa + sz);
 #endif
 
+	sz = round_page(pa + sz) - trunc_page(pa);
+	pa = trunc_page(pa);
+
 	npte = m88k_protection(prot) | cmode | PG_W | PG_V;
 #ifdef M88110
 	if (CPU_IS88110 && m88k_protection(prot) != PG_RO)
 		npte |= PG_M;
 #endif
 
-	sz = atop(round_page(pa + sz) - trunc_page(pa));
-	pa = trunc_page(pa);
-	while (sz-- != 0) {
-		if ((pte = pmap_pte(pmap_kernel(), pa)) == NULL)
-			pte = pmap_expand_kmap(pa, 0);
+	npg = atop(sz);
+	curpa = pa;
+	while (npg-- != 0) {
+		if ((pte = pmap_pte(pmap_kernel(), curpa)) == NULL)
+			pte = pmap_expand_kmap(curpa, 0);
 
-		*pte = npte | pa;
-		pa += PAGE_SIZE;
+		*pte = npte | curpa;
+		curpa += PAGE_SIZE;
 		pmap_kernel()->pm_stats.resident_count++;
 		pmap_kernel()->pm_stats.wired_count++;
+	}
+
+	if (may_use_batc) {
+		sz = round_batc(pa + sz) - trunc_batc(pa);
+		pa = trunc_batc(pa);
+
+		batc = BATC_SO | BATC_V;
+		if ((prot & VM_PROT_WRITE) == 0)
+			batc |= BATC_PROT;
+		if (cmode & CACHE_INH)
+			batc |= BATC_INH;
+		if (cmode & CACHE_WT)
+			batc |= BATC_WT;
+		batc |= BATC_GLOBAL;	/* XXX 88110 SP */
+
+		for (; sz != 0; sz -= BATC_BLKBYTES, pa += BATC_BLKBYTES) {
+			/* check if an existing BATC covers this area */
+			for (batcno = 0; batcno < BATC_MAX; batcno++) {
+				if ((global_dbatc[batcno] & BATC_V) == 0)
+					continue;
+				curpa = (global_dbatc[batcno] <<
+				    (BATC_BLKSHIFT - BATC_PSHIFT)) &
+				    ~BATC_BLKMASK;
+				if (curpa == pa)
+					break;
+			}
+
+			/*
+			 * If there is a BATC covering this range, reuse it.
+			 * We assume all BATC-possible mappings will use the
+			 * same protection and cacheability settings.
+			 */
+			if (batcno != BATC_MAX)
+				continue;
+
+			/* create a new DBATC if possible */
+			for (batcno = BATC_MAX; batcno != 0; batcno--) {
+				if (global_dbatc[batcno - 1] & BATC_V)
+					continue;
+				global_dbatc[batcno - 1] = batc |
+				    ((pa >> BATC_BLKSHIFT) << BATC_PSHIFT) |
+				    ((pa >> BATC_BLKSHIFT) << BATC_VSHIFT);
+				break;
+			}
+		}
 	}
 }
 
@@ -539,20 +665,20 @@ pmap_map(paddr_t pa, psize_t sz, vm_prot_t prot, u_int cmode)
 void
 pmap_bootstrap(paddr_t s_rom, paddr_t e_rom)
 {
-	paddr_t s_text, e_text;
-	unsigned int nsdt, npdt;
+	paddr_t s_low, s_text, e_rodata;
+	unsigned int npdtpg, nsdt, npdt;
 	unsigned int i;
 	sdt_entry_t *sdt;
-	pt_entry_t *pdt, template;
-	paddr_t pa, sptpa, eptpa;
+	pt_entry_t *pte, template;
+	paddr_t pa, sdtpa, ptepa;
 	const struct pmap_table *ptable;
 	extern void *kernelstart;
-	extern void *etext;
+	extern void *erodata;
 
 	virtual_avail = (vaddr_t)avail_end;
 
 	s_text = trunc_page((vaddr_t)&kernelstart);
-	e_text = round_page((vaddr_t)&etext);
+	e_rodata = round_page((vaddr_t)&erodata);
 
 	/*
 	 * Reserve space for 1:1 memory mapping in supervisor space.
@@ -568,14 +694,46 @@ pmap_bootstrap(paddr_t s_rom, paddr_t e_rom)
 	DPRINTF(CD_BOOT, ("avail_end %08x pages %08x nsdt %08x npdt %08x\n",
 	    avail_end, atop(avail_end), nsdt, npdt));
 
-	sdt = (sdt_entry_t *)uvm_pageboot_alloc(PAGE_SIZE);
-	pdt = (pt_entry_t *)
-	    uvm_pageboot_alloc(round_page(npdt * sizeof(pt_entry_t)));
-	DPRINTF(CD_BOOT, ("kernel sdt %p", sdt));
-	sptpa = (paddr_t)sdt;
+	/*
+	 * Since page tables may need specific cacheability settings,
+	 * we need to make sure they will not end up in the BATC
+	 * mapping the end of the kernel data.
+	 *
+	 * The CMMU initialization code will try, whenever possible, to
+	 * setup 512KB BATC entries to map the kernel text and data,
+	 * therefore platform-specific code is expected to register a
+	 * non-overlapping range of pages (so that their cacheability
+	 * can be controlled at the PTE level).
+	 *
+	 * If there is enough room between the firmware image and the
+	 * beginning of the BATC-mapped region, we will setup the
+	 * initial page tables there (and actually try to setup as many
+	 * second level pages as possible, since this memory is not
+	 * given to the VM system).
+	 */
+
+	npdtpg = atop(round_page(npdt * sizeof(pt_entry_t)));
+	s_low = trunc_batc(s_text);
+
+	if (e_rom == 0)
+		s_rom = e_rom = PAGE_SIZE;
+	DPRINTF(CD_BOOT, ("nsdt %d npdt %d npdtpg %d\n", nsdt, npdt, npdtpg));
+	DPRINTF(CD_BOOT, ("area below the kernel %p-%p: %d pages, need %d\n",
+	    e_rom, s_low, atop(s_low - e_rom), npdtpg + 1));
+	if (e_rom < s_low && npdtpg + 1 <= atop(s_low - e_rom)) {
+		sdtpa = e_rom;
+		ptepa = sdtpa + PAGE_SIZE;
+	} else {
+		sdtpa = (paddr_t)uvm_pageboot_alloc(PAGE_SIZE);
+		ptepa = (paddr_t)uvm_pageboot_alloc(ptoa(npdtpg));
+	}
+
+	sdt = (sdt_entry_t *)sdtpa;
+	pte = (pt_entry_t *)ptepa;
 	pmap_kernel()->pm_stab = sdt;
-	pa = (paddr_t)pdt;
-	eptpa = pa + round_page(npdt * sizeof(pt_entry_t));
+
+	DPRINTF(CD_BOOT, ("kernel sdt %p", sdt));
+	pa = ptepa;
 	for (i = nsdt; i != 0; i--) {
 		*sdt++ = pa | SG_SO | SG_RW | PG_M | SG_V;
 		pa += PAGE_SIZE;
@@ -583,41 +741,45 @@ pmap_bootstrap(paddr_t s_rom, paddr_t e_rom)
 	DPRINTF(CD_BOOT, ("-%p\n", sdt));
 	for (i = (PAGE_SIZE / sizeof(sdt_entry_t)) - nsdt; i != 0; i--)
 		*sdt++ = SG_NV;
-	KDASSERT((vaddr_t)sdt == (vaddr_t)pdt);
-	DPRINTF(CD_BOOT, ("kernel pdt %p", pdt));
+	KDASSERT((vaddr_t)sdt == ptepa);
 
+	DPRINTF(CD_BOOT, ("kernel pte %p", pte));
 	/* memory below the kernel image */
 	for (i = atop(s_text); i != 0; i--)
-		*pdt++ = PG_NV;
-	/* kernel text */
+		*pte++ = PG_NV;
+	/* kernel text and rodata */
 	pa = s_text;
-	for (i = atop(e_text) - atop(pa); i != 0; i--) {
-		*pdt++ = pa | PG_SO | PG_RO | PG_W | PG_V;
+	for (i = atop(e_rodata) - atop(pa); i != 0; i--) {
+		*pte++ = pa | PG_SO | PG_RO | PG_W | PG_V;
 		pa += PAGE_SIZE;
 	}
 	/* kernel data and symbols */
-	for (i = atop(sptpa) - atop(pa); i != 0; i--) {
+	for (i = atop(avail_start) - atop(pa); i != 0; i--) {
 #ifdef MULTIPROCESSOR
-		*pdt++ = pa | PG_SO | PG_RW | PG_M_U | PG_W | PG_V | CACHE_WT;
+		*pte++ = pa | PG_SO | PG_RW | PG_M_U | PG_W | PG_V | CACHE_WT;
 #else
-		*pdt++ = pa | PG_SO | PG_RW | PG_M_U | PG_W | PG_V;
+		*pte++ = pa | PG_SO | PG_RW | PG_M_U | PG_W | PG_V;
 #endif
-		pa += PAGE_SIZE;
-	}
-	/* kernel page tables */
-	template = PG_SO | PG_RW | PG_M_U | PG_W | PG_V | CACHE_PT;
-	for (i = atop(eptpa) - atop(pa); i != 0; i--) {
-		*pdt++ = pa | template;
 		pa += PAGE_SIZE;
 	}
 	/* regular memory */
 	for (i = atop(avail_end) - atop(pa); i != 0; i--) {
-		*pdt++ = pa | PG_SO | PG_RW | PG_M_U | PG_V;
+		*pte++ = pa | PG_SO | PG_RW | PG_M_U | PG_V;
 		pa += PAGE_SIZE;
 	}
-	DPRINTF(CD_BOOT, ("-%p, pa %08x\n", pdt, pa));
-	for (i = (pt_entry_t *)round_page((vaddr_t)pdt) - pdt; i != 0; i--)
-		*pdt++ = PG_NV;
+	DPRINTF(CD_BOOT, ("-%p, pa %08x\n", pte, pa));
+	for (i = (pt_entry_t *)round_page((vaddr_t)pte) - pte; i != 0; i--)
+		*pte++ = PG_NV;
+
+	/* kernel page tables */
+	pte_cmode = cmmu_pte_cmode();
+	template = PG_SO | PG_RW | PG_M_U | PG_W | PG_V | pte_cmode;
+	pa = sdtpa;
+	pte = (pt_entry_t *)ptepa + atop(pa);
+	for (i = 1 + npdtpg; i != 0; i--) {
+		*pte++ = pa | template;
+		pa += PAGE_SIZE;
+	}
 
 	/*
 	 * Create all the machine-specific mappings.
@@ -626,33 +788,39 @@ pmap_bootstrap(paddr_t s_rom, paddr_t e_rom)
 	 * XXX VM_MAX_KERNEL_ADDRESS.
 	 */
 
-	if (e_rom != s_rom)
-		pmap_map(s_rom, e_rom - s_rom, UVM_PROT_RW, CACHE_INH);
+	if (e_rom != s_rom) {
+		s_firmware = s_rom;
+		l_firmware = e_rom - s_rom;
+		pmap_map(s_firmware, l_firmware, UVM_PROT_RW, CACHE_INH, FALSE);
+	}
+
 	for (ptable = pmap_table_build(); ptable->size != (vsize_t)-1; ptable++)
 		if (ptable->size != 0)
 			pmap_map(ptable->start, ptable->size,
-			    ptable->prot, ptable->cacheability);
+			    ptable->prot, ptable->cacheability,
+			    ptable->may_use_batc);
+
+	/*
+	 * Adjust cache settings according to the hardware we are running on.
+	 */
+
+	kernel_apr = (kernel_apr & ~(CACHE_MASK & ~CACHE_GLOBAL)) |
+	    cmmu_apr_cmode();
+#if defined(M88110) && !defined(MULTIPROCESSOR)
+	if (CPU_IS88110)
+		kernel_apr &= ~CACHE_GLOBAL;
+#endif
+	userland_apr = (userland_apr & ~CACHE_MASK) | (kernel_apr & CACHE_MASK);
 
 	/*
 	 * Switch to using new page tables
 	 */
 
-#if defined(M88110)
-	if (CPU_IS88110) {
-#ifdef MULTIPROCESSOR
-		/* XXX until whatever causes the kernel to hang without
-		   XXX is understood and fixed */
-		kernel_apr_cmode = CACHE_WT;
-#else
-		default_apr &= ~CACHE_GLOBAL;
-#endif
-	}
-#endif
 	pmap_kernel()->pm_count = 1;
-	pmap_kernel()->pm_apr = sptpa | default_apr | KERNEL_APR_CMODE;
+	pmap_kernel()->pm_apr = sdtpa | kernel_apr;
 
 	DPRINTF(CD_BOOT, ("default apr %08x kernel apr %08x\n",
-	    default_apr, sptpa));
+	    kernel_apr, sdtpa));
 
 	pmap_bootstrap_cpu(cpu_number());
 }
@@ -669,7 +837,23 @@ pmap_bootstrap_cpu(cpuid_t cpu)
 #ifdef PMAPDEBUG
 	printf("cpu%d: running virtual\n", cpu);
 #endif
+
+	cmmu_batc_setup(cpu, kernel_apr & CACHE_MASK);
+
 	curcpu()->ci_curpmap = NULL;
+}
+
+/*
+ * [MD]
+ * Remove firmware mappings when they are no longer necessary.
+ */
+void
+pmap_unmap_firmware()
+{
+	if (l_firmware != 0) {
+		pmap_kremove(s_firmware, l_firmware);
+		pmap_update(pmap_kernel());
+	}
 }
 
 /*
@@ -712,11 +896,10 @@ pmap_create(void)
 	}
 
 	pa = VM_PAGE_TO_PHYS(pg);
-	/* memory for page tables should not be writeback */
-	pmap_cache_ctrl(pa, pa + PAGE_SIZE, CACHE_PT);
+	pmap_cache_ctrl(pa, pa + PAGE_SIZE, pte_cmode);
 
 	pmap->pm_stab = (sdt_entry_t *)pa;
-	pmap->pm_apr = pa | default_apr | USERLAND_APR_CMODE;
+	pmap->pm_apr = pa | userland_apr;
 	pmap->pm_count = 1;
 
 	DPRINTF(CD_CREAT, ("pmap_create() -> pmap %p, pm_stab %p\n", pmap, pa));
@@ -1090,9 +1273,7 @@ pmap_remove_pte(pmap_t pmap, vaddr_t va, pt_entry_t *pte, struct vm_page *pg,
 			 * code without getting a chance of writeback),
 			 * we make sure the page gets written back.
 			 */
-			if (KERNEL_APR_CMODE == CACHE_DFL ||
-			    USERLAND_APR_CMODE == CACHE_DFL)
-				cmmu_dcache_wb(cpu_number(), pa, PAGE_SIZE);
+			pmap_clean_page(pa);
 		}
 	} else {
 		prev->pv_next = cur->pv_next;
@@ -1197,13 +1378,10 @@ pmap_kremove(vaddr_t va, vsize_t len)
 					 * Make sure the page is written back
 					 * if it was cached.
 					 */
-					if (KERNEL_APR_CMODE == CACHE_DFL &&
-					    (opte & (CACHE_INH | CACHE_WT)) ==
-					    0) {
-						cmmu_dcache_wb(cpu_number(),
-						    ptoa(PG_PFNUM(opte)),
-						    PAGE_SIZE);
-					}
+					if ((opte & (CACHE_INH | CACHE_WT)) ==
+					    0)
+						pmap_clean_page(
+						    ptoa(PG_PFNUM(opte)));
 				}
 				va += PAGE_SIZE;
 				pte++;
@@ -1622,6 +1800,30 @@ pmap_page_protect(struct vm_page *pg, vm_prot_t prot)
  */
 
 /*
+ * [INTERNAL]
+ * Writeback the data cache for the given page, on all processors.
+ */
+void
+pmap_clean_page(paddr_t pa)
+{
+	struct cpu_info *ci;
+#ifdef MULTIPROCESSOR
+	CPU_INFO_ITERATOR cpu;
+#endif
+
+	if (KERNEL_APR_CMODE != CACHE_DFL && USERLAND_APR_CMODE != CACHE_DFL)
+		return;
+
+#ifdef MULTIPROCESSOR
+	CPU_INFO_FOREACH(cpu, ci)
+#else
+	ci = curcpu();
+#endif
+	/* CPU_INFO_FOREACH(cpu, ci) */
+		cmmu_dcache_wb(ci->ci_cpuid, pa, PAGE_SIZE);
+}
+
+/*
  * [MI]
  * Flushes instruction cache for the range `va'..`va'+`len' in proc `p'.
  */
@@ -1632,6 +1834,9 @@ pmap_proc_iflush(struct proc *p, vaddr_t va, vsize_t len)
 	paddr_t pa;
 	vsize_t count;
 	struct cpu_info *ci;
+
+	if (KERNEL_APR_CMODE != CACHE_DFL && USERLAND_APR_CMODE != CACHE_DFL)
+		return;
 
 	while (len != 0) {
 		count = min(len, PAGE_SIZE - (va & PAGE_MASK));
@@ -1644,6 +1849,9 @@ pmap_proc_iflush(struct proc *p, vaddr_t va, vsize_t len)
 			ci = curcpu();
 #endif
 			/* CPU_INFO_FOREACH(cpu, ci) */ {
+				cmmu_dcache_wb(ci->ci_cpuid, pa, count);
+				/* XXX this should not be necessary, */
+				/* XXX I$ is configured to snoop D$ */
 				cmmu_icache_inv(ci->ci_cpuid, pa, count);
 			}
 		}
@@ -1740,7 +1948,8 @@ pmap_cache_ctrl(vaddr_t sva, vaddr_t eva, u_int mode)
 					if (mode & CACHE_INH)
 						cmmu_cache_wbinv(cpu,
 						    pa, PAGE_SIZE);
-					else if (KERNEL_APR_CMODE == CACHE_DFL)
+					else if (KERNEL_APR_CMODE == CACHE_DFL ||
+					    USERLAND_APR_CMODE == CACHE_DFL)
 						cmmu_dcache_wb(cpu,
 						    pa, PAGE_SIZE);
 #ifdef MULTIPROCESSOR

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pool.h,v 1.41 2011/07/05 16:36:15 tedu Exp $	*/
+/*	$OpenBSD: pool.h,v 1.44 2013/11/05 03:28:44 dlg Exp $	*/
 /*	$NetBSD: pool.h,v 1.27 2001/06/06 22:00:17 rafal Exp $	*/
 
 /*-
@@ -63,7 +63,7 @@ LIST_HEAD(pool_pagelist,pool_item_header);
 
 struct pool {
 	struct mutex	pr_mtx;
-	TAILQ_ENTRY(pool)
+	SIMPLEQ_ENTRY(pool)
 			pr_poollist;
 	struct pool_pagelist
 			pr_emptypages;	/* Empty pages */
@@ -87,7 +87,6 @@ struct pool {
 					   items */
 	unsigned int	pr_serial;	/* unique serial number of the pool */
 	struct pool_allocator *pr_alloc;/* backend allocator */
-	TAILQ_ENTRY(pool) pr_alloc_list;/* list of pools using this allocator */
 	const char	*pr_wchan;	/* tsleep(9) identifier */
 	unsigned int	pr_flags;	/* r/w flags */
 	unsigned int	pr_roflags;	/* r/o flags */
@@ -109,10 +108,6 @@ struct pool {
 	int		pr_curcolor;
 	int		pr_phoffset;	/* Offset in page of page header */
 
-	/* constructor, destructor, and arg */
-	int		(*pr_ctor)(void *, void *, int);
-	void		(*pr_dtor)(void *, void *);
-	void		*pr_arg;
 	/*
 	 * Warning message to be issued, and a per-time-delta rate cap,
 	 * if the hard limit is reached.
@@ -150,8 +145,6 @@ int		pool_sethardlimit(struct pool *, u_int, const char *, int);
 struct uvm_constraint_range; /* XXX */
 void		pool_set_constraints(struct pool *,
 		    const struct kmem_pa_mode *mode);
-void		pool_set_ctordtor(struct pool *, int (*)(void *, void *, int),
-		    void(*)(void *, void *), void *);
 
 /* these functions are locked */
 void		*pool_get(struct pool *, int) __malloc;
@@ -166,7 +159,6 @@ int		pool_prime(struct pool *, int);
  */
 void		pool_printit(struct pool *, const char *,
 		    int (*)(const char *, ...));
-int		pool_chk(struct pool *);
 void		pool_walk(struct pool *, int, int (*)(const char *, ...),
 		    void (*)(void *, int, int (*)(const char *, ...)));
 #endif

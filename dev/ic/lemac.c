@@ -1,4 +1,4 @@
-/* $OpenBSD: lemac.c,v 1.13 2009/08/10 22:08:04 deraadt Exp $ */
+/* $OpenBSD: lemac.c,v 1.15 2013/11/26 09:50:33 mpi Exp $ */
 /* $NetBSD: lemac.c,v 1.20 2001/06/13 10:46:02 wiz Exp $ */
 
 /*-
@@ -53,7 +53,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -491,6 +490,7 @@ void
 lemac_multicast_filter(struct lemac_softc *sc)
 {
 #if 0
+	struct arpcom *ac = &sc->sc_ec;
 	struct ether_multistep step;
 	struct ether_multi *enm;
 #endif
@@ -500,13 +500,14 @@ lemac_multicast_filter(struct lemac_softc *sc)
 	lemac_multicast_op(sc->sc_mctbl, etherbroadcastaddr, 1);
 
 #if 0
-	ETHER_FIRST_MULTI(step, &sc->sc_ec, enm);
+	if (ac->ac_multirangecnt > 0) {
+		sc->sc_flags |= LEMAC_ALLMULTI;
+		sc->sc_if.if_flags |= IFF_ALLMULTI;
+		return;
+	}
+
+	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (!LEMAC_ADDREQUAL(enm->enm_addrlo, enm->enm_addrhi)) {
-			sc->sc_flags |= LEMAC_ALLMULTI;
-			sc->sc_if.if_flags |= IFF_ALLMULTI;
-			return;
-		}
 		lemac_multicast_op(sc->sc_mctbl, enm->enm_addrlo, TRUE);
 		ETHER_NEXT_MULTI(step, enm);
 	}

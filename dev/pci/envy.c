@@ -1,4 +1,4 @@
-/*	$OpenBSD: envy.c,v 1.50 2011/04/27 07:01:33 ratchov Exp $	*/
+/*	$OpenBSD: envy.c,v 1.56 2013/05/24 07:58:46 ratchov Exp $	*/
 /*
  * Copyright (c) 2007 Alexandre Ratchov <alex@caoua.org>
  *
@@ -42,6 +42,7 @@
 #include <dev/pci/envyvar.h>
 #include <dev/pci/envyreg.h>
 #include <machine/bus.h>
+#include <uvm/uvm.h>
 
 #ifdef ENVY_DEBUG
 #define DPRINTF(...) do { if (envydebug) printf(__VA_ARGS__); } while(0)
@@ -427,7 +428,10 @@ delta_codec_write(struct envy_softc *sc, int dev, int addr, int data)
 #define AP192K_GPIO_CSMASK	0x30
 #define AP192K_GPIO_CS(dev)	((dev) << 4)
 #define AP192K_GPIO_ADC_PWR	0x800
+#define AP192K_GPIO_ADC_DFSMASK	(3 << 9)
+#define AP192K_GPIO_ADC_DFS(v)	((v) << 9)
 #define AP192K_GPIO_MUTE	0x400000
+
 void
 ap192k_init(struct envy_softc *sc)
 {
@@ -442,10 +446,11 @@ ap192k_init(struct envy_softc *sc)
 		sc->shadow[0][AK4358_ATT(i)] = 0xff;
 	}
 
-	/* ADC */
+	/* AK5385 */
 	delay(1);
 	reg = envy_gpio_getstate(sc);
-	reg &= ~AP192K_GPIO_ADC_PWR;
+	reg &= ~(AP192K_GPIO_ADC_PWR | AP192K_GPIO_ADC_DFSMASK);
+	reg |= AP192K_GPIO_ADC_DFS(0);
 	envy_gpio_setstate(sc, reg);
 	reg |= AP192K_GPIO_ADC_PWR;
 	envy_gpio_setstate(sc, reg);
@@ -1672,7 +1677,7 @@ envyattach(struct device *parent, struct device *self, void *aux)
 		printf(": can't map interrupt\n");
 	}
 	intrstr = pci_intr_string(sc->pci_pc, ih);
-	sc->pci_ih = pci_intr_establish(sc->pci_pc, ih, IPL_AUDIO,
+	sc->pci_ih = pci_intr_establish(sc->pci_pc, ih, IPL_AUDIO | IPL_MPSAFE,
 	    envy_intr, sc, sc->dev.dv_xname);
 	if (sc->pci_ih == NULL) {
 		printf(": can't establish interrupt");
@@ -1733,7 +1738,7 @@ void *
 envy_allocm(void *self, int dir, size_t size, int type, int flags)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
-	int err, rsegs, basereg, wait;
+	int err, basereg, wait;
 	struct envy_buf *buf;
 	bus_addr_t dma_addr;
 
@@ -1752,19 +1757,14 @@ envy_allocm(void *self, int dir, size_t size, int type, int flags)
 	wait = (flags & M_NOWAIT) ? BUS_DMA_NOWAIT : BUS_DMA_WAITOK;
 
 #define ENVY_ALIGN	4
-#define ENVY_BOUNDARY	(1 << 28)
+#define ENVY_MAXADDR	((1 << 28) - 1)
 
-	err = bus_dmamem_alloc(sc->pci_dmat, buf->size, ENVY_ALIGN,
-	    sc->isht ? 0 : ENVY_BOUNDARY, &buf->seg, 1, &rsegs, wait);
-	if (err) {
-		DPRINTF("%s: dmamem_alloc: failed %d\n", DEVNAME(sc), err);
+	buf->addr = (caddr_t)uvm_km_kmemalloc_pla(kernel_map,
+	    uvm.kernel_object, buf->size, 0, UVM_KMF_NOWAIT, 0,
+	    (paddr_t)ENVY_MAXADDR, 0, 0, 1);
+	if (buf->addr == NULL) {
+		DPRINTF("%s: unable to alloc dma segment\n", DEVNAME(sc));
 		goto err_ret;
-	}
-	err = bus_dmamem_map(sc->pci_dmat, &buf->seg, rsegs, buf->size,
-	    &buf->addr, wait | BUS_DMA_COHERENT);
-	if (err) {
-		DPRINTF("%s: dmamem_map: failed %d\n", DEVNAME(sc), err);
-		goto err_free;
 	}
 	err = bus_dmamap_create(sc->pci_dmat, buf->size, 1, buf->size, 0,
 	    wait, &buf->map);
@@ -1781,7 +1781,7 @@ envy_allocm(void *self, int dir, size_t size, int type, int flags)
 	dma_addr = buf->map->dm_segs[0].ds_addr;
 	DPRINTF("%s: allocated %zd bytes dir=%d, ka=%p, da=%p\n", DEVNAME(sc),
 	    buf->size, dir, buf->addr, dma_addr);
-	if (!sc->isht && (dma_addr & ~(ENVY_BOUNDARY - 1))) {
+	if (!sc->isht && (dma_addr & ~ENVY_MAXADDR)) {
 		printf("%s: DMA address beyond 0x10000000\n", DEVNAME(sc));
 		goto err_unload;
 	}
@@ -1792,9 +1792,7 @@ envy_allocm(void *self, int dir, size_t size, int type, int flags)
  err_destroy:
 	bus_dmamap_destroy(sc->pci_dmat, buf->map);
  err_unmap:
-	bus_dmamem_unmap(sc->pci_dmat, buf->addr, buf->size);
- err_free:
-	bus_dmamem_free(sc->pci_dmat, &buf->seg, 1);
+	uvm_km_free(kernel_map, (vaddr_t)buf->addr, buf->size);
  err_ret:
 	return NULL;
 }
@@ -1818,8 +1816,7 @@ envy_freem(void *self, void *addr, int type)
 	}
 	bus_dmamap_unload(sc->pci_dmat, buf->map);
 	bus_dmamap_destroy(sc->pci_dmat, buf->map);
-	bus_dmamem_unmap(sc->pci_dmat, buf->addr, buf->size);
-	bus_dmamem_free(sc->pci_dmat, &buf->seg, 1);
+	uvm_km_free(kernel_map, (vaddr_t)&buf->addr, buf->size);
 	buf->addr = NULL;
 	DPRINTF("%s: freed buffer (mode=%d)\n", DEVNAME(sc), dir);
 }
@@ -1921,13 +1918,13 @@ envy_pintr(struct envy_softc *sc)
 	int i;
 
 	if (sc->spurious > 0 || envydebug >= 2) {
-		printf("%s: spurious = %u, start = %u.%ld\n", 
+		printf("%s: spurious = %u, start = %lld.%ld\n", 
 			DEVNAME(sc), sc->spurious,
-			sc->start_ts.tv_sec, sc->start_ts.tv_nsec);
+			(long long)sc->start_ts.tv_sec, sc->start_ts.tv_nsec);
 		for (i = 0; i < sc->nintr; i++) {
-			printf("%u.%09ld: "
+			printf("%lld.%09ld: "
 			    "active=%d/%d pos=%d/%d st=%x/%x, ctl=%x\n",
-			    sc->intrs[i].ts.tv_sec,
+			    (long long)sc->intrs[i].ts.tv_sec,
 			    sc->intrs[i].ts.tv_nsec,
 			    sc->intrs[i].iactive,
 			    sc->intrs[i].oactive,
@@ -1949,10 +1946,13 @@ envy_intr(void *self)
 	int st, err, ctl;
 	int max;
 
+	mtx_enter(&audio_lock);
 	st = envy_mt_read_1(sc, ENVY_MT_INTR);
 	mintr = envy_ccs_read(sc, ENVY_CCS_INTSTAT);
-	if (!(st & ENVY_MT_INTR_ALL) && !(mintr & ENVY_CCS_INT_MIDI0))
+	if (!(st & ENVY_MT_INTR_ALL) && !(mintr & ENVY_CCS_INT_MIDI0)) {
+		mtx_leave(&audio_lock);
 		return 0;
+	}
 	if (st & ENVY_MT_INTR_ERR) {
 		err = envy_mt_read_1(sc, ENVY_MT_ERR);
 		envy_mt_write_1(sc, ENVY_MT_ERR, err);
@@ -2021,6 +2021,7 @@ envy_intr(void *self)
 #endif
 		}
 	}
+	mtx_leave(&audio_lock);
 	return 1;
 }
 
@@ -2030,7 +2031,7 @@ envy_trigger_output(void *self, void *start, void *end, int blksz,
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
 	size_t bufsz;
-	int s, st;
+	int st;
 
 	bufsz = (char *)end - (char *)start;
 #ifdef ENVY_DEBUG
@@ -2043,7 +2044,7 @@ envy_trigger_output(void *self, void *start, void *end, int blksz,
 		return EINVAL;
 	}
 #endif
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	envy_mt_write_2(sc, ENVY_MT_PBUFSZ, bufsz / 4 - 1);
 	envy_mt_write_2(sc, ENVY_MT_PBLKSZ(sc), blksz / 4 - 1);
 
@@ -2063,7 +2064,7 @@ envy_trigger_output(void *self, void *start, void *end, int blksz,
 	st = envy_mt_read_1(sc, ENVY_MT_CTL);
 	st |= ENVY_MT_CTL_PSTART;
 	envy_mt_write_1(sc, ENVY_MT_CTL, st);
-	splx(s);
+	mtx_leave(&audio_lock);
 	return 0;
 }
 
@@ -2073,7 +2074,7 @@ envy_trigger_input(void *self, void *start, void *end, int blksz,
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
 	size_t bufsz;
-	int s, st;
+	int st;
 
 	bufsz = (char *)end - (char *)start;
 #ifdef ENVY_DEBUG
@@ -2086,7 +2087,7 @@ envy_trigger_input(void *self, void *start, void *end, int blksz,
 		return EINVAL;
 	}
 #endif
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	envy_mt_write_2(sc, ENVY_MT_RBUFSZ, bufsz / 4 - 1);
 	envy_mt_write_2(sc, ENVY_MT_RBLKSZ, blksz / 4 - 1);
 
@@ -2106,7 +2107,7 @@ envy_trigger_input(void *self, void *start, void *end, int blksz,
 	st = envy_mt_read_1(sc, ENVY_MT_CTL);
 	st |= ENVY_MT_CTL_RSTART(sc);
 	envy_mt_write_1(sc, ENVY_MT_CTL, st);
-	splx(s);
+	mtx_leave(&audio_lock);
 	return 0;
 }
 
@@ -2114,20 +2115,20 @@ int
 envy_halt_output(void *self)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
-	int s, err;
+	int err;
 
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	sc->oactive = 0;
 	if (sc->obusy) {
-		err = tsleep(&sc->obusy, PWAIT, "envyobus", 4 * hz); 
+		err = msleep(&sc->obusy, &audio_lock, PWAIT, "envyobus", 4 * hz);
 		if (err)
 			printf("%s: output DMA halt timeout\n", DEVNAME(sc));
 	}
-	splx(s);
 #ifdef ENVY_DEBUG
 	if (!sc->iactive)
 		envy_pintr(sc);
 #endif
+	mtx_leave(&audio_lock);
 	return 0;
 }
 
@@ -2135,12 +2136,12 @@ int
 envy_halt_input(void *self)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
-	int s, err;
+	int err;
 
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	sc->iactive = 0;
 	if (sc->ibusy) {
-		err = tsleep(&sc->ibusy, PWAIT, "envyibus", 4 * hz); 
+		err = msleep(&sc->ibusy, &audio_lock, PWAIT, "envyibus", 4 * hz); 
 		if (err)
 			printf("%s: input DMA halt timeout\n", DEVNAME(sc));
 	}
@@ -2148,7 +2149,7 @@ envy_halt_input(void *self)
 	if (!sc->oactive)
 		envy_pintr(sc);
 #endif
-	splx(s);
+	mtx_leave(&audio_lock);
 	return 0;
 }
 
@@ -2363,13 +2364,12 @@ envy_midi_open(void *self, int flags,
     void *arg)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
-	int s;
 
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	sc->midi_in = in;
 	sc->midi_out = out;
 	sc->midi_arg = arg;
-	splx(s);
+	mtx_leave(&audio_lock);
 	return 0;
 }
 
@@ -2377,23 +2377,25 @@ void
 envy_midi_close(void *self)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
-	int s;
 
 	tsleep(sc, PWAIT, "envymid", hz / 10);
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	sc->midi_in = NULL;
 	sc->midi_out = NULL;
-	splx(s);
+	mtx_leave(&audio_lock);
 }
 
 int
 envy_midi_output(void *self, int data)
 {
 	struct envy_softc *sc = (struct envy_softc *)self;
+	int st;
 	
-	envy_midi_wait(sc);
+	st = envy_ccs_read(sc, ENVY_CCS_MIDISTAT0);
+	if (st & ENVY_MIDISTAT_OBUSY(sc))
+		return 0;
 	envy_ccs_write(sc, ENVY_CCS_MIDIDATA0, data);
-	return 0;
+	return 1;
 }
 
 void

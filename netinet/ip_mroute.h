@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_mroute.h,v 1.15 2009/07/13 19:14:29 michele Exp $	*/
+/*	$OpenBSD: ip_mroute.h,v 1.17 2013/10/27 20:57:39 deraadt Exp $	*/
 /*	$NetBSD: ip_mroute.h,v 1.23 2004/04/21 17:49:46 itojun Exp $	*/
 
 #ifndef _NETINET_IP_MROUTE_H_
@@ -231,10 +231,6 @@ struct vif {
 	u_long	  v_bytes_out;		/* # bytes out on interface */
 	struct	  route v_route;	/* cached route if this is a tunnel */
 	struct	  timeout v_repq_ch;	/* for tbf_reprocess_q() */
-#ifdef RSVP_ISI
-	int	  v_rsvp_on;		/* # RSVP listening on this vif */
-	struct	  socket *v_rsvpd;	/* # RSVPD daemon */
-#endif /* RSVP_ISI */
 };
 
 /*
@@ -283,9 +279,6 @@ struct igmpmsg {
 struct rtdetq {
 	struct	mbuf *m;		/* a copy of the packet */
 	struct	ifnet *ifp;		/* interface pkt came in on */
-#ifdef UPCALL_TIMING
-	struct	timeval t;		/* timestamp */
-#endif /* UPCALL_TIMING */
 	struct	rtdetq *next;
 };
 
@@ -325,16 +318,6 @@ int	ip_mrouter_done(void);
 void	ip_mrouter_detach(struct ifnet *);
 void	reset_vif(struct vif *);
 void	vif_delete(struct ifnet *);
-#ifdef RSVP_ISI
-int	ip_mforward(struct mbuf *, struct ifnet *, struct ip_moptions *);
-int	legal_vif_num(int);
-int	ip_rsvp_vif_init(struct socket *, struct mbuf *);
-int	ip_rsvp_vif_done(struct socket *, struct mbuf *);
-void	ip_rsvp_force_done(struct socket *);
-void	rsvp_input(struct mbuf *, int, int);
-#else
-int	ip_mforward(struct mbuf *, struct ifnet *);
-#endif /* RSVP_ISI */
 
 #endif /* _KERNEL */
 #endif /* _NETINET_IP_MROUTE_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: malo.c,v 1.93 2011/07/03 21:35:38 dhill Exp $ */
+/*	$OpenBSD: malo.c,v 1.96 2013/11/14 12:21:13 dlg Exp $ */
 
 /*
  * Copyright (c) 2006 Claudio Jeker <claudio@openbsd.org>
@@ -19,14 +19,13 @@
 
 #include "bpfilter.h"
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/types.h>
 
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
@@ -2216,7 +2215,7 @@ malo_cmd_set_txpower(struct malo_softc *sc, unsigned int powerlevel)
 
 	bzero(body, sizeof(*body));
 	body->action = htole16(1);
-	if (powerlevel >= 0 && powerlevel < 30)
+	if (powerlevel < 30)
 		body->supportpowerlvl = htole16(5);	/* LOW */
 	else if (powerlevel >= 30 && powerlevel < 60)
 		body->supportpowerlvl = htole16(10);	/* MEDIUM */

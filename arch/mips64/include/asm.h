@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.14 2011/03/23 16:54:36 pirofti Exp $ */
+/*	$OpenBSD: asm.h,v 1.19 2013/03/28 17:41:04 martynas Exp $ */
 
 /*
  * Copyright (c) 2001-2002 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -29,12 +29,6 @@
 #define _MIPS64_ASM_H_
 
 #include <machine/regdef.h>
-
-#ifdef NEED_OLD_RM7KFIX
-#define ITLBNOPFIX      nop;nop;nop;nop;nop;nop;nop;nop;nop;nop;
-#else
-#define ITLBNOPFIX      nop;nop;nop;nop
-#endif
 
 #define	_MIPS_ISA_MIPS1	1	/* R2000/R3000 */
 #define	_MIPS_ISA_MIPS2	2	/* R4000/R6000 */
@@ -181,6 +175,30 @@
 #endif
 
 /*
+ * The following macros are here to benefit the R8000 processor:
+ * - all coprocessor 0 control registers are 64-bit
+ * - the regular nop (sll zero, zero, 0) has the drawback of using the
+ *   shifter, potentially breaking instruction dispatch if occuring after
+ *   another instruction using the shifter.
+ */
+#ifdef CPU_R8000
+#define	SSNOP	sll zero, zero, 1		/* ``ssnop'' */
+#define	NOP	PTR_ADDU zero, zero, zero	/* real nop for R8000 */
+#define	DMFC0	SSNOP; dmfc0
+#define	DMTC0	SSNOP; dmtc0
+#define	MFC0	SSNOP; dmfc0
+#define	MTC0	SSNOP; dmtc0
+#define	ERET	eret; mul k0, k0; mflo k0
+#else
+#define	NOP	nop
+#define	DMFC0	dmfc0
+#define	DMTC0	dmtc0
+#define	MFC0	mfc0
+#define	MTC0	mtc0
+#define	ERET	sync; eret
+#endif
+
+/*
  * Define -pg profile entry code.
  */
 #if defined(XGPROF) || defined(XPROF)
@@ -270,8 +288,11 @@ x: ;				\
 	.end x
 
 /*
- * WEAK ALIAS: create a weak alias
+ * STRONG_ALIAS, WEAK_ALIAS
+ *	Create a strong or weak alias.
  */
+#define STRONG_ALIAS(alias,sym) \
+	.global alias; alias = sym
 #define WEAK_ALIAS(alias,sym) \
 	.weak alias; alias = sym
 
@@ -310,5 +331,66 @@ x: ;				\
 #define GET_CPU_INFO(ci, tmp)		\
 	LA	ci, cpu_info_primary
 #endif /* MULTIPROCESSOR */
+
+/*
+ * Hazards
+ */
+
+#ifdef CPU_RM7000
+/*
+ * Due to a flaw in RM7000 1.x processors a pipeline 'drain' is
+ * required after some mtc0 instructions.
+ * Ten nops in sequence does the trick.
+ */
+#define	MTC0_HAZARD		NOP;NOP;NOP;NOP;NOP;NOP;NOP;NOP;NOP;NOP
+#define	MTC0_SR_IE_HAZARD	MTC0_HAZARD
+/*
+ * The RM7000 needs twice as much nops around tlb* instructions.
+ */
+#define	TLB_HAZARD		NOP; NOP; NOP; NOP
+#endif
+
+#ifdef CPU_R8000
+/*
+ * The R8000 needs a lot of care inserting proper superscalar dispatch breaks
+ * to prevent unwanted side-effects or avoid collisions on the internal MiscBus
+ * and the E and W stages of the pipelines.
+ *
+ * The following settings are a bit pessimistic, but better run safely than
+ * not at all.
+ */
+#define	PRE_MFC0_ADDR_HAZARD	.align 5; SSNOP
+#define	MFC0_HAZARD		SSNOP
+#define	MTC0_HAZARD		SSNOP; SSNOP; SSNOP
+#define	MTC0_SR_IE_HAZARD	MTC0_HAZARD; SSNOP
+#define	MTC0_SR_CU_HAZARD	MTC0_HAZARD; SSNOP
+#endif
+
+/* Hazard between {d,}mfc0 of COP_0_VADDR */
+#ifndef	PRE_MFC0_ADDR_HAZARD
+#define	PRE_MFC0_ADDR_HAZARD	/* nothing */
+#endif
+
+/* Hazard after {d,}mfc0 from any register */
+#ifndef	MFC0_HAZARD
+#define	MFC0_HAZARD     	/* nothing */
+#endif
+/* Hazard after {d,}mtc0 to any register */
+#ifndef	MTC0_HAZARD
+#define	MTC0_HAZARD     	NOP; NOP; NOP; NOP
+#endif
+/* Hazard after {d,}mtc0 to COP_0_SR affecting the state of interrupts */
+#ifndef	MTC0_SR_IE_HAZARD
+#define	MTC0_SR_IE_HAZARD	MTC0_HAZARD
+#endif
+/* Hazard after {d,}mtc0 to COP_0_SR affecting the state of coprocessors */
+#ifndef	MTC0_SR_CU_HAZARD
+#define	MTC0_SR_CU_HAZARD	NOP; NOP
+#endif
+
+/* Hazard before and after a tlbp, tlbr, tlbwi or tlbwr instruction */
+#ifndef	TLB_HAZARD
+#define	TLB_HAZARD		NOP; NOP
+#endif
 
 #endif /* !_MIPS64_ASM_H_ */

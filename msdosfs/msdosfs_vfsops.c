@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_vfsops.c,v 1.61 2011/07/04 20:35:35 deraadt Exp $	*/
+/*	$OpenBSD: msdosfs_vfsops.c,v 1.63 2013/04/15 15:32:19 jsing Exp $	*/
 /*	$NetBSD: msdosfs_vfsops.c,v 1.48 1997/10/18 02:54:57 briggs Exp $	*/
 
 /*-
@@ -101,10 +101,10 @@ msdosfs_mount(struct mount *mp, const char *path, void *data,
 	struct msdosfs_args args; /* will hold data from mount request */
 	/* msdosfs specific mount control block */
 	struct msdosfsmount *pmp = NULL;
-	size_t size;
+	char fname[MNAMELEN];
+	char fspec[MNAMELEN];
 	int error, flags;
 	mode_t accessmode;
-	char *fspec = NULL;
 
 	error = copyin(data, &args, sizeof(struct msdosfs_args));
 	if (error)
@@ -146,7 +146,7 @@ msdosfs_mount(struct mount *mp, const char *path, void *data,
 			}
 			pmp->pm_flags &= ~MSDOSFSMNT_RONLY;
 		}
-		if (args.fspec == 0) {
+		if (args.fspec == NULL) {
 #ifdef	__notyet__		/* doesn't work correctly with current mountd	XXX */
 			if (args.flags & MSDOSFSMNT_MNTOPT) {
 				pmp->pm_flags &= ~MSDOSFSMNT_MNTOPT;
@@ -167,13 +167,14 @@ msdosfs_mount(struct mount *mp, const char *path, void *data,
 	 * Not an update, or updating the name: look up the name
 	 * and verify that it refers to a sensible block device.
 	 */
-	fspec = malloc(MNAMELEN, M_MOUNT, M_WAITOK);
-	error = copyinstr(args.fspec, fspec, MNAMELEN - 1, &size);
+	error = copyinstr(args.fspec, fspec, sizeof(fspec), NULL);
 	if (error)
 		goto error;
-	disk_map(fspec, fspec, MNAMELEN, DM_OPENBLCK);
 
-	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fspec, p);
+	if (disk_map(fspec, fname, sizeof(fname), DM_OPENBLCK) == -1)
+		bcopy(fspec, fname, sizeof(fname));
+
+	NDINIT(ndp, LOOKUP, FOLLOW, UIO_SYSSPACE, fname, p);
 	if ((error = namei(ndp)) != 0)
 		goto error;
 
@@ -242,25 +243,26 @@ msdosfs_mount(struct mount *mp, const char *path, void *data,
 			vput(rvp);
 		}
 	}
-	(void) copyinstr(path, mp->mnt_stat.f_mntonname, MNAMELEN - 1, &size);
-	bzero(mp->mnt_stat.f_mntonname + size, MNAMELEN - size);
 
-	size = strlcpy(mp->mnt_stat.f_mntfromname, fspec, MNAMELEN - 1);
-	bzero(mp->mnt_stat.f_mntfromname + size, MNAMELEN - size);
+	bzero(mp->mnt_stat.f_mntonname, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntonname, path, MNAMELEN);
+	bzero(mp->mnt_stat.f_mntfromname, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntfromname, fname, MNAMELEN);
+	bzero(mp->mnt_stat.f_mntfromspec, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntfromspec, fspec, MNAMELEN);
 	bcopy(&args, &mp->mnt_stat.mount_info.msdosfs_args, sizeof(args));
+
 #ifdef MSDOSFS_DEBUG
 	printf("msdosfs_mount(): mp %x, pmp %x, inusemap %x\n", mp,
 	    pmp, pmp->pm_inusemap);
 #endif
+
 	return (0);
 
 error_devvp:
 	vrele(devvp);
 
 error:
-	if (fspec)
-		free(fspec, M_MOUNT);
-
 	return (error);
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: fiq.c,v 1.2 2011/09/20 22:02:11 miod Exp $	*/
+/*	$OpenBSD: fiq.c,v 1.4 2013/05/10 10:18:46 patrick Exp $	*/
 /*	$NetBSD: fiq.c,v 1.5 2002/04/03 23:33:27 thorpej Exp $	*/
 
 /*
@@ -36,8 +36,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
-
 #include <sys/param.h>
 #include <sys/systm.h>
 
@@ -69,13 +67,13 @@ static void
 fiq_installhandler(void *func, size_t size)
 {
 #if !defined(__ARM_FIQ_INDIRECT)
-	vector_page_setprot(VM_PROT_READ|VM_PROT_WRITE);
+	vector_page_setprot(VM_PROT_READ|VM_PROT_WRITE|VM_PROT_EXECUTE);
 #endif
 
 	memcpy(fiqvector, func, size);
 
 #if !defined(__ARM_FIQ_INDIRECT)
-	vector_page_setprot(VM_PROT_READ);
+	vector_page_setprot(VM_PROT_READ|VM_PROT_EXECUTE);
 #endif
 	cpu_icache_sync_range((vaddr_t) fiqvector, size);
 }

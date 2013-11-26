@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.70 2011/12/26 23:07:04 haesbaert Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.82 2013/10/05 16:58:30 guenther Exp $	*/
 /*	$NetBSD: cpu.h,v 1.1 2003/04/26 18:39:39 fvdl Exp $	*/
 
 /*-
@@ -41,15 +41,18 @@
 /*
  * Definitions unique to x86-64 cpu support.
  */
+#ifdef _KERNEL
 #include <machine/frame.h>
 #include <machine/segments.h>
-#include <machine/intrdefs.h>
 #include <machine/cacheinfo.h>
+#include <machine/intrdefs.h>
 
 #ifdef MULTIPROCESSOR
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
 #endif
+
+#endif /* _KERNEL */
 
 #include <sys/device.h>
 #include <sys/lock.h>
@@ -72,7 +75,6 @@ struct cpu_info {
 	u_int32_t ci_randseed;
 
 	u_int64_t ci_scratch;
-	u_int64_t ci_cur_fsbase;
 
 	struct proc *ci_fpcurproc;
 	struct proc *ci_fpsaveproc;
@@ -96,15 +98,27 @@ struct cpu_info {
 
 	u_int32_t	ci_feature_flags;
 	u_int32_t	ci_feature_eflags;
+	u_int32_t	ci_feature_sefflags;
 	u_int32_t	ci_signature;
 	u_int32_t	ci_family;
 	u_int32_t	ci_model;
 	u_int32_t	ci_cflushsz;
 	u_int64_t	ci_tsc_freq;
 
+#define ARCH_HAVE_CPU_TOPOLOGY
+	u_int32_t	ci_smt_id;
+	u_int32_t	ci_core_id;
+	u_int32_t	ci_pkg_id;
+
 	struct cpu_functions *ci_func;
 	void (*cpu_setup)(struct cpu_info *);
 	void (*ci_info)(struct cpu_info *);
+
+	u_int		*ci_mwait;
+/* bits in ci_mwait[0] */
+#define	MWAIT_IN_IDLE		0x1	/* don't need IPI to wake */
+#define	MWAIT_KEEP_IDLING	0x2	/* cleared by other cpus to wake me */
+#define	MWAIT_IDLING	(MWAIT_IN_IDLE | MWAIT_KEEP_IDLING)
 
 	int		ci_want_resched;
 
@@ -128,6 +142,9 @@ struct cpu_info {
 
 	struct ksensordev	ci_sensordev;
 	struct ksensor		ci_sensor;
+#ifdef GPROF
+	struct gmonparam	*ci_gmon;
+#endif
 };
 
 #define CPUF_BSP	0x0001		/* CPU is the original BSP */
@@ -135,12 +152,18 @@ struct cpu_info {
 #define CPUF_SP		0x0004		/* CPU is only processor */  
 #define CPUF_PRIMARY	0x0008		/* CPU is active primary processor */
 
+#define CPUF_IDENTIFY	0x0010		/* CPU may now identify */
+#define CPUF_IDENTIFIED	0x0020		/* CPU has been identified */
+
+#define CPUF_CONST_TSC	0x0040		/* CPU has constant TSC */
+
 #define CPUF_PRESENT	0x1000		/* CPU is present */
 #define CPUF_RUNNING	0x2000		/* CPU is running */
 #define CPUF_PAUSE	0x4000		/* CPU is paused in DDB */
 #define CPUF_GO		0x8000		/* CPU should start running */
 
 #define PROC_PC(p)	((p)->p_md.md_regs->tf_rip)
+#define PROC_STACK(p)	((p)->p_md.md_regs->tf_rsp)
 
 extern struct cpu_info cpu_info_primary;
 extern struct cpu_info *cpu_info_list;
@@ -178,6 +201,7 @@ extern struct cpu_info *cpu_info[MAXCPUS];
 void cpu_boot_secondary_processors(void);
 void cpu_init_idle_pcbs(void);    
 
+void cpu_kick(struct cpu_info *);
 void cpu_unidle(struct cpu_info *);
 
 #else /* !MULTIPROCESSOR */
@@ -189,6 +213,7 @@ extern struct cpu_info cpu_info_primary;
 
 #define curcpu()		(&cpu_info_primary)
 
+#define cpu_kick(ci)
 #define cpu_unidle(ci)
 
 #endif
@@ -202,9 +227,9 @@ extern struct cpu_info cpu_info_primary;
 
 #endif	/* MULTIPROCESSOR */
 
-#endif /* _KERNEL */
-
 #include <machine/psl.h>
+
+#endif /* _KERNEL */
 
 #ifdef MULTIPROCESSOR
 #include <sys/mplock.h>
@@ -255,6 +280,10 @@ extern int biosextmem;
 extern int cpu;
 extern int cpu_feature;
 extern int cpu_ecxfeature;
+extern int cpu_perf_eax;
+extern int cpu_perf_ebx;
+extern int cpu_perf_edx;
+extern int cpu_apmi_edx;
 extern int ecpu_ecxfeature;
 extern int cpu_id;
 extern char cpu_vendor[];
@@ -264,7 +293,6 @@ extern int cpuspeed;
 /* identcpu.c */
 void	identifycpu(struct cpu_info *);
 int	cpu_amd64speed(int *);
-void cpu_probe_features(struct cpu_info *);
 
 /* machdep.c */
 void	dumpconf(void);

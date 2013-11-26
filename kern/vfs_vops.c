@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vops.c,v 1.4 2011/07/02 15:52:25 thib Exp $	*/
+/*	$OpenBSD: vfs_vops.c,v 1.9 2013/08/13 05:52:24 guenther Exp $	*/
 /*
  * Copyright (c) 2010 Thordur I. Bjornsson <thib@openbsd.org> 
  *
@@ -45,6 +45,7 @@
 #include <sys/param.h>
 #include <sys/mount.h>
 #include <sys/vnode.h>
+#include <sys/unistd.h>
 
 #ifdef VFSLCKDEBUG
 #define ASSERT_VP_ISLOCKED(vp) do {                             \
@@ -424,15 +425,13 @@ VOP_SYMLINK(struct vnode *dvp, struct vnode **vpp,
 
 int
 VOP_READDIR(struct vnode *vp, struct uio *uio, struct ucred *cred, 
-    int *eofflag, int *ncookies, u_long **cookies)
+    int *eofflag)
 {
 	struct vop_readdir_args a;
 	a.a_vp = vp;
 	a.a_uio = uio;
 	a.a_cred = cred;
 	a.a_eofflag = eofflag;
-	a.a_ncookies = ncookies;
-	a.a_cookies = cookies;
 
 	ASSERT_VP_ISLOCKED(vp);
 
@@ -528,8 +527,8 @@ VOP_UNLOCK(struct vnode *vp, int flags, struct proc *p)
 }
 
 int
-VOP_BMAP(struct vnode *vp, daddr64_t bn, struct vnode **vpp, 
-    daddr64_t *bnp, int *runp)
+VOP_BMAP(struct vnode *vp, daddr_t bn, struct vnode **vpp, 
+    daddr_t *bnp, int *runp)
 {
 	struct vop_bmap_args a;
 	a.a_vp = vp;
@@ -562,6 +561,25 @@ int
 VOP_PATHCONF(struct vnode *vp, int name, register_t *retval)
 {
 	struct vop_pathconf_args a;
+
+	/*
+	 * Handle names that are constant across filesystem
+	 */
+	switch (name) {
+	case _PC_PATH_MAX:
+		*retval = PATH_MAX;
+		return (0);
+	case _PC_PIPE_BUF:
+		*retval = PIPE_BUF;
+		return (0);
+	case _PC_ASYNC_IO:
+	case _PC_PRIO_IO:
+	case _PC_SYNC_IO:
+		*retval = 0;
+		return (0);
+
+	}
+
 	a.a_vp = vp;
 	a.a_name = name;
 	a.a_retval = retval;

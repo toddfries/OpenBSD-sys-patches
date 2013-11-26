@@ -1,4 +1,4 @@
-/*	$OpenBSD: dev_i386.c,v 1.10 2012/03/19 15:20:16 jsing Exp $	*/
+/*	$OpenBSD: dev_i386.c,v 1.13 2012/10/30 14:06:29 jsing Exp $	*/
 
 /*
  * Copyright (c) 1996-1999 Michael Shalayeff
@@ -30,11 +30,16 @@
 #include <sys/queue.h>
 #include <sys/disklabel.h>
 #include <dev/cons.h>
-#include <dev/biovar.h>
-#include <dev/softraidvar.h>
+
 #include "libsa.h"
 #include "biosdev.h"
 #include "disk.h"
+
+#ifdef SOFTRAID
+#include <dev/biovar.h>
+#include <dev/softraidvar.h>
+#include "softraid.h"
+#endif
 
 extern int debug;
 
@@ -78,7 +83,7 @@ devopen(struct open_file *f, const char *fname, char **file)
 		else if (debug)
 			printf("%d", rc);
 #endif
-			
+
 	}
 #ifdef DEBUG
 	if (debug)
@@ -94,9 +99,13 @@ devopen(struct open_file *f, const char *fname, char **file)
 void
 devboot(dev_t bootdev, char *p)
 {
+#ifdef SOFTRAID
 	struct sr_boot_volume *bv;
 	struct sr_boot_chunk *bc;
+	struct diskinfo *dip = NULL;
+#endif
 	int sr_boot_vol = -1;
+	int part_type = FS_UNUSED;
 
 #ifdef _TEST
 	*p++ = '/';
@@ -107,14 +116,21 @@ devboot(dev_t bootdev, char *p)
 	*p++ = 'r';
 #endif
 
+#ifdef SOFTRAID
+	/*
+	 * Determine the partition type for the 'a' partition of the
+	 * boot device.
+	 */
+	TAILQ_FOREACH(dip, &disklist, list)
+		if (dip->bios_info.bios_number == bootdev &&
+		    (dip->bios_info.flags & BDI_BADLABEL) == 0)
+			part_type = dip->disklabel.d_partitions[0].p_fstype;
+
 	/*
 	 * See if we booted from a disk that is a member of a bootable
 	 * softraid volume.
 	 */
 	SLIST_FOREACH(bv, &sr_volumes, sbv_link) {
-		/* For now we only support booting from RAID 1 volumes. */
-		if (bv->sbv_level != 1)
-			continue;
 		if (bv->sbv_flags & BIOC_SCBOOTABLE)
 			SLIST_FOREACH(bc, &bv->sbv_chunks, sbc_link)
 				if (bc->sbc_disk == bootdev)
@@ -122,8 +138,9 @@ devboot(dev_t bootdev, char *p)
 		if (sr_boot_vol != -1)
 			break;
 	}
+#endif
 
-	if (sr_boot_vol != -1) {
+	if (sr_boot_vol != -1 && part_type != FS_BSDFFS) {
 		*p++ = 's';
 		*p++ = 'r';
 		*p++ = '0' + sr_boot_vol;
@@ -148,7 +165,7 @@ int pch_pos = 0;
 void
 putchar(int c)
 {
-	switch(c) {
+	switch (c) {
 	case '\177':	/* DEL erases */
 		cnputc('\b');
 		cnputc(' ');
@@ -158,9 +175,9 @@ putchar(int c)
 			pch_pos--;
 		break;
 	case '\t':
-		do
+		do {
 			cnputc(' ');
-		while(++pch_pos % 8);
+		} while (++pch_pos % 8);
 		break;
 	case '\n':
 	case '\r':
@@ -183,11 +200,11 @@ getchar(void)
 		c = '\n';
 
 	if ((c < ' ' && c != '\n') || c == '\177')
-		return(c);
+		return c;
 
 	putchar(c);
 
-	return(c);
+	return c;
 }
 
 char ttyname_buf[8];
@@ -196,9 +213,9 @@ char *
 ttyname(int fd)
 {
 	snprintf(ttyname_buf, sizeof ttyname_buf, "%s%d",
-	    cdevs[major(cn_tab->cn_dev)],
-	    minor(cn_tab->cn_dev));
-	return (ttyname_buf);
+	    cdevs[major(cn_tab->cn_dev)], minor(cn_tab->cn_dev));
+
+	return ttyname_buf;
 }
 
 dev_t
@@ -210,11 +227,11 @@ ttydev(char *name)
 	while (no >= name && *no >= '0' && *no <= '9')
 		unit = (unit < 0 ? 0 : (unit * 10)) + *no-- - '0';
 	if (no < name || unit < 0)
-		return (NODEV);
+		return NODEV;
 	for (i = 0; i < ncdevs; i++)
 		if (strncmp(name, cdevs[i], no - name + 1) == 0)
-			return (makedev(i, unit));
-	return (NODEV);
+			return makedev(i, unit);
+	return NODEV;
 }
 
 int
@@ -222,6 +239,7 @@ cnspeed(dev_t dev, int sp)
 {
 	if (major(dev) == 8)	/* comN */
 		return comspeed(dev, sp);
+
 	/* pc0 and anything else */
 	return 9600;
 }

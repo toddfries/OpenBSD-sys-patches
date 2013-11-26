@@ -1,4 +1,4 @@
-/*	$OpenBSD: exception.S,v 1.32 2010/12/28 18:40:28 miod Exp $ */
+/*	$OpenBSD: exception.S,v 1.36 2012/10/03 11:18:23 miod Exp $ */
 
 /*
  * Copyright (c) 2002-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -42,6 +42,7 @@
 #include <machine/param.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
 #ifdef CPU_LOONGSON2
@@ -129,6 +130,11 @@ u_exception_table:
  *	to the vector area and must thus be PIC and less than 128
  *	bytes long to fit. Only k0 and k1 may be used at this time.
  */
+	.globl	cache_err
+cache_err:
+#ifdef CPU_R4000
+	nop
+#endif
 	.globl	exception
 exception:
 	.set	noat
@@ -141,8 +147,8 @@ exception:
 	li	k0, COP_0_DIAG_BTB_CLEAR | COP_0_DIAG_RAS_DISABLE
 	dmtc0	k0, COP_0_DIAG
 #endif
-	mfc0	k0, COP_0_STATUS_REG
-	mfc0	k1, COP_0_CAUSE_REG
+	MFC0	k0, COP_0_STATUS_REG
+	MFC0	k1, COP_0_CAUSE_REG
 	and	k0, k0, SR_KSU_USER
 	beqz	k0, k_exception		# Kernel mode mode
 	and	k1, k1, CR_EXC_CODE
@@ -189,9 +195,8 @@ NNON_LEAF(k_intr, FRAMESZ(KERN_EXC_FRAME_SIZE), ra)
 	move	sp, k0			# Already on kernel stack
 	LA	gp, _gp
 	and	t0, a1, ~(SR_COP_1_BIT | SR_EXL | SR_INT_ENAB | SR_KSU_MASK)
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
-	ITLBNOPFIX			# XXX necessary?
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 	PTR_S	a0, 0(sp)
 	jal	interrupt
 	PTR_S	a3, CF_RA_OFFS + KERN_REG_SIZE(sp)
@@ -204,8 +209,7 @@ NNON_LEAF(k_intr, FRAMESZ(KERN_EXC_FRAME_SIZE), ra)
 #endif
 	RESTORE_CPU(sp, CF_RA_OFFS)
 	PTR_ADDU sp, sp, FRAMESZ(KERN_EXC_FRAME_SIZE)
-	sync
-	eret
+	ERET
 	.set	at
 END(k_intr)
 
@@ -229,17 +233,16 @@ NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 	LA	gp, _gp
 	.set	at
 	and	t0, a1, ~(SR_COP_1_BIT | SR_EXL | SR_INT_ENAB | SR_KSU_MASK)
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
-	ITLBNOPFIX			# XXX necessary?
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 	PTR_S	a0, 0(sp)
 	jal	interrupt
 	PTR_S	a3, CF_RA_OFFS(sp)	# for debugging
 
-	mfc0	t0, COP_0_STATUS_REG	# enable interrupts before checking
+	MFC0	t0, COP_0_STATUS_REG	# enable interrupts before checking
 	ori	t0, SR_INT_ENAB		# for ast.
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 
 	GET_CPU_INFO(t1, t0)
 0:
@@ -307,15 +310,15 @@ NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 	nop
 
 4:
-	mfc0	t0, COP_0_STATUS_REG	# disable interrupts
-	li	v0, ~SR_INT_ENAB
+	MFC0	t0, COP_0_STATUS_REG	# disable interrupts
+	LI	v0, ~SR_INT_ENAB
 	and	t0, t0, v0
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 
 	ori	t0, SR_EXL		# restoring to user mode.
-	mtc0	t0, COP_0_STATUS_REG	# must set exception level bit.
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG	# must set exception level bit.
+	MTC0_SR_IE_HAZARD
 
 	# t1 is curcpu() from earlier
 	move	k1, t1
@@ -332,8 +335,7 @@ NNON_LEAF(u_intr, FRAMESZ(CF_SZ), ra)
 	RESTORE_REG(sp, SP, k0, 0)
 	LI	k0, 0
 	LI	k1, 0
-	sync
-	eret
+	ERET
 	.set	at
 END(u_intr)
 
@@ -358,17 +360,17 @@ NNON_LEAF(k_general, FRAMESZ(KERN_EXC_FRAME_SIZE), ra)
 	move	sp, k0			# Already on kernel stack
 	LA	gp, _gp
 	and	t0, a1, ~(SR_COP_1_BIT | SR_EXL | SR_INT_ENAB | SR_KSU_MASK)
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 	PTR_S	a0, 0(sp)
 	jal	trap
 	PTR_S	a3, CF_RA_OFFS + KERN_REG_SIZE(sp)
 
-	mfc0	t0, COP_0_STATUS_REG	# disable interrupts
-	li	t1, ~SR_INT_ENAB
+	MFC0	t0, COP_0_STATUS_REG	# disable interrupts
+	LI	t1, ~SR_INT_ENAB
 	and	t0, t0, t1
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 
 	.set	noat
 #ifdef RM7000_ICR
@@ -378,8 +380,7 @@ NNON_LEAF(k_general, FRAMESZ(KERN_EXC_FRAME_SIZE), ra)
 	RESTORE_REG(a0, PC, sp, CF_RA_OFFS)
 	RESTORE_CPU(sp, CF_RA_OFFS)
 	PTR_ADDU sp, sp, FRAMESZ(KERN_EXC_FRAME_SIZE)
-	sync
-	eret
+	ERET
 	.set	at
 END(k_general)
 
@@ -402,8 +403,8 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	LA	gp, _gp
 	.set	at
 	and	t0, a1, ~(SR_COP_1_BIT | SR_EXL | SR_INT_ENAB | SR_KSU_MASK)
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 
 #ifdef PERFCNTRS
 	lw	t0, cpu_is_rm7k
@@ -446,7 +447,8 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	lw	t0, cpu_is_rm7k
 	beqz	t0, 1f			# not an RM7K. Don't do perf setup.
 
-	LOAD	t0, CI_CURPROC(k1)	# set up rm7k.
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t0, CI_CURPROC(k1)	# set up rm7k.
 	ld	v0, P_WATCH_1(t0)
 	dmtc0	v0, COP_0_WATCH_1
 	ld	v0, P_WATCH_2(t0)
@@ -462,15 +464,15 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	nop;nop;nop;nop
 1:
 #endif
-	mfc0	t0, COP_0_STATUS_REG	# disable interrupts
-	li	t1, ~SR_INT_ENAB
+	MFC0	t0, COP_0_STATUS_REG	# disable interrupts
+	LI	t1, ~SR_INT_ENAB
 	and	t0, t0, t1
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG
+	MTC0_SR_IE_HAZARD
 
 	ori	t0, SR_EXL		# restoring to user mode.
-	mtc0	t0, COP_0_STATUS_REG	# must set exception level bit.
-	ITLBNOPFIX
+	MTC0	t0, COP_0_STATUS_REG	# must set exception level bit.
+	MTC0_SR_IE_HAZARD
 
 	GET_CPU_INFO(k1, k0)
 	PTR_L	k0, CI_CURPROCPADDR(k1)
@@ -487,84 +489,6 @@ NNON_LEAF(u_general, FRAMESZ(CF_SZ), ra)
 	RESTORE_REG(sp, SP, k0, 0)
 	LI	k0, 0
 	LI	k1, 0
-	sync
-	eret
+	ERET
 	.set	at
 END(u_general)
-
-/*-------------------------------------------------------------- proc_trampoline
- *	Setup for and return to user.
- */
-LEAF(proc_trampoline, 0)
-#ifdef DDB
-	move	zero, ra
-#endif
-#ifdef MULTIPROCESSOR
-	jal	_C_LABEL(proc_trampoline_mp)
-	nop
-#endif
-	/*
-	 * Enable interrupts, since we want kernel threads to
-	 * start at spl0 and with interrupts enabled, and these
-	 * won't ``return to userland''.
-	 */
-#ifndef MULTIPROCESSOR	/* done by proc_trampoline_mp() */
-	jal	splx
-	xor	a0, a0
-#endif
-	jal	updateimask		# Make sure SR imask is updated
-	xor	a0, a0			# and interrupts enabled
-
-	jal	s0
-	move	a0,s1			# invoke callback.
-
-#if 0	/* && defined(RM7000_ICR) */
-	lw	t0, cpu_is_rm7k
-	beqz	t0, 1f			# not an RM7K. Don't do IC reg.
-
-	LOAD	t0, curproc		# set up rm7k.
-	ld	v0, P_WATCH_1(t0)
-	dmtc0	v0, COP_0_WATCH_1
-	ld	v0, P_WATCH_2(t0)
-	dmtc0	v0, COP_0_WATCH_2
-	lw	v0, P_WATCH_M(t0)
-	mtc0	v0, COP_0_WATCH_M
-	lw	v0, P_PC_CTRL(t0)
-	lw	v1, P_PC_COUNT(t0)
-	nop;nop
-	mtc0	v0, COP_0_PC_CTRL
-	nop;nop;nop;nop
-	mtc0	v1, COP_0_PC_COUNT
-	nop;nop;nop;nop
-	li	v0, IC_INT_PERF
-	ctc0	v0, COP_0_ICR		# enable perfcntr interrupt.
-1:
-#endif
-
-	mfc0	t0, COP_0_STATUS_REG
-	li	t1, ~SR_INT_ENAB
-	and	t0, t0, t1
-	mtc0	t0, COP_0_STATUS_REG
-	ITLBNOPFIX
-
-	ori	t0, SR_EXL		# restoring to user mode.
-	mtc0	t0, COP_0_STATUS_REG	# must set exception level bit.
-	ITLBNOPFIX
-
-	.set	noat
-	GET_CPU_INFO(k1, k0)
-	PTR_L	k0, CI_CURPROCPADDR(k1)
-	RESTORE_CPU_SREG(k0, 0)
-	RESTORE_REG(a0, PC, k0, 0)
-#ifdef RM7000_ICR
-	RESTORE_REG(t0, IC, k0, 0)
-	ctc0	t0, COP_0_ICR
-#endif
-	RESTORE_CPU(k0, 0)
-	RESTORE_REG(sp, SP, k0, 0)
-	LI	k0, 0
-	LI	k1, 0
-	sync
-	eret
-	.set	at
-END(proc_trampoline)

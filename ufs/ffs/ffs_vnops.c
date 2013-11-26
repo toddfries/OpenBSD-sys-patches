@@ -1,4 +1,4 @@
-/*	$OpenBSD: ffs_vnops.c,v 1.67 2011/08/16 14:36:39 thib Exp $	*/
+/*	$OpenBSD: ffs_vnops.c,v 1.72 2013/09/14 02:28:02 guenther Exp $	*/
 /*	$NetBSD: ffs_vnops.c,v 1.7 1996/05/11 18:27:24 mycroft Exp $	*/
 
 /*
@@ -201,7 +201,7 @@ ffs_read(void *v)
 	struct uio *uio;
 	struct fs *fs;
 	struct buf *bp;
-	daddr64_t lbn, nextlbn;
+	daddr_t lbn, nextlbn;
 	off_t bytesinfile;
 	long size, xfersize, blkoffset;
 	mode_t mode;
@@ -295,11 +295,10 @@ ffs_write(void *v)
 	struct inode *ip;
 	struct fs *fs;
 	struct buf *bp;
-	struct proc *p;
-	daddr64_t lbn;
+	daddr_t lbn;
 	off_t osize;
-	int blkoffset, error, extended, flags, ioflag, resid, size, xfersize;
-	extern int num_indirdep, max_indirdep;
+	int blkoffset, error, extended, flags, ioflag, size, xfersize;
+	ssize_t resid, overrun;
 
 	extended = 0;
 	ioflag = ap->a_ioflag;
@@ -340,17 +339,10 @@ ffs_write(void *v)
 	if (uio->uio_offset < 0 ||
 	    (u_int64_t)uio->uio_offset + uio->uio_resid > fs->fs_maxfilesize)
 		return (EFBIG);
-	/*
-	 * Maybe this should be above the vnode op call, but so long as
-	 * file servers have no limits, I don't think it matters.
-	 */
-	p = uio->uio_procp;
-	if (vp->v_type == VREG && p && !(ioflag & IO_NOLIMIT) &&
-	    uio->uio_offset + uio->uio_resid >
-	    p->p_rlimit[RLIMIT_FSIZE].rlim_cur) {
-		psignal(p, SIGXFSZ);
-		return (EFBIG);
-	}
+
+	/* do the filesize rlimit check */
+	if ((error = vn_fsizechk(vp, uio, ioflag, &overrun)))
+		return (error);
 
 	resid = uio->uio_resid;
 	osize = DIP(ip, size);
@@ -373,11 +365,7 @@ ffs_write(void *v)
 		if (uio->uio_offset + xfersize > DIP(ip, size)) {
 			DIP_ASSIGN(ip, size, uio->uio_offset + xfersize);
 			uvm_vnp_setsize(vp, DIP(ip, size));
-			/* Are we extending into an indirect block? */
-			if (bp->b_lblkno < NDADDR)
-				extended = 1;
-			else
-				extended = 2;
+			extended = 1;
 		}
 		(void)uvm_vnp_uncache(vp);
 
@@ -421,21 +409,11 @@ ffs_write(void *v)
 			uio->uio_offset -= resid - uio->uio_resid;
 			uio->uio_resid = resid;
 		}
-	} else if (resid > uio->uio_resid) {
-		if (ioflag & IO_SYNC)
-			error = UFS_UPDATE(ip, MNT_WAIT);
-		if (DOINGSOFTDEP(vp) && num_indirdep > max_indirdep)
-			if (extended > 1) {
-				/*
-				 * If the number of pending indirect block
-				 * dependencies is sufficiently close to the
-				 * maximum number of simultaneously mappable
-				 * buffers force a sync on the vnode to prevent
-				 * buffer cache exhaustion.
-				 */
-				VOP_FSYNC(vp, NULL, MNT_WAIT, p);
-			}
+	} else if (resid > uio->uio_resid && (ioflag & IO_SYNC)) {
+		error = UFS_UPDATE(ip, MNT_WAIT);
 	}
+	/* correct the result for writes clamped by vn_fsizechk() */
+	uio->uio_resid += overrun;
 	return (error);
 }
 

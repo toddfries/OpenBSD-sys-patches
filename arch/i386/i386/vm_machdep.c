@@ -1,4 +1,4 @@
-/*	$OpenBSD: vm_machdep.c,v 1.58 2009/06/03 00:49:12 art Exp $	*/
+/*	$OpenBSD: vm_machdep.c,v 1.60 2013/01/16 19:04:43 miod Exp $	*/
 /*	$NetBSD: vm_machdep.c,v 1.61 1996/05/03 19:42:35 christos Exp $	*/
 
 /*-
@@ -105,7 +105,6 @@ cpu_fork(struct proc *p1, struct proc *p2, void *stack, size_t stacksize,
 
 	/*
 	 * Copy the trapframe, and arrange for the child to return directly
-	 * through rei().
 	 */
 	p2->p_md.md_regs = tf = (struct trapframe *)pcb->pcb_tss.tss_esp0 - 1;
 	*tf = *p1->p_md.md_regs;
@@ -175,14 +174,13 @@ cpu_coredump(struct proc *p, struct vnode *vp, struct ucred *cred,
 	cseg.c_size = chdr->c_cpusize;
 
 	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&cseg, chdr->c_seghdrsize,
-	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE, IO_NODELOCKED|IO_UNIT, cred,
-	    NULL, p);
+	    (off_t)chdr->c_hdrsize, UIO_SYSSPACE, IO_UNIT, cred, NULL, p);
 	if (error)
 		return error;
 
 	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&md_core, sizeof(md_core),
 	    (off_t)(chdr->c_hdrsize + chdr->c_seghdrsize), UIO_SYSSPACE,
-	    IO_NODELOCKED|IO_UNIT, cred, NULL, p);
+	    IO_UNIT, cred, NULL, p);
 	if (error)
 		return error;
 

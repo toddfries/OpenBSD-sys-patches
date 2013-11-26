@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.121 2011/11/02 23:53:44 jsg Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.131 2013/10/09 01:48:41 guenther Exp $	*/
 /*	$NetBSD: cpu.h,v 1.35 1996/05/05 19:29:26 christos Exp $	*/
 
 /*-
@@ -41,6 +41,7 @@
 /*
  * Definitions unique to i386 cpu support.
  */
+#ifdef _KERNEL
 #include <machine/frame.h>
 #include <machine/psl.h>
 #include <machine/segments.h>
@@ -50,6 +51,8 @@
 #include <machine/i82489reg.h>
 #include <machine/i82489var.h>
 #endif
+
+#endif /* _KERNEL */
 
 /*
  * Arguments to hardclock, softclock and statclock
@@ -82,10 +85,6 @@ struct cpu_info {
 	struct simplelock ci_slock;	/* lock on this data structure */
 	cpuid_t ci_cpuid; 		/* our CPU ID */
 	u_int ci_apicid;		/* our APIC ID */
-#if defined(DIAGNOSTIC) || defined(LOCKDEBUG)
-	u_long ci_spin_locks;		/* # of spin locks held */
-	u_long ci_simple_locks;		/* # of simple locks held */
-#endif
 	u_int32_t ci_randseed;
 
 	/*
@@ -120,11 +119,18 @@ struct cpu_info {
 	u_int32_t	ci_family;		/* extended cpuid family */
 	u_int32_t	ci_model;		/* extended cpuid model */
 	u_int32_t	ci_feature_flags;	/* X86 CPUID feature bits */
+	u_int32_t	ci_feature_sefflags;	/* more CPUID feature bits */
 	u_int32_t	cpu_class;		/* CPU class */
 	u_int32_t	ci_cflushsz;		/* clflush cache-line size */
 
 	struct cpu_functions *ci_func;	/* start/stop functions */
 	void (*cpu_setup)(struct cpu_info *);	/* proc-dependant init */
+
+	u_int		*ci_mwait;
+/* bits in ci_mwait[0] */
+#define	MWAIT_IN_IDLE		0x1	/* don't need IPI to wake */
+#define	MWAIT_KEEP_IDLING	0x2	/* cleared by other cpus to wake me */
+#define	MWAIT_IDLING		(MWAIT_IN_IDLE | MWAIT_KEEP_IDLING)
 
 	int		ci_want_resched;
 
@@ -147,6 +153,9 @@ struct cpu_info {
 
 	struct ksensordev	ci_sensordev;
 	struct ksensor		ci_sensor;
+#ifdef GPROF
+	struct gmonparam	*ci_gmon;
+#endif
 };
 
 /*
@@ -162,6 +171,7 @@ struct cpu_info {
 #define	CPUF_SP		0x0004		/* CPU is only processor */
 #define	CPUF_PRIMARY	0x0008		/* CPU is active primary processor */
 #define	CPUF_APIC_CD	0x0010		/* CPU has apic configured */
+#define	CPUF_CONST_TSC	0x0020		/* CPU has constant TSC */
 
 #define	CPUF_PRESENT	0x1000		/* CPU is present */
 #define	CPUF_RUNNING	0x2000		/* CPU is running */
@@ -210,6 +220,7 @@ extern struct cpu_info	*cpu_info[MAXCPUS];
 extern void cpu_boot_secondary_processors(void);
 extern void cpu_init_idle_pcbs(void);
 
+void cpu_kick(struct cpu_info *);
 void cpu_unidle(struct cpu_info *);
 
 #else /* MULTIPROCESSOR */
@@ -221,6 +232,7 @@ void cpu_unidle(struct cpu_info *);
 
 #define CPU_IS_PRIMARY(ci)	1
 
+#define cpu_kick(ci)
 #define cpu_unidle(ci)
 
 #endif
@@ -246,6 +258,7 @@ extern void need_resched(struct cpu_info *);
  * This is used during profiling to integrate system time.
  */
 #define	PROC_PC(p)		((p)->p_md.md_regs->tf_eip)
+#define	PROC_STACK(p)		((p)->p_md.md_regs->tf_esp)
 
 /*
  * Give a profiling tick to the current process when the user profiling
@@ -318,6 +331,10 @@ extern int cpu_cache_eax;
 extern int cpu_cache_ebx;
 extern int cpu_cache_ecx;
 extern int cpu_cache_edx;
+extern int cpu_perf_eax;
+extern int cpu_perf_ebx;
+extern int cpu_perf_edx;
+extern int cpu_apmi_edx;
 
 /* machdep.c */
 extern int cpu_apmhalt;
@@ -388,7 +405,7 @@ void	i8254_inittimecounter_simple(void);
 
 #if !defined(SMALL_KERNEL)
 /* est.c */
-void	est_init(const char *, int);
+void	est_init(struct cpu_info *, int);
 void	est_setperf(int);
 /* longrun.c */
 void	longrun_init(void);

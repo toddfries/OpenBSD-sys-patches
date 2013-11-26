@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.93 2011/09/18 11:17:58 miod Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.112 2013/11/21 09:08:38 mpi Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -47,14 +47,13 @@
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
+#include <sys/timeout.h>
 #include <sys/kernel.h>
 #include <sys/syslog.h>
-#include <sys/proc.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
 #include <net/route.h>
-#include <net/if_fddi.h>
 #include <net/if_types.h>
 
 #include <netinet/in.h>
@@ -63,8 +62,10 @@
 #if NCARP > 0
 #include <netinet/ip_carp.h>
 #endif
+#if NBRIDGE > 0
+#include <net/if_bridge.h>
+#endif
 
-#define SIN(s) ((struct sockaddr_in *)s)
 #define SDL(s) ((struct sockaddr_dl *)s)
 #define SRP(s) ((struct sockaddr_inarp *)s)
 
@@ -93,20 +94,23 @@ int	useloopback = 1;	/* use loopback interface for local traffic */
 int	arpinit_done;
 int	la_hold_total;
 
+#ifdef NFSCLIENT
 /* revarp state */
-struct in_addr myip, srv_ip;
-int myip_initialized;
+struct in_addr revarp_myip, revarp_srvip;
+int revarp_finished;
 int revarp_in_progress;
-struct ifnet *myip_ifp;
+struct ifnet *revarp_ifp;
+#endif /* NFSCLIENT */
 
 #ifdef DDB
-#include <uvm/uvm_extern.h>
 
 void	db_print_sa(struct sockaddr *);
 void	db_print_ifa(struct ifaddr *);
 void	db_print_llinfo(caddr_t);
 int	db_show_radix_node(struct radix_node *, void *, u_int);
 #endif
+
+static const struct sockaddr_dl null_sdl = { sizeof(null_sdl), AF_LINK };
 
 /*
  * Timeout routine.  Age arp_tab entries periodically.
@@ -121,8 +125,7 @@ arptimer(void *arg)
 
 	s = splsoftnet();
 	timeout_add_sec(to, arpt_prune);
-	for (la = LIST_FIRST(&llinfo_arp); la != LIST_END(&llinfo_arp);
-	    la = nla) {
+	for (la = LIST_FIRST(&llinfo_arp); la != NULL; la = nla) {
 		struct rtentry *rt = la->la_rt;
 
 		nla = LIST_NEXT(la, la_list);
@@ -136,12 +139,10 @@ arptimer(void *arg)
  * Parallel to llc_rtrequest.
  */
 void
-arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
+arp_rtrequest(int req, struct rtentry *rt)
 {
 	struct sockaddr *gate = rt->rt_gateway;
 	struct llinfo_arp *la = (struct llinfo_arp *)rt->rt_llinfo;
-	static struct sockaddr_dl null_sdl = {sizeof(null_sdl), AF_LINK};
-	struct in_ifaddr *ia;
 	struct ifaddr *ifa;
 	struct mbuf *m;
 
@@ -162,24 +163,8 @@ arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 		timeout_add_sec(&arptimer_to, 1);
 	}
 
-	if (rt->rt_flags & RTF_GATEWAY) {
-		if (req != RTM_ADD)
-			return;
-
-		/*
-		 * linklayers with particular link MTU limitation.  it is a bit
-		 * awkward to have FDDI handling here, we should split ARP from
-		 * netinet/if_ether.c like NetBSD does.
-		 */
-		switch (rt->rt_ifp->if_type) {
-		case IFT_FDDI:
-			if (rt->rt_ifp->if_mtu > FDDIIPMTU)
-				rt->rt_rmx.rmx_mtu = FDDIIPMTU;
-			break;
-		}
-
+	if (rt->rt_flags & RTF_GATEWAY)
 		return;
-	}
 
 	switch (req) {
 
@@ -189,8 +174,8 @@ arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 		 * such as older version of routed or gated might provide,
 		 * restore cloning bit.
 		 */
-		if ((rt->rt_flags & RTF_HOST) == 0 &&
-		    SIN(rt_mask(rt))->sin_addr.s_addr != 0xffffffff)
+		if ((rt->rt_flags & RTF_HOST) == 0 && rt_mask(rt) &&
+		    satosin(rt_mask(rt))->sin_addr.s_addr != 0xffffffff)
 			rt->rt_flags |= RTF_CLONING;
 		if (rt->rt_flags & RTF_CLONING) {
 			/*
@@ -208,30 +193,18 @@ arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 			 * from it do not need their expiration time set.
 			 */
 			rt->rt_expire = time_second;
-			/*
-			 * linklayers with particular link MTU limitation.
-			 */
-			switch (rt->rt_ifp->if_type) {
-			case IFT_FDDI:
-				if ((rt->rt_rmx.rmx_locks & RTV_MTU) == 0 &&
-				    (rt->rt_rmx.rmx_mtu > FDDIIPMTU ||
-				     (rt->rt_rmx.rmx_mtu == 0 &&
-				      rt->rt_ifp->if_mtu > FDDIIPMTU)))
-					rt->rt_rmx.rmx_mtu = FDDIIPMTU;
-				break;
-			}
 			break;
 		}
 		/* Announce a new entry if requested. */
 		if (rt->rt_flags & RTF_ANNOUNCE)
 			arprequest(rt->rt_ifp,
-			    &SIN(rt_key(rt))->sin_addr.s_addr,
-			    &SIN(rt_key(rt))->sin_addr.s_addr,
+			    &satosin(rt_key(rt))->sin_addr.s_addr,
+			    &satosin(rt_key(rt))->sin_addr.s_addr,
 			    (u_char *)LLADDR(SDL(gate)));
 		/*FALLTHROUGH*/
 	case RTM_RESOLVE:
 		if (gate->sa_family != AF_LINK ||
-		    gate->sa_len < sizeof(null_sdl)) {
+		    gate->sa_len < sizeof(struct sockaddr_dl)) {
 			log(LOG_DEBUG, "arp_rtrequest: bad gateway value\n");
 			break;
 		}
@@ -255,13 +228,13 @@ arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 		rt->rt_flags |= RTF_LLINFO;
 		LIST_INSERT_HEAD(&llinfo_arp, la, la_list);
 
-		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-			if (ia->ia_ifp == rt->rt_ifp &&
-			    SIN(rt_key(rt))->sin_addr.s_addr ==
-			    (IA_SIN(ia))->sin_addr.s_addr)
+		TAILQ_FOREACH(ifa, &rt->rt_ifp->if_addrlist, ifa_list) {
+			if ((ifa->ifa_addr->sa_family == AF_INET) &&
+			    ifatoia(ifa)->ia_addr.sin_addr.s_addr ==
+			    satosin(rt_key(rt))->sin_addr.s_addr)
 				break;
 		}
-		if (ia) {
+		if (ifa) {
 			/*
 			 * This test used to be
 			 *	if (lo0ifp->if_flags & IFF_UP)
@@ -290,9 +263,8 @@ arp_rtrequest(int req, struct rtentry *rt, struct rt_addrinfo *info)
 			 * address we are using, otherwise we will have trouble
 			 * with source address selection.
 			 */
-			ifa = &ia->ia_ifa;
 			if (ifa != rt->rt_ifa) {
-				IFAFREE(rt->rt_ifa);
+				ifafree(rt->rt_ifa);
 				ifa->ifa_refcnt++;
 				rt->rt_ifa = ifa;
 			}
@@ -374,6 +346,7 @@ arpresolve(struct arpcom *ac, struct rtentry *rt, struct mbuf *m,
 	struct llinfo_arp *la;
 	struct sockaddr_dl *sdl;
 	struct mbuf *mh;
+	char addr[INET_ADDRSTRLEN];
 
 	if (m->m_flags & M_BCAST) {	/* broadcast */
 		bcopy((caddr_t)etherbroadcastaddr, (caddr_t)desten,
@@ -381,22 +354,24 @@ arpresolve(struct arpcom *ac, struct rtentry *rt, struct mbuf *m,
 		return (1);
 	}
 	if (m->m_flags & M_MCAST) {	/* multicast */
-		ETHER_MAP_IP_MULTICAST(&SIN(dst)->sin_addr, desten);
+		ETHER_MAP_IP_MULTICAST(&satosin(dst)->sin_addr, desten);
 		return (1);
 	}
 	if (rt) {
 		la = (struct llinfo_arp *)rt->rt_llinfo;
 		if (la == NULL)
 			log(LOG_DEBUG, "arpresolve: %s: route without link "
-			    "local address\n", inet_ntoa(SIN(dst)->sin_addr));
+			    "local address\n", inet_ntop(AF_INET,
+				&satosin(dst)->sin_addr, addr, sizeof(addr)));
 	} else {
-		if ((la = arplookup(SIN(dst)->sin_addr.s_addr, RT_REPORT, 0,
+		if ((la = arplookup(satosin(dst)->sin_addr.s_addr, RT_REPORT, 0,
 		    ac->ac_if.if_rdomain)) != NULL)
 			rt = la->la_rt;
 		else
 			log(LOG_DEBUG,
 			    "arpresolve: %s: can't allocate llinfo\n",
-			    inet_ntoa(SIN(dst)->sin_addr));
+			    inet_ntop(AF_INET, &satosin(dst)->sin_addr,
+				addr, sizeof(addr)));
 	}
 	if (la == 0 || rt == 0) {
 		m_freem(m);
@@ -468,8 +443,8 @@ arpresolve(struct arpcom *ac, struct rtentry *rt, struct mbuf *m,
 			rt->rt_expire = time_second;
 			if (la->la_asked++ < arp_maxtries)
 				arprequest(&ac->ac_if,
-				    &(SIN(rt->rt_ifa->ifa_addr)->sin_addr.s_addr),
-				    &(SIN(dst)->sin_addr.s_addr),
+				    &satosin(rt->rt_ifa->ifa_addr)->sin_addr.s_addr,
+				    &satosin(dst)->sin_addr.s_addr,
 #if NCARP > 0
 				    (rt->rt_ifp->if_type == IFT_CARP) ?
 					((struct arpcom *) rt->rt_ifp->if_softc
@@ -558,11 +533,12 @@ void
 in_arpinput(struct mbuf *m)
 {
 	struct ether_arp *ea;
-	struct arpcom *ac = (struct arpcom *)m->m_pkthdr.rcvif;
+	struct ifnet *ifp = m->m_pkthdr.rcvif;
+	struct arpcom *ac = (struct arpcom *)ifp;
 	struct ether_header *eh;
 	struct llinfo_arp *la = 0;
 	struct rtentry *rt;
-	struct in_ifaddr *ia;
+	struct ifaddr *ifa;
 	struct sockaddr_dl *sdl;
 	struct sockaddr sa;
 	struct in_addr isaddr, itaddr, myaddr;
@@ -571,6 +547,7 @@ in_arpinput(struct mbuf *m)
 #if NCARP > 0
 	u_int8_t *ether_shost = NULL;
 #endif
+	char addr[INET_ADDRSTRLEN];
 	int op;
 
 	ea = mtod(m, struct ether_arp *);
@@ -589,71 +566,71 @@ in_arpinput(struct mbuf *m)
 	bcopy((caddr_t)ea->arp_spa, (caddr_t)&isaddr, sizeof(isaddr));
 
 	/* First try: check target against our addresses */
-	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-		if (itaddr.s_addr != ia->ia_addr.sin_addr.s_addr)
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+		if (ifa->ifa_addr->sa_family != AF_INET)
+			continue;
+
+		if (itaddr.s_addr != ifatoia(ifa)->ia_addr.sin_addr.s_addr)
 			continue;
 
 #if NCARP > 0
-		if (ia->ia_ifp->if_type == IFT_CARP &&
-		    ((ia->ia_ifp->if_flags & (IFF_UP|IFF_RUNNING)) ==
+		if (ifp->if_type == IFT_CARP &&
+		    ((ifp->if_flags & (IFF_UP|IFF_RUNNING)) ==
 		    (IFF_UP|IFF_RUNNING))) {
-			if (ia->ia_ifp == m->m_pkthdr.rcvif) {
-				if (op == ARPOP_REPLY)
-					break;
-				if (carp_iamatch(ia, ea->arp_sha,
-				    &enaddr, &ether_shost))
-					break;
-				else
-					goto out;
-			}
-		} else
-#endif
-			if (ia->ia_ifp == m->m_pkthdr.rcvif)
+			if (op == ARPOP_REPLY)
 				break;
+			if (carp_iamatch(ifatoia(ifa), ea->arp_sha,
+			    &enaddr, &ether_shost))
+				break;
+			else
+				goto out;
+		}
+#endif
+		break;
 	}
 
 	/* Second try: check source against our addresses */
-	if (ia == NULL) {
-		TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
-			if (isaddr.s_addr != ia->ia_addr.sin_addr.s_addr)
+	if (ifa == NULL) {
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+			if (ifa->ifa_addr->sa_family != AF_INET)
 				continue;
-			if (ia->ia_ifp == m->m_pkthdr.rcvif)
+
+			if (isaddr.s_addr ==
+			    ifatoia(ifa)->ia_addr.sin_addr.s_addr)
 				break;
 		}
 	}
 
 	/* Third try: not one of our addresses, just find an usable ia */
-	if (ia == NULL) {
-		struct ifaddr *ifa;
-
-		TAILQ_FOREACH(ifa, &m->m_pkthdr.rcvif->if_addrlist, ifa_list) {
+	if (ifa == NULL) {
+		TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
 			if (ifa->ifa_addr->sa_family == AF_INET)
 				break;
 		}
-		if (ifa)
-			ia = (struct in_ifaddr *)ifa;
 	}
 
-	if (ia == NULL)
+	if (ifa == NULL)
 		goto out;
 
 	if (!enaddr)
 		enaddr = ac->ac_enaddr;
-	myaddr = ia->ia_addr.sin_addr;
+	myaddr = ifatoia(ifa)->ia_addr.sin_addr;
 
 	if (!bcmp((caddr_t)ea->arp_sha, enaddr, sizeof (ea->arp_sha)))
 		goto out;	/* it's from me, ignore it. */
 	if (ETHER_IS_MULTICAST(&ea->arp_sha[0]))
 		if (!bcmp((caddr_t)ea->arp_sha, (caddr_t)etherbroadcastaddr,
 		    sizeof (ea->arp_sha))) {
+			inet_ntop(AF_INET, &isaddr, addr, sizeof(addr));
 			log(LOG_ERR, "arp: ether address is broadcast for "
-			    "IP address %s!\n", inet_ntoa(isaddr));
+			    "IP address %s!\n", addr);
 			goto out;
 		}
 	if (myaddr.s_addr && isaddr.s_addr == myaddr.s_addr) {
+		inet_ntop(AF_INET, &isaddr, addr, sizeof(addr));
 		log(LOG_ERR,
 		   "duplicate IP address %s sent from ethernet address %s\n",
-		   inet_ntoa(isaddr), ether_sprintf(ea->arp_sha));
+		   addr, ether_sprintf(ea->arp_sha));
 		itaddr = myaddr;
 		goto reply;
 	}
@@ -663,45 +640,58 @@ in_arpinput(struct mbuf *m)
 		if (sdl->sdl_alen) {
 		    if (bcmp(ea->arp_sha, LLADDR(sdl), sdl->sdl_alen)) {
 			if (rt->rt_flags & RTF_PERMANENT_ARP) {
+				inet_ntop(AF_INET, &isaddr, addr, sizeof(addr));
 				log(LOG_WARNING,
 				   "arp: attempt to overwrite permanent "
-				   "entry for %s by %s on %s\n",
-				   inet_ntoa(isaddr),
+				   "entry for %s by %s on %s\n", addr,
 				   ether_sprintf(ea->arp_sha),
 				   ac->ac_if.if_xname);
 				goto out;
 			} else if (rt->rt_ifp != &ac->ac_if) {
+#if NCARP > 0
 				if (ac->ac_if.if_type != IFT_CARP)
+#endif
+				{
+					inet_ntop(AF_INET, &isaddr,
+					    addr, sizeof(addr));
 					log(LOG_WARNING,
 					   "arp: attempt to overwrite entry for"
-					   " %s on %s by %s on %s\n",
-					   inet_ntoa(isaddr),
+					   " %s on %s by %s on %s\n", addr,
 					   rt->rt_ifp->if_xname,
 					   ether_sprintf(ea->arp_sha),
 					   ac->ac_if.if_xname);
+				}
 				goto out;
 			} else {
+				inet_ntop(AF_INET, &isaddr, addr, sizeof(addr));
 				log(LOG_INFO,
 				   "arp info overwritten for %s by %s on %s\n",
-				   inet_ntoa(isaddr),
+				   addr,
 				   ether_sprintf(ea->arp_sha),
 				   ac->ac_if.if_xname);
 				rt->rt_expire = 1; /* no longer static */
 			}
 		    }
-		} else if (rt->rt_ifp != &ac->ac_if && !(ac->ac_if.if_bridge &&
-		    (rt->rt_ifp->if_bridge == ac->ac_if.if_bridge)) &&
+		} else if (rt->rt_ifp != &ac->ac_if &&
+#if NBRIDGE > 0
+		    !SAME_BRIDGE(ac->ac_if.if_bridgeport,
+		    rt->rt_ifp->if_bridgeport) &&
+#endif
+#if NCARP > 0
 		    !(rt->rt_ifp->if_type == IFT_CARP &&
 		    rt->rt_ifp->if_carpdev == &ac->ac_if) &&
 		    !(ac->ac_if.if_type == IFT_CARP &&
-		    ac->ac_if.if_carpdev == rt->rt_ifp)) {
-		    log(LOG_WARNING,
-			"arp: attempt to add entry for %s "
-			"on %s by %s on %s\n",
-			inet_ntoa(isaddr), rt->rt_ifp->if_xname,
-			ether_sprintf(ea->arp_sha),
-			ac->ac_if.if_xname);
-		    goto out;
+		    ac->ac_if.if_carpdev == rt->rt_ifp) &&
+#endif
+		    1) {
+			inet_ntop(AF_INET, &isaddr, addr, sizeof(addr));
+			log(LOG_WARNING,
+			    "arp: attempt to add entry for %s "
+			    "on %s by %s on %s\n", addr,
+			    rt->rt_ifp->if_xname,
+			    ether_sprintf(ea->arp_sha),
+			    ac->ac_if.if_xname);
+			goto out;
 		}
 		bcopy(ea->arp_sha, LLADDR(sdl),
 		    sdl->sdl_alen = sizeof(ea->arp_sha));
@@ -811,13 +801,14 @@ struct llinfo_arp *
 arplookup(u_int32_t addr, int create, int proxy, u_int tableid)
 {
 	struct rtentry *rt;
-	static struct sockaddr_inarp sin;
+	struct sockaddr_inarp sin;
 
+	bzero(&sin, sizeof(sin));
 	sin.sin_len = sizeof(sin);
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = addr;
 	sin.sin_other = proxy ? SIN_PROXY : 0;
-	rt = rtalloc1(sintosa(&sin), create, tableid);
+	rt = rtalloc1((struct sockaddr *)&sin, create, tableid);
 	if (rt == 0)
 		return (0);
 	rt->rt_refcnt--;
@@ -842,14 +833,43 @@ arplookup(u_int32_t addr, int create, int proxy, u_int tableid)
 	return ((struct llinfo_arp *)rt->rt_llinfo);
 }
 
+/*
+ * Check whether we do proxy ARP for this address and we point to ourselves.
+ */
+int
+arpproxy(struct in_addr in, u_int rdomain)
+{
+	struct llinfo_arp *la;
+	struct ifnet *ifp;
+	int found = 0;
+
+	la = arplookup(in.s_addr, 0, SIN_PROXY, rdomain);
+	if (la == NULL)
+		return (0);
+
+	TAILQ_FOREACH(ifp, &ifnet, if_list) {
+		if (ifp->if_rdomain != rdomain)
+			continue;
+
+		if (!bcmp(LLADDR((struct sockaddr_dl *)la->la_rt->rt_gateway),
+		    LLADDR((struct sockaddr_dl *)ifp->if_lladdr->ifa_addr),
+		    ETHER_ADDR_LEN)) {
+		    	found = 1;
+		    	break;
+		}
+	}
+
+	return (found);
+}
+
 void
 arp_ifinit(struct arpcom *ac, struct ifaddr *ifa)
 {
 
 	/* Warn the user if another station has this IP address. */
 	arprequest(&ac->ac_if,
-	    &(IA_SIN(ifa)->sin_addr.s_addr),
-	    &(IA_SIN(ifa)->sin_addr.s_addr),
+	    &satosin(ifa->ifa_addr)->sin_addr.s_addr,
+	    &satosin(ifa->ifa_addr)->sin_addr.s_addr,
 	    ac->ac_enaddr);
 	ifa->ifa_rtrequest = arp_rtrequest;
 	ifa->ifa_flags |= RTF_CLONING;
@@ -901,7 +921,9 @@ out:
 void
 in_revarpinput(struct mbuf *m)
 {
+#ifdef NFSCLIENT
 	struct ifnet *ifp;
+#endif /* NFSCLIENT */
 	struct ether_arp *ar;
 	int op;
 
@@ -918,21 +940,25 @@ in_revarpinput(struct mbuf *m)
 	default:
 		goto out;
 	}
+#ifdef NFSCLIENT
 	if (!revarp_in_progress)
 		goto out;
 	ifp = m->m_pkthdr.rcvif;
-	if (ifp != myip_ifp) /* !same interface */
+	if (ifp != revarp_ifp) /* !same interface */
 		goto out;
-	if (myip_initialized)
+	if (revarp_finished)
 		goto wake;
 	if (bcmp(ar->arp_tha, ((struct arpcom *)ifp)->ac_enaddr,
 	    sizeof(ar->arp_tha)))
 		goto out;
-	bcopy((caddr_t)ar->arp_spa, (caddr_t)&srv_ip, sizeof(srv_ip));
-	bcopy((caddr_t)ar->arp_tpa, (caddr_t)&myip, sizeof(myip));
-	myip_initialized = 1;
+	bcopy((caddr_t)ar->arp_spa, (caddr_t)&revarp_srvip,
+	    sizeof(revarp_srvip));
+	bcopy((caddr_t)ar->arp_tpa, (caddr_t)&revarp_myip,
+	    sizeof(revarp_myip));
+	revarp_finished = 1;
 wake:	/* Do wakeup every time in case it was missed. */
-	wakeup((caddr_t)&myip);
+	wakeup((caddr_t)&revarp_myip);
+#endif
 
 out:
 	m_freem(m);
@@ -979,6 +1005,7 @@ revarprequest(struct ifnet *ifp)
 	ifp->if_output(ifp, m, &sa, (struct rtentry *)0);
 }
 
+#ifdef NFSCLIENT
 /*
  * RARP for the ip address of the specified interface, but also
  * save the ip address of the server that sent the answer.
@@ -990,23 +1017,23 @@ revarpwhoarewe(struct ifnet *ifp, struct in_addr *serv_in,
 {
 	int result, count = 20;
 
-	if (myip_initialized)
+	if (revarp_finished)
 		return EIO;
 
-	myip_ifp = ifp;
+	revarp_ifp = ifp;
 	revarp_in_progress = 1;
 	while (count--) {
 		revarprequest(ifp);
-		result = tsleep((caddr_t)&myip, PSOCK, "revarp", hz/2);
+		result = tsleep((caddr_t)&revarp_myip, PSOCK, "revarp", hz/2);
 		if (result != EWOULDBLOCK)
 			break;
 	}
 	revarp_in_progress = 0;
-	if (!myip_initialized)
+	if (!revarp_finished)
 		return ENETUNREACH;
 
-	bcopy((caddr_t)&srv_ip, serv_in, sizeof(*serv_in));
-	bcopy((caddr_t)&myip, clnt_in, sizeof(*clnt_in));
+	bcopy((caddr_t)&revarp_srvip, serv_in, sizeof(*serv_in));
+	bcopy((caddr_t)&revarp_myip, clnt_in, sizeof(*clnt_in));
 	return 0;
 }
 
@@ -1017,7 +1044,7 @@ revarpwhoami(struct in_addr *in, struct ifnet *ifp)
 	struct in_addr server;
 	return (revarpwhoarewe(ifp, &server, in));
 }
-
+#endif /* NFSCLIENT */
 
 #ifdef DDB
 
@@ -1087,7 +1114,7 @@ db_show_radix_node(struct radix_node *rn, void *w, u_int id)
 
 	db_printf("rtentry=%p", rt);
 
-	db_printf(" flags=0x%x refcnt=%d use=%llu expire=%u rtableid %u\n",
+	db_printf(" flags=0x%x refcnt=%d use=%llu expire=%lld rtableid=%u\n",
 	    rt->rt_flags, rt->rt_refcnt, rt->rt_use, rt->rt_expire, id);
 
 	db_printf(" key="); db_print_sa(rt_key(rt));

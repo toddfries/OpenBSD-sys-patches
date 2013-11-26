@@ -1,4 +1,4 @@
-/*	$OpenBSD: apm.c,v 1.98 2011/07/02 22:20:07 nicm Exp $	*/
+/*	$OpenBSD: apm.c,v 1.101 2013/11/18 20:21:51 deraadt Exp $	*/
 
 /*-
  * Copyright (c) 1998-2001 Michael Shalayeff. All rights reserved.
@@ -49,6 +49,7 @@
 #include <sys/fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/buf.h>
+#include <sys/reboot.h>
 #include <sys/event.h>
 
 #include <machine/conf.h>
@@ -253,6 +254,14 @@ apm_suspend(int state)
 	s = splhigh();
 	disable_intr();
 	config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND);
+
+	/* XXX
+	 * Flag to disk drivers that they should "power down" the disk
+	 * when we get to DVACT_POWERDOWN.
+	 */
+	boothowto |= RB_POWERDOWN;
+	config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	boothowto &= ~RB_POWERDOWN;
 
 	/* Send machine to sleep */
 	apm_set_powstate(APM_DEV_ALLDEVS, state);
@@ -873,7 +882,7 @@ apm_thread_create(void *v)
 	}
 #endif
 
-	if (kthread_create(apm_thread, sc, &sc->sc_thread, "%s",
+	if (kthread_create(apm_thread, sc, &sc->sc_thread,
 	    sc->sc_dev.dv_xname)) {
 		apm_disconnect(sc);
 		printf("%s: failed to create kernel thread, disabled",

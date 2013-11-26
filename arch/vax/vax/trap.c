@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.42 2011/11/16 20:50:19 deraadt Exp $     */
+/*	$OpenBSD: trap.c,v 1.48 2013/11/24 22:08:25 miod Exp $     */
 /*	$NetBSD: trap.c,v 1.47 1999/08/21 19:26:20 matt Exp $     */
 /*
  * Copyright (c) 1994 Ludd, University of Lule}, Sweden.
@@ -36,12 +36,10 @@
 #include <sys/proc.h>
 #include <sys/user.h>
 #include <sys/syscall.h>
+#include <sys/syscall_mi.h>
 #include <sys/systm.h>
 #include <sys/signalvar.h>
 #include <sys/exec.h>
-
-#include "systrace.h"
-#include <dev/systrace.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -56,9 +54,6 @@
 #include <machine/db_machdep.h>
 #endif
 #include <kern/syscalls.c>
-#ifdef KTRACE
-#include <sys/ktrace.h>
-#endif
 
 #ifdef TRAPDEBUG
 volatile int startsysc = 0, faultdebug = 0;
@@ -114,7 +109,7 @@ arithflt(frame)
 	uvmexp.traps++;
 	if ((umode = USERMODE(frame))) {
 		type |= T_USER;
-		p->p_addr->u_pcb.framep = frame; 
+		p->p_addr->u_pcb.framep = frame;
 	}
 
 	type&=~(T_WRITE|T_PTEFETCH);
@@ -147,7 +142,7 @@ fram:
 		 * Due to a hardware bug (at in least KA65x CPUs) a double
 		 * page table fetch trap will cause a translation fault
 		 * even if access in the SPT PTE entry specifies 'no access'.
-		 * In for example section 6.4.2 in VAX Architecture 
+		 * In for example section 6.4.2 in VAX Architecture
 		 * Reference Manual it states that if a page both are invalid
 		 * and have no access set, a 'access violation fault' occurs.
 		 * Therefore, we must fall through here...
@@ -155,6 +150,7 @@ fram:
 #ifdef nohwbug
 		panic("translation fault");
 #endif
+	case T_PTELEN|T_USER:	/* Page table length exceeded */
 	case T_ACCFLT|T_USER:
 		if (frame->code < 0) { /* Check for kernel space */
 			sv.sival_int = frame->code;
@@ -162,6 +158,9 @@ fram:
 			typ = SEGV_ACCERR;
 			break;
 		}
+		/* FALLTHROUGH */
+
+	case T_PTELEN:
 	case T_ACCFLT:
 #ifdef TRAPDEBUG
 if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
@@ -174,7 +173,7 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 #endif
 
 		/*
-		 * Page tables are allocated in pmap_enter(). We get 
+		 * Page tables are allocated in pmap_enter(). We get
 		 * info from below if it is a page table fault, but
 		 * UVM may want to map in pages without faults, so
 		 * because we must check for PTE pages anyway we don't
@@ -216,18 +215,6 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 			if (umode != 0)
 				uvm_grow(p, addr);
 		}
-		break;
-
-	case T_PTELEN:
-		if (p && p->p_addr)
-			FAULTCHK;
-		panic("ptelen fault in system space: addr %lx pc %lx",
-		    frame->code, frame->pc);
-
-	case T_PTELEN|T_USER:	/* Page table length exceeded */
-		sv.sival_int = frame->code;
-		sig = SIGSEGV;
-		typ = SEGV_MAPERR;
 		break;
 
 	case T_BPTFLT|T_USER:
@@ -284,9 +271,7 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 #endif
 	}
 
-	if (trapsig) { 
-		trapsignal(p, sig, frame->code, typ, sv);
-
+	if (trapsig) {
 		/*
 		 * Arithmetic exceptions can be of two kinds:
 		 * - traps (codes 1..7), where pc points to the
@@ -303,6 +288,8 @@ if(faultdebug)printf("trap accflt type %lx, code %lx, pc %lx, psl %lx\n",
 
 			frame->pc = skip_opcode(frame->pc);
 		}
+
+		trapsignal(p, sig, frame->code, typ, sv);
 	}
 
 	if (umode == 0)
@@ -336,8 +323,8 @@ syscall(frame)
 	struct	trapframe *frame;
 {
 	struct sysent *callp;
-	int nsys;
-	int err, rval[2], args[8];
+	int nsys, err;
+	long rval[2], args[8];
 	struct trapframe *exptr;
 	struct proc *p = curproc;
 
@@ -347,7 +334,7 @@ if(startsysc)printf("trap syscall %s pc %lx, psl %lx, sp %lx, pid %d, frame %p\n
 		curproc->p_pid,frame);
 #endif
 	uvmexp.syscalls++;
- 
+
 	exptr = p->p_addr->u_pcb.framep = frame;
 	callp = p->p_emul->e_sysent;
 	nsys = p->p_emul->e_nsysent;
@@ -368,27 +355,12 @@ if(startsysc)printf("trap syscall %s pc %lx, psl %lx, sp %lx, pid %d, frame %p\n
 	rval[0] = 0;
 	rval[1] = frame->r1;
 	if(callp->sy_narg) {
-		err = copyin((char *)frame->ap + 4, args, callp->sy_argsize);
-		if (err) {
-#ifdef KTRACE
-			if (KTRPOINT(p, KTR_SYSCALL))
-				ktrsyscall(p, frame->code,
-				    callp->sy_argsize, args);
-#endif
+		if ((err = copyin((char *)frame->ap + 4, args,
+		    callp->sy_argsize)))
 			goto bad;
-		}
 	}
 
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL))
-		ktrsyscall(p, frame->code, callp->sy_argsize, args);
-#endif
-#if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE))
-		err = systrace_redirect(frame->code, curproc, args, rval);
-	else
-#endif
-		err = (*callp->sy_call)(curproc, args, rval);
+	err = mi_syscall(p, frame->code, callp, args, rval);
 
 #ifdef TRAPDEBUG
 if(startsysc)
@@ -397,7 +369,6 @@ if(startsysc)
 		curproc->p_pid,err,rval[0],rval[1],exptr);
 #endif
 
-bad:
 	switch (err) {
 	case 0:
 		exptr->r1 = rval[1];
@@ -413,17 +384,13 @@ bad:
 		break;
 
 	default:
+	bad:
 		exptr->r0 = err;
 		exptr->psl |= PSL_C;
 		break;
 	}
 
-	userret(p);
-
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, frame->code, err, rval[0]);
-#endif
+	mi_syscall_return(p, frame->code, err, rval);
 }
 
 void
@@ -437,13 +404,5 @@ child_return(arg)
 	frame->r1 = frame->r0 = 0;
 	frame->psl &= ~PSL_C;
 
-	userret(p);
-
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p,
-		    (p->p_flag & P_THREAD) ? SYS_rfork :
-		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
-		    0, 0);
-#endif
+	mi_child_return(p);
 }

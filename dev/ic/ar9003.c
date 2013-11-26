@@ -1,4 +1,4 @@
-/*	$OpenBSD: ar9003.c,v 1.22 2011/01/01 13:44:42 damien Exp $	*/
+/*	$OpenBSD: ar9003.c,v 1.27 2013/08/07 01:06:28 bluhm Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -52,7 +52,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -503,7 +502,8 @@ int
 ar9003_gpio_read(struct athn_softc *sc, int pin)
 {
 	KASSERT(pin < sc->ngpiopins);
-	return ((AR_READ(sc, AR_GPIO_IN_OUT) >> pin) & 1);
+	return (((AR_READ(sc, AR_GPIO_IN) & AR9300_GPIO_IN_VAL) &
+	    (1 << pin)) != 0);
 }
 
 void
@@ -1023,7 +1023,7 @@ ar9003_rx_process(struct athn_softc *sc, int qid)
 	if (!(wh->i_fc[0] & IEEE80211_FC0_TYPE_CTL)) {
 		u_int hdrlen = ieee80211_get_hdrlen(wh);
 		if (hdrlen & 3) {
-			ovbcopy(wh, (caddr_t)wh + 2, hdrlen);
+			memmove((caddr_t)wh + 2, wh, hdrlen);
 			m_adj(m, 2);
 		}
 	}
@@ -1183,6 +1183,8 @@ int
 ar9003_swba_intr(struct athn_softc *sc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
+	struct ifnet *ifp = &ic->ic_if;
+	struct ieee80211_node *ni = ic->ic_bss;
 	struct athn_tx_buf *bf = sc->bcnbuf;
 	struct ieee80211_frame *wh;
 	struct ar_tx_desc *ds;
@@ -1190,6 +1192,11 @@ ar9003_swba_intr(struct athn_softc *sc)
 	uint32_t sum;
 	uint8_t ridx, hwrate;
 	int error, totlen;
+
+	if (ic->ic_tim_mcast_pending &&
+	    IF_IS_EMPTY(&ni->ni_savedq) &&
+	    SIMPLEQ_EMPTY(&sc->txq[ATHN_QID_CAB].head))
+		ic->ic_tim_mcast_pending = 0;
 
 	if (ic->ic_dtim_count == 0)
 		ic->ic_dtim_count = ic->ic_dtim_period - 1;
@@ -1275,6 +1282,26 @@ ar9003_swba_intr(struct athn_softc *sc)
 	athn_stop_tx_dma(sc, ATHN_QID_BEACON);
 
 	AR_WRITE(sc, AR_QTXDP(ATHN_QID_BEACON), bf->bf_daddr);
+
+	for(;;) {
+		if (SIMPLEQ_EMPTY(&sc->txbufs))
+			break;
+
+		IF_DEQUEUE(&ni->ni_savedq, m);
+		if (m == NULL)
+			break;
+		if (!IF_IS_EMPTY(&ni->ni_savedq)) {
+			/* more queued frames, set the more data bit */
+			wh = mtod(m, struct ieee80211_frame *);
+			wh->i_fc[1] |= IEEE80211_FC1_MORE_DATA;
+		}
+		
+		if (sc->ops.tx(sc, m, ni, ATHN_TXFLAG_CAB) != 0) {
+			ieee80211_release_node(ic, ni);
+			ifp->if_oerrors++;
+			break;
+		}
+	}
 
 	/* Kick Tx. */
 	AR_WRITE(sc, AR_Q_TXE, 1 << ATHN_QID_BEACON);
@@ -1381,7 +1408,7 @@ ar9003_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 	struct mbuf *m1;
 	uintptr_t entry;
 	uint32_t sum;
-	uint16_t qos;
+	uint16_t qos = 0;
 	uint8_t txpower, type, encrtype, tid, ridx[4];
 	int i, error, totlen, hasqos, qid;
 
@@ -1425,6 +1452,8 @@ ar9003_tx(struct athn_softc *sc, struct mbuf *m, struct ieee80211_node *ni,
 		qid = athn_ac2qid[ieee80211_up_to_ac(ic, tid)];
 	} else if (type == AR_FRAME_TYPE_PSPOLL) {
 		qid = ATHN_QID_PSPOLL;
+	} else if (txflags & ATHN_TXFLAG_CAB) {
+		qid = ATHN_QID_CAB;
 	} else
 		qid = ATHN_QID_AC_BE;
 	txq = &sc->txq[qid];
@@ -2716,7 +2745,7 @@ ar9003_compute_predistortion(struct athn_softc *sc, const uint32_t *lo,
 	I = (maxidx >= 16) ? 7 : maxidx / 2;
 	L = maxidx - I;
 
-	sumy2 = sumy4 = 0;
+	sumy2 = sumy4 = y2 = y4 = 0;
 	for (i = 0; i <= L; i++) {
 		if (y[i + I] == 0)
 			return (1);	/* Prevent division by 0. */

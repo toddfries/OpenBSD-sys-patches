@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.181 2012/03/19 09:05:39 guenther Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.199 2013/10/25 14:56:52 millert Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -69,32 +69,23 @@ void checkdirs(struct vnode *);
 
 int copyout_statfs(struct statfs *, void *, struct proc *);
 
-int getdirentries_internal(struct proc *, int, char *, int, off_t *,
-    register_t *);
-
 int doopenat(struct proc *, int, const char *, int, mode_t, register_t *);
-int domknodat(struct proc *, int, const char *, mode_t, dev_t, register_t *);
-int domkfifoat(struct proc *, int, const char *, mode_t, register_t *);
-int dolinkat(struct proc *, int, const char *, int, const char *, int,
-    register_t *);
-int dosymlinkat(struct proc *, const char *, int, const char *, register_t *);
-int dounlinkat(struct proc *, int, const char *, int, register_t *);
-int dofaccessat(struct proc *, int, const char *, int, int, register_t *);
-int dofstatat(struct proc *, int, const char *, struct stat *, int,
-    register_t *);
+int domknodat(struct proc *, int, const char *, mode_t, dev_t);
+int domkfifoat(struct proc *, int, const char *, mode_t);
+int dolinkat(struct proc *, int, const char *, int, const char *, int);
+int dosymlinkat(struct proc *, const char *, int, const char *);
+int dounlinkat(struct proc *, int, const char *, int);
+int dofaccessat(struct proc *, int, const char *, int, int);
+int dofstatat(struct proc *, int, const char *, struct stat *, int);
 int doreadlinkat(struct proc *, int, const char *, char *, size_t,
     register_t *);
-int dofchmodat(struct proc *, int, const char *, mode_t, int, register_t *);
-int dofchownat(struct proc *, int, const char *, uid_t, gid_t, int,
-    register_t *);
-int dorenameat(struct proc *, int, const char *, int, const char *,
-    register_t *);
-int domkdirat(struct proc *, int, const char *, mode_t, register_t *);
-int doutimensat(struct proc *, int, const char *, struct timespec [2],
-    int, register_t *);
-int dovutimens(struct proc *, struct vnode *, struct timespec [2],
-    register_t *);
-int dofutimens(struct proc *, int, struct timespec [2], register_t *);
+int dofchmodat(struct proc *, int, const char *, mode_t, int);
+int dofchownat(struct proc *, int, const char *, uid_t, gid_t, int);
+int dorenameat(struct proc *, int, const char *, int, const char *);
+int domkdirat(struct proc *, int, const char *, mode_t);
+int doutimensat(struct proc *, int, const char *, struct timespec [2], int);
+int dovutimens(struct proc *, struct vnode *, struct timespec [2]);
+int dofutimens(struct proc *, int, struct timespec [2]);
 
 /*
  * Virtual File System System Calls
@@ -269,7 +260,7 @@ update:
 	/*
 	 * Mount the filesystem.
 	 */
-	error = VFS_MOUNT(mp, SCARG(uap, path), SCARG(uap, data), &nd, p);
+	error = VFS_MOUNT(mp, fspath, SCARG(uap, data), &nd, p);
 	if (!error) {
 		mp->mnt_stat.f_ctime = time_second;
 	}
@@ -324,42 +315,44 @@ update:
 /*
  * Scan all active processes to see if any of them have a current
  * or root directory onto which the new filesystem has just been
- * mounted. If so, replace them with the new mount point.
+ * mounted. If so, replace them with the new mount point, keeping
+ * track of how many were replaced.  That's the number of references
+ * the old vnode had that we've replaced, so finish by vrele()'ing
+ * it that many times.  This puts off any possible sleeping until
+ * we've finished walking the allprocs list.
  */
 void
 checkdirs(struct vnode *olddp)
 {
 	struct filedesc *fdp;
-	struct vnode *newdp, *vp;
+	struct vnode *newdp;
 	struct proc *p;
+	u_int  free_count = 0;
 
 	if (olddp->v_usecount == 1)
 		return;
 	if (VFS_ROOT(olddp->v_mountedhere, &newdp))
 		panic("mount: lost mount");
-again:
 	LIST_FOREACH(p, &allproc, p_list) {
 		fdp = p->p_fd;
 		if (fdp->fd_cdir == olddp) {
-			vp = fdp->fd_cdir;
+			free_count++;
 			vref(newdp);
 			fdp->fd_cdir = newdp;
-			if (vrele(vp))
-				goto again;
 		}
 		if (fdp->fd_rdir == olddp) {
-			vp = fdp->fd_rdir;
+			free_count++;
 			vref(newdp);
 			fdp->fd_rdir = newdp;
-			if (vrele(vp))
-				goto again;
 		}
 	}
 	if (rootvnode == olddp) {
-		vrele(rootvnode);
+		free_count++;
 		vref(newdp);
 		rootvnode = newdp;
 	}
+	while (free_count-- > 0)
+		vrele(olddp);
 	vput(newdp);
 }
 
@@ -607,12 +600,12 @@ sys_fstatfs(struct proc *p, void *v, register_t *retval)
 		return (error);
 	mp = ((struct vnode *)fp->f_data)->v_mount;
 	if (!mp) {
-		FRELE(fp);
+		FRELE(fp, p);
 		return (ENOENT);
 	}
 	sp = &mp->mnt_stat;
 	error = VFS_STATFS(mp, sp, p);
-	FRELE(fp);
+	FRELE(fp, p);
 	if (error)
 		return (error);
 	sp->f_flags = mp->mnt_flag & MNT_VISFLAGMASK;
@@ -697,7 +690,7 @@ sys_fchdir(struct proc *p, void *v, register_t *retval)
 		syscallarg(int) fd;
 	} */ *uap = v;
 	struct filedesc *fdp = p->p_fd;
-	struct vnode *vp, *tdp;
+	struct vnode *vp, *tdp, *old_cdir;
 	struct mount *mp;
 	struct file *fp;
 	int error;
@@ -726,8 +719,9 @@ sys_fchdir(struct proc *p, void *v, register_t *retval)
 		return (error);
 	}
 	VOP_UNLOCK(vp, 0, p);
-	vrele(fdp->fd_cdir);
+	old_cdir = fdp->fd_cdir;
 	fdp->fd_cdir = vp;
+	vrele(old_cdir);
 	return (0);
 }
 
@@ -742,6 +736,7 @@ sys_chdir(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 	} */ *uap = v;
 	struct filedesc *fdp = p->p_fd;
+	struct vnode *old_cdir;
 	int error;
 	struct nameidata nd;
 
@@ -749,8 +744,9 @@ sys_chdir(struct proc *p, void *v, register_t *retval)
 	    SCARG(uap, path), p);
 	if ((error = change_dir(&nd, p)) != 0)
 		return (error);
-	vrele(fdp->fd_cdir);
+	old_cdir = fdp->fd_cdir;
 	fdp->fd_cdir = nd.ni_vp;
+	vrele(old_cdir);
 	return (0);
 }
 
@@ -765,6 +761,7 @@ sys_chroot(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 	} */ *uap = v;
 	struct filedesc *fdp = p->p_fd;
+	struct vnode *old_cdir, *old_rdir;
 	int error;
 	struct nameidata nd;
 
@@ -779,12 +776,14 @@ sys_chroot(struct proc *p, void *v, register_t *retval)
 		 * A chroot() done inside a changed root environment does
 		 * an automatic chdir to avoid the out-of-tree experience.
 		 */
-		vrele(fdp->fd_rdir);
-		vrele(fdp->fd_cdir);
 		vref(nd.ni_vp);
-		fdp->fd_cdir = nd.ni_vp;
-	}
-	fdp->fd_rdir = nd.ni_vp;
+		old_rdir = fdp->fd_rdir;
+		old_cdir = fdp->fd_cdir;
+		fdp->fd_rdir = fdp->fd_cdir = nd.ni_vp;
+		vrele(old_rdir);
+		vrele(old_cdir);
+	} else
+		fdp->fd_rdir = nd.ni_vp;
 	return (0);
 }
 
@@ -859,8 +858,10 @@ doopenat(struct proc *p, int fd, const char *path, int oflags, mode_t mode,
 
 	if ((error = falloc(p, &fp, &indx)) != 0)
 		goto out;
-
 	flags = FFLAGS(oflags);
+	if (flags & O_CLOEXEC)
+		fdp->fd_ofileflags[indx] |= UF_EXCLOSE;
+
 	cmode = ((mode &~ fdp->fd_cmask) & ALLPERMS) &~ S_ISTXT;
 	NDINITAT(&nd, LOOKUP, FOLLOW, UIO_USERSPACE, fd, path, p);
 	p->p_dupfd = -1;			/* XXX check for fdopen */
@@ -869,10 +870,10 @@ doopenat(struct proc *p, int fd, const char *path, int oflags, mode_t mode,
 		flags &= ~O_TRUNC;	/* Must do truncate ourselves */
 	}
 	if ((error = vn_open(&nd, flags, cmode)) != 0) {
-		if ((error == ENODEV || error == ENXIO) &&
+		if (error == ENODEV &&
 		    p->p_dupfd >= 0 &&			/* XXX from fdopen */
 		    (error =
-			dupfdopen(fdp, indx, p->p_dupfd, flags, error)) == 0) {
+			dupfdopen(fdp, indx, p->p_dupfd, flags)) == 0) {
 			closef(fp, p);
 			*retval = indx;
 			goto out;
@@ -909,7 +910,7 @@ doopenat(struct proc *p, int fd, const char *path, int oflags, mode_t mode,
 			goto out;
 		}
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-		fp->f_flag |= FHASLOCK;
+		fp->f_iflags |= FIF_HASLOCK;
 	}
 	if (localtrunc) {
 		if ((fp->f_flag & FWRITE) == 0)
@@ -932,10 +933,8 @@ doopenat(struct proc *p, int fd, const char *path, int oflags, mode_t mode,
 		}
 	}
 	VOP_UNLOCK(vp, 0, p);
-	if (flags & O_CLOEXEC)
-		fdp->fd_ofileflags[indx] |= UF_EXCLOSE;
 	*retval = indx;
-	FILE_SET_MATURE(fp);
+	FILE_SET_MATURE(fp, p);
 out:
 	fdpunlock(fdp);
 	return (error);
@@ -1019,6 +1018,8 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 		fp = NULL;
 		goto bad;
 	}
+	if (flags & O_CLOEXEC)
+		fdp->fd_ofileflags[indx] |= UF_EXCLOSE;
 
 	if ((error = copyin(SCARG(uap, fhp), &fh, sizeof(fhandle_t))) != 0)
 		goto bad;
@@ -1037,6 +1038,10 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 
 	if (vp->v_type == VSOCK) {
 		error = EOPNOTSUPP;
+		goto bad;
+	}
+	if ((flags & O_DIRECTORY) && vp->v_type != VDIR) {
+		error = ENOTDIR;
 		goto bad;
 	}
 	if (flags & FREAD) {
@@ -1087,11 +1092,11 @@ sys_fhopen(struct proc *p, void *v, register_t *retval)
 			goto bad;
 		}
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-		fp->f_flag |= FHASLOCK;
+		fp->f_iflags |= FIF_HASLOCK;
 	}
 	VOP_UNLOCK(vp, 0, p);
 	*retval = indx;
-	FILE_SET_MATURE(fp);
+	FILE_SET_MATURE(fp, p);
 
 	fdpunlock(fdp);
 	return (0);
@@ -1192,7 +1197,7 @@ sys_mknod(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (domknodat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode),
-	    SCARG(uap, dev), retval));
+	    SCARG(uap, dev)));
 }
 
 int
@@ -1206,12 +1211,11 @@ sys_mknodat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (domknodat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, mode), SCARG(uap, dev), retval));
+	    SCARG(uap, mode), SCARG(uap, dev)));
 }
 
 int
-domknodat(struct proc *p, int fd, const char *path, mode_t mode, dev_t dev,
-    register_t *retval)
+domknodat(struct proc *p, int fd, const char *path, mode_t mode, dev_t dev)
 {
 	struct vnode *vp;
 	struct vattr vattr;
@@ -1274,8 +1278,7 @@ sys_mkfifo(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
-	return (domkfifoat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode),
-	    retval));
+	return (domkfifoat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode)));
 }
 
 int
@@ -1288,11 +1291,11 @@ sys_mkfifoat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (domkfifoat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, mode), retval));
+	    SCARG(uap, mode)));
 }
 
 int
-domkfifoat(struct proc *p, int fd, const char *path, mode_t mode, register_t *retval)
+domkfifoat(struct proc *p, int fd, const char *path, mode_t mode)
 {
 #ifndef FIFO
 	return (EOPNOTSUPP);
@@ -1333,7 +1336,7 @@ sys_link(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dolinkat(p, AT_FDCWD, SCARG(uap, path), AT_FDCWD,
-	    SCARG(uap, link), AT_SYMLINK_FOLLOW, retval));
+	    SCARG(uap, link), AT_SYMLINK_FOLLOW));
 }
 
 int
@@ -1348,12 +1351,12 @@ sys_linkat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dolinkat(p, SCARG(uap, fd1), SCARG(uap, path1),
-	    SCARG(uap, fd2), SCARG(uap, path2), SCARG(uap, flag), retval));
+	    SCARG(uap, fd2), SCARG(uap, path2), SCARG(uap, flag)));
 }
 
 int
 dolinkat(struct proc *p, int fd1, const char *path1, int fd2,
-    const char *path2, int flag, register_t *retval)
+    const char *path2, int flag)
 {
 	struct vnode *vp;
 	struct nameidata nd;
@@ -1405,8 +1408,7 @@ sys_symlink(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) link;
 	} */ *uap = v;
 
-	return (dosymlinkat(p, SCARG(uap, path), AT_FDCWD, SCARG(uap, link),
-	    retval));
+	return (dosymlinkat(p, SCARG(uap, path), AT_FDCWD, SCARG(uap, link)));
 }
 
 int
@@ -1419,12 +1421,11 @@ sys_symlinkat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dosymlinkat(p, SCARG(uap, path), SCARG(uap, fd),
-	    SCARG(uap, link), retval));
+	    SCARG(uap, link)));
 }
 
 int
-dosymlinkat(struct proc *p, const char *upath, int fd, const char *link,
-    register_t *retval)
+dosymlinkat(struct proc *p, const char *upath, int fd, const char *link)
 {
 	struct vattr vattr;
 	char *path;
@@ -1467,7 +1468,7 @@ sys_unlink(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 	} */ *uap = v;
 
-	return (dounlinkat(p, AT_FDCWD, SCARG(uap, path), 0, retval));
+	return (dounlinkat(p, AT_FDCWD, SCARG(uap, path), 0));
 }
 
 int
@@ -1480,12 +1481,11 @@ sys_unlinkat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dounlinkat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, flag), retval));
+	    SCARG(uap, flag)));
 }
 
 int
-dounlinkat(struct proc *p, int fd, const char *path, int flag,
-    register_t *retval)
+dounlinkat(struct proc *p, int fd, const char *path, int flag)
 {
 	struct vnode *vp;
 	int error;
@@ -1599,7 +1599,7 @@ sys_lseek(struct proc *p, void *v, register_t *retval)
 	fp->f_seek++;
 	error = 0;
  bad:
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -1615,7 +1615,7 @@ sys_access(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofaccessat(p, AT_FDCWD, SCARG(uap, path),
-	    SCARG(uap, flags), 0, retval));
+	    SCARG(uap, flags), 0));
 }
 
 int
@@ -1629,12 +1629,11 @@ sys_faccessat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofaccessat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, amode), SCARG(uap, flag), retval));
+	    SCARG(uap, amode), SCARG(uap, flag)));
 }
 
 int
-dofaccessat(struct proc *p, int fd, const char *path, int amode, int flag,
-    register_t *retval)
+dofaccessat(struct proc *p, int fd, const char *path, int amode, int flag)
 {
 	struct vnode *vp;
 	int error;
@@ -1692,8 +1691,7 @@ sys_stat(struct proc *p, void *v, register_t *retval)
 		syscallarg(struct stat *) ub;
 	} */ *uap = v;
 
-	return (dofstatat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, ub), 0,
-	    retval));
+	return (dofstatat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, ub), 0));
 }
 
 int
@@ -1707,12 +1705,11 @@ sys_fstatat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofstatat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, buf), SCARG(uap, flag), retval));
+	    SCARG(uap, buf), SCARG(uap, flag)));
 }
 
 int
-dofstatat(struct proc *p, int fd, const char *path, struct stat *buf,
-    int flag, register_t *retval)
+dofstatat(struct proc *p, int fd, const char *path, struct stat *buf, int flag)
 {
 	struct stat sb;
 	int error, follow;
@@ -1753,7 +1750,7 @@ sys_lstat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofstatat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, ub),
-	    AT_SYMLINK_NOFOLLOW, retval));
+	    AT_SYMLINK_NOFOLLOW));
 }
 
 /*
@@ -1837,9 +1834,9 @@ doreadlinkat(struct proc *p, int fd, const char *path, char *buf,
 		auio.uio_procp = p;
 		auio.uio_resid = count;
 		error = VOP_READLINK(vp, &auio, p->p_ucred);
+		*retval = count - auio.uio_resid;
 	}
 	vput(vp);
-	*retval = count - auio.uio_resid;
 	return (error);
 }
 
@@ -1928,7 +1925,7 @@ sys_fchflags(struct proc *p, void *v, register_t *retval)
 	}
 out:
 	VOP_UNLOCK(vp, 0, p);
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -1944,8 +1941,7 @@ sys_chmod(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
-	return (dofchmodat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode),
-	    0, retval));
+	return (dofchmodat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode), 0));
 }
 
 int
@@ -1959,12 +1955,11 @@ sys_fchmodat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofchmodat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, mode), SCARG(uap, flag), retval));
+	    SCARG(uap, mode), SCARG(uap, flag)));
 }
 
 int
-dofchmodat(struct proc *p, int fd, const char *path, mode_t mode, int flag,
-    register_t *retval)
+dofchmodat(struct proc *p, int fd, const char *path, mode_t mode, int flag)
 {
 	struct vnode *vp;
 	struct vattr vattr;
@@ -2024,7 +2019,7 @@ sys_fchmod(struct proc *p, void *v, register_t *retval)
 		error = VOP_SETATTR(vp, &vattr, p->p_ucred, p);
 	}
 	VOP_UNLOCK(vp, 0, p);
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -2042,7 +2037,7 @@ sys_chown(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofchownat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, uid),
-	    SCARG(uap, gid), 0, retval));
+	    SCARG(uap, gid), 0));
 }
 
 int
@@ -2057,12 +2052,12 @@ sys_fchownat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dofchownat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, uid), SCARG(uap, gid), SCARG(uap, flag), retval));
+	    SCARG(uap, uid), SCARG(uap, gid), SCARG(uap, flag)));
 }
 
 int
 dofchownat(struct proc *p, int fd, const char *path, uid_t uid, gid_t gid,
-    int flag, register_t *retval)
+    int flag)
 {
 	struct vnode *vp;
 	struct vattr vattr;
@@ -2199,7 +2194,7 @@ sys_fchown(struct proc *p, void *v, register_t *retval)
 	}
 out:
 	VOP_UNLOCK(vp, 0, p);
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -2230,7 +2225,7 @@ sys_utimes(struct proc *p, void *v, register_t *retval)
 	} else
 		ts[0].tv_nsec = ts[1].tv_nsec = UTIME_NOW;
 
-	return (doutimensat(p, AT_FDCWD, SCARG(uap, path), ts, 0, retval));
+	return (doutimensat(p, AT_FDCWD, SCARG(uap, path), ts, 0));
 }
 
 int
@@ -2256,12 +2251,12 @@ sys_utimensat(struct proc *p, void *v, register_t *retval)
 		ts[0].tv_nsec = ts[1].tv_nsec = UTIME_NOW;
 
 	return (doutimensat(p, SCARG(uap, fd), SCARG(uap, path), ts,
-	    SCARG(uap, flag), retval));
+	    SCARG(uap, flag)));
 }
 
 int
 doutimensat(struct proc *p, int fd, const char *path,
-    struct timespec ts[2], int flag, register_t *retval)
+    struct timespec ts[2], int flag)
 {
 	struct vnode *vp;
 	int error, follow;
@@ -2276,12 +2271,11 @@ doutimensat(struct proc *p, int fd, const char *path,
 		return (error);
 	vp = nd.ni_vp;
 
-	return (dovutimens(p, vp, ts, retval));
+	return (dovutimens(p, vp, ts));
 }
 
 int
-dovutimens(struct proc *p, struct vnode *vp, struct timespec ts[2],
-    register_t *retval)
+dovutimens(struct proc *p, struct vnode *vp, struct timespec ts[2])
 {
 	struct vattr vattr;
 	struct timespec now;
@@ -2361,7 +2355,7 @@ sys_futimes(struct proc *p, void *v, register_t *retval)
 	} else
 		ts[0].tv_nsec = ts[1].tv_nsec = UTIME_NOW;
 
-	return (dofutimens(p, SCARG(uap, fd), ts, retval));
+	return (dofutimens(p, SCARG(uap, fd), ts));
 }
 
 int
@@ -2383,11 +2377,11 @@ sys_futimens(struct proc *p, void *v, register_t *retval)
 	} else
 		ts[0].tv_nsec = ts[1].tv_nsec = UTIME_NOW;
 
-	return (dofutimens(p, SCARG(uap, fd), ts, retval));
+	return (dofutimens(p, SCARG(uap, fd), ts));
 }
 
 int
-dofutimens(struct proc *p, int fd, struct timespec ts[2], register_t *retval)
+dofutimens(struct proc *p, int fd, struct timespec ts[2])
 {
 	struct file *fp;
 	struct vnode *vp;
@@ -2397,9 +2391,9 @@ dofutimens(struct proc *p, int fd, struct timespec ts[2], register_t *retval)
 		return (error);
 	vp = (struct vnode *)fp->f_data;
 	vref(vp);
-	FRELE(fp);
+	FRELE(fp, p);
 
-	return (dovutimens(p, vp, ts, retval));
+	return (dovutimens(p, vp, ts));
 }
 
 /*
@@ -2472,7 +2466,7 @@ sys_ftruncate(struct proc *p, void *v, register_t *retval)
 	}
 	VOP_UNLOCK(vp, 0, p);
 bad:
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -2501,7 +2495,7 @@ sys_fsync(struct proc *p, void *v, register_t *retval)
 #endif
 
 	VOP_UNLOCK(vp, 0, p);
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
 
@@ -2519,7 +2513,7 @@ sys_rename(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dorenameat(p, AT_FDCWD, SCARG(uap, from), AT_FDCWD,
-	    SCARG(uap, to), retval));
+	    SCARG(uap, to)));
 }
 
 int
@@ -2533,12 +2527,12 @@ sys_renameat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (dorenameat(p, SCARG(uap, fromfd), SCARG(uap, from),
-	    SCARG(uap, tofd), SCARG(uap, to), retval));
+	    SCARG(uap, tofd), SCARG(uap, to)));
 }
 
 int
 dorenameat(struct proc *p, int fromfd, const char *from, int tofd,
-    const char *to, register_t *retval)
+    const char *to)
 {
 	struct vnode *tvp, *fvp, *tdvp;
 	struct nameidata fromnd, tond;
@@ -2626,8 +2620,7 @@ sys_mkdir(struct proc *p, void *v, register_t *retval)
 		syscallarg(mode_t) mode;
 	} */ *uap = v;
 
-	return (domkdirat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode),
-	    retval));
+	return (domkdirat(p, AT_FDCWD, SCARG(uap, path), SCARG(uap, mode)));
 }
 
 int
@@ -2640,12 +2633,11 @@ sys_mkdirat(struct proc *p, void *v, register_t *retval)
 	} */ *uap = v;
 
 	return (domkdirat(p, SCARG(uap, fd), SCARG(uap, path),
-	    SCARG(uap, mode), retval));
+	    SCARG(uap, mode)));
 }
 
 int
-domkdirat(struct proc *p, int fd, const char *path, mode_t mode,
-    register_t *retval)
+domkdirat(struct proc *p, int fd, const char *path, mode_t mode)
 {
 	struct vnode *vp;
 	struct vattr vattr;
@@ -2686,26 +2678,32 @@ sys_rmdir(struct proc *p, void *v, register_t *retval)
 		syscallarg(const char *) path;
 	} */ *uap = v;
 
-	return (dounlinkat(p, AT_FDCWD, SCARG(uap, path), AT_REMOVEDIR,
-	    retval));
+	return (dounlinkat(p, AT_FDCWD, SCARG(uap, path), AT_REMOVEDIR));
 }
 
 /*
  * Read a block of directory entries in a file system independent format.
  */
 int
-getdirentries_internal(struct proc *p, int fd, char *buf, int count,
-    off_t *basep, register_t *retval)
+sys_getdents(struct proc *p, void *v, register_t *retval)
 {
+	struct sys_getdents_args /* {
+		syscallarg(int) fd;
+		syscallarg(void *) buf;
+		syscallarg(size_t) buflen;
+	} */ *uap = v;
 	struct vnode *vp;
 	struct file *fp;
 	struct uio auio;
 	struct iovec aiov;
+	size_t buflen;
 	int error, eofflag;
 
-	if (count < 0)
+	buflen = SCARG(uap, buflen);
+
+	if (buflen > INT_MAX)
 		return EINVAL;
-	if ((error = getvnode(p->p_fd, fd, &fp)) != 0)
+	if ((error = getvnode(p->p_fd, SCARG(uap, fd), &fp)) != 0)
 		return (error);
 	if ((fp->f_flag & FREAD) == 0) {
 		error = EBADF;
@@ -2715,73 +2713,31 @@ getdirentries_internal(struct proc *p, int fd, char *buf, int count,
 		error = EINVAL;
 		goto bad;
 	}
-	vp = (struct vnode *)fp->f_data;
+	vp = fp->f_data;
 	if (vp->v_type != VDIR) {
 		error = EINVAL;
 		goto bad;
 	}
-	aiov.iov_base = buf;
-	aiov.iov_len = count;
+	aiov.iov_base = SCARG(uap, buf);
+	aiov.iov_len = buflen;
 	auio.uio_iov = &aiov;
 	auio.uio_iovcnt = 1;
 	auio.uio_rw = UIO_READ;
 	auio.uio_segflg = UIO_USERSPACE;
 	auio.uio_procp = p;
-	auio.uio_resid = count;
+	auio.uio_resid = buflen;
 	vn_lock(vp, LK_EXCLUSIVE | LK_RETRY, p);
-	*basep = auio.uio_offset = fp->f_offset;
-	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag, 0, 0);
+	auio.uio_offset = fp->f_offset;
+	error = VOP_READDIR(vp, &auio, fp->f_cred, &eofflag);
 	fp->f_offset = auio.uio_offset;
 	VOP_UNLOCK(vp, 0, p);
 	if (error)
 		goto bad;
-	*retval = count - auio.uio_resid;
+	*retval = buflen - auio.uio_resid;
 bad:
-	FRELE(fp);
+	FRELE(fp, p);
 	return (error);
 }
-
-int
-sys_getdirentries(struct proc *p, void *v, register_t *retval)
-{
-	struct sys_getdirentries_args /* {
-		syscallarg(int) fd;
-		syscallarg(char *) buf;
-		syscallarg(int) count;
-		syscallarg(off_t *) basep;
-	} */ *uap = v;
-	int error;
-	off_t off;
-
-	error = getdirentries_internal(p, SCARG(uap, fd), SCARG(uap, buf),
-	    SCARG(uap, count), &off, retval);
-	if (!error)
-		error = copyout(&off, SCARG(uap, basep), sizeof(off_t));
-	return error;
-}
-
-#ifdef COMPAT_O48
-int
-compat_o48_sys_getdirentries(struct proc *p, void *v, register_t *retval)
-{
-	struct compat_o48_sys_getdirentries_args /* {
-		syscallarg(int) fd;
-		syscallarg(char *) buf;
-		syscallarg(int) count;
-		syscallarg(long *) basep;
-	} */ *uap = v;
-	int error;
-	off_t off;
-
-	error = getdirentries_internal(p, SCARG(uap, fd), SCARG(uap, buf),
-	    SCARG(uap, count), &off, retval);
-	if (!error) {
-		long loff = (long)off;
-		error = copyout(&loff, SCARG(uap, basep), sizeof(long));
-	}
-	return error;
-}
-#endif
 
 /*
  * Set the mode mask for creation of filesystem nodes.
@@ -2984,7 +2940,7 @@ sys_pwrite(struct proc *p, void *v, register_t *retval)
 
 	FREF(fp);
 
-	/* dofilewrite() will FRELE the descriptor for us */
+	/* dofilewritev() will FRELE the descriptor for us */
 	return (dofilewritev(p, fd, fp, &iov, 1, 0, &offset, retval));
 }
 
@@ -3028,3 +2984,4 @@ sys_pwritev(struct proc *p, void *v, register_t *retval)
 	return (dofilewritev(p, fd, fp, SCARG(uap, iovp), SCARG(uap, iovcnt),
 	    1, &offset, retval));
 }
+

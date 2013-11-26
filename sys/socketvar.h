@@ -1,4 +1,4 @@
-/*	$OpenBSD: socketvar.h,v 1.50 2011/07/04 22:53:53 tedu Exp $	*/
+/*	$OpenBSD: socketvar.h,v 1.55 2013/01/15 11:12:57 bluhm Exp $	*/
 /*	$NetBSD: socketvar.h,v 1.18 1996/02/09 18:25:38 christos Exp $	*/
 
 /*-
@@ -35,6 +35,11 @@
 #include <sys/selinfo.h>			/* for struct selinfo */
 #include <sys/queue.h>
 #include <sys/timeout.h>
+
+#ifndef	_SOCKLEN_T_DEFINED_
+#define	_SOCKLEN_T_DEFINED_
+typedef	__socklen_t	socklen_t;	/* length type for network syscalls */
+#endif
 
 TAILQ_HEAD(soqhead, socket);
 
@@ -77,14 +82,12 @@ struct socket {
 	uid_t	so_sigeuid;		/* euid of process who set so_pgid */
 	u_long	so_oobmark;		/* chars to oob mark */
 
-#if 1 /*def SOCKET_SPLICE*/
 	struct	socket *so_splice;	/* send data to drain socket */
 	struct	socket *so_spliceback;	/* back ref for notify and cleanup */
 	off_t	so_splicelen;		/* number of bytes spliced so far */
 	off_t	so_splicemax;		/* maximum number of bytes to splice */
 	struct	timeval so_idletv;	/* idle timeout */
 	struct	timeout so_idleto;
-#endif /* SOCKET_SPLICE */
 /*
  * Variables for socket buffering.
  */
@@ -101,6 +104,7 @@ struct socket {
 		struct mbuf *sb_lastrecord;/* first mbuf of last record in
 					      socket buffer */
 		struct	selinfo sb_sel;	/* process selecting read/write */
+		int	sb_flagsintr;	/* flags, changed during interrupt */
 		short	sb_flags;	/* flags, see below */
 		u_short	sb_timeo;	/* timeout for read/write */
 	} so_rcv, so_snd;
@@ -110,9 +114,9 @@ struct socket {
 #define	SB_WAIT		0x04		/* someone is waiting for data/space */
 #define	SB_SEL		0x08		/* someone is selecting */
 #define	SB_ASYNC	0x10		/* ASYNC I/O, need signals */
+#define	SB_SPLICE	0x20		/* buffer is splice source or drain */
 #define	SB_NOINTR	0x40		/* operations not interruptible */
 #define	SB_KNOTE	0x80		/* kernel note attached */
-#define	SB_SPLICE	0x0100		/* buffer is splice source or drain */
 
 	void	(*so_upcall)(struct socket *so, caddr_t arg, int waitf);
 	caddr_t	so_upcallarg;		/* Arg for above */
@@ -120,13 +124,6 @@ struct socket {
 	gid_t	so_egid, so_rgid;
 	pid_t	so_cpid;		/* pid of process that opened socket */
 };
-
-#define	SB_EMPTY_FIXUP(sb) do {						\
-	if ((sb)->sb_mb == NULL) {					\
-		(sb)->sb_mbtail = NULL;					\
-		(sb)->sb_lastrecord = NULL;				\
-	}								\
-} while (/*CONSTCOND*/0)
 
 /*
  * Socket state bits.
@@ -147,6 +144,7 @@ struct socket {
 #define	SS_CONNECTOUT		0x1000	/* connect, not accept, at this end */
 #define	SS_ISSENDING		0x2000	/* hint for lower layer */
 
+#ifdef _KERNEL
 /*
  * Macros for sockets and socket buffering.
  */
@@ -154,8 +152,8 @@ struct socket {
 /*
  * Do we need to notify the other side when I/O is possible?
  */
-#define	sb_notify(sb)	(((sb)->sb_flags & (SB_WAIT|SB_SEL|SB_ASYNC| \
-    SB_KNOTE|SB_SPLICE)) != 0)
+#define	sb_notify(sb)	((((sb)->sb_flags | (sb)->sb_flagsintr) & \
+    (SB_WAIT|SB_SEL|SB_ASYNC|SB_SPLICE|SB_KNOTE)) != 0)
 
 /*
  * How much space is there in a socket buffer (so->so_snd or so->so_rcv)?
@@ -175,10 +173,11 @@ struct socket {
     ((so)->so_state & SS_ISSENDING)
 
 /* can we read something from so? */
-#define	_soreadable(so) \
+#define	soreadable(so)	\
+    ((so)->so_splice == NULL && \
     ((so)->so_rcv.sb_cc >= (so)->so_rcv.sb_lowat || \
-	((so)->so_state & SS_CANTRCVMORE) || \
-	(so)->so_qlen || (so)->so_error)
+    ((so)->so_state & SS_CANTRCVMORE) || \
+    (so)->so_qlen || (so)->so_error))
 
 /* can we write something to so? */
 #define	sowriteable(so) \
@@ -225,26 +224,13 @@ struct socket {
 	}								\
 } while (/* CONSTCOND */ 0)
 
-#define	_sorwakeup(so) do {						\
-	sowakeup((so), &(so)->so_rcv);					\
-	if ((so)->so_upcall)						\
-		(*((so)->so_upcall))((so), (so)->so_upcallarg,		\
-		    M_DONTWAIT);					\
-} while (/* CONSTCOND */ 0)
+#define	SB_EMPTY_FIXUP(sb) do {						\
+	if ((sb)->sb_mb == NULL) {					\
+		(sb)->sb_mbtail = NULL;					\
+		(sb)->sb_lastrecord = NULL;				\
+	}								\
+} while (/*CONSTCOND*/0)
 
-#define	_sowwakeup(so)	sowakeup((so), &(so)->so_snd)
-
-#ifdef SOCKET_SPLICE
-#define	soreadable(so)	((so)->so_splice == NULL && _soreadable(so))
-void	sorwakeup(struct socket *);
-void	sowwakeup(struct socket *);
-#else /* SOCKET_SPLICE */
-#define	soreadable(so)	_soreadable(so)
-#define	sorwakeup(so)	_sorwakeup(so)
-#define	sowwakeup(so)	_sowwakeup(so)
-#endif /* SOCKET_SPLICE */
-
-#ifdef _KERNEL
 extern u_long sb_max;
 
 extern struct pool	socket_pool;
@@ -278,7 +264,6 @@ int	sbappendaddr(struct sockbuf *sb, struct sockaddr *asa,
 int	sbappendcontrol(struct sockbuf *sb, struct mbuf *m0,
 	    struct mbuf *control);
 void	sbappendrecord(struct sockbuf *sb, struct mbuf *m0);
-void	sbcheck(struct sockbuf *sb);
 void	sbcompress(struct sockbuf *sb, struct mbuf *m, struct mbuf *n);
 struct mbuf *
 	sbcreatecontrol(caddr_t p, int size, int type, int level);
@@ -326,6 +311,8 @@ int	sosetopt(struct socket *so, int level, int optname,
 	    struct mbuf *m0);
 int	soshutdown(struct socket *so, int how);
 void	sowakeup(struct socket *so, struct sockbuf *sb);
+void	sorwakeup(struct socket *);
+void	sowwakeup(struct socket *);
 int	sockargs(struct mbuf **, const void *, size_t, int);
 
 int	sendit(struct proc *, int, struct msghdr *, int, register_t *);
@@ -338,9 +325,12 @@ void	sblastrecordchk(struct sockbuf *, const char *);
 
 void	sblastmbufchk(struct sockbuf *, const char *);
 #define	SBLASTMBUFCHK(sb, where)	sblastmbufchk((sb), (where))
+void	sbcheck(struct sockbuf *sb);
+#define	SBCHECK(sb)			sbcheck(sb)
 #else
 #define	SBLASTRECORDCHK(sb, where)	/* nothing */
 #define	SBLASTMBUFCHK(sb, where)	/* nothing */
+#define	SBCHECK(sb)			/* nothing */
 #endif /* SOCKBUF_DEBUG */
 
 #endif /* _KERNEL */

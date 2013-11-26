@@ -1,4 +1,4 @@
-/*	$OpenBSD: rbus_machdep.c,v 1.11 2010/09/22 02:28:37 jsg Exp $ */
+/*	$OpenBSD: rbus_machdep.c,v 1.13 2013/08/07 07:29:19 mpi Exp $ */
 /*	$NetBSD: rbus_machdep.c,v 1.2 1999/10/15 06:43:06 haya Exp $	*/
 
 /*
@@ -28,18 +28,14 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/extent.h>
-#include <sys/proc.h>
-#include <sys/sysctl.h>
-#include <sys/device.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 #include <dev/cardbus/rbus.h>
 
 #include <dev/pci/pcivar.h>
-#include <arch/macppc/pci/pcibrvar.h>
+#include <dev/pci/pcidevs.h>
+
+#include <dev/ofw/openfirm.h>
 
 void macppc_cardbus_init(pci_chipset_tag_t pc, pcitag_t tag);
 
@@ -112,4 +108,18 @@ void
 pccbb_attach_hook(struct device *parent, struct device *self,
     struct pci_attach_args *pa)
 {
+	pci_chipset_tag_t pc = pa->pa_pc;
+	int node = PCITAG_NODE(pa->pa_tag);
+	int bus, busrange[2];
+
+	if (OF_getprop(OF_parent(node), "bus-range", &busrange,
+	    sizeof(busrange)) != sizeof(busrange))
+		return;
+
+	bus = busrange[0] + 1;
+	while (bus < 256 && pc->busnode[bus])
+		bus++;
+	if (bus == 256)
+		return;
+	pc->busnode[bus] = node;
 }

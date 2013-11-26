@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp_usrreq.c,v 1.146 2012/03/17 10:16:41 dlg Exp $	*/
+/*	$OpenBSD: udp_usrreq.c,v 1.171 2013/11/22 07:59:09 mpi Exp $	*/
 /*	$NetBSD: udp_usrreq.c,v 1.28 1996/03/16 23:54:03 christos Exp $	*/
 
 /*
@@ -78,6 +78,7 @@
 #include <sys/sysctl.h>
 
 #include <net/if.h>
+#include <net/if_media.h>
 #include <net/route.h>
 
 #include <netinet/in.h>
@@ -99,15 +100,10 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
+#include <netinet6/in6_var.h>
+#include <netinet6/ip6_var.h>
 #include <netinet6/ip6protosw.h>
-
-extern int ip6_defhlim;
 #endif /* INET6 */
-
-#include "faith.h"
-#if NFAITH > 0
-#include <net/if_types.h>
-#endif
 
 #include "pf.h"
 #if NPF > 0
@@ -117,6 +113,11 @@ extern int ip6_defhlim;
 #ifdef PIPEX 
 #include <netinet/if_ether.h>
 #include <net/pipex.h>
+#endif
+
+#include "vxlan.h"
+#if NVXLAN > 0
+#include <net/if_vxlan.h>
 #endif
 
 /*
@@ -142,9 +143,6 @@ void udp_notify(struct inpcb *, int);
 #endif
 int	udbhashsize = UDBHASHSIZE;
 
-/* from in_pcb.c */
-extern	struct baddynamicports baddynamicports;
-
 void
 udp_init()
 {
@@ -156,16 +154,6 @@ int
 udp6_input(struct mbuf **mp, int *offp, int proto)
 {
 	struct mbuf *m = *mp;
-
-#if NFAITH > 0
-	if (m->m_pkthdr.rcvif) {
-		if (m->m_pkthdr.rcvif->if_type == IFT_FAITH) {
-			/* XXX send icmp6 host/port unreach? */
-			m_freem(m);
-			return IPPROTO_DONE;
-		}
-	}
-#endif
 
 	udp_input(m, *offp, proto);
 	return IPPROTO_DONE;
@@ -197,7 +185,8 @@ udp_input(struct mbuf *m, ...)
 	struct m_tag *mtag;
 	struct tdb_ident *tdbi;
 	struct tdb *tdb;
-	int error, s;
+	int error;
+	u_int32_t ipsecflowinfo = 0;
 #endif /* IPSEC */
 
 	va_start(ap, m);
@@ -273,12 +262,6 @@ udp_input(struct mbuf *m, ...)
 	if (ip)
 		save_ip = *ip;
 
-	/*
-	 * Checksum extended UDP header and data.
-	 * from W.R.Stevens: check incoming udp cksums even if
-	 *	udpcksum is not set.
-	 */
-	savesum = uh->uh_sum;
 #ifdef INET6
 	if (ip6) {
 		/* Be proactive about malicious use of IPv4 mapped address */
@@ -287,56 +270,55 @@ udp_input(struct mbuf *m, ...)
 			/* XXX stat */
 			goto bad;
 		}
+	}
+#endif /* INET6 */
 
+	/*
+	 * Checksum extended UDP header and data.
+	 * from W.R.Stevens: check incoming udp cksums even if
+	 *	udpcksum is not set.
+	 */
+	savesum = uh->uh_sum;
+	if (uh->uh_sum == 0) {
+		udpstat.udps_nosum++;
+#ifdef INET6
 		/*
 		 * In IPv6, the UDP checksum is ALWAYS used.
 		 */
-		if (uh->uh_sum == 0) {
-			udpstat.udps_nosum++;
+		if (ip6)
 			goto bad;
-		}
-		if ((m->m_pkthdr.csum_flags & M_UDP_CSUM_IN_OK) == 0) {
-			if (m->m_pkthdr.csum_flags & M_UDP_CSUM_IN_BAD) {
-				udpstat.udps_badsum++;
-				udpstat.udps_inhwcsum++;
-				goto bad;
-			}
-
-			if ((uh->uh_sum = in6_cksum(m, IPPROTO_UDP,
-			    iphlen, len))) {
-				udpstat.udps_badsum++;
-				goto bad;
-			}
-		} else {
-			m->m_pkthdr.csum_flags &= ~M_UDP_CSUM_IN_OK;
-			udpstat.udps_inhwcsum++;
-		}
-	} else
 #endif /* INET6 */
-	if (uh->uh_sum) {
+	} else {
 		if ((m->m_pkthdr.csum_flags & M_UDP_CSUM_IN_OK) == 0) {
 			if (m->m_pkthdr.csum_flags & M_UDP_CSUM_IN_BAD) {
 				udpstat.udps_badsum++;
 				udpstat.udps_inhwcsum++;
-				m_freem(m);
-				return;
+				goto bad;
 			}
 
-			if ((uh->uh_sum = in4_cksum(m, IPPROTO_UDP,
-			    iphlen, len))) {
+			if (ip)
+				uh->uh_sum = in4_cksum(m, IPPROTO_UDP,
+				    iphlen, len);
+#ifdef INET6
+			else if (ip6)
+				uh->uh_sum = in6_cksum(m, IPPROTO_UDP,
+				    iphlen, len);
+#endif /* INET6 */
+			if (uh->uh_sum != 0) {
 				udpstat.udps_badsum++;
-				m_freem(m);
-				return;
+				goto bad;
 			}
 		} else {
 			m->m_pkthdr.csum_flags &= ~M_UDP_CSUM_IN_OK;
 			udpstat.udps_inhwcsum++;
 		}
-	} else
-		udpstat.udps_nosum++;
+	}
 
 #ifdef IPSEC
 	if (udpencap_enable && udpencap_port &&
+#if NPF > 0
+	    !(m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) &&
+#endif
 	    uh->uh_dport == htons(udpencap_port)) {
 		u_int32_t spi;
 		int skip = iphlen + sizeof(struct udphdr);
@@ -408,6 +390,20 @@ udp_input(struct mbuf *m, ...)
 		break;
 #endif /* INET6 */
 	}
+
+#if NVXLAN > 0
+	if (vxlan_enable > 0 &&
+#if NPF > 0
+	    !(m->m_pkthdr.pf.flags & PF_TAG_DIVERTED) &&
+#endif
+	    (error = vxlan_lookup(m, uh, iphlen, &srcsa.sa)) != 0) {
+		if (error == -1) {
+			udpstat.udps_hdrops++;
+			m_freem(m);
+		}
+		return;
+	}
+#endif
 
 #ifdef INET6
 	if ((ip6 && IN6_IS_ADDR_MULTICAST(&ip6->ip6_dst)) ||
@@ -563,21 +559,21 @@ udp_input(struct mbuf *m, ...)
 	 */
 #if 0
 	if (m->m_pkthdr.pf.statekey)
-		inp = ((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp;
+		inp = m->m_pkthdr.pf.statekey->inp;
 #endif
 	if (inp == NULL) {
 #ifdef INET6
 		if (ip6)
 			inp = in6_pcbhashlookup(&udbtable, &ip6->ip6_src,
-			    uh->uh_sport, &ip6->ip6_dst, uh->uh_dport);
+			    uh->uh_sport, &ip6->ip6_dst, uh->uh_dport,
+			    m->m_pkthdr.rdomain);
 		else
 #endif /* INET6 */
 		inp = in_pcbhashlookup(&udbtable, ip->ip_src, uh->uh_sport,
 		    ip->ip_dst, uh->uh_dport, m->m_pkthdr.rdomain);
 #if NPF > 0
 		if (m->m_pkthdr.pf.statekey && inp) {
-			((struct pf_state_key *)m->m_pkthdr.pf.statekey)->inp =
-			    inp;
+			m->m_pkthdr.pf.statekey->inp = inp;
 			inp->inp_pf_sk = m->m_pkthdr.pf.statekey;
 		}
 #endif
@@ -590,7 +586,8 @@ udp_input(struct mbuf *m, ...)
 #ifdef INET6
 		if (ip6) {
 			inp = in6_pcblookup_listen(&udbtable,
-			    &ip6->ip6_dst, uh->uh_dport, inpl_reverse, m);
+			    &ip6->ip6_dst, uh->uh_dport, inpl_reverse, m,
+			    m->m_pkthdr.rdomain);
 		} else
 #endif /* INET6 */
 		inp = in_pcblookup_listen(&udbtable,
@@ -618,10 +615,15 @@ udp_input(struct mbuf *m, ...)
 			return;
 		}
 	}
+	KASSERT(sotoinpcb(inp->inp_socket) == inp);
+
+#if NPF > 0
+	/* The statekey has finished finding the inp, it is no longer needed. */
+	m->m_pkthdr.pf.statekey = NULL;
+#endif
 
 #ifdef IPSEC
 	mtag = m_tag_find(m, PACKET_TAG_IPSEC_IN_DONE, NULL);
-	s = splnet();
 	if (mtag != NULL) {
 		tdbi = (struct tdb_ident *)(mtag + 1);
 		tdb = gettdb(tdbi->rdomain, tdbi->spi,
@@ -629,9 +631,9 @@ udp_input(struct mbuf *m, ...)
 	} else
 		tdb = NULL;
 	ipsp_spd_lookup(m, srcsa.sa.sa_family, iphlen, &error,
-	    IPSP_DIRECTION_IN, tdb, inp);
+	    IPSP_DIRECTION_IN, tdb, inp, 0);
 	if (error) {
-		splx(s);
+		udpstat.udps_nosec++;
 		goto bad;
 	}
 
@@ -644,7 +646,6 @@ udp_input(struct mbuf *m, ...)
 				inp->inp_ipo = ipsec_add_policy(inp,
 				    srcsa.sa.sa_family, IPSP_DIRECTION_OUT);
 				if (inp->inp_ipo == NULL) {
-					splx(s);
 					goto bad;
 				}
 			}
@@ -671,7 +672,10 @@ udp_input(struct mbuf *m, ...)
 			inp->inp_tdb_in = NULL;
 		}
 	}
-	splx(s);
+	/* create ipsec options while we know that tdb cannot be modified */
+	if (tdb)
+		ipsecflowinfo = tdb->tdb_spi;
+
 #endif /*IPSEC */
 
 	opts = NULL;
@@ -683,6 +687,16 @@ udp_input(struct mbuf *m, ...)
 	if (ip && (inp->inp_flags & INP_CONTROLOPTS ||
 	    inp->inp_socket->so_options & SO_TIMESTAMP))
 		ip_savecontrol(inp, &opts, ip, m);
+#ifdef INET6
+	if (ip6 && (inp->inp_flags & IN6P_RECVDSTPORT)) {
+		struct mbuf **mp = &opts;
+
+		while (*mp)
+			mp = &(*mp)->m_next;
+		*mp = sbcreatecontrol((caddr_t)&uh->uh_dport, sizeof(u_int16_t),
+		    IPV6_RECVDSTPORT, IPPROTO_IPV6);
+	}
+#endif /* INET6 */
 	if (ip && (inp->inp_flags & INP_RECVDSTPORT)) {
 		struct mbuf **mp = &opts;
 
@@ -691,13 +705,27 @@ udp_input(struct mbuf *m, ...)
 		*mp = sbcreatecontrol((caddr_t)&uh->uh_dport, sizeof(u_int16_t),
 		    IP_RECVDSTPORT, IPPROTO_IP);
 	}
+#ifdef IPSEC
+	if (ipsecflowinfo && (inp->inp_flags & INP_IPSECFLOWINFO)) {
+		struct mbuf **mp = &opts;
+
+		while (*mp)
+			mp = &(*mp)->m_next;
+		*mp = sbcreatecontrol((caddr_t)&ipsecflowinfo,
+		    sizeof(u_int32_t), IP_IPSECFLOWINFO, IPPROTO_IP);
+	}
+#endif
 #ifdef PIPEX
 	if (pipex_enable && inp->inp_pipex) {
 		struct pipex_session *session;
 		int off = iphlen + sizeof(struct udphdr);
 		if ((session = pipex_l2tp_lookup_session(m, off)) != NULL) {
-			if ((m = pipex_l2tp_input(m, off, session)) == NULL)
+			if ((m = pipex_l2tp_input(m, off, session,
+			    ipsecflowinfo)) == NULL) {
+				if (opts)
+					m_freem(opts);
 				return; /* the packet is handled by PIPEX */
+			}
 		}
 	}
 #endif
@@ -730,7 +758,7 @@ udp_notify(struct inpcb *inp, int errno)
 
 #ifdef INET6
 void
-udp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
+udp6_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *d)
 {
 	struct udphdr uh;
 	struct sockaddr_in6 sa6;
@@ -844,7 +872,8 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 			 * payload.
 			 */
 			if (in6_pcbhashlookup(&udbtable, &sa6.sin6_addr,
-			    uh.uh_dport, &sa6_src.sin6_addr, uh.uh_sport))
+			    uh.uh_dport, &sa6_src.sin6_addr, uh.uh_sport,
+			    rdomain))
 				valid = 1;
 #if 0
 			/*
@@ -855,7 +884,8 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 			 * is really ours.
 			 */
 			else if (in6_pcblookup_listen(&udbtable,
-			    &sa6_src.sin6_addr, uh.uh_sport, 0);
+			    &sa6_src.sin6_addr, uh.uh_sport, 0,
+			    rdomain))
 				valid = 1;
 #endif
 
@@ -877,12 +907,11 @@ udp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 			 */
 		}
 
-		(void) in6_pcbnotify(&udbtable, (struct sockaddr *)&sa6,
-		    uh.uh_dport, (struct sockaddr *)&sa6_src,
-		    uh.uh_sport, cmd, cmdarg, notify);
+		(void) in6_pcbnotify(&udbtable, &sa6, uh.uh_dport,
+		    &sa6_src, uh.uh_sport, rdomain, cmd, cmdarg, notify);
 	} else {
-		(void) in6_pcbnotify(&udbtable, (struct sockaddr *)&sa6, 0,
-		    (struct sockaddr *)&sa6_any, 0, cmd, cmdarg, notify);
+		(void) in6_pcbnotify(&udbtable, &sa6, 0,
+		    &sa6_any, 0, rdomain, cmd, cmdarg, notify);
 	}
 }
 #endif
@@ -894,7 +923,6 @@ udp_ctlinput(int cmd, struct sockaddr *sa, u_int rdomain, void *v)
 	struct udphdr *uhp;
 	struct in_addr faddr;
 	struct inpcb *inp;
-	extern int inetctlerrmap[];
 	void (*notify)(struct inpcb *, int) = udp_notify;
 	int errno;
 
@@ -943,6 +971,7 @@ udp_output(struct mbuf *m, ...)
 	struct inpcb *inp;
 	struct mbuf *addr, *control;
 	struct udpiphdr *ui;
+	u_int32_t ipsecflowinfo = 0;
 	int len = m->m_pkthdr.len;
 	struct in_addr laddr;
 	int s = 0, error = 0;
@@ -989,6 +1018,46 @@ udp_output(struct mbuf *m, ...)
 			goto release;
 		}
 	}
+
+#ifdef IPSEC
+	if (control && (inp->inp_flags & INP_IPSECFLOWINFO) != 0) {
+		u_int clen;
+		struct cmsghdr *cm;
+		caddr_t cmsgs;
+
+		/*
+		 * XXX: Currently, we assume all the optional information is stored
+		 * in a single mbuf.
+		 */
+		if (control->m_next) {
+			error = EINVAL;
+			goto bail;
+		}
+
+		clen = control->m_len;
+		cmsgs = mtod(control, caddr_t);
+		do {
+			if (clen < CMSG_LEN(0)) {
+				error = EINVAL;
+				goto bail;
+			}
+			cm = (struct cmsghdr *)cmsgs;
+			if (cm->cmsg_len < CMSG_LEN(0) ||
+			    CMSG_ALIGN(cm->cmsg_len) > clen) {
+				error = EINVAL;
+				goto bail;
+			}
+			if (cm->cmsg_len == CMSG_LEN(sizeof(ipsecflowinfo)) &&
+			    cm->cmsg_level == IPPROTO_IP &&
+			    cm->cmsg_type == IP_IPSECFLOWINFO) {
+				ipsecflowinfo = *(u_int32_t *)CMSG_DATA(cm);
+				break;
+			}
+			clen -= CMSG_ALIGN(cm->cmsg_len);
+			cmsgs += CMSG_ALIGN(cm->cmsg_len);
+		} while (clen);
+	}
+#endif
 	/*
 	 * Calculate data length and get a mbuf
 	 * for UDP and IP headers.
@@ -1012,21 +1081,11 @@ udp_output(struct mbuf *m, ...)
 	ui->ui_sport = inp->inp_lport;
 	ui->ui_dport = inp->inp_fport;
 	ui->ui_ulen = ui->ui_len;
-
-	/*
-	 * Compute the pseudo-header checksum; defer further checksumming
-	 * until ip_output() or hardware (if it exists).
-	 */
-	if (udpcksum) {
-		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
-		ui->ui_sum = in_cksum_phdr(ui->ui_src.s_addr,
-		    ui->ui_dst.s_addr, htons((u_int16_t)len +
-		    sizeof (struct udphdr) + IPPROTO_UDP));
-	} else
-		ui->ui_sum = 0;
 	((struct ip *)ui)->ip_len = htons(sizeof (struct udpiphdr) + len);
 	((struct ip *)ui)->ip_ttl = inp->inp_ip.ip_ttl;
 	((struct ip *)ui)->ip_tos = inp->inp_ip.ip_tos;
+	if (udpcksum)
+		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
 
 	udpstat.udps_opackets++;
 
@@ -1034,8 +1093,8 @@ udp_output(struct mbuf *m, ...)
 	m->m_pkthdr.rdomain = inp->inp_rtableid;
 
 	error = ip_output(m, inp->inp_options, &inp->inp_route,
-	    inp->inp_socket->so_options & (SO_DONTROUTE | SO_BROADCAST),
-	    inp->inp_moptions, inp);
+	    (inp->inp_socket->so_options & (SO_DONTROUTE | SO_BROADCAST))
+	    |IP_IPSECFLOW, inp->inp_moptions, inp, ipsecflowinfo);
 	if (error == EACCES)	/* translate pf(4) error for userland */
 		error = EHOSTUNREACH;
 
@@ -1069,7 +1128,7 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 #ifdef INET6
 		if (inp->inp_flags & INP_IPV6)
 			return (in6_control(so, (u_long)m, (caddr_t)addr,
-			    (struct ifnet *)control, 0));
+			    (struct ifnet *)control));
 		else
 #endif /* INET6 */
 			return (in_control(so, (u_long)m, (caddr_t)addr,
@@ -1091,20 +1150,18 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 			break;
 		}
 		s = splsoftnet();
-		error = in_pcballoc(so, &udbtable);
+		if ((error = soreserve(so, udp_sendspace, udp_recvspace)) ||
+		    (error = in_pcballoc(so, &udbtable))) {
+			splx(s);
+			break;
+		}
 		splx(s);
-		if (error)
-			break;
-		error = soreserve(so, udp_sendspace, udp_recvspace);
-		if (error)
-			break;
 #ifdef INET6
-		if (((struct inpcb *)so->so_pcb)->inp_flags & INP_IPV6)
-			((struct inpcb *) so->so_pcb)->inp_ipv6.ip6_hlim =
-			    ip6_defhlim;
+		if (sotoinpcb(so)->inp_flags & INP_IPV6)
+			sotoinpcb(so)->inp_ipv6.ip6_hlim = ip6_defhlim;
 		else
 #endif /* INET6 */
-			((struct inpcb *) so->so_pcb)->inp_ip.ip_ttl = ip_defttl;
+			sotoinpcb(so)->inp_ip.ip_ttl = ip_defttl;
 		break;
 
 	case PRU_DETACH:
@@ -1197,6 +1254,12 @@ udp_usrreq(struct socket *so, int req, struct mbuf *m, struct mbuf *addr,
 #ifdef PIPEX
 		if (inp->inp_pipex) {
 			struct pipex_session *session;
+
+			if (addr != NULL) 
+				session =
+				    pipex_l2tp_userland_lookup_session(m,
+					mtod(addr, struct sockaddr *));
+			else
 #ifdef INET6
 			if (inp->inp_flags & INP_IPV6)
 				session =

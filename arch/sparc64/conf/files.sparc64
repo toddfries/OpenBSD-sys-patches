@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc64,v 1.136 2012/03/17 21:30:09 kettenis Exp $
+#	$OpenBSD: files.sparc64,v 1.144 2013/11/04 14:07:16 deraadt Exp $
 #	$NetBSD: files.sparc64,v 1.50 2001/08/10 20:53:50 eeh Exp $
 
 # maxpartitions must be first item in files.${ARCH}
@@ -73,7 +73,6 @@ attach	prtc at mainbus
 file	arch/sparc64/dev/prtc.c			prtc
 
 include	"dev/sbus/files.sbus"
-include	"dev/i2o/files.i2o"
 include	"dev/mii/files.mii"
 include	"dev/atapiscsi/files.atapiscsi"
 include	"dev/ata/files.ata"
@@ -277,13 +276,13 @@ file	arch/sparc64/dev/lpt_ebus.c		lpt_ebus
 #device	zs {[channel = -1]}
 attach	zs at sbus with zs_sbus
 attach	zs at fhc with zs_fhc
-file	arch/sparc64/dev/zs.c			zs needs-flag
-file	arch/sparc64/dev/z8530sc.c		zs
+file	arch/sparc64/dev/zs.c			zs
+file	dev/ic/z8530sc.c			zs
 
 define	zstty {}
 device	zstty: tty
 attach	zstty at zs
-file	arch/sparc64/dev/z8530tty.c		zstty needs-flag
+file	dev/ic/z8530tty.c			zstty needs-flag
 
 device	zskbd: wskbddev, sunkbd
 attach	zskbd at zs
@@ -344,8 +343,6 @@ file	arch/sparc64/sparc64/vm_machdep.c
 file	arch/sparc64/sparc64/db_interface.c	ddb | kgdb
 file	arch/sparc64/sparc64/db_trace.c		ddb
 file	arch/sparc64/sparc64/db_disasm.c	ddb
-
-file	arch/sparc64/dev/md_root.c	memory_disk_hooks
 
 #
 # Machine-independent SCSI drivers
@@ -438,7 +435,7 @@ file	arch/sparc64/dev/vds.c			vds
 # Virtual disk server port
 device	vdsp: ldc
 attach	vdsp at vds
-file	arch/sparc64/dev/vdsp.c			vdsp
+file	arch/sparc64/dev/vdsp.c			vdsp needs-flag
 
 # Virtual disk
 device	vdsk: ldc, scsi
@@ -469,9 +466,9 @@ device	vldc {}
 attach	vldc at cbus
 file	arch/sparc64/dev/vldc.c			vldc
 
-device	hvctl: ldc
-attach	hvctl at vldc
-file	arch/sparc64/dev/hvctl.c		hvctl needs-flag
+device	vldcp: ldc
+attach	vldcp at vldc
+file	arch/sparc64/dev/vldcp.c		vldcp needs-flag
 
 device	mgiic: i2cbus
 attach	mgiic at mainbus

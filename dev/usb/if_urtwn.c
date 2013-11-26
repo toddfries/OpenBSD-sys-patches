@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtwn.c,v 1.20 2011/11/26 06:39:33 ckuethe Exp $	*/
+/*	$OpenBSD: if_urtwn.c,v 1.32 2013/09/30 05:18:57 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -47,7 +47,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -78,36 +77,75 @@ static const struct usb_devno urtwn_devs[] = {
 	{ USB_VENDOR_ABOCOM,	USB_PRODUCT_ABOCOM_RTL8188CU_1 },
 	{ USB_VENDOR_ABOCOM,	USB_PRODUCT_ABOCOM_RTL8188CU_2 },
 	{ USB_VENDOR_ABOCOM,	USB_PRODUCT_ABOCOM_RTL8192CU },
+	{ USB_VENDOR_ASUS,	USB_PRODUCT_ASUS_RTL8192CU },
+	{ USB_VENDOR_ASUS,	USB_PRODUCT_ASUS_RTL8192CU_2 },
+	{ USB_VENDOR_ASUS,	USB_PRODUCT_ASUS_RTL8192CU_3 },
 	{ USB_VENDOR_AZUREWAVE,	USB_PRODUCT_AZUREWAVE_RTL8188CE_1 },
 	{ USB_VENDOR_AZUREWAVE,	USB_PRODUCT_AZUREWAVE_RTL8188CE_2 },
+	{ USB_VENDOR_AZUREWAVE,	USB_PRODUCT_AZUREWAVE_RTL8188CU },
+	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_F7D2102 },
+	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_F9L1004V1 },
 	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8188CU },
+	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8188CUS },
+	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8192CU },
+	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8192CU_2 },
+	{ USB_VENDOR_CHICONY,	USB_PRODUCT_CHICONY_RTL8188CUS_1 },
+	{ USB_VENDOR_CHICONY,	USB_PRODUCT_CHICONY_RTL8188CUS_2 },
+	{ USB_VENDOR_CHICONY,	USB_PRODUCT_CHICONY_RTL8188CUS_3 },
+	{ USB_VENDOR_CHICONY,	USB_PRODUCT_CHICONY_RTL8188CUS_4 },
+	{ USB_VENDOR_CHICONY,	USB_PRODUCT_CHICONY_RTL8188CUS_5 },
+	{ USB_VENDOR_CHICONY,	USB_PRODUCT_CHICONY_RTL8188CUS_6 },
+	{ USB_VENDOR_COMPARE,	USB_PRODUCT_COMPARE_RTL8192CU },
 	{ USB_VENDOR_COREGA,	USB_PRODUCT_COREGA_RTL8192CU },
+	{ USB_VENDOR_DLINK,	USB_PRODUCT_DLINK_DWA131B },
 	{ USB_VENDOR_DLINK,	USB_PRODUCT_DLINK_RTL8188CU },
 	{ USB_VENDOR_DLINK,	USB_PRODUCT_DLINK_RTL8192CU_1 },
 	{ USB_VENDOR_DLINK,	USB_PRODUCT_DLINK_RTL8192CU_2 },
 	{ USB_VENDOR_DLINK,	USB_PRODUCT_DLINK_RTL8192CU_3 },
-	{ USB_VENDOR_EDIMAX,	USB_PRODUCT_EDIMAX_RTL8188CU },
+	{ USB_VENDOR_DLINK,	USB_PRODUCT_DLINK_RTL8192CU_4 },
+	{ USB_VENDOR_EDIMAX,	USB_PRODUCT_EDIMAX_EW7811UN },
 	{ USB_VENDOR_EDIMAX,	USB_PRODUCT_EDIMAX_RTL8192CU },
 	{ USB_VENDOR_FEIXUN,	USB_PRODUCT_FEIXUN_RTL8188CU },
 	{ USB_VENDOR_FEIXUN,	USB_PRODUCT_FEIXUN_RTL8192CU },
 	{ USB_VENDOR_GUILLEMOT,	USB_PRODUCT_GUILLEMOT_HWNUP150 },
+	{ USB_VENDOR_GUILLEMOT,	USB_PRODUCT_GUILLEMOT_RTL8192CU },
+	{ USB_VENDOR_HAWKING,	USB_PRODUCT_HAWKING_RTL8192CU },
+	{ USB_VENDOR_HAWKING,	USB_PRODUCT_HAWKING_RTL8192CU_2 },
 	{ USB_VENDOR_HP3,	USB_PRODUCT_HP3_RTL8188CU },
+	{ USB_VENDOR_IODATA,	USB_PRODUCT_IODATA_WNG150UM },
+	{ USB_VENDOR_IODATA,	USB_PRODUCT_IODATA_RTL8192CU },
 	{ USB_VENDOR_NETGEAR,	USB_PRODUCT_NETGEAR_WNA1000M },
+	{ USB_VENDOR_NETGEAR,	USB_PRODUCT_NETGEAR_RTL8192CU },
+	{ USB_VENDOR_NETGEAR4,	USB_PRODUCT_NETGEAR4_RTL8188CU },
+	{ USB_VENDOR_NETWEEN,	USB_PRODUCT_NETWEEN_RTL8192CU },
 	{ USB_VENDOR_NOVATECH,	USB_PRODUCT_NOVATECH_RTL8188CU },
 	{ USB_VENDOR_PLANEX2,	USB_PRODUCT_PLANEX2_RTL8188CU_1 },
 	{ USB_VENDOR_PLANEX2,	USB_PRODUCT_PLANEX2_RTL8188CU_2 },
+	{ USB_VENDOR_PLANEX2,	USB_PRODUCT_PLANEX2_RTL8188CU_3 },
+	{ USB_VENDOR_PLANEX2,	USB_PRODUCT_PLANEX2_RTL8188CU_4 },
+	{ USB_VENDOR_PLANEX2,	USB_PRODUCT_PLANEX2_RTL8188CUS },
 	{ USB_VENDOR_PLANEX2,	USB_PRODUCT_PLANEX2_RTL8192CU },
 	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188CE_0 },
 	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188CE_1 },
+	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188CTV },
 	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188CU_0 },
 	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188CU_1 },
 	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188CU_2 },
+	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188CU_COMBO },
+	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188CUS },
 	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188RU },
+	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188RU_2 },
+	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8188RU_3 },
 	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8191CU },
 	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8192CE },
 	{ USB_VENDOR_REALTEK,	USB_PRODUCT_REALTEK_RTL8192CU },
 	{ USB_VENDOR_SITECOMEU,	USB_PRODUCT_SITECOMEU_RTL8188CU },
+	{ USB_VENDOR_SITECOMEU,	USB_PRODUCT_SITECOMEU_RTL8188CU_2 },
+	{ USB_VENDOR_SITECOMEU,	USB_PRODUCT_SITECOMEU_RTL8192CU },
+	{ USB_VENDOR_SITECOMEU,	USB_PRODUCT_SITECOMEU_RTL8192CU_2 },
+	{ USB_VENDOR_TPLINK,	USB_PRODUCT_TPLINK_RTL8192CU },
 	{ USB_VENDOR_TRENDNET,	USB_PRODUCT_TRENDNET_RTL8188CU },
+	{ USB_VENDOR_TRENDNET,	USB_PRODUCT_TRENDNET_RTL8192CU },
 	{ USB_VENDOR_ZYXEL,	USB_PRODUCT_ZYXEL_RTL8192CU }
 };
 
@@ -165,9 +203,9 @@ void		urtwn_delete_key_cb(struct urtwn_softc *, void *);
 void		urtwn_update_avgrssi(struct urtwn_softc *, int, int8_t);
 int8_t		urtwn_get_rssi(struct urtwn_softc *, int, void *);
 void		urtwn_rx_frame(struct urtwn_softc *, uint8_t *, int);
-void		urtwn_rxeof(usbd_xfer_handle, usbd_private_handle,
+void		urtwn_rxeof(struct usbd_xfer *, void *,
 		    usbd_status);
-void		urtwn_txeof(usbd_xfer_handle, usbd_private_handle,
+void		urtwn_txeof(struct usbd_xfer *, void *,
 		    usbd_status);
 int		urtwn_tx(struct urtwn_softc *, struct mbuf *,
 		    struct ieee80211_node *);
@@ -1610,7 +1648,7 @@ urtwn_rx_frame(struct urtwn_softc *sc, uint8_t *buf, int pktlen)
 }
 
 void
-urtwn_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
+urtwn_rxeof(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct urtwn_rx_data *data = priv;
@@ -1676,7 +1714,7 @@ urtwn_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv,
 }
 
 void
-urtwn_txeof(usbd_xfer_handle xfer, usbd_private_handle priv,
+urtwn_txeof(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct urtwn_tx_data *data = priv;
@@ -1715,7 +1753,7 @@ urtwn_tx(struct urtwn_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 	struct ieee80211_key *k = NULL;
 	struct urtwn_tx_data *data;
 	struct r92c_tx_desc *txd;
-	usbd_pipe_handle pipe;
+	struct usbd_pipe *pipe;
 	uint16_t qos, sum;
 	uint8_t raid, type, tid, qid;
 	int i, hasqos, xferlen, error;
@@ -2639,7 +2677,7 @@ urtwn_write_txpower(struct urtwn_softc *sc, int chain,
 	    SM(R92C_TXAGC_MCS07,  power[19]));
 	urtwn_bb_write(sc, R92C_TXAGC_MCS11_MCS08(chain),
 	    SM(R92C_TXAGC_MCS08,  power[20]) |
-	    SM(R92C_TXAGC_MCS08,  power[21]) |
+	    SM(R92C_TXAGC_MCS09,  power[21]) |
 	    SM(R92C_TXAGC_MCS10,  power[22]) |
 	    SM(R92C_TXAGC_MCS11,  power[23]));
 	urtwn_bb_write(sc, R92C_TXAGC_MCS15_MCS12(chain),
@@ -2768,7 +2806,6 @@ urtwn_set_chan(struct urtwn_softc *sc, struct ieee80211_channel *c,
     struct ieee80211_channel *extc)
 {
 	struct ieee80211com *ic = &sc->sc_ic;
-	uint32_t reg;
 	u_int chan;
 	int i;
 
@@ -2783,6 +2820,8 @@ urtwn_set_chan(struct urtwn_softc *sc, struct ieee80211_channel *c,
 	}
 #ifndef IEEE80211_NO_HT
 	if (extc != NULL) {
+		uint32_t reg;
+
 		/* Is secondary channel below or above primary? */
 		int prichlo = c->ic_freq < extc->ic_freq;
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpithinkpad.c,v 1.28 2011/06/06 06:13:46 deraadt Exp $	*/
+/*	$OpenBSD: acpithinkpad.c,v 1.34 2013/11/04 11:57:26 mpi Exp $	*/
 /*
  * Copyright (c) 2008 joshua stein <jcs@openbsd.org>
  *
@@ -18,7 +18,6 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
-#include <sys/workq.h>
 
 #include <dev/acpi/acpireg.h>
 #include <dev/acpi/acpivar.h>
@@ -66,6 +65,8 @@
 #define	THINKPAD_BUTTON_MICROPHONE_MUTE	0x101b
 #define	THINKPAD_BUTTON_FN_F11		0x100b
 #define	THINKPAD_BUTTON_HIBERNATE	0x100c
+#define THINKPAD_PORT_REPL_DOCKED	0x4010
+#define THINKPAD_PORT_REPL_UNDOCKED	0x4011
 #define	THINKPAD_LID_OPEN		0x5001
 #define	THINKPAD_LID_CLOSED		0x5002
 #define	THINKPAD_TABLET_SCREEN_NORMAL	0x500a
@@ -73,7 +74,9 @@
 #define	THINKPAD_BRIGHTNESS_CHANGED	0x5010
 #define	THINKPAD_TABLET_PEN_INSERTED	0x500b
 #define	THINKPAD_TABLET_PEN_REMOVED	0x500c
-#define	THINKPAD_POWER_CHANGED		0x6030
+#define	THINKPAD_THERMAL_TABLE_CHANGED	0x6030
+#define	THINKPAD_POWER_CHANGED		0x6040
+#define	THINKPAD_BACKLIGHT_CHANGED	0x6050
 #define	THINKPAD_SWITCH_WIRELESS	0x7000
 
 #define THINKPAD_NSENSORS 9
@@ -112,7 +115,7 @@ void    thinkpad_sensor_attach(struct acpithinkpad_softc *sc);
 void    thinkpad_sensor_refresh(void *);
 
 #if NAUDIO > 0 && NWSKBD > 0
-extern int wskbd_set_mixervolume(long dir, int out);
+extern int wskbd_set_mixervolume(long, long);
 #endif
 
 struct cfattach acpithinkpad_ca = {
@@ -300,18 +303,6 @@ thinkpad_hotkey(struct aml_node *node, int notify_type, void *arg)
 #endif
 			handled = 1;
 			break;
-		case THINKPAD_BUTTON_HIBERNATE:
-		case THINKPAD_BUTTON_FN_F1:
-		case THINKPAD_BUTTON_LOCK_SCREEN:
-		case THINKPAD_BUTTON_BATTERY_INFO:
-		case THINKPAD_BUTTON_FN_F6:
-		case THINKPAD_BUTTON_EXTERNAL_SCREEN:
-		case THINKPAD_BUTTON_POINTER_SWITCH:
-		case THINKPAD_BUTTON_EJECT:
-		case THINKPAD_BUTTON_THINKLIGHT:
-		case THINKPAD_BUTTON_FN_SPACE:
-			handled = 1;
-			break;
 		case THINKPAD_BUTTON_VOLUME_MUTE:
 			thinkpad_volume_mute(sc);
 			handled = 1;
@@ -326,32 +317,45 @@ thinkpad_hotkey(struct aml_node *node, int notify_type, void *arg)
 			break;
 		case THINKPAD_BUTTON_MICROPHONE_MUTE:
 #if NAUDIO > 0 && NWSKBD > 0
-			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-			    (void *)(long)0, (void *)(int)0);
+			wskbd_set_mixervolume(0, 0);
 #endif
 			handled = 1;
 			break;
-		case THINKPAD_BUTTON_THINKVANTAGE:
-		case THINKPAD_BUTTON_FN_F11:
+		case THINKPAD_BUTTON_HIBERNATE:
+#ifndef SMALL_KERNEL
+			acpi_addtask(sc->sc_acpi, acpi_sleep_task, 
+			    sc->sc_acpi, ACPI_STATE_S4);
+#endif
 			handled = 1;
 			break;
-		case THINKPAD_LID_OPEN:
-		case THINKPAD_LID_CLOSED:
-		case THINKPAD_TABLET_SCREEN_NORMAL:
-		case THINKPAD_TABLET_SCREEN_ROTATED:
+		case THINKPAD_BACKLIGHT_CHANGED:
 		case THINKPAD_BRIGHTNESS_CHANGED:
+		case THINKPAD_BUTTON_BATTERY_INFO:
+		case THINKPAD_BUTTON_EJECT:
+		case THINKPAD_BUTTON_EXTERNAL_SCREEN:
+		case THINKPAD_BUTTON_FN_F11:
+		case THINKPAD_BUTTON_FN_F1:
+		case THINKPAD_BUTTON_FN_F6:
+		case THINKPAD_BUTTON_FN_SPACE:
+		case THINKPAD_BUTTON_LOCK_SCREEN:
+		case THINKPAD_BUTTON_POINTER_SWITCH:
+		case THINKPAD_BUTTON_THINKLIGHT:
+		case THINKPAD_BUTTON_THINKVANTAGE:
+		case THINKPAD_LID_CLOSED:
+		case THINKPAD_LID_OPEN:
+		case THINKPAD_PORT_REPL_DOCKED:
+		case THINKPAD_PORT_REPL_UNDOCKED:
+		case THINKPAD_POWER_CHANGED:
+		case THINKPAD_SWITCH_WIRELESS:
 		case THINKPAD_TABLET_PEN_INSERTED:
 		case THINKPAD_TABLET_PEN_REMOVED:
-			handled = 1;
-			break;
-		case THINKPAD_POWER_CHANGED:
-			handled = 1;
-			break;
-		case THINKPAD_SWITCH_WIRELESS:
+		case THINKPAD_TABLET_SCREEN_NORMAL:
+		case THINKPAD_TABLET_SCREEN_ROTATED:
+		case THINKPAD_THERMAL_TABLE_CHANGED:
 			handled = 1;
 			break;
 		default:
-			printf("%s: unknown event 0x%03x\n",
+			printf("%s: unknown event 0x%03llx\n",
 			    DEVNAME(sc), event);
 		}
 	}

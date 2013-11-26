@@ -1,4 +1,4 @@
-/*	$OpenBSD: vdsk.c,v 1.29 2011/07/17 22:46:47 matthew Exp $	*/
+/*	$OpenBSD: vdsk.c,v 1.33 2013/05/12 19:33:01 krw Exp $	*/
 /*
  * Copyright (c) 2009, 2011 Mark Kettenis
  *
@@ -27,6 +27,7 @@
 #include <uvm/uvm.h>
 
 #include <scsi/scsi_all.h>
+#include <scsi/cd.h>
 #include <scsi/scsi_disk.h>
 #include <scsi/scsiconf.h>
 
@@ -111,10 +112,10 @@ struct vdsk_dring *vdsk_dring_alloc(bus_dma_tag_t, int);
 void	vdsk_dring_free(bus_dma_tag_t, struct vdsk_dring *);
 
 /*
- * For now, we only support vDisk 1.0.
+ * We support vDisk 1.0 and 1.1.
  */
 #define VDSK_MAJOR	1
-#define VDSK_MINOR	0
+#define VDSK_MINOR	1
 
 struct vdsk_soft_desc {
 	int		vsd_map_idx[MAXPHYS / PAGE_SIZE];
@@ -162,6 +163,7 @@ struct vdsk_softc {
 
 	uint32_t	sc_vdisk_block_size;
 	uint64_t	sc_vdisk_size;
+	uint8_t		sc_vd_mtype;
 };
 
 int	vdsk_match(struct device *, void *, void *);
@@ -313,6 +315,9 @@ vdsk_attach(struct device *parent, struct device *self, void *aux)
 	    lc->lc_rxq->lq_map->dm_segs[0].ds_addr, lc->lc_rxq->lq_nentries);
 	if (err != H_EOK)
 		printf("hv_ldc_rx_qconf %d\n", err);
+
+	cbus_intr_setenabled(sysino[0], INTR_ENABLED);
+	cbus_intr_setenabled(sysino[1], INTR_ENABLED);
 
 	ldc_send_vers(lc);
 
@@ -559,6 +564,10 @@ vdsk_rx_vio_attr_info(struct vdsk_softc *sc, struct vio_msg_tag *tag)
 
 		sc->sc_vdisk_block_size = ai->vdisk_block_size;
 		sc->sc_vdisk_size = ai->vdisk_size;
+		if (sc->sc_major > 1 || sc->sc_minor >= 1)
+			sc->sc_vd_mtype = ai->vd_mtype;
+		else
+			sc->sc_vd_mtype = VD_MEDIA_TYPE_FIXED;
 
 		sc->sc_vio_state |= VIO_ACK_ATTR_INFO;
 		break;
@@ -913,6 +922,8 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 {
 	struct scsi_rw *rw;
 	struct scsi_rw_big *rwb;
+	struct scsi_rw_12 *rw12;
+	struct scsi_rw_16 *rw16;
 	u_int64_t lba;
 	u_int32_t sector_count;
 	uint8_t operation;
@@ -920,10 +931,14 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 	switch (xs->cmd->opcode) {
 	case READ_BIG:
 	case READ_COMMAND:
+	case READ_12:
+	case READ_16:
 		operation = VD_OP_BREAD;
 		break;
 	case WRITE_BIG:
 	case WRITE_COMMAND:
+	case WRITE_12:
+	case WRITE_16:
 		operation = VD_OP_BWRITE;
 		break;
 
@@ -952,18 +967,31 @@ vdsk_scsi_cmd(struct scsi_xfer *xs)
 	case MODE_SENSE:
 	case MODE_SENSE_BIG:
 	case REPORT_LUNS:
+	case READ_TOC:
 		vdsk_scsi_done(xs, XS_DRIVER_STUFFUP);
 		return;
 	}
 
+	/*
+	 * READ/WRITE/SYNCHRONIZE commands. SYNCHRONIZE CACHE has same
+	 * layout as 10-byte READ/WRITE commands.
+	 */
 	if (xs->cmdlen == 6) {
 		rw = (struct scsi_rw *)xs->cmd;
 		lba = _3btol(rw->addr) & (SRW_TOPADDR << 16 | 0xffff);
 		sector_count = rw->length ? rw->length : 0x100;
-	} else {
+	} else if (xs->cmdlen == 10) {
 		rwb = (struct scsi_rw_big *)xs->cmd;
 		lba = _4btol(rwb->addr);
 		sector_count = _2btol(rwb->length);
+	} else if (xs->cmdlen == 12) {
+		rw12 = (struct scsi_rw_12 *)xs->cmd;
+		lba = _4btol(rw12->addr);
+		sector_count = _4btol(rw12->length);
+	} else if (xs->cmdlen == 16) {
+		rw16 = (struct scsi_rw_16 *)xs->cmd;
+		lba = _8btol(rw16->addr);
+		sector_count = _4btol(rw16->length);
 	}
 
 {
@@ -1076,7 +1104,18 @@ vdsk_scsi_inquiry(struct scsi_xfer *xs)
 
 	bzero(&inq, sizeof(inq));
 
-	inq.device = T_DIRECT;
+	switch (sc->sc_vd_mtype) {
+	case VD_MEDIA_TYPE_CD:
+	case VD_MEDIA_TYPE_DVD:
+		inq.device = T_CDROM;
+		break;
+
+	case VD_MEDIA_TYPE_FIXED:
+	default:
+		inq.device = T_DIRECT;
+		break;
+	}
+
 	inq.version = 0x05; /* SPC-3 */
 	inq.response_format = 2;
 	inq.additional_length = 32;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_loop.c,v 1.46 2011/07/09 00:47:18 henning Exp $	*/
+/*	$OpenBSD: if_loop.c,v 1.53 2013/10/24 11:31:43 mpi Exp $	*/
 /*	$NetBSD: if_loop.c,v 1.15 1996/05/07 02:40:33 thorpej Exp $	*/
 
 /*
@@ -116,7 +116,6 @@
 #include <sys/ioctl.h>
 #include <sys/time.h>
 
-#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -126,7 +125,6 @@
 #ifdef	INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #endif
 
@@ -134,7 +132,6 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
-#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #endif
 
@@ -164,17 +161,14 @@ struct if_clone loop_cloner =
 
 /* ARGSUSED */
 void
-loopattach(n)
-	int n;
+loopattach(int n)
 {
 	(void) loop_clone_create(&loop_cloner, 0);
 	if_clone_attach(&loop_cloner);
 }
 
 int
-loop_clone_create(ifc, unit)
-	struct if_clone *ifc;
-	int unit;
+loop_clone_create(struct if_clone *ifc, int unit)
 {
 	struct ifnet *ifp;
 
@@ -209,8 +203,7 @@ loop_clone_create(ifc, unit)
 }
 
 int
-loop_clone_destroy(ifp)
-	struct ifnet *ifp;
+loop_clone_destroy(struct ifnet *ifp)
 {
 	if (ifp == lo0ifp)
 		return (EPERM);
@@ -222,11 +215,8 @@ loop_clone_destroy(ifp)
 }
 
 int
-looutput(ifp, m, dst, rt)
-	struct ifnet *ifp;
-	struct mbuf *m;
-	struct sockaddr *dst;
-	struct rtentry *rt;
+looutput(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
+    struct rtentry *rt)
 {
 	int s, isr;
 	struct ifqueue *ifq = 0;
@@ -240,8 +230,7 @@ looutput(ifp, m, dst, rt)
 	 * packets for local use. But don't dup them to bpf.
 	 */
 	if (ifp->if_bpf && (ifp->if_flags & IFF_LOOPBACK))
-		bpf_mtap_af(ifp->if_bpf, htonl(dst->sa_family), m,
-		    BPF_DIRECTION_OUT);
+		bpf_mtap_af(ifp->if_bpf, dst->sa_family, m, BPF_DIRECTION_OUT);
 #endif
 	m->m_pkthdr.rcvif = ifp;
 
@@ -320,8 +309,7 @@ looutput(ifp, m, dst, rt)
 
 #ifdef ALTQ
 static void
-lo_altqstart(ifp)
-	struct ifnet *ifp;
+lo_altqstart(struct ifnet *ifp)
 {
 	struct ifqueue *ifq;
 	struct mbuf *m;
@@ -383,12 +371,8 @@ lo_altqstart(ifp)
 
 /* ARGSUSED */
 void
-lortrequest(cmd, rt, info)
-	int cmd;
-	struct rtentry *rt;
-	struct rt_addrinfo *info;
+lortrequest(int cmd, struct rtentry *rt)
 {
-
 	if (rt)
 		rt->rt_rmx.rmx_mtu = LOMTU;
 }
@@ -398,10 +382,7 @@ lortrequest(cmd, rt, info)
  */
 /* ARGSUSED */
 int
-loioctl(ifp, cmd, data)
-	struct ifnet *ifp;
-	u_long cmd;
-	caddr_t data;
+loioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 {
 	struct ifaddr *ifa;
 	struct ifreq *ifr;
@@ -425,26 +406,6 @@ loioctl(ifp, cmd, data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		ifr = (struct ifreq *)data;
-		if (ifr == 0) {
-			error = EAFNOSUPPORT;		/* XXX */
-			break;
-		}
-		switch (ifr->ifr_addr.sa_family) {
-
-#ifdef INET
-		case AF_INET:
-			break;
-#endif
-#ifdef INET6
-		case AF_INET6:
-			break;
-#endif /* INET6 */
-
-		default:
-			error = EAFNOSUPPORT;
-			break;
-		}
 		break;
 
 	case SIOCSIFMTU:

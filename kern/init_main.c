@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.181 2012/01/01 12:17:33 fgsch Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.191 2013/10/29 04:23:16 dlg Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -75,6 +75,7 @@
 #include <sys/mbuf.h>
 #include <sys/pipe.h>
 #include <sys/workq.h>
+#include <sys/task.h>
 
 #include <sys/syscall.h>
 #include <sys/syscallargs.h>
@@ -83,7 +84,6 @@
 
 #include <ufs/ufs/quota.h>
 
-#include <machine/cpu.h>
 
 #include <uvm/uvm.h>
 
@@ -107,7 +107,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2012 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2013 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -119,18 +119,22 @@ struct	plimit limit0;
 struct	vmspace vmspace0;
 struct	sigacts sigacts0;
 struct	proc *initproc;
+struct	proc *reaperproc;
 
 int	cmask = CMASK;
 extern	struct user *proc0paddr;
 
 struct	vnode *rootvp, *swapdev_vp;
 int	boothowto;
-struct	timeval boottime;
+struct	timespec boottime;
 int	ncpus =  1;
 int	ncpusfound = 1;			/* number of cpus we find */
 __volatile int start_init_exec;		/* semaphore for start_init() */
 
 #if !defined(NO_PROPOLICE)
+#ifdef __ELF__
+long	__guard_local __dso_hidden;
+#endif
 long	__guard[8];
 #endif
 
@@ -145,6 +149,7 @@ void	crypto_init(void);
 void	init_exec(void);
 void	kqueue_init(void);
 void	workq_init(void);
+void	taskq_init(void);
 
 extern char sigcode[], esigcode[];
 #ifdef SYSCALL_DEBUG
@@ -288,7 +293,7 @@ main(void *framep)
 
 	/* Init timeouts. */
 	timeout_set(&p->p_sleep_to, endtsleep, p);
-	timeout_set(&p->p_realit_to, realitexpire, p);
+	timeout_set(&pr->ps_realit_to, realitexpire, pr);
 
 	/* Create credentials. */
 	p->p_cred = &cred0;
@@ -326,12 +331,6 @@ main(void *framep)
 	p->p_addr = proc0paddr;				/* XXX */
 
 	/*
-	 * We continue to place resource usage info in the
-	 * user struct so they're pageable.
-	 */
-	p->p_stats = &p->p_addr->u_stats;
-
-	/*
 	 * Charge root for one process.
 	 */
 	(void)chgproccnt(0, 1);
@@ -343,14 +342,22 @@ main(void *framep)
 
 	/* Initialize work queues */
 	workq_init();
+	taskq_init();
 
 	random_start();
 
 	/* Initialize the interface/address trees */
 	ifinit();
 
+#if NMPATH > 0
+	/* Attach mpath before hardware */
+	config_rootfound("mpath", NULL);
+#endif
+
 	/* Configure the devices */
 	cpu_configure();
+
+	random_hostseed();
 
 	/* Configure virtual memory system, set vm rlimits. */
 	uvm_init_limits(p);
@@ -413,6 +420,9 @@ main(void *framep)
 
 		arc4random_buf((long *)newguard, sizeof(newguard));
 
+#ifdef __ELF__
+		__guard_local = newguard[0];
+#endif
 		for (i = nitems(__guard) - 1; i; i--)
 			__guard[i] = newguard[i];
 	}
@@ -454,9 +464,6 @@ main(void *framep)
 
 	dostartuphooks();
 
-#if NMPATH > 0
-	config_rootfound("mpath", NULL);
-#endif
 #if NVSCSI > 0
 	config_rootfound("vscsi", NULL);
 #endif
@@ -494,15 +501,11 @@ main(void *framep)
 	 * from the file system.  Reset p->p_rtime as it may have been
 	 * munched in mi_switch() after the time got set.
 	 */
-#ifdef __HAVE_TIMECOUNTER
-	microtime(&boottime);
-#else
-	boottime = mono_time = time;	
-#endif
+	nanotime(&boottime);
 	LIST_FOREACH(p, &allproc, p_list) {
-		p->p_stats->p_start = boottime;
-		microuptime(&p->p_cpu->ci_schedstate.spc_runtime);
-		p->p_rtime.tv_sec = p->p_rtime.tv_usec = 0;
+		p->p_p->ps_start = boottime;
+		nanouptime(&p->p_cpu->ci_schedstate.spc_runtime);
+		timespecclear(&p->p_rtime);
 	}
 
 	uvm_swap_init();
@@ -512,7 +515,7 @@ main(void *framep)
 		panic("fork pagedaemon");
 
 	/* Create the reaper daemon kernel thread. */
-	if (kthread_create(start_reaper, NULL, NULL, "reaper"))
+	if (kthread_create(start_reaper, NULL, &reaperproc, "reaper"))
 		panic("fork reaper");
 
 	/* Create the cleaner daemon kernel thread. */

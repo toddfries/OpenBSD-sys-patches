@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.5 2011/03/23 16:54:37 pirofti Exp $	*/
+/*	$OpenBSD: asm.h,v 1.7 2013/03/28 17:41:04 martynas Exp $	*/
 /*	$NetBSD: asm.h,v 1.5 1997/07/16 15:16:43 christos Exp $ */
 
 /*
@@ -53,9 +53,13 @@
 #define	_ASM_LABEL(name)	name
 
 /*
- * WEAK_ALIAS: create a weak alias (ELF only)
+ * STRONG_ALIAS, WEAK_ALIAS
+ *	Create a strong or weak alias.
  */
 #ifdef __ELF__
+#define STRONG_ALIAS(alias,sym)		\
+	.global alias;			\
+	alias = sym
 #define WEAK_ALIAS(alias,sym)		\
 	.weak alias;			\
 	alias = sym
@@ -71,7 +75,7 @@
 #endif /* __ELF__ */
 
 
-#ifdef PIC
+#ifdef __PIC__
 /*
  * PIC_PROLOGUE() is akin to the compiler generated function prologue for
  * PIC code. It leaves the address of the Global Offset Table in DEST,

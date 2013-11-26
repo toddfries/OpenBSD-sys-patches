@@ -1,4 +1,4 @@
-/*	$OpenBSD: bwi.c,v 1.95 2010/08/27 17:08:00 jsg Exp $	*/
+/*	$OpenBSD: bwi.c,v 1.99 2013/11/14 12:10:04 dlg Exp $	*/
 
 /*
  * Copyright (c) 2007 The DragonFly Project.  All rights reserved.
@@ -38,14 +38,13 @@
 
 #include "bpfilter.h"
 
-#include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/types.h>
 
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <sys/socket.h>
@@ -1674,7 +1673,7 @@ bwi_fwimage_is_valid(struct bwi_softc *sc, uint8_t *fw, size_t fw_len,
 	const struct bwi_fwhdr *hdr;
 
 	if (fw_len < sizeof(*hdr)) {
-		printf("%s: invalid firmware (%s): invalid size %u\n",
+		printf("%s: invalid firmware (%s): invalid size %zu\n",
 		    sc->sc_dev.dv_xname, fw_name, fw_len);
 		return (1);
 	}
@@ -1687,7 +1686,7 @@ bwi_fwimage_is_valid(struct bwi_softc *sc, uint8_t *fw, size_t fw_len,
 		 */
 		if (betoh32(hdr->fw_size) != fw_len - sizeof(*hdr)) {
 			printf("%s: invalid firmware (%s): size mismatch, "
-			    "fw %u, real %u\n",
+			    "fw %u, real %zu\n",
 			    sc->sc_dev.dv_xname,
 			    fw_name,
 			    betoh32(hdr->fw_size),
@@ -2599,7 +2598,7 @@ bwi_mac_adjust_tpctl(struct bwi_mac *mac, int rf_atten_adj, int bbp_atten_adj)
 
 	bcopy(&mac->mac_tpctl, &tpctl, sizeof(tpctl));
 
-	/* NOTE: Use signed value to do calulation */
+	/* NOTE: Use signed value to do calculation */
 	bbp_atten = tpctl.bbp_atten;
 	rf_atten = tpctl.rf_atten;
 	tp_ctrl1 = tpctl.tp_ctrl1;

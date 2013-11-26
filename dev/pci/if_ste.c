@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ste.c,v 1.47 2011/06/22 16:44:27 tedu Exp $ */
+/*	$OpenBSD: if_ste.c,v 1.54 2013/08/07 01:06:38 bluhm Exp $ */
 /*
  * Copyright (c) 1997, 1998, 1999
  *	Bill Paul <wpaul@ctr.columbia.edu>.  All rights reserved.
@@ -53,7 +53,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -115,7 +114,7 @@ int	ste_eeprom_wait(struct ste_softc *);
 int	ste_read_eeprom(struct ste_softc *, caddr_t, int,
 	    int, int);
 void	ste_wait(struct ste_softc *);
-void	ste_setmulti(struct ste_softc *);
+void	ste_iff(struct ste_softc *);
 int	ste_init_rx_list(struct ste_softc *);
 void	ste_init_tx_list(struct ste_softc *);
 
@@ -141,6 +140,12 @@ void	ste_init_tx_list(struct ste_softc *);
 #define MII_SET(x)		STE_SETBIT1(sc, STE_PHYCTL, x)
 #define MII_CLR(x)		STE_CLRBIT1(sc, STE_PHYCTL, x) 
 
+const struct pci_matchid ste_devices[] = {
+	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_DFE550TX },
+	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201_1 },
+	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201_2 }
+};
+
 struct cfattach ste_ca = {
 	sizeof(struct ste_softc), ste_probe, ste_attach
 };
@@ -165,8 +170,6 @@ ste_mii_sync(struct ste_softc *sc)
 		MII_CLR(STE_PHYCTL_MCLK);
 		DELAY(1);
 	}
-
-	return;
 }
 
 /*
@@ -360,8 +363,6 @@ ste_miibus_writereg(struct device *self, int phy, int reg, int data)
 	frame.mii_data = data;
 
 	ste_mii_writereg(sc, &frame);
-
-	return;
 }
 
 void
@@ -390,8 +391,6 @@ ste_miibus_statchg(struct device *self)
 
 	STE_SETBIT4(sc, STE_DMACTL,
 	    STE_DMACTL_RXDMA_UNSTALL | STE_DMACTL_TXDMA_UNSTALL);
-
-	return;
 }
  
 int
@@ -425,8 +424,6 @@ ste_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 	mii_pollstat(mii);
 	ifmr->ifm_active = mii->mii_media_active;
 	ifmr->ifm_status = mii->mii_media_status;
-
-	return;
 }
 
 void
@@ -441,8 +438,6 @@ ste_wait(struct ste_softc *sc)
 
 	if (i == STE_TIMEOUT)
 		printf("%s: command never completed!\n", sc->sc_dev.dv_xname);
-
-	return;
 }
 
 /*
@@ -502,52 +497,56 @@ ste_read_eeprom(struct ste_softc *sc, caddr_t dest, int off, int cnt, int swap)
 }
 
 void
-ste_setmulti(struct ste_softc *sc)
+ste_iff(struct ste_softc *sc)
 {
-	struct ifnet		*ifp;
+	struct ifnet		*ifp = &sc->arpcom.ac_if;
 	struct arpcom		*ac = &sc->arpcom;
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
+	u_int32_t		rxmode, hashes[2];
 	int			h = 0;
-	u_int32_t		hashes[2] = { 0, 0 };
 
-	ifp = &sc->arpcom.ac_if;
-allmulti:
-	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
-		STE_SETBIT1(sc, STE_RX_MODE, STE_RXMODE_ALLMULTI);
-		STE_CLRBIT1(sc, STE_RX_MODE, STE_RXMODE_MULTIHASH);
-		return;
-	}
+	rxmode = CSR_READ_1(sc, STE_RX_MODE);
+	rxmode &= ~(STE_RXMODE_ALLMULTI | STE_RXMODE_BROADCAST |
+	    STE_RXMODE_MULTIHASH | STE_RXMODE_PROMISC |
+	    STE_RXMODE_UNICAST);
+	bzero(hashes, sizeof(hashes));
+	ifp->if_flags &= ~IFF_ALLMULTI;
 
-	/* first, zot all the existing hash bits */
-	CSR_WRITE_2(sc, STE_MAR0, 0);
-	CSR_WRITE_2(sc, STE_MAR1, 0);
-	CSR_WRITE_2(sc, STE_MAR2, 0);
-	CSR_WRITE_2(sc, STE_MAR3, 0);
+	/*
+	 * Always accept broadcast frames.
+	 * Always accept frames destined to our station address.
+	 */
+	rxmode |= STE_RXMODE_BROADCAST | STE_RXMODE_UNICAST;
 
-	/* now program new ones */
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		rxmode |= STE_RXMODE_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			rxmode |= STE_RXMODE_PROMISC;
+	} else {
+		rxmode |= STE_RXMODE_MULTIHASH;
+
+		/* now program new ones */
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			h = ether_crc32_be(enm->enm_addrlo,
+			    ETHER_ADDR_LEN) & 0x3F;
+
+			if (h < 32)
+				hashes[0] |= (1 << h);
+			else
+				hashes[1] |= (1 << (h - 32));
+
+			ETHER_NEXT_MULTI(step, enm);
 		}
-		h = ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) & 0x3F;
-		if (h < 32)
-			hashes[0] |= (1 << h);
-		else
-			hashes[1] |= (1 << (h - 32));
-		ETHER_NEXT_MULTI(step, enm);
 	}
 
 	CSR_WRITE_2(sc, STE_MAR0, hashes[0] & 0xFFFF);
 	CSR_WRITE_2(sc, STE_MAR1, (hashes[0] >> 16) & 0xFFFF);
 	CSR_WRITE_2(sc, STE_MAR2, hashes[1] & 0xFFFF);
 	CSR_WRITE_2(sc, STE_MAR3, (hashes[1] >> 16) & 0xFFFF);
-	STE_CLRBIT1(sc, STE_RX_MODE, STE_RXMODE_ALLMULTI);
-	STE_SETBIT1(sc, STE_RX_MODE, STE_RXMODE_MULTIHASH);
-
-	return;
+	CSR_WRITE_1(sc, STE_RX_MODE, rxmode);
 }
 
 int
@@ -708,8 +707,6 @@ ste_rxeof(struct ste_softc *sc)
 		cur_rx->ste_ptr->ste_status = 0;
 		count++;
 	}
-
-	return;
 }
 
 void
@@ -746,8 +743,6 @@ ste_txeoc(struct ste_softc *sc)
 		ste_init(sc);
 		CSR_WRITE_2(sc, STE_TX_STATUS, txstat);
 	}
-
-	return;
 }
 
 void
@@ -777,8 +772,6 @@ ste_txeof(struct ste_softc *sc)
 	sc->ste_cdata.ste_tx_cons = idx;
 	if (idx == sc->ste_cdata.ste_tx_prod)
 		ifp->if_timer = 0;
-
-	return;
 }
 
 void
@@ -816,15 +809,7 @@ ste_stats_update(void *xsc)
 
 	timeout_add_sec(&sc->sc_stats_tmo, 1);
 	splx(s);
-
-	return;
 }
-
-const struct pci_matchid ste_devices[] = {
-	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201_1 },
-	{ PCI_VENDOR_SUNDANCE, PCI_PRODUCT_SUNDANCE_ST201_2 },
-	{ PCI_VENDOR_DLINK, PCI_PRODUCT_DLINK_550TX }
-};	
 
 /*
  * Probe for a Sundance ST201 chip. Check the PCI vendor and device
@@ -845,7 +830,6 @@ void
 ste_attach(struct device *parent, struct device *self, void *aux)
 {
 	const char		*intrstr = NULL;
-	pcireg_t		command;
 	struct ste_softc	*sc = (struct ste_softc *)self;
 	struct pci_attach_args	*pa = aux;
 	pci_chipset_tag_t	pc = pa->pa_pc;
@@ -853,41 +837,15 @@ ste_attach(struct device *parent, struct device *self, void *aux)
 	struct ifnet		*ifp;
 	bus_size_t		size;
 
-	/*
-	 * Handle power management nonsense.
-	 */
-	command = pci_conf_read(pc, pa->pa_tag, STE_PCI_CAPID) & 0x000000FF;
-	if (command == 0x01) {
-
-		command = pci_conf_read(pc, pa->pa_tag, STE_PCI_PWRMGMTCTRL);
-		if (command & STE_PSTATE_MASK) {
-			u_int32_t		iobase, membase, irq;
-
-			/* Save important PCI config data. */
-			iobase = pci_conf_read(pc, pa->pa_tag, STE_PCI_LOIO);
-			membase = pci_conf_read(pc, pa->pa_tag, STE_PCI_LOMEM);
-			irq = pci_conf_read(pc, pa->pa_tag, STE_PCI_INTLINE);
-
-			/* Reset the power state. */
-			printf("%s: chip is in D%d power mode -- setting to D0\n",
-				sc->sc_dev.dv_xname, command & STE_PSTATE_MASK);
-			command &= 0xFFFFFFFC;
-			pci_conf_write(pc, pa->pa_tag, STE_PCI_PWRMGMTCTRL, command);
-
-			/* Restore PCI config data. */
-			pci_conf_write(pc, pa->pa_tag, STE_PCI_LOIO, iobase);
-			pci_conf_write(pc, pa->pa_tag, STE_PCI_LOMEM, membase);
-			pci_conf_write(pc, pa->pa_tag, STE_PCI_INTLINE, irq);
-		}
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/*
 	 * Only use one PHY since this chip reports multiple
-	 * Note on the DFE-550 the PHY is at 1 on the DFE-580
+	 * Note on the DFE-550TX the PHY is at 1 on the DFE-580TX
 	 * it is at 0 & 1.  It is rev 0x12.
 	 */
 	if (PCI_VENDOR(pa->pa_id) == PCI_VENDOR_DLINK &&
-	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_DLINK_550TX &&
+	    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_DLINK_DFE550TX &&
 	    PCI_REVISION(pa->pa_class) == 0x12)
 		sc->ste_one_phy = 1;
 
@@ -958,7 +916,6 @@ ste_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = ste_ioctl;
 	ifp->if_start = ste_start;
 	ifp->if_watchdog = ste_watchdog;
-	ifp->if_baudrate = 10000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, STE_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
@@ -1081,8 +1038,6 @@ ste_init_tx_list(struct ste_softc *sc)
 
 	cd->ste_tx_prod = 0;
 	cd->ste_tx_cons = 0;
-
-	return;
 }
 
 void
@@ -1128,24 +1083,8 @@ ste_init(void *xsc)
 	/* Set the TX reclaim threshold. */
 	CSR_WRITE_1(sc, STE_TX_RECLAIM_THRESH, (ETHER_MAX_DIX_LEN >> 4));
 
-	/* Set up the RX filter. */
-	CSR_WRITE_1(sc, STE_RX_MODE, STE_RXMODE_UNICAST);
-
-	/* If we want promiscuous mode, set the allframes bit. */
-	if (ifp->if_flags & IFF_PROMISC) {
-		STE_SETBIT1(sc, STE_RX_MODE, STE_RXMODE_PROMISC);
-	} else {
-		STE_CLRBIT1(sc, STE_RX_MODE, STE_RXMODE_PROMISC);
-	}
-
-	/* Set capture broadcast bit to accept broadcast frames. */
-	if (ifp->if_flags & IFF_BROADCAST) {
-		STE_SETBIT1(sc, STE_RX_MODE, STE_RXMODE_BROADCAST);
-	} else {
-		STE_CLRBIT1(sc, STE_RX_MODE, STE_RXMODE_BROADCAST);
-	}
-
-	ste_setmulti(sc);
+	/* Program promiscuous mode and multicast filters. */
+	ste_iff(sc);
 
 	/* Load the address of the RX list. */
 	STE_SETBIT4(sc, STE_DMACTL, STE_DMACTL_RXDMA_STALL);
@@ -1193,8 +1132,6 @@ ste_init(void *xsc)
 
 	timeout_set(&sc->sc_stats_tmo, ste_stats_update, sc);
 	timeout_add_sec(&sc->sc_stats_tmo, 1);
-
-	return;
 }
 
 void
@@ -1239,8 +1176,6 @@ ste_stop(struct ste_softc *sc)
 	}
 
 	bzero(sc->ste_ldata, sizeof(struct ste_list_data));
-
-	return;
 }
 
 void
@@ -1273,7 +1208,6 @@ ste_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	struct ste_softc	*sc = ifp->if_softc;
 	struct ifaddr		*ifa = (struct ifaddr *) data;
 	struct ifreq		*ifr = (struct ifreq *) data;
-	struct mii_data		*mii;
 	int			s, error = 0;
 
 	s = splnet();
@@ -1281,34 +1215,19 @@ ste_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	switch(command) {
 	case SIOCSIFADDR:
 		ifp->if_flags |= IFF_UP;
-		switch (ifa->ifa_addr->sa_family) {
-		case AF_INET:
+		if (!(ifp->if_flags & IFF_RUNNING))
 			ste_init(sc);
+#ifdef INET
+		if (ifa->ifa_addr->sa_family == AF_INET)
 			arp_ifinit(&sc->arpcom, ifa);
-			break;
-		default:
-			ste_init(sc);
-			break;
-		}
+#endif
 		break;
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			if (ifp->if_flags & IFF_RUNNING &&
-			    ifp->if_flags & IFF_PROMISC &&
-			    !(sc->ste_if_flags & IFF_PROMISC)) {
-				STE_SETBIT1(sc, STE_RX_MODE,
-				    STE_RXMODE_PROMISC);
-			} else if (ifp->if_flags & IFF_RUNNING &&
-			    !(ifp->if_flags & IFF_PROMISC) &&
-			    sc->ste_if_flags & IFF_PROMISC) {
-				STE_CLRBIT1(sc, STE_RX_MODE,
-				    STE_RXMODE_PROMISC);
-			}
-			if (ifp->if_flags & IFF_RUNNING &&
-			    (ifp->if_flags ^ sc->ste_if_flags) & IFF_ALLMULTI)
-				ste_setmulti(sc);
-			if (!(ifp->if_flags & IFF_RUNNING)) {
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else {
 				sc->ste_tx_thresh = STE_TXSTART_THRESH;
 				ste_init(sc);
 			}
@@ -1316,14 +1235,11 @@ ste_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 			if (ifp->if_flags & IFF_RUNNING)
 				ste_stop(sc);
 		}
-		sc->ste_if_flags = ifp->if_flags;
-		error = 0;
 		break;
 
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
-		mii = &sc->sc_mii;
-		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, command);
+		error = ifmedia_ioctl(ifp, ifr, &sc->sc_mii.mii_media, command);
 		break;
 
 	default:
@@ -1332,7 +1248,7 @@ ste_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			ste_setmulti(sc);
+			ste_iff(sc);
 		error = 0;
 	}
 
@@ -1475,8 +1391,6 @@ ste_start(struct ifnet *ifp)
 		ifp->if_timer = 5;
 	}
 	sc->ste_cdata.ste_tx_prod = idx;
-
-	return;
 }
 
 void
@@ -1498,6 +1412,4 @@ ste_watchdog(struct ifnet *ifp)
 
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))
 		ste_start(ifp);
-
-	return;
 }

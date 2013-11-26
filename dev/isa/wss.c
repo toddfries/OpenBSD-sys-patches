@@ -1,4 +1,4 @@
-/*	$OpenBSD: wss.c,v 1.24 2010/06/30 11:21:35 jakemsr Exp $	*/
+/*	$OpenBSD: wss.c,v 1.26 2013/05/24 07:58:46 ratchov Exp $	*/
 /*	$NetBSD: wss.c,v 1.42 1998/01/19 22:18:23 augustss Exp $	*/
 
 /*
@@ -126,7 +126,8 @@ wssattach(sc)
     
     madattach(sc);
 
-    sc->sc_ih = isa_intr_establish(sc->sc_ic, sc->wss_irq, IST_EDGE, IPL_AUDIO,
+    sc->sc_ih = isa_intr_establish(sc->sc_ic, sc->wss_irq,
+	IST_EDGE, IPL_AUDIO | IPL_MPSAFE,
         ad1848_intr, &sc->sc_ad1848, sc->sc_dev.dv_xname);
 
     ad1848_attach(&sc->sc_ad1848);
@@ -375,7 +376,6 @@ mad_read(sc, port)
 {
     u_int tmp;
     int pwd;
-    int s;
     
     switch (sc->mad_chip_type) {	/* Output password */
     case MAD_82C928:
@@ -391,10 +391,10 @@ mad_read(sc, port)
     default:
 	panic("mad_read: Bad chip type=%d", sc->mad_chip_type);
     }
-    s = splaudio();		/* don't want an interrupt between outb&inb */
+    mtx_enter(&audio_lock);		/* don't want an interrupt between outb&inb */
     bus_space_write_1(sc->sc_iot, sc->mad_ioh, MC_PASSWD_REG, pwd);
     tmp = bus_space_read_1(sc->sc_iot, sc->mad_ioh, port);
-    splx(s);
+    mtx_leave(&audio_lock);
     return tmp;
 }
 
@@ -405,7 +405,6 @@ mad_write(sc, port, value)
     int value;
 {
     int pwd;
-    int s;
 
     switch (sc->mad_chip_type) {	/* Output password */
     case MAD_82C928:
@@ -421,10 +420,10 @@ mad_write(sc, port, value)
     default:
 	panic("mad_write: Bad chip type=%d", sc->mad_chip_type);
     }
-    s = splaudio();
+    mtx_enter(&audio_lock);
     bus_space_write_1(sc->sc_iot, sc->mad_ioh, MC_PASSWD_REG, pwd);
     bus_space_write_1(sc->sc_iot, sc->mad_ioh, port, value & 0xff);
-    splx(s);
+    mtx_enter(&audio_lock);
 }
 
 void

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ppp.c,v 1.64 2012/01/20 23:36:53 bluhm Exp $	*/
+/*	$OpenBSD: if_ppp.c,v 1.71 2013/10/23 15:12:42 mpi Exp $	*/
 /*	$NetBSD: if_ppp.c,v 1.39 1997/05/17 21:11:59 christos Exp $	*/
 
 /*
@@ -128,7 +128,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #else
 #ifdef _KERNEL
@@ -150,7 +149,6 @@
 #include <net/ppp_defs.h>
 #include <net/if_ppp.h>
 #include <net/if_pppvar.h>
-#include <machine/cpu.h>
 
 #ifdef PPP_COMPRESS
 #define PACKETPTR	struct mbuf *
@@ -184,8 +182,8 @@ int		ppp_clone_destroy(struct ifnet *);
  * We steal two bits in the mbuf m_flags, to mark high-priority packets
  * for output, and received packets following lost/corrupted packets.
  */
-#define M_HIGHPRI	0x2000	/* output packet for sc_fastq */
-#define M_ERRMARK	0x4000	/* steal a bit in mbuf m_flags */
+#define M_HIGHPRI	M_PROTO1	/* output packet for sc_fastq */
+#define M_ERRMARK	M_LINK0		/* steal a bit in mbuf m_flags */
 
 
 #ifdef PPP_COMPRESS
@@ -244,10 +242,10 @@ ppp_clone_create(struct if_clone *ifc, int unit)
     sc->sc_if.if_ioctl = pppsioctl;
     sc->sc_if.if_output = pppoutput;
     sc->sc_if.if_start = ppp_ifstart;
-    IFQ_SET_MAXLEN(&sc->sc_if.if_snd, ifqmaxlen);
-    IFQ_SET_MAXLEN(&sc->sc_inq, ifqmaxlen);
-    IFQ_SET_MAXLEN(&sc->sc_fastq, ifqmaxlen);
-    IFQ_SET_MAXLEN(&sc->sc_rawq, ifqmaxlen);
+    IFQ_SET_MAXLEN(&sc->sc_if.if_snd, IFQ_MAXLEN);
+    IFQ_SET_MAXLEN(&sc->sc_inq, IFQ_MAXLEN);
+    IFQ_SET_MAXLEN(&sc->sc_fastq, IFQ_MAXLEN);
+    IFQ_SET_MAXLEN(&sc->sc_rawq, IFQ_MAXLEN);
     IFQ_SET_READY(&sc->sc_if.if_snd);
     if_attach(&sc->sc_if);
     if_alloc_sadl(&sc->sc_if);
@@ -463,7 +461,7 @@ pppioctl(struct ppp_softc *sc, u_long cmd, caddr_t data, int flag,
     case PPPIOCXFERUNIT:
 	if ((error = suser(p, 0)) != 0)
 	    return (error);
-	sc->sc_xfer = p->p_pid;
+	sc->sc_xfer = p->p_p->ps_pid;
 	break;
 
 #ifdef PPP_COMPRESS
@@ -634,19 +632,6 @@ pppsioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
     case SIOCADDMULTI:
     case SIOCDELMULTI:
-	if (ifr == 0) {
-	    error = EAFNOSUPPORT;
-	    break;
-	}
-	switch(ifr->ifr_addr.sa_family) {
-#ifdef INET
-	case AF_INET:
-	    break;
-#endif
-	default:
-	    error = EAFNOSUPPORT;
-	    break;
-	}
 	break;
 
     case SIOCGPPPSTATS:
@@ -1136,7 +1121,7 @@ ppp_ccp(struct ppp_softc *sc, struct mbuf *m, int rcvd)
 	mp = m->m_next;
 	if (mp == NULL)
 	    return;
-	dp = (mp != NULL)? mtod(mp, u_char *): NULL;
+	dp = mtod(mp, u_char *);
     } else {
 	mp = m;
 	dp = mtod(mp, u_char *) + PPP_HDRLEN;

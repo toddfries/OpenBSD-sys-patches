@@ -1,4 +1,4 @@
-/*	$OpenBSD: dc.c,v 1.124 2011/07/07 20:42:56 henning Exp $	*/
+/*	$OpenBSD: dc.c,v 1.128 2013/11/20 08:36:36 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998, 1999
@@ -110,7 +110,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -919,7 +918,9 @@ dc_setfilt_21143(struct dc_softc *sc)
 	else
 		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
 
-allmulti:
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if (ifp->if_flags & IFF_ALLMULTI)
 		DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
 	else {
@@ -927,12 +928,6 @@ allmulti:
 
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
-			if (bcmp(enm->enm_addrlo, enm->enm_addrhi,
-			    ETHER_ADDR_LEN)) {
-				ifp->if_flags |= IFF_ALLMULTI;
-				goto allmulti;
-			}
-
 			h = dc_crc_le(sc, enm->enm_addrlo);
 			sp[h >> 4] |= htole32(1 << (h & 0xF));
 			ETHER_NEXT_MULTI(step, enm);
@@ -997,7 +992,9 @@ dc_setfilt_admtek(struct dc_softc *sc)
 	else
 		DC_CLRBIT(sc, DC_NETCFG, DC_NETCFG_RX_PROMISC);
 
-allmulti:
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if (ifp->if_flags & IFF_ALLMULTI)
 		DC_SETBIT(sc, DC_NETCFG, DC_NETCFG_RX_ALLMULTI);
 	else
@@ -1017,11 +1014,6 @@ allmulti:
 	/* now program new ones */
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
-		}
-
 		if (DC_IS_CENTAUR(sc))
 			h = dc_crc_le(sc, enm->enm_addrlo);
 		else
@@ -1731,7 +1723,6 @@ hasmac:
 	ifp->if_ioctl = dc_ioctl;
 	ifp->if_start = dc_start;
 	ifp->if_watchdog = dc_watchdog;
-	ifp->if_baudrate = 10000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, DC_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
@@ -2187,8 +2178,7 @@ dc_rxeof(struct dc_softc *sc)
 		total_len -= ETHER_CRC_LEN;
 
 		m->m_pkthdr.rcvif = ifp;
-		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN,
-		    ifp, NULL);
+		m0 = m_devget(mtod(m, char *), total_len, ETHER_ALIGN, ifp);
 		dc_newbuf(sc, i, m);
 		DC_INC(i, DC_RX_LIST_CNT);
 		if (m0 == NULL) {

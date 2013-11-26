@@ -1,4 +1,4 @@
-/* $OpenBSD: wskbd.c,v 1.70 2011/11/09 14:27:52 shadchin Exp $ */
+/* $OpenBSD: wskbd.c,v 1.75 2013/11/04 11:57:26 mpi Exp $ */
 /* $NetBSD: wskbd.c,v 1.80 2005/05/04 01:52:16 augustss Exp $ */
 
 /*
@@ -95,10 +95,10 @@
 #include <sys/fcntl.h>
 #include <sys/vnode.h>
 #include <sys/poll.h>
-#include <sys/workq.h>
 
 #include <ddb/db_var.h>
 
+#include <dev/wscons/wscons_features.h>
 #include <dev/wscons/wsconsio.h>
 #include <dev/wscons/wskbdvar.h>
 #include <dev/wscons/wsksymdef.h>
@@ -111,11 +111,6 @@
 #include "wsdisplay.h"
 #include "wskbd.h"
 #include "wsmux.h"
-
-#ifndef	SMALL_KERNEL
-#define	BURNER_SUPPORT
-#define	SCROLLBACK_SUPPORT
-#endif
 
 #ifdef WSKBD_DEBUG
 #define DPRINTF(x)	if (wskbddebug) printf x
@@ -302,7 +297,7 @@ static struct wskbd_internal wskbd_console_data;
 void	wskbd_update_layout(struct wskbd_internal *, kbd_t);
 
 #if NAUDIO > 0
-extern int wskbd_set_mixervolume(long dir, int out);
+extern int wskbd_set_mixervolume(long, long);
 #endif
 
 void
@@ -440,7 +435,7 @@ wskbd_attach(struct device *parent, struct device *self, void *aux)
 	}
 #endif
 
-#if WSDISPLAY > 0 && NWSMUX == 0
+#if NWSDISPLAY > 0 && NWSMUX == 0
 	if (ap->console == 0) {
 		/*
 		 * In the non-wsmux world, always connect wskbd0 and wsdisplay0
@@ -515,6 +510,7 @@ wskbd_repeat(void *v)
 		/* deliver keys */
 		if (sc->sc_displaydv != NULL)
 			wsdisplay_kbdinput(sc->sc_displaydv,
+			    sc->id->t_keymap->layout,
 			    sc->id->t_symbols, sc->sc_repeating);
 	} else {
 		/* queue event */
@@ -618,14 +614,14 @@ wskbd_input(struct device *dev, u_int type, int value)
 	 * send upstream.
 	 */
 	if (sc->sc_translating) {
-#ifdef BURNER_SUPPORT
+#ifdef HAVE_BURNER_SUPPORT
 		if (type == WSCONS_EVENT_KEY_DOWN && sc->sc_displaydv != NULL)
 			wsdisplay_burn(sc->sc_displaydv, WSDISPLAY_BURN_KBD);
 #endif
 		num = wskbd_translate(sc->id, type, value);
 		if (num > 0) {
 			if (sc->sc_displaydv != NULL) {
-#ifdef SCROLLBACK_SUPPORT
+#ifdef HAVE_SCROLLBACK_SUPPORT
 				/* XXX - Shift_R+PGUP(release) emits PrtSc */
 				if (sc->id->t_symbols[0] != KS_Print_Screen) {
 					wsscrollback(sc->sc_displaydv,
@@ -633,6 +629,7 @@ wskbd_input(struct device *dev, u_int type, int value)
 				}
 #endif
 				wsdisplay_kbdinput(sc->sc_displaydv,
+				    sc->id->t_keymap->layout,
 				    sc->id->t_symbols, num);
 			}
 
@@ -1388,7 +1385,7 @@ internal_command(struct wskbd_softc *sc, u_int *type, keysym_t ksym,
 	if (*type != WSCONS_EVENT_KEY_DOWN)
 		return (0);
 
-#ifdef SCROLLBACK_SUPPORT
+#ifdef HAVE_SCROLLBACK_SUPPORT
 #if NWSDISPLAY > 0
 	switch (ksym) {
 	case KS_Cmd_ScrollBack:
@@ -1646,16 +1643,13 @@ wskbd_translate(struct wskbd_internal *id, u_int type, int value)
 		switch (ksym) {
 #if NAUDIO > 0
 		case KS_AudioMute:
-			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-			    (void *)(long)0, (void *)(int)1);
-			break;
+			wskbd_set_mixervolume(0, 1);
+			return (0);
 		case KS_AudioLower:
-			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-			    (void *)(long)-1, (void*)(int)1);
-			break;
+			wskbd_set_mixervolume(-1, 1);
+			return (0);
 		case KS_AudioRaise:
-			workq_add_task(NULL, 0, (workq_fn)wskbd_set_mixervolume,
-			    (void *)(long)1, (void*)(int)1);
+			wskbd_set_mixervolume(1, 1);
 			return (0);
 #endif
 		default:

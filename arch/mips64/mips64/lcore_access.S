@@ -1,4 +1,4 @@
-/*	$OpenBSD: lcore_access.S,v 1.19 2010/01/31 19:39:04 miod Exp $ */
+/*	$OpenBSD: lcore_access.S,v 1.24 2012/10/03 11:18:23 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -31,6 +31,7 @@
 #include <machine/param.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
 #include <machine/trap.h>
@@ -98,17 +99,17 @@ LEAF(copystr, 0)
 	sb	t0, 0(a1)
 	PTR_ADDU a0, a0, 1
 	beq	t0, zero, 2f
-	PTR_ADDU a1, a1, 1
+	 PTR_ADDU a1, a1, 1
 	bne	a2, zero, 1b
-	nop
+	 NOP
 	LI	v0, ENAMETOOLONG	# String is longer than maxlength
 2:
 	beq	a3, zero, 3f
-	PTR_SUBU a2, t2, a2		# Compute length copied
+	 PTR_SUBU a2, t2, a2		# Compute length copied
 	REG_S	a2, 0(a3)
 3:
 	j	ra
-	nop
+	 NOP
 END(copystr)
 
 /*
@@ -116,14 +117,14 @@ END(copystr)
  * mem_zero_page(addr);
  */
 LEAF(mem_zero_page, 0)
-	LI	v0, NBPG
+	LI	v0, PAGE_SIZE
 1:
 	PTR_SUBU v0, 8
 	sd	zero, 0(a0)
 	bne	zero, v0, 1b
-	PTR_ADDU a0, 8
+	 PTR_ADDU a0, 8
 	jr	ra
-	nop
+	 NOP
 END(mem_zero_page)
 
 /*
@@ -141,11 +142,11 @@ NON_LEAF(copyinstr, FRAMESZ(CF_SZ), ra)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a0, zero, _copyerr	# make sure address is in user space
-	LI	v0, KT_COPYERR
+	 LI	v0, KT_COPYERR
 	GET_CPU_INFO(t1, t0)
 	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	copystr
-	sw	v0, PCB_ONFAULT(t3)
+	 sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
 	GET_CPU_INFO(t1, t0)
@@ -153,7 +154,7 @@ NON_LEAF(copyinstr, FRAMESZ(CF_SZ), ra)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
-	nop
+	 NOP
 END(copyinstr)
 
 /*
@@ -171,11 +172,11 @@ NON_LEAF(copyoutstr, FRAMESZ(CF_SZ), ra)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a1, zero, _copyerr	# make sure address is in user space
-	LI	v0, KT_COPYERR
+	 LI	v0, KT_COPYERR
 	GET_CPU_INFO(t1, t0)
 	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	copystr
-	sw	v0, PCB_ONFAULT(t3)
+	 sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
 	GET_CPU_INFO(t1, t0)
@@ -183,7 +184,7 @@ NON_LEAF(copyoutstr, FRAMESZ(CF_SZ), ra)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
-	nop
+	 NOP
 END(copyoutstr)
 
 /*
@@ -198,11 +199,11 @@ NON_LEAF(copyin, FRAMESZ(CF_SZ), ra)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a0, zero, _copyerr	# make sure address is in user space
-	li	v0, KT_COPYERR
+	 li	v0, KT_COPYERR
 	GET_CPU_INFO(t1, t0)
 	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	bcopy
-	sw	v0, PCB_ONFAULT(t3)
+	 sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
 	GET_CPU_INFO(t1, t0)
@@ -210,7 +211,7 @@ NON_LEAF(copyin, FRAMESZ(CF_SZ), ra)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
-	move	v0, zero
+	 move	v0, zero
 END(copyin)
 
 /*
@@ -225,11 +226,11 @@ NON_LEAF(copyout, FRAMESZ(CF_SZ), ra)
 	.mask	0x80000000, (CF_RA_OFFS - FRAMESZ(CF_SZ))
 	PTR_S	ra, CF_RA_OFFS(sp)
 	blt	a1, zero, _copyerr	# make sure address is in user space
-	li	v0, KT_COPYERR
+	 li	v0, KT_COPYERR
 	GET_CPU_INFO(t1, t0)
 	PTR_L	t3, CI_CURPROCPADDR(t1)
 	jal	bcopy
-	sw	v0, PCB_ONFAULT(t3)
+	 sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	ra, CF_RA_OFFS(sp)
 	GET_CPU_INFO(t1, t0)
@@ -237,7 +238,7 @@ NON_LEAF(copyout, FRAMESZ(CF_SZ), ra)
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
-	move	v0, zero
+	 move	v0, zero
 END(copyout)
 
 _copyerr:
@@ -247,7 +248,7 @@ _copyerr:
 	sw	zero, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ)
 	j	ra
-	li	v0, EFAULT		# return error
+	 li	v0, EFAULT		# return error
 
 /*
  *  kcopy is a wrapper around bcopy that catches bad memory references.
@@ -262,7 +263,7 @@ NON_LEAF(kcopy, FRAMESZ(CF_SZ + REGSZ), ra)
 	li	v0, KT_KCOPYERR
 	PTR_S	v1, CF_ARGSZ(sp)	# save old pcb_onfault
 	jal	bcopy
-	sw	v0, PCB_ONFAULT(t3)
+	 sw	v0, PCB_ONFAULT(t3)
 
 	PTR_L	v0, CF_ARGSZ(sp)
 	GET_CPU_INFO(t1, t0)
@@ -271,7 +272,7 @@ NON_LEAF(kcopy, FRAMESZ(CF_SZ + REGSZ), ra)
 	sw	v0, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ + REGSZ)
 	j	ra
-	move	v0, zero
+	 move	v0, zero
 END(kcopy)
 
 _kcopyerr:
@@ -282,24 +283,110 @@ _kcopyerr:
 	sw	v0, PCB_ONFAULT(t3)
 	PTR_ADDU sp, sp, FRAMESZ(CF_SZ + REGSZ)
 	j	ra
-	li	v0, EFAULT		# return error
+	 li	v0, EFAULT		# return error
 
 /*
  * Guarded ``memory'' access routines
+ * int guarded_read_1(paddr_t address, uint8_t *dest);
+ * int guarded_read_2(paddr_t address, uint16_t *dest);
  * int guarded_read_4(paddr_t address, uint32_t *dest);
  * int guarded_write_4(paddr_t address, uint32_t src);
  */
 
-LEAF(guarded_read_4, 0)
+LEAF(guarded_read_1, 0)
 	GET_CPU_INFO(t1, t0)
 	PTR_L	t3, CI_CURPROCPADDR(t1)
+
+#ifndef CPU_R8000
+	li	a3, SR_BOOT_EXC_VEC
+	MFC0	a2, COP_0_STATUS_REG
+	or	a4, a2, a3
+	xor	a4, a4, a3
+#endif
+
 	li	v0, KT_GUARDERR
 	lw	v1, PCB_ONFAULT(t3)
 	sw	v0, PCB_ONFAULT(t3)
 
+#ifndef CPU_R8000
+	MTC0	a4, COP_0_STATUS_REG
+	MTC0_HAZARD
+#endif
+
+	lb	v0, 0(a0)
+	sb	v0, 0(a1)
+
+#ifndef CPU_R8000
+	MTC0	a2, COP_0_STATUS_REG
+	MTC0_HAZARD
+#endif
+
+	sw	v1, PCB_ONFAULT(t3)
+	j	ra
+	 move	v0, zero
+END(guarded_read_1)
+
+LEAF(guarded_read_2, 0)
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
+
+#ifndef CPU_R8000
+	li	a3, SR_BOOT_EXC_VEC
+	MFC0	a2, COP_0_STATUS_REG
+	or	a4, a2, a3
+	xor	a4, a4, a3
+#endif
+
+	li	v0, KT_GUARDERR
+	lw	v1, PCB_ONFAULT(t3)
+	sw	v0, PCB_ONFAULT(t3)
+
+#ifndef CPU_R8000
+	MTC0	a4, COP_0_STATUS_REG
+	MTC0_HAZARD
+#endif
+
+	lh	v0, 0(a0)
+	sh	v0, 0(a1)
+
+#ifndef CPU_R8000
+	MTC0	a2, COP_0_STATUS_REG
+	MTC0_HAZARD
+#endif
+
+	sw	v1, PCB_ONFAULT(t3)
+	j	ra
+	move	v0, zero
+END(guarded_read_2)
+
+LEAF(guarded_read_4, 0)
+	GET_CPU_INFO(t1, t0)
+	PTR_L	t3, CI_CURPROCPADDR(t1)
+
+#ifndef CPU_R8000
+	li	a3, SR_BOOT_EXC_VEC
+	MFC0	a2, COP_0_STATUS_REG
+	or	a4, a2, a3
+	xor	a4, a4, a3
+#endif
+
+	li	v0, KT_GUARDERR
+	lw	v1, PCB_ONFAULT(t3)
+	sw	v0, PCB_ONFAULT(t3)
+
+#ifndef CPU_R8000
+	MTC0	a4, COP_0_STATUS_REG
+	MTC0_HAZARD
+#endif
+
 	lw	v0, 0(a0)
 	sw	v0, 0(a1)
-	
+
+#ifndef CPU_R8000
+	MTC0	a2, COP_0_STATUS_REG
+	MTC0_HAZARD
+#endif
+
 	sw	v1, PCB_ONFAULT(t3)
 	j	ra
 	move	v0, zero
@@ -308,18 +395,41 @@ END(guarded_read_4)
 LEAF(guarded_write_4, 0)
 	GET_CPU_INFO(t1, t0)
 	PTR_L	t3, CI_CURPROCPADDR(t1)
+
+#ifndef CPU_R8000
+	li	a3, SR_BOOT_EXC_VEC
+	MFC0	a2, COP_0_STATUS_REG
+	or	a4, a2, a3
+	xor	a4, a4, a3
+#endif
+
 	li	v0, KT_GUARDERR
 	lw	v1, PCB_ONFAULT(t3)
 	sw	v0, PCB_ONFAULT(t3)
 
+#ifndef CPU_R8000
+	MTC0	a4, COP_0_STATUS_REG
+	MTC0_HAZARD
+#endif
+
 	sw	a1, 0(a0)
-	
+
+#ifndef CPU_R8000
+	MTC0	a2, COP_0_STATUS_REG
+	MTC0_HAZARD
+#endif
+
 	sw	v1, PCB_ONFAULT(t3)
 	j	ra
 	move	v0, zero
 END(guarded_write_4)
 
 _guarderr:
+#ifndef CPU_R8000
+	MTC0	a2, COP_0_STATUS_REG
+	MTC0_HAZARD
+#endif
+
 	sw	v1, PCB_ONFAULT(t3)
 	j	ra
 	li	v0, EFAULT		# return error

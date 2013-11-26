@@ -1,4 +1,4 @@
-/*	$OpenBSD: piixpm.c,v 1.37 2012/03/07 21:41:53 brynet Exp $	*/
+/*	$OpenBSD: piixpm.c,v 1.39 2013/10/01 20:06:02 sf Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -321,6 +321,8 @@ piixpm_i2c_exec(void *cookie, i2c_op_t op, i2c_addr_t addr,
 		ctl = PIIX_SMB_HC_CMD_BDATA;
 	else if (len == 2)
 		ctl = PIIX_SMB_HC_CMD_WDATA;
+	else
+		panic("%s: unexpected len %zd", __func__, len);
 
 	if ((flags & I2C_F_POLL) == 0)
 		ctl |= PIIX_SMB_HC_INTREN;
@@ -357,7 +359,7 @@ timeout:
 	/*
 	 * Transfer timeout. Kill the transaction and clear status bits.
 	 */
-	printf("%s: exec: op %d, addr 0x%02x, cmdlen %d, len %d, "
+	printf("%s: exec: op %d, addr 0x%02x, cmdlen %zu, len %zu, "
 	    "flags 0x%02x: timeout, status 0x%b\n",
 	    sc->sc_dev.dv_xname, op, addr, cmdlen, len, flags,
 	    st, PIIX_SMB_HS_BITS);

@@ -1,4 +1,4 @@
-/* $OpenBSD: if_pppoe.c,v 1.34 2012/01/19 01:13:20 sthen Exp $ */
+/* $OpenBSD: if_pppoe.c,v 1.37 2013/04/10 08:50:59 mpi Exp $ */
 /* $NetBSD: if_pppoe.c,v 1.51 2003/11/28 08:56:48 keihan Exp $ */
 
 /*
@@ -42,7 +42,6 @@
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/syslog.h>
-#include <sys/proc.h>
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <net/if_types.h>
@@ -152,8 +151,6 @@ struct pppoe_softc {
 /* incoming traffic will be queued here */
 struct ifqueue pppoediscinq;
 struct ifqueue pppoeinq;
-
-extern int sppp_ioctl(struct ifnet *, unsigned long, void *);
 
 /* input routines */
 static void pppoe_disc_input(struct mbuf *);
@@ -920,8 +917,8 @@ pppoe_ioctl(struct ifnet *ifp, unsigned long cmd, caddr_t data)
 	{
 		struct pppoediscparms *parms = (struct pppoediscparms *)data;
 		int len;
-		
-		if ((error = suser(p, p->p_acflag)) != 0)
+
+		if ((error = suser(p, 0)) != 0)
 			return (error);
 		if (parms->eth_ifname[0] != '\0') {
 			struct ifnet	*eth_if;

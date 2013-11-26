@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_malloc_debug.c,v 1.28 2011/07/28 14:07:01 mcbride Exp $	*/
+/*	$OpenBSD: kern_malloc_debug.c,v 1.32 2013/08/08 23:25:06 syl Exp $	*/
 
 /*
  * Copyright (c) 1999, 2000 Artur Grabowski <art@openbsd.org>
@@ -300,7 +300,9 @@ debug_malloc_assert_allocated(void *addr, const char *func)
 }
 
 void
-debug_malloc_printit(int (*pr)(const char *, ...), vaddr_t addr)
+debug_malloc_printit(
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))),
+    vaddr_t addr)
 {
 	struct debug_malloc_entry *md;
 

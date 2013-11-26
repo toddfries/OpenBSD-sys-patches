@@ -1,4 +1,4 @@
-/*	$OpenBSD: ulpt.c,v 1.40 2011/09/17 08:36:06 miod Exp $ */
+/*	$OpenBSD: ulpt.c,v 1.45 2013/11/07 13:11:10 pirofti Exp $ */
 /*	$NetBSD: ulpt.c,v 1.57 2003/01/05 10:19:42 scw Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ulpt.c,v 1.24 1999/11/17 22:33:44 n_hibma Exp $	*/
 
@@ -39,13 +39,14 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
 #include <sys/uio.h>
 #include <sys/conf.h>
 #include <sys/vnode.h>
 #include <sys/syslog.h>
+#include <sys/types.h>
+#include <sys/malloc.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbdi.h>
@@ -80,17 +81,17 @@ int	ulptdebug = 0;
 
 struct ulpt_softc {
 	struct device sc_dev;
-	usbd_device_handle sc_udev;	/* device */
-	usbd_interface_handle sc_iface;	/* interface */
+	struct usbd_device *sc_udev;	/* device */
+	struct usbd_interface *sc_iface;/* interface */
 	int sc_ifaceno;
 
 	int sc_out;
-	usbd_pipe_handle sc_out_pipe;	/* bulk out pipe */
+	struct usbd_pipe *sc_out_pipe;	/* bulk out pipe */
 
 	int sc_in;
-	usbd_pipe_handle sc_in_pipe;	/* bulk in pipe */
-	usbd_xfer_handle sc_in_xfer1;
-	usbd_xfer_handle sc_in_xfer2;
+	struct usbd_pipe *sc_in_pipe;	/* bulk in pipe */
+	struct usbd_xfer *sc_in_xfer1;
+	struct usbd_xfer *sc_in_xfer2;
 	u_char sc_junk[64];	/* somewhere to dump input */
 
 	u_char sc_state;
@@ -102,7 +103,8 @@ struct ulpt_softc {
 	u_char sc_laststatus;
 
 	int sc_refcnt;
-	u_char sc_dying;
+
+	struct ulpt_fwdev *sc_fwdev;
 };
 
 void ulpt_disco(void *);
@@ -111,6 +113,38 @@ int ulpt_do_write(struct ulpt_softc *, struct uio *uio, int);
 int ulpt_status(struct ulpt_softc *);
 void ulpt_reset(struct ulpt_softc *);
 int ulpt_statusmsg(u_char, struct ulpt_softc *);
+
+/*
+ * Printers which need firmware uploads.
+ */
+void ulpt_load_firmware(void *);
+usbd_status ulpt_ucode_loader_hp(struct ulpt_softc *);
+struct ulpt_fwdev {
+	struct usb_devno	 uv_dev;
+	char			*ucode_name;
+	usbd_status		 (*ucode_loader)(struct ulpt_softc *);
+} ulpt_fwdevs[] = {
+	{
+	    { USB_VENDOR_HP, USB_PRODUCT_HP_1000 },
+	    "ulpt-hp1000",
+	    ulpt_ucode_loader_hp
+	},
+	{
+	    { USB_VENDOR_HP, USB_PRODUCT_HP_1005 },
+	    "ulpt-hp1005",
+	    ulpt_ucode_loader_hp
+	},
+	{
+	    { USB_VENDOR_HP, USB_PRODUCT_HP_1018 },
+	    "ulpt-hp1018",
+	    ulpt_ucode_loader_hp
+	},
+	{
+	    { USB_VENDOR_HP, USB_PRODUCT_HP_1020 },
+	    "ulpt-hp1020",
+	    ulpt_ucode_loader_hp
+	},
+};
 
 #if 0
 void ieee1284_print_id(char *);
@@ -158,12 +192,27 @@ ulpt_match(struct device *parent, void *match, void *aux)
 }
 
 void
+ulpt_load_firmware(void *arg)
+{
+	struct ulpt_softc *sc = (struct ulpt_softc *)arg;
+	usbd_status err;
+
+	err = (sc->sc_fwdev->ucode_loader)(sc);
+	if (err != USBD_NORMAL_COMPLETION)
+		printf("%s: could not load firmware '%s'\n",
+		    sc->sc_dev.dv_xname, sc->sc_fwdev->ucode_name);
+}
+
+#define ulpt_lookup(v, p) \
+	((struct ulpt_fwdev *)usb_lookup(ulpt_fwdevs, v, p))
+
+void
 ulpt_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct ulpt_softc *sc = (struct ulpt_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	usbd_device_handle dev = uaa->device;
-	usbd_interface_handle iface = uaa->iface;
+	struct usbd_device *dev = uaa->device;
+	struct usbd_interface *iface = uaa->iface;
 	usb_interface_descriptor_t *ifcd = usbd_get_interface_descriptor(iface);
 	usb_interface_descriptor_t *id, *iend;
 	usb_config_descriptor_t *cdesc;
@@ -216,7 +265,7 @@ ulpt_attach(struct device *parent, struct device *self, void *aux)
 		if (err) {
 			printf("%s: setting alternate interface failed\n",
 			       sc->sc_dev.dv_xname);
-			sc->sc_dying = 1;
+			usbd_deactivate(sc->sc_udev);
 			return;
 		}
 	}
@@ -244,7 +293,7 @@ ulpt_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_out == -1) {
 		printf("%s: could not find bulk out endpoint\n",
 		    sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -261,6 +310,15 @@ ulpt_attach(struct device *parent, struct device *self, void *aux)
 	sc->sc_iface = iface;
 	sc->sc_ifaceno = id->bInterfaceNumber;
 	sc->sc_udev = dev;
+
+	/* maybe the device needs firmware */
+	sc->sc_fwdev = ulpt_lookup(uaa->vendor, uaa->product);
+	if (sc->sc_fwdev) {
+		if (rootvp == NULL)
+			mountroothook_establish(ulpt_load_firmware, sc);
+		else
+			ulpt_load_firmware(sc);
+	}
 
 #if 0
 /*
@@ -306,7 +364,7 @@ ulpt_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 	return (0);
@@ -392,7 +450,7 @@ ulpt_reset(struct ulpt_softc *sc)
 }
 
 static void
-ulpt_input(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+ulpt_input(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct ulpt_softc *sc = priv;
 
@@ -423,7 +481,7 @@ ulptopen(dev_t dev, int flag, int mode, struct proc *p)
 	if (sc == NULL)
 		return (ENXIO);
 
-	if (sc == NULL || sc->sc_iface == NULL || sc->sc_dying)
+	if (sc == NULL || sc->sc_iface == NULL || usbd_is_dying(sc->sc_udev))
 		return (ENXIO);
 
 	if (sc->sc_state)
@@ -438,7 +496,7 @@ ulptopen(dev_t dev, int flag, int mode, struct proc *p)
 
 	if ((flags & ULPT_NOPRIME) == 0) {
 		ulpt_reset(sc);
-		if (sc->sc_dying) {
+		if (usbd_is_dying(sc->sc_udev)) {
 			error = ENXIO;
 			sc->sc_state = 0;
 			goto done;
@@ -559,7 +617,7 @@ ulpt_do_write(struct ulpt_softc *sc, struct uio *uio, int flags)
 	u_int32_t n;
 	int error = 0;
 	void *bufp;
-	usbd_xfer_handle xfer;
+	struct usbd_xfer *xfer;
 	usbd_status err;
 
 	DPRINTF(("ulptwrite\n"));
@@ -577,9 +635,11 @@ ulpt_do_write(struct ulpt_softc *sc, struct uio *uio, int flags)
 		if (error)
 			break;
 		DPRINTFN(1, ("ulptwrite: transfer %d bytes\n", n));
-		err = usbd_bulk_transfer(xfer, sc->sc_out_pipe, USBD_NO_COPY,
-			  USBD_NO_TIMEOUT, bufp, &n, "ulptwr");
+		usbd_setup_xfer(xfer, sc->sc_out_pipe, 0, bufp, n,
+		    USBD_NO_COPY | USBD_SYNCHRONOUS | USBD_CATCH, 0, NULL);
+		err = usbd_transfer(xfer);
 		if (err) {
+			usbd_clear_endpoint_stall(sc->sc_out_pipe);
 			DPRINTF(("ulptwrite: error=%d\n", err));
 			error = EIO;
 			break;
@@ -598,13 +658,76 @@ ulptwrite(dev_t dev, struct uio *uio, int flags)
 
 	sc = ulpt_cd.cd_devs[ULPTUNIT(dev)];
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	sc->sc_refcnt++;
 	error = ulpt_do_write(sc, uio, flags);
 	if (--sc->sc_refcnt < 0)
 		usb_detach_wakeup(&sc->sc_dev);
+	return (error);
+}
+
+usbd_status
+ulpt_ucode_loader_hp(struct ulpt_softc *sc)
+{
+	usbd_status error;
+	int load_error;
+	uint8_t *ucode;
+	uint32_t len;
+	size_t ucode_size;
+	const char *ucode_name = sc->sc_fwdev->ucode_name;
+	int offset = 0, remain;
+	struct usbd_xfer *xfer;
+	void *bufp;
+
+	/* open microcode file */
+	load_error = loadfirmware(ucode_name, &ucode, &ucode_size);
+	if (load_error != 0) {
+		printf("%s: failed loadfirmware of file %s (error %d)\n",
+		    sc->sc_dev.dv_xname, ucode_name, load_error);
+		return (USBD_INVAL);
+	}
+
+	/* upload microcode */
+	error = usbd_open_pipe(sc->sc_iface, sc->sc_out, 0, &sc->sc_out_pipe);
+	if (error)
+		goto free_ucode;
+	xfer = usbd_alloc_xfer(sc->sc_udev);
+	if (xfer == NULL)
+		goto close_pipe;
+	bufp = usbd_alloc_buffer(xfer, ULPT_BSIZE);
+	if (bufp == NULL) {
+		error = USBD_NOMEM;
+		goto free_xfer;
+	}
+	remain = ucode_size;
+	while (remain > 0) {
+		len = min(remain, ULPT_BSIZE);
+		memcpy(bufp, &ucode[offset], len);
+		usbd_setup_xfer(xfer, sc->sc_out_pipe, 0, bufp, len,
+		    USBD_NO_COPY | USBD_SYNCHRONOUS, 0, NULL);
+		error = usbd_transfer(xfer);
+		if (error != USBD_NORMAL_COMPLETION) {
+			usbd_clear_endpoint_stall(sc->sc_out_pipe);
+			printf("%s: ucode upload error=%s!\n",
+			    sc->sc_dev.dv_xname, usbd_errstr(error));
+			break;
+		}
+		DPRINTF(("%s: uploaded %d bytes ucode\n",
+		    sc->sc_dev.dv_xname, len));
+
+		offset += len;
+		remain -= len;
+	}
+free_xfer:
+	usbd_free_xfer(xfer);
+close_pipe:
+	usbd_close_pipe(sc->sc_out_pipe);
+	sc->sc_out_pipe = NULL;
+free_ucode:
+	free(ucode, M_DEVBUF);
+
 	return (error);
 }
 

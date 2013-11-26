@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.3 2011/03/23 16:54:34 pirofti Exp $	*/
+/*	$OpenBSD: asm.h,v 1.5 2013/03/28 17:41:03 martynas Exp $	*/
 /*	$NetBSD: asm.h,v 1.2 2003/05/02 18:05:47 yamt Exp $	*/
 
 /*-
@@ -38,7 +38,7 @@
 #ifndef _MACHINE_ASM_H_
 #define _MACHINE_ASM_H_
 
-#ifdef PIC
+#ifdef __PIC__
 #define PIC_PLT(x)	x@PLT
 #define PIC_GOT(x)	x@GOTPCREL(%rip)
 #else
@@ -100,6 +100,9 @@
 
 #define RCSID(x)	.text; .asciz x
 
+#define	STRONG_ALIAS(alias,sym)						\
+	.global alias;							\
+	alias = sym
 #define	WEAK_ALIAS(alias,sym)						\
 	.weak alias;							\
 	alias = sym

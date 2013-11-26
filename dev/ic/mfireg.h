@@ -1,4 +1,4 @@
-/* $OpenBSD: mfireg.h,v 1.30 2012/01/12 06:12:30 dlg Exp $ */
+/* $OpenBSD: mfireg.h,v 1.40 2013/05/03 02:46:28 dlg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -110,15 +110,21 @@
 #define MR_DCMD_CTRL_EVENT_WAIT			0x01040500
 #define MR_DCMD_PD_GET_LIST			0x02010000
 #define MR_DCMD_PD_GET_INFO			0x02020000
-#define MD_DCMD_PD_SET_STATE			0x02030100
-#define MD_DCMD_PD_REBUILD			0x02040100
+#define MR_DCMD_PD_SET_STATE			0x02030100
+#define MR_DCMD_PD_REBUILD			0x02040100
 #define MR_DCMD_PD_BLINK			0x02070100
 #define MR_DCMD_PD_UNBLINK			0x02070200
 #define MR_DCMD_PD_GET_ALLOWED_OPS_LIST		0x020a0100
 #define MR_DCMD_LD_GET_LIST			0x03010000
 #define MR_DCMD_LD_GET_INFO			0x03020000
 #define MR_DCMD_LD_GET_PROPERTIES		0x03030000
-#define MD_DCMD_CONF_GET			0x04010000
+#define MR_DCMD_CONF_GET			0x04010000
+#define MR_DCMD_BBU_GET_STATUS			0x05010000
+#define MR_DCMD_BBU_GET_CAPACITY_INFO		0x05020000
+#define MR_DCMD_BBU_GET_DESIGN_INFO		0x05030000
+#define MR_DCMD_BBU_START_LEARN			0x05040000
+#define MR_DCMD_BBU_GET_PROP			0x05050100
+#define MR_DCMD_BBU_SET_PROP			0x05050200
 #define MR_DCMD_CLUSTER				0x08000000
 #define MR_DCMD_CLUSTER_RESET_ALL		0x08010100
 #define MR_DCMD_CLUSTER_RESET_LD		0x08010200
@@ -217,27 +223,27 @@ typedef enum {
 } mfi_evt_locale_t;
 
 typedef enum {
-        MR_EVT_ARGS_NONE =			0x00,
-        MR_EVT_ARGS_CDB_SENSE,
-        MR_EVT_ARGS_LD,
-        MR_EVT_ARGS_LD_COUNT,
-        MR_EVT_ARGS_LD_LBA,
-        MR_EVT_ARGS_LD_OWNER,
-        MR_EVT_ARGS_LD_LBA_PD_LBA,
-        MR_EVT_ARGS_LD_PROG,
-        MR_EVT_ARGS_LD_STATE,
-        MR_EVT_ARGS_LD_STRIP,
-        MR_EVT_ARGS_PD,
-        MR_EVT_ARGS_PD_ERR,
-        MR_EVT_ARGS_PD_LBA,
-        MR_EVT_ARGS_PD_LBA_LD,
-        MR_EVT_ARGS_PD_PROG,
-        MR_EVT_ARGS_PD_STATE,
-        MR_EVT_ARGS_PCI,
-        MR_EVT_ARGS_RATE,
-        MR_EVT_ARGS_STR,
-        MR_EVT_ARGS_TIME,
-        MR_EVT_ARGS_ECC
+	MR_EVT_ARGS_NONE =			0x00,
+	MR_EVT_ARGS_CDB_SENSE,
+	MR_EVT_ARGS_LD,
+	MR_EVT_ARGS_LD_COUNT,
+	MR_EVT_ARGS_LD_LBA,
+	MR_EVT_ARGS_LD_OWNER,
+	MR_EVT_ARGS_LD_LBA_PD_LBA,
+	MR_EVT_ARGS_LD_PROG,
+	MR_EVT_ARGS_LD_STATE,
+	MR_EVT_ARGS_LD_STRIP,
+	MR_EVT_ARGS_PD,
+	MR_EVT_ARGS_PD_ERR,
+	MR_EVT_ARGS_PD_LBA,
+	MR_EVT_ARGS_PD_LBA_LD,
+	MR_EVT_ARGS_PD_PROG,
+	MR_EVT_ARGS_PD_STATE,
+	MR_EVT_ARGS_PCI,
+	MR_EVT_ARGS_RATE,
+	MR_EVT_ARGS_STR,
+	MR_EVT_ARGS_TIME,
+	MR_EVT_ARGS_ECC
 } mfi_evt_args;
 
 /* driver definitions */
@@ -251,7 +257,7 @@ typedef enum {
 #define MFI_MAX_LD				64
 #define MFI_MAX_SPAN				8
 #define MFI_MAX_ARRAY_DEDICATED			16
-#define MFI_MAX_PHYSDISK			256
+#define MFI_MAX_PD				256
 
 /* sense buffer */
 struct mfi_sense {
@@ -299,10 +305,8 @@ union mfi_sgl_frame {
 
 struct mfi_init_frame {
 	struct mfi_frame_header	mif_header;
-	uint32_t		mif_qinfo_new_addr_lo;
-	uint32_t		mif_qinfo_new_addr_hi;
-	uint32_t		mif_qinfo_old_addr_lo;
-	uint32_t		mif_qinfo_old_addr_hi;
+	uint64_t		mif_qinfo_new_addr;
+	uint64_t		mif_qinfo_old_addr;
 	uint32_t		mif_reserved[6];
 } __packed;
 
@@ -310,29 +314,23 @@ struct mfi_init_frame {
 struct mfi_init_qinfo {
 	uint32_t		miq_flags;
 	uint32_t		miq_rq_entries;
-	uint32_t		miq_rq_addr_lo;
-	uint32_t		miq_rq_addr_hi;
-	uint32_t		miq_pi_addr_lo;
-	uint32_t		miq_pi_addr_hi;
-	uint32_t		miq_ci_addr_lo;
-	uint32_t		miq_ci_addr_hi;
+	uint64_t		miq_rq_addr;
+	uint64_t		miq_pi_addr;
+	uint64_t		miq_ci_addr;
 } __packed;
 
 #define MFI_IO_FRAME_SIZE	40
 struct mfi_io_frame {
 	struct mfi_frame_header	mif_header;
-	uint32_t		mif_sense_addr_lo;
-	uint32_t		mif_sense_addr_hi;
-	uint32_t		mif_lba_lo;
-	uint32_t		mif_lba_hi;
+	uint64_t		mif_sense_addr;
+	uint64_t		mif_lba;
 	union mfi_sgl		mif_sgl;
 } __packed;
 
 #define MFI_PASS_FRAME_SIZE	48
 struct mfi_pass_frame {
 	struct mfi_frame_header mpf_header;
-	uint32_t		mpf_sense_addr_lo;
-	uint32_t		mpf_sense_addr_hi;
+	uint64_t		mpf_sense_addr;
 	uint8_t			mpf_cdb[16];
 	union mfi_sgl		mpf_sgl;
 } __packed;
@@ -349,8 +347,7 @@ struct mfi_abort_frame {
 	struct mfi_frame_header maf_header;
 	uint32_t		maf_abort_context;
 	uint32_t		maf_pad;
-	uint32_t		maf_abort_mfi_addr_lo;
-	uint32_t		maf_abort_mfi_addr_hi;
+	uint64_t		maf_abort_mfi_addr;
 	uint32_t		maf_reserved[6];
 } __packed;
 
@@ -585,7 +582,7 @@ struct mfi_info_host {
 	uint64_t		mih_port_addr[8];
 } __packed;
 
-/* device  interface info */
+/* device interface info */
 struct mfi_info_device {
 	uint8_t			mid_type;
 #define MFI_INFO_DEV_SPI	0x01
@@ -627,10 +624,13 @@ struct mfi_ctrl_info {
 	char			mci_product_name[80];
 	char			mci_serial_number[32];
 	uint32_t		mci_hw_present;
-#define MFI_INFO_HW_BBU		0x01
-#define MFI_INFO_HW_ALARM	0x02
-#define MFI_INFO_HW_NVRAM	0x04
-#define MFI_INFO_HW_UART	0x08
+#define MFI_INFO_HW_BBU			0x01
+#define MFI_INFO_HW_ALARM		0x02
+#define MFI_INFO_HW_NVRAM		0x04
+#define MFI_INFO_HW_UART		0x08
+#define MFI_INFO_HW_FMT		"\020" "\001BBU" "\002ALARM" "\003NVRAM" \
+				    "\004UART"
+
 	uint32_t		mci_current_fw_time;
 	uint16_t		mci_max_cmds;
 	uint16_t		mci_max_sg_elements;
@@ -674,6 +674,15 @@ struct mfi_ctrl_info {
 #define MFI_INFO_AOPS_SELF_DIAGNOSTIC	0x1000
 #define MFI_INFO_AOPS_MIXED_ARRAY	0x2000
 #define MFI_INFO_AOPS_GLOBAL_SPARES	0x4000
+#define MFI_INFO_AOPS_FMT	"\020" "\001RBLD_RATE" "\002CC_RATE" \
+				    "\003BGI_RATE" "\004RECON_RATE" \
+				    "\005PATROL_RATE" "\006ALARM_CONTROL" \
+				    "\007CLUSTER_SUPPORT" "\010BBU" \
+				    "\011SPANNING_ALLOWED" \
+				    "\012DEDICATED_SPARES" \
+				    "\013REVERTIBLE_SPARES" \
+				    "\014FOREIGN_IMPORT" "\015SELF_DIAGNOSTIC" \
+				    "\016MIXED_ARRAY" "\017GLOBAL_SPARES"
 
 	uint32_t		mci_ld_ops;
 #define MFI_INFO_LDOPS_READ_POLICY	0x01
@@ -821,9 +830,8 @@ struct mfi_pd_address {
 struct mfi_pd_list {
 	uint32_t		mpl_size;
 	uint32_t		mpl_no_pd;
-	struct mfi_pd_address	mpl_address[1];
+	struct mfi_pd_address	mpl_address[MFI_MAX_PD];
 } __packed;
-#define MFI_PD_LIST_SIZE (MFI_MAX_PHYSDISK * sizeof(struct mfi_pd_address) + 8)
 
 struct mfi_pd {
 	uint16_t		mfp_id;
@@ -922,10 +930,10 @@ struct mfi_pd_details {
 struct mfi_pd_allowedops_list {
 	uint32_t		mpo_no_entries;
 	uint32_t		mpo_res;
-	uint32_t		mpo_allowedops_list[MFI_MAX_PHYSDISK];
+	uint32_t		mpo_allowedops_list[MFI_MAX_PD];
 } __packed;
 
-/* array configuration from MD_DCMD_CONF_GET */
+/* array configuration from MR_DCMD_CONF_GET */
 struct mfi_array {
 	u_quad_t		mar_smallest_pd;
 	uint8_t			mar_no_disk;
@@ -942,6 +950,8 @@ struct mfi_array {
 #define MFI_PD_FAILED		0x11
 #define MFI_PD_REBUILD		0x14
 #define MFI_PD_ONLINE		0x18
+#define MFI_PD_COPYBACK		0x20
+#define MFI_PD_SYSTEM		0x40
 		uint8_t		mar_enc_pd;
 		uint8_t		mar_enc_slot;
 	} pd[MFI_MAX_PD_ARRAY];
@@ -979,3 +989,122 @@ struct mfi_conf {
 	struct mfi_ld_cfg	mfc_ld[1];
 	struct mfi_hotspare	mfc_hs[1];
 } __packed;
+
+struct mfi_bbu_capacity_info {
+	uint16_t		relative_charge;
+	uint16_t		absolute_charge;
+	uint16_t		remaining_capacity;
+	uint16_t		full_charge_capacity;
+	uint16_t		run_time_to_empty;
+	uint16_t		average_time_to_empty;
+	uint16_t		average_time_to_full;
+	uint16_t		cycle_count;
+	uint16_t		max_error;
+	uint16_t		remaining_capacity_alarm;
+	uint16_t		remaining_time_alarm;
+	uint8_t			reserved[26];
+} __packed;
+
+struct mfi_bbu_design_info {
+	uint32_t		mfg_date;
+	uint16_t		design_capacity;
+	uint16_t		design_voltage;
+	uint16_t		spec_info;
+	uint16_t		serial_number;
+	uint16_t		pack_stat_config;
+	uint8_t			mfg_name[12];
+	uint8_t			device_name[8];
+	uint8_t			device_chemistry[8];
+	uint8_t			mfg_data[8];
+	uint8_t			reserved[17];
+} __packed;
+
+struct mfi_ibbu_state {
+	uint16_t		gas_guage_status;
+	uint16_t		relative_charge;
+	uint16_t		charger_system_state;
+	uint16_t		charger_system_ctrl;
+	uint16_t		charging_current;
+	uint16_t		absolute_charge;
+	uint16_t		max_error;
+	uint8_t			reserved[18];
+} __packed;
+
+struct mfi_bbu_state {
+	uint16_t		gas_guage_status;
+	uint16_t		relative_charge;
+	uint16_t		charger_status;
+	uint16_t		remaining_capacity;
+	uint16_t		full_charge_capacity;
+	uint8_t			is_SOH_good;
+	uint8_t			reserved[21];
+} __packed;
+
+struct mfi_bbu_properties {
+	uint32_t		auto_learn_period;
+	uint32_t		next_learn_time;
+	uint8_t			learn_delay_interval;
+	uint8_t			auto_learn_mode;
+	uint8_t			bbu_mode;
+	uint8_t			reserved[21];
+} __packed;
+
+union mfi_bbu_status_detail {
+	struct mfi_ibbu_state	ibbu;
+	struct mfi_bbu_state	bbu;
+};
+
+struct mfi_bbu_status {
+	uint8_t			battery_type;
+#define MFI_BBU_TYPE_NONE		0
+#define MFI_BBU_TYPE_IBBU		1
+#define MFI_BBU_TYPE_BBU		2
+	uint8_t			reserved;
+	uint16_t		voltage; /* mV */
+	int16_t			current; /* mA */
+	uint16_t		temperature; /* degC */
+	uint32_t		fw_status;
+#define MFI_BBU_STATE_PACK_MISSING	(1 << 0)
+#define MFI_BBU_STATE_VOLTAGE_LOW	(1 << 1)
+#define MFI_BBU_STATE_TEMPERATURE_HIGH	(1 << 2)
+#define MFI_BBU_STATE_CHARGE_ACTIVE	(1 << 3)
+#define MFI_BBU_STATE_DISCHARGE_ACTIVE	(1 << 4)
+#define MFI_BBU_STATE_LEARN_CYC_REQ	(1 << 5)
+#define MFI_BBU_STATE_LEARN_CYC_ACTIVE	(1 << 6)
+#define MFI_BBU_STATE_LEARN_CYC_FAIL	(1 << 7)
+#define MFI_BBU_STATE_LEARN_CYC_TIMEOUT	(1 << 8)
+#define MFI_BBU_STATE_I2C_ERR_DETECT	(1 << 9)
+#define MFI_BBU_STATE_REPLACE_PACK	(1 << 10)
+#define MFI_BBU_STATE_CAPACITY_LOW	(1 << 11)
+#define MFI_BBU_STATE_LEARN_REQUIRED	(1 << 12)
+#define MFI_BBU_STATE_FMT	"\020" \
+				    "\001PACK_MISSING" \
+				    "\002VOLTAGE_LOW" \
+				    "\003TEMP_HIGH" \
+				    "\004CHARGE_ACTIVE" \
+				    "\005DISCHARGE_ACTIVE" \
+				    "\006LEARN_CYC_REQ" \
+				    "\007LEARN_CYC_ACTIVE" \
+				    "\010LEARN_CYC_FAIL" \
+				    "\011LEARN_CYC_TIMEOUT" \
+				    "\012I2C_ERR_DETECT" \
+				    "\013REPLACE_PACK" \
+				    "\014CAPACITY_LOW" \
+				    "\015LEARN_REQUIRED"
+#define MFI_BBU_STATE_BAD_IBBU	( \
+				    MFI_BBU_STATE_PACK_MISSING | \
+				    MFI_BBU_STATE_VOLTAGE_LOW | \
+				    MFI_BBU_STATE_DISCHARGE_ACTIVE | \
+				    MFI_BBU_STATE_LEARN_CYC_REQ | \
+				    MFI_BBU_STATE_LEARN_CYC_ACTIVE | \
+				    MFI_BBU_STATE_REPLACE_PACK | \
+				    MFI_BBU_STATE_CAPACITY_LOW)
+#define MFI_BBU_STATE_BAD_BBU	( \
+				    MFI_BBU_STATE_PACK_MISSING | \
+				    MFI_BBU_STATE_REPLACE_PACK | \
+				    MFI_BBU_STATE_CAPACITY_LOW)
+
+	uint8_t			pad[20];
+	union mfi_bbu_status_detail detail;
+} __packed;
+

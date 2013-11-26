@@ -1,4 +1,4 @@
-/*	$OpenBSD: gbe.c,v 1.14 2012/03/15 18:57:22 miod Exp $ */
+/*	$OpenBSD: gbe.c,v 1.21 2013/10/21 10:36:16 miod Exp $ */
 
 /*
  * Copyright (c) 2007, 2008, 2009 Joel Sing <jsing@openbsd.org>
@@ -31,8 +31,8 @@
 #include <machine/bus.h>
 
 #include <mips64/arcbios.h>
-#include <mips64/archtype.h>
 
+#include <sgi/dev/gl.h>
 #include <sgi/localbus/crimebus.h>
 #include <sgi/localbus/macebusvar.h>
 
@@ -128,7 +128,8 @@ int	gbe_alloc_screen(void *, const struct wsscreen_descr *, void **,
 void	gbe_free_screen(void *, void *);
 int	gbe_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
-void	gbe_burner(void *, u_int, u_int);
+int	gbe_load_font(void *, void *, struct wsdisplay_font *);
+int	gbe_list_font(void *, struct wsdisplay_font *);
 
 /*
  * Hardware acceleration for rasops.
@@ -151,16 +152,13 @@ struct wsscreen_descr gbe_stdscreen = {
 };
 
 struct wsdisplay_accessops gbe_accessops = {
-	gbe_ioctl,
-	gbe_mmap,
-	gbe_alloc_screen,
-	gbe_free_screen,
-	gbe_show_screen,
-	NULL,		/* load_font */
-	NULL,		/* scrollback */
-	NULL,		/* getchar */
-	gbe_burner,
-	NULL		/* pollc */
+	.ioctl = gbe_ioctl,
+	.mmap = gbe_mmap,
+	.alloc_screen = gbe_alloc_screen,
+	.free_screen = gbe_free_screen,
+	.show_screen = gbe_show_screen,
+	.load_font = gbe_load_font,
+	.list_font = gbe_list_font
 };
 
 const struct wsscreen_descr *gbe_scrlist[] = {
@@ -173,9 +171,11 @@ struct wsscreen_list gbe_screenlist = {
 
 int	gbe_match(struct device *, void *, void *);
 void	gbe_attach(struct device *, struct device *, void *);
+int	gbe_activate(struct device *, int);
 
 struct cfattach gbe_ca = {
-	sizeof (struct gbe_softc), gbe_match, gbe_attach
+	sizeof (struct gbe_softc), gbe_match, gbe_attach,
+	NULL, gbe_activate
 };
 
 struct cfdriver gbe_cd = {
@@ -237,8 +237,6 @@ gbe_attach(struct device *parent, struct device *self, void *aux)
 		printf("rev %u, %iMB, %dx%d at %d bits\n", gsc->rev,
 		    gbe_consdata.fb_size >> 20, gbe_consdata.width,
 		    gbe_consdata.height, gbe_consdata.depth);
-
-		shutdownhook_establish((void(*)(void *))gbe_disable, self);
 
 		waa.console = gsc->console;
 		waa.scrdata = &gbe_screenlist;
@@ -381,8 +379,6 @@ gbe_attach(struct device *parent, struct device *self, void *aux)
 	screen->fb_phys = fb_dmamap->dm_segs[0].ds_addr;
 	screen->ro_phys = ro_dmamap->dm_segs[0].ds_addr;
 
-	shutdownhook_establish((void(*)(void *))gbe_disable, self);
-
 	gbe_init_screen(screen);
 	gbe_disable(gsc);
 	gbe_setup(gsc);
@@ -445,6 +441,21 @@ fail1:
 	bus_space_unmap(gsc->iot, gsc->re_ioh, RE_REG_SIZE);
 fail0:
 	bus_space_unmap(gsc->iot, gsc->ioh, GBE_REG_SIZE);
+}
+
+int
+gbe_activate(struct device *self, int act)
+{
+	struct gbe_softc *gsc = (struct gbe_softc *)self;
+	int ret = 0;
+
+	switch (act) {
+	case DVACT_POWERDOWN:
+		gbe_disable(gsc);
+		break;
+	}
+
+	return (ret);
 }
 
 /*
@@ -563,6 +574,11 @@ gbe_enable(struct gbe_softc *gsc)
 	if (i == 10000)
 		printf("timeout unfreezing pixel counter!\n");
 
+	/* Disable sync-on-green. */
+	if (strcmp(osloadoptions, "nosog") == 0)
+		bus_space_write_4(gsc->iot, gsc->ioh, GBE_VT_FLAGS,
+		    GBE_VT_SYNC_LOW);
+
 	/* Provide GBE with address of tilemap and enable DMA. */
 	bus_space_write_4(gsc->iot, gsc->ioh, GBE_FB_CTRL, 
 	    ((screen->tm_phys >> 9) << 
@@ -579,6 +595,9 @@ gbe_disable(struct gbe_softc *gsc)
 	val = bus_space_read_4(gsc->iot, gsc->ioh, GBE_VT_XY);
 	if ((val & GBE_VT_XY_FREEZE) == GBE_VT_XY_FREEZE)
 		return;
+
+	/* Enable sync-on-green. */
+	bus_space_write_4(gsc->iot, gsc->ioh, GBE_VT_FLAGS, 0);
 
 	val = bus_space_read_4(gsc->iot, gsc->ioh, GBE_DOTCLOCK);
 	if ((val & GBE_DOTCLOCK_RUN) == 0) 
@@ -731,8 +750,8 @@ gbe_setup(struct gbe_softc *gsc)
 		    ((screen->depth >> 4) << GBE_FB_SIZE_TILE_DEPTH_SHIFT) |
 		    ((screen->width / tile_width) <<
 		        GBE_FB_SIZE_TILE_WIDTH_SHIFT) |
-		    ((screen->width % tile_width != 0) ?
-		        (screen->height / GBE_TILE_HEIGHT) : 0));
+		    (((screen->width % tile_width) >> (screen->depth >> 4)) /
+		        32));
 
 		bus_space_write_4(gsc->iot, gsc->ioh, GBE_FB_SIZE_PIXEL, 
 		    screen->height << GBE_FB_SIZE_PIXEL_HEIGHT_SHIFT);
@@ -964,9 +983,20 @@ gbe_show_screen(void *v, void *cookie, int waitok, void (*cb)(void *, int, int),
 	return (0);
 }
 
-void
-gbe_burner(void *v, u_int on, u_int flags)
+int
+gbe_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
 {
+	struct gbe_screen *screen = (struct gbe_screen *)v;
+
+	return rasops_load_font(&screen->ri, emulcookie, font);
+}
+
+int
+gbe_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct gbe_screen *screen = (struct gbe_screen *)v;
+
+	return rasops_list_font(&screen->ri, font);
 }
 
 /*
@@ -1050,7 +1080,6 @@ gbe_loadcmap(struct gbe_screen *screen, u_int start, u_int end)
 void
 gbe_rop(struct gbe_softc *gsc, int x, int y, int w, int h, int op)
 {
-
 	gbe_wait_re_idle(gsc);
 
 	bus_space_write_4(gsc->iot, gsc->re_ioh, RE_PP_PRIMITIVE,
@@ -1156,7 +1185,7 @@ gbe_do_cursor(struct rasops_info *ri)
 	x = ri->ri_xorigin + ri->ri_ccol * w;
 	y = ri->ri_yorigin + ri->ri_crow * h;
 
-	gbe_rop(sc, x, y, w, h, LOGIC_OP_XOR);
+	gbe_rop(sc, x, y, w, h, OPENGL_LOGIC_OP_COPY_INVERTED);
 
 	return 0;
 }

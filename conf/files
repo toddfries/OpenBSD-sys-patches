@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.534 2012/03/09 13:01:28 ariane Exp $
+#	$OpenBSD: files,v 1.562 2013/11/11 09:15:34 mpi Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -55,13 +55,16 @@ define	rasops32
 define	rasops_bswap
 define	rasops_rotation
 
-# net device attributes - we have generic code for ether(net),
-# and fddi.
-define	atm
+# I2C bus bit-banging
+define	i2c_bitbang
+
+# 1-Wire bus bit-banging
+define	onewire_bitbang
+
+# net device attributes - we have generic code for ether(net)
 define	crypto
 define	systrace
 define	ether
-define	fddi
 define	sppp
 define	wlan
 define	bluetooth
@@ -70,7 +73,6 @@ define	bluetooth
 # of device drivers.
 define	ncr5380sbc	# NCR 5380 SCSI Bus Controller
 define	ncr53c7xx	# NCR 53c7xx SCSI Bus Controller
-define	pdq		# DEC FDDI chipset
 define	dp8390nic	# 8390-family Ethernet controllers
 define	rtl80x9		# RealTek 8019/8029 NE2000-compatible
 define	dl10019		# DL10019/10022-family Ethernet controllers
@@ -101,7 +103,6 @@ define agpint {}
 
 # DRM - Direct Rendering Manager: /dev/drm
 define drmdev {}
-include "dev/pci/drm/files.drm"
 
 # VGA graphics
 device	vga: wsemuldisplaydev, pcdisplayops, drmdev, agpint
@@ -125,9 +126,6 @@ define	atapi {[channel = -1]}
 # Common code for ESDI/IDE/etc. controllers
 device	wdc: ata, atapi, wdc_base
 file	dev/ic/wdc.c			wdc_base
-
-# 1-Wire bus bit-banging
-define	onewire_bitbang
 
 # "Chipset" drivers.  These are the bus-independent routines which
 # contain the cfdrivers.  Attachments are provided by files.<bus>
@@ -197,6 +195,10 @@ file	dev/ic/isp.c			isp
 file	dev/ic/isp_openbsd.c		isp
 file	dev/ic/isp_library.c		isp
 
+# Advanced Host Controller Interface for Serial ATA
+device	ahci: scsi, atascsi
+file	dev/ic/ahci.c			ahci | ahci_pci | ahci_jmb needs-flag
+
 # LSI Logic Fusion-MPT Message Passing Interface
 device	mpi: scsi
 file	dev/ic/mpi.c			mpi
@@ -228,11 +230,15 @@ file	dev/ic/siop.c			siop & (siop_pci | siop_gedoens)
 
 # Symbios/NCR 53c710 SCSI controllers
 device	osiop: scsi
-file	dev/ic/osiop.c			osiop & (osiop_gsc | osiop_eisa | osiop_pcctwo)
+file	dev/ic/osiop.c			osiop & (osiop_gsc | osiop_eisa | osiop_mc | osiop_pcctwo)
 
 # Symbios/NCR 53c700 SCSI controllers
 device	oosiop: scsi
 file	dev/ic/oosiop.c			oosiop
+
+# Western Digital WD33C93 SCSI controllers
+define	wd33c93
+file	dev/ic/wd33c93.c		wd33c93
 
 # 3Com Etherlink-III Ethernet controller
 device	ep: ether, ifnet, ifmedia, mii
@@ -253,7 +259,11 @@ file	dev/ic/an.c			an
 
 # LANCE and PCnet Ethernet controllers
 device	le: ether, ifnet, ifmedia
-file	dev/ic/am7990.c			le
+define	le24
+define	le32
+file	dev/ic/am7990.c			le24
+file	dev/ic/am79900.c		le32
+file	dev/ic/lance.c			le24 | le32
 
 # 3Com 3c9xx
 device	xl: ether, ifnet, ifmedia, mii
@@ -450,6 +460,10 @@ device wbsd: sdmmcbus
 file	dev/ic/w83l518d.c		wbsd
 file	dev/ic/w83l518d_sdmmc.c		wbsd
 
+# Realtek RTS5209 Card Reader
+device	rtsx: sdmmcbus
+file	dev/ic/rtsx.c			rtsx	needs-flag
+
 # AMD 7930 audio/ISDN codec
 define	am7930
 file	dev/ic/am7930.c			am7930
@@ -497,9 +511,12 @@ file	dev/softraid_concat.c		softraid
 device	spdmem
 file	dev/spdmem.c			spdmem
 
+# AIC-6250 SCSI
+device	oaic: scsi
+file	dev/ic/aic6250.c		oaic
+
 # legitimate pseudo-devices
 pseudo-device vnd: disk
-pseudo-device raid: disk
 pseudo-device rd: disk
 file	dev/rd.c			rd needs-flag
 
@@ -518,7 +535,6 @@ pseudo-device bridge: ifnet, ether
 pseudo-device vlan: ifnet, ether
 pseudo-device carp: ifnet, ether
 pseudo-device sppp: ifnet
-pseudo-device faith: ifnet
 pseudo-device gif: ifnet
 pseudo-device gre: ifnet
 pseudo-device crypto: ifnet
@@ -526,12 +542,20 @@ pseudo-device trunk: ifnet, ether, ifmedia
 pseudo-device mpe: ifnet, ether
 pseudo-device vether: ifnet, ether
 pseudo-device pppx: ifnet
+pseudo-device vxlan: ifnet, ether, ifmedia
 
-pseudo-device sequencer
 pseudo-device systrace
 
 pseudo-device ksyms
 file	dev/ksyms.c			ksyms needs-flag
+
+pseudo-device fuse
+file	miscfs/fuse/fuse_device.c	fuse	needs-flag
+file	miscfs/fuse/fuse_file.c		fuse
+file	miscfs/fuse/fuse_lookup.c	fuse
+file	miscfs/fuse/fuse_vfsops.c	fuse
+file	miscfs/fuse/fuse_vnops.c	fuse
+file	miscfs/fuse/fusebuf.c		fuse
 
 pseudo-device pf: ifnet
 file	net/pf.c			pf	needs-flag
@@ -542,6 +566,8 @@ file	net/pf_table.c			pf
 file	net/pf_osfp.c			pf
 file	net/pf_if.c			pf
 file	net/pf_lb.c			pf
+file	net/hfsc.c			ifnet
+
 pseudo-device pflog: ifnet
 file	net/if_pflog.c			pflog	needs-flag
 pseudo-device pfsync: ifnet
@@ -569,7 +595,6 @@ file altq/altq_rmclass.c		altq
 file altq/altq_hfsc.c			altq
 file altq/altq_priq.c			altq
 file ddb/db_access.c			ddb | kgdb
-file ddb/db_aout.c			ddb
 file ddb/db_break.c			ddb
 file ddb/db_command.c			ddb
 file ddb/db_elf.c			ddb
@@ -596,8 +621,6 @@ file dev/firmload.c			firmload
 file dev/flash.c			flash			needs-flag
 file dev/ic/ncr5380sbc.c		ncr5380sbc
 file dev/ic/ncr53c7xx.c			ncr53c7xx
-file dev/ic/pdq.c			pdq
-file dev/ic/pdq_ifsubr.c		pdq
 file dev/ic/dp8390.c			dp8390nic
 file dev/ic/rtl80x9.c			rtl80x9
 file dev/ic/tea5757.c			tea5757
@@ -606,70 +629,9 @@ file dev/ic/tc921x.c			tc921x
 file dev/ic/pt2254a.c			pt2254a
 file dev/midi.c				midi | midibus		needs-flag
 file dev/mulaw.c			mulaw
-file dev/sequencer.c			sequencer		needs-flag
 file dev/systrace.c			systrace		needs-flag
 file dev/vnd.c				vnd			needs-flag
 file dev/rnd.c
-file dev/raidframe/rf_acctrace.c	raid			needs-flag
-file dev/raidframe/rf_alloclist.c	raid			needs-flag
-file dev/raidframe/rf_aselect.c		raid			needs-flag
-file dev/raidframe/rf_callback.c	raid			needs-flag
-file dev/raidframe/rf_chaindecluster.c	raid			needs-flag
-file dev/raidframe/rf_copyback.c	raid			needs-flag
-file dev/raidframe/rf_cvscan.c		raid			needs-flag
-file dev/raidframe/rf_dagdegrd.c	raid			needs-flag
-file dev/raidframe/rf_dagdegwr.c	raid			needs-flag
-file dev/raidframe/rf_dagffrd.c		raid			needs-flag
-file dev/raidframe/rf_dagffwr.c		raid			needs-flag
-file dev/raidframe/rf_dagfuncs.c	raid			needs-flag
-file dev/raidframe/rf_dagutils.c	raid			needs-flag
-file dev/raidframe/rf_debugMem.c	raid			needs-flag
-file dev/raidframe/rf_debugprint.c	raid			needs-flag
-file dev/raidframe/rf_decluster.c	raid			needs-flag
-file dev/raidframe/rf_declusterPQ.c	raid			needs-flag
-file dev/raidframe/rf_diskqueue.c	raid			needs-flag
-file dev/raidframe/rf_disks.c		raid			needs-flag
-file dev/raidframe/rf_driver.c		raid			needs-flag
-file dev/raidframe/rf_engine.c		raid			needs-flag
-file dev/raidframe/rf_evenodd.c		raid			needs-flag
-file dev/raidframe/rf_evenodd_dagfuncs.c raid			needs-flag
-file dev/raidframe/rf_evenodd_dags.c	raid			needs-flag
-file dev/raidframe/rf_fifo.c		raid			needs-flag
-file dev/raidframe/rf_interdecluster.c	raid			needs-flag
-file dev/raidframe/rf_invertq.c		raid			needs-flag
-file dev/raidframe/rf_openbsdkintf.c	raid			needs-flag
-file dev/raidframe/rf_layout.c		raid			needs-flag
-file dev/raidframe/rf_map.c		raid			needs-flag
-file dev/raidframe/rf_mcpair.c		raid			needs-flag
-file dev/raidframe/rf_memchunk.c	raid			needs-flag
-file dev/raidframe/rf_nwayxor.c		raid			needs-flag
-file dev/raidframe/rf_options.c		raid			needs-flag
-file dev/raidframe/rf_paritylog.c	raid			needs-flag
-file dev/raidframe/rf_paritylogDiskMgr.c raid			needs-flag
-file dev/raidframe/rf_paritylogging.c	raid			needs-flag
-file dev/raidframe/rf_parityloggingdags.c raid			needs-flag
-file dev/raidframe/rf_parityscan.c	raid			needs-flag
-file dev/raidframe/rf_pq.c		raid			needs-flag
-file dev/raidframe/rf_pqdeg.c		raid			needs-flag
-file dev/raidframe/rf_pqdegdags.c	raid			needs-flag
-file dev/raidframe/rf_psstatus.c	raid			needs-flag
-file dev/raidframe/rf_raid0.c		raid			needs-flag
-file dev/raidframe/rf_raid1.c		raid			needs-flag
-file dev/raidframe/rf_raid4.c		raid			needs-flag
-file dev/raidframe/rf_raid5.c		raid			needs-flag
-file dev/raidframe/rf_raid5_rotatedspare.c raid			needs-flag
-file dev/raidframe/rf_reconbuffer.c	raid			needs-flag
-file dev/raidframe/rf_reconmap.c	raid			needs-flag
-file dev/raidframe/rf_reconstruct.c	raid			needs-flag
-file dev/raidframe/rf_reconutil.c	raid			needs-flag
-file dev/raidframe/rf_revent.c		raid			needs-flag
-file dev/raidframe/rf_shutdown.c	raid			needs-flag
-file dev/raidframe/rf_sstf.c		raid			needs-flag
-file dev/raidframe/rf_states.c		raid			needs-flag
-file dev/raidframe/rf_stripelocks.c	raid			needs-flag
-file dev/raidframe/rf_strutils.c	raid			needs-flag
-file dev/raidframe/rf_threadstuff.c	raid			needs-flag
-file dev/raidframe/rf_utils.c		raid			needs-flag
 file dev/video.c			video			needs-flag
 file isofs/cd9660/cd9660_bmap.c		cd9660
 file isofs/cd9660/cd9660_lookup.c	cd9660
@@ -682,9 +644,7 @@ file isofs/udf/udf_subr.c		udf
 file isofs/udf/udf_vfsops.c		udf
 file isofs/udf/udf_vnops.c		udf
 file kern/clock_subr.c
-file kern/exec_aout.c
 file kern/exec_conf.c
-file kern/exec_ecoff.c
 file kern/exec_elf32.c
 file kern/exec_elf64.c
 file kern/exec_script.c
@@ -721,6 +681,7 @@ file kern/kern_time.c
 file kern/kern_timeout.c
 file kern/kern_watchdog.c		!small_kernel
 file kern/kern_workq.c
+file kern/kern_task.c
 file kern/kern_xxx.c
 file kern/kgdb_stub.c			kgdb
 file kern/sched_bsd.c
@@ -730,6 +691,7 @@ file kern/subr_evcount.c
 file kern/subr_extent.c
 file kern/subr_hibernate.c		hibernate
 file kern/subr_log.c
+file kern/subr_poison.c			diagnostic
 file kern/subr_pool.c
 file kern/dma_alloc.c
 file kern/subr_prf.c
@@ -796,12 +758,16 @@ file ntfs/ntfs_ihash.c			ntfs
 file ntfs/ntfs_subr.c			ntfs
 file ntfs/ntfs_vfsops.c			ntfs
 file ntfs/ntfs_vnops.c			ntfs
+file tmpfs/tmpfs_mem.c			tmpfs
+file tmpfs/tmpfs_subr.c			tmpfs
+file tmpfs/tmpfs_vfsops.c		tmpfs
+file tmpfs/tmpfs_vnops.c		tmpfs
+file tmpfs/tmpfs_specops.c		tmpfs
+file tmpfs/tmpfs_fifoops.c		tmpfs & fifo
 file net/bpf.c				bpfilter		needs-count
 file net/bpf_filter.c			bpfilter
 file net/if.c
-file net/if_atmsubr.c			atm			needs-flag
-file net/if_ethersubr.c			ether | inet | fddi	needs-flag
-file net/if_fddisubr.c			fddi
+file net/if_ethersubr.c			ether | inet		needs-flag
 file net/if_spppsubr.c			sppp
 file net/if_loop.c			loop
 file net/if_media.c			ifmedia
@@ -831,6 +797,7 @@ file net/if_mpe.c			mpe			needs-count
 file net/if_vether.c			vether			needs-count
 file net/if_pppx.c			pppx			needs-count
 file net/if_aoe.c			ether & aoe
+file net/if_vxlan.c			vxlan			needs-count
 file net80211/ieee80211.c		wlan
 file net80211/ieee80211_amrr.c		wlan
 file net80211/ieee80211_crypto.c	wlan
@@ -847,13 +814,13 @@ file net80211/ieee80211_pae_output.c	wlan
 file net80211/ieee80211_proto.c		wlan
 file net80211/ieee80211_rssadapt.c	wlan
 file net80211/ieee80211_regdomain.c	wlan
-file netinet/if_atm.c			atm
 file netinet/if_ether.c			ether | inet
 file netinet/igmp.c			inet
 file netinet/in.c			inet
 file netinet/in_pcb.c			inet
 file netinet/in_proto.c			inet
 file netinet/inet_nat64.c		inet & pf
+file netinet/inet_ntop.c		inet | inet6
 file netinet/ip_divert.c		inet & pf
 file netinet/ip_icmp.c			inet
 file netinet/ip_id.c			inet
@@ -926,9 +893,6 @@ file netmpls/mpls_output.c		mpls
 file netmpls/mpls_proto.c		mpls
 file netmpls/mpls_raw.c			mpls
 file netmpls/mpls_shim.c		mpls
-file netnatm/natm_pcb.c			natm
-file netnatm/natm_proto.c		natm
-file netnatm/natm.c			natm
 file nfs/krpc_subr.c			nfsclient
 #file nfs/nfs_aiod.c			nfsclient
 file nfs/nfs_bio.c			nfsclient
@@ -973,20 +937,6 @@ file ufs/ext2fs/ext2fs_readwrite.c	ext2fs
 file ufs/ext2fs/ext2fs_subr.c		ext2fs
 file ufs/ext2fs/ext2fs_vfsops.c		ext2fs
 file ufs/ext2fs/ext2fs_vnops.c		ext2fs
-file nnpfs/nnpfs_common-bsd.c		nnpfs
-file nnpfs/nnpfs_deb.c			nnpfs
-file nnpfs/nnpfs_dev-bsd.c		nnpfs
-file nnpfs/nnpfs_dev-common.c		nnpfs
-file nnpfs/nnpfs_message.c		nnpfs
-file nnpfs/nnpfs_node.c			nnpfs
-file nnpfs/nnpfs_node-bsd.c		nnpfs
-file nnpfs/nnpfs_syscalls-common.c	nnpfs
-file nnpfs/nnpfs_vfsops-bsd.c		nnpfs
-file nnpfs/nnpfs_vfsops-common.c	nnpfs
-file nnpfs/nnpfs_vfsops-openbsd.c	nnpfs
-file nnpfs/nnpfs_vnodeops-bsd.c		nnpfs
-file nnpfs/nnpfs_vnodeops-common.c	nnpfs
-file nnpfs/nnpfs_syscalls-dummy.c	!nnpfs
 file uvm/uvm_addr.c
 file uvm/uvm_amap.c
 file uvm/uvm_anon.c
@@ -997,7 +947,6 @@ file uvm/uvm_glue.c
 file uvm/uvm_init.c
 file uvm/uvm_io.c
 file uvm/uvm_km.c
-#file uvm/uvm_loan.c
 file uvm/uvm_map.c
 file uvm/uvm_meter.c
 file uvm/uvm_mmap.c
@@ -1014,7 +963,6 @@ file uvm/uvm_user.c
 file uvm/uvm_vnode.c
 
 # IPv6
-file net/if_faith.c			faith			needs-count
 file net/if_gif.c			gif			needs-count
 file netinet/ip_ecn.c			inet | inet6
 file netinet/in_gif.c			gif & inet
@@ -1049,9 +997,8 @@ file net/pfkeyv2_parsemessage.c		key | ipsec | tcp_signature
 file net/pfkeyv2_convert.c		key | ipsec | tcp_signature
 
 # COMPAT_* support code (base and other shared code)
-file compat/common/compat_exec.c	!small_kernel
 file compat/common/compat_util.c	!small_kernel
-file compat/common/compat_dir.c		!small_kernel
+file compat/common/compat_dir.c		!small_kernel & compat_linux
 file compat/common/tty_43.c		compat_43
 
 # libx86emu
@@ -1080,10 +1027,11 @@ file lib/libkern/arch/${MACHINE_ARCH}/memcmp.S | lib/libkern/memcmp.c
 file lib/libkern/arch/${MACHINE_ARCH}/bcmp.S | lib/libkern/bcmp.c
 file lib/libkern/arch/${MACHINE_ARCH}/bzero.S | lib/libkern/bzero.c
 file lib/libkern/arch/${MACHINE_ARCH}/bcopy.S | lib/libkern/bcopy.c
-file lib/libkern/arch/${MACHINE_ARCH}/ovbcopy.S | lib/libkern/ovbcopy.c
 file lib/libkern/arch/${MACHINE_ARCH}/memcpy.S | lib/libkern/memcpy.c
 file lib/libkern/arch/${MACHINE_ARCH}/memmove.S | lib/libkern/memmove.c
 file lib/libkern/arch/${MACHINE_ARCH}/ffs.S | lib/libkern/ffs.c
+file lib/libkern/arch/${MACHINE_ARCH}/fls.S | lib/libkern/fls.c
+file lib/libkern/arch/${MACHINE_ARCH}/flsl.S | lib/libkern/flsl.c
 file lib/libkern/arch/${MACHINE_ARCH}/memset.S | lib/libkern/memset.c
 file lib/libkern/arch/${MACHINE_ARCH}/strcmp.S | lib/libkern/strcmp.c
 file lib/libkern/arch/${MACHINE_ARCH}/strlcat.S | lib/libkern/strlcat.c
@@ -1091,6 +1039,7 @@ file lib/libkern/arch/${MACHINE_ARCH}/strlcpy.S | lib/libkern/strlcpy.c
 file lib/libkern/arch/${MACHINE_ARCH}/strlen.S | lib/libkern/strlen.c
 file lib/libkern/arch/${MACHINE_ARCH}/strncmp.S | lib/libkern/strncmp.c
 file lib/libkern/arch/${MACHINE_ARCH}/strncpy.S | lib/libkern/strncpy.c
+file lib/libkern/arch/${MACHINE_ARCH}/strnlen.S | lib/libkern/strnlen.c
 file lib/libkern/arch/${MACHINE_ARCH}/scanc.S | lib/libkern/scanc.c
 file lib/libkern/arch/${MACHINE_ARCH}/skpc.S | lib/libkern/skpc.c
 file lib/libkern/arch/${MACHINE_ARCH}/htonl.S | lib/libkern/htonl.c

@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.57 2011/07/12 15:23:50 jsg Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.64 2013/10/19 14:46:30 mpi Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -45,12 +45,12 @@
 #include "pf.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -60,7 +60,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
 #include <netinet/if_ether.h>
@@ -156,8 +155,7 @@ gre_clone_create(struct if_clone *ifc, int unit)
 	if_alloc_sadl(&sc->sc_if);
 
 #if NBPFILTER > 0
-	bpfattach(&sc->sc_if.if_bpf, &sc->sc_if, DLT_NULL,
-	    sizeof(u_int32_t));
+	bpfattach(&sc->sc_if.if_bpf, &sc->sc_if, DLT_LOOP, sizeof(u_int32_t));
 #endif
 	s = splnet();
 	LIST_INSERT_HEAD(&gre_softc_list, sc, sc_list);
@@ -476,25 +474,11 @@ gre_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 	case SIOCGIFMTU:
 		ifr->ifr_mtu = sc->sc_if.if_mtu;
 		break;
+	case SIOCGIFHARDMTU:
+		ifr->ifr_hardmtu = sc->sc_if.if_hardmtu;
+		break;
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		if (ifr == 0) {
-			error = EAFNOSUPPORT;
-			break;
-		}
-		switch (ifr->ifr_addr.sa_family) {
-#ifdef INET
-		case AF_INET:
-			break;
-#endif
-#ifdef INET6
-		case AF_INET6:
-			break;
-#endif
-		default:
-			error = EAFNOSUPPORT;
-			break;
-		}
 		break;
 	case GRESPROTO:
 		/* Check for superuser */
@@ -598,9 +582,8 @@ recompute:
 			error = EINVAL;
 			break;
 		}
-		sc->g_src = (satosin((struct sockadrr *)&lifr->addr))->sin_addr;
-		sc->g_dst =
-		    (satosin((struct sockadrr *)&lifr->dstaddr))->sin_addr;
+		sc->g_src = ((struct sockaddr_in *)&lifr->addr)->sin_addr;
+		sc->g_dst = ((struct sockaddr_in *)&lifr->dstaddr)->sin_addr;
 		goto recompute;
 	case SIOCDIFPHYADDR:
 		if ((error = suser(prc, 0)) != 0)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpufunc.h,v 1.9 2011/09/20 22:02:13 miod Exp $	*/
+/*	$OpenBSD: cpufunc.h,v 1.14 2013/03/30 01:30:30 patrick Exp $	*/
 /*	$NetBSD: cpufunc.h,v 1.29 2003/09/06 09:08:35 rearnsha Exp $	*/
 
 /*
@@ -60,8 +60,10 @@ struct cpu_functions {
 	u_int	(*cf_control)		(u_int bic, u_int eor);
 	void	(*cf_domains)		(u_int domains);
 	void	(*cf_setttb)		(u_int ttb);
-	u_int	(*cf_faultstatus)	(void);
-	u_int	(*cf_faultaddress)	(void);
+	u_int	(*cf_dfsr)		(void);
+	u_int	(*cf_dfar)		(void);
+	u_int	(*cf_ifsr)		(void);
+	u_int	(*cf_ifar)		(void);
 
 	/* TLB functions */
 
@@ -133,6 +135,11 @@ struct cpu_functions {
 	void	(*cf_idcache_wbinv_all)	(void);
 	void	(*cf_idcache_wbinv_range) (vaddr_t, vsize_t);
 
+	void	(*cf_sdcache_wbinv_all)	(void);
+	void	(*cf_sdcache_wbinv_range) (vaddr_t, paddr_t, vsize_t);
+	void	(*cf_sdcache_inv_range)	(vaddr_t, paddr_t, vsize_t);
+	void	(*cf_sdcache_wb_range)	(vaddr_t, paddr_t, vsize_t);
+
 	/* Other functions */
 
 	void	(*cf_flush_prefetchbuf)	(void);
@@ -154,8 +161,10 @@ extern u_int cputype;
 #define cpu_control(c, e)	cpufuncs.cf_control(c, e)
 #define cpu_domains(d)		cpufuncs.cf_domains(d)
 #define cpu_setttb(t)		cpufuncs.cf_setttb(t)
-#define cpu_faultstatus()	cpufuncs.cf_faultstatus()
-#define cpu_faultaddress()	cpufuncs.cf_faultaddress()
+#define cpu_dfsr()		cpufuncs.cf_dfsr()
+#define cpu_dfar()		cpufuncs.cf_dfar()
+#define cpu_ifsr()		cpufuncs.cf_ifsr()
+#define cpu_ifar()		cpufuncs.cf_ifar()
 
 #define	cpu_tlb_flushID()	cpufuncs.cf_tlb_flushID()
 #define	cpu_tlb_flushID_SE(e)	cpufuncs.cf_tlb_flushID_SE(e)
@@ -175,6 +184,12 @@ extern u_int cputype;
 #define	cpu_idcache_wbinv_all()	cpufuncs.cf_idcache_wbinv_all()
 #define	cpu_idcache_wbinv_range(a, s) cpufuncs.cf_idcache_wbinv_range((a), (s))
 
+#define	cpu_sdcache_enabled()	(cpufuncs.cf_sdcache_wbinv_all != cpufunc_nullop)
+#define	cpu_sdcache_wbinv_all()	cpufuncs.cf_sdcache_wbinv_all()
+#define	cpu_sdcache_wbinv_range(va, pa, s) cpufuncs.cf_sdcache_wbinv_range((va), (pa), (s))
+#define	cpu_sdcache_inv_range(va, pa, s) cpufuncs.cf_sdcache_inv_range((va), (pa), (s))
+#define	cpu_sdcache_wb_range(va, pa, s) cpufuncs.cf_sdcache_wb_range((va), (pa), (s))
+
 #define	cpu_flush_prefetchbuf()	cpufuncs.cf_flush_prefetchbuf()
 #define	cpu_drain_writebuf()	cpufuncs.cf_drain_writebuf()
 
@@ -193,8 +208,10 @@ int	late_abort_fixup	(void *);
 u_int	cpufunc_id		(void);
 u_int	cpufunc_control		(u_int clear, u_int bic);
 void	cpufunc_domains		(u_int domains);
-u_int	cpufunc_faultstatus	(void);
-u_int	cpufunc_faultaddress	(void);
+u_int	cpufunc_dfsr		(void);
+u_int	cpufunc_dfar		(void);
+u_int	cpufunc_ifsr		(void);
+u_int	cpufunc_ifar		(void);
 
 #ifdef CPU_ARM8
 void	arm8_setttb		(u_int ttb);
@@ -290,6 +307,7 @@ void	arm10_tlb_flushI_SE	(u_int);
 
 void	arm10_context_switch	(u_int);
 
+void	arm9e_setup		(void);
 void	arm10_setup		(void);
 #endif
 
@@ -354,7 +372,6 @@ void	armv7_tlb_flushID_SE	(u_int);
 void	armv7_tlb_flushI_SE	(u_int);
 
 void	armv7_context_switch	(u_int);
-void	armv7_context_switch	(u_int);
 
 void	armv7_setup		(void);
 void	armv7_tlb_flushID	(void);
@@ -365,7 +382,7 @@ void	armv7_tlb_flushD_SE	(u_int va);
 void	armv7_drain_writebuf	(void);
 void	armv7_cpu_sleep		(int mode);
 
-void	armv7_setttb			(u_int);
+u_int	armv7_periphbase	(void);
 
 void	armv7_icache_sync_all		(void);
 void	armv7_icache_sync_range		(vaddr_t, vsize_t);

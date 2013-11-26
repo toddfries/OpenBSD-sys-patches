@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_socket2.c,v 1.52 2011/04/04 21:11:22 claudio Exp $	*/
+/*	$OpenBSD: uipc_socket2.c,v 1.56 2013/04/05 08:25:30 tedu Exp $	*/
 /*	$NetBSD: uipc_socket2.c,v 1.11 1996/02/04 02:17:55 christos Exp $	*/
 
 /*
@@ -152,12 +152,12 @@ sonewconn(struct socket *head, int connstatus)
 	splsoftassert(IPL_SOFTNET);
 
 	if (mclpools[0].pr_nout > mclpools[0].pr_hardlimit * 95 / 100)
-		return ((struct socket *)0);
+		return (NULL);
 	if (head->so_qlen + head->so_q0len > head->so_qlimit * 3)
-		return ((struct socket *)0);
+		return (NULL);
 	so = pool_get(&socket_pool, PR_NOWAIT|PR_ZERO);
 	if (so == NULL)
-		return ((struct socket *)0);
+		return (NULL);
 	so->so_type = head->so_type;
 	so->so_options = head->so_options &~ SO_ACCEPTCONN;
 	so->so_linger = head->so_linger;
@@ -178,7 +178,7 @@ sonewconn(struct socket *head, int connstatus)
 	 */
 	if (soreserve(so, head->so_snd.sb_hiwat, head->so_rcv.sb_hiwat)) {
 		pool_put(&socket_pool, so);
-		return ((struct socket *)0);
+		return (NULL);
 	}
 	so->so_snd.sb_wat = head->so_snd.sb_wat;
 	so->so_snd.sb_lowat = head->so_snd.sb_lowat;
@@ -192,7 +192,7 @@ sonewconn(struct socket *head, int connstatus)
 	    curproc)) {
 		(void) soqremque(so, soqueue);
 		pool_put(&socket_pool, so);
-		return ((struct socket *)0);
+		return (NULL);
 	}
 	if (connstatus) {
 		sorwakeup(head);
@@ -275,8 +275,9 @@ socantrcvmore(struct socket *so)
 int
 sbwait(struct sockbuf *sb)
 {
+	splsoftassert(IPL_SOFTNET);
 
-	sb->sb_flags |= SB_WAIT;
+	sb->sb_flagsintr |= SB_WAIT;
 	return (tsleep(&sb->sb_cc,
 	    (sb->sb_flags & SB_NOINTR) ? PSOCK : PSOCK | PCATCH, "netio",
 	    sb->sb_timeo));
@@ -311,12 +312,15 @@ sb_lock(struct sockbuf *sb)
 void
 sowakeup(struct socket *so, struct sockbuf *sb)
 {
+	int s = splsoftnet();
+
 	selwakeup(&sb->sb_sel);
-	sb->sb_flags &= ~SB_SEL;
-	if (sb->sb_flags & SB_WAIT) {
-		sb->sb_flags &= ~SB_WAIT;
+	sb->sb_flagsintr &= ~SB_SEL;
+	if (sb->sb_flagsintr & SB_WAIT) {
+		sb->sb_flagsintr &= ~SB_WAIT;
 		wakeup(&sb->sb_cc);
 	}
+	splx(s);
 	if (so->so_state & SS_ASYNC)
 		csignal(so->so_pgid, SIGIO, so->so_siguid, so->so_sigeuid);
 }
@@ -573,16 +577,18 @@ sbappendstream(struct sockbuf *sb, struct mbuf *m)
 void
 sbcheck(struct sockbuf *sb)
 {
-	struct mbuf *m;
+	struct mbuf *m, *n;
 	u_long len = 0, mbcnt = 0;
 
-	for (m = sb->sb_mb; m; m = m->m_next) {
-		len += m->m_len;
-		mbcnt += MSIZE;
-		if (m->m_flags & M_EXT)
-			mbcnt += m->m_ext.ext_size;
-		if (m->m_nextpkt)
-			panic("sbcheck nextpkt");
+	for (m = sb->sb_mb; m; m = m->m_nextpkt) {
+		for (n = m; n; n = n->m_next) {
+			len += n->m_len;
+			mbcnt += MSIZE;
+			if (n->m_flags & M_EXT)
+				mbcnt += n->m_ext.ext_size;
+			if (m != n && n->m_nextpkt)
+				panic("sbcheck nextpkt");
+		}
 	}
 	if (len != sb->sb_cc || mbcnt != sb->sb_mbcnt) {
 		printf("cc %lu != %lu || mbcnt %lu != %lu\n", len, sb->sb_cc,
@@ -787,7 +793,7 @@ sbcompress(struct sockbuf *sb, struct mbuf *m, struct mbuf *n)
 		    m->m_len <= M_TRAILINGSPACE(n) &&
 		    n->m_type == m->m_type) {
 			bcopy(mtod(m, caddr_t), mtod(n, caddr_t) + n->m_len,
-			    (unsigned)m->m_len);
+			    m->m_len);
 			n->m_len += m->m_len;
 			sb->sb_cc += m->m_len;
 			if (m->m_type != MT_CONTROL && m->m_type != MT_SONAME)
@@ -925,7 +931,7 @@ sbcreatecontrol(caddr_t p, int size, int type, int level)
 	}
 
 	if ((m = m_get(M_DONTWAIT, MT_CONTROL)) == NULL)
-		return ((struct mbuf *) NULL);
+		return (NULL);
 	if (CMSG_SPACE(size) > MLEN) {
 		MCLGET(m, M_DONTWAIT);
 		if ((m->m_flags & M_EXT) == 0) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.34 2012/03/14 21:56:46 kettenis Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.38 2013/11/18 08:20:22 uebayasi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -881,23 +881,21 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct trapframe *tf;
 	struct sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
-	int oldonstack;
 
+	bzero(&frame, sizeof(frame));
 	frame.sf_signum = sig;
 
 	tf = trapframe(p);
-	oldonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/*
 	 * Allocate stack space for signal handler.
 	 */
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0
-	    && !oldonstack
-	    && (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(tf->fixreg[1]) &&
+	    (psp->ps_sigonstack & sigmask(sig)))
 		fp = (struct sigframe *)(p->p_sigstk.ss_sp
 					 + p->p_sigstk.ss_size);
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		fp = (struct sigframe *)tf->fixreg[1];
 
 	fp = (struct sigframe *)((int)(fp - 1) & ~0xf);
@@ -905,7 +903,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	/*
 	 * Generate signal context for SYS_sigreturn.
 	 */
-	frame.sf_sc.sc_onstack = oldonstack;
 	frame.sf_sc.sc_mask = mask;
 	frame.sf_sip = NULL;
 	bcopy(tf, &frame.sf_sc.sc_frame, sizeof *tf);
@@ -949,10 +946,6 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	if ((sc.sc_frame.srr1 & PSL_USERSTATIC) != (tf->srr1 & PSL_USERSTATIC))
 		return EINVAL;
 	bcopy(&sc.sc_frame, tf, sizeof *tf);
-	if (sc.sc_onstack & 1)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = sc.sc_mask & ~sigcantmask;
 	return EJUSTRETURN;
 }
@@ -1065,8 +1058,14 @@ boot(int howto)
 
 	uvm_shutdown();
 	splhigh();
+
+	if (!cold && (howto & RB_DUMP))
+		dumpsys();
+	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+
 	if (howto & RB_HALT) {
-		doshutdownhooks();
 		if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
 			;
 		}
@@ -1074,9 +1073,6 @@ boot(int howto)
 		printf("halted\n\n");
 		(fw->exit)();
 	}
-	if (!cold && (howto & RB_DUMP))
-		dumpsys();
-	doshutdownhooks();
 	printf("rebooting\n\n");
 
 	{

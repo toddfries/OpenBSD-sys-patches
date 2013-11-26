@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.c,v 1.2 2010/10/26 00:02:01 syuu Exp $	*/
+/*	$OpenBSD: autoconf.c,v 1.4 2013/04/08 09:42:26 jasper Exp $	*/
 /*
  * Copyright (c) 2009 Miodrag Vallat.
  *
@@ -24,14 +24,13 @@
 #include <machine/autoconf.h>
 
 extern void dumpconf(void);
-void	parsepmonbp(void);
+void parse_uboot_root(void);
 
 int	cold = 1;
 struct device *bootdv = NULL;
 char    bootdev[16];
 enum devclass bootdev_class = DV_DULL;
-
-extern char pmon_bootp[];
+extern char uboot_rootdev[];
 
 void
 cpu_configure(void)
@@ -46,37 +45,23 @@ cpu_configure(void)
 }
 
 void
-parsepmonbp(void)
+parse_uboot_root(void)
 {
-	char *p, *q;
+	char *p;
 	size_t len;
 
-	if (strncmp(pmon_bootp, "tftp://", 7) == 0) {
-		bootdev_class = DV_IFNET;
-		strlcpy(bootdev, "netboot", sizeof bootdev);
-		return;
-	}
-	strlcpy(bootdev, "unknown", sizeof bootdev);
+        /*
+         * Turn the U-Boot root device (root=/dev/octcf0) into a boot device.
+         */
+        p = strrchr(uboot_rootdev, '/');
+        if (p == NULL)
+                return;
+	p++;
 
-	if (strncmp(pmon_bootp, "/dev/disk/", 10) == 0) {
-		/* kernel loaded by our boot blocks */
-		p = pmon_bootp + 10;
-		len = strlen(p);
-	} else {
-		/* kernel loaded by PMON */
-		p = strchr(pmon_bootp, '@');
-		if (p == NULL)
-			return;
-		p++;
-
-		q = strchr(p, '/');
-		if (q == NULL)
-			return;
-		len = q - p;
-	}
-
+	len = strlen(p);
 	if (len <= 2 || len >= sizeof bootdev - 1)
 		return;
+
 	memcpy(bootdev, p, len);
 	bootdev[len] = '\0';
 	bootdev_class = DV_DISK;
@@ -85,9 +70,6 @@ parsepmonbp(void)
 void
 diskconf(void)
 {
-	if (*pmon_bootp != '\0')
-		printf("pmon bootpath: %s\n", pmon_bootp);
-
 	if (bootdv != NULL)
 		printf("boot device: %s\n", bootdv->dv_xname);
 
@@ -105,28 +87,14 @@ device_register(struct device *dev, void *aux)
 	const char *name = dev->dv_xname;
 
 	if (dev->dv_class != bootdev_class)
-		return;	
+		return;
 
-	/* 
-	 * The device numbering must match. There's no way
-	 * pmon tells us more info. Depending on the usb slot
-	 * and hubs used you may be lucky. Also, assume umass/sd for usb
-	 * attached devices.
-	 */
 	switch (bootdev_class) {
 	case DV_DISK:
 		if (strcmp(drvrname, "wd") == 0 && strcmp(name, bootdev) == 0)
 			bootdv = dev;
 		if (strcmp(drvrname, "octcf") == 0 && strcmp(name, bootdev) == 0)
 			bootdv = dev;
-		else {
-			/* XXX this really only works safely for usb0... */
-		    	if ((strcmp(drvrname, "sd") == 0 ||
-			    strcmp(drvrname, "cd") == 0) &&
-			    strncmp(bootdev, "usb", 3) == 0 &&
-			    strcmp(name + 2, bootdev + 3) == 0)
-				bootdv = dev;
-		}
 		break;
 	case DV_IFNET:
 		/*

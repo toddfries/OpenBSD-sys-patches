@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_wb.c,v 1.48 2011/06/22 16:44:29 tedu Exp $	*/
+/*	$OpenBSD: if_wb.c,v 1.55 2013/11/26 09:50:33 mpi Exp $	*/
 
 /*
  * Copyright (c) 1997, 1998
@@ -105,7 +105,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -538,7 +537,9 @@ void wb_setmulti(sc)
 
 	rxfilt = CSR_READ_4(sc, WB_NETCFG);
 
-allmulti:
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if (ifp->if_flags & IFF_ALLMULTI || ifp->if_flags & IFF_PROMISC) {
 		rxfilt |= WB_NETCFG_RX_MULTI;
 		CSR_WRITE_4(sc, WB_NETCFG, rxfilt);
@@ -554,10 +555,6 @@ allmulti:
 	/* now program new ones */
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			goto allmulti;
-		}
 		h = ~(ether_crc32_be(enm->enm_addrlo, ETHER_ADDR_LEN) >> 26);
 		if (h < 32)
 			hashes[0] |= (1 << h);
@@ -714,41 +711,11 @@ wb_attach(parent, self, aux)
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	bus_size_t size;
 	int rseg;
-	pcireg_t command;
 	bus_dma_segment_t seg;
 	bus_dmamap_t dmamap;
 	caddr_t kva;
 
-	/*
-	 * Handle power management nonsense.
-	 */
-
-	command = pci_conf_read(pc, pa->pa_tag, WB_PCI_CAPID) & 0x000000FF;
-	if (command == 0x01) {
-
-		command = pci_conf_read(pc, pa->pa_tag, WB_PCI_PWRMGMTCTRL);
-		if (command & WB_PSTATE_MASK) {
-			u_int32_t		io, mem, irq;
-
-			/* Save important PCI config data. */
-			io = pci_conf_read(pc, pa->pa_tag, WB_PCI_LOIO);
-			mem = pci_conf_read(pc, pa->pa_tag, WB_PCI_LOMEM);
-			irq = pci_conf_read(pc, pa->pa_tag, WB_PCI_INTLINE);
-
-			/* Reset the power state. */
-			printf("%s: chip is in D%d power mode "
-			    "-- setting to D0\n", sc->sc_dev.dv_xname,
-			    command & WB_PSTATE_MASK);
-			command &= 0xFFFFFFFC;
-			pci_conf_write(pc, pa->pa_tag, WB_PCI_PWRMGMTCTRL,
-			    command);
-
-			/* Restore PCI config data. */
-			pci_conf_write(pc, pa->pa_tag, WB_PCI_LOIO, io);
-			pci_conf_write(pc, pa->pa_tag, WB_PCI_LOMEM, mem);
-			pci_conf_write(pc, pa->pa_tag, WB_PCI_INTLINE, irq);
-		}
-	}
+	pci_set_powerstate(pa->pa_pc, pa->pa_tag, PCI_PMCSR_STATE_D0);
 
 	/*
 	 * Map control/status registers.
@@ -803,7 +770,7 @@ wb_attach(parent, self, aux)
 	}
 	if (bus_dmamem_map(pa->pa_dmat, &seg, rseg,
 	    sizeof(struct wb_list_data), &kva, BUS_DMA_NOWAIT)) {
-		printf(": can't map list data, size %d\n",
+		printf(": can't map list data, size %zd\n",
 		    sizeof(struct wb_list_data));
 		goto fail_3;
 	}
@@ -824,7 +791,6 @@ wb_attach(parent, self, aux)
 	ifp->if_ioctl = wb_ioctl;
 	ifp->if_start = wb_start;
 	ifp->if_watchdog = wb_watchdog;
-	ifp->if_baudrate = 10000000;
 	IFQ_SET_MAXLEN(&ifp->if_snd, WB_TX_LIST_CNT - 1);
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -1008,7 +974,7 @@ void wb_rxeof(sc)
 		total_len -= ETHER_CRC_LEN;
 
 		m = m_devget(cur_rx->wb_buf + sizeof(u_int64_t), total_len,
-		    ETHER_ALIGN, ifp, NULL);
+		    ETHER_ALIGN, ifp);
 		wb_newbuf(sc, cur_rx);
 		if (m == NULL) {
 			ifp->if_ierrors++;

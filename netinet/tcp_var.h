@@ -1,4 +1,4 @@
-/*	$OpenBSD: tcp_var.h,v 1.99 2011/07/06 23:44:20 sthen Exp $	*/
+/*	$OpenBSD: tcp_var.h,v 1.104 2013/10/23 19:49:11 deraadt Exp $	*/
 /*	$NetBSD: tcp_var.h,v 1.17 1996/02/13 23:44:24 christos Exp $	*/
 
 /*
@@ -97,6 +97,7 @@ struct tcpcb {
 #define TF_PMTUD_PEND	0x00400000	/* Path MTU Discovery pending */
 #define TF_NEEDOUTPUT	0x00800000	/* call tcp_output after tcp_input */
 #define TF_BLOCKOUTPUT	0x01000000	/* avert tcp_output during tcp_input */
+#define TF_NOPUSH	0x02000000	/* don't push */
 
 	struct	mbuf *t_template;	/* skeletal packet for transmit */
 	struct	inpcb *t_inpcb;		/* back pointer to internet pcb */
@@ -251,9 +252,7 @@ struct tcp_opt_info {
 union syn_cache_sa {
 	struct sockaddr sa;
 	struct sockaddr_in sin;
-#if 1 /*def INET6*/
 	struct sockaddr_in6 sin6;
-#endif
 };
 
 struct syn_cache {
@@ -538,7 +537,9 @@ extern	struct inpcbtable tcbtable;	/* head of queue of active tcpcb's */
 extern	struct tcpstat tcpstat;	/* tcp statistics */
 extern	u_int32_t tcp_now;		/* for RFC 1323 timestamps */
 extern	int tcp_do_rfc1323;	/* enabled/disabled? */
+extern	int tcptv_keep_init;	/* time to keep alive the initial SYN packet */
 extern	int tcp_mssdflt;	/* default maximum segment size */
+extern	int tcp_rst_ppslim;	/* maximum outgoing RST packet per second */
 extern	int tcp_ack_on_push;	/* ACK immediately on PUSH */
 #ifdef TCP_SACK
 extern	int tcp_do_sack;	/* SACK enabled/disabled */
@@ -565,7 +566,7 @@ struct tcpcb *
 void	 tcp_reaper(void *);
 int	 tcp_freeq(struct tcpcb *);
 #ifdef INET6
-void	 tcp6_ctlinput(int, struct sockaddr *, void *);
+void	 tcp6_ctlinput(int, struct sockaddr *, u_int, void *);
 #endif
 void	 *tcp_ctlinput(int, struct sockaddr *, u_int, void *);
 int	 tcp_ctloutput(int, struct socket *, int, int, struct mbuf **);
@@ -587,7 +588,7 @@ void	 tcp_mtudisc(struct inpcb *, int);
 void	 tcp_mtudisc_increase(struct inpcb *, int);
 #ifdef INET6
 void	tcp6_mtudisc(struct inpcb *, int);
-void	tcp6_mtudisc_callback(struct in6_addr *);
+void	tcp6_mtudisc_callback(struct sockaddr_in6 *, u_int);
 #endif
 struct tcpcb *
 	 tcp_newtcpcb(struct inpcb *);

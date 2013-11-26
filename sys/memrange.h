@@ -1,4 +1,4 @@
-/* $OpenBSD: memrange.h,v 1.5 2009/11/29 17:11:30 kettenis Exp $ */
+/* $OpenBSD: memrange.h,v 1.7 2013/08/24 04:26:16 mlarkin Exp $ */
 /*-
  * Copyright (c) 1999 Michael Smith <msmith@freebsd.org>
  * All rights reserved.
@@ -43,19 +43,16 @@
 #define MDF_ACTIVE		(1<<27)	/* currently active */
 #define MDF_BOGUS		(1<<28)	/* we don't like it */
 #define MDF_FIXACTIVE		(1<<29)	/* can't be turned off */
-#define MDF_BUSY		(1<<30)	/* range is in use */
 #define MDF_FORCE		(1<<31)	/* force risky changes */
 
-struct mem_range_desc
-{
+struct mem_range_desc {
 	u_int64_t	mr_base;
 	u_int64_t	mr_len;
 	int		mr_flags;
 	char		mr_owner[8];
 };
 
-struct mem_range_op
-{
+struct mem_range_op {
 	struct mem_range_desc	*mo_desc;
 	int			mo_arg[2];
 #define MEMRANGE_SET_UPDATE	0
@@ -69,16 +66,15 @@ struct mem_range_op
 #ifdef _KERNEL
 
 struct mem_range_softc;
-struct mem_range_ops
-{
+struct mem_range_ops {
 	void	(*init)(struct mem_range_softc *sc);
-	int	(*set)(struct mem_range_softc *sc, struct mem_range_desc *mrd, int *arg);
-    	void	(*initAP)(struct mem_range_softc *sc);
+	int	(*set)(struct mem_range_softc *sc,
+		    struct mem_range_desc *mrd, int *arg);
+	void	(*initAP)(struct mem_range_softc *sc);
 	void	(*reload)(struct mem_range_softc *sc);
 };
 
-struct mem_range_softc 
-{
+struct mem_range_softc {
 	struct mem_range_ops	*mr_op;
 	int			mr_cap;
 	int			mr_ndesc;
@@ -93,5 +89,5 @@ extern int mem_range_attr_set(struct mem_range_desc *mrd, int *arg);
 extern void mem_range_AP_init(void);
 extern void mem_range_reload(void);
 __END_DECLS
-#endif
+#endif /* _KERNEL */
 

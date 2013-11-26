@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_cdcef.c,v 1.27 2010/12/30 03:06:31 jakemsr Exp $	*/
+/*	$OpenBSD: if_cdcef.c,v 1.31 2013/11/11 10:09:40 mpi Exp $	*/
 
 /*
  * Copyright (c) 2007 Dale Rahn <drahn@openbsd.org>
@@ -44,7 +44,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 
@@ -61,14 +60,14 @@
 
 struct cdcef_softc {
 	struct usbf_function	sc_dev;
-	usbf_config_handle	sc_config;
-	usbf_interface_handle	sc_iface;
-	usbf_endpoint_handle	sc_ep_in;
-	usbf_endpoint_handle	sc_ep_out;
-	usbf_pipe_handle	sc_pipe_in;
-	usbf_pipe_handle	sc_pipe_out;
-	usbf_xfer_handle	sc_xfer_in;
-	usbf_xfer_handle	sc_xfer_out;
+	struct usbf_config	*sc_config;
+	struct usbf_interface	*sc_iface;
+	struct usbf_endpoint	*sc_ep_in;
+	struct usbf_endpoint	*sc_ep_out;
+	struct usbf_pipe	*sc_pipe_in;
+	struct usbf_pipe	*sc_pipe_out;
+	struct usbf_xfer	*sc_xfer_in;
+	struct usbf_xfer	*sc_xfer_out;
 	void			*sc_buffer_in;
 	void			*sc_buffer_out;
 
@@ -81,21 +80,20 @@ struct cdcef_softc {
 
 	int			sc_rxeof_errors;
 	int			sc_unit;
-	int			sc_attached;
 	int			sc_listening;
 };
 
 int		cdcef_match(struct device *, void *, void *);
 void		cdcef_attach(struct device *, struct device *, void *);
 
-usbf_status	cdcef_do_request(usbf_function_handle,
+usbf_status	cdcef_do_request(struct usbf_function *,
 				 usb_device_request_t *, void **);
 
 void		cdcef_start(struct ifnet *);
 
-void		cdcef_txeof(usbf_xfer_handle, usbf_private_handle,
+void		cdcef_txeof(struct usbf_xfer *, void *,
 			    usbf_status);
-void		cdcef_rxeof(usbf_xfer_handle, usbf_private_handle,
+void		cdcef_rxeof(struct usbf_xfer *, void *,
 			    usbf_status);
 int		cdcef_ioctl(struct ifnet *ifp, u_long command, caddr_t data);
 void		cdcef_watchdog(struct ifnet *ifp);
@@ -143,10 +141,10 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct cdcef_softc *sc = (struct cdcef_softc *)self;
 	struct usbf_attach_arg *uaa = aux;
-	usbf_device_handle dev = uaa->device;
+	struct usbf_device *dev = uaa->device;
 	struct ifnet *ifp;
 	usbf_status err;
-	usb_cdc_union_descriptor_t udesc;
+	struct usb_cdc_union_descriptor udesc;
 	int s;
 	u_int16_t macaddr_hi;
 
@@ -262,12 +260,11 @@ cdcef_attach(struct device *parent, struct device *self, void *aux)
 	if_attach(ifp);
 	ether_ifattach(ifp);
 
-	sc->sc_attached = 1;
 	splx(s);
 }
 
 usbf_status
-cdcef_do_request(usbf_function_handle fun, usb_device_request_t *req,
+cdcef_do_request(struct usbf_function *fun, usb_device_request_t *req,
     void **data)
 {
 	printf("cdcef_do_request\n");
@@ -316,7 +313,7 @@ cdcef_start(struct ifnet *ifp)
 }
 
 void
-cdcef_txeof(usbf_xfer_handle xfer, usbf_private_handle priv,
+cdcef_txeof(struct usbf_xfer *xfer, void *priv,
     usbf_status err)
 {
 	struct cdcef_softc *sc = priv;
@@ -361,7 +358,7 @@ cdcef_start_timeout (void *v)
 
 
 void
-cdcef_rxeof(usbf_xfer_handle xfer, usbf_private_handle priv,
+cdcef_rxeof(struct usbf_xfer *xfer, void *priv,
     usbf_status status)
 {
 	struct cdcef_softc	*sc = priv;
@@ -387,8 +384,6 @@ cdcef_rxeof(usbf_xfer_handle xfer, usbf_private_handle priv,
 		if (sc->sc_rxeof_errors++ > 10) {
 			printf("%s: too many errors, disabling\n",
 			    DEVNAME(sc));
-			/* sc->sc_dying = 1; */
-			// return;
 		}
 		goto done;
 	}
@@ -517,11 +512,6 @@ cdcef_watchdog(struct ifnet *ifp)
 {
 	struct cdcef_softc	*sc = ifp->if_softc;
 	int s;
-
-#if 0
-	if (sc->sc_dying)
-		return;
-#endif
 
 	ifp->if_oerrors++;
 	printf("%s: watchdog timeout\n", DEVNAME(sc));

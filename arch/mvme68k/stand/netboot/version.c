@@ -1,8 +1,8 @@
-/*	$OpenBSD: version.c,v 1.7 2009/02/17 18:42:45 miod Exp $ */
+/*	$OpenBSD: version.c,v 1.9 2013/05/12 08:10:07 miod Exp $ */
 
 /*
- * make a random change to this file when you want the bootblock
- * revision to increase. like change this q to an x, or something.
+ *	1.9	lower load address and heap location by 1MB to fit 8MB boards
+ *	1.8	kernel loaded with loadfile, a.out and ELF formats
  */
 
-char *version = "$Revision: 1.7 $";
+char *version = "1.9";

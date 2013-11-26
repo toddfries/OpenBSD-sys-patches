@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_types.h,v 1.10 2011/04/05 22:54:31 pirofti Exp $	*/
+/*	$OpenBSD: linux_types.h,v 1.13 2013/10/25 04:51:39 guenther Exp $	*/
 /*	$NetBSD: linux_types.h,v 1.5 1996/05/20 01:59:28 fvdl Exp $	*/
 
 /*
@@ -53,6 +53,42 @@ typedef long linux_off_t;
 typedef u_int64_t linux_loff_t;
 typedef int linux_pid_t;
 
+#define LINUX_TIME_MAX	LONG_MAX
+#define LINUX_INO_MAX	ULONG_MAX
+#define LINUX_INO64_MAX	ULLONG_MAX
+
+#define LINUX_FSTYPE_FFS	0x11954
+#define LINUX_FSTYPE_NFS	0x6969
+#define LINUX_FSTYPE_MSDOS	0x4d44
+#define LINUX_FSTYPE_PROCFS	0x9fa0
+#define LINUX_FSTYPE_EXT2FS	0xef53
+#define LINUX_FSTYPE_CD9660	0x9660
+#define LINUX_FSTYPE_NCPFS	0x6969
+#define LINUX_FSTYPE_NTFS	0x5346544e	/* "NTFS" */
+#define LINUX_FSTYPE_UDF	0x15013346
+#define LINUX_FSTYPE_AFS	0x5346414f
+
+/*
+ * Linux version of time-based structures, passed to many system calls
+ */
+struct linux_timespec {
+	linux_time_t	tv_sec;
+	long		tv_nsec;
+};
+
+struct linux_timeval {
+	linux_time_t	tv_sec;
+	long		tv_usec;
+};
+
+struct linux_itimerval {
+	struct linux_timeval	it_interval;
+	struct linux_timeval	it_value;
+};
+
+/*
+ * Passed to the statfs(2) system call family
+ */
 struct linux_statfs {
 	long		l_ftype;
 	long		l_fbsize;
@@ -66,8 +102,21 @@ struct linux_statfs {
 	long		l_fspare[6];
 };
 
+struct linux_statfs64 {
+        int		l_ftype;
+        int		l_fbsize;
+        uint64_t	l_fblocks;
+        uint64_t	l_fbfree;
+        uint64_t	l_fbavail;
+        uint64_t	l_ffiles;
+        uint64_t	l_fffree;
+        linux_fsid_t	l_ffsid;
+        int		l_fnamelen;
+        int		l_fspare[6];
+};
+
 /*
- * Structure for uname(2)
+ * Passed to the uname(2) system call
  */
 struct linux_utsname {
 	char l_sysname[65];
@@ -114,7 +163,7 @@ struct linux_select {
 	fd_set *readfds;
 	fd_set *writefds;
 	fd_set *exceptfds;
-	struct timeval *timeout;
+	struct linux_timeval *timeout;
 };
 
 struct linux_stat {
@@ -170,7 +219,7 @@ struct linux_stat64 {
 	unsigned int	__pad1;
 
 #define LINUX_STAT64_HAS_BROKEN_ST_INO	1
-	unsigned int	__lst_ino;
+	linux_ino_t	__lst_ino;
 	unsigned int	lst_mode;
 	unsigned int	lst_nlink;
 
@@ -194,12 +243,7 @@ struct linux_stat64 {
 	unsigned int	lst_ctime;
 	unsigned int	__unused3;	/* will be high 32 bits of ctime someday */
 
-	unsigned long long lst_ino;
-};
-
-struct l_timespec {
-	linux_time_t	tv_sec;
-	long		tv_nsec;
+	linux_ino64_t	lst_ino;
 };
 
 #endif /* !_LINUX_TYPES_H_ */

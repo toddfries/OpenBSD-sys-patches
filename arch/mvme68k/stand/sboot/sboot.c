@@ -1,4 +1,4 @@
-/*	$OpenBSD: sboot.c,v 1.9 2003/08/19 10:22:30 deraadt Exp $ */
+/*	$OpenBSD: sboot.c,v 1.12 2012/12/31 21:35:32 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Theo de Raadt
@@ -54,8 +54,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
 #include <sys/types.h>
+#include "stand.h"
 #include "sboot.h"
 
 int
@@ -131,7 +131,7 @@ do_cmd(char *buf, char *ebuf)
 		}
 		if (*++buf == '\0')
 			buf = " bsd";
-		go(LOAD_ADDR, buf+1, ebuf);
+		go(STAGE2_RELOC, buf+1, ebuf);
 		break;
 	case 'h':
 	case '?':
@@ -148,7 +148,7 @@ do_cmd(char *buf, char *ebuf)
 		le_init();
 		break;
 	case 'g':
-		go(LOAD_ADDR, buf+1, ebuf);
+		go(STAGE2_RELOC, buf+1, ebuf);
 		break;
 	default:
 		printf("sboot: %s: Unknown command\n", buf);

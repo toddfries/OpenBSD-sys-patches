@@ -1,4 +1,4 @@
-/*	$OpenBSD: re.c,v 1.136 2011/06/15 13:19:19 jsg Exp $	*/
+/*	$OpenBSD: re.c,v 1.146 2013/10/25 22:48:10 brad Exp $	*/
 /*	$FreeBSD: if_re.c,v 1.31 2004/09/04 07:54:05 ru Exp $	*/
 /*
  * Copyright (c) 1997, 1998-2003
@@ -128,7 +128,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -224,7 +223,11 @@ static const struct re_revision {
 	{ RL_HWREV_8101,	"RTL8101" },
 	{ RL_HWREV_8101E,	"RTL8101E" },
 	{ RL_HWREV_8102E,	"RTL8102E" },
+	{ RL_HWREV_8106E,	"RTL8106E" },
+	{ RL_HWREV_8106E_SPIN1,	"RTL8106E" },
 	{ RL_HWREV_8401E,	"RTL8401E" },
+	{ RL_HWREV_8402,	"RTL8402" },
+	{ RL_HWREV_8411,	"RTL8411" },
 	{ RL_HWREV_8102EL,	"RTL8102EL" },
 	{ RL_HWREV_8102EL_SPIN1, "RTL8102EL 1" },
 	{ RL_HWREV_8103E,       "RTL8103E" },
@@ -236,7 +239,13 @@ static const struct re_revision {
 	{ RL_HWREV_8168C,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168C_SPIN2,	"RTL8168C/8111C" },
 	{ RL_HWREV_8168CP,	"RTL8168CP/8111CP" },
+	{ RL_HWREV_8168F,	"RTL8168F/8111F" },
+	{ RL_HWREV_8168G,	"RTL8168G/8111G" },
+	{ RL_HWREV_8168G_SPIN1,	"RTL8168G/8111G" },
+	{ RL_HWREV_8168G_SPIN2,	"RTL8168G/8111G" },
+	{ RL_HWREV_8168G_SPIN4,	"RTL8168G/8111G" },
 	{ RL_HWREV_8105E,	"RTL8105E" },
+	{ RL_HWREV_8105E_SPIN1,	"RTL8105E" },
 	{ RL_HWREV_8168D,	"RTL8168D/8111D" },
 	{ RL_HWREV_8168DP,      "RTL8168DP/8111DP" },
 	{ RL_HWREV_8168E,       "RTL8168E/8111E" },
@@ -840,10 +849,15 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
 		break;
 	case RL_HWREV_8401E:
+	case RL_HWREV_8402:
 	case RL_HWREV_8105E:
+	case RL_HWREV_8105E_SPIN1:
+	case RL_HWREV_8106E:
+	case RL_HWREV_8106E_SPIN1:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
-		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD;
+		    RL_FLAG_MACSTAT | RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD |
+		    RL_FLAG_NOJUMBO;
 		break;
 	case RL_HWREV_8168_SPIN1:
 	case RL_HWREV_8168_SPIN2:
@@ -856,7 +870,6 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		/* FALLTHROUGH */
 	case RL_HWREV_8168C:
 	case RL_HWREV_8168CP:
-	case RL_HWREV_8168D:
 	case RL_HWREV_8168DP:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
@@ -873,6 +886,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		 */
 		sc->rl_flags |= RL_FLAG_NOJUMBO;
 		break;
+	case RL_HWREV_8168D:
 	case RL_HWREV_8168E:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PHYWAKE_PM | RL_FLAG_PAR | RL_FLAG_DESCV2 |
@@ -880,9 +894,20 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 		    RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
 		break;
 	case RL_HWREV_8168E_VL:
+	case RL_HWREV_8168F:
+	case RL_HWREV_8411:
 		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
 		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
 		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO;
+		break;
+	case RL_HWREV_8168G:
+	case RL_HWREV_8168G_SPIN1:
+	case RL_HWREV_8168G_SPIN2:
+	case RL_HWREV_8168G_SPIN4:
+		sc->rl_flags |= RL_FLAG_INVMAR | RL_FLAG_PHYWAKE |
+		    RL_FLAG_PAR | RL_FLAG_DESCV2 | RL_FLAG_MACSTAT |
+		    RL_FLAG_CMDSTOP | RL_FLAG_AUTOPAD | RL_FLAG_NOJUMBO |
+		    RL_FLAG_EARLYOFF;
 		break;
 	case RL_HWREV_8169_8110SB:
 	case RL_HWREV_8169_8110SBL:
@@ -1058,8 +1083,7 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 	/* Create DMA maps for TX buffers */
 	for (i = 0; i < RL_TX_QLEN; i++) {
 		error = bus_dmamap_create(sc->sc_dmat,
-		    RL_JUMBO_FRAMELEN,
-		    RL_TX_DESC_CNT(sc) - RL_NTXDESC_RSVD, RL_TDESC_CMD_FRAGLEN,
+		    RL_JUMBO_FRAMELEN, RL_NTXSEGS, RL_JUMBO_FRAMELEN,
 		    0, 0, &sc->rl_ldata.rl_txq[i].txq_dmamap);
 		if (error) {
 			printf("%s: can't create DMA map for TX\n",
@@ -1130,8 +1154,21 @@ re_attach(struct rl_softc *sc, const char *intrstr)
 
 	m_clsetwms(ifp, MCLBYTES, 2, RL_RX_DESC_CNT);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_IPv4 |
-			       IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
+	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_TCPv4 |
+	    IFCAP_CSUM_UDPv4;
+
+	/*
+	 * RTL8168/8111C generates wrong IP checksummed frame if the
+	 * packet has IP options so disable TX IP checksum offloading.
+	 */
+	switch (sc->sc_hwrev) {
+	case RL_HWREV_8168C:
+	case RL_HWREV_8168C_SPIN2:
+	case RL_HWREV_8168CP:
+		break;
+	default:
+		ifp->if_capabilities |= IFCAP_CSUM_IPv4;
+	}
 
 #if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
@@ -1570,8 +1607,7 @@ re_txeof(struct rl_softc *sc)
 
 	sc->rl_ldata.rl_txq_considx = idx;
 
-	if (sc->rl_ldata.rl_tx_free > RL_NTXDESC_RSVD)
-		ifp->if_flags &= ~IFF_OACTIVE;
+	ifp->if_flags &= ~IFF_OACTIVE;
 
 	/*
 	 * Some chips will ignore a second TX request issued while an
@@ -1630,6 +1666,9 @@ re_intr(void *arg)
 
 	if (!(ifp->if_flags & IFF_RUNNING))
 		return (0);
+
+	/* Disable interrupts. */
+	CSR_WRITE_2(sc, RL_IMR, 0);
 
 	rx = tx = 0;
 	status = CSR_READ_2(sc, RL_ISR);
@@ -1697,6 +1736,8 @@ re_intr(void *arg)
 	if (tx && !IFQ_IS_EMPTY(&ifp->if_snd))
 		re_start(ifp);
 
+	CSR_WRITE_2(sc, RL_IMR, sc->rl_intrs);
+
 	return (claimed);
 }
 
@@ -1708,9 +1749,6 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 	struct rl_desc	*d;
 	u_int32_t	cmdstat, vlanctl = 0, csum_flags = 0;
 	struct rl_txq	*txq;
-
-	if (sc->rl_ldata.rl_tx_free <= RL_NTXDESC_RSVD)
-		return (EFBIG);
 
 	/*
 	 * Set up checksum offload. Note: checksum offload bits must
@@ -1762,7 +1800,7 @@ re_encap(struct rl_softc *sc, struct mbuf *m, int *idx)
 		nsegs++;
 	}
 
-	if (nsegs > sc->rl_ldata.rl_tx_free - RL_NTXDESC_RSVD) {
+	if (sc->rl_ldata.rl_tx_free - nsegs <= 1) {
 		error = EFBIG;
 		goto fail_unload;
 	}
@@ -1953,6 +1991,7 @@ re_init(struct ifnet *ifp)
 {
 	struct rl_softc *sc = ifp->if_softc;
 	u_int16_t	cfg;
+	uint32_t	rxcfg;
 	int		s;
 	union {
 		u_int32_t align_dummy;
@@ -1967,13 +2006,12 @@ re_init(struct ifnet *ifp)
 	re_stop(ifp);
 
 	/*
-	 * Enable C+ RX and TX mode, as well as RX checksum offload.
-	 * We must configure the C+ register before all others.
+	 * Enable C+ RX and TX mode, as well as VLAN stripping and
+	 * RX checksum offload. We must configure the C+ register
+	 * before all others.
 	 */
-	cfg = RL_CPLUSCMD_TXENB | RL_CPLUSCMD_PCI_MRW;
-
-	if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
-		cfg |= RL_CPLUSCMD_RXCSUM_ENB;
+	cfg = RL_CPLUSCMD_TXENB | RL_CPLUSCMD_PCI_MRW |
+	    RL_CPLUSCMD_RXCSUM_ENB;
 
 	if (ifp->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		cfg |= RL_CPLUSCMD_VLANSTRIP;
@@ -2037,7 +2075,10 @@ re_init(struct ifnet *ifp)
 
 	CSR_WRITE_1(sc, RL_EARLY_TX_THRESH, 16);
 
-	CSR_WRITE_4(sc, RL_RXCFG, RL_RXCFG_CONFIG);
+	rxcfg = RL_RXCFG_CONFIG;
+	if (sc->rl_flags & RL_FLAG_EARLYOFF)
+		rxcfg |= RL_RXCFG_EARLYOFF;
+	CSR_WRITE_4(sc, RL_RXCFG, rxcfg);
 
 	/* Program promiscuous mode and multicast filters. */
 	re_iff(sc);

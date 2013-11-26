@@ -1,4 +1,4 @@
-/*	$OpenBSD: pfkeyv2_parsemessage.c,v 1.44 2010/07/01 02:09:45 reyk Exp $	*/
+/*	$OpenBSD: pfkeyv2_parsemessage.c,v 1.47 2013/04/10 08:50:59 mpi Exp $	*/
 
 /*
  *	@(#)COPYRIGHT	1.1 (NRL) 17 January 1995
@@ -76,14 +76,13 @@
 #include <sys/mbuf.h>
 #include <sys/proc.h>
 #include <netinet/ip_ipsp.h>
+#include <netinet/ip_var.h>
 #include <net/pfkeyv2.h>
 
 #if NPF > 0
 #include <net/if.h>
 #include <net/pfvar.h>
 #endif
-
-extern int encdebug;
 
 #ifdef ENCDEBUG
 #define DPRINTF(x)	if (encdebug) printf x
@@ -323,7 +322,7 @@ pfkeyv2_parsemessage(void *p, int len, void **headers)
 		return (EINVAL);
 	}
 
-	if (sadb_msg->sadb_msg_pid != curproc->p_pid) {
+	if (sadb_msg->sadb_msg_pid != curproc->p_p->ps_pid) {
 		DPRINTF(("pfkeyv2_parsemessage: bad PID value\n"));
 		return (EINVAL);
 	}
@@ -430,7 +429,7 @@ pfkeyv2_parsemessage(void *p, int len, void **headers)
 				return (EINVAL);
 			}
 
-			if (sadb_sa->sadb_sa_replay > 32) {
+			if (sadb_sa->sadb_sa_replay > 64) {
 				DPRINTF(("pfkeyv2_parsemessage: unsupported "
 				    "replay window size %d in SA extension "
 				    "header %d\n", sadb_sa->sadb_sa_replay,

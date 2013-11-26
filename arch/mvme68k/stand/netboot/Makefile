@@ -1,14 +1,15 @@
-#	$OpenBSD: Makefile,v 1.15 2009/02/17 18:42:06 miod Exp $
+#	$OpenBSD: Makefile,v 1.18 2013/02/02 13:36:06 miod Exp $
 
 SIZE?=	size
+STRIP?=	strip
 
 S=	${.CURDIR}/../../../..
-DEFS= -DSUN_BOOTPARAMS -DRELOC=${STAGE2_RELOC}
+DEFS= -DSUN_BOOTPARAMS
+#-DNETIF_DEBUG
 INCPATH=-I${.CURDIR} -I${.CURDIR}/../libsa -I${.CURDIR}/../libbug \
 	-I${S} -I${S}/lib/libsa
-CFLAGS+=	-O2 ${DEFS} ${INCPATH} ${COPTS}
-CFLAGS+=-DSTAGE2_RELOC=${STAGE2_RELOC}
-CLEANFILES+=netboot netboot.bin
+CFLAGS+=-O2 ${DEFS} ${INCPATH} ${COPTS}
+CLEANFILES+=netboot netboot.bin netboot.strip
 
 .include "${S}/arch/mvme68k/stand/bugcrt/Makefile.inc"
 .include "${S}/arch/mvme68k/stand/libbug/Makefile.inc"
@@ -19,17 +20,18 @@ SRCS=   boot.c conf.c version.c devopen.c dev_net.c
 SRCS+=	if_ie.c if_le.c
 OBJS=  ${SRCS:S/.c/.o/g}
 LIBS= ${LIBSA} ${LIBBUG} ${LIBZ}
-LDFLAGS+= -nostdlib -s -N -T ${STAGE2_RELOC}
+LDFLAGS+=-N -T ${S}/arch/mvme68k/stand/ld.script -Ttext ${STAGE2_RELOC}
+NOPIE=
 
 all:	netboot.bin
 
-netboot: ${OBJS} ${BUGCRT} ${LIBS}
+netboot: ${SRTOBJ} ${BUGCRT} ${OBJS} ${LIBS}
 	${LD} ${LDFLAGS} -o $@ \
-		${SRTOBJ} ${BUGCRT} ${OBJS} ${LIBS} `cc -print-libgcc-file-name`
-	@${SIZE} $@
+	    ${SRTOBJ} ${BUGCRT} ${OBJS} ${LIBS} `${CC} -print-libgcc-file-name`
 
 netboot.bin: netboot
-	dd ibs=32 skip=1 if=netboot of=$@
+	${STRIP} -I a.out-m68k-netbsd -o netboot.strip netboot
+	dd ibs=32 skip=1 if=netboot.strip of=$@
 
 install:
 	${INSTALL} ${INSTALL_COPY} -o ${LIBOWN} -g ${LIBGRP} -m ${LIBMODE} \

@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_sched.c,v 1.11 2011/08/03 16:11:31 guenther Exp $	*/
+/*	$OpenBSD: linux_sched.c,v 1.14 2012/05/25 04:39:40 guenther Exp $	*/
 /*	$NetBSD: linux_sched.c,v 1.6 2000/05/28 05:49:05 thorpej Exp $	*/
 
 /*-
@@ -61,7 +61,7 @@ linux_sys_clone(struct proc *p, void *v, register_t *retval)
 	struct linux_sys_clone_args *uap = v;
 	struct linux_emuldata *emul = p->p_emuldata;
 	int cflags = SCARG(uap, flags);
-	int flags = FORK_RFORK, sig;
+	int flags = FORK_TFORK, sig;
 	int error = 0;
 
 	/*
@@ -97,9 +97,15 @@ linux_sys_clone(struct proc *p, void *v, register_t *retval)
 		 * CLONE_FS and CLONE_SYSVSEM.  Also, we decree it
 		 * to be incompatible with CLONE_VFORK, as I don't
 		 * want to work out whether that's 100% safe.
+		 * Requires CLONE_FILES so that the rest of the kernel
+		 * can assume that threads share an fd table.
 		 */
 #define REQUIRED	\
-	(LINUX_CLONE_SIGHAND | LINUX_CLONE_FS | LINUX_CLONE_SYSVSEM)
+	( LINUX_CLONE_SIGHAND \
+	| LINUX_CLONE_FS \
+	| LINUX_CLONE_SYSVSEM \
+	| LINUX_CLONE_FILES \
+	)
 #define BANNED		\
 	LINUX_CLONE_VFORK
 		if ((cflags & (REQUIRED | BANNED)) != REQUIRED)
@@ -166,9 +172,10 @@ linux_sys_clone(struct proc *p, void *v, register_t *retval)
 		if (ldesc.entry_number != GUGS_SEL)
 			return (EINVAL);
 		emul->child_tls_base = ldesc.base_addr;
+		emul->set_tls_base = 1;
 	}
 	else
-		emul->child_tls_base = 0;
+		emul->set_tls_base = 0;
 
 	/*
 	 * Note that Linux does not provide a portable way of specifying
@@ -407,7 +414,8 @@ linux_child_return(void *arg)
 	struct proc *p = (struct proc *)arg;
 	struct linux_emuldata *emul = p->p_emuldata;
 
-	i386_set_threadbase(p, emul->my_tls_base, TSEG_GS);
+	if (emul->set_tls_base)
+		i386_set_threadbase(p, emul->my_tls_base, TSEG_GS);
 
 	if (emul->my_set_tid) {
 		pid_t pid = p->p_pid + THREAD_PID_OFFSET;

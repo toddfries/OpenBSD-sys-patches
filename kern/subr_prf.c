@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_prf.c,v 1.76 2011/04/03 16:46:19 drahn Exp $	*/
+/*	$OpenBSD: subr_prf.c,v 1.80 2013/11/25 00:33:21 djm Exp $	*/
 /*	$NetBSD: subr_prf.c,v 1.45 1997/10/24 18:14:25 chuck Exp $	*/
 
 /*-
@@ -64,7 +64,6 @@
 
 #ifdef KGDB
 #include <sys/kgdb.h>
-#include <machine/cpu.h>
 #endif
 #ifdef DDB
 #include <ddb/db_output.h>	/* db_printf, db_putchar prototypes */
@@ -185,6 +184,9 @@ panic(const char *fmt, ...)
 	static char panicbuf[512];
 	int bootopt;
 	va_list ap;
+
+	/* do not trigger assertions, we know that we are inconsistent */
+	splassert_ctl = 0;
 
 	bootopt = RB_AUTOBOOT | RB_DUMP;
 	va_start(ap, fmt);
@@ -843,6 +845,9 @@ reswitch:	switch (ch) {
 			size = 1;
 			sign = '\0';
 			break;
+		case 't':
+			/* ptrdiff_t */
+			/* FALLTHROUGH */
 		case 'D':
 			flags |= LONGINT;
 			/*FALLTHROUGH*/
@@ -856,16 +861,17 @@ reswitch:	switch (ch) {
 			base = DEC;
 			goto number;
 		case 'n':
+			/* %n is unsupported in the kernel; just skip it */
 			if (flags & QUADINT)
-				*va_arg(ap, quad_t *) = ret;
+				(void)va_arg(ap, quad_t *);
 			else if (flags & LONGINT)
-				*va_arg(ap, long *) = ret;
+				(void)va_arg(ap, long *);
 			else if (flags & SHORTINT)
-				*va_arg(ap, short *) = ret;
+				(void)va_arg(ap, short *);
 			else if (flags & SIZEINT)
-				*va_arg(ap, ssize_t *) = ret;
+				(void)va_arg(ap, ssize_t *);
 			else
-				*va_arg(ap, int *) = ret;
+				(void)va_arg(ap, int *);
 			continue;	/* no output */
 		case 'O':
 			flags |= LONGINT;

@@ -1,4 +1,4 @@
-/*	$OpenBSD: aic7xxx.c,v 1.84 2010/03/14 14:37:01 krw Exp $	*/
+/*	$OpenBSD: aic7xxx.c,v 1.86 2013/04/20 20:23:09 miod Exp $	*/
 /*	$NetBSD: aic7xxx.c,v 1.108 2003/11/02 11:07:44 wiz Exp $	*/
 
 /*
@@ -40,14 +40,11 @@
  * IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGES.
  *
- * $Id: aic7xxx.c,v 1.84 2010/03/14 14:37:01 krw Exp $
+ * $Id: aic7xxx.c,v 1.86 2013/04/20 20:23:09 miod Exp $
  */
 /*
  * Ported from FreeBSD by Pascal Renauld, Network Storage Solutions, Inc. - April 2003
  */
-
-#include <sys/cdefs.h>
-/* __FBSDID("$FreeBSD: src/sys/dev/aic7xxx/aic7xxx.c,v 1.100 2004/05/11 20:39:46 gibbs Exp $"); */
 
 #include <dev/ic/aic7xxx_openbsd.h>
 #ifdef SMALL_KERNEL
@@ -4101,11 +4098,11 @@ ahc_reset(struct ahc_softc *ahc, int reinit)
 	case 0:
 		/* Single Narrow Channel */
 		break;
-	case 2:
+	case SELWIDE:
 		/* Wide Channel */
 		ahc->features |= AHC_WIDE;
 		break;
-	case 8:
+	case SELBUSB:
 		/* Twin Channel */
 		ahc->features |= AHC_TWIN;
 		break;

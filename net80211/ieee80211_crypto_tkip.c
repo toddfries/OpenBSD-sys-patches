@@ -1,4 +1,4 @@
-/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.19 2011/04/05 11:48:28 blambert Exp $	*/
+/*	$OpenBSD: ieee80211_crypto_tkip.c,v 1.21 2013/11/21 16:16:08 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2008 Damien Bergamini <damien.bergamini@free.fr>
@@ -34,7 +34,6 @@
 #include <net/if_dl.h>
 #include <net/if_media.h>
 #include <net/if_arp.h>
-#include <net/if_llc.h>
 
 #ifdef INET
 #include <netinet/in.h>
@@ -524,7 +523,7 @@ ieee80211_michael_mic_failure(struct ieee80211com *ic, u_int64_t tsc)
 	 * seconds have passed since the most recent previous MIC failure.
 	 */
 	if (ic->ic_tkip_micfail == 0 ||
-	    ticks >= ic->ic_tkip_micfail + 60 * hz) {
+	    ticks - (ic->ic_tkip_micfail + 60 * hz) >= 0) {
 		ic->ic_tkip_micfail = ticks;
 		ic->ic_tkip_micfail_last_tsc = tsc;
 		return;

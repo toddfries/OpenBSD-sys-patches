@@ -1,4 +1,4 @@
-/* $OpenBSD: ip_ipcomp.c,v 1.28 2011/07/07 02:57:25 deraadt Exp $ */
+/* $OpenBSD: ip_ipcomp.c,v 1.32 2013/05/14 14:29:08 mpi Exp $ */
 
 /*
  * Copyright (c) 2001 Jean-Jacques Bernard-Gundol (jj@wabbitt.org)
@@ -43,6 +43,7 @@
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
+#include <netinet/ip_var.h>
 #endif				/* INET */
 
 #ifdef INET6
@@ -63,6 +64,9 @@
 #include <lib/libz/zlib.h>
 
 #include "bpfilter.h"
+
+int ipcomp_output_cb(void *);
+int ipcomp_input_cb(void *);
 
 #ifdef ENCDEBUG
 #define DPRINTF(x)      if (encdebug) printf x
@@ -113,7 +117,6 @@ ipcomp_init(tdbp, xsp, ii)
 	    tcomp->name));
 
 	tdbp->tdb_xform = xsp;
-	tdbp->tdb_bitmap = 0;
 
 	/* Initialize crypto session */
 	bzero(&cric, sizeof(cric));
@@ -234,7 +237,7 @@ ipcomp_input_cb(op)
 		return (EINVAL);
 	}
 
-	s = spltdb();
+	s = splsoftnet();
 
 	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
@@ -578,7 +581,7 @@ ipcomp_output_cb(cp)
 		return (EINVAL);
 	}
 
-	s = spltdb();
+	s = splsoftnet();
 
 	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {

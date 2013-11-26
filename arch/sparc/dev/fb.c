@@ -1,4 +1,4 @@
-/*	$OpenBSD: fb.c,v 1.52 2010/07/10 19:32:24 miod Exp $	*/
+/*	$OpenBSD: fb.c,v 1.54 2013/10/21 10:36:18 miod Exp $	*/
 /*	$NetBSD: fb.c,v 1.23 1997/07/07 23:30:22 pk Exp $ */
 
 /*
@@ -130,6 +130,8 @@ int	fb_alloc_screen(void *, const struct wsscreen_descr *, void **,
 void	fb_free_screen(void *, void *);
 int	fb_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
+int	fb_load_font(void *, void *, struct wsdisplay_font *);
+int	fb_list_font(void *, struct wsdisplay_font *);
 
 void
 fb_setsize(struct sunfb *sf, int def_depth, int def_width, int def_height,
@@ -462,6 +464,7 @@ void
 fbwscons_console_init(struct sunfb *sf, int row)
 {
 	struct rasops_info *ri = &sf->sf_ro;
+	void *cookie;
 	long defattr;
 
 	if (CPU_ISSUN4 || romgetcursoraddr(&sf->sf_crowp, &sf->sf_ccolp))
@@ -508,14 +511,19 @@ fbwscons_console_init(struct sunfb *sf, int row)
 	    (sf->sf_ccolp != NULL || sf->sf_crowp != NULL))
 		ri->ri_updatecursor = fb_updatecursor;
 
+	if (ri->ri_flg & RI_VCONS)
+		cookie = ri->ri_active;
+	else
+		cookie = ri;
+
 	if (ISSET(ri->ri_caps, WSSCREEN_WSCOLORS))
-		ri->ri_ops.alloc_attr(ri,
+		ri->ri_ops.alloc_attr(cookie,
 		    WSCOL_BLACK, WSCOL_WHITE, WSATTR_WSCOLORS, &defattr);
 	else
-		ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
+		ri->ri_ops.alloc_attr(cookie, 0, 0, 0, &defattr);
 
 	fb_initwsd(sf);
-	wsdisplay_cnattach(&sf->sf_wsd, ri,
+	wsdisplay_cnattach(&sf->sf_wsd, cookie,
 	    ri->ri_ccol, ri->ri_crow, defattr);
 }
 
@@ -568,6 +576,10 @@ fbwscons_attach(struct sunfb *sf, struct wsdisplay_accessops *op, int isconsole)
 		op->free_screen = fb_free_screen;
 		op->show_screen = fb_show_screen;
 	}
+	if (op->load_font == NULL) {
+		op->load_font = fb_load_font;
+		op->list_font = fb_list_font;
+	}
 
 	sf->sf_scrlist[0] = &sf->sf_wsd;
 	sf->sf_wsl.nscreens = 1;
@@ -590,18 +602,24 @@ fb_alloc_screen(void *v, const struct wsscreen_descr *type,
 {
 	struct sunfb *sf = v;
 	struct rasops_info *ri = &sf->sf_ro;
+	void *cookie;
 
 	if (sf->sf_nscreens > 0)
 		return (ENOMEM);
 
-	*cookiep = ri;
+	if (ri->ri_flg & RI_VCONS)
+		cookie = ri->ri_active;
+	else
+		cookie = ri;
+
+	*cookiep = cookie;
 	*curyp = 0;
 	*curxp = 0;
 	if (ISSET(ri->ri_caps, WSSCREEN_WSCOLORS))
-		ri->ri_ops.alloc_attr(ri,
+		ri->ri_ops.alloc_attr(cookie,
 		    WSCOL_BLACK, WSCOL_WHITE, WSATTR_WSCOLORS, attrp);
 	else
-		ri->ri_ops.alloc_attr(ri, 0, 0, 0, attrp);
+		ri->ri_ops.alloc_attr(cookie, 0, 0, 0, attrp);
 	sf->sf_nscreens++;
 	return (0);
 }
@@ -619,6 +637,24 @@ fb_show_screen(void *v, void *cookie, int waitok, void (*cb)(void *, int, int),
     void *cbarg)
 {
 	return (0);
+}
+
+int
+fb_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct sunfb *sf = v;
+	struct rasops_info *ri = &sf->sf_ro;
+
+	return rasops_load_font(ri, emulcookie, font);
+}
+
+int
+fb_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct sunfb *sf = v;
+	struct rasops_info *ri = &sf->sf_ro;
+
+	return rasops_list_font(ri, font);
 }
 
 #if defined(SUN4)

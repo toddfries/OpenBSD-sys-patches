@@ -36,13 +36,13 @@
 #include <sys/device.h>
 #include <sys/proc.h>
 
-#include <mips64/archtype.h>
+#include <mips64/mips_cpu.h>
 
 #include <machine/autoconf.h>
 #include <machine/atomic.h>
 #include <machine/intr.h>
+#include <machine/octeonreg.h>
 
-#include <octeon/dev/octeonreg.h>
 #include <octeon/dev/iobusvar.h>
 
 extern bus_space_handle_t iobus_h;
@@ -144,7 +144,8 @@ octeon_splx(int newipl)
 	/* Update masks to new ipl. Order highly important! */
 	__asm__ (".set noreorder\n");
 	ci->ci_ipl = newipl;
-	__asm__ ("sync\n\t.set reorder\n");
+	mips_sync();
+	__asm__ (".set reorder\n");
 	if (CPU_IS_PRIMARY(ci))
 		octeon_setintrmask(newipl);
 	/* If we still have softints pending trigger processing. */
@@ -252,7 +253,8 @@ octeon_iointr(uint32_t hwpend, struct trap_frame *frame)
 
 		__asm__ (".set noreorder\n");
 		ipl = ci->ci_ipl;
-		__asm__ ("sync\n\t.set reorder\n");
+		mips_sync();
+		__asm__ (".set reorder\n");
 
 		/* Service higher level interrupts first */
 		for (lvl = NIPLS - 1; lvl != IPL_NONE; lvl--) {
@@ -269,7 +271,7 @@ octeon_iointr(uint32_t hwpend, struct trap_frame *frame)
 					ih != NULL;
 				    ih = ih->ih_next) {
 #ifdef MULTIPROCESSOR
-					u_int32_t sr;
+					register_t sr;
 #endif
 					splraise(ih->ih_level);
 #ifdef MULTIPROCESSOR
@@ -293,10 +295,11 @@ octeon_iointr(uint32_t hwpend, struct trap_frame *frame)
 #endif
 					__asm__ (".set noreorder\n");
 					ci->ci_ipl = ipl;
-					__asm__ ("sync\n\t.set reorder\n");
+					mips_sync();
+					__asm__ (".set reorder\n");
 				}
 				if (rc == 0)
-					printf("spurious crime interrupt %d\n", bitno);
+					printf("spurious interrupt %d\n", bitno);
 
 				isr ^= mask;
 				if ((tmpisr ^= mask) == 0)

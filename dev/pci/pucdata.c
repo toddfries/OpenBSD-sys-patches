@@ -1,4 +1,4 @@
-/*	$OpenBSD: pucdata.c,v 1.80 2012/01/09 22:31:51 haesbaert Exp $	*/
+/*	$OpenBSD: pucdata.c,v 1.90 2013/11/09 04:05:58 jsg Exp $	*/
 /*	$NetBSD: pucdata.c,v 1.6 1999/07/03 05:55:23 cgd Exp $	*/
 
 /*
@@ -48,8 +48,29 @@
 
 const struct puc_device_description puc_devs[] = {
 
-	{   /* Intel GM45 SOL */
-	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_AMT_SOL, 0x0000, 0x0000 },
+	{   /* Intel GM45 KT */
+	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_82GM45_KT, 0x0000, 0x0000 },
+	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{   /* Intel 6 Series KT */
+	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_6SERIES_KT, 0x0000, 0x0000 },
+	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{   /* Intel 7 Series KT */
+	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7SERIES_KT, 0x0000, 0x0000 },
+	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
+	    },
+	},
+	{   /* Intel 8 Series KT */
+	    {   PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_8SERIES_KT, 0x0000, 0x0000 },
 	    {	0xffff,	0xffff,				      0x0000, 0x0000 },
 	    {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
@@ -624,6 +645,15 @@ const struct puc_device_description puc_devs[] = {
 	    },
 	},
 
+	/* Exsys EX-41092 (sold as SIIG JJ-E10011-S3) */
+	{      /* "Exsys EX-41092", */
+		{ PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_EXSYS_EX41092,0x0000,0x0000},
+		{ 0xffff, 0xffff,                                       0x0000,0x0000},
+		{
+			{ PUC_COM_MUL(10), 0x10, 0x0000 },
+		},
+	},
+
 	/* Exsys EX-41098, second part of Serial Technologies Expander PCI-232-108 */
 	{   /* "Exsys EX-41098", */
 	    {	PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_EXSYS_EX41098,
@@ -943,6 +973,15 @@ const struct puc_device_description puc_devs[] = {
 	    },
 	},
 
+	/* Oxford Semiconductor OXPCIE952 PCIE Parallel port */
+	{   /* "Oxford Semiconductor OXPCIE952 PCIE Parallel port", */
+	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OXPCIE952,	0, 0 },
+	    {   0xffff, 0xffff,						0, 0 },
+	    {
+		{ PUC_LPT, 0x10, 0x0000 },
+	    },
+	},
+
 	/* SIIG 2050 (uses Oxford 16PCI954 and a 10x clock) */
 	{   /* "Oxford Semiconductor OX16PCI954 UARTs", */
 	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OX16PCI954,
@@ -953,6 +992,17 @@ const struct puc_device_description puc_devs[] = {
 		{ PUC_COM_MUL(10), 0x10, 0x0008 },
 		{ PUC_COM_MUL(10), 0x10, 0x0010 },
 		{ PUC_COM_MUL(10), 0x10, 0x0018 },
+	    },
+	},
+
+	/* I-O DATA RSA-PCI2 (uses Oxford 16PCI954 and a 8x clock) */
+	{   /* "Oxford Semiconductor OX16PCI954 UARTs", */
+	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OX16PCI954,
+		PCI_VENDOR_IODATA, 0xc070 },
+	    {   0xffff, 0xffff, 0xffff, 0xffff },
+	    {
+		{ PUC_COM_POW2(3), 0x10, 0x0000 },
+		{ PUC_COM_POW2(3), 0x10, 0x0008 },
 	    },
 	},
 
@@ -997,6 +1047,15 @@ const struct puc_device_description puc_devs[] = {
 	    {   0xffff, 0xffff,						0, 0 },
 	    {
 		{ PUC_LPT, 0x10, 0x0000 },
+	    },
+	},
+
+	/* Oxford Semiconductor PCIE `950 UARTs - 128 byte FIFOs */
+	{   /* "Oxford Semiconductor PCIE UARTs", */
+	    {   PCI_VENDOR_OXFORD2, PCI_PRODUCT_OXFORD2_OXPCIE952S,	0, 0 },
+	    {   0xffff, 0xffff,						0, 0 },
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
 	    },
 	},
 
@@ -1743,6 +1802,22 @@ const struct puc_device_description puc_devs[] = {
 	    },
 	},
 
+	/* Digi International Digi Neo 8 PCIe Serial */
+	{
+	    {	PCI_VENDOR_DIGI, PCI_PRODUCT_DIGI_NEO8_PCIE,	0, 0  },
+	    {	0xffff, 0xffff,					0, 0  },
+	    {
+		{ PUC_COM_POW2(3), 0x10, 0x0000 },
+		{ PUC_COM_POW2(3), 0x10, 0x0200 },
+		{ PUC_COM_POW2(3), 0x10, 0x0400 },
+		{ PUC_COM_POW2(3), 0x10, 0x0600 },
+		{ PUC_COM_POW2(3), 0x10, 0x0800 },
+		{ PUC_COM_POW2(3), 0x10, 0x0a00 },
+		{ PUC_COM_POW2(3), 0x10, 0x0c00 },
+		{ PUC_COM_POW2(3), 0x10, 0x0e00 },
+	    },
+	},
+
 	/*
 	 * Multi-Tech ISI5634PCI/4 4-port modem board.
 	 * Has a 4-channel Exar XR17C154 UART, but with bogus product ID in its
@@ -1891,6 +1966,13 @@ const struct puc_device_description puc_devs[] = {
 	    {
 		{ PUC_COM_POW2(0), 0x10, 0x0000 },
 		{ PUC_COM_POW2(0), 0x14, 0x0000 },
+	    },
+	},
+	{   /* "NetMos NM9820 UART" */
+	    {   PCI_VENDOR_NETMOS, PCI_PRODUCT_NETMOS_NM9820,	0, 0	},
+	    {	0xffff,	0xffff,					0, 0	},
+	    {
+		{ PUC_COM_POW2(0), 0x10, 0x0000 },
 	    },
 	},
 	{   /* "MosChip MCS9865 Quad Serial Port" */

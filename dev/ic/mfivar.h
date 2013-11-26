@@ -1,4 +1,4 @@
-/* $OpenBSD: mfivar.h,v 1.42 2012/01/12 06:12:30 dlg Exp $ */
+/* $OpenBSD: mfivar.h,v 1.53 2013/05/03 02:46:28 dlg Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
@@ -15,7 +15,8 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#define DEVNAME(_s)     ((_s)->sc_dev.dv_xname)
+struct mfi_softc;
+#define DEVNAME(_s)	((_s)->sc_dev.dv_xname)
 
 /* #define MFI_DEBUG */
 #ifdef MFI_DEBUG
@@ -43,6 +44,7 @@ struct mfi_mem {
 };
 
 #define MFIMEM_MAP(_am)		((_am)->am_map)
+#define MFIMEM_LEN(_am)		((_am)->am_map->dm_mapsize)
 #define MFIMEM_DVA(_am)		((_am)->am_map->dm_segs[0].ds_addr)
 #define MFIMEM_KVA(_am)		((void *)(_am)->am_kva)
 
@@ -53,8 +55,6 @@ struct mfi_prod_cons {
 };
 
 struct mfi_ccb {
-	struct mfi_softc	*ccb_sc;
-
 	union mfi_frame		*ccb_frame;
 	paddr_t			ccb_pframe;
 	bus_addr_t		ccb_pframe_offset;
@@ -78,7 +78,8 @@ struct mfi_ccb {
 #define MFI_DATA_OUT	2
 
 	void			*ccb_cookie;
-	void			(*ccb_done)(struct mfi_ccb *);
+	void			(*ccb_done)(struct mfi_softc *,
+				    struct mfi_ccb *);
 
 	volatile enum {
 		MFI_CCB_FREE,
@@ -104,6 +105,20 @@ struct mfi_iop_ops {
 	void		(*mio_intr_ena)(struct mfi_softc *);
 	int		(*mio_intr)(struct mfi_softc *);
 	void		(*mio_post)(struct mfi_softc *, struct mfi_ccb *);
+	u_int32_t	mio_idb;
+	u_int32_t	mio_flags;
+#define MFI_IOP_F_SYSPD		(1 << 0)
+};
+
+struct mfi_pd_link {
+	u_int16_t		pd_id;
+	struct mfi_pd_details	pd_info;
+};
+
+struct mfi_pd_softc {
+	struct scsi_link	pd_link;
+	struct scsibus_softc	*pd_scsibus;
+	struct mfi_pd_link	*pd_links[MFI_MAX_PD];
 };
 
 struct mfi_softc {
@@ -115,7 +130,6 @@ struct mfi_softc {
 	const struct mfi_iop_ops *sc_iop;
 
 	int			sc_64bit_dma;
-	int			sc_flags;
 
 	bus_space_tag_t		sc_iot;
 	bus_space_handle_t	sc_ioh;
@@ -136,7 +150,6 @@ struct mfi_softc {
 	uint32_t		sc_max_cmds;
 	uint32_t		sc_max_sgl;
 	uint32_t		sc_sgl_size;
-	uint32_t		sc_max_ld;
 	uint32_t		sc_ld_cnt;
 
 	uint16_t		sc_sgl_flags;
@@ -166,12 +179,17 @@ struct mfi_softc {
 	struct mfi_ccb_list	sc_ccb_freeq;
 	struct mutex		sc_ccb_mtx;
 
+	struct scsibus_softc	*sc_scsibus;
+	struct mfi_pd_softc	*sc_pd;
+
 	/* mgmt lock */
 	struct rwlock		sc_lock;
 
 	/* sensors */
-	struct ksensor		*sc_sensors;
 	struct ksensordev	sc_sensordev;
+	struct ksensor		*sc_bbu;
+	struct ksensor		*sc_bbu_status;
+	struct ksensor		*sc_sensors;
 };
 
 int	mfi_attach(struct mfi_softc *sc, enum mfi_iop);

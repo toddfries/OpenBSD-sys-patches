@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_cluster.c,v 1.38 2011/07/04 04:30:41 tedu Exp $	*/
+/*	$OpenBSD: vfs_cluster.c,v 1.40 2013/10/01 20:22:12 sf Exp $	*/
 /*	$NetBSD: vfs_cluster.c,v 1.12 1996/04/22 01:39:05 christos Exp $	*/
 
 /*
@@ -43,8 +43,8 @@
 
 #include <uvm/uvm_extern.h>
 
-void cluster_wbuild(struct vnode *, struct buf *, long, daddr64_t, int,
-    daddr64_t);
+void cluster_wbuild(struct vnode *, struct buf *, long, daddr_t, int,
+    daddr_t);
 struct cluster_save *cluster_collectbufs(struct vnode *, struct cluster_info *,
     struct buf *);
 
@@ -62,7 +62,7 @@ void
 cluster_write(struct buf *bp, struct cluster_info *ci, u_quad_t filesize)
 {
 	struct vnode *vp;
-	daddr64_t lbn;
+	daddr_t lbn;
 	int maxclen, cursize;
 
 	vp = bp->b_vp;
@@ -169,13 +169,13 @@ cluster_write(struct buf *bp, struct cluster_info *ci, u_quad_t filesize)
  */
 void
 cluster_wbuild(struct vnode *vp, struct buf *last_bp, long size,
-    daddr64_t start_lbn, int len, daddr64_t lbn)
+    daddr_t start_lbn, int len, daddr_t lbn)
 {
 	struct buf *bp;
 
 #ifdef DIAGNOSTIC
 	if (size != vp->v_mount->mnt_stat.f_iosize)
-		panic("cluster_wbuild: size %ld != filesize %ld",
+		panic("cluster_wbuild: size %ld != filesize %u",
 			size, vp->v_mount->mnt_stat.f_iosize);
 #endif
 redo:
@@ -226,7 +226,7 @@ cluster_collectbufs(struct vnode *vp, struct cluster_info *ci,
     struct buf *last_bp)
 {
 	struct cluster_save *buflist;
-	daddr64_t lbn;
+	daddr_t lbn;
 	int i, len;
 
 	len = ci->ci_lastw - ci->ci_cstart + 1;

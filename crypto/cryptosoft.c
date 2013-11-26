@@ -1,4 +1,4 @@
-/*	$OpenBSD: cryptosoft.c,v 1.63 2011/01/11 23:00:21 markus Exp $	*/
+/*	$OpenBSD: cryptosoft.c,v 1.69 2013/08/25 14:26:56 jsing Exp $	*/
 
 /*
  * The author of this code is Angelos D. Keromytis (angelos@cis.upenn.edu)
@@ -446,6 +446,9 @@ swcr_authcompute(struct cryptop *crp, struct cryptodesc *crd,
 	if (err)
 		return err;
 
+	if (crd->crd_flags & CRD_F_ESN)
+		axf->Update(&ctx, crd->crd_esn, 4);
+
 	switch (sw->sw_alg) {
 	case CRYPTO_MD5_HMAC:
 	case CRYPTO_SHA1_HMAC:
@@ -490,7 +493,7 @@ swcr_authcompute(struct cryptop *crp, struct cryptodesc *crd,
  * Apply a combined encryption-authentication transformation
  */
 int
-swcr_combined(struct cryptop *crp)
+swcr_authenc(struct cryptop *crp)
 {
 	uint32_t blkbuf[howmany(EALG_MAX_BLOCK_LEN, sizeof(uint32_t))];
 	u_char *blk = (u_char *)blkbuf;
@@ -498,14 +501,16 @@ swcr_combined(struct cryptop *crp)
 	u_char iv[EALG_MAX_BLOCK_LEN];
 	union authctx ctx;
 	struct cryptodesc *crd, *crda = NULL, *crde = NULL;
-	struct swcr_data *sw, *swa, *swe;
+	struct swcr_data *sw, *swa, *swe = NULL;
 	struct auth_hash *axf = NULL;
 	struct enc_xform *exf = NULL;
 	struct mbuf *m = NULL;
 	struct uio *uio = NULL;
 	caddr_t buf = (caddr_t)crp->crp_buf;
 	uint32_t *blkp;
-	int i, blksz, ivlen, outtype, len;
+	int aadlen, blksz, i, ivlen, outtype, len, iskip, oskip;
+
+	ivlen = blksz = iskip = oskip = 0;
 
 	for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
 		for (sw = swcr_sessions[crp->crp_sid & 0xffffffff];
@@ -576,10 +581,31 @@ swcr_combined(struct cryptop *crp)
 		axf->Reinit(&ctx, iv, ivlen);
 
 	/* Supply MAC with AAD */
-	for (i = 0; i < crda->crd_len; i += blksz) {
-		len = MIN(crda->crd_len - i, blksz);
-		COPYDATA(outtype, buf, crda->crd_skip + i, len, blk);
-		axf->Update(&ctx, blk, len);
+	aadlen = crda->crd_len;
+	/*
+	 * Section 5 of RFC 4106 specifies that AAD construction consists of
+	 * {SPI, ESN, SN} whereas the real packet contains only {SPI, SN}.
+	 * Unfortunately it doesn't follow a good example set in the Section
+	 * 3.3.2.1 of RFC 4303 where upper part of the ESN, located in the
+	 * external (to the packet) memory buffer, is processed by the hash
+	 * function in the end thus allowing to retain simple programming
+	 * interfaces and avoid kludges like the one below.
+	 */
+	if (crda->crd_flags & CRD_F_ESN) {
+		aadlen += 4;
+		/* SPI */
+		COPYDATA(outtype, buf, crda->crd_skip, 4, blk);
+		iskip = 4; /* loop below will start with an offset of 4 */
+		/* ESN */
+		bcopy(crda->crd_esn, blk + 4, 4);
+		oskip = iskip + 4; /* offset output buffer blk by 8 */
+	}
+	for (i = iskip; i < crda->crd_len; i += blksz) {
+		len = MIN(crda->crd_len - i, blksz - oskip);
+		COPYDATA(outtype, buf, crda->crd_skip + i, len, blk + oskip);
+		bzero(blk + len + oskip, blksz - len - oskip);
+		axf->Update(&ctx, blk, blksz);
+		oskip = 0; /* reset initial output offset */
 	}
 
 	if (exf->reinit)
@@ -609,7 +635,7 @@ swcr_combined(struct cryptop *crp)
 			/* length block */
 			bzero(blk, blksz);
 			blkp = (uint32_t *)blk + 1;
-			*blkp = htobe32(crda->crd_len * 8);
+			*blkp = htobe32(aadlen * 8);
 			blkp = (uint32_t *)blk + 3;
 			*blkp = htobe32(crde->crd_len * 8);
 			axf->Update(&ctx, blk, blksz);
@@ -798,7 +824,15 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 			txf = &enc_xform_null;
 			goto enccommon;
 		enccommon:
-			if (txf->setkey(&((*swd)->sw_kschedule), cri->cri_key,
+			if (txf->ctxsize > 0) {
+				(*swd)->sw_kschedule = malloc(txf->ctxsize,
+				    M_CRYPTO_DATA, M_NOWAIT | M_ZERO);
+				if ((*swd)->sw_kschedule == NULL) {
+					swcr_freesession(i);
+					return EINVAL;
+				}
+			}
+			if (txf->setkey((*swd)->sw_kschedule, cri->cri_key,
 			    cri->cri_klen / 8) < 0) {
 				swcr_freesession(i);
 				return EINVAL;
@@ -937,6 +971,9 @@ swcr_newsession(u_int32_t *sid, struct cryptoini *cri)
 			cxf = &comp_algo_deflate;
 			(*swd)->sw_cxf = cxf;
 			break;
+		case CRYPTO_ESN:
+			/* nothing to do */
+			break;
 		default:
 			swcr_freesession(i);
 			return EINVAL;
@@ -984,8 +1021,10 @@ swcr_freesession(u_int64_t tid)
 		case CRYPTO_NULL:
 			txf = swd->sw_exf;
 
-			if (swd->sw_kschedule)
-				txf->zerokey(&(swd->sw_kschedule));
+			if (swd->sw_kschedule) {
+				explicit_bzero(swd->sw_kschedule, txf->ctxsize);
+				free(swd->sw_kschedule, M_CRYPTO_DATA);
+			}
 			break;
 
 		case CRYPTO_MD5_HMAC:
@@ -1127,7 +1166,7 @@ swcr_process(struct cryptop *crp)
 		case CRYPTO_AES_128_GMAC:
 		case CRYPTO_AES_192_GMAC:
 		case CRYPTO_AES_256_GMAC:
-			crp->crp_etype = swcr_combined(crp);
+			crp->crp_etype = swcr_authenc(crp);
 			goto done;
 
 		case CRYPTO_DEFLATE_COMP:
@@ -1192,6 +1231,7 @@ swcr_init(void)
 	algs[CRYPTO_AES_128_GMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_AES_192_GMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
 	algs[CRYPTO_AES_256_GMAC] = CRYPTO_ALG_FLAG_SUPPORTED;
+	algs[CRYPTO_ESN] = CRYPTO_ALG_FLAG_SUPPORTED;
 
 	crypto_register(swcr_id, algs, swcr_newsession,
 	    swcr_freesession, swcr_process);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdivar.h,v 1.43 2012/01/08 13:12:38 miod Exp $ */
+/*	$OpenBSD: usbdivar.h,v 1.53 2013/11/01 12:00:54 mpi Exp $ */
 /*	$NetBSD: usbdivar.h,v 1.70 2002/07/11 21:14:36 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdivar.h,v 1.11 1999/11/17 22:33:51 n_hibma Exp $	*/
 
@@ -32,12 +32,14 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/timeout.h>
+
 /* From usb_mem.h */
 struct usb_dma_block;
-typedef struct {
+struct usb_dma {
 	struct usb_dma_block	*block;
 	u_int			 offs;
-} usb_dma_t;
+};
 
 struct usbd_xfer;
 struct usbd_pipe;
@@ -52,20 +54,17 @@ struct usbd_bus_methods {
 	usbd_status	      (*open_pipe)(struct usbd_pipe *pipe);
 	void		      (*soft_intr)(void *);
 	void		      (*do_poll)(struct usbd_bus *);
-	usbd_status	      (*allocm)(struct usbd_bus *, usb_dma_t *,
-					u_int32_t bufsize);
-	void		      (*freem)(struct usbd_bus *, usb_dma_t *);
 	struct usbd_xfer *    (*allocx)(struct usbd_bus *);
 	void		      (*freex)(struct usbd_bus *, struct usbd_xfer *);
 };
 
 struct usbd_pipe_methods {
-	usbd_status	      (*transfer)(usbd_xfer_handle xfer);
-	usbd_status	      (*start)(usbd_xfer_handle xfer);
-	void		      (*abort)(usbd_xfer_handle xfer);
-	void		      (*close)(usbd_pipe_handle pipe);
-	void		      (*cleartoggle)(usbd_pipe_handle pipe);
-	void		      (*done)(usbd_xfer_handle xfer);
+	usbd_status	      (*transfer)(struct usbd_xfer *xfer);
+	usbd_status	      (*start)(struct usbd_xfer *xfer);
+	void		      (*abort)(struct usbd_xfer *xfer);
+	void		      (*close)(struct usbd_pipe *pipe);
+	void		      (*cleartoggle)(struct usbd_pipe *pipe);
+	void		      (*done)(struct usbd_xfer *xfer);
 };
 
 struct usbd_tt {
@@ -85,15 +84,11 @@ struct usbd_port {
 };
 
 struct usbd_hub {
-	usbd_status	      (*explore)(usbd_device_handle hub);
+	int		      (*explore)(struct usbd_device *hub);
 	void		       *hubsoftc;
 	usb_hub_descriptor_t	hubdesc;
 	struct usbd_port        *ports;
 };
-
-struct usb_softc;
-
-/*****/
 
 struct usbd_bus {
 	/* Filled by HC driver */
@@ -102,12 +97,12 @@ struct usbd_bus {
 	u_int32_t		pipe_size; /* size of a pipe struct */
 	/* Filled by usb driver */
 	struct usbd_device     *root_hub;
-	usbd_device_handle	devices[USB_MAX_DEVICES];
+	struct usbd_device	*devices[USB_MAX_DEVICES];
 	char			use_polling;
 	char			dying;
 	int			flags;
 #define USB_BUS_CONFIG_PENDING	0x01
-	struct usb_softc       *usbctl;
+	struct device	       *usbctl;
 	struct usb_device_stats	stats;
 	int 			intr_context;
 	u_int			no_intrs;
@@ -164,13 +159,12 @@ struct usbd_pipe {
 	struct usbd_interface  *iface;
 	struct usbd_device     *device;
 	struct usbd_endpoint   *endpoint;
-	int			refcnt;
 	char			running;
 	char			aborting;
 	SIMPLEQ_HEAD(, usbd_xfer) queue;
 	LIST_ENTRY(usbd_pipe)	next;
 
-	usbd_xfer_handle	intrxfer; /* used for repeating requests */
+	struct usbd_xfer	*intrxfer; /* used for repeating requests */
 	char			repeat;
 	int			interval;
 
@@ -205,7 +199,7 @@ struct usbd_xfer {
 
 	/* For memory allocation */
 	struct usbd_device     *device;
-	usb_dma_t		dmabuf;
+	struct usb_dma		dmabuf;
 
 	int			rqflags;
 #define URQ_REQUEST	0x01
@@ -216,46 +210,39 @@ struct usbd_xfer {
 
 	void		       *hcpriv; /* private use by the HC driver */
 
+	struct usb_task		abort_task;
 	struct timeout		timeout_handle;
 };
-
-void usbd_init(void);
-void usbd_finish(void);
-void usb_begin_tasks(void);
-void usb_end_tasks(void);
 
 #ifdef USB_DEBUG
 void usbd_dump_iface(struct usbd_interface *iface);
 void usbd_dump_device(struct usbd_device *dev);
 void usbd_dump_endpoint(struct usbd_endpoint *endp);
-void usbd_dump_queue(usbd_pipe_handle pipe);
-void usbd_dump_pipe(usbd_pipe_handle pipe);
+void usbd_dump_queue(struct usbd_pipe *pipe);
+void usbd_dump_pipe(struct usbd_pipe *pipe);
 #endif
 
 /* Routines from usb_subr.c */
 int		usbctlprint(void *, const char *);
-void		usb_delay_ms(usbd_bus_handle, u_int);
-usbd_status	usbd_port_disown_to_1_1(usbd_device_handle dev, 
+void		usb_delay_ms(struct usbd_bus *, u_int);
+usbd_status	usbd_port_disown_to_1_1(struct usbd_device *dev, 
 		    int port, usb_port_status_t *ps);
-usbd_status	usbd_reset_port(usbd_device_handle dev,
+usbd_status	usbd_reset_port(struct usbd_device *dev,
 		    int port, usb_port_status_t *ps);
-usbd_status	usbd_setup_pipe(usbd_device_handle dev,
-		    usbd_interface_handle iface, struct usbd_endpoint *, int,
-		    usbd_pipe_handle *pipe);
-usbd_status	usbd_new_device(struct device *parent, usbd_bus_handle bus,
+usbd_status	usbd_setup_pipe(struct usbd_device *dev,
+		    struct usbd_interface *iface, struct usbd_endpoint *, int,
+		    struct usbd_pipe **pipe);
+usbd_status	usbd_new_device(struct device *parent, struct usbd_bus *bus,
 		    int depth, int lowspeed, int port, struct usbd_port *);
-void		usbd_remove_device(usbd_device_handle, struct usbd_port *);
-int		usbd_printBCD(char *cp, size_t len, int bcd);
-usbd_status	usbd_fill_iface_data(usbd_device_handle dev, int i, int a);
-void		usb_free_device(usbd_device_handle);
+usbd_status	usbd_fill_iface_data(struct usbd_device *dev, int i, int a);
 
-usbd_status	usb_insert_transfer(usbd_xfer_handle xfer);
-void		usb_transfer_complete(usbd_xfer_handle xfer);
+usbd_status	usb_insert_transfer(struct usbd_xfer *xfer);
+void		usb_transfer_complete(struct usbd_xfer *xfer);
 void		usb_disconnect_port(struct usbd_port *up, struct device *);
 
 /* Routines from usb.c */
-void		usb_needs_explore(usbd_device_handle, int);
-void		usb_needs_reattach(usbd_device_handle);
+void		usb_needs_explore(struct usbd_device *, int);
+void		usb_needs_reattach(struct usbd_device *);
 void		usb_schedsoftintr(struct usbd_bus *);
 
 /* Locator stuff. */

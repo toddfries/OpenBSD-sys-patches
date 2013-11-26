@@ -1,4 +1,4 @@
-/*	$OpenBSD: signal.h,v 1.5 2006/01/08 14:20:17 millert Exp $	*/
+/*	$OpenBSD: signal.h,v 1.7 2013/04/01 17:18:20 deraadt Exp $	*/
 /*	$NetBSD: signal.h,v 1.4 1995/01/10 19:01:31 jtc Exp $	*/
 
 /*
@@ -39,7 +39,7 @@
 
 typedef int sig_atomic_t;
 
-#if __BSD_VISIBLE
+#ifdef _KERNEL
 /*
  * Get the "code" values
  */
@@ -55,7 +55,7 @@ typedef int sig_atomic_t;
  * a non-standard exit is performed.
  */
 struct	sigcontext {
-	int	sc_onstack;		/* sigstack state to restore */
+	int	__sc_unused;
 	int	sc_mask;		/* signal mask to restore */
 	int	sc_sp;			/* sp to restore */
 	int	sc_fp;			/* fp to restore */

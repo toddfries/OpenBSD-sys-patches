@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_vnops.c,v 1.70 2011/11/27 21:31:08 guenther Exp $	*/
+/*	$OpenBSD: vfs_vnops.c,v 1.74 2013/09/14 02:28:01 guenther Exp $	*/
 /*	$NetBSD: vfs_vnops.c,v 1.20 1996/02/04 02:18:41 christos Exp $	*/
 
 /*
@@ -45,6 +45,8 @@
 #include <sys/stat.h>
 #include <sys/buf.h>
 #include <sys/proc.h>
+#include <sys/resourcevar.h>
+#include <sys/signalvar.h>
 #include <sys/mount.h>
 #include <sys/namei.h>
 #include <sys/vnode.h>
@@ -221,6 +223,39 @@ vn_writechk(struct vnode *vp)
 
 	return (0);
 }
+
+/*
+ * Check whether a write operation would exceed the file size rlimit
+ * for the process, if one should be applied for this operation.
+ * If a partial write should take place, the uio is adjusted and the
+ * amount by which the request would have exceeded the limit is returned
+ * via the 'overrun' argument.
+ */
+int
+vn_fsizechk(struct vnode *vp, struct uio *uio, int ioflag, ssize_t *overrun)
+{
+	struct proc *p = uio->uio_procp;
+
+	*overrun = 0;
+	if (vp->v_type == VREG && p != NULL && !(ioflag & IO_NOLIMIT)) {
+		rlim_t limit = p->p_rlimit[RLIMIT_FSIZE].rlim_cur;
+
+		/* if already at or over the limit, send the signal and fail */
+		if (uio->uio_offset >= limit) {
+			psignal(p, SIGXFSZ);
+			return (EFBIG);
+		}
+
+		/* otherwise, clamp the write to stay under the limit */
+		if (uio->uio_resid > limit - uio->uio_offset) {
+			*overrun = uio->uio_resid - (limit - uio->uio_offset);
+			uio->uio_resid = limit - uio->uio_offset;
+		}
+	}
+
+	return (0);
+}
+
 
 /*
  * Mark a vnode as being the text image of a running process.
@@ -447,10 +482,11 @@ vn_ioctl(struct file *fp, u_long com, caddr_t data, struct proc *p)
 		error = VOP_IOCTL(vp, com, data, fp->f_flag, p->p_ucred, p);
 		if (error == 0 && com == TIOCSCTTY) {
 			struct session *s = p->p_p->ps_session;
-			if (s->s_ttyvp)
-				vrele(s->s_ttyvp);
+			struct vnode *ovp = s->s_ttyvp;
 			s->s_ttyvp = vp;
 			vref(vp);
+			if (ovp)
+				vrele(ovp);
 		}
 		return (error);
 	}
@@ -500,7 +536,7 @@ vn_closefile(struct file *fp, struct proc *p)
 	struct vnode *vp = fp->f_data;
 	struct flock lf;
 	
-	if ((fp->f_flag & FHASLOCK)) {
+	if ((fp->f_iflags & FIF_HASLOCK)) {
 		lf.l_whence = SEEK_SET;
 		lf.l_start = 0;
 		lf.l_len = 0;

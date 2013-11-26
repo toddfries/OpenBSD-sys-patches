@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_run.c,v 1.89 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: if_run.c,v 1.95 2013/09/30 05:18:56 jsg Exp $	*/
 
 /*-
  * Copyright (c) 2008-2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -48,7 +48,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -97,7 +96,9 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(ACCTON,		RT3070_3),
 	USB_ID(ACCTON,		RT3070_4),
 	USB_ID(ACCTON,		RT3070_5),
+	USB_ID(ACCTON,		RT3070_6),
 	USB_ID(AIRTIES,		RT3070),
+	USB_ID(AIRTIES,		RT3070_2),
 	USB_ID(ALLWIN,		RT2070),
 	USB_ID(ALLWIN,		RT2770),
 	USB_ID(ALLWIN,		RT2870),
@@ -115,21 +116,28 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(ASUS,		RT2870_3),
 	USB_ID(ASUS,		RT2870_4),
 	USB_ID(ASUS,		RT2870_5),
-	USB_ID(ASUS,		RT3070),
 	USB_ID(ASUS,		RT3070_1),
+	USB_ID(ASUS,		USBN13),
+	USB_ID(ASUS,		USBN53),
 	USB_ID(ASUS2,		USBN11),
 	USB_ID(AZUREWAVE,	RT2870_1),
 	USB_ID(AZUREWAVE,	RT2870_2),
 	USB_ID(AZUREWAVE,	RT3070_1),
 	USB_ID(AZUREWAVE,	RT3070_2),
 	USB_ID(AZUREWAVE,	RT3070_3),
+	USB_ID(AZUREWAVE,	RT3070_4),
+	USB_ID(AZUREWAVE,	RT3070_5),
 	USB_ID(BELKIN,		F5D8053V3),
 	USB_ID(BELKIN,		F5D8055),
 	USB_ID(BELKIN,		F5D8055V2),
 	USB_ID(BELKIN,		F6D4050V1),
 	USB_ID(BELKIN,		F6D4050V2),
+	USB_ID(BELKIN,		F7D1101V2),
 	USB_ID(BELKIN,		RT2870_1),
 	USB_ID(BELKIN,		RT2870_2),
+	USB_ID(BEWAN,		RT3070),
+	USB_ID(CISCOLINKSYS,	AE1000),
+	USB_ID(CISCOLINKSYS,	AM10),
 	USB_ID(CISCOLINKSYS2,	RT3070),
 	USB_ID(CISCOLINKSYS3,	RT3070),
 	USB_ID(CONCEPTRONIC2,	RT2870_1),
@@ -150,6 +158,7 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(COREGA,		RT2870_3),
 	USB_ID(COREGA,		RT3070),
 	USB_ID(CYBERTAN,	RT2870),
+	USB_ID(DLINK,		DWA127),
 	USB_ID(DLINK,		RT2870),
 	USB_ID(DLINK,		RT3072),
 	USB_ID(DLINK2,		DWA130),
@@ -162,8 +171,10 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(DLINK2,		RT3070_5),
 	USB_ID(DLINK2,		RT3072),
 	USB_ID(DLINK2,		RT3072_1),
+	USB_ID(DVICO,		RT3070),
 	USB_ID(EDIMAX,		EW7717),
 	USB_ID(EDIMAX,		EW7718),
+	USB_ID(EDIMAX,		EW7722UTN),
 	USB_ID(EDIMAX,		RT2870_1),
 	USB_ID(ENCORE,		RT3070_1),
 	USB_ID(ENCORE,		RT3070_2),
@@ -190,17 +201,21 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(LINKSYS4,	WUSB54GCV3),
 	USB_ID(LINKSYS4,	WUSB600N),
 	USB_ID(LINKSYS4,	WUSB600NV2),
+	USB_ID(LOGITEC,		LANW150NU2),
+	USB_ID(LOGITEC,		LANW300NU2),
+	USB_ID(LOGITEC,		LANW300NU2S),
 	USB_ID(LOGITEC,		RT2870_1),
 	USB_ID(LOGITEC,		RT2870_2),
 	USB_ID(LOGITEC,		RT2870_3),
-	USB_ID(LOGITEC,		RT3020),
 	USB_ID(MELCO,		RT2870_1),
 	USB_ID(MELCO,		RT2870_2),
 	USB_ID(MELCO,		WLIUCAG300N),
 	USB_ID(MELCO,		WLIUCG300N),
+	USB_ID(MELCO,		WLIUCG301N),
 	USB_ID(MELCO,		WLIUCGN),
 	USB_ID(MELCO,		WLIUCGNHP),
 	USB_ID(MELCO,		WLIUCGNM),
+	USB_ID(MELCO,		WLIUCGNM2),
 	USB_ID(MOTOROLA4,	RT2770),
 	USB_ID(MOTOROLA4,	RT3070),
 	USB_ID(MSI,		RT3070_1),
@@ -214,12 +229,18 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(MSI,		RT3070_9),
 	USB_ID(MSI,		RT3070_10),
 	USB_ID(MSI,		RT3070_11),
+	USB_ID(MSI,		RT3070_12),
+	USB_ID(MSI,		RT3070_13),
+	USB_ID(MSI,		RT3070_14),
+	USB_ID(MSI,		RT3070_15),
+	USB_ID(OVISLINK,	RT3071),
 	USB_ID(OVISLINK,	RT3072),
 	USB_ID(PARA,		RT3070),
 	USB_ID(PEGATRON,	RT2870),
 	USB_ID(PEGATRON,	RT3070),
 	USB_ID(PEGATRON,	RT3070_2),
 	USB_ID(PEGATRON,	RT3070_3),
+	USB_ID(PEGATRON,	RT3072),
 	USB_ID(PHILIPS,		RT2870),
 	USB_ID(PLANEX2,		GWUS300MINIS),
 	USB_ID(PLANEX2,		GWUSMICRO300),
@@ -252,8 +273,10 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(SITECOMEU,	RT2870_1),
 	USB_ID(SITECOMEU,	RT2870_2),
 	USB_ID(SITECOMEU,	RT2870_3),
+	USB_ID(SITECOMEU,	RT3070_1),
 	USB_ID(SITECOMEU,	RT3072_3),
 	USB_ID(SITECOMEU,	RT3072_4),
+	USB_ID(SITECOMEU,	RT3072_5),
 	USB_ID(SITECOMEU,	WL302),
 	USB_ID(SITECOMEU,	WL315),
 	USB_ID(SITECOMEU,	WL321),
@@ -264,13 +287,17 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(SITECOMEU,	WL345),
 	USB_ID(SITECOMEU,	WL349V4),
 	USB_ID(SITECOMEU,	WL608),
+	USB_ID(SITECOMEU,	WLA4000),
+	USB_ID(SITECOMEU,	WLA5000),
 	USB_ID(SPARKLAN,	RT2870_1),
+	USB_ID(SPARKLAN,	RT2870_2),
 	USB_ID(SPARKLAN,	RT3070),
 	USB_ID(SWEEX2,		LW153),
 	USB_ID(SWEEX2,		LW303),
 	USB_ID(SWEEX2,		LW313),
 	USB_ID(TOSHIBA,		RT3070),
 	USB_ID(UMEDIA,		RT2870_1),
+	USB_ID(UMEDIA,		TEW645UB),
 	USB_ID(ZCOM,		RT2870_1),
 	USB_ID(ZCOM,		RT2870_2),
 	USB_ID(ZINWELL,		RT2870_1),
@@ -278,8 +305,11 @@ static const struct usb_devno run_devs[] = {
 	USB_ID(ZINWELL,		RT3070),
 	USB_ID(ZINWELL,		RT3072_1),
 	USB_ID(ZINWELL,		RT3072_2),
+	USB_ID(ZYXEL,		NWD2105),
+	USB_ID(ZYXEL,		NWD211AN),
 	USB_ID(ZYXEL,		RT2870_1),
-	USB_ID(ZYXEL,		RT2870_2)
+	USB_ID(ZYXEL,		RT2870_2),
+	USB_ID(ZYXEL,		RT3070)
 };
 
 int		run_match(struct device *, void *, void *);
@@ -331,8 +361,8 @@ void		run_calibrate_cb(struct run_softc *, void *);
 void		run_newassoc(struct ieee80211com *, struct ieee80211_node *,
 		    int);
 void		run_rx_frame(struct run_softc *, uint8_t *, int);
-void		run_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void		run_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void		run_rxeof(struct usbd_xfer *, void *, usbd_status);
+void		run_txeof(struct usbd_xfer *, void *, usbd_status);
 int		run_tx(struct run_softc *, struct mbuf *,
 		    struct ieee80211_node *);
 void		run_start(struct ifnet *);
@@ -1939,7 +1969,7 @@ run_rx_frame(struct run_softc *sc, uint8_t *buf, int dmalen)
 
 	if (flags & RT2860_RX_L2PAD) {
 		u_int hdrlen = ieee80211_get_hdrlen(wh);
-		ovbcopy(wh, (caddr_t)wh + 2, hdrlen);
+		memmove((caddr_t)wh + 2, wh, hdrlen);
 		wh = (struct ieee80211_frame *)((caddr_t)wh + 2);
 	}
 
@@ -2024,7 +2054,7 @@ run_rx_frame(struct run_softc *sc, uint8_t *buf, int dmalen)
 }
 
 void
-run_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+run_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct run_rx_data *data = priv;
 	struct run_softc *sc = data->sc;
@@ -2074,7 +2104,7 @@ skip:	/* setup a new transfer */
 }
 
 void
-run_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+run_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct run_tx_data *data = priv;
 	struct run_softc *sc = data->sc;
@@ -2124,6 +2154,7 @@ run_tx(struct run_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		tid = qos & IEEE80211_QOS_TID;
 		qid = ieee80211_up_to_ac(ic, tid);
 	} else {
+		qos = 0;
 		tid = 0;
 		qid = EDCA_AC_BE;
 	}

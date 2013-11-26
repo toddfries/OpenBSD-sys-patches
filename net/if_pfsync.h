@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pfsync.h,v 1.44 2010/11/29 05:31:38 dlg Exp $	*/
+/*	$OpenBSD: if_pfsync.h,v 1.47 2013/10/24 11:14:33 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2001 Michael Shalayeff
@@ -59,11 +59,12 @@
 #define PFSYNC_ACT_INS_F	8	/* insert fragment */
 #define PFSYNC_ACT_DEL_F	9	/* delete fragments */
 #define PFSYNC_ACT_BUS		10	/* bulk update status */
-#define PFSYNC_ACT_TDB		11	/* TDB replay counter update */
+#define PFSYNC_ACT_OTDB		11	/* old TDB replay counter update */
 #define PFSYNC_ACT_EOF		12	/* end of frame - DEPRECATED */
 #define PFSYNC_ACT_INS		13	/* insert state */
 #define PFSYNC_ACT_UPD		14	/* update state */
-#define PFSYNC_ACT_MAX		15
+#define PFSYNC_ACT_TDB		15	/* TDB replay counter update */
+#define PFSYNC_ACT_MAX		16
 
 #define PFSYNC_ACTIONS		"CLR ST",		\
 				"INS ST OLD",		\
@@ -76,10 +77,11 @@
 				"INS FR",		\
 				"DEL FR",		\
 				"BULK UPD STAT",	\
-				"TDB UPD",		\
+				"UPD TDB OLD",		\
 				"EOF",			\
 				"INS ST",		\
-				"UPD ST"
+				"UPD ST",		\
+				"UPD TDB"
 
 /*
  * A pfsync frame is built from a header followed by several sections which
@@ -212,7 +214,7 @@ struct pfsync_bus {
 struct pfsync_tdb {
 	u_int32_t			spi;
 	union sockaddr_union		dst;
-	u_int32_t			rpl;
+	u_int64_t			rpl;
 	u_int64_t			cur_bytes;
 	u_int8_t			sproto;
 	u_int8_t			updates;
@@ -308,6 +310,6 @@ int			pfsync_defer(struct pf_state *, struct mbuf *);
 
 int			pfsync_up(void);
 int			pfsync_state_in_use(struct pf_state *);
-#endif
+#endif /* _KERNEL */
 
 #endif /* _NET_IF_PFSYNC_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.101 2011/11/16 20:50:18 deraadt Exp $	*/
+/*	$OpenBSD: trap.c,v 1.109 2013/11/03 13:52:44 pirofti Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 /*-
@@ -48,13 +48,8 @@
 #include <sys/acct.h>
 #include <sys/kernel.h>
 #include <sys/signal.h>
-#ifdef KTRACE
-#include <sys/ktrace.h>
-#endif
 #include <sys/syscall.h>
-
-#include "systrace.h"
-#include <dev/systrace.h>
+#include <sys/syscall_mi.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -74,16 +69,14 @@
 #include <sys/exec.h>
 #ifdef COMPAT_LINUX
 #include <compat/linux/linux_syscall.h>
-extern struct emul emul_linux_aout, emul_linux_elf;
-#endif
-#ifdef COMPAT_AOUT
-extern struct emul emul_aout;
+extern struct emul emul_linux_elf;
 #endif
 #ifdef KVM86
 #include <machine/kvm86.h>
 #define KVM86MODE (kvm86_incall)
 #endif
 
+#include "isa.h"
 #include "npx.h"
 
 void trap(struct trapframe *);
@@ -411,6 +404,15 @@ trap(struct trapframe *frame)
 #endif
 		cr2 = rcr2();
 		KERNEL_LOCK();
+		/* This will only trigger if SMEP is enabled */
+		if (cr2 <= VM_MAXUSER_ADDRESS && frame->tf_err & PGEX_I)
+			panic("attempt to execute user address %p "
+			    "in supervisor mode", (void *)cr2);
+		/* This will only trigger if SMAP is enabled */
+		if (pcb->pcb_onfault == NULL && cr2 <= VM_MAXUSER_ADDRESS &&
+		    frame->tf_err & PGEX_P)
+			panic("attempt to access user address %p "
+			    "in supervisor mode", (void *)cr2);
 		goto faultcommon;
 
 	case T_PAGEFLT|T_USER: {	/* page fault */
@@ -541,7 +543,7 @@ syscall(struct trapframe *frame)
 	caddr_t params;
 	struct sysent *callp;
 	struct proc *p;
-	int orig_error, error, opc, nsys, lock;
+	int error, opc, nsys;
 	register_t code, args[8], rval[2];
 #ifdef DIAGNOSTIC
 	int ocpl = lapic_tpr;
@@ -578,8 +580,7 @@ syscall(struct trapframe *frame)
 	case SYS_syscall:
 #ifdef COMPAT_LINUX
 		/* Linux has a special system setup call as number 0 */
-		if (p->p_emul == &emul_linux_aout ||
-		    p->p_emul == &emul_linux_elf)
+		if (p->p_emul == &emul_linux_elf)
 			break;
 #endif
 		/*
@@ -593,11 +594,7 @@ syscall(struct trapframe *frame)
 		 * Like syscall, but code is a quad, so as to maintain
 		 * quad alignment for the rest of the arguments.
 		 */
-		if (callp != sysent
-#ifdef COMPAT_AOUT
-		    && p->p_emul != &emul_aout
-#endif
-		    )
+		if (callp != sysent)
 			break;
 		copyin(params + _QUAD_LOWWORD * sizeof(int), &code, sizeof(int));
 		params += sizeof(quad_t);
@@ -612,7 +609,7 @@ syscall(struct trapframe *frame)
 	argsize = callp->sy_argsize;
 #ifdef COMPAT_LINUX
 	/* XXX extra if() for every emul type.. */
-	if (p->p_emul == &emul_linux_aout || p->p_emul == &emul_linux_elf) {
+	if (p->p_emul == &emul_linux_elf) {
 		/*
 		 * Linux passes the args in ebx, ecx, edx, esi, edi, ebp, in
 		 * increasing order.
@@ -637,52 +634,16 @@ syscall(struct trapframe *frame)
 			    argsize);
 			break;
 		}
-		error = 0;
 	}
 	else
 #endif
-	if (argsize)
-		error = copyin(params, (caddr_t)args, argsize);
-	else
-		error = 0;
-	orig_error = error;
-
-	lock = !(callp->sy_flags & SY_NOLOCK);	
-
-#ifdef SYSCALL_DEBUG
-	KERNEL_LOCK();
-	scdebug_call(p, code, args);
-	KERNEL_UNLOCK();
-#endif
-
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL)) {
-		KERNEL_LOCK();
-		ktrsyscall(p, code, argsize, args);
-		KERNEL_UNLOCK();
-	}
-#endif
-
-	if (error) {
+	if (argsize && (error = copyin(params, args, argsize)))
 		goto bad;
-	}
+
 	rval[0] = 0;
 	rval[1] = frame->tf_edx;
 
-#if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE)) {
-		KERNEL_LOCK();
-		orig_error = error = systrace_redirect(code, p, args, rval);
-		KERNEL_UNLOCK();
-	} else
-#endif
-	{
-		if (lock)
-			KERNEL_LOCK();
-			orig_error = error = (*callp->sy_call)(p, args, rval);
-		if (lock)
-			KERNEL_UNLOCK();
-	}
+	error = mi_syscall(p, code, callp, args, rval);
 
 	switch (error) {
 	case 0:
@@ -703,26 +664,16 @@ syscall(struct trapframe *frame)
 		break;
 	default:
 	bad:
-		if (p->p_emul->e_errno)
-			error = p->p_emul->e_errno[error];
-		frame->tf_eax = error;
+		if (p->p_emul->e_errno && error >= 0 && error <= ELAST)
+			frame->tf_eax = p->p_emul->e_errno[error];
+		else
+			frame->tf_eax = error;
 		frame->tf_eflags |= PSL_C;	/* carry bit */
 		break;
 	}
 
-#ifdef SYSCALL_DEBUG
-	KERNEL_LOCK();
-	scdebug_ret(p, code, orig_error, rval);
-	KERNEL_UNLOCK();
-#endif
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_LOCK();
-		ktrsysret(p, code, orig_error, rval[0]);
-		KERNEL_UNLOCK();
-	}
-#endif
+	mi_syscall_return(p, code, error, rval);
+
 #ifdef DIAGNOSTIC
 	if (lapic_tpr != ocpl) {
 		printf("WARNING: SPL (0x%x) NOT LOWERED ON "
@@ -744,15 +695,5 @@ child_return(void *arg)
 
 	KERNEL_UNLOCK();
 
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_LOCK();
-		ktrsysret(p,
-		    (p->p_flag & P_THREAD) ? SYS_rfork :
-		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
-		    0, 0);
-		KERNEL_UNLOCK();
-	}
-#endif
+	mi_child_return(p);
 }

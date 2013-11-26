@@ -1,4 +1,4 @@
-/*	$OpenBSD: mscp_tape.c,v 1.12 2011/04/06 18:12:47 miod Exp $ */
+/*	$OpenBSD: mscp_tape.c,v 1.16 2013/06/11 16:42:13 deraadt Exp $ */
 /*	$NetBSD: mscp_tape.c,v 1.16 2001/11/13 07:38:28 lukem Exp $ */
 /*
  * Copyright (c) 1996 Ludd, University of Lule}, Sweden.
@@ -40,8 +40,6 @@
  * TODO
  *	Write status handling code.
  */
-
-#include <sys/cdefs.h>
 
 #include <sys/param.h>
 #include <sys/device.h>
@@ -169,7 +167,7 @@ mt_putonline(mt)
 	struct	mscp_softc *mi = (struct mscp_softc *)mt->mt_dev.dv_parent;
 	volatile int i;
 
-	(volatile int)mt->mt_state = MT_OFFLINE;
+	mt->mt_state = MT_OFFLINE;
 	mp = mscp_getcp(mi, MSCP_WAIT);
 	mp->mscp_opcode = M_OP_ONLINE;
 	mp->mscp_unit = mt->mt_hwunit;
@@ -434,9 +432,7 @@ mtioctl(dev, cmd, data, flag, p)
 	struct mt_softc *mt = mt_cd.cd_devs[unit];
 	struct	mtop *mtop;
 	struct	mtget *mtget;
-	int error = 0, count;
-
-	count = mtop->mt_count;
+	int error = 0;
 
 	switch (cmd) {
 
@@ -468,7 +464,7 @@ mtioctl(dev, cmd, data, flag, p)
 int
 mtdump(dev, blkno, va, size)
 	dev_t	dev;
-	daddr64_t blkno;
+	daddr_t blkno;
 	caddr_t va;
 	size_t	size;
 {

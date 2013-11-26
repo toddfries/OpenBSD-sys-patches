@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci_cardbus.c,v 1.15 2010/03/27 21:40:13 jsg Exp $ */
+/*	$OpenBSD: ehci_cardbus.c,v 1.17 2013/04/15 09:23:00 mglocker Exp $ */
 /*	$NetBSD: ehci_cardbus.c,v 1.6.6.3 2004/09/21 13:27:25 skrll Exp $	*/
 
 /*
@@ -64,7 +64,7 @@ void	ehci_cardbus_attach(struct device *, struct device *, void *);
 int	ehci_cardbus_detach(struct device *, int);
 
 struct ehci_cardbus_softc {
-	ehci_softc_t		sc;
+	struct ehci_softc	sc;
 	cardbus_chipset_tag_t	sc_cc;
 	cardbus_function_tag_t	sc_cf;
 	cardbus_devfunc_t	sc_ct;
@@ -73,7 +73,7 @@ struct ehci_cardbus_softc {
 
 struct cfattach ehci_cardbus_ca = {
 	sizeof(struct ehci_cardbus_softc), ehci_cardbus_match,
-	    ehci_cardbus_attach, ehci_cardbus_detach, ehci_activate
+	ehci_cardbus_attach, ehci_cardbus_detach, ehci_activate
 };
 
 #define CARDBUS_CBMEM PCI_CBMEM
@@ -161,8 +161,6 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
-	sc->sc.sc_shutdownhook = shutdownhook_establish(ehci_shutdown, &sc->sc);
-
 	/* Attach usb device. */
 	sc->sc.sc_child = config_found((void *)sc, &sc->sc.sc_bus,
 				       usbctlprint);
@@ -189,4 +187,3 @@ ehci_cardbus_detach(struct device *self, int flags)
 	}
 	return (0);
 }
-

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.5 2011/07/08 08:49:53 drahn Exp $
+#	$OpenBSD: Makefile,v 1.9 2013/10/27 04:49:54 deraadt Exp $
 #       $NetBSD: Makefile,v 1.1 1996/09/30 16:35:05 ws Exp $
 
 S=      ${.CURDIR}/../../../..
@@ -6,16 +6,17 @@ R=              ..
 .PATH:          $(.CURDIR)/$(R)
 RELOC=		E00000				
 ENTRY=		_entry
+NOMAN=
 PROG=           boot.mac
 SRCS=           Locore.c main.c ofdev.c net.c netif_of.c alloc.c cache.c hfs.c
 SRCS+=          boot.c conf.c cmd.c vars.c ctime.c strtol.c
 
-NOMAN=
 INSTALL_STRIP=
 BINDIR=         /usr/mdec
 OBJCOPY?=	objcopy
 OBJCOPY_ARGS=	-O aixcoff-rs6000 -R .comment -R .note
-LDFLAGS=	-X -Ttext ${RELOC} -e $(ENTRY) -T ${.CURDIR}/elf32_powerpc_merge.x -Bstatic
+LDFLAGS=	-nopie -X -Ttext ${RELOC} -e $(ENTRY)
+LDFLAGS+=	-T ${.CURDIR}/elf32_powerpc_merge.x -Bstatic
 
 .PATH:          ${S}/stand/boot
 .PATH:          ${S}/lib/libsa
@@ -27,6 +28,7 @@ SRCS+=		moddi3.c
 CPPFLAGS+=	-I. -I${.CURDIR}/../../.. -I${.CURDIR}/../../../..
 CPPFLAGS+=	-DRELOC=0x${RELOC} -DCONSPEED=57600
 CPPFLAGS+=	-DXCOFF_GLUE		# for booting PCI Powermacs
+CFLAGS+=	-fno-pie
 
 LIBS!=          cd $(.CURDIR)/$(R); $(MAKE) libdep
 CLEANFILES=	fixcoff

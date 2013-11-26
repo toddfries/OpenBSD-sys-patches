@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnx.c,v 1.95 2011/06/22 16:44:27 tedu Exp $	*/
+/*	$OpenBSD: if_bnx.c,v 1.103 2013/10/30 04:08:07 dlg Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -29,11 +29,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
-
-#if 0
-#include <sys/cdefs.h>
-__FBSDID("$FreeBSD: src/sys/dev/bce/if_bce.c,v 1.3 2006/04/13 14:12:26 ru Exp $");
-#endif
 
 /*
  * The following controllers are supported by this driver:
@@ -363,11 +358,12 @@ int	bnx_get_buf(struct bnx_softc *, u_int16_t *, u_int16_t *, u_int32_t *);
 
 int	bnx_init_tx_chain(struct bnx_softc *);
 void	bnx_init_tx_context(struct bnx_softc *);
-void	bnx_fill_rx_chain(struct bnx_softc *);
+int	bnx_fill_rx_chain(struct bnx_softc *);
 void	bnx_init_rx_context(struct bnx_softc *);
 int	bnx_init_rx_chain(struct bnx_softc *);
 void	bnx_free_rx_chain(struct bnx_softc *);
 void	bnx_free_tx_chain(struct bnx_softc *);
+void	bnx_rxrefill(void *);
 
 int	bnx_tx_encap(struct bnx_softc *, struct mbuf *);
 void	bnx_start(struct ifnet *);
@@ -748,16 +744,18 @@ bnx_attach(struct device *parent, struct device *self, void *aux)
 	if (val & BNX_PCICFG_MISC_STATUS_32BIT_DET)
 		sc->bnx_flags |= BNX_PCI_32BIT_FLAG;
 
-	printf(": %s\n", intrstr);
-
 	/* Hookup IRQ last. */
 	sc->bnx_intrhand = pci_intr_establish(pc, sc->bnx_ih, IPL_NET,
 	    bnx_intr, sc, sc->bnx_dev.dv_xname);
 	if (sc->bnx_intrhand == NULL) {
-		printf("%s: couldn't establish interrupt\n",
-		    sc->bnx_dev.dv_xname);
+		printf(": couldn't establish interrupt");
+		if (intrstr != NULL)
+			printf(" at %s", intrstr);
+		printf("\n");
 		goto bnx_attach_fail;
 	}
+
+	printf(": %s\n", intrstr);
 
 	mountroothook_establish(bnx_attachhook, sc);
 	return;
@@ -886,11 +884,8 @@ bnx_attachhook(void *xsc)
 	bcopy(sc->eaddr, sc->arpcom.ac_enaddr, ETHER_ADDR_LEN);
 	bcopy(sc->bnx_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
-	ifp->if_capabilities = IFCAP_VLAN_MTU;
-
-#ifdef BNX_CSUM
-	ifp->if_capabilities |= IFCAP_CSUM_TCPv4 | IFCAP_CSUM_UDPv4;
-#endif	
+	ifp->if_capabilities = IFCAP_VLAN_MTU | IFCAP_CSUM_TCPv4 |
+	    IFCAP_CSUM_UDPv4;
 
 #if NVLAN > 0
 	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING;
@@ -912,10 +907,11 @@ bnx_attachhook(void *xsc)
 	/* Look for our PHY. */
 	ifmedia_init(&sc->bnx_mii.mii_media, 0, bnx_ifmedia_upd,
 	    bnx_ifmedia_sts);
+	mii_flags |= MIIF_DOPAUSE;
 	if (sc->bnx_phy_flags & BNX_PHY_SERDES_FLAG)
 		mii_flags |= MIIF_HAVEFIBER;
 	mii_attach(&sc->bnx_dev, &sc->bnx_mii, 0xffffffff,
-	    MII_PHY_ANY, MII_OFFSET_ANY, mii_flags);
+	    sc->bnx_phy_addr, MII_OFFSET_ANY, mii_flags);
 
 	if (LIST_FIRST(&sc->bnx_mii.mii_phys) == NULL) {
 		printf("%s: no PHY found!\n", sc->bnx_dev.dv_xname);
@@ -933,6 +929,7 @@ bnx_attachhook(void *xsc)
 	ether_ifattach(ifp);
 
 	timeout_set(&sc->bnx_timeout, bnx_tick, sc);
+	timeout_set(&sc->bnx_rxrefill, bnx_rxrefill, sc);
 
 	/* Print some important debugging info. */
 	DBRUN(BNX_INFO, bnx_dump_driver_state(sc));
@@ -1100,13 +1097,6 @@ bnx_miibus_read_reg(struct device *dev, int phy, int reg)
 	u_int32_t		val;
 	int			i;
 
-	/* Make sure we are accessing the correct PHY address. */
-	if (phy != sc->bnx_phy_addr) {
-		DBPRINT(sc, BNX_VERBOSE,
-		    "Invalid PHY address %d for PHY read!\n", phy);
-		return(0);
-	}
-
 	/*
 	 * The BCM5709S PHY is an IEEE Clause 45 PHY
 	 * with special mappings to work with IEEE
@@ -1185,13 +1175,6 @@ bnx_miibus_write_reg(struct device *dev, int phy, int reg, int val)
 	u_int32_t		val1;
 	int			i;
 
-	/* Make sure we are accessing the correct PHY address. */
-	if (phy != sc->bnx_phy_addr) {
-		DBPRINT(sc, BNX_VERBOSE, "Invalid PHY address %d for PHY write!\n",
-		    phy);
-		return;
-	}
-
 	DBPRINT(sc, BNX_EXCESSIVE, "%s(): phy = %d, reg = 0x%04X, "
 	    "val = 0x%04X\n", __FUNCTION__,
 	    phy, (u_int16_t) reg & 0xffff, (u_int16_t) val & 0xffff);
@@ -1261,12 +1244,22 @@ bnx_miibus_statchg(struct device *dev)
 {
 	struct bnx_softc	*sc = (struct bnx_softc *)dev;
 	struct mii_data		*mii = &sc->bnx_mii;
+	u_int32_t		rx_mode = sc->rx_mode;
 	int			val;
 
 	val = REG_RD(sc, BNX_EMAC_MODE);
 	val &= ~(BNX_EMAC_MODE_PORT | BNX_EMAC_MODE_HALF_DUPLEX | 
 		BNX_EMAC_MODE_MAC_LOOP | BNX_EMAC_MODE_FORCE_LINK | 
 		BNX_EMAC_MODE_25G);
+
+	/*
+	 * Get flow control negotiation result.
+	 */
+	if (IFM_SUBTYPE(mii->mii_media.ifm_cur->ifm_media) == IFM_AUTO &&
+	    (mii->mii_media_active & IFM_ETH_FMASK) != sc->bnx_flowflags) {
+		sc->bnx_flowflags = mii->mii_media_active & IFM_ETH_FMASK;
+		mii->mii_media_active &= ~IFM_ETH_FMASK;
+	}
 
 	/* Set MII or GMII interface based on the speed
 	 * negotiated by the PHY.
@@ -1307,6 +1300,34 @@ bnx_miibus_statchg(struct device *dev)
 		DBPRINT(sc, BNX_INFO, "Setting Full-Duplex interface.\n");
 
 	REG_WR(sc, BNX_EMAC_MODE, val);
+
+	/*
+	 * 802.3x flow control
+	 */
+	if (sc->bnx_flowflags & IFM_ETH_RXPAUSE) {
+		DBPRINT(sc, BNX_INFO, "Enabling RX mode flow control.\n");
+		rx_mode |= BNX_EMAC_RX_MODE_FLOW_EN;
+	} else {
+		DBPRINT(sc, BNX_INFO, "Disabling RX mode flow control.\n");
+		rx_mode &= ~BNX_EMAC_RX_MODE_FLOW_EN;
+	}
+
+	if (sc->bnx_flowflags & IFM_ETH_TXPAUSE) {
+		DBPRINT(sc, BNX_INFO, "Enabling TX mode flow control.\n");
+		BNX_SETBIT(sc, BNX_EMAC_TX_MODE, BNX_EMAC_TX_MODE_FLOW_EN);
+	} else {
+		DBPRINT(sc, BNX_INFO, "Disabling TX mode flow control.\n");
+		BNX_CLRBIT(sc, BNX_EMAC_TX_MODE, BNX_EMAC_TX_MODE_FLOW_EN);
+	}
+
+	/* Only make changes if the recive mode has actually changed. */
+	if (rx_mode != sc->rx_mode) {
+		DBPRINT(sc, BNX_VERBOSE, "Enabling new receive mode: 0x%08X\n",
+		    rx_mode);
+
+		sc->rx_mode = rx_mode;
+		REG_WR(sc, BNX_EMAC_RX_MODE, rx_mode);
+	}
 }
 
 /****************************************************************************/
@@ -2575,6 +2596,7 @@ bnx_dma_alloc(struct bnx_softc *sc)
 	TAILQ_INIT(&sc->tx_used_pkts);
 	sc->tx_pkt_count = 0;
 	mtx_init(&sc->tx_pkt_mtx, IPL_NET);
+	task_set(&sc->tx_alloc_task, bnx_alloc_pkts, sc, NULL);
 
 	/*
 	 * Allocate DMA memory for the Rx buffer descriptor chain,
@@ -3233,6 +3255,7 @@ bnx_stop(struct bnx_softc *sc)
 	DBPRINT(sc, BNX_VERBOSE_RESET, "Entering %s()\n", __FUNCTION__);
 
 	timeout_del(&sc->bnx_timeout);
+	timeout_del(&sc->bnx_rxrefill);
 
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
@@ -3746,10 +3769,6 @@ bnx_alloc_pkts(void *xsc, void *arg)
 		mtx_leave(&sc->tx_pkt_mtx);
 	}
 
-	mtx_enter(&sc->tx_pkt_mtx);
-	CLR(sc->bnx_flags, BNX_ALLOC_PKTS_FLAG);
-	mtx_leave(&sc->tx_pkt_mtx);
-
 	s = splnet();
 	if (!IFQ_IS_EMPTY(&ifp->if_snd))
 		bnx_start(ifp);
@@ -3941,6 +3960,13 @@ bnx_init_rx_context(struct bnx_softc *sc)
 	val = BNX_L2CTX_CTX_TYPE_CTX_BD_CHN_TYPE_VALUE |
 		BNX_L2CTX_CTX_TYPE_SIZE_L2 | (0x02 << 8);
 
+	/*
+	 * Set the level for generating pause frames
+	 * when the number of available rx_bd's gets
+	 * too low (the low watermark) and the level
+	 * when pause frames can be stopped (the high
+	 * watermark).
+	 */
 	if (BNX_CHIP_NUM(sc) == BNX_CHIP_NUM_5709) {
 		u_int32_t lo_water, hi_water;
 
@@ -3954,7 +3980,8 @@ bnx_init_rx_context(struct bnx_softc *sc)
 			hi_water = 0xf;
 		else if (hi_water == 0)
 			lo_water = 0;
-		val |= lo_water |
+
+		val |= (lo_water << BNX_L2CTX_RX_LO_WATER_MARK_SHIFT) |
 		    (hi_water << BNX_L2CTX_RX_HI_WATER_MARK_SHIFT);
 	}
 
@@ -3980,11 +4007,12 @@ bnx_init_rx_context(struct bnx_softc *sc)
 /* Returns:                                                                 */
 /*   Nothing                                                                */
 /****************************************************************************/
-void
+int
 bnx_fill_rx_chain(struct bnx_softc *sc)
 {
 	u_int16_t		prod, chain_prod;
 	u_int32_t		prod_bseq;
+	int			ndesc = 0;
 #ifdef BNX_DEBUG
 	int rx_mbuf_alloc_before, free_rx_bd_before;
 #endif
@@ -4007,6 +4035,7 @@ bnx_fill_rx_chain(struct bnx_softc *sc)
 			break;
 		}
 		prod = NEXT_RX_BD(prod);
+		ndesc++;
 	}
 
 #if 0
@@ -4025,6 +4054,8 @@ bnx_fill_rx_chain(struct bnx_softc *sc)
 	REG_WR(sc, MB_RX_CID_ADDR + BNX_L2CTX_HOST_BSEQ, sc->rx_prod_bseq);
 
 	DBPRINT(sc, BNX_EXCESSIVE_RECV, "Exiting %s()\n", __FUNCTION__);
+
+	return (ndesc);
 }
 
 /****************************************************************************/
@@ -4142,6 +4173,18 @@ bnx_free_rx_chain(struct bnx_softc *sc)
 	DBPRINT(sc, BNX_VERBOSE_RESET, "Exiting %s()\n", __FUNCTION__);
 }
 
+void
+bnx_rxrefill(void *xsc)
+{
+	struct bnx_softc	*sc = xsc;
+	int			s;
+
+	s = splnet();
+	if (!bnx_fill_rx_chain(sc))
+		timeout_add(&sc->bnx_rxrefill, 1);
+	splx(s);
+}
+
 /****************************************************************************/
 /* Set media options.                                                       */
 /*                                                                          */
@@ -4189,8 +4232,9 @@ bnx_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 	mii = &sc->bnx_mii;
 
 	mii_pollstat(mii);
-	ifmr->ifm_active = mii->mii_media_active;
 	ifmr->ifm_status = mii->mii_media_status;
+	ifmr->ifm_active = (mii->mii_media_active & ~IFM_ETH_FMASK) |
+	    sc->bnx_flowflags;
 
 	splx(s);
 }
@@ -4506,7 +4550,8 @@ bnx_rx_int_next_rx:
 
 	/* No new packets to process.  Refill the RX chain and exit. */
 	sc->rx_cons = sw_cons;
-	bnx_fill_rx_chain(sc);
+	if (!bnx_fill_rx_chain(sc))
+		timeout_add(&sc->bnx_rxrefill, 1);
 
 	for (i = 0; i < RX_PAGES; i++)
 		bus_dmamap_sync(sc->bnx_dmatag,
@@ -4817,17 +4862,17 @@ bnx_tx_encap(struct bnx_softc *sc, struct mbuf *m)
 	u_int16_t		debug_prod;
 #endif
 	u_int32_t		addr, prod_bseq;
-	int			i, error;
+	int			i, error, add;
 
 	mtx_enter(&sc->tx_pkt_mtx);
 	pkt = TAILQ_FIRST(&sc->tx_free_pkts);
 	if (pkt == NULL) {
-		if (sc->tx_pkt_count <= TOTAL_TX_BD &&
-		    !ISSET(sc->bnx_flags, BNX_ALLOC_PKTS_FLAG) &&
-		    workq_add_task(NULL, 0, bnx_alloc_pkts, sc, NULL) == 0)
-			SET(sc->bnx_flags, BNX_ALLOC_PKTS_FLAG);
-
+		add = (sc->tx_pkt_count <= TOTAL_TX_BD);
 		mtx_leave(&sc->tx_pkt_mtx);
+
+		if (add)
+			task_add(systq, &sc->tx_alloc_task);
+
 		return (ENOMEM);
 	}
 	TAILQ_REMOVE(&sc->tx_free_pkts, pkt, pkt_entry);
@@ -5078,6 +5123,20 @@ bnx_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 		break;
 
 	case SIOCSIFMEDIA:
+		/* Flow control requires full-duplex mode. */
+		if (IFM_SUBTYPE(ifr->ifr_media) == IFM_AUTO ||
+		    (ifr->ifr_media & IFM_FDX) == 0)
+			ifr->ifr_media &= ~IFM_ETH_FMASK;
+
+		if (IFM_SUBTYPE(ifr->ifr_media) != IFM_AUTO) {
+			if ((ifr->ifr_media & IFM_ETH_FMASK) == IFM_FLOW) {
+				/* We can do both TXPAUSE and RXPAUSE. */
+				ifr->ifr_media |=
+				    IFM_ETH_TXPAUSE | IFM_ETH_RXPAUSE;
+			}
+			sc->bnx_flowflags = ifr->ifr_media & IFM_ETH_FMASK;
+		}
+		/* FALLTHROUGH */
 	case SIOCGIFMEDIA:
 		DBPRINT(sc, BNX_VERBOSE, "bnx_phy_flags = 0x%08X\n",
 		    sc->bnx_phy_flags);

@@ -1,4 +1,4 @@
-/* $OpenBSD: softraidvar.h,v 1.116 2012/01/28 14:40:04 jsing Exp $ */
+/* $OpenBSD: softraidvar.h,v 1.140 2013/11/04 21:02:57 deraadt Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -19,25 +19,9 @@
 #ifndef SOFTRAIDVAR_H
 #define SOFTRAIDVAR_H
 
-#include <sys/socket.h>
-#include <sys/vnode.h>
-
-#include <net/if.h>
-#include <netinet/in.h>
-#include <netinet/if_ether.h>
-
-#include <crypto/md5.h>
-
 #define SR_META_VERSION		5	/* bump when sr_metadata changes */
 #define SR_META_SIZE		64	/* save space at chunk beginning */
 #define SR_META_OFFSET		16	/* skip 8192 bytes at chunk beginning */
-
-#define SR_META_V3_SIZE		64
-#define SR_META_V3_OFFSET	16
-#define SR_META_V3_DATA_OFFSET	(SR_META_V3_OFFSET + SR_META_V3_SIZE)
-
-#define SR_META_F_NATIVE	0	/* Native metadata format. */
-#define SR_META_F_INVALID	-1
 
 #define SR_BOOT_OFFSET		(SR_META_OFFSET + SR_META_SIZE)
 #define SR_BOOT_LOADER_SIZE	320	/* Size of boot loader storage. */
@@ -45,6 +29,71 @@
 #define SR_BOOT_BLOCKS_SIZE	128	/* Size of boot block storage. */
 #define SR_BOOT_BLOCKS_OFFSET	(SR_BOOT_LOADER_OFFSET + SR_BOOT_LOADER_SIZE)
 #define SR_BOOT_SIZE		(SR_BOOT_LOADER_SIZE + SR_BOOT_BLOCKS_SIZE)
+
+#define SR_CRYPTO_MAXKEYBYTES	32	/* max bytes in a key (AES-XTS-256) */
+#define SR_CRYPTO_MAXKEYS	32	/* max keys per volume */
+#define SR_CRYPTO_KEYBITS	512	/* AES-XTS with 2 * 256 bit keys */
+#define SR_CRYPTO_KEYBYTES	(SR_CRYPTO_KEYBITS >> 3)
+#define SR_CRYPTO_KDFHINTBYTES	256	/* size of opaque KDF hint */
+#define SR_CRYPTO_CHECKBYTES	64	/* size of generic key chksum struct */
+#define SR_CRYPTO_KEY_BLKSHIFT	30	/* 0.5TB per key */
+
+/* this is a generic hint for KDF done in userland, not interpreted by the kernel. */
+struct sr_crypto_genkdf {
+	u_int32_t	len;
+	u_int32_t	type;
+#define SR_CRYPTOKDFT_INVALID	0
+#define SR_CRYPTOKDFT_PBKDF2	1
+#define SR_CRYPTOKDFT_KEYDISK	2
+};
+
+/* this is a hint for KDF using PKCS#5.  Not interpreted by the kernel */
+struct sr_crypto_kdf_pbkdf2 {
+	u_int32_t	len;
+	u_int32_t	type;
+	u_int32_t	rounds;
+	u_int8_t	salt[128];
+};
+
+/*
+ * this structure is used to copy masking keys and KDF hints from/to userland.
+ * the embedded hint structures are not interpreted by the kernel.
+ */
+struct sr_crypto_kdfinfo {
+	u_int32_t	len;
+	u_int32_t	flags;
+#define SR_CRYPTOKDF_INVALID	(0)
+#define SR_CRYPTOKDF_KEY	(1<<0)
+#define SR_CRYPTOKDF_HINT	(1<<1)
+	u_int8_t	maskkey[SR_CRYPTO_MAXKEYBYTES];
+	union {
+		struct sr_crypto_genkdf		generic;
+		struct sr_crypto_kdf_pbkdf2	pbkdf2;
+	}		_kdfhint;
+#define genkdf		_kdfhint.generic
+#define pbkdf2		_kdfhint.pbkdf2
+};
+
+#define SR_IOCTL_GET_KDFHINT		0x01	/* Get KDF hint. */
+#define SR_IOCTL_CHANGE_PASSPHRASE	0x02	/* Change passphase. */
+
+struct sr_crypto_kdfpair {
+	void		*kdfinfo1;
+	u_int32_t	kdfsize1;
+	void		*kdfinfo2;
+	u_int32_t	kdfsize2;
+};
+
+#if defined(_KERNEL) || defined(_STANDALONE)
+
+#include <crypto/md5.h>
+
+#define SR_META_V3_SIZE		64
+#define SR_META_V3_OFFSET	16
+#define SR_META_V3_DATA_OFFSET	(SR_META_V3_OFFSET + SR_META_V3_SIZE)
+
+#define SR_META_F_NATIVE	0	/* Native metadata format. */
+#define SR_META_F_INVALID	-1
 
 #define SR_HEADER_SIZE		(SR_META_SIZE + SR_BOOT_SIZE)
 #define SR_DATA_OFFSET		(SR_META_OFFSET + SR_HEADER_SIZE)
@@ -117,14 +166,6 @@ struct sr_meta_chunk {
 	u_int8_t		scm_checksum[MD5_DIGEST_LENGTH];
 	u_int32_t		scm_status;	/* use bio bioc_disk status */
 } __packed;
-
-#define SR_CRYPTO_MAXKEYBYTES	32	/* max bytes in a key (AES-XTS-256) */
-#define SR_CRYPTO_MAXKEYS	32	/* max keys per volume */
-#define SR_CRYPTO_KEYBITS	512	/* AES-XTS with 2 * 256 bit keys */
-#define SR_CRYPTO_KEYBYTES	(SR_CRYPTO_KEYBITS >> 3)
-#define SR_CRYPTO_KDFHINTBYTES	256	/* size of opaque KDF hint */
-#define SR_CRYPTO_CHECKBYTES	64	/* size of generic key chksum struct */
-#define SR_CRYPTO_KEY_BLKSHIFT	30	/* 0.5TB per key */
 
 /*
  * Check that HMAC-SHA1_k(decrypted scm_key) == sch_mac, where
@@ -199,62 +240,9 @@ struct sr_meta_opt_item {
 
 SLIST_HEAD(sr_meta_opt_head, sr_meta_opt_item);
 
-/* this is a generic hint for KDF done in userland, not interpreted by the kernel. */
-struct sr_crypto_genkdf {
-	u_int32_t	len;
-	u_int32_t	type;
-#define SR_CRYPTOKDFT_INVALID	0
-#define SR_CRYPTOKDFT_PBKDF2	1
-#define SR_CRYPTOKDFT_KEYDISK	2
-};
-
-/* this is a hint for KDF using PKCS#5.  Not interpreted by the kernel */
-struct sr_crypto_kdf_pbkdf2 {
-	u_int32_t	len;
-	u_int32_t	type;
-	u_int32_t	rounds;
-	u_int8_t	salt[128];
-};
-
-/*
- * this structure is used to copy masking keys and KDF hints from/to userland.
- * the embedded hint structures are not interpreted by the kernel.
- */
-struct sr_crypto_kdfinfo {
-	u_int32_t	len;
-	u_int32_t	flags;
-#define SR_CRYPTOKDF_INVALID	(0)
-#define SR_CRYPTOKDF_KEY	(1<<0)
-#define SR_CRYPTOKDF_HINT	(1<<1)
-	u_int8_t	maskkey[SR_CRYPTO_MAXKEYBYTES];
-	union {
-		struct sr_crypto_genkdf		generic;
-		struct sr_crypto_kdf_pbkdf2	pbkdf2;
-	}		_kdfhint;
-#define genkdf		_kdfhint.generic
-#define pbkdf2		_kdfhint.pbkdf2
-};
-
-#define SR_IOCTL_GET_KDFHINT		0x01	/* Get KDF hint. */
-#define SR_IOCTL_CHANGE_PASSPHRASE	0x02	/* Change passphase. */
-
-struct sr_crypto_kdfpair {
-	void		*kdfinfo1;
-	u_int32_t	kdfsize1;
-	void		*kdfinfo2;
-	u_int32_t	kdfsize2;
-};
-
-struct sr_aoe_config {
-	char		nic[IFNAMSIZ];
-	struct ether_addr dsteaddr;
-	unsigned short	shelf;
-	unsigned char	slot;
-};
-
 struct sr_boot_chunk {
 	struct sr_metadata *sbc_metadata;
-	dev_t		sbc_mm;			
+	dev_t		sbc_mm;			/* Device major/minor. */
 
 	u_int32_t	sbc_chunk_id;		/* Chunk ID. */
 	u_int32_t	sbc_state;		/* Chunk state. */
@@ -285,18 +273,24 @@ struct sr_boot_volume {
 	char		sbv_part;		/* Partition opened. */
 	void		*sbv_diskinfo;		/* MD disk information. */
 
+	u_int8_t	*sbv_keys;		/* Disk keys for volume. */
+	u_int8_t	*sbv_maskkey;		/* Mask key for disk keys. */
+
 	struct sr_boot_chunk_head sbv_chunks;	/* List of chunks. */
+	struct sr_meta_opt_head sbv_meta_opt;	/* List of optional metadata. */
 
 	SLIST_ENTRY(sr_boot_volume)	sbv_link;
 };
 
 SLIST_HEAD(sr_boot_volume_head, sr_boot_volume);
 
+#endif /* _KERNEL | _STANDALONE */
+
 #ifdef _KERNEL
+
 #include <dev/biovar.h>
 
 #include <sys/buf.h>
-#include <sys/pool.h>
 #include <sys/queue.h>
 #include <sys/rwlock.h>
 
@@ -332,6 +326,9 @@ extern u_int32_t		sr_debug;
 #define SR_VM_IGNORE_DIRTY	1
 #define SR_REBUILD_IO_SIZE	128 /* blocks */
 
+extern struct sr_uuid	sr_bootuuid;
+extern u_int8_t		sr_bootkey[SR_CRYPTO_MAXKEYBYTES];
+
 /* forward define to prevent dependency goo */
 struct sr_softc;
 
@@ -348,7 +345,7 @@ struct sr_ccb {
 #define SR_CCB_OK		2
 #define SR_CCB_FAILED		3
 
-	int			ccb_flag;
+	int			ccb_flags;
 #define SR_CCBF_FREEBUF		(1<<0)		/* free ccb_buf.b_data */
 
 	void			*ccb_opaque; /* discipline usable pointer */
@@ -372,17 +369,20 @@ struct sr_workunit {
 #define SR_WU_PENDING		6
 #define SR_WU_RESTART		7
 #define SR_WU_REQUEUE		8
+#define SR_WU_CONSTRUCT		9
 
 	int			swu_flags;	/* additional hints */
 #define SR_WUF_REBUILD		(1<<0)		/* rebuild io */
-#define SR_WUF_REBUILDIOCOMP	(1<<1)		/* rbuild io complete */
+#define SR_WUF_REBUILDIOCOMP	(1<<1)		/* rebuild io complete */
 #define SR_WUF_FAIL		(1<<2)		/* RAID6: failure */
 #define SR_WUF_FAILIOCOMP	(1<<3)
+#define SR_WUF_WAKEUP		(1<<4)		/* Wakeup on I/O completion. */
+#define SR_WUF_DISCIPLINE	(1<<5)		/* Discipline specific I/O. */
 
 	int			swu_fake;	/* faked wu */
 	/* workunit io range */
-	daddr64_t		swu_blk_start;
-	daddr64_t		swu_blk_end;
+	daddr_t			swu_blk_start;
+	daddr_t			swu_blk_end;
 
 	/* in flight totals */
 	u_int32_t		swu_ios_complete;
@@ -448,6 +448,7 @@ struct sr_crypto {
 	u_int64_t		scr_sid[SR_CRYPTO_MAXKEYS];
 };
 
+#ifdef AOE
 /* ata over ethernet */
 #define SR_RAIDAOE_NOWU		2
 struct sr_aoe {
@@ -456,6 +457,7 @@ struct sr_aoe {
 	struct ifnet		*sra_ifp;
 	struct ether_addr	sra_eaddr;
 };
+#endif /* AOE */
 
 #define SR_CONCAT_NOWU		16
 struct sr_concat {
@@ -512,6 +514,7 @@ struct sr_discipline {
 #define SR_CAP_AUTO_ASSEMBLE	0x00000002	/* Can auto assemble. */
 #define SR_CAP_REBUILD		0x00000004	/* Supports rebuild. */
 #define SR_CAP_NON_COERCED	0x00000008	/* Uses non-coerced size. */
+#define SR_CAP_REDUNDANT	0x00000010	/* Redundant copies of data. */
 
 	union {
 	    struct sr_raid0	mdd_raid0;
@@ -573,9 +576,9 @@ struct sr_discipline {
 	int			(*sd_create)(struct sr_discipline *,
 				    struct bioc_createraid *, int, int64_t);
 	int			(*sd_assemble)(struct sr_discipline *,
-				    struct bioc_createraid *, int);
+				    struct bioc_createraid *, int, void *);
 	int			(*sd_alloc_resources)(struct sr_discipline *);
-	int			(*sd_free_resources)(struct sr_discipline *);
+	void			(*sd_free_resources)(struct sr_discipline *);
 	int			(*sd_ioctl_handler)(struct sr_discipline *,
 				    struct bioc_discipline *);
 	int			(*sd_start_discipline)(struct sr_discipline *);
@@ -589,6 +592,9 @@ struct sr_discipline {
 	/* SCSI emulation */
 	struct scsi_sense_data	sd_scsi_sense;
 	int			(*sd_scsi_rw)(struct sr_workunit *);
+	void			(*sd_scsi_intr)(struct buf *);
+	int			(*sd_scsi_wu_done)(struct sr_workunit *);
+	void			(*sd_scsi_done)(struct sr_workunit *);
 	int			(*sd_scsi_sync)(struct sr_workunit *);
 	int			(*sd_scsi_tur)(struct sr_workunit *);
 	int			(*sd_scsi_start_stop)(struct sr_workunit *);
@@ -598,7 +604,11 @@ struct sr_discipline {
 
 	/* background operation */
 	struct proc		*sd_background_proc;
+
+	TAILQ_ENTRY(sr_discipline) sd_link;
 };
+
+TAILQ_HEAD(sr_discipline_list, sr_discipline);
 
 struct sr_softc {
 	struct device		sc_dev;
@@ -619,11 +629,9 @@ struct sr_softc {
 	struct scsi_link	sc_link;	/* scsi prototype link */
 	struct scsibus_softc	*sc_scsibus;
 
-	/*
-	 * XXX expensive, alternative would be nice but has to be cheap
-	 * since the target lookup happens on each IO
-	 */
-	struct sr_discipline	*sc_dis[SR_MAX_LD];
+	/* The target lookup has to be cheap since it happens for each I/O. */
+	struct sr_discipline	*sc_targets[SR_MAX_LD];
+	struct sr_discipline_list sc_dis_list;
 };
 
 /* hotplug */
@@ -638,10 +646,19 @@ int			sr_ccb_alloc(struct sr_discipline *);
 void			sr_ccb_free(struct sr_discipline *);
 struct sr_ccb		*sr_ccb_get(struct sr_discipline *);
 void			sr_ccb_put(struct sr_ccb *);
+struct sr_ccb		*sr_ccb_rw(struct sr_discipline *, int, daddr_t,
+			    daddr_t, u_int8_t *, int, int);
+void			sr_ccb_done(struct sr_ccb *);
 int			sr_wu_alloc(struct sr_discipline *);
 void			sr_wu_free(struct sr_discipline *);
 void			*sr_wu_get(void *);
 void			sr_wu_put(void *, void *);
+void			sr_wu_init(struct sr_discipline *,
+			    struct sr_workunit *);
+void			sr_wu_enqueue_ccb(struct sr_workunit *,
+			    struct sr_ccb *);
+void			sr_wu_release_ccbs(struct sr_workunit *);
+void			sr_wu_done(struct sr_workunit *);
 
 /* misc functions */
 void			sr_info(struct sr_softc *, const char *, ...);
@@ -661,11 +678,14 @@ void			sr_meta_opt_load(struct sr_softc *,
 			    struct sr_metadata *, struct sr_meta_opt_head *);
 void			sr_checksum(struct sr_softc *, void *, void *,
 			    u_int32_t);
-int			sr_validate_io(struct sr_workunit *, daddr64_t *,
+int			sr_validate_io(struct sr_workunit *, daddr_t *,
 			    char *);
-int			sr_check_io_collision(struct sr_workunit *);
+void			sr_schedule_wu(struct sr_workunit *);
 void			sr_scsi_done(struct sr_discipline *,
 			    struct scsi_xfer *);
+struct sr_workunit	*sr_scsi_wu_get(struct sr_discipline *, int);
+void			sr_scsi_wu_put(struct sr_discipline *,
+			    struct sr_workunit *);
 int			sr_chunk_in_use(struct sr_softc *, dev_t);
 
 /* discipline functions */
@@ -675,7 +695,9 @@ int			sr_raid_tur(struct sr_workunit *);
 int			sr_raid_request_sense( struct sr_workunit *);
 int			sr_raid_start_stop(struct sr_workunit *);
 int			sr_raid_sync(struct sr_workunit *);
+void			sr_raid_intr(struct buf *);
 void			sr_raid_startwu(struct sr_workunit *);
+void			sr_raid_recreate_wu(struct sr_workunit *);
 
 /* Discipline specific initialisation. */
 void			sr_raid0_discipline_init(struct sr_discipline *);

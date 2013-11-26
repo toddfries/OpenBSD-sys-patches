@@ -1,4 +1,4 @@
-/*	$OpenBSD: dvbox.c,v 1.13 2006/08/11 18:33:13 miod Exp $	*/
+/*	$OpenBSD: dvbox.c,v 1.15 2013/10/21 10:36:12 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, Miodrag Vallat
@@ -126,15 +126,14 @@ int	dvbox_ioctl(void *, u_long, caddr_t, int, struct proc *);
 void	dvbox_burner(void *, u_int, u_int);
 
 struct	wsdisplay_accessops	dvbox_accessops = {
-	dvbox_ioctl,
-	diofb_mmap,
-	diofb_alloc_screen,
-	diofb_free_screen,
-	diofb_show_screen,
-	NULL,   /* load_font */
-	NULL,   /* scrollback */
-	NULL,   /* getchar */
-	dvbox_burner
+	.ioctl = dvbox_ioctl,
+	.mmap = diofb_mmap,
+	.alloc_screen = diofb_alloc_screen,
+	.free_screen = diofb_free_screen,
+	.show_screen = diofb_show_screen,
+	.load_font = diofb_load_font,
+	.list_font = diofb_list_font,
+	.burn_screen = dvbox_burner
 };
 
 /*

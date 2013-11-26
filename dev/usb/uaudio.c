@@ -1,4 +1,4 @@
-/*	$OpenBSD: uaudio.c,v 1.96 2012/03/01 08:49:22 ratchov Exp $ */
+/*	$OpenBSD: uaudio.c,v 1.101 2013/11/06 16:13:42 pirofti Exp $ */
 /*	$NetBSD: uaudio.c,v 1.90 2004/10/29 17:12:53 kent Exp $	*/
 
 /*
@@ -45,10 +45,7 @@
 #include <sys/ioctl.h>
 #include <sys/tty.h>
 #include <sys/file.h>
-#include <sys/reboot.h>			/* for bootverbose */
 #include <sys/selinfo.h>
-#include <sys/proc.h>
-#include <sys/vnode.h>
 #include <sys/device.h>
 #include <sys/poll.h>
 
@@ -111,10 +108,10 @@ struct as_info {
 	u_int8_t	attributes; /* Copy of bmAttributes of
 				     * usb_audio_streaming_endpoint_descriptor
 				     */
-	usbd_interface_handle	ifaceh;
+	struct usbd_interface *ifaceh;
 	const usb_interface_descriptor_t *idesc;
-	const usb_endpoint_descriptor_audio_t *edesc;
-	const usb_endpoint_descriptor_audio_t *edesc1;
+	const struct usb_endpoint_descriptor_audio *edesc;
+	const struct usb_endpoint_descriptor_audio *edesc1;
 	const struct usb_audio_streaming_type1_descriptor *asf1desc;
 	int		sc_busy;	/* currently used */
 };
@@ -122,8 +119,8 @@ struct as_info {
 struct chan {
 	void	(*intr)(void *);	/* DMA completion intr handler */
 	void	*arg;		/* arg for intr() */
-	usbd_pipe_handle pipe;
-	usbd_pipe_handle sync_pipe;
+	struct usbd_pipe *pipe;
+	struct usbd_pipe *sync_pipe;
 
 	u_int	sample_size;
 	u_int	sample_rate;
@@ -152,7 +149,7 @@ struct chan {
 
 	struct chanbuf {
 		struct chan	*chan;
-		usbd_xfer_handle xfer;
+		struct usbd_xfer *xfer;
 		u_char		*buffer;
 		u_int16_t	sizes[UAUDIO_MAX_FRAMES];
 		u_int16_t	offsets[UAUDIO_MAX_FRAMES];
@@ -161,7 +158,7 @@ struct chan {
 
 	struct syncbuf {
 		struct chan	*chan;
-		usbd_xfer_handle xfer;
+		struct usbd_xfer *xfer;
 		u_char		*buffer;
 		u_int16_t	sizes[UAUDIO_MAX_FRAMES];
 		u_int16_t	offsets[UAUDIO_MAX_FRAMES];
@@ -232,7 +229,7 @@ struct uaudio_devs {
 
 struct uaudio_softc {
 	struct device	 sc_dev;	/* base device */
-	usbd_device_handle sc_udev;	/* USB device */
+	struct usbd_device *sc_udev;	/* USB device */
 	int		 sc_ac_iface;	/* Audio Control interface */
 	struct chan	 sc_playchan;	/* play channel */
 	struct chan	 sc_recchan;	/* record channel */
@@ -254,7 +251,6 @@ struct uaudio_softc {
 	struct mixerctl *sc_ctls;	/* mixer controls */
 	int		 sc_nctls;	/* # of mixer controls */
 	struct device	*sc_audiodev;
-	char		 sc_dying;
 	int		 sc_quirks;
 };
 
@@ -368,14 +364,14 @@ void	uaudio_chan_init
 void	uaudio_chan_set_param(struct chan *, u_char *, u_char *, int);
 void	uaudio_chan_ptransfer(struct chan *);
 void	uaudio_chan_pintr
-	(usbd_xfer_handle, usbd_private_handle, usbd_status);
+	(struct usbd_xfer *, void *, usbd_status);
 void	uaudio_chan_psync_transfer(struct chan *);
 void	uaudio_chan_psync_intr
-	(usbd_xfer_handle, usbd_private_handle, usbd_status);
+	(struct usbd_xfer *, void *, usbd_status);
 
 void	uaudio_chan_rtransfer(struct chan *);
 void	uaudio_chan_rintr
-	(usbd_xfer_handle, usbd_private_handle, usbd_status);
+	(struct usbd_xfer *, void *, usbd_status);
 
 int	uaudio_open(void *, int);
 void	uaudio_close(void *);
@@ -598,7 +594,7 @@ uaudio_activate(struct device *self, int act)
 	case DVACT_DEACTIVATE:
 		if (sc->sc_audiodev != NULL)
 			rv = config_deactivate(sc->sc_audiodev);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 	return (rv);
@@ -632,7 +628,7 @@ uaudio_query_encoding(void *addr, struct audio_encoding *fp)
 {
 	struct uaudio_softc *sc = addr;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	if (sc->sc_nalts == 0 || sc->sc_altflags == 0)
@@ -1426,7 +1422,7 @@ uaudio_io_terminaltype(int outtype, struct io_terminal *iot, int id)
 		}
 		it->output->terminals[0] = outtype;
 		it->output->size = 1;
-		it->direct = FALSE;
+		it->direct = 0;
 	}
 
 	switch (it->d.desc->bDescriptorSubtype) {
@@ -1467,7 +1463,7 @@ uaudio_io_terminaltype(int outtype, struct io_terminal *iot, int id)
 		src_id = it->d.ot->bSourceId;
 		it->inputs[0] = uaudio_io_terminaltype(outtype, iot, src_id);
 		it->inputs_size = 1;
-		iot[src_id].direct = TRUE;
+		iot[src_id].direct = 1;
 		return NULL;
 	case UDESCSUB_AC_MIXER:
 		it->inputs_size = 0;
@@ -1653,8 +1649,8 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 {
 	const struct usb_audio_streaming_interface_descriptor *asid;
 	const struct usb_audio_streaming_type1_descriptor *asf1d;
-	const usb_endpoint_descriptor_audio_t *ed;
-	const usb_endpoint_descriptor_audio_t *sync_ed;
+	const struct usb_endpoint_descriptor_audio *ed;
+	const struct usb_endpoint_descriptor_audio *sync_ed;
 	const struct usb_audio_streaming_endpoint_descriptor *sed;
 	int format, chan, prec, enc, bps;
 	int dir, type, sync, sync_addr;
@@ -1704,18 +1700,18 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 	type = UE_GET_ISO_TYPE(ed->bmAttributes);
 
 	/* Check for sync endpoint. */
-	sync = FALSE;
+	sync = 0;
 	sync_addr = 0;
 	if (id->bNumEndpoints > 1 &&
 	    ((dir == UE_DIR_IN && type == UE_ISO_ADAPT) ||
 	    (dir != UE_DIR_IN && type == UE_ISO_ASYNC)))
-		sync = TRUE;
+		sync = 1;
 
 	/* Check whether sync endpoint address is given. */
 	if (ed->bLength >= USB_ENDPOINT_DESCRIPTOR_AUDIO_SIZE) {
 		/* bSynchAdress set to 0 indicates sync is not used. */
 		if (ed->bSynchAddress == 0)
-			sync = FALSE;
+			sync = 0;
 		else
 			sync_addr = ed->bSynchAddress;
 	}
@@ -1730,7 +1726,7 @@ uaudio_process_as(struct uaudio_softc *sc, const char *buf, int *offsp,
 		return (USBD_INVAL);
 
 	sync_ed = NULL;
-	if (sync == TRUE) {
+	if (sync == 1) {
 		sync_ed = (const void*)(buf + offs);
 		if (sync_ed->bDescriptorType != UDESC_ENDPOINT) {
 			printf("%s: sync ep descriptor wrong type\n",
@@ -2137,7 +2133,7 @@ uaudio_query_devinfo(void *addr, mixer_devinfo_t *mi)
 	int n, nctls, i;
 
 	DPRINTFN(2,("uaudio_query_devinfo: index=%d\n", mi->index));
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	n = mi->index;
@@ -2219,7 +2215,7 @@ uaudio_open(void *addr, int flags)
 	struct uaudio_softc *sc = addr;
 
 	DPRINTF(("uaudio_open: sc=%p\n", sc));
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	if ((flags & FWRITE) && !(sc->sc_mode & AUMODE_PLAY))
@@ -2302,7 +2298,7 @@ uaudio_getdev(void *addr, struct audio_device *retp)
 	struct uaudio_softc *sc = addr;
 
 	DPRINTF(("uaudio_mixer_getdev:\n"));
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	*retp = uaudio_device;
@@ -2581,7 +2577,7 @@ uaudio_mixer_get_port(void *addr, mixer_ctrl_t *cp)
 
 	DPRINTFN(2,("uaudio_mixer_get_port: index=%d\n", cp->dev));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	n = cp->dev - UAC_NCLASSES;
@@ -2625,7 +2621,7 @@ uaudio_mixer_set_port(void *addr, mixer_ctrl_t *cp)
 	int i, n, vals[MIX_MAX_CHAN];
 
 	DPRINTFN(2,("uaudio_mixer_set_port: index = %d\n", cp->dev));
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	n = cp->dev - UAC_NCLASSES;
@@ -2668,7 +2664,7 @@ uaudio_trigger_input(void *addr, void *start, void *end, int blksize,
 	usbd_status err;
 	int i, s;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	DPRINTFN(3,("uaudio_trigger_input: sc=%p start=%p end=%p "
@@ -2710,7 +2706,7 @@ uaudio_trigger_output(void *addr, void *start, void *end, int blksize,
 	usbd_status err;
 	int i, s;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	DPRINTFN(3,("uaudio_trigger_output: sc=%p start=%p end=%p "
@@ -2825,7 +2821,7 @@ usbd_status
 uaudio_chan_alloc_buffers(struct uaudio_softc *sc, struct chan *ch)
 {
 	struct as_info *as = &sc->sc_alts[ch->altidx];
-	usbd_xfer_handle xfer;
+	struct usbd_xfer *xfer;
 	void *buf;
 	int i, size;
 
@@ -2900,9 +2896,8 @@ uaudio_chan_ptransfer(struct chan *ch)
 	struct chanbuf *cb;
 	u_char *pos;
 	int i, n, size, residue, total;
-	int s;
 
-	if (ch->sc->sc_dying)
+	if (usbd_is_dying(ch->sc->sc_udev))
 		return;
 
 	/* Pick the next channel buffer. */
@@ -2948,9 +2943,9 @@ uaudio_chan_ptransfer(struct chan *ch)
 		if (ch->transferred >= ch->blksize) {
 			DPRINTFN(5,("uaudio_chan_ptransfer: call %p(%p)\n",
 				    ch->intr, ch->arg));
-			s = splaudio();
+			mtx_enter(&audio_lock);
 			ch->intr(ch->arg);
-			splx(s);
+			mtx_leave(&audio_lock);
 			ch->transferred -= ch->blksize;
 		}
 	}
@@ -2975,7 +2970,7 @@ uaudio_chan_ptransfer(struct chan *ch)
 }
 
 void
-uaudio_chan_pintr(usbd_xfer_handle xfer, usbd_private_handle priv,
+uaudio_chan_pintr(struct usbd_xfer *xfer, void *priv,
 		  usbd_status status)
 {
 	struct chanbuf *cb = priv;
@@ -3007,7 +3002,7 @@ uaudio_chan_psync_transfer(struct chan *ch)
 	struct syncbuf *sb;
 	int i, size, total = 0;
 
-	if (ch->sc->sc_dying)
+	if (usbd_is_dying(ch->sc->sc_udev))
 		return;
 
 	/* Pick the next sync buffer. */
@@ -3032,7 +3027,7 @@ uaudio_chan_psync_transfer(struct chan *ch)
 }
 
 void
-uaudio_chan_psync_intr(usbd_xfer_handle xfer, usbd_private_handle priv,
+uaudio_chan_psync_intr(struct usbd_xfer *xfer, void *priv,
     usbd_status status)
 {
 	struct syncbuf *sb = priv;
@@ -3092,7 +3087,7 @@ uaudio_chan_rtransfer(struct chan *ch)
 	struct chanbuf *cb;
 	int i, size, residue, total;
 
-	if (ch->sc->sc_dying)
+	if (usbd_is_dying(ch->sc->sc_udev))
 		return;
 
 	/* Pick the next channel buffer. */
@@ -3132,14 +3127,14 @@ uaudio_chan_rtransfer(struct chan *ch)
 }
 
 void
-uaudio_chan_rintr(usbd_xfer_handle xfer, usbd_private_handle priv,
+uaudio_chan_rintr(struct usbd_xfer *xfer, void *priv,
 		  usbd_status status)
 {
 	struct chanbuf *cb = priv;
 	struct chan *ch = cb->chan;
 	u_int16_t pos;
 	u_int32_t count;
-	int s, i, n, frsize;
+	int i, n, frsize;
 
 	/* Return if we are aborting. */
 	if (status == USBD_CANCELLED)
@@ -3179,9 +3174,9 @@ uaudio_chan_rintr(usbd_xfer_handle xfer, usbd_private_handle priv,
 			if (ch->transferred >= ch->blksize) {
 				DPRINTFN(5,("uaudio_chan_rintr: call %p(%p)\n",
 					    ch->intr, ch->arg));
-				s = splaudio();
+				mtx_enter(&audio_lock);
 				ch->intr(ch->arg);
-				splx(s);
+				mtx_leave(&audio_lock);
 				ch->transferred -= ch->blksize;
 			}
 			if (count < n)
@@ -3461,7 +3456,7 @@ uaudio_set_params(void *addr, int setmode, int usemode,
 	struct audio_params *p;
 	int mode;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	if (((usemode & AUMODE_PLAY) && sc->sc_playchan.pipe != NULL) ||

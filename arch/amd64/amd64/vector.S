@@ -1,4 +1,4 @@
-/*	$OpenBSD: vector.S,v 1.31 2011/06/16 19:46:40 kettenis Exp $	*/
+/*	$OpenBSD: vector.S,v 1.34 2013/11/02 14:23:38 kettenis Exp $	*/
 /*	$NetBSD: vector.S,v 1.5 2004/06/28 09:13:11 fvdl Exp $	*/
 
 /*
@@ -245,6 +245,7 @@ NENTRY(resume_iret)
 NENTRY(alltraps)
 	INTRENTRY
 	sti
+	.globl	calltrap
 calltrap:
 #ifdef DIAGNOSTIC
 	movl	CPUVAR(ILEVEL),%ebx
@@ -302,8 +303,6 @@ calltrap:
  * segment registers.
  *
  */
-
-#define MY_COUNT _C_LABEL(uvmexp)
 
 /* XXX See comment in locore.s */
 #ifdef __ELF__
@@ -425,13 +424,6 @@ IDTVEC(resume_lapic_ltimer)
 	INTRFASTEXIT
 #endif /* NLAPIC > 0 */
 
-#ifdef MULTIPROCESSOR
-#define LOCK_KERNEL	movq %rsp, %rdi; call _C_LABEL(x86_intlock)
-#define UNLOCK_KERNEL	movq %rsp, %rdi; call _C_LABEL(x86_intunlock)
-#else
-#define LOCK_KERNEL
-#define UNLOCK_KERNEL
-#endif
 
 #define voidop(num)
 
@@ -466,24 +458,21 @@ IDTVEC(intr_##name##num)						;\
 	movl	CPUVAR(ILEVEL),%r13d					;\
 	cmpl	%ebx,%r13d						;\
 	jae	10f			/* currently masked; hold it */	;\
-	incl	MY_COUNT+V_INTR		/* statistical info */		;\
+	incl	_C_LABEL(uvmexp)+V_INTR	/* statistical info */		;\
 1:									\
 	pushq	%r13							;\
 	movl	%ebx,CPUVAR(ILEVEL)					;\
 	sti								;\
 	incl	CPUVAR(IDEPTH)						;\
 	movq	IS_HANDLERS(%r14),%rbx					;\
-	LOCK_KERNEL							;\
 6:									\
 	movl	IH_LEVEL(%rbx),%r12d					;\
 	cmpl	%r13d,%r12d						;\
 	jle	7f							;\
-	movq	IH_ARG(%rbx),%rdi					;\
-	testq	%rdi, %rdi						;\
-	jnz	8f							;\
+	movl	%r12d,CPUVAR(ILEVEL)					;\
+	movq	%rbx, %rsi						;\
 	movq	%rsp, %rdi						;\
-8:	movl	%r12d,CPUVAR(ILEVEL)					;\
-	call	*IH_FUN(%rbx)		/* call it */			;\
+	call	_C_LABEL(intr_handler)	/* call it */			;\
 	orl	%eax,%eax		/* should it be counted? */	;\
 	jz	4f			/* no, skip it */		;\
 	incq	IH_COUNT(%rbx)		/* count the intrs */		;\
@@ -495,14 +484,12 @@ IDTVEC(intr_##name##num)						;\
 	testq	%rbx,%rbx						;\
 	jnz	6b							;\
 5:									\
-	UNLOCK_KERNEL							;\
 	cli								;\
 	unmask(num)			/* unmask it in hardware */	;\
 	late_ack(num)							;\
 	sti								;\
 	jmp	_C_LABEL(Xdoreti)	/* lower spl and do ASTs */	;\
 7:									\
-	UNLOCK_KERNEL							;\
 	cli								;\
 	movq	$(1 << num),%rax					;\
 	orq     %rax,CPUVAR(IPENDING)					;\

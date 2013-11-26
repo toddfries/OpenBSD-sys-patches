@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.226 2012/03/17 10:16:41 dlg Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.250 2013/10/25 18:44:36 lteo Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -70,19 +70,7 @@
 #else
 #define DPRINTF(x)
 #endif
-
-extern u_int8_t get_sa_require(struct inpcb *);
-
-extern int ipsec_auth_default_level;
-extern int ipsec_esp_trans_default_level;
-extern int ipsec_esp_network_default_level;
-extern int ipsec_ipcomp_default_level;
-extern int ipforwarding;
 #endif /* IPSEC */
-
-#ifdef MROUTING
-extern int ipmforwarding;
-#endif
 
 struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
 void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
@@ -120,7 +108,7 @@ ip_output(struct mbuf *m0, ...)
 
 	struct inpcb *inp;
 	struct tdb *tdb;
-	int s;
+	u_int32_t ipsecflowinfo;
 #if NPF > 0
 	struct ifnet *encif;
 #endif
@@ -135,6 +123,7 @@ ip_output(struct mbuf *m0, ...)
 	inp = va_arg(ap, struct inpcb *);
 	if (inp && (inp->inp_flags & INP_IPV6) != 0)
 		panic("ip_output: IPv6 pcb is passed");
+	ipsecflowinfo = (flags & IP_IPSECFLOW) ? va_arg(ap, u_int32_t) : 0;
 #endif /* IPSEC */
 	va_end(ap);
 
@@ -266,18 +255,12 @@ reroute:
 	if (!ipsec_in_use && inp == NULL)
 		goto done_spd;
 
-	/*
-	 * splnet is chosen over spltdb because we are not allowed to
-	 * lower the level, and udp_output calls us in splnet().
-	 */
-	s = splnet();
-
 	/* Do we have any pending SAs to apply ? */
 	mtag = m_tag_find(m, PACKET_TAG_IPSEC_PENDING_TDB, NULL);
 	if (mtag != NULL) {
 #ifdef DIAGNOSTIC
 		if (mtag->m_tag_len != sizeof (struct tdb_ident))
-			panic("ip_output: tag of length %d (should be %d",
+			panic("ip_output: tag of length %hu (should be %zu",
 			    mtag->m_tag_len, sizeof (struct tdb_ident));
 #endif
 		tdbi = (struct tdb_ident *)(mtag + 1);
@@ -289,11 +272,9 @@ reroute:
 	}
 	else
 		tdb = ipsp_spd_lookup(m, AF_INET, hlen, &error,
-		    IPSP_DIRECTION_OUT, NULL, inp);
+		    IPSP_DIRECTION_OUT, NULL, inp, ipsecflowinfo);
 
 	if (tdb == NULL) {
-		splx(s);
-
 		if (error == 0) {
 			/*
 			 * No IPsec processing required, we'll just send the
@@ -328,7 +309,6 @@ reroute:
 			    tdbi->rdomain == tdb->tdb_rdomain &&
 			    !bcmp(&tdbi->dst, &tdb->tdb_dst,
 			    sizeof(union sockaddr_union))) {
-				splx(s);
 				sproto = 0; /* mark as no-IPsec-needed */
 				goto done_spd;
 			}
@@ -338,7 +318,6 @@ reroute:
 		bcopy(&tdb->tdb_dst, &sdst, sizeof(sdst));
 		sspi = tdb->tdb_spi;
 		sproto = tdb->tdb_sproto;
-		splx(s);
 
 		/*
 		 * If it needs TCP/UDP hardware-checksumming, do the
@@ -485,13 +464,9 @@ reroute:
 		 * of outgoing interface.
 		 */
 		if (ip->ip_src.s_addr == INADDR_ANY) {
-			struct in_ifaddr *ia;
-
-			TAILQ_FOREACH(ia, &in_ifaddr, ia_list)
-				if (ia->ia_ifp == ifp) {
-					ip->ip_src = ia->ia_addr.sin_addr;
-					break;
-				}
+			IFP_TO_IA(ifp, ia);
+			if (ia != NULL)
+				ip->ip_src = ia->ia_addr.sin_addr;
 		}
 
 		IN_LOOKUP_MULTI(ip->ip_dst, ifp, inm);
@@ -521,8 +496,6 @@ reroute:
 			 * above, will be forwarded by the ip_input() routine,
 			 * if necessary.
 			 */
-			extern struct socket *ip_mrouter;
-
 			if (ipmforwarding && ip_mrouter &&
 			    (flags & IP_FORWARDING) == 0) {
 				if (ip_mforward(m, ifp) != 0) {
@@ -587,14 +560,11 @@ sendit:
 	 * Check if the packet needs encapsulation.
 	 */
 	if (sproto != 0) {
-		s = splnet();
-
 		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
 		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
 			DPRINTF(("ip_output: unknown TDB"));
 			error = EHOSTUNREACH;
-			splx(s);
 			m_freem(m);
 			goto done;
 		}
@@ -607,12 +577,10 @@ sendit:
 		    tdb->tdb_tap)) == NULL ||
 		    pf_test(AF_INET, PF_OUT, encif, &m, NULL) != PF_PASS) {
 			error = EACCES;
-			splx(s);
 			m_freem(m);
 			goto done;
 		}
 		if (m == NULL) {
-			splx(s);
 			goto done;
 		}
 		ip = mtod(m, struct ip *);
@@ -625,6 +593,7 @@ sendit:
 		 * What's the behaviour?
 		 */
 #endif
+		in_proto_cksum_out(m, encif);
 
 		/* Check if we are allowed to fragment */
 		if (ip_mtudisc && (ip->ip_off & htons(IP_DF)) && tdb->tdb_mtu &&
@@ -638,7 +607,6 @@ sendit:
 			    (tdb->tdb_dst.sin.sin_addr.s_addr ==
 			    ip->ip_dst.s_addr);
 			icmp_mtu = tdb->tdb_mtu;
-			splx(s);
 
 			/* Find a host route to store the mtu in */
 			if (ro != NULL)
@@ -647,10 +615,7 @@ sendit:
 			if (transportmode)
 				rt = NULL;
 			else if (rt == NULL || (rt->rt_flags & RTF_HOST) == 0) {
-				struct sockaddr_in dst = {
-					sizeof(struct sockaddr_in), AF_INET};
-				dst.sin_addr = ip->ip_dst;
-				rt = icmp_mtudisc_clone((struct sockaddr *)&dst,
+				rt = icmp_mtudisc_clone(ip->ip_dst,
 				    m->m_pkthdr.rdomain);
 				rt_mtucloned = 1;
 			}
@@ -660,8 +625,7 @@ sendit:
 				rt->rt_rmx.rmx_mtu = icmp_mtu;
 				if (ro && ro->ro_rt != NULL) {
 					RTFREE(ro->ro_rt);
-					ro->ro_rt = NULL;
-					rtalloc1(&ro->ro_dst, RT_REPORT,
+					ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT,
 					    m->m_pkthdr.rdomain);
 				}
 				if (rt_mtucloned)
@@ -679,7 +643,6 @@ sendit:
 
 		/* Callee frees mbuf */
 		error = ipsp_process_packet(m, tdb, AF_INET, 0);
-		splx(s);
 		return error;  /* Nothing more to be done */
 	}
 
@@ -695,8 +658,6 @@ sendit:
 		goto done;
 	}
 #endif /* IPSEC */
-
-	in_proto_cksum_out(m, ifp);
 
 	/*
 	 * Packet filter
@@ -723,6 +684,7 @@ sendit:
 		goto reroute;
 	}
 #endif
+	in_proto_cksum_out(m, ifp);
 
 #ifdef IPSEC
 	if (ipsec_in_use && (flags & IP_FORWARDING) && (ipforwarding == 2) &&
@@ -739,7 +701,7 @@ sendit:
 	if (ntohs(ip->ip_len) <= mtu) {
 		ip->ip_sum = 0;
 		if ((ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-		    (ifp->if_bridge == NULL)) {
+		    (ifp->if_bridgeport == NULL)) {
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 			ipstat.ips_outhwcsum++;
 		} else
@@ -886,7 +848,7 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		mhip->ip_sum = 0;
 		if ((ifp != NULL) &&
 		    (ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-		    (ifp->if_bridge == NULL)) {
+		    (ifp->if_bridgeport == NULL)) {
 			m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 			ipstat.ips_outhwcsum++;
 		} else
@@ -906,7 +868,7 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 	ip->ip_sum = 0;
 	if ((ifp != NULL) &&
 	    (ifp->if_capabilities & IFCAP_CSUM_IPv4) &&
-	    (ifp->if_bridge == NULL)) {
+	    (ifp->if_bridgeport == NULL)) {
 		m->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
 		ipstat.ips_outhwcsum++;
 	} else
@@ -929,15 +891,12 @@ sendorfree:
  * as indicated by a non-zero in_addr at the start of the options.
  */
 struct mbuf *
-ip_insertoptions(m, opt, phlen)
-	struct mbuf *m;
-	struct mbuf *opt;
-	int *phlen;
+ip_insertoptions(struct mbuf *m, struct mbuf *opt, int *phlen)
 {
 	struct ipoption *p = mtod(opt, struct ipoption *);
 	struct mbuf *n;
 	struct ip *ip = mtod(m, struct ip *);
-	unsigned optlen;
+	unsigned int optlen;
 
 	optlen = opt->m_len - sizeof(p->ipopt_dst);
 	if (optlen + ntohs(ip->ip_len) > IP_MAXPACKET)
@@ -961,10 +920,10 @@ ip_insertoptions(m, opt, phlen)
 		m->m_data -= optlen;
 		m->m_len += optlen;
 		m->m_pkthdr.len += optlen;
-		ovbcopy((caddr_t)ip, mtod(m, caddr_t), sizeof(struct ip));
+		memmove(mtod(m, caddr_t), (caddr_t)ip, sizeof(struct ip));
 	}
 	ip = mtod(m, struct ip *);
-	bcopy((caddr_t)p->ipopt_list, (caddr_t)(ip + 1), (unsigned)optlen);
+	bcopy((caddr_t)p->ipopt_list, (caddr_t)(ip + 1), optlen);
 	*phlen = sizeof(struct ip) + optlen;
 	ip->ip_len = htons(ntohs(ip->ip_len) + optlen);
 	return (m);
@@ -975,8 +934,7 @@ ip_insertoptions(m, opt, phlen)
  * omitting those not copied during fragmentation.
  */
 int
-ip_optcopy(ip, jp)
-	struct ip *ip, *jp;
+ip_optcopy(struct ip *ip, struct ip *jp)
 {
 	u_char *cp, *dp;
 	int opt, optlen, cnt;
@@ -1007,7 +965,7 @@ ip_optcopy(ip, jp)
 		if (optlen > cnt)
 			optlen = cnt;
 		if (IPOPT_COPIED(opt)) {
-			bcopy((caddr_t)cp, (caddr_t)dp, (unsigned)optlen);
+			bcopy((caddr_t)cp, (caddr_t)dp, optlen);
 			dp += optlen;
 		}
 	}
@@ -1020,11 +978,8 @@ ip_optcopy(ip, jp)
  * IP socket option processing.
  */
 int
-ip_ctloutput(op, so, level, optname, mp)
-	int op;
-	struct socket *so;
-	int level, optname;
-	struct mbuf **mp;
+ip_ctloutput(int op, struct socket *so, int level, int optname,
+    struct mbuf **mp)
 {
 	struct inpcb *inp = sotoinpcb(so);
 	struct mbuf *m = *mp;
@@ -1045,12 +1000,7 @@ ip_ctloutput(op, so, level, optname, mp)
 	case PRCO_SETOPT:
 		switch (optname) {
 		case IP_OPTIONS:
-#ifdef notyet
-		case IP_RETOPTS:
-			return (ip_pcbopts(optname, &inp->inp_options, m));
-#else
 			return (ip_pcbopts(&inp->inp_options, m));
-#endif
 
 		case IP_TOS:
 		case IP_TTL:
@@ -1062,6 +1012,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVTTL:
 		case IP_RECVDSTPORT:
 		case IP_RECVRTABLE:
+		case IP_IPSECFLOWINFO:
 			if (m == NULL || m->m_len != sizeof(int))
 				error = EINVAL;
 			else {
@@ -1113,6 +1064,9 @@ ip_ctloutput(op, so, level, optname, mp)
 					break;
 				case IP_RECVRTABLE:
 					OPTSET(INP_RECVRTABLE);
+					break;
+				case IP_IPSECFLOWINFO:
+					OPTSET(INP_IPSECFLOWINFO);
 					break;
 				}
 			}
@@ -1179,14 +1133,14 @@ ip_ctloutput(op, so, level, optname, mp)
 
 			/* Unlink cached output TDB to force a re-search */
 			if (inp->inp_tdb_out) {
-				int s = spltdb();
+				int s = splsoftnet();
 				TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out,
 				    inp, inp_tdb_out_next);
 				splx(s);
 			}
 
 			if (inp->inp_tdb_in) {
-				int s = spltdb();
+				int s = splsoftnet();
 				TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in,
 				    inp, inp_tdb_in_next);
 				splx(s);
@@ -1194,7 +1148,7 @@ ip_ctloutput(op, so, level, optname, mp)
 
 			switch (optname) {
 			case IP_AUTH_LEVEL:
-				if (optval < ipsec_auth_default_level &&
+				if (optval < IPSEC_AUTH_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1203,7 +1157,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 
 			case IP_ESP_TRANS_LEVEL:
-				if (optval < ipsec_esp_trans_default_level &&
+				if (optval < IPSEC_ESP_TRANS_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1212,7 +1166,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 
 			case IP_ESP_NETWORK_LEVEL:
-				if (optval < ipsec_esp_network_default_level &&
+				if (optval < IPSEC_ESP_NETWORK_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1220,7 +1174,7 @@ ip_ctloutput(op, so, level, optname, mp)
 				inp->inp_seclevel[SL_ESP_NETWORK] = optval;
 				break;
 			case IP_IPCOMP_LEVEL:
-				if (optval < ipsec_ipcomp_default_level &&
+				if (optval < IPSEC_IPCOMP_LEVEL_DEFAULT &&
 				    suser(p, 0)) {
 					error = EACCES;
 					break;
@@ -1375,35 +1329,36 @@ ip_ctloutput(op, so, level, optname, mp)
 
 			/* Unlink cached output TDB to force a re-search */
 			if (inp->inp_tdb_out) {
-				int s = spltdb();
+				int s = splsoftnet();
 				TAILQ_REMOVE(&inp->inp_tdb_out->tdb_inp_out,
 				    inp, inp_tdb_out_next);
 				splx(s);
 			}
 
 			if (inp->inp_tdb_in) {
-				int s = spltdb();
+				int s = splsoftnet();
 				TAILQ_REMOVE(&inp->inp_tdb_in->tdb_inp_in,
 				    inp, inp_tdb_in_next);
 				splx(s);
 			}
 #endif
 			break;
-		case IP_RTABLE:
+		case SO_RTABLE:
 			if (m == NULL || m->m_len < sizeof(u_int)) {
 				error = EINVAL;
 				break;
 			}
 			rtid = *mtod(m, u_int *);
+			if (inp->inp_rtableid == rtid)
+				break;
+			/* needs priviledges to switch when already set */
+			if (p->p_p->ps_rtableid != rtid &&
+			    p->p_p->ps_rtableid != 0 &&
+			    (error = suser(p, 0)) != 0)
+				break;
 			/* table must exist */
 			if (!rtable_exists(rtid)) {
 				error = EINVAL;
-				break;
-			}
-			/* needs priviledges to switch when already set */
-			if (p->p_p->ps_rtableid != rtid &&
-			    p->p_p->ps_rtableid != 0 && suser(p, 0) != 0) {
-				error = EACCES;
 				break;
 			}
 			inp->inp_rtableid = rtid;
@@ -1431,7 +1386,7 @@ ip_ctloutput(op, so, level, optname, mp)
 			if (inp->inp_options) {
 				m->m_len = inp->inp_options->m_len;
 				bcopy(mtod(inp->inp_options, caddr_t),
-				    mtod(m, caddr_t), (unsigned)m->m_len);
+				    mtod(m, caddr_t), m->m_len);
 			} else
 				m->m_len = 0;
 			break;
@@ -1446,6 +1401,7 @@ ip_ctloutput(op, so, level, optname, mp)
 		case IP_RECVTTL:
 		case IP_RECVDSTPORT:
 		case IP_RECVRTABLE:
+		case IP_IPSECFLOWINFO:
 			*mp = m = m_get(M_WAIT, MT_SOOPTS);
 			m->m_len = sizeof(int);
 			switch (optname) {
@@ -1486,6 +1442,9 @@ ip_ctloutput(op, so, level, optname, mp)
 				break;
 			case IP_RECVRTABLE:
 				optval = OPTBIT(INP_RECVRTABLE);
+				break;
+			case IP_IPSECFLOWINFO:
+				optval = OPTBIT(INP_IPSECFLOWINFO);
 				break;
 			}
 			*mtod(m, int *) = optval;
@@ -1637,14 +1596,7 @@ ip_ctloutput(op, so, level, optname, mp)
  * with destination address if source routed.
  */
 int
-#ifdef notyet
-ip_pcbopts(optname, pcbopt, m)
-	int optname;
-#else
-ip_pcbopts(pcbopt, m)
-#endif
-	struct mbuf **pcbopt;
-	struct mbuf *m;
+ip_pcbopts(struct mbuf **pcbopt, struct mbuf *m)
 {
 	int cnt, optlen;
 	u_char *cp;
@@ -1676,7 +1628,7 @@ ip_pcbopts(pcbopt, m)
 	cnt = m->m_len;
 	m->m_len += sizeof(struct in_addr);
 	cp = mtod(m, u_char *) + sizeof(struct in_addr);
-	ovbcopy(mtod(m, caddr_t), (caddr_t)cp, (unsigned)cnt);
+	memmove((caddr_t)cp, mtod(m, caddr_t), (unsigned)cnt);
 	bzero(mtod(m, caddr_t), sizeof(struct in_addr));
 
 	for (; cnt > 0; cnt -= optlen, cp += optlen) {
@@ -1722,9 +1674,9 @@ ip_pcbopts(pcbopt, m)
 			 * Then copy rest of options back
 			 * to close up the deleted entry.
 			 */
-			ovbcopy((caddr_t)(&cp[IPOPT_OFFSET+1] +
-			    sizeof(struct in_addr)),
-			    (caddr_t)&cp[IPOPT_OFFSET+1],
+			memmove((caddr_t)&cp[IPOPT_OFFSET+1],
+			    (caddr_t)(&cp[IPOPT_OFFSET+1] +
+			    sizeof(struct in_addr)),			    
 			    (unsigned)cnt - (IPOPT_OFFSET+1));
 			break;
 		}
@@ -1883,7 +1835,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		 * membership slots are full.
 		 */
 		for (i = 0; i < imo->imo_num_memberships; ++i) {
-			if (imo->imo_membership[i]->inm_ia->ia_ifp == ifp &&
+			if (imo->imo_membership[i]->inm_ifp == ifp &&
 			    imo->imo_membership[i]->inm_addr.s_addr
 						== mreq->imr_multiaddr.s_addr)
 				break;
@@ -1965,7 +1917,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
 		 */
 		for (i = 0; i < imo->imo_num_memberships; ++i) {
 			if ((ifp == NULL ||
-			     imo->imo_membership[i]->inm_ia->ia_ifp == ifp) &&
+			     imo->imo_membership[i]->inm_ifp == ifp) &&
 			     imo->imo_membership[i]->inm_addr.s_addr ==
 			     mreq->imr_multiaddr.s_addr)
 				break;
@@ -2011,10 +1963,7 @@ ip_setmoptions(int optname, struct ip_moptions **imop, struct mbuf *m,
  * Return the IP multicast options in response to user getsockopt().
  */
 int
-ip_getmoptions(optname, imo, mp)
-	int optname;
-	struct ip_moptions *imo;
-	struct mbuf **mp;
+ip_getmoptions(int optname, struct ip_moptions *imo, struct mbuf **mp)
 {
 	u_char *ttl;
 	u_char *loop;
@@ -2060,8 +2009,7 @@ ip_getmoptions(optname, imo, mp)
  * Discard the IP multicast options.
  */
 void
-ip_freemoptions(imo)
-	struct ip_moptions *imo;
+ip_freemoptions(struct ip_moptions *imo)
 {
 	int i;
 
@@ -2080,10 +2028,7 @@ ip_freemoptions(imo)
  * pointer that might NOT be &loif -- easier than replicating that code here.
  */
 void
-ip_mloopback(ifp, m, dst)
-	struct ifnet *ifp;
-	struct mbuf *m;
-	struct sockaddr_in *dst;
+ip_mloopback(struct ifnet *ifp, struct mbuf *m, struct sockaddr_in *dst)
 {
 	struct ip *ip;
 	struct mbuf *copym;
@@ -2125,6 +2070,10 @@ in_delayed_cksum(struct mbuf *m)
 		offset += offsetof(struct udphdr, uh_sum);
 		break;
 
+	case IPPROTO_ICMP:
+		offset += offsetof(struct icmp, icmp_cksum);
+		break;
+
 	default:
 		return;
 	}
@@ -2138,31 +2087,39 @@ in_delayed_cksum(struct mbuf *m)
 void
 in_proto_cksum_out(struct mbuf *m, struct ifnet *ifp)
 {
+	/* some hw and in_delayed_cksum need the pseudo header cksum */
+	if (m->m_pkthdr.csum_flags & (M_TCP_CSUM_OUT|M_UDP_CSUM_OUT)) {
+		struct ip *ip;
+		u_int16_t csum, offset;
+
+		ip  = mtod(m, struct ip *);
+		offset = ip->ip_hl << 2;
+		csum = in_cksum_phdr(ip->ip_src.s_addr, ip->ip_dst.s_addr,
+		    htonl(ntohs(ip->ip_len) - offset + ip->ip_p));
+		if (ip->ip_p == IPPROTO_TCP)
+			offset += offsetof(struct tcphdr, th_sum);
+		else if (ip->ip_p == IPPROTO_UDP)
+			offset += offsetof(struct udphdr, uh_sum);
+		if ((offset + sizeof(u_int16_t)) > m->m_len)
+			m_copyback(m, offset, sizeof(csum), &csum, M_NOWAIT);
+		else
+			*(u_int16_t *)(mtod(m, caddr_t) + offset) = csum;
+	}
+
 	if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT) {
 		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_TCPv4) ||
-		    ifp->if_bridge != NULL) {
+		    ifp->if_bridgeport != NULL) {
 			in_delayed_cksum(m);
 			m->m_pkthdr.csum_flags &= ~M_TCP_CSUM_OUT; /* Clear */
 		}
 	} else if (m->m_pkthdr.csum_flags & M_UDP_CSUM_OUT) {
 		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_UDPv4) ||
-		    ifp->if_bridge != NULL) {
+		    ifp->if_bridgeport != NULL) {
 			in_delayed_cksum(m);
 			m->m_pkthdr.csum_flags &= ~M_UDP_CSUM_OUT; /* Clear */
 		}
 	} else if (m->m_pkthdr.csum_flags & M_ICMP_CSUM_OUT) {
-		struct ip *ip = mtod(m, struct ip *);
-		int hlen;
-		struct icmp *icp;
-
-		hlen = ip->ip_hl << 2;
-		m->m_data += hlen;
-		m->m_len -= hlen;
-		icp = mtod(m, struct icmp *);
-		icp->icmp_cksum = 0;
-		icp->icmp_cksum = in_cksum(m, ntohs(ip->ip_len) - hlen);
-		m->m_data -= hlen;
-		m->m_len += hlen;
+		in_delayed_cksum(m);
 		m->m_pkthdr.csum_flags &= ~M_ICMP_CSUM_OUT; /* Clear */
 	}
 }

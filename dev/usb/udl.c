@@ -1,4 +1,4 @@
-/*	$OpenBSD: udl.c,v 1.68 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: udl.c,v 1.78 2013/10/21 10:36:26 miod Exp $ */
 
 /*
  * Copyright (c) 2009 Marcus Glocker <mglocker@openbsd.org>
@@ -32,8 +32,9 @@
 #include <sys/device.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
-#include <sys/proc.h>
-#include <uvm/uvm.h>
+#include <sys/systm.h>
+
+#include <uvm/uvm_extern.h>
 
 #include <machine/bus.h>
 
@@ -84,6 +85,8 @@ int		udl_alloc_screen(void *, const struct wsscreen_descr *,
 void		udl_free_screen(void *, void *);
 int		udl_show_screen(void *, void *, int,
 		    void (*)(void *, int, int), void *);
+int		udl_load_font(void *, void *, struct wsdisplay_font *);
+int		udl_list_font(void *, struct wsdisplay_font *);
 void		udl_burner(void *, u_int, u_int);
 
 int		udl_copycols(void *, int, int, int, int);
@@ -135,8 +138,7 @@ void		udl_cmd_write_reg_1(struct udl_softc *, uint8_t, uint8_t);
 void		udl_cmd_write_reg_3(struct udl_softc *, uint8_t, uint32_t);
 usbd_status	udl_cmd_send(struct udl_softc *);
 usbd_status	udl_cmd_send_async(struct udl_softc *);
-void		udl_cmd_send_async_cb(usbd_xfer_handle, usbd_private_handle,
-		    usbd_status);
+void		udl_cmd_send_async_cb(struct usbd_xfer *, void *, usbd_status);
 
 usbd_status	udl_init_chip(struct udl_softc *);
 void		udl_init_fb_offsets(struct udl_softc *, uint32_t, uint32_t,
@@ -212,15 +214,14 @@ struct wsscreen_list udl_screenlist = {
 };
 
 struct wsdisplay_accessops udl_accessops = {
-	udl_ioctl,
-	udl_mmap,
-	udl_alloc_screen,
-	udl_free_screen,
-	udl_show_screen,
-	NULL,
-	NULL,
-	NULL,
-	udl_burner
+	.ioctl = udl_ioctl,
+	.mmap = udl_mmap,
+	.alloc_screen = udl_alloc_screen,
+	.free_screen = udl_free_screen,
+	.show_screen = udl_show_screen,
+	.load_font = udl_load_font,
+	.list_font = udl_list_font,
+	.burn_screen = udl_burner
 };
 
 /*
@@ -248,7 +249,9 @@ static const struct udl_type udl_devs[] = {
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_SWDVI },	DLUNK },
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_UM7X0 },	DL120 },
 	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_CONV },	DL160 },
-	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_LUM70 },	DL125 }
+	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_LUM70 },	DL125 },
+	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_POLARIS2 },	DLUNK },
+	{ { USB_VENDOR_DISPLAYLINK, USB_PRODUCT_DISPLAYLINK_LT1421 },	DLUNK }
 };
 #define udl_lookup(v, p) ((struct udl_type *)usb_lookup(udl_devs, v, p))
 
@@ -484,14 +487,16 @@ int
 udl_activate(struct device *self, int act)
 {
 	struct udl_softc *sc = (struct udl_softc *)self;
+	int ret = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
 		usbd_deactivate(sc->sc_udev);
 		break;
 	}
+	ret = config_activate_children(self, act);
 
-	return (0);
+	return (ret);
 }
 
 /* ---------- */
@@ -692,6 +697,24 @@ udl_show_screen(void *v, void *cookie, int waitok,
 	DPRINTF(1, "%s: %s\n", DN(sc), FUNC);
 
 	return (0);
+}
+
+int
+udl_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct udl_softc *sc = v;
+	struct rasops_info *ri = &sc->sc_ri;
+
+	return rasops_load_font(ri, emulcookie, font);
+}
+
+int
+udl_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct udl_softc *sc = v;
+	struct rasops_info *ri = &sc->sc_ri;
+
+	return rasops_list_font(ri, font);
 }
 
 void
@@ -1778,9 +1801,9 @@ udl_cmd_send(struct udl_softc *sc)
 	bcopy(cb->buf, cx->buf, cb->off);
 
 	len = cb->off;
-	error = usbd_bulk_transfer(cx->xfer, sc->sc_tx_pipeh,
-	    USBD_NO_COPY | USBD_SHORT_XFER_OK, 1000, cx->buf, &len,
-	    "udl_bulk_xmit");
+	usbd_setup_xfer(cx->xfer, sc->sc_tx_pipeh, 0, cx->buf, len,
+	    USBD_NO_COPY | USBD_SHORT_XFER_OK | USBD_SYNCHRONOUS, 1000, NULL);
+	error = usbd_transfer(cx->xfer);
 	if (error != USBD_NORMAL_COMPLETION) {
 		printf("%s: %s: %s!\n", DN(sc), FUNC, usbd_errstr(error));
 		/* we clear our buffer now to avoid growing out of bounds */
@@ -1851,8 +1874,7 @@ udl_cmd_send_async(struct udl_softc *sc)
 }
 
 void
-udl_cmd_send_async_cb(usbd_xfer_handle xfer, usbd_private_handle priv,
-    usbd_status status)
+udl_cmd_send_async_cb(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct udl_cmd_xfer *cx = priv;
 	struct udl_softc *sc = cx->sc;

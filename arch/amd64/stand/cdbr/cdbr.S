@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdbr.S,v 1.2 2004/08/24 15:33:25 tom Exp $	*/
+/*	$OpenBSD: cdbr.S,v 1.5 2013/01/17 12:07:19 jsing Exp $	*/
 
 /*
  * Copyright (c) 2004 Tom Cosgrove <tom.cosgrove@arches-consulting.com>
@@ -31,9 +31,6 @@
  */
 
 	.file	"cdbr.S"
-
-/* #include <machine/asm.h> */
-/* #include <assym.h> */
 
 /*
  * This program is a CD boot sector, similar to the partition boot record
@@ -204,9 +201,11 @@ load_loop:
 load_notrunc:
 	subb	%dh, %cl		/* Update count */
 	pushl	%eax			/* Save */
-	movw	%bx, %es		/* %bx had the segment (para) number */
-	xorw	%bx, %bx		/* %es:0000  for destination */
+	pushl	%ebx			/* Save */
+	movw	%bx, %es		/* %bx has the segment (para) number */
+	xorw	%bx, %bx		/* %es:0000 for destination */
 	call	read			/* Read it in */
+	popl	%ebx			/* Restore */
 	popl	%eax			/* Restore */
 	addl	$MAX_READ_SEC, %eax	/* Update LBA */
 	addw	$MAX_READ_PARAS, %bx	/* Update dest addr */
@@ -491,7 +490,7 @@ signon:		.asciz	"CD-ROM: "
 crlf:		.asciz	"\r\n"
 msg_load2big:	.asciz  "File too big"
 msg_badread:	.asciz  "Read error: 0x"
-msg_novd:	.asciz  "Can't find Primary Volume Descriptor"
+msg_novd:	.asciz  "No Primary Volume Descriptor"
 msg_loading:	.asciz  "Loading "
 
 /* State for searching dir */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: sig_machdep.c,v 1.13 2011/07/05 04:48:01 guenther Exp $	*/
+/*	$OpenBSD: sig_machdep.c,v 1.16 2012/12/02 07:03:31 guenther Exp $	*/
 /*
  * Copyright (c) 1998, 1999, 2000, 2001 Steve Murphree, Jr.
  * Copyright (c) 1996 Nivas Madhur
@@ -74,7 +74,7 @@ struct sigframe {
 
 #ifdef DEBUG
 int sigdebug = 0;
-int sigpid = 0;
+pid_t sigpid = 0;
 #define SDB_FOLLOW	0x01
 #define SDB_KSTACK	0x02
 #endif
@@ -90,12 +90,12 @@ sendsig(sig_t catcher, int sig, int mask, unsigned long code, int type,
 	struct trapframe *tf;
 	struct sigacts *psp = p->p_sigacts;
 	struct sigframe *fp;
-	int oonstack, fsize;
+	int fsize;
 	struct sigframe sf;
 	vaddr_t addr;
 
 	tf = p->p_md.md_tf;
-	oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
+
 	/*
 	 * Allocate and validate space for the signal handler
 	 * context. Note that if the stack is in data space, the
@@ -105,12 +105,10 @@ sendsig(sig_t catcher, int sig, int mask, unsigned long code, int type,
 	 */
 	fsize = sizeof(struct sigframe);
 	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
-	    (p->p_sigstk.ss_flags & SS_ONSTACK) == 0 &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	    !sigonstack(tf->tf_r[31]) && (psp->ps_sigonstack & sigmask(sig)))
 		fp = (struct sigframe *)(p->p_sigstk.ss_sp +
 					 p->p_sigstk.ss_size - fsize);
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		fp = (struct sigframe *)(tf->tf_r[31] - fsize);
 
 	/* make sure the frame is aligned on a 8 byte boundary */
@@ -124,13 +122,13 @@ sendsig(sig_t catcher, int sig, int mask, unsigned long code, int type,
 	if ((sigdebug & SDB_FOLLOW) ||
 	    ((sigdebug & SDB_KSTACK) && p->p_pid == sigpid))
 		printf("sendsig(%d): sig %d ssp %x usp %x scp %x\n",
-		       p->p_pid, sig, &oonstack, fp, &fp->sf_sc);
+		       p->p_pid, sig, &sf, fp, &fp->sf_sc);
 #endif
 	/*
 	 * Build the signal context to be used by sigreturn.
 	 */
+	bzero(&sf, sizeof(sf));
 	sf.sf_scp = &fp->sf_sc;
-	sf.sf_sc.sc_onstack = oonstack;
 	sf.sf_sc.sc_mask = mask;
 
 	if (psp->ps_siginfo & sigmask(sig)) {
@@ -212,7 +210,8 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	tf = p->p_md.md_tf;
 	scp = &ksc;
 
-	if ((scp->sc_regs.epsr ^ tf->tf_regs.epsr) & PSR_USERSTATIC)
+	if ((((struct reg *)&scp->sc_regs)->epsr ^ tf->tf_regs.epsr) &
+	    PSR_USERSTATIC)
 		return (EINVAL);
 
 	bcopy((const void *)&scp->sc_regs, (caddr_t)&tf->tf_regs,
@@ -221,10 +220,6 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	/*
 	 * Restore the user supplied information
 	 */
-	if (scp->sc_onstack & SS_ONSTACK)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = scp->sc_mask & ~sigcantmask;
 
 	/*

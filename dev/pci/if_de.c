@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_de.c,v 1.109 2011/07/07 20:42:56 henning Exp $	*/
+/*	$OpenBSD: if_de.c,v 1.112 2013/11/26 09:50:33 mpi Exp $	*/
 /*	$NetBSD: if_de.c,v 1.58 1998/01/12 09:39:58 thorpej Exp $	*/
 
 /*-
@@ -65,7 +65,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #endif
 
@@ -212,7 +211,7 @@ void tulip_intr_handler(tulip_softc_t * const sc, int *progress_p);
 int tulip_intr_shared(void *arg);
 int tulip_intr_normal(void *arg);
 struct mbuf *tulip_mbuf_compress(struct mbuf *m);
-struct mbuf *tulip_txput(tulip_softc_t * const sc, struct mbuf *m);
+struct mbuf *tulip_txput(tulip_softc_t * const sc, struct mbuf *m, int);
 void tulip_txput_setup(tulip_softc_t * const sc);
 int tulip_ifioctl(struct ifnet * ifp, u_long cmd, caddr_t data);
 void tulip_ifstart(struct ifnet *ifp);
@@ -292,7 +291,7 @@ tulip_txprobe(tulip_softc_t * const sc)
     sc->tulip_flags |= TULIP_TXPROBE_ACTIVE;
     TULIP_CSR_WRITE(sc, csr_command, sc->tulip_cmdmode);
     TULIP_CSR_WRITE(sc, csr_intr, sc->tulip_intrmask);
-    if ((m = tulip_txput(sc, m)) != NULL)
+    if ((m = tulip_txput(sc, m, 1)) != NULL)
 	m_freem(m);
     sc->tulip_probe.probe_txprobes++;
     return (1);
@@ -2887,6 +2886,7 @@ tulip_free_txmap(tulip_softc_t *sc, bus_dmamap_t map)
 void
 tulip_addr_filter(tulip_softc_t * const sc)
 {
+    struct arpcom *ac = &sc->tulip_ac;
     struct ether_multistep step;
     struct ether_multi *enm;
 
@@ -2916,21 +2916,20 @@ tulip_addr_filter(tulip_softc_t * const sc)
 	 * hash and one perfect hardware).
 	 */
 	bzero(sc->tulip_setupdata, sizeof(sc->tulip_setupdata));
-	ETHER_FIRST_MULTI(step, &sc->tulip_ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, 6) == 0) {
+	if (ac->ac_multirangecnt > 0) {
+	    sc->tulip_flags |= TULIP_ALLMULTI;
+	    sc->tulip_flags &= ~(TULIP_WANTHASHONLY|TULIP_WANTHASHPERFECT);
+	} else {
+	    ETHER_FIRST_MULTI(step, ac, enm);
+	    while (enm != NULL) {
 		    hash = tulip_mchash(enm->enm_addrlo);
 #if BYTE_ORDER == BIG_ENDIAN
 		    sp[hash >> 4] |= swap32(1 << (hash & 0xF));
 #else
 		    sp[hash >> 4] |= 1 << (hash & 0xF);
 #endif
-		} else {
-		    sc->tulip_flags |= TULIP_ALLMULTI;
-		    sc->tulip_flags &= ~(TULIP_WANTHASHONLY|TULIP_WANTHASHPERFECT);
-		    break;
-		}
 		ETHER_NEXT_MULTI(step, enm);
+	    }
 	}
 	/*
 	 * No reason to use a hash if we are going to be
@@ -2966,13 +2965,15 @@ tulip_addr_filter(tulip_softc_t * const sc)
     if ((sc->tulip_flags & (TULIP_WANTHASHPERFECT|TULIP_WANTHASHONLY)) == 0) {
 	u_int32_t *sp = sc->tulip_setupdata;
 	int idx = 0;
+	if (ac->ac_multirangecnt > 0)
+		sc->tulip_flags |= TULIP_ALLMULTI;
+
 	if ((sc->tulip_flags & TULIP_ALLMULTI) == 0) {
 	    /*
 	     * Else can get perfect filtering for 16 addresses.
 	     */
-	    ETHER_FIRST_MULTI(step, &sc->tulip_ac, enm);
+	    ETHER_FIRST_MULTI(step, ac, enm);
 	    for (; enm != NULL; idx++) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, 6) == 0) {
 #if BYTE_ORDER == BIG_ENDIAN
 		    *sp++ = ((u_int16_t *) enm->enm_addrlo)[0] << 16;
 		    *sp++ = ((u_int16_t *) enm->enm_addrlo)[1] << 16;
@@ -2982,10 +2983,6 @@ tulip_addr_filter(tulip_softc_t * const sc)
 		    *sp++ = ((u_int16_t *) enm->enm_addrlo)[1];
 		    *sp++ = ((u_int16_t *) enm->enm_addrlo)[2];
 #endif
-		} else {
-		    sc->tulip_flags |= TULIP_ALLMULTI;
-		    break;
-		}
 		ETHER_NEXT_MULTI(step, enm);
 	    }
 	    /*
@@ -3225,6 +3222,10 @@ tulip_rx_intr(tulip_softc_t * const sc)
 	 */
 	TULIP_RXDESC_POSTSYNC(sc, eop, sizeof(*eop));
 	if ((((volatile tulip_desc_t *) eop)->d_status & (TULIP_DSTS_OWNER|TULIP_DSTS_RxFIRSTDESC|TULIP_DSTS_RxLASTDESC)) == (TULIP_DSTS_RxFIRSTDESC|TULIP_DSTS_RxLASTDESC)) {
+#ifdef DIAGNOSTIC
+	    if (IF_IS_EMPTY(&sc->tulip_rxq))
+		panic("%s: tulip_rxq empty", sc->tulip_if.if_xname);
+#endif
 	    IF_DEQUEUE(&sc->tulip_rxq, ms);
 	    me = ms;
 	} else {
@@ -3814,7 +3815,7 @@ tulip_mbuf_compress(struct mbuf *m)
 }
 
 struct mbuf *
-tulip_txput(tulip_softc_t * const sc, struct mbuf *m)
+tulip_txput(tulip_softc_t * const sc, struct mbuf *m, int notonqueue)
 {
     TULIP_PERFSTART(txput)
     tulip_ringinfo_t * const ri = &sc->tulip_txinfo;
@@ -3824,7 +3825,9 @@ tulip_txput(tulip_softc_t * const sc, struct mbuf *m)
     bus_dmamap_t map;
     int error;
     struct ifnet *ifp = &sc->tulip_if;
+#ifdef DIAGNOSTIC
     struct mbuf *ombuf = m;
+#endif
     int compressed = 0;
 
 #if defined(TULIP_DEBUG)
@@ -3887,24 +3890,17 @@ tulip_txput(tulip_softc_t * const sc, struct mbuf *m)
 	     * to recopy it into one mbuf and then try again.
 	     */
 	    struct mbuf *tmp;
-	    /*
-	     * tulip_mbuf_compress() frees the original mbuf.
-	     * thus, we have to remove the mbuf from the queue
-	     * before calling it.
-	     * we don't have to worry about space shortage
-	     * after compressing the mbuf since the compressed
-	     * mbuf will take only two segs.
-	     */
-	     if (compressed) {
-		 /* should not happen */
-#ifdef TULIP_DEBUG
-		 printf("tulip_txput: compress called twice!\n");
+	    if (!notonqueue) {
+#ifdef DIAGNOSTIC
+		if (IF_IS_EMPTY(&ifp->if_snd))
+			panic("%s: if_snd queue empty", ifp->if_xname);
 #endif
-		 goto finish;
+		IFQ_DEQUEUE(&ifp->if_snd, tmp);
+#ifdef DIAGNOSTIC
+		if (tmp != ombuf)
+		    panic("tulip_txput: different mbuf dequeued!");
+#endif
 	    }
-	    IFQ_DEQUEUE(&ifp->if_snd, tmp);
-	    if (tmp != ombuf)
-		 panic("tulip_txput: different mbuf dequeued!");
 	    compressed = 1;
 	    m = tulip_mbuf_compress(m);
 	    if (m == NULL) {
@@ -3976,12 +3972,18 @@ tulip_txput(tulip_softc_t * const sc, struct mbuf *m)
      * The descriptors have been filled in.  Now get ready
      * to transmit.
      */
-    if (!compressed && (sc->tulip_flags & TULIP_TXPROBE_ACTIVE) == 0) {
+    if (!compressed && !notonqueue) {
 	/* remove the mbuf from the queue */
 	struct mbuf *tmp;
+#ifdef DIAGNOSTIC
+	if (IF_IS_EMPTY(&ifp->if_snd))
+	    panic("%s: if_snd queue empty", ifp->if_xname);
+#endif
 	IFQ_DEQUEUE(&ifp->if_snd, tmp);
+#ifdef DIAGNOSTIC
 	if (tmp != ombuf)
 	    panic("tulip_txput: different mbuf dequeued!");
+#endif
     }
 
     IF_ENQUEUE(&sc->tulip_txq, m);
@@ -4246,7 +4248,7 @@ tulip_ifstart(struct ifnet * const ifp)
 	    IFQ_POLL(&sc->tulip_if.if_snd, m);
 	    if (m == NULL)
 		break;
-	    if ((m0 = tulip_txput(sc, m)) != NULL) {
+	    if ((m0 = tulip_txput(sc, m, 0)) != NULL) {
 		if (m0 != m)
 		    /* should not happen */
 		    printf("tulip_if_start: txput failed!\n");
@@ -4274,7 +4276,7 @@ tulip_ifstart_one(struct ifnet * const ifp)
 	    && !IFQ_IS_EMPTY(&sc->tulip_if.if_snd)) {
 	struct mbuf *m, *m0;
 	IFQ_POLL(&sc->tulip_if.if_snd, m);
-	if (m != NULL && (m0 = tulip_txput(sc, m)) != NULL)
+	if (m != NULL && (m0 = tulip_txput(sc, m, 0)) != NULL)
 	    if (m0 != m)
 		/* should not happen */
 		printf("tulip_if_start_one: txput failed!\n");

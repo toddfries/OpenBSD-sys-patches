@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.15 2011/03/23 16:54:35 pirofti Exp $ */
+/*	$OpenBSD: db_machdep.h,v 1.17 2013/10/17 08:02:16 deraadt Exp $ */
 /*
  * Mach Operating System
  * Copyright (c) 1993-1991 Carnegie Mellon University
@@ -54,7 +54,7 @@ do {									\
 #define BKPT_SET(inst)	(BKPT_INST)
 
 /* Entry trap for the debugger - used for inline assembly breaks*/
-#define ENTRY_ASM		"tb0 0, r0, 132"
+#define ENTRY_ASM		"tb0 0, %r0, 132"
 
 typedef	vaddr_t		db_addr_t;
 typedef	long		db_expr_t;
@@ -92,7 +92,8 @@ void	m88k_print_instruction(int, u_int, u_int32_t);	/* db_disasm.c */
 /* machine specific commands have been added to ddb */
 #define DB_MACHINE_COMMANDS
 
-#define	DB_AOUT_SYMBOLS
+#define	DB_ELF_SYMBOLS
+#define	DB_ELFSIZE	32
 
 #ifdef MULTIPROCESSOR
 extern cpuid_t ddb_mp_nextcpu;

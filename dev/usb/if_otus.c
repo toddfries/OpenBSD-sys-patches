@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_otus.c,v 1.31 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: if_otus.c,v 1.36 2013/11/05 10:20:04 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -47,7 +47,6 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 
@@ -133,11 +132,11 @@ int		otus_media_change(struct ifnet *);
 int		otus_read_eeprom(struct otus_softc *);
 void		otus_newassoc(struct ieee80211com *, struct ieee80211_node *,
 		    int);
-void		otus_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void		otus_intr(struct usbd_xfer *, void *, usbd_status);
 void		otus_cmd_rxeof(struct otus_softc *, uint8_t *, int);
 void		otus_sub_rxeof(struct otus_softc *, uint8_t *, int);
-void		otus_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void		otus_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void		otus_rxeof(struct usbd_xfer *, void *, usbd_status);
+void		otus_txeof(struct usbd_xfer *, void *, usbd_status);
 int		otus_tx(struct otus_softc *, struct mbuf *,
 		    struct ieee80211_node *);
 void		otus_start(struct ifnet *);
@@ -867,8 +866,9 @@ otus_cmd(struct otus_softc *sc, uint8_t code, const void *idata, int ilen,
 	cmd->done = 0;
 
 	usbd_setup_xfer(cmd->xfer, sc->cmd_tx_pipe, cmd, cmd->buf, xferlen,
-	    USBD_FORCE_SHORT_XFER | USBD_NO_COPY, OTUS_CMD_TIMEOUT, NULL);
-	error = usbd_sync_transfer(cmd->xfer);
+	    USBD_FORCE_SHORT_XFER | USBD_NO_COPY | USBD_SYNCHRONOUS,
+	    OTUS_CMD_TIMEOUT, NULL);
+	error = usbd_transfer(cmd->xfer);
 	if (error != 0) {
 		splx(s);
 		printf("%s: could not send command 0x%x (error=%s)\n",
@@ -994,7 +994,7 @@ otus_newassoc(struct ieee80211com *ic, struct ieee80211_node *ni, int isnew)
 
 /* ARGSUSED */
 void
-otus_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+otus_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 #if 0
 	struct otus_softc *sc = priv;
@@ -1227,7 +1227,7 @@ otus_sub_rxeof(struct otus_softc *sc, uint8_t *buf, int len)
 }
 
 void
-otus_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+otus_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct otus_rx_data *data = priv;
 	struct otus_softc *sc = data->sc;
@@ -1273,7 +1273,7 @@ otus_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 }
 
 void
-otus_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+otus_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct otus_tx_data *data = priv;
 	struct otus_softc *sc = data->sc;
@@ -1324,8 +1324,10 @@ otus_tx(struct otus_softc *sc, struct mbuf *m, struct ieee80211_node *ni)
 		qos = ieee80211_get_qos(wh);
 		tid = qos & IEEE80211_QOS_TID;
 		qid = ieee80211_up_to_ac(ic, tid);
-	} else
+	} else {
+		qos = 0;
 		qid = EDCA_AC_BE;
+	}
 
 	/* Pickup a rate index. */
 	if (IEEE80211_IS_MULTICAST(wh->i_addr1) ||
@@ -1577,6 +1579,9 @@ otus_set_multi(struct otus_softc *sc)
 	uint32_t lo, hi;
 	uint8_t bit;
 
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if ((ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
 		lo = hi = 0xffffffff;
 		goto done;
@@ -1584,11 +1589,6 @@ otus_set_multi(struct otus_softc *sc)
 	lo = hi = 0;
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			lo = hi = 0xffffffff;
-			goto done;
-		}
 		bit = enm->enm_addrlo[5] >> 2;
 		if (bit < 32)
 			lo |= 1 << bit;

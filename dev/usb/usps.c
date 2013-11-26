@@ -1,4 +1,4 @@
-/*	$OpenBSD: usps.c,v 1.1 2011/09/16 15:48:19 yuo Exp $   */
+/*	$OpenBSD: usps.c,v 1.4 2013/11/07 10:44:37 pirofti Exp $   */
 
 /*
  * Copyright (c) 2011 Yojiro UO <yuo@nui.org>
@@ -19,7 +19,6 @@
 /* Driver for usb smart power strip FX-5204PS */
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/malloc.h>
@@ -73,15 +72,14 @@ struct usps_port_sensor {
 
 struct usps_softc {
 	struct device		 sc_dev;
-	usbd_device_handle	 sc_udev;
-	usbd_interface_handle	 sc_iface;
-	usbd_pipe_handle	 sc_ipipe; 
+	struct usbd_device	*sc_udev;
+	struct usbd_interface	*sc_iface;
+	struct usbd_pipe	*sc_ipipe; 
 	int			 sc_isize;
-	usbd_xfer_handle	 sc_xfer;
+	struct usbd_xfer	*sc_xfer;
 	uint8_t			 sc_buf[16];
 	uint8_t			 *sc_intrbuf;
 
-	u_char			 sc_dying;
 	uint16_t		 sc_flag;
 
 	/* device info */
@@ -117,7 +115,7 @@ int  usps_match(struct device *, void *, void *);
 void usps_attach(struct device *, struct device *, void *);
 int  usps_detach(struct device *, int);
 int  usps_activate(struct device *, int);
-void usps_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void usps_intr(struct usbd_xfer *, void *, usbd_status);
 
 usbd_status usps_cmd(struct usps_softc *, uint8_t, uint16_t, uint16_t);
 usbd_status usps_set_measurement_mode(struct usps_softc *, int);
@@ -312,7 +310,7 @@ usps_detach(struct device *self, int flags)
 	struct usps_softc *sc = (struct usps_softc *)self;
 	int i, rv = 0, s;
 
-	sc->sc_dying = 1;
+	usbd_deactivate(sc->sc_udev);
 
 	s = splusb();
 	if (sc->sc_ipipe != NULL) {
@@ -354,7 +352,7 @@ usps_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 	return (0);
@@ -415,14 +413,14 @@ usps_set_measurement_mode(struct usps_softc *sc, int mode)
 }
 
 void
-usps_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+usps_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct usps_softc *sc = priv;
 	struct usps_port_pkt *pkt;
 	struct usps_port_sensor *ps;
 	int i, total;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {

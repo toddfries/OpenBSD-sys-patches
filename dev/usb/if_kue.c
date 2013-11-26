@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_kue.c,v 1.64 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: if_kue.c,v 1.71 2013/11/15 10:17:39 pirofti Exp $ */
 /*	$NetBSD: if_kue.c,v 1.50 2002/07/16 22:00:31 augustss Exp $	*/
 /*
  * Copyright (c) 1997, 1998, 1999, 2000
@@ -80,7 +80,6 @@
 #include <sys/kernel.h>
 #include <sys/socket.h>
 #include <sys/device.h>
-#include <sys/proc.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -92,7 +91,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -175,8 +173,8 @@ int kue_rx_list_init(struct kue_softc *);
 int kue_newbuf(struct kue_softc *, struct kue_chain *,struct mbuf *);
 int kue_send(struct kue_softc *, struct mbuf *, int);
 int kue_open_pipes(struct kue_softc *);
-void kue_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void kue_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void kue_rxeof(struct usbd_xfer *, void *, usbd_status);
+void kue_txeof(struct usbd_xfer *, void *, usbd_status);
 void kue_start(struct ifnet *);
 int kue_ioctl(struct ifnet *, u_long, caddr_t);
 void kue_init(void *);
@@ -233,7 +231,7 @@ kue_ctl(struct kue_softc *sc, int rw, u_int8_t breq, u_int16_t val,
 int
 kue_load_fw(struct kue_softc *sc)
 {
-	usb_device_descriptor_t dd;
+	usb_device_descriptor_t *dd;
 	usbd_status		err;
 	struct kue_firmware	*fw;
 	u_char			*buf;
@@ -255,9 +253,9 @@ kue_load_fw(struct kue_softc *sc)
 	 * it's probed while the firmware is still loaded and
 	 * running.
 	 */
-	if (usbd_get_device_desc(sc->kue_udev, &dd))
+	if ((dd = usbd_get_device_descriptor(sc->kue_udev)) == NULL)
 		return (EIO);
-	if (UGETW(dd.bcdDevice) >= KUE_WARM_REV) {
+	if (UGETW(dd->bcdDevice) >= KUE_WARM_REV) {
 		printf("%s: warm boot, no firmware download\n",
 		       sc->kue_dev.dv_xname);
 		return (0);
@@ -335,6 +333,7 @@ kue_load_fw(struct kue_softc *sc)
 void
 kue_setmulti(struct kue_softc *sc)
 {
+	struct arpcom		*ac = &sc->arpcom;
 	struct ifnet		*ifp = GET_IFP(sc);
 	struct ether_multi	*enm;
 	struct ether_multistep	step;
@@ -342,7 +341,7 @@ kue_setmulti(struct kue_softc *sc)
 
 	DPRINTFN(5,("%s: %s: enter\n", sc->kue_dev.dv_xname, __func__));
 
-	if (ifp->if_flags & IFF_PROMISC) {
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
 allmulti:
 		ifp->if_flags |= IFF_ALLMULTI;
 		sc->kue_rxfilt |= KUE_RXFILT_ALLMULTI;
@@ -354,11 +353,9 @@ allmulti:
 	sc->kue_rxfilt &= ~KUE_RXFILT_ALLMULTI;
 
 	i = 0;
-	ETHER_FIRST_MULTI(step, &sc->arpcom, enm);
+	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (i == KUE_MCFILTCNT(sc) ||
-		    memcmp(enm->enm_addrlo, enm->enm_addrhi,
-			ETHER_ADDR_LEN) != 0)
+		if (i == KUE_MCFILTCNT(sc))
 			goto allmulti;
 
 		memcpy(KUE_MCFILT(sc, i), enm->enm_addrlo, ETHER_ADDR_LEN);
@@ -417,8 +414,8 @@ kue_attachhook(void *xsc)
 	struct kue_softc *sc = xsc;
 	int			s;
 	struct ifnet		*ifp;
-	usbd_device_handle	dev = sc->kue_udev;
-	usbd_interface_handle	iface;
+	struct usbd_device	*dev = sc->kue_udev;
+	struct usbd_interface	*iface;
 	usbd_status		err;
 	usb_interface_descriptor_t	*id;
 	usb_endpoint_descriptor_t	*ed;
@@ -523,7 +520,7 @@ kue_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct kue_softc	*sc = (struct kue_softc *)self;
 	struct usb_attach_arg	*uaa = aux;
-	usbd_device_handle	dev = uaa->device;
+	struct usbd_device	*dev = uaa->device;
 	usbd_status		err;
 
 	DPRINTFN(5,(" : kue_attach: sc=%p, dev=%p", sc, dev));
@@ -594,7 +591,7 @@ kue_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		sc->kue_dying = 1;
+		usbd_deactivate(sc->kue_udev);
 		break;
 	}
 	return (0);
@@ -699,7 +696,7 @@ kue_tx_list_init(struct kue_softc *sc)
  * the higher level protocols.
  */
 void
-kue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+kue_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct kue_chain	*c = priv;
 	struct kue_softc	*sc = c->kue_sc;
@@ -711,7 +708,7 @@ kue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 	DPRINTFN(10,("%s: %s: enter status=%d\n", sc->kue_dev.dv_xname,
 		     __func__, status));
 
-	if (sc->kue_dying)
+	if (usbd_is_dying(sc->kue_udev))
 		return;
 
 	if (!(ifp->if_flags & IFF_RUNNING))
@@ -802,14 +799,14 @@ kue_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
  */
 
 void
-kue_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+kue_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct kue_chain	*c = priv;
 	struct kue_softc	*sc = c->kue_sc;
 	struct ifnet		*ifp = GET_IFP(sc);
 	int			s;
 
-	if (sc->kue_dying)
+	if (usbd_is_dying(sc->kue_udev))
 		return;
 
 	s = splnet();
@@ -897,7 +894,7 @@ kue_start(struct ifnet *ifp)
 
 	DPRINTFN(10,("%s: %s: enter\n", sc->kue_dev.dv_xname,__func__));
 
-	if (sc->kue_dying)
+	if (usbd_is_dying(sc->kue_udev))
 		return;
 
 	if (ifp->if_flags & IFF_OACTIVE)
@@ -1048,7 +1045,7 @@ kue_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 
 	DPRINTFN(5,("%s: %s: enter\n", sc->kue_dev.dv_xname,__func__));
 
-	if (sc->kue_dying)
+	if (usbd_is_dying(sc->kue_udev))
 		return (EIO);
 
 #ifdef DIAGNOSTIC
@@ -1122,7 +1119,7 @@ kue_watchdog(struct ifnet *ifp)
 
 	DPRINTFN(5,("%s: %s: enter\n", sc->kue_dev.dv_xname,__func__));
 
-	if (sc->kue_dying)
+	if (usbd_is_dying(sc->kue_udev))
 		return;
 
 	ifp->if_oerrors++;
@@ -1157,11 +1154,7 @@ kue_stop(struct kue_softc *sc)
 
 	/* Stop transfers. */
 	if (sc->kue_ep[KUE_ENDPT_RX] != NULL) {
-		err = usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_RX]);
-		if (err) {
-			printf("%s: abort rx pipe failed: %s\n",
-			    sc->kue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_RX]);
 		err = usbd_close_pipe(sc->kue_ep[KUE_ENDPT_RX]);
 		if (err) {
 			printf("%s: close rx pipe failed: %s\n",
@@ -1171,11 +1164,7 @@ kue_stop(struct kue_softc *sc)
 	}
 
 	if (sc->kue_ep[KUE_ENDPT_TX] != NULL) {
-		err = usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_TX]);
-		if (err) {
-			printf("%s: abort tx pipe failed: %s\n",
-			    sc->kue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_TX]);
 		err = usbd_close_pipe(sc->kue_ep[KUE_ENDPT_TX]);
 		if (err) {
 			printf("%s: close tx pipe failed: %s\n",
@@ -1185,11 +1174,7 @@ kue_stop(struct kue_softc *sc)
 	}
 
 	if (sc->kue_ep[KUE_ENDPT_INTR] != NULL) {
-		err = usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_INTR]);
-		if (err) {
-			printf("%s: abort intr pipe failed: %s\n",
-			    sc->kue_dev.dv_xname, usbd_errstr(err));
-		}
+		usbd_abort_pipe(sc->kue_ep[KUE_ENDPT_INTR]);
 		err = usbd_close_pipe(sc->kue_ep[KUE_ENDPT_INTR]);
 		if (err) {
 			printf("%s: close intr pipe failed: %s\n",

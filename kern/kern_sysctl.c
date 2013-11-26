@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.216 2012/03/13 17:28:32 tedu Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.241 2013/10/22 16:40:26 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -70,10 +70,9 @@
 #include <sys/socket.h>
 #include <sys/domain.h>
 #include <sys/protosw.h>
-#ifdef __HAVE_TIMECOUNTER
 #include <sys/timetc.h>
-#endif
 #include <sys/evcount.h>
+#include <sys/un.h>
 #include <sys/unpcb.h>
 
 #include <sys/mount.h>
@@ -123,11 +122,13 @@ int sysctl_sensors(int *, u_int, void *, size_t *, void *, size_t);
 int sysctl_emul(int *, u_int, void *, size_t *, void *, size_t);
 int sysctl_cptime2(int *, u_int, void *, size_t *, void *, size_t);
 
+void fill_file(struct kinfo_file *, struct file *, struct filedesc *,
+    int, struct vnode *, struct proc *, struct proc *, int);
+void fill_kproc(struct proc *, struct kinfo_proc *, int, int);
+
 int (*cpu_cpuspeed)(int *);
 void (*cpu_setperf)(int);
 int perflevel = 100;
-
-int rthreads_enabled = 1;
 
 /*
  * Lock to avoid too many processes vslocking a large amount of memory
@@ -140,7 +141,7 @@ int
 sys___sysctl(struct proc *p, void *v, register_t *retval)
 {
 	struct sys___sysctl_args /* {
-		syscallarg(int *) name;
+		syscallarg(const int *) name;
 		syscallarg(u_int) namelen;
 		syscallarg(void *) old;
 		syscallarg(size_t *) oldlenp;
@@ -291,11 +292,9 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		case KERN_WATCHDOG:
 		case KERN_EMUL:
 		case KERN_EVCOUNT:
-#ifdef __HAVE_TIMECOUNTER
 		case KERN_TIMECOUNTER:
-#endif
 		case KERN_CPTIME2:
-		case KERN_FILE2:
+		case KERN_FILE:
 			break;
 		default:
 			return (ENOTDIR);	/* overloaded */
@@ -316,7 +315,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_MAXVNODES:
 		return(sysctl_int(oldp, oldlenp, newp, newlen, &maxvnodes));
 	case KERN_MAXPROC:
-		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxproc));
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxprocess));
 	case KERN_MAXFILES:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxfiles));
 	case KERN_NFILES:
@@ -358,9 +357,11 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (error);
 	case KERN_CLOCKRATE:
 		return (sysctl_clockrate(oldp, oldlenp, newp));
-	case KERN_BOOTTIME:
-		return (sysctl_rdstruct(oldp, oldlenp, newp, &boottime,
-		    sizeof(struct timeval)));
+	case KERN_BOOTTIME: {
+		struct timeval bt;
+		TIMESPEC_TO_TIMEVAL(&bt, &boottime);
+		return (sysctl_rdstruct(oldp, oldlenp, newp, &bt, sizeof bt));
+	  }
 	case KERN_VNODE:
 		return (sysctl_vnode(oldp, oldlenp, p));
 #ifndef SMALL_KERNEL
@@ -372,11 +373,9 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_PROC_CWD:
 		return (sysctl_proc_cwd(name + 1, namelen - 1, oldp, oldlenp,
 		     p));
-	case KERN_FILE2:
-		return (sysctl_file2(name + 1, namelen - 1, oldp, oldlenp, p));
-#endif
 	case KERN_FILE:
-		return (sysctl_file(oldp, oldlenp, p));
+		return (sysctl_file(name + 1, namelen - 1, oldp, oldlenp, p));
+#endif
 	case KERN_MBSTAT:
 		return (sysctl_rdstruct(oldp, oldlenp, newp, &mbstat,
 		    sizeof(mbstat)));
@@ -392,15 +391,15 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_JOB_CONTROL:
 		return (sysctl_rdint(oldp, oldlenp, newp, 1));
 	case KERN_SAVED_IDS:
-#ifdef _POSIX_SAVED_IDS
 		return (sysctl_rdint(oldp, oldlenp, newp, 1));
-#else
-		return (sysctl_rdint(oldp, oldlenp, newp, 0));
-#endif
 	case KERN_MAXPARTITIONS:
 		return (sysctl_rdint(oldp, oldlenp, newp, MAXPARTITIONS));
 	case KERN_RAWPARTITION:
 		return (sysctl_rdint(oldp, oldlenp, newp, RAW_PART));
+	case KERN_MAXTHREAD:
+		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxthread));
+	case KERN_NTHREADS:
+		return (sysctl_rdint(oldp, oldlenp, newp, nthreads));
 	case KERN_SOMAXCONN:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &somaxconn));
 	case KERN_SOMINCONN:
@@ -494,7 +493,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 	case KERN_CCPU:
 		return (sysctl_rdint(oldp, oldlenp, newp, ccpu));
 	case KERN_NPROCS:
-		return (sysctl_rdint(oldp, oldlenp, newp, nprocs));
+		return (sysctl_rdint(oldp, oldlenp, newp, nprocesses));
 	case KERN_POOL:
 		return (sysctl_dopool(name + 1, namelen - 1, oldp, oldlenp));
 	case KERN_STACKGAPRANDOM:
@@ -557,19 +556,14 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		return (evcount_sysctl(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
 #endif
-#ifdef __HAVE_TIMECOUNTER
 	case KERN_TIMECOUNTER:
 		return (sysctl_tc(name + 1, namelen - 1, oldp, oldlenp,
 		    newp, newlen));
-#endif
 	case KERN_MAXLOCKSPERUID:
 		return (sysctl_int(oldp, oldlenp, newp, newlen, &maxlocksperuid));
 	case KERN_CPTIME2:
 		return (sysctl_cptime2(name + 1, namelen -1, oldp, oldlenp,
 		    newp, newlen));
-	case KERN_RTHREADS:
-		return (sysctl_int(oldp, oldlenp, newp, newlen,
-		    &rthreads_enabled));
 	case KERN_CACHEPCT: {
 		u_int64_t dmapages;
 		int opct, pgs;
@@ -998,73 +992,11 @@ sysctl_rdstruct(void *oldp, size_t *oldlenp, void *newp, const void *sp,
 	return (error);
 }
 
-/*
- * Get file structures.
- */
-int
-sysctl_file(char *where, size_t *sizep, struct proc *p)
-{
-	int buflen, error;
-	struct file *fp, cfile;
-	char *start = where;
-	struct ucred *cred = p->p_ucred;
-
-	buflen = *sizep;
-	if (where == NULL) {
-		/*
-		 * overestimate by KERN_FILESLOP files
-		 */
-		*sizep = sizeof(filehead) +
-		    (nfiles + KERN_FILESLOP) * sizeof(struct file);
-		return (0);
-	}
-
-	/*
-	 * first copyout filehead
-	 */
-	if (buflen < sizeof(filehead)) {
-		*sizep = 0;
-		return (0);
-	}
-	error = copyout((caddr_t)&filehead, where, sizeof(filehead));
-	if (error)
-		return (error);
-	buflen -= sizeof(filehead);
-	where += sizeof(filehead);
-
-	/*
-	 * followed by an array of file structures
-	 */
-	LIST_FOREACH(fp, &filehead, f_list) {
-		if (buflen < sizeof(struct file)) {
-			*sizep = where - start;
-			return (ENOMEM);
-		}
-
-		/* Only let the superuser or the owner see some information */
-		bcopy(fp, &cfile, sizeof (struct file));
-		if (suser(p, 0) != 0 && cred->cr_uid != fp->f_cred->cr_uid) {
-			cfile.f_offset = (off_t)-1;
-			cfile.f_rxfer = 0;
-			cfile.f_wxfer = 0;
-			cfile.f_seek = 0;
-			cfile.f_rbytes = 0;
-			cfile.f_wbytes = 0;
-		}
-		error = copyout(&cfile, where, sizeof (struct file));
-		if (error)
-			return (error);
-		buflen -= sizeof(struct file);
-		where += sizeof(struct file);
-	}
-	*sizep = where - start;
-	return (0);
-}
-
 #ifndef SMALL_KERNEL
 void
-fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
-	  int fd, struct vnode *vp, struct proc *pp, struct proc *p)
+fill_file(struct kinfo_file *kf, struct file *fp, struct filedesc *fdp,
+	  int fd, struct vnode *vp, struct proc *pp, struct proc *p,
+	  int show_pointers)
 {
 	struct vattr va;
 
@@ -1073,18 +1005,22 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 	kf->fd_fd = fd;		/* might not really be an fd */
 
 	if (fp != NULL) {
-		kf->f_fileaddr = PTRTOINT64(fp);
+		if (show_pointers)
+			kf->f_fileaddr = PTRTOINT64(fp);
 		kf->f_flag = fp->f_flag;
 		kf->f_iflags = fp->f_iflags;
 		kf->f_type = fp->f_type;
 		kf->f_count = fp->f_count;
 		kf->f_msgcount = fp->f_msgcount;
-		kf->f_ucred = PTRTOINT64(fp->f_cred);
+		if (show_pointers)
+			kf->f_ucred = PTRTOINT64(fp->f_cred);
 		kf->f_uid = fp->f_cred->cr_uid;
 		kf->f_gid = fp->f_cred->cr_gid;
-		kf->f_ops = PTRTOINT64(fp->f_ops);
-		kf->f_data = PTRTOINT64(fp->f_data);
-		kf->f_usecount = fp->f_usecount;
+		if (show_pointers)
+			kf->f_ops = PTRTOINT64(fp->f_ops);
+		if (show_pointers)
+			kf->f_data = PTRTOINT64(fp->f_data);
+		kf->f_usecount = 0;
 
 		if (suser(p, 0) == 0 || p->p_ucred->cr_uid == fp->f_cred->cr_uid) {
 			kf->f_offset = fp->f_offset;
@@ -1092,7 +1028,7 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 			kf->f_rwfer = fp->f_wxfer;
 			kf->f_seek = fp->f_seek;
 			kf->f_rbytes = fp->f_rbytes;
-			kf->f_wbytes = fp->f_rbytes;
+			kf->f_wbytes = fp->f_wbytes;
 		} else
 			kf->f_offset = -1;
 	} else if (vp != NULL) {
@@ -1109,12 +1045,15 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		if (fp != NULL)
 			vp = (struct vnode *)fp->f_data;
 
-		kf->v_un = PTRTOINT64(vp->v_un.vu_socket);
+		if (show_pointers)
+			kf->v_un = PTRTOINT64(vp->v_un.vu_socket);
 		kf->v_type = vp->v_type;
 		kf->v_tag = vp->v_tag;
 		kf->v_flag = vp->v_flag;
-		kf->v_data = PTRTOINT64(vp->v_data);
-		kf->v_mount = PTRTOINT64(vp->v_mount);
+		if (show_pointers)
+			kf->v_data = PTRTOINT64(vp->v_data);
+		if (show_pointers)
+			kf->v_mount = PTRTOINT64(vp->v_mount);
 		if (vp->v_mount)
 			strlcpy(kf->f_mntonname,
 			    vp->v_mount->mnt_stat.f_mntonname,
@@ -1134,11 +1073,17 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 
 		kf->so_type = so->so_type;
 		kf->so_state = so->so_state;
-		kf->so_pcb = PTRTOINT64(so->so_pcb);
+		if (show_pointers)
+			kf->so_pcb = PTRTOINT64(so->so_pcb);
+		else
+			kf->so_pcb = -1;
 		kf->so_protocol = so->so_proto->pr_protocol;
 		kf->so_family = so->so_proto->pr_domain->dom_family;
+		kf->so_rcv_cc = so->so_rcv.sb_cc;
+		kf->so_snd_cc = so->so_snd.sb_cc;
 		if (so->so_splice) {
-			kf->so_splice = PTRTOINT64(so->so_splice);
+			if (show_pointers)
+				kf->so_splice = PTRTOINT64(so->so_splice);
 			kf->so_splicelen = so->so_splicelen;
 		} else if (so->so_spliceback)
 			kf->so_splicelen = -1;
@@ -1148,7 +1093,8 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		case AF_INET: {
 			struct inpcb *inpcb = so->so_pcb;
 
-			kf->inp_ppcb = PTRTOINT64(inpcb->inp_ppcb);
+			if (show_pointers)
+				kf->inp_ppcb = PTRTOINT64(inpcb->inp_ppcb);
 			kf->inp_lport = inpcb->inp_lport;
 			kf->inp_laddru[0] = inpcb->inp_laddr.s_addr;
 			kf->inp_fport = inpcb->inp_fport;
@@ -1176,7 +1122,19 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 		case AF_UNIX: {
 			struct unpcb *unpcb = so->so_pcb;
 
-			kf->unp_conn = PTRTOINT64(unpcb->unp_conn);
+			if (show_pointers) {
+				kf->unp_conn	= PTRTOINT64(unpcb->unp_conn);
+				kf->unp_refs	= PTRTOINT64(unpcb->unp_refs);
+				kf->unp_nextref	= PTRTOINT64(unpcb->unp_nextref);
+				kf->v_un	= PTRTOINT64(unpcb->unp_vnode);
+				kf->unp_addr	= PTRTOINT64(unpcb->unp_addr);
+			}
+			if (unpcb->unp_addr != NULL) {
+				struct sockaddr_un *un = mtod(unpcb->unp_addr,
+				    struct sockaddr_un *);
+				memcpy(kf->unp_path, un->sun_path, un->sun_len
+				    - offsetof(struct sockaddr_un,sun_path));
+			}
 			break;
 		    }
 		}
@@ -1186,7 +1144,8 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
 	case DTYPE_PIPE: {
 		struct pipe *pipe = (struct pipe *)fp->f_data;
 
-		kf->pipe_peer = PTRTOINT64(pipe->pipe_peer);
+		if (show_pointers)
+			kf->pipe_peer = PTRTOINT64(pipe->pipe_peer);
 		kf->pipe_state = pipe->pipe_state;
 		break;
 	    }
@@ -1222,10 +1181,10 @@ fill_file2(struct kinfo_file2 *kf, struct file *fp, struct filedesc *fdp,
  * Get file structures.
  */
 int
-sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
+sysctl_file(int *name, u_int namelen, char *where, size_t *sizep,
     struct proc *p)
 {
-	struct kinfo_file2 *kf;
+	struct kinfo_file *kf;
 	struct filedesc *fdp;
 	struct file *fp;
 	struct proc *pp;
@@ -1233,6 +1192,7 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 	char *dp = where;
 	int arg, i, error = 0, needed = 0;
 	u_int op;
+	int show_pointers;
 
 	if (namelen > 4)
 		return (ENOTDIR);
@@ -1246,14 +1206,16 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 	elem_count = name[3];
 	outsize = MIN(sizeof(*kf), elem_size);
 
-	if (elem_size < 1 || elem_count < 0)
+	if (elem_size < 1)
 		return (EINVAL);
+
+	show_pointers = suser(curproc, 0) == 0;
 
 	kf = malloc(sizeof(*kf), M_TEMP, M_WAITOK);
 
 #define FILLIT(fp, fdp, i, vp, pp) do {				\
 	if (buflen >= elem_size && elem_count > 0) {		\
-		fill_file2(kf, fp, fdp, i, vp, pp, p);		\
+		fill_file(kf, fp, fdp, i, vp, pp, p, show_pointers);	\
 		error = copyout(kf, dp, outsize);		\
 		if (error)					\
 			break;					\
@@ -1284,8 +1246,11 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 			break;
 		}
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, exiting, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			/*
+			 * skip system, exiting, embryonic and undead
+			 * processes, as well as threads
+			 */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_THREAD)
 			    || (pp->p_p->ps_flags & PS_EXITING)
 			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
@@ -1313,8 +1278,11 @@ sysctl_file2(int *name, u_int namelen, char *where, size_t *sizep,
 		break;
 	case KERN_FILE_BYUID:
 		LIST_FOREACH(pp, &allproc, p_list) {
-			/* skip system, exiting, embryonic and undead processes */
-			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_WEXIT)
+			/*
+			 * skip system, exiting, embryonic and undead
+			 * processes, as well as threads
+			 */
+			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_THREAD)
 			    || (pp->p_p->ps_flags & PS_EXITING)
 			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
@@ -1364,11 +1332,13 @@ int
 sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 {
 	struct kinfo_proc *kproc = NULL;
-	struct proc *p;
+	struct proc *p, *pp;
 	struct process *pr;
 	char *dp;
 	int arg, buflen, doingzomb, elem_size, elem_count;
 	int error, needed, op;
+	int dothreads = 0;
+	int show_pointers;
 
 	dp = where;
 	buflen = where != NULL ? *sizep : 0;
@@ -1381,6 +1351,11 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 	arg = name[1];
 	elem_size = name[2];
 	elem_count = name[3];
+
+	dothreads = op & KERN_PROC_SHOW_THREADS;
+	op &= ~KERN_PROC_SHOW_THREADS;
+
+	show_pointers = suser(curproc, 0) == 0;
 
 	if (where != NULL)
 		kproc = malloc(sizeof(*kproc), M_TEMP, M_WAITOK);
@@ -1454,8 +1429,33 @@ again:
 			goto err;
 		}
 
+		if ((p->p_flag & P_THREAD) == 0) {
+			if (buflen >= elem_size && elem_count > 0) {
+				fill_kproc(p, kproc, 0, show_pointers);
+				/* Update %cpu for all threads */
+				if (!dothreads) {
+					TAILQ_FOREACH(pp, &pr->ps_threads,
+					    p_thr_link) {
+						if (pp == p)
+							continue;
+						kproc->p_pctcpu += pp->p_pctcpu;
+					}
+				}
+				error = copyout(kproc, dp, elem_size);
+				if (error)
+					goto err;
+				dp += elem_size;
+				buflen -= elem_size;
+				elem_count--;
+			}
+			needed += elem_size;
+		}
+		/* Skip the second entry if not required by op */
+		if (!dothreads)
+			continue;
+
 		if (buflen >= elem_size && elem_count > 0) {
-			fill_kproc(p, kproc);
+			fill_kproc(p, kproc, 1, show_pointers);
 			error = copyout(kproc, dp, elem_size);
 			if (error)
 				goto err;
@@ -1490,15 +1490,17 @@ err:
  * Fill in a kproc structure for the specified process.
  */
 void
-fill_kproc(struct proc *p, struct kinfo_proc *ki)
+fill_kproc(struct proc *p, struct kinfo_proc *ki, int isthread,
+    int show_pointers)
 {
 	struct process *pr = p->p_p;
 	struct session *s = pr->ps_session;
 	struct tty *tp;
-	struct timeval ut, st;
+	struct timespec ut, st;
 
 	FILL_KPROC(ki, strlcpy, p, pr, p->p_cred, p->p_ucred, pr->ps_pgrp,
-	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_stats, p->p_sigacts);
+	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_sigacts, isthread,
+	    show_pointers);
 
 	/* stuff that's too painful to generalize into the macros */
 	ki->p_pid = pr->ps_pid;
@@ -1510,7 +1512,8 @@ fill_kproc(struct proc *p, struct kinfo_proc *ki)
 	if ((pr->ps_flags & PS_CONTROLT) && (tp = s->s_ttyp)) {
 		ki->p_tdev = tp->t_dev;
 		ki->p_tpgid = tp->t_pgrp ? tp->t_pgrp->pg_id : -1;
-		ki->p_tsess = PTRTOINT64(tp->t_session);
+		if (show_pointers)
+			ki->p_tsess = PTRTOINT64(tp->t_session);
 	} else {
 		ki->p_tdev = NODEV;
 		ki->p_tpgid = -1;
@@ -1521,11 +1524,11 @@ fill_kproc(struct proc *p, struct kinfo_proc *ki)
 		if (p->p_stat != SIDL)
 			ki->p_vm_rssize = vm_resident_count(p->p_vmspace);
 
-		calcru(p, &ut, &st, NULL);
+		calctsru(&p->p_tu, &ut, &st, NULL);
 		ki->p_uutime_sec = ut.tv_sec;
-		ki->p_uutime_usec = ut.tv_usec;
+		ki->p_uutime_usec = ut.tv_nsec/1000;
 		ki->p_ustime_sec = st.tv_sec;
-		ki->p_ustime_usec = st.tv_usec;
+		ki->p_ustime_usec = st.tv_nsec/1000;
 
 #ifdef MULTIPROCESSOR
 		if (p->p_cpu != NULL)
@@ -1588,6 +1591,12 @@ sysctl_proc_args(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	/* Execing - danger. */
 	if ((vp->p_p->ps_flags & PS_INEXEC))
 		return (EBUSY);
+	
+	/* Only owner or root can get env */
+	if ((op == KERN_PROC_NENV || op == KERN_PROC_ENV) &&
+	    (vp->p_ucred->cr_uid != cp->p_ucred->cr_uid &&
+	    (error = suser(cp, 0)) != 0))
+		return (error);
 
 	vm = vp->p_vmspace;
 	vm->vm_refcnt++;
@@ -1742,6 +1751,7 @@ sysctl_proc_cwd(int *name, u_int namelen, void *oldp, size_t *oldlenp,
     struct proc *cp)
 {
 	struct proc *findp;
+	struct vnode *vp;
 	pid_t pid;
 	int error;
 	size_t lenused, len;
@@ -1780,6 +1790,10 @@ sysctl_proc_cwd(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (ERANGE);
 	*oldlenp = 0;
 
+	/* snag a reference to the vnode before we can sleep */
+	vp = findp->p_fd->fd_cdir;
+	vref(vp);
+
 	path = malloc(len, M_TEMP, M_WAITOK);
 
 	bp = &path[len];
@@ -1787,13 +1801,14 @@ sysctl_proc_cwd(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 	*(--bp) = '\0';
 
 	/* Same as sys__getcwd */
-	error = vfs_getcwd_common(findp->p_fd->fd_cdir, NULL,
+	error = vfs_getcwd_common(vp, NULL,
 	    &bp, path, len / 2, GETCWD_CHECK_ACCESS, cp);
 	if (error == 0) {
 		*oldlenp = lenused = bend - bp;
 		error = copyout(bp, oldp, lenused);
 	}
 
+	vrele(vp);
 	free(path, M_TEMP);
 
 	return (error);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: biosdev.c,v 1.17 2012/01/11 14:47:02 jsing Exp $	*/
+/*	$OpenBSD: biosdev.c,v 1.20 2013/03/23 16:08:27 deraadt Exp $	*/
 
 /*
  * Copyright (c) 1996 Michael Shalayeff
@@ -31,15 +31,19 @@
 #include <sys/param.h>
 #include <sys/reboot.h>
 #include <sys/disklabel.h>
-#include <dev/biovar.h>
-#include <dev/softraidvar.h>
 #include <isofs/cd9660/iso.h>
 #include <lib/libsa/saerrno.h>
 #include <machine/tss.h>
 #include <machine/biosvar.h>
+
+#include "biosdev.h"
 #include "disk.h"
 #include "libsa.h"
-#include "biosdev.h"
+
+#ifdef SOFTRAID
+#include <dev/softraidvar.h>
+#include "softraid.h"
+#endif
 
 static const char *biosdisk_err(u_int);
 static int biosdisk_errno(u_int);
@@ -48,10 +52,6 @@ int CHS_rw (int, int, int, int, int, int, void *);
 static int EDD_rw (int, int, u_int32_t, u_int32_t, void *);
 
 static u_int findopenbsd(bios_diskinfo_t *, const char **);
-
-static const char *sr_getdisklabel(struct sr_boot_volume *, struct disklabel *);
-static int sr_strategy(struct sr_boot_volume *, int, daddr32_t, size_t,
-    void *, size_t *);
 
 extern int debug;
 int bios_bootdev;
@@ -257,8 +257,8 @@ biosd_io(int rw, bios_diskinfo_t *bd, u_int off, int nsect, void *buf)
 		 * routine.  However, the El Torito spec says that the
 		 * BIOS will work in 2,048-byte sectors.  So shift back.
 		 */
-		off >>= (ISO_DEFAULT_BLOCK_SHIFT - DEV_BSHIFT);
-		nsect >>= (ISO_DEFAULT_BLOCK_SHIFT - DEV_BSHIFT);
+		off /= (ISO_DEFAULT_BLOCK_SIZE / DEV_BSIZE);
+		nsect /= (ISO_DEFAULT_BLOCK_SIZE / DEV_BSIZE);
 	}
 
 	/*
@@ -455,7 +455,9 @@ bios_getdisklabel(bios_diskinfo_t *bd, struct disklabel *label)
 int
 biosopen(struct open_file *f, ...)
 {
+#ifdef SOFTRAID
 	struct sr_boot_volume *bv;
+#endif
 	register char *cp, **file;
 	dev_t maj, unit, part;
 	struct diskinfo *dip;
@@ -508,6 +510,7 @@ biosopen(struct open_file *f, ...)
 	else
 		f->f_flags |= F_RAW;
 
+#ifdef SOFTRAID
 	/* Intercept softraid disks. */
 	if (strncmp("sr", dev, 2) == 0) {
 
@@ -519,6 +522,10 @@ biosopen(struct open_file *f, ...)
 			printf("Unknown device: sr%d\n", unit);
 			return EADAPT;
 		}
+
+		if (bv->sbv_level == 'C' && bv->sbv_keys == NULL)
+			sr_crypto_decrypt_keys(bv);
+
 		if (bv->sbv_diskinfo == NULL) {
 			dip = alloc(sizeof(struct diskinfo));
 			bzero(dip, sizeof(*dip));
@@ -544,6 +551,7 @@ biosopen(struct open_file *f, ...)
 
 		return 0;
 	}
+#endif
  
 	for (maj = 0; maj < nbdevs &&
 	    strncmp(dev, bdevs[maj], devlen); maj++);
@@ -703,11 +711,13 @@ biosstrategy(void *devdata, int rw, daddr32_t blk, size_t size, void *buf,
 	u_int8_t error = 0;
 	size_t nsect;
 
+#ifdef SOFTRAID
 	/* Intercept strategy for softraid volumes. */
 	if (dip->sr_vol)
 		return sr_strategy(dip->sr_vol, rw, blk, size, buf, rsize);
+#endif
 
-	nsect = (size + DEV_BSIZE-1) / DEV_BSIZE;
+	nsect = (size + DEV_BSIZE - 1) / DEV_BSIZE;
 	blk += dip->disklabel.d_partitions[B_PARTITION(dip->bsddev)].p_offset;
 
 	/* Read all, sub-functions handle track boundaries */
@@ -742,92 +752,4 @@ int
 biosioctl(struct open_file *f, u_long cmd, void *data)
 {
 	return 0;
-}
-
-static int
-sr_strategy(struct sr_boot_volume *bv, int rw, daddr32_t blk, size_t size,
-    void *buf, size_t *rsize)
-{
-	struct diskinfo *sr_dip, *dip;
-	struct sr_boot_chunk *bc;
-
-	/* We only support read-only softraid. */
-	if (rw != F_READ)
-		return EPERM;
-
-	/* Partition offset within softraid volume. */
-	sr_dip = (struct diskinfo *)bv->sbv_diskinfo;
-	blk += sr_dip->disklabel.d_partitions[bv->sbv_part - 'a'].p_offset;
-
-	if (bv->sbv_level == 0) {
-		return ENOTSUP;
-	} else if (bv->sbv_level == 1) {
-
-		/* Select first online chunk. */
-		SLIST_FOREACH(bc, &bv->sbv_chunks, sbc_link)
-			if (bc->sbc_state == BIOC_SDONLINE)
-				break;
-		if (bc == NULL)
-			return EIO;
-
-		dip = (struct diskinfo *)bc->sbc_diskinfo;
-		dip->bsddev = bc->sbc_mm;
-		blk += bv->sbv_data_offset;
-
-		/* XXX - If I/O failed we should try another chunk... */
-		return biosstrategy(dip, rw, blk, size, buf, rsize);
-
-	} else if (bv->sbv_level == 'C') {
-		printf("mmmm... crypto!\n");
-		return ENOTSUP;
-	} else 
-		return ENOTSUP;
-}
-
-static const char *
-sr_getdisklabel(struct sr_boot_volume *bv, struct disklabel *label)
-{
-	struct dos_partition *dp;
-	struct dos_mbr mbr;
-	u_int start = 0;
-	char *buf;
-	int i;
-
-	/* Check for MBR to determine partition offset. */
-	bzero(&mbr, sizeof(mbr));
-	sr_strategy(bv, F_READ, DOSBBSECTOR, sizeof(struct dos_mbr),
-	    &mbr, NULL);
-	if (mbr.dmbr_sign == DOSMBR_SIGNATURE) {
-
-		/* Search for OpenBSD partition */
-		for (i = 0; i < NDOSPART; i++) {
-			dp = &mbr.dmbr_parts[i];
-			if (!dp->dp_size)
-				continue;
-			if (dp->dp_typ == DOSPTYP_OPENBSD) {
-				if (dp->dp_start > (dp->dp_start + DOSBBSECTOR))
-					continue;
-				start = dp->dp_start + DOSBBSECTOR;
-			}
-		}
-	}
-
-	start += LABELSECTOR;
-
-	/* Read the disklabel. */
-	buf = alloca(DEV_BSIZE);
-	sr_strategy(bv, F_READ, start, sizeof(struct disklabel), buf, NULL);
-
-#if BIOS_DEBUG
-	printf("sr_getdisklabel: magic %lx\n",
-	    ((struct disklabel *)buf)->d_magic);
-	for (i = 0; i < MAXPARTITIONS; i++)
-		printf("part %c: type = %d, size = %d, offset = %d\n", 'a' + i,
-		    (int)((struct disklabel *)buf)->d_partitions[i].p_fstype,
-		    (int)((struct disklabel *)buf)->d_partitions[i].p_size,
-		    (int)((struct disklabel *)buf)->d_partitions[i].p_offset);
-#endif
-
-	/* Fill in disklabel */
-	return (getdisklabel(buf, label));
 }

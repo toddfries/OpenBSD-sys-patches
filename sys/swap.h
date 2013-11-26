@@ -1,4 +1,4 @@
-/*	$OpenBSD: swap.h,v 1.4 2001/06/27 04:51:48 art Exp $	*/
+/*	$OpenBSD: swap.h,v 1.7 2013/09/30 12:02:30 millert Exp $	*/
 /*	$NetBSD: swap.h,v 1.2 1998/09/13 14:46:24 christos Exp $	*/
 
 /*
@@ -28,15 +28,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* NOTE: This is the current swap.h from NetBSD.  Since we are "upgrading"
- * to the new vm_swap code now, we will not keep compatibility with the
- * old vm_swap code that was in NetBSD.  This means that we do not have
- * an oswapent structure, but instead use a "new" swapent structure, with
- * no overlay.
- *
- * --Toby.
- */
-
 #ifndef _SYS_SWAP_H_
 #define _SYS_SWAP_H_
 
@@ -49,8 +40,12 @@ struct swapent {
 	int	se_nblks;		/* total blocks */
 	int	se_inuse;		/* blocks in use */
 	int	se_priority;		/* priority of this device */
-	char	se_path[MAXPATHLEN];	/* path name */
+	char	se_path[PATH_MAX];	/* path name */
 };
+
+#ifdef _KERNEL
+#define	NETDEV		(dev_t)(-2)	/* network device (for nfs swap) */
+#endif /* _KERNEL */
 
 #define SWAP_ON		1		/* begin swapping on device */
 #define SWAP_OFF	2		/* (stop swapping on device) */

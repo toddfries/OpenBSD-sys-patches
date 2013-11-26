@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_if.c,v 1.63 2011/07/28 11:03:49 henning Exp $ */
+/*	$OpenBSD: pf_if.c,v 1.68 2013/10/17 16:27:42 bluhm Exp $ */
 
 /*
  * Copyright 2005 Henning Brauer <henning@openbsd.org>
@@ -48,7 +48,6 @@
 #include <net/if_types.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -112,7 +111,7 @@ pfi_kif_get(const char *kif_name)
 		return (kif);
 
 	/* create new one */
-	if ((kif = malloc(sizeof(*kif), PFI_MTYPE, M_DONTWAIT|M_ZERO)) == NULL)
+	if ((kif = malloc(sizeof(*kif), PFI_MTYPE, M_NOWAIT|M_ZERO)) == NULL)
 		return (NULL);
 
 	strlcpy(kif->pfik_name, kif_name, sizeof(kif->pfik_name));
@@ -635,6 +634,7 @@ pfi_update_status(const char *name, struct pf_status *pfs)
 			bzero(p->pfik_bytes, sizeof(p->pfik_bytes));
 			p->pfik_tzero = time_second;
 		}
+		splx(s);
 		return;
 	}
 

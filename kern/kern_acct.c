@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_acct.c,v 1.23 2010/07/26 01:56:27 guenther Exp $	*/
+/*	$OpenBSD: kern_acct.c,v 1.27 2013/06/03 16:55:22 guenther Exp $	*/
 /*	$NetBSD: kern_acct.c,v 1.42 1996/02/04 02:15:12 christos Exp $	*/
 
 /*-
@@ -159,27 +159,17 @@ int
 acct_process(struct proc *p)
 {
 	struct acct acct;
+	struct process *pr = p->p_p;
 	struct rusage *r;
-	struct timeval ut, st, tmp;
+	struct timespec ut, st, tmp;
 	int t;
 	struct vnode *vp;
-	struct plimit *oplim = NULL;
 	int error;
 
 	/* If accounting isn't enabled, don't bother */
 	vp = acctp;
 	if (vp == NULL)
 		return (0);
-
-	/*
-	 * Raise the file limit so that accounting can't be stopped by the
-	 * user. (XXX - we should think about the cpu limit too).
-	 */
-	if (p->p_p->ps_limit->p_refcnt > 1) {
-		oplim = p->p_p->ps_limit;
-		p->p_p->ps_limit = limcopy(p->p_p->ps_limit);
-	}
-	p->p_rlimit[RLIMIT_FSIZE].rlim_cur = RLIM_INFINITY;
 
 	/*
 	 * Get process accounting information.
@@ -189,20 +179,20 @@ acct_process(struct proc *p)
 	bcopy(p->p_comm, acct.ac_comm, sizeof acct.ac_comm);
 
 	/* (2) The amount of user and system time that was used */
-	calcru(p, &ut, &st, NULL);
-	acct.ac_utime = encode_comp_t(ut.tv_sec, ut.tv_usec);
-	acct.ac_stime = encode_comp_t(st.tv_sec, st.tv_usec);
+	calctsru(&pr->ps_tu, &ut, &st, NULL);
+	acct.ac_utime = encode_comp_t(ut.tv_sec, ut.tv_nsec);
+	acct.ac_stime = encode_comp_t(st.tv_sec, st.tv_nsec);
 
 	/* (3) The elapsed time the command ran (and its starting time) */
-	acct.ac_btime = p->p_stats->p_start.tv_sec;
-	getmicrotime(&tmp);
-	timersub(&tmp, &p->p_stats->p_start, &tmp);
-	acct.ac_etime = encode_comp_t(tmp.tv_sec, tmp.tv_usec);
+	acct.ac_btime = pr->ps_start.tv_sec;
+	getnanotime(&tmp);
+	timespecsub(&tmp, &pr->ps_start, &tmp);
+	acct.ac_etime = encode_comp_t(tmp.tv_sec, tmp.tv_nsec);
 
 	/* (4) The average amount of memory used */
-	r = &p->p_stats->p_ru;
-	timeradd(&ut, &st, &tmp);
-	t = tmp.tv_sec * hz + tmp.tv_usec / tick;
+	r = &p->p_ru;
+	timespecadd(&ut, &st, &tmp);
+	t = tmp.tv_sec * hz + tmp.tv_nsec / (1000 * tick);
 	if (t)
 		acct.ac_mem = (r->ru_ixrss + r->ru_idrss + r->ru_isrss) / t;
 	else
@@ -216,25 +206,21 @@ acct_process(struct proc *p)
 	acct.ac_gid = p->p_cred->p_rgid;
 
 	/* (7) The terminal from which the process was started */
-	if ((p->p_p->ps_flags & PS_CONTROLT) &&
-	    p->p_p->ps_pgrp->pg_session->s_ttyp)
-		acct.ac_tty = p->p_p->ps_pgrp->pg_session->s_ttyp->t_dev;
+	if ((pr->ps_flags & PS_CONTROLT) &&
+	    pr->ps_pgrp->pg_session->s_ttyp)
+		acct.ac_tty = pr->ps_pgrp->pg_session->s_ttyp->t_dev;
 	else
 		acct.ac_tty = NODEV;
 
 	/* (8) The boolean flags that tell how the process terminated, etc. */
-	acct.ac_flag = p->p_acflag;
+	acct.ac_flag = pr->ps_acflag;
 
 	/*
 	 * Now, just write the accounting information to the file.
 	 */
 	error = vn_rdwr(UIO_WRITE, vp, (caddr_t)&acct, sizeof (acct),
-	    (off_t)0, UIO_SYSSPACE, IO_APPEND|IO_UNIT, p->p_ucred, NULL, p);
-
-	if (oplim) {
-		limfree(p->p_p->ps_limit);
-		p->p_p->ps_limit = oplim;
-	}
+	    (off_t)0, UIO_SYSSPACE, IO_APPEND|IO_UNIT|IO_NOLIMIT,
+	    p->p_ucred, NULL, p);
 
 	return error;
 }
@@ -250,14 +236,14 @@ acct_process(struct proc *p)
 #define	MAXFRACT	((1 << MANTSIZE) - 1)	/* Maximum fractional value. */
 
 comp_t
-encode_comp_t(u_long s, u_long us)
+encode_comp_t(u_long s, u_long ns)
 {
 	int exp, rnd;
 
 	exp = 0;
 	rnd = 0;
 	s *= AHZ;
-	s += us / (1000000 / AHZ);	/* Maximize precision. */
+	s += ns / (1000000000 / AHZ);	/* Maximize precision. */
 
 	while (s > MAXFRACT) {
 	rnd = s & (1 << (EXPSIZE - 1));	/* Round up? */

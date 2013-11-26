@@ -1,9 +1,11 @@
-/*	$OpenBSD: udf_extern.h,v 1.11 2010/12/21 20:14:43 thib Exp $	*/
+/*	$OpenBSD: udf_extern.h,v 1.13 2013/06/02 15:35:18 deraadt Exp $	*/
 
 /*
  * Written by Pedro Martelletto <pedro@ambientworks.net> in February 2005.
  * Public domain.
  */
+
+#ifdef _KERNEL
 
 /*
  * udf_subr.c
@@ -48,6 +50,7 @@ int udf_inactive(void *v);
 int udf_reclaim(void *v);
 int udf_lock(void *v);
 int udf_unlock(void *v);
+int udf_pathconf(void *);
 int udf_islocked(void *v);
 int udf_print(void *v);
 int udf_transname(char *, char *, int, struct umount *);
@@ -63,3 +66,5 @@ extern struct pool udf_ds_pool;
 
 /* Set of UDF vnode operations.*/
 extern struct vops udf_vops;
+
+#endif /* _KERNEL */

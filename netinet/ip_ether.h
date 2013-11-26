@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ether.h,v 1.15 2010/05/11 09:36:07 claudio Exp $ */
+/*	$OpenBSD: ip_ether.h,v 1.17 2013/01/14 23:06:10 deraadt Exp $ */
 /*
  * The author of this code is Angelos D. Keromytis (angelos@adk.gr)
  *
@@ -42,11 +42,16 @@ struct etheripstat {
 };
 
 struct etherip_header {
-	u_int8_t	eip_ver;		/* version/reserved */
-	u_int8_t	eip_pad;		/* required padding byte */
-};
-#define ETHERIP_VER_VERS_MASK	0x0f
-#define ETHERIP_VER_RSVD_MASK	0xf0
+#if BYTE_ORDER == LITTLE_ENDIAN
+	u_int		eip_oldver:4;	/* reserved */
+	u_int		eip_ver:4;	/* version */
+#endif
+#if BYTE_ORDER == BIG_ENDIAN
+	u_int		eip_ver:4;	/* version */
+	u_int		eip_oldver:4;	/* reserved */
+#endif
+	u_int8_t	eip_pad;	/* required padding byte */
+} __packed;
 
 #define ETHERIP_VERSION		0x03
 
@@ -64,6 +69,8 @@ struct etherip_header {
 }
 
 #ifdef _KERNEL
+struct tdb;
+
 int	etherip_output(struct mbuf *, struct tdb *, struct mbuf **, int);
 void	etherip_input(struct mbuf *, ...);
 #ifdef INET6

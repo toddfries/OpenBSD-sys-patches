@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ipsp.c,v 1.183 2011/05/11 07:37:04 blambert Exp $	*/
+/*	$OpenBSD: ip_ipsp.c,v 1.192 2013/11/11 09:15:34 mpi Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr),
@@ -46,6 +46,7 @@
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
+#include <sys/timeout.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -63,13 +64,13 @@
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
+#include <netinet/ip_var.h>
 #endif /* INET */
 
 #ifdef INET6
 #ifndef INET
 #include <netinet/in.h>
 #endif
-#include <netinet6/in6_var.h>
 #endif /* INET6 */
 
 #include <netinet/ip_ipsp.h>
@@ -88,7 +89,6 @@ void tdb_hashstats(void);
 #define	DPRINTF(x)
 #endif
 
-u_int8_t	get_sa_require(struct inpcb *);
 void		tdb_rehash(void);
 void		tdb_timeout(void *v);
 void		tdb_firstuse(void *v);
@@ -96,12 +96,6 @@ void		tdb_soft_timeout(void *v);
 void		tdb_soft_firstuse(void *v);
 int		tdb_hash(u_int, u_int32_t, union sockaddr_union *, u_int8_t);
 
-extern int	ipsec_auth_default_level;
-extern int	ipsec_esp_trans_default_level;
-extern int	ipsec_esp_network_default_level;
-extern int	ipsec_ipcomp_default_level;
-
-extern int encdebug;
 int ipsec_in_use = 0;
 u_int64_t ipsec_last_added = 0;
 
@@ -139,8 +133,6 @@ struct xformsw xformsw[] = {
 };
 
 struct xformsw *xformswNXFORMSW = &xformsw[nitems(xformsw)];
-
-unsigned char ipseczeroes[IPSEC_ZEROES_SIZE]; /* zeroes! */
 
 #define	TDB_HASHSIZE_INIT	32
 
@@ -252,7 +244,7 @@ reserve_spi(u_int rdomain, u_int32_t sspi, u_int32_t tspi,
 			spi = htonl(spi);
 
 		/* Check whether we're using this SPI already. */
-		s = spltdb();
+		s = splsoftnet();
 		exists = gettdb(rdomain, spi, dst, sproto);
 		splx(s);
 
@@ -291,7 +283,7 @@ reserve_spi(u_int rdomain, u_int32_t sspi, u_int32_t tspi,
  * block, based on the SPI in the packet and the destination address (which
  * is really one of our addresses if we received the packet!
  *
- * Caller is responsible for setting at least spltdb().
+ * Caller is responsible for setting at least splsoftnet().
  */
 struct tdb *
 gettdb(u_int rdomain, u_int32_t spi, union sockaddr_union *dst, u_int8_t proto)
@@ -513,7 +505,7 @@ tdb_hashstats(void)
 #endif	/* DDB */
 
 /*
- * Caller is responsible for setting at least spltdb().
+ * Caller is responsible for setting at least splsoftnet().
  */
 int
 tdb_walk(u_int rdomain, int (*walker)(struct tdb *, void *, int), void *arg)
@@ -599,7 +591,7 @@ tdb_soft_firstuse(void *v)
 }
 
 /*
- * Caller is responsible for spltdb().
+ * Caller is responsible for splsoftnet().
  */
 void
 tdb_rehash(void)
@@ -663,7 +655,7 @@ void
 puttdb(struct tdb *tdbp)
 {
 	u_int32_t hashval;
-	int s = spltdb();
+	int s = splsoftnet();
 
 	if (tdbh == NULL) {
 		tdbh = malloc(sizeof(struct tdb *) * (tdb_hashmask + 1), M_TDB,
@@ -713,7 +705,7 @@ puttdb(struct tdb *tdbp)
 }
 
 /*
- * Caller is responsible to set at least spltdb().
+ * Caller is responsible to set at least splsoftnet().
  */
 void
 tdb_delete(struct tdb *tdbp)
@@ -728,7 +720,7 @@ tdb_delete(struct tdb *tdbp)
 	hashval = tdb_hash(tdbp->tdb_rdomain, tdbp->tdb_spi,
 	    &tdbp->tdb_dst, tdbp->tdb_sproto);
 
-	s = spltdb();
+	s = splsoftnet();
 	if (tdbh[hashval] == tdbp) {
 		tdbh[hashval] = tdbp->tdb_hnext;
 	} else {
@@ -942,11 +934,15 @@ get_sa_require(struct inpcb *inp)
 		sareq |= inp->inp_seclevel[SL_ESP_NETWORK] >= IPSEC_LEVEL_USE ?
 		    NOTIFY_SATYPE_TUNNEL : 0;
 	} else {
-		sareq |= ipsec_auth_default_level >= IPSEC_LEVEL_USE ?
+		/*
+		 * Code left for documentation purposes, these
+		 * conditions are always evaluated to false.
+		 */
+		sareq |= IPSEC_AUTH_LEVEL_DEFAULT >= IPSEC_LEVEL_USE ?
 		    NOTIFY_SATYPE_AUTH : 0;
-		sareq |= ipsec_esp_trans_default_level >= IPSEC_LEVEL_USE ?
+		sareq |= IPSEC_ESP_TRANS_LEVEL_DEFAULT >= IPSEC_LEVEL_USE ?
 		    NOTIFY_SATYPE_CONF : 0;
-		sareq |= ipsec_esp_network_default_level >= IPSEC_LEVEL_USE ?
+		sareq |= IPSEC_ESP_NETWORK_LEVEL_DEFAULT >= IPSEC_LEVEL_USE ?
 		    NOTIFY_SATYPE_TUNNEL : 0;
 	}
 
@@ -984,40 +980,36 @@ tdb_add_inp(struct tdb *tdb, struct inpcb *inp, int inout)
 	}
 }
 
-/* Return a printable string for the IPv4 address. */
-char *
-inet_ntoa4(struct in_addr ina)
-{
-	static char buf[4][4 * sizeof "123" + 4];
-	unsigned char *ucp = (unsigned char *) &ina;
-	static int i = 3;
-
-	i = (i + 1) % 4;
-	snprintf(buf[i], sizeof buf[0], "%d.%d.%d.%d",
-	    ucp[0] & 0xff, ucp[1] & 0xff,
-	    ucp[2] & 0xff, ucp[3] & 0xff);
-	return (buf[i]);
-}
-
+#ifdef ENCDEBUG
 /* Return a printable string for the address. */
-char *
+const char *
 ipsp_address(union sockaddr_union sa)
 {
+	static char ipspbuf[4][INET6_ADDRSTRLEN];
+	static int ipspround = 0;
+	char *buf;
+
+	ipspround = (ipspround + 1) % 4;
+	buf = ipspbuf[ipspround];
+
 	switch (sa.sa.sa_family) {
 #ifdef INET
 	case AF_INET:
-		return inet_ntoa4(sa.sin.sin_addr);
+		return inet_ntop(AF_INET, &sa.sin.sin_addr,
+		    buf, INET_ADDRSTRLEN);
 #endif /* INET */
 
 #ifdef INET6
 	case AF_INET6:
-		return ip6_sprintf(&sa.sin6.sin6_addr);
+		return inet_ntop(AF_INET6, &sa.sin6.sin6_addr,
+		    buf, INET6_ADDRSTRLEN);
 #endif /* INET6 */
 
 	default:
 		return "(unknown address family)";
 	}
 }
+#endif /* ENCDEBUG */
 
 /* Check whether an IP{4,6} address is unspecified. */
 int
@@ -1065,7 +1057,7 @@ void
 ipsp_skipcrypto_mark(struct tdb_ident *tdbi)
 {
 	struct tdb *tdb;
-	int s = spltdb();
+	int s = splsoftnet();
 
 	tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst, tdbi->proto);
 	if (tdb != NULL) {
@@ -1080,7 +1072,7 @@ void
 ipsp_skipcrypto_unmark(struct tdb_ident *tdbi)
 {
 	struct tdb *tdb;
-	int s = spltdb();
+	int s = splsoftnet();
 
 	tdb = gettdb(tdbi->rdomain, tdbi->spi, &tdbi->dst, tdbi->proto);
 	if (tdb != NULL) {
@@ -1215,7 +1207,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 			m_copydata(m, off, sizeof(u_int32_t), (caddr_t) &spi);
 			bzero(&su, sizeof(union sockaddr_union));
 
-			s = spltdb();
+			s = splsoftnet();
 
 #ifdef INET
 			if (ipv4sa) {
@@ -1240,22 +1232,7 @@ ipsp_parse_headers(struct mbuf *m, int off, u_int8_t proto)
 			}
 
 			/* How large is the ESP header ? We use this later. */
-			if (tdb->tdb_flags & TDBF_NOREPLAY)
-				esphlen = sizeof(u_int32_t) + tdb->tdb_ivlen;
-			else
-				esphlen = 2 * sizeof(u_int32_t) +
-				    tdb->tdb_ivlen;
-
-			/*
-			 * Verify decryption. If the SA is using
-			 * random padding (as the "old" ESP SAs were
-			 * bound to do, there's nothing we can do to
-			 * see if the payload has been decrypted.
-			 */
-			if (tdb->tdb_flags & TDBF_RANDOMPADDING) {
-				splx(s);
-				return SLIST_FIRST(&tags);
-			}
+			esphlen = 2 * sizeof(u_int32_t) + tdb->tdb_ivlen;
 
 			/* Update the length of trailing ESP authenticators. */
 			if (tdb->tdb_authalgxform)

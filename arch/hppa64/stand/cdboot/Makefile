@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.2 2007/11/26 08:36:49 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.4 2013/10/15 22:49:04 deraadt Exp $
 
 NOMAN=	no man
 S	=${.CURDIR}/../../../..
@@ -37,7 +37,7 @@ LDADD+=	$(SALIB)
 all:	${PROG}
 
 clean::
-	rm -f a.out [Ee]rrs mklog core *.core \
+	rm -f a.out [Ee]rrs mklog *.core \
 	    ${PROG} ${OBJS} ${LOBJS} ${CLEANFILES}
 
 realinstall:
@@ -60,3 +60,5 @@ NOPROG=
 
 CPPFLAGS+=-DRELOC=${LOADADDR} -DHEAP_LIMIT=${HEAP_LIMIT}
 CFLAGS+=$(SACFLAGS) -I../.. -I${.CURDIR}/../libsa -I${S}/stand/boot
+CFLAGS+=${NOPIE_FLAGS}
+AFLAGS+=${NOPIE_FLAGS}

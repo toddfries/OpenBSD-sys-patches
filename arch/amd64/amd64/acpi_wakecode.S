@@ -1,4 +1,4 @@
-/* $OpenBSD: acpi_wakecode.S,v 1.12 2010/11/18 21:15:13 miod Exp $ */
+/* $OpenBSD: acpi_wakecode.S,v 1.21 2013/11/02 00:42:16 mlarkin Exp $ */
 /*
  * Copyright (c) 2001 Takanori Watanabe <takawata@jp.freebsd.org>
  * Copyright (c) 2001 Mitsuru IWASAKI <iwasaki@jp.freebsd.org>
@@ -45,6 +45,9 @@
 
 #include "assym.h"
 #include <machine/asm.h>
+#ifdef HIBERNATE
+#include <machine/hibernate_var.h>
+#endif /* HIBERNATE */
 #include <machine/specialreg.h>
 #include <machine/param.h>
 #include <machine/segments.h>
@@ -84,6 +87,7 @@
 	.global _C_LABEL(acpi_pdirpa)
 	.global _C_LABEL(do_real_mode_post)
 _C_LABEL(acpi_real_mode_resume):
+_ACPI_TRMP_OFFSET(acpi_s3_vector_real)
 	nop
 	cli
 	cld
@@ -374,6 +378,127 @@ _C_LABEL(acpi_long_mode_resume):
 	xorq	%rax, %rax	
 	jmp   	*acpi_saved_ret
 
+#ifdef HIBERNATE
+	/*
+	 * hibernate_resume_machdep drops to real mode and
+	 * restarts the OS using the saved S3 resume vector
+	 */
+	.code64
+NENTRY(hibernate_resume_machdep)
+	cli
+	/* Jump to the identity mapped version of ourself */
+	mov	$hibernate_resume_vector_2, %rax
+	jmp	*%rax
+_ACPI_TRMP_LABEL(hibernate_resume_vector_2)
+
+	/* Get out of 64 bit CS */
+	lgdtq	tmp_gdt6416
+
+	rex64	ljmp	*(hibernate_indirect_16)
+_ACPI_TRMP_LABEL(hibernate_indirect_16)
+	.quad	hibernate_resume_vector_3
+	.word	0x18
+
+_ACPI_TRMP_LABEL(hibernate_resume_vector_3)
+	.code16
+
+	movl	%cr0, %eax
+	/* Disable CR0.PG - no paging */
+	andl	$(~CR0_PG), %eax
+	/* Disable CR0.PE - real mode */
+	andl	$(~CR0_PE), %eax
+	movl	%eax, %cr0
+
+	/* Set up real mode segment selectors */
+	movw	$0x0400, %ax
+	movw	%ax, %ds
+	movw	%ax, %es
+	movw	%ax, %fs
+	movw	%ax, %gs
+	movl	$0x0FFE, %esp
+	lidtl	clean_idt
+
+	/* Jump to the S3 resume vector */
+	ljmp	$0x0400, $acpi_s3_vector_real
+
+NENTRY(hibernate_drop_to_real_mode)
+	.code64
+	cli
+	/* Jump to the identity mapped version of ourself */
+	mov	$hibernate_resume_vector_2b, %rax
+	jmp	*%rax
+_ACPI_TRMP_LABEL(hibernate_resume_vector_2b)
+
+	/* Get out of 64 bit CS */
+	lgdtq	tmp_gdt6416
+
+	rex64	ljmp	*(hibernate_indirect_16b)
+_ACPI_TRMP_LABEL(hibernate_indirect_16b)
+	.quad	hibernate_resume_vector_3b
+	.word	0x18
+
+_ACPI_TRMP_LABEL(hibernate_resume_vector_3b)
+	.code16
+
+	movl	%cr0, %eax
+	/* Disable CR0.PG - no paging */
+	andl	$(~CR0_PG), %eax
+	/* Disable CR0.PE - real mode */
+	andl	$(~CR0_PE), %eax
+	movl	%eax, %cr0
+
+	/* Set up real mode segment selectors */
+	movw	$0x0400, %ax
+	movw	%ax, %ds
+	movw	%ax, %es
+	movw	%ax, %fs
+	movw	%ax, %gs
+	movl	$0x0FFE, %esp
+	lidtl	clean_idt
+
+	ljmp	$0x0400, $hib_hlt_real
+
+_ACPI_TRMP_LABEL(hib_hlt_real)
+	hlt
+	ljmp 	$0x0400, $hib_hlt_real
+
+	.code64
+	/* Switch to hibernate resume pagetable */
+NENTRY(hibernate_activate_resume_pt_machdep)
+	/* Enable large pages */
+	movq	%cr4, %rax
+	orq	$(CR4_PSE), %rax
+
+	/* Disable global pages */
+	andq	$(~CR4_PGE), %rax
+	movq	%rax, %cr4
+
+	wbinvd
+	movq	$HIBERNATE_PML4T, %rax
+	movq	%rax,	%cr3
+	jmp	1f
+
+1:	nop
+	ret
+
+	/*
+	 * Switch to the private resume-time hibernate stack
+	 */
+NENTRY(hibernate_switch_stack_machdep)
+	movq	(%rsp), %rax
+	movq    %rax, HIBERNATE_STACK_PAGE + HIBERNATE_STACK_OFFSET
+	movq    $(HIBERNATE_STACK_PAGE + HIBERNATE_STACK_OFFSET), %rax
+	movq    %rax, %rsp
+
+	/* On our own stack from here onward */
+	ret
+
+NENTRY(hibernate_flush)
+	movq	$HIBERNATE_PML4T, %rax
+	movq	%rax, %cr3
+	ret
+#endif /* HIBERNATE */
+
 	.align 8
 _ACPI_TRMP_OFFSET(tmp_gdt)
 	.word	tmp_gdt_end - tmp_gdtable
@@ -425,6 +550,56 @@ _ACPI_TRMP_OFFSET(clean_idt)
 	.long	0
 	.word	0
 
+	/*
+	 * gdt_16 is the gdt used when returning to real mode for bios
+	 * reads/writes (sets up a 16 bit segment)
+	 */
+	.align 8
+_ACPI_TRMP_LABEL(gdt_16)
+	.word   gdt_16_end - gdt_16_table
+	.long   gdt_16_table
+
+	.align 8
+_ACPI_TRMP_LABEL(gdt_16_table)
+	/*
+	 * null
+	 */
+	.word   0, 0
+	.byte   0, 0, 0, 0
+	/*
+	 * Code
+	 * Limit: 0xffffffff
+	 * Base: 0x00000000
+	 * Descriptor Type: Code
+	 * Segment Type: CRA
+	 * Present: True
+	 * Priv: 0
+	 * AVL: False
+	 * 64-bit: False
+	 * 32-bit: False
+	 *
+	 */
+	.word   0xffff, 0
+	.byte   0, 0x9f, 0x8f, 0
+
+	/*
+	 * Data
+	 * Limit: 0xffffffff
+	 * Base: 0x00000000
+	 * Descriptor Type:
+	 * Segment Type: W
+	 * Present: True
+	 * Priv: 0
+	 * AVL: False
+	 * 64-bit: False
+	 * 32-bit: False
+	 *
+	 */
+	.word   0xffff, 0
+	.byte   0, 0x93, 0x8f, 0
+
+_ACPI_TRMP_LABEL(gdt_16_end)
+
 	.align 8
 _ACPI_TRMP_LABEL(tmp_gdt64)
 	.word 	tmp_gdt64_end - tmp_gdtable64
@@ -436,6 +611,19 @@ _ACPI_TRMP_LABEL(tmp_gdtable64)
 	.quad	0x00af9a000000ffff
 	.quad	0x00cf92000000ffff
 _ACPI_TRMP_LABEL(tmp_gdt64_end)
+
+	.align 8
+_ACPI_TRMP_LABEL(tmp_gdt6416)
+	.word 	tmp_gdt6416_end - tmp_gdtable6416
+	.quad	tmp_gdtable6416
+
+	.align 8
+_ACPI_TRMP_LABEL(tmp_gdtable6416)
+	.quad	0x0000000000000000
+	.quad	0x00af9a000000ffff
+	.quad	0x00cf92000000ffff
+	.quad   0x00009a000000ffff
+_ACPI_TRMP_LABEL(tmp_gdt6416_end)
 
 	.align 4
 _C_LABEL(do_real_mode_post):
@@ -539,6 +727,7 @@ _C_LABEL(acpi_resume_end):
 	 * for use during the ACPI suspend/resume process.
 	 */
 
+	.code64
 NENTRY(acpi_savecpu)
 	movq	(%rsp), %rax
 	movq	%rax, acpi_saved_ret

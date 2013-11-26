@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.507 2012/03/19 00:49:08 jsg Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.528 2013/11/01 17:36:19 krw Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -165,6 +165,9 @@ extern struct proc *npxproc;
 #include <dev/ic/comvar.h>
 #endif /* NCOM > 0 */
 
+void	replacesmap(void);
+int     intr_handler(struct intrframe *, struct intrhand *);
+
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
 
@@ -251,7 +254,7 @@ void (*initclock_func)(void) = i8254_initclocks;
 
 /*
  * Extent maps to manage I/O and ISA memory hole space.  Allocate
- * storage for 8 regions in each, initially.  Later, ioport_malloc_safe
+ * storage for 16 regions in each, initially.  Later, ioport_malloc_safe
  * will indicate that it's safe to use malloc() to dynamically allocate
  * region descriptors.
  *
@@ -305,6 +308,8 @@ int allowaperture = 1;
 int allowaperture = 0;
 #endif
 #endif
+
+int has_rdrand;
 
 void	winchip_cpu_setup(struct cpu_info *);
 void	amd_family5_setperf_setup(struct cpu_info *);
@@ -972,7 +977,7 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 	{ CPUID_CMOV,	"CMOV" },
 	{ CPUID_PAT,	"PAT" },
 	{ CPUID_PSE36,	"PSE36" },
-	{ CPUID_SER,	"SER" },
+	{ CPUID_PSN,	"PSN" },
 	{ CPUID_CFLUSH,	"CFLUSH" },
 	{ CPUID_DS,	"DS" },
 	{ CPUID_ACPI,	"ACPI" },
@@ -983,7 +988,7 @@ const struct cpu_cpuid_feature i386_cpuid_features[] = {
 	{ CPUID_SS,	"SS" },
 	{ CPUID_HTT,	"HTT" },
 	{ CPUID_TM,	"TM" },
-	{ CPUID_SBF,	"SBF" }
+	{ CPUID_PBE,	"PBE" }
 };
 
 const struct cpu_cpuid_feature i386_ecpuid_features[] = {
@@ -999,6 +1004,7 @@ const struct cpu_cpuid_feature i386_ecpuid_features[] = {
 const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_SSE3,	"SSE3" },
 	{ CPUIDECX_PCLMUL,	"PCLMUL" },
+	{ CPUIDECX_DTES64,	"DTES64" },
 	{ CPUIDECX_MWAIT,	"MWAIT" },
 	{ CPUIDECX_DSCPL,	"DS-CPL" },
 	{ CPUIDECX_VMX,		"VMX" },
@@ -1011,26 +1017,65 @@ const struct cpu_cpuid_feature i386_cpuid_ecxfeatures[] = {
 	{ CPUIDECX_CX16,	"CX16" },
 	{ CPUIDECX_XTPR,	"xTPR" },
 	{ CPUIDECX_PDCM,	"PDCM" },
+	{ CPUIDECX_PCID,	"PCID" },
 	{ CPUIDECX_DCA,		"DCA" },
 	{ CPUIDECX_SSE41,	"SSE4.1" },
 	{ CPUIDECX_SSE42,	"SSE4.2" },
 	{ CPUIDECX_X2APIC,	"x2APIC" },
 	{ CPUIDECX_MOVBE,	"MOVBE" },
 	{ CPUIDECX_POPCNT,	"POPCNT" },
+	{ CPUIDECX_DEADLINE,	"DEADLINE" },
 	{ CPUIDECX_AES,		"AES" },
 	{ CPUIDECX_XSAVE,	"XSAVE" },
 	{ CPUIDECX_OSXSAVE,	"OSXSAVE" },
 	{ CPUIDECX_AVX,		"AVX" },
+	{ CPUIDECX_F16C,	"F16C" },
+	{ CPUIDECX_RDRAND,	"RDRAND" },
 };
 
 const struct cpu_cpuid_feature i386_ecpuid_ecxfeatures[] = {
 	{ CPUIDECX_LAHF,	"LAHF" },
+	{ CPUIDECX_CMPLEG,	"CMPLEG" },
 	{ CPUIDECX_SVM,		"SVM" },
+	{ CPUIDECX_EAPICSP,	"EAPICSP" },
+	{ CPUIDECX_AMCR8,	"AMCR8" },
 	{ CPUIDECX_ABM,		"ABM" },
 	{ CPUIDECX_SSE4A,	"SSE4A" },
+	{ CPUIDECX_MASSE,	"MASSE" },
+	{ CPUIDECX_3DNOWP,	"3DNOWP" },
+	{ CPUIDECX_OSVW,	"OSVW" },
+	{ CPUIDECX_IBS,		"IBS" },
 	{ CPUIDECX_XOP,		"XOP" },
+	{ CPUIDECX_SKINIT,	"SKINIT" },
 	{ CPUIDECX_WDT,		"WDT" },
-	{ CPUIDECX_FMA4,	"FMA4" }
+	{ CPUIDECX_LWP,		"LWP" },
+	{ CPUIDECX_FMA4,	"FMA4" },
+	{ CPUIDECX_NODEID,	"NODEID" },
+	{ CPUIDECX_TBM,		"TBM" },
+	{ CPUIDECX_TOPEXT,	"TOPEXT" },
+};
+
+const struct cpu_cpuid_feature cpu_seff0_ebxfeatures[] = {
+	{ SEFF0EBX_FSGSBASE,	"FSGSBASE" },
+	{ SEFF0EBX_BMI1,	"BMI1" },
+	{ SEFF0EBX_HLE,		"HLE" },
+	{ SEFF0EBX_AVX2,	"AVX2" },
+	{ SEFF0EBX_SMEP,	"SMEP" },
+	{ SEFF0EBX_BMI2,	"BMI2" },
+	{ SEFF0EBX_ERMS,	"ERMS" },
+	{ SEFF0EBX_INVPCID,	"INVPCID" },
+	{ SEFF0EBX_RTM,		"RTM" },
+	{ SEFF0EBX_RDSEED,	"RDSEED" },
+	{ SEFF0EBX_ADX,		"ADX" },
+	{ SEFF0EBX_SMAP,	"SMAP" },
+};
+
+const struct cpu_cpuid_feature i386_cpuid_eaxperf[] = {
+	{ CPUIDEAX_VERID,	"PERF" },
+};
+
+const struct cpu_cpuid_feature i386_cpuid_edxapmi[] = {
+	{ CPUIDEDX_ITSC,	"ITSC" },
 };
 
 void
@@ -1053,7 +1098,7 @@ cyrix3_setperf_setup(struct cpu_info *ci)
 {
 	if (cpu_ecxfeature & CPUIDECX_EST) {
 		if (rdmsr(MSR_MISC_ENABLE) & (1 << 16))
-			est_init(ci->ci_dev.dv_xname, CPUVENDOR_VIA);
+			est_init(ci, CPUVENDOR_VIA);
 		else
 			printf("%s: Enhanced SpeedStep disabled by BIOS\n",
 			    ci->ci_dev.dv_xname);
@@ -1075,8 +1120,6 @@ cyrix3_cpu_setup(struct cpu_info *ci)
 	extern void i686_pagezero(void *, size_t);
 
 	pagezero = i686_pagezero;
-
-	cyrix3_get_bus_clock(ci);
 
 	setperf_setup = cyrix3_setperf_setup;
 #endif
@@ -1443,7 +1486,7 @@ intel686_setperf_setup(struct cpu_info *ci)
 
 	if (cpu_ecxfeature & CPUIDECX_EST) {
 		if (rdmsr(MSR_MISC_ENABLE) & (1 << 16))
-			est_init(ci->ci_dev.dv_xname, CPUVENDOR_INTEL);
+			est_init(ci, CPUVENDOR_INTEL);
 		else
 			printf("%s: Enhanced SpeedStep disabled by BIOS\n",
 			    ci->ci_dev.dv_xname);
@@ -1485,10 +1528,6 @@ intel686_cpu_setup(struct cpu_info *ci)
 	int step = ci->ci_signature & 15;
 	u_quad_t msr119;
 
-#if !defined(SMALL_KERNEL)
-	p3_get_bus_clock(ci);
-#endif
-
 	intel686_common_cpu_setup(ci);
 
 	/*
@@ -1501,14 +1540,14 @@ intel686_cpu_setup(struct cpu_info *ci)
 	/*
 	 * Disable the Pentium3 serial number.
 	 */
-	if ((model == 7) && (ci->ci_feature_flags & CPUID_SER)) {
+	if ((model == 7) && (ci->ci_feature_flags & CPUID_PSN)) {
 		msr119 = rdmsr(MSR_BBL_CR_CTL);
 		msr119 |= 0x0000000000200000LL;
 		wrmsr(MSR_BBL_CR_CTL, msr119);
 
 		printf("%s: disabling processor serial number\n",
 			 ci->ci_dev.dv_xname);
-		ci->ci_feature_flags &= ~CPUID_SER;
+		ci->ci_feature_flags &= ~CPUID_PSN;
 		ci->ci_level = 2;
 	}
 
@@ -1521,10 +1560,6 @@ intel686_cpu_setup(struct cpu_info *ci)
 void
 intel686_p4_cpu_setup(struct cpu_info *ci)
 {
-#if !defined(SMALL_KERNEL)
-	p4_get_bus_clock(ci);
-#endif
-
 	intel686_common_cpu_setup(ci);
 
 #if !defined(SMALL_KERNEL)
@@ -1812,7 +1847,20 @@ identifycpu(struct cpu_info *ci)
 	}
 
 	if (ci->ci_feature_flags && (ci->ci_feature_flags & CPUID_TSC)) {
-		/* Has TSC */
+		/* Has TSC, check if it's constant */
+		switch (vendor) {
+		case CPUVENDOR_INTEL:
+			if ((ci->ci_family == 0x0f && ci->ci_model >= 0x03) ||
+			    (ci->ci_family == 0x06 && ci->ci_model >= 0x0e)) {
+				ci->ci_flags |= CPUF_CONST_TSC;
+			}
+			break;
+		case CPUVENDOR_VIA:
+			if (ci->ci_model >= 0x0f) {
+				ci->ci_flags |= CPUF_CONST_TSC;
+			}
+			break;
+		}
 		calibrate_cyclecounter();
 		if (cpuspeed > 994) {
 			int ghz, fr;
@@ -1874,8 +1922,49 @@ identifycpu(struct cpu_info *ci)
 					numbits++;
 				}
 			}
+			for (i = 0; i < nitems(i386_cpuid_eaxperf); i++) {
+				if (cpu_perf_eax &
+				    i386_cpuid_eaxperf[i].feature_bit) {
+					printf("%s%s", (numbits == 0 ? "" : ","),
+					    i386_cpuid_eaxperf[i].feature_name);
+					numbits++;
+				}
+			}
+			for (i = 0; i < nitems(i386_cpuid_edxapmi); i++) {
+				if (cpu_apmi_edx &
+				    i386_cpuid_edxapmi[i].feature_bit) {
+					printf("%s%s", (numbits == 0 ? "" : ","),
+					    i386_cpuid_edxapmi[i].feature_name);
+					numbits++;
+				}
+			}
+
+			if (cpuid_level >= 0x07) {
+				u_int dummy;
+
+				/* "Structured Extended Feature Flags" */
+				CPUID_LEAF(0x7, 0, dummy,
+				    ci->ci_feature_sefflags, dummy, dummy);
+				max = sizeof(cpu_seff0_ebxfeatures) /
+				    sizeof(cpu_seff0_ebxfeatures[0]);
+				for (i = 0; i < max; i++)
+					if (ci->ci_feature_sefflags &
+					    cpu_seff0_ebxfeatures[i].feature_bit)
+						printf("%s%s",
+						    (numbits == 0 ? "" : ","),
+						    cpu_seff0_ebxfeatures[i].feature_name);
+			}
 			printf("\n");
 		}
+	}
+
+	if (ci->ci_flags & CPUF_PRIMARY) {
+		if (cpu_ecxfeature & CPUIDECX_RDRAND)
+			has_rdrand = 1;
+#ifndef SMALL_KERNEL
+		if (ci->ci_feature_sefflags & SEFF0EBX_SMAP)
+			replacesmap();
+#endif
 	}
 
 #ifndef SMALL_KERNEL
@@ -2156,8 +2245,12 @@ print_msr:
 void
 p4_update_cpuspeed(void)
 {
+	struct cpu_info *ci;
 	u_int64_t msr;
 	int mult;
+
+	ci = curcpu();
+	p4_get_bus_clock(ci);
 
 	if (bus_clock == 0) {
 		printf("p4_update_cpuspeed: unknown bus clock\n");
@@ -2173,10 +2266,14 @@ p4_update_cpuspeed(void)
 void
 p3_update_cpuspeed(void)
 {
+	struct cpu_info *ci;
 	u_int64_t msr;
 	int mult;
 	const u_int8_t mult_code[] = {
 	    50, 30, 40, 0, 55, 35, 45, 0, 0, 70, 80, 60, 0, 75, 0, 65 };
+
+	ci = curcpu();
+	p3_get_bus_clock(ci);
 
 	if (bus_clock == 0) {
 		printf("p3_update_cpuspeed: unknown bus clock\n");
@@ -2219,21 +2316,20 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct sigframe *fp, frame;
 	struct sigacts *psp = p->p_sigacts;
 	register_t sp;
-	int oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/*
 	 * Build the argument list for the signal handler.
 	 */
+	bzero(&frame, sizeof(frame));
 	frame.sf_signum = sig;
 
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !oonstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(tf->tf_esp) && (psp->ps_sigonstack & sigmask(sig)))
 		sp = (long)p->p_sigstk.ss_sp + p->p_sigstk.ss_size;
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		sp = tf->tf_esp;
 
 	frame.sf_sc.sc_fpstate = NULL;
@@ -2260,7 +2356,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	 */
 	frame.sf_sc.sc_err = tf->tf_err;
 	frame.sf_sc.sc_trapno = tf->tf_trapno;
-	frame.sf_sc.sc_onstack = oonstack;
 	frame.sf_sc.sc_mask = mask;
 #ifdef VM86
 	if (tf->tf_eflags & PSL_VM) {
@@ -2406,14 +2501,35 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 		p->p_md.md_flags |= MDP_USEDFPU;
 	}
 
-	if (context.sc_onstack & 01)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = context.sc_mask & ~sigcantmask;
 
 	return (EJUSTRETURN);
 }
+
+#ifdef MULTIPROCESSOR
+/* force a CPU into the kernel, whether or not it's idle */
+void
+cpu_kick(struct cpu_info *ci)
+{
+	/* only need to kick other CPUs */
+	if (ci != curcpu()) {
+		if (ci->ci_mwait != NULL) {
+			/*
+			 * If not idling, then send an IPI, else
+			 * just clear the "keep idling" bit.
+			 */
+			if ((ci->ci_mwait[0] & MWAIT_IN_IDLE) == 0)
+				i386_send_ipi(ci, I386_IPI_NOP);
+			else
+				atomic_clearbits_int(&ci->ci_mwait[0],
+				    MWAIT_KEEP_IDLING);
+		} else {
+			/* no mwait, so need an IPI */
+			i386_send_ipi(ci, I386_IPI_NOP);
+		}
+	}
+}
+#endif
 
 /*
  * Notify the current process (p) that it has a signal pending,
@@ -2423,13 +2539,22 @@ void
 signotify(struct proc *p)
 {
 	aston(p);
-	cpu_unidle(p->p_cpu);
+	cpu_kick(p->p_cpu);
 }
 
 #ifdef MULTIPROCESSOR
 void
 cpu_unidle(struct cpu_info *ci)
 {
+	if (ci->ci_mwait != NULL) {
+		/*
+		 * Just clear the "keep idling" bit; if it wasn't
+		 * idling then we didn't need to do anything anyway.
+		 */
+		atomic_clearbits_int(&ci->ci_mwait[0], MWAIT_KEEP_IDLING);
+		return;
+	}
+
 	if (ci != curcpu())
 		i386_send_ipi(ci, I386_IPI_NOP);
 }
@@ -2458,7 +2583,7 @@ boot(int howto)
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
 		extern struct proc proc0;
 
-		/* protect against curproc->p_stats.foo refs in sync()   XXX */
+		/* make sure there's a process to charge for I/O in sync() */
 		if (curproc == NULL)
 			curproc = &proc0;
 
@@ -2487,6 +2612,8 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	i386_broadcast_ipi(I386_IPI_HALT);
@@ -2591,7 +2718,7 @@ dumpconf(void)
 int
 cpu_dump()
 {
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	long buf[dbtob(1) / sizeof (long)];
 	kcore_seg_t	*segp;
 
@@ -2628,8 +2755,8 @@ dumpsys()
 {
 	u_int i, j, npg;
 	int maddr;
-	daddr64_t blkno;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error;
 	char *str;
 	extern int msgbufmapped;
@@ -2676,16 +2803,16 @@ dumpsys()
 		maddr = ptoa(dumpmem[i].start);
 		blkno = dumplo + btodb(maddr) + 1;
 #if 0
-		printf("(%d %lld %d) ", maddr, blkno, npg);
+		printf("(%d %lld %d) ", maddr, (long long)blkno, npg);
 #endif
 		for (j = npg; j--; maddr += NBPG, blkno += btodb(NBPG)) {
 
 			/* Print out how many MBs we have more to go. */
 			if (dbtob(blkno - dumplo) % (1024 * 1024) < NBPG)
-				printf("%d ",
+				printf("%ld ",
 				    (ptoa(dumpsize) - maddr) / (1024 * 1024));
 #if 0
-			printf("(%x %lld) ", maddr, blkno);
+			printf("(%x %lld) ", maddr, (long long)blkno);
 #endif
 			pmap_enter(pmap_kernel(), dumpspace, maddr,
 			    VM_PROT_READ, PMAP_WIRED);
@@ -3132,7 +3259,7 @@ init386(paddr_t first_avail)
 
 			if (extent_alloc_region(iomem_ex, a, e - a, EX_NOWAIT))
 				/* XXX What should we do? */
-				printf("\nWARNING: CAN'T ALLOCATE RAM (%x-%x)"
+				printf("\nWARNING: CAN'T ALLOCATE RAM (%lx-%lx)"
 				    " FROM IOMEM EXTENT MAP!\n", a, e);
 
 			physmem += atop(e - a);
@@ -3160,8 +3287,8 @@ init386(paddr_t first_avail)
 	printf("physload: ");
 #endif
 	kb = atop(KERNTEXTOFF - KERNBASE);
-	if (kb > atop(0x100000)) {
-		paddr_t lim = atop(0x100000);
+	if (kb > atop(IOM_END)) {
+		paddr_t lim = atop(IOM_END);
 #ifdef DEBUG
 		printf(" %x-%x (<16M)", lim, kb);
 #endif
@@ -3247,19 +3374,6 @@ init386(paddr_t first_avail)
 }
 
 /*
- * cpu_exec_aout_makecmds():
- *	cpu-dependent a.out format hook for execve().
- *
- * Determine of the given exec package refers to something which we
- * understand and, if so, set up the vmcmds for it.
- */
-int
-cpu_exec_aout_makecmds(struct proc *p, struct exec_package *epp)
-{
-	return ENOEXEC;
-}
-
-/*
  * consinit:
  * initialize the system console.
  */
@@ -3339,7 +3453,7 @@ need_resched(struct cpu_info *ci)
 	/* There's a risk we'll be called before the idle threads start */
 	if (ci->ci_curproc) {
 		aston(ci->ci_curproc);
-		cpu_unidle(ci);
+		cpu_kick(ci);
 	}
 }
 
@@ -3753,6 +3867,16 @@ bus_space_subregion(bus_space_tag_t t, bus_space_handle_t bsh,
 	return (0);
 }
 
+paddr_t
+bus_space_mmap(bus_space_tag_t t, bus_addr_t addr, off_t off, int prot, int flags)
+{
+	/* Can't mmap I/O space. */
+	if (t == I386_BUS_SPACE_IO)
+		return (-1);
+
+	return (addr + off);
+}
+
 #ifdef DIAGNOSTIC
 void
 splassert_check(int wantipl, const char *func)
@@ -3765,20 +3889,6 @@ splassert_check(int wantipl, const char *func)
 #endif
 
 #ifdef MULTIPROCESSOR
-void
-i386_intlock(int ipl)
-{
-	if (ipl < IPL_SCHED)
-		__mp_lock(&kernel_lock);
-}
-
-void
-i386_intunlock(int ipl)
-{
-	if (ipl < IPL_SCHED)
-		__mp_unlock(&kernel_lock);
-}
-
 void
 i386_softintlock(void)
 {
@@ -3846,3 +3956,27 @@ spllower(int ncpl)
 	splx(ncpl);
 	return (ocpl);
 }
+
+int
+intr_handler(struct intrframe *frame, struct intrhand *ih)
+{
+	int rc;
+#ifdef MULTIPROCESSOR
+	int need_lock;
+
+	if (ih->ih_flags & IPL_MPSAFE)
+		need_lock = 0;
+	else
+		need_lock = frame->if_ppl < IPL_SCHED;
+
+	if (need_lock)
+		__mp_lock(&kernel_lock);
+#endif
+	rc = (*ih->ih_fun)(ih->ih_arg ? ih->ih_arg : frame);
+#ifdef MULTIPROCESSOR
+	if (need_lock)
+		__mp_unlock(&kernel_lock);
+#endif
+	return rc;
+}
+

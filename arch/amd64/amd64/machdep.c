@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.152 2012/01/13 12:55:52 jsing Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.171 2013/11/19 04:12:17 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.3 2003/05/07 22:58:18 fvdl Exp $	*/
 
 /*-
@@ -101,7 +101,6 @@
 
 #include <machine/cpu.h>
 #include <machine/cpufunc.h>
-#include <machine/gdt.h>
 #include <machine/pio.h>
 #include <machine/psl.h>
 #include <machine/reg.h>
@@ -139,6 +138,15 @@ extern int db_console;
 #include <dev/ic/comvar.h>
 #include <dev/ic/comreg.h>
 #endif
+
+#include "softraid.h"
+#if NSOFTRAID > 0
+#include <dev/softraidvar.h>
+#endif
+
+#ifdef HIBERNATE
+#include <machine/hibernate_var.h>
+#endif /* HIBERNATE */
 
 /* the following is used externally (sysctl_hw) */
 char machine[] = MACHINE;
@@ -548,16 +556,14 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 #endif
 
 	bcopy(tf, &ksc, sizeof(*tf));
-	ksc.sc_onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
+	bzero((char *)&ksc + sizeof(*tf), sizeof(ksc) - sizeof(*tf));
 	ksc.sc_mask = mask;
-	ksc.sc_fpstate = NULL;
 
 	/* Allocate space for the signal handler context. */
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !ksc.sc_onstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(tf->tf_rsp) && (psp->ps_sigonstack & sigmask(sig)))
 		sp = (register_t)p->p_sigstk.ss_sp + p->p_sigstk.ss_size;
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		sp = tf->tf_rsp - 128;
 
 	sp &= ~15ULL;	/* just in case */
@@ -663,11 +669,7 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	ksc.sc_err = tf->tf_err;
 	bcopy(&ksc, tf, sizeof(*tf));
 
-	/* Restore signal stack. */
-	if (ksc.sc_onstack)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
+	/* Restore signal mask. */
 	p->p_sigmask = ksc.sc_mask & ~sigcantmask;
 
 	/*
@@ -683,6 +685,31 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	return (EJUSTRETURN);
 }
 
+#ifdef MULTIPROCESSOR
+/* force a CPU into the kernel, whether or not it's idle */
+void
+cpu_kick(struct cpu_info *ci)
+{
+	/* only need to kick other CPUs */
+	if (ci != curcpu()) {
+		if (ci->ci_mwait != NULL) {
+			/*
+			 * If not idling, then send an IPI, else
+			 * just clear the "keep idling" bit.
+			 */
+			if ((ci->ci_mwait[0] & MWAIT_IN_IDLE) == 0)
+				x86_send_ipi(ci, X86_IPI_NOP);
+			else
+				atomic_clearbits_int(&ci->ci_mwait[0],
+				    MWAIT_KEEP_IDLING);
+		} else {
+			/* no mwait, so need an IPI */
+			x86_send_ipi(ci, X86_IPI_NOP);
+		}
+	}
+}
+#endif
+
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
@@ -691,13 +718,22 @@ void
 signotify(struct proc *p)
 {
 	aston(p);
-	cpu_unidle(p->p_cpu);
+	cpu_kick(p->p_cpu);
 }
 
 #ifdef MULTIPROCESSOR
 void
 cpu_unidle(struct cpu_info *ci)
 {
+	if (ci->ci_mwait != NULL) {
+		/*
+		 * Just clear the "keep idling" bit; if it wasn't
+		 * idling then we didn't need to do anything anyway.
+		 */
+		atomic_clearbits_int(&ci->ci_mwait[0], MWAIT_KEEP_IDLING);
+		return;
+	}
+
 	if (ci != curcpu())
 		x86_send_ipi(ci, X86_IPI_NOP);
 }
@@ -752,6 +788,8 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	x86_broadcast_ipi(X86_IPI_HALT);
@@ -796,7 +834,7 @@ long	dumplo = 0; 		/* blocks */
 int
 cpu_dump(void)
 {
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	char buf[dbtob(1)];
 	kcore_seg_t *segp;
 	cpu_kcore_hdr_t *cpuhdrp;
@@ -891,9 +929,9 @@ dumpsys(void)
 {
 	u_long totalbytesleft, bytes, i, n, memseg;
 	u_long maddr;
-	daddr64_t blkno;
+	daddr_t blkno;
 	void *va;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error;
 
 	/* Save registers. */
@@ -1156,7 +1194,7 @@ cpu_init_extents(void)
 		if (extent_alloc_region(iomem_ex, mem_clusters[i].start,
 		    mem_clusters[i].size, EX_NOWAIT)) {
 			/* XXX What should we do? */
-			printf("WARNING: CAN'T ALLOCATE RAM (%lx-%lx)"
+			printf("WARNING: CAN'T ALLOCATE RAM (%llx-%llx)"
 			    " FROM IOMEM EXTENT MAP!\n", mem_clusters[i].start,
 			    mem_clusters[i].start + mem_clusters[i].size - 1);
 		}
@@ -1199,7 +1237,6 @@ map_tramps(void) {
 
 #define	IDTVEC(name)	__CONCAT(X, name)
 typedef void (vector)(void);
-extern vector IDTVEC(osyscall);
 extern vector *IDTVEC(exceptions)[];
 
 void
@@ -1285,6 +1322,11 @@ init_x86_64(paddr_t first_avail)
 	if (avail_start < ACPI_TRAMPOLINE + PAGE_SIZE)
 		avail_start = ACPI_TRAMPOLINE + PAGE_SIZE;
 #endif
+
+#ifdef HIBERNATE
+	if (avail_start < HIBERNATE_HIBALLOC_PAGE + PAGE_SIZE)
+		avail_start = HIBERNATE_HIBALLOC_PAGE + PAGE_SIZE;
+#endif /* HIBERNATE */
 
 	/*
 	 * We need to go through the BIOS memory map given, and
@@ -1395,6 +1437,24 @@ init_x86_64(paddr_t first_avail)
 		uvm_page_physload(atop(seg_start), atop(seg_end),
 		    atop(seg_start), atop(seg_end), 0);
 	}
+
+	/*
+         * Now, load the memory between the end of I/O memory "hole"
+         * and the kernel.
+	 */
+	{
+		paddr_t seg_start = round_page(IOM_END);
+		paddr_t seg_end = trunc_page(KERNTEXTOFF - KERNBASE);
+
+		if (seg_start < seg_end) {
+#if DEBUG_MEMLOAD
+			printf("loading 0x%lx-0x%lx\n", seg_start, seg_end);
+#endif
+			uvm_page_physload(atop(seg_start), atop(seg_end),
+			    atop(seg_start), atop(seg_end), 0);
+		}
+	}
+
 #if DEBUG_MEMLOAD
 	printf("avail_start = 0x%lx\n", avail_start);
 	printf("avail_end = 0x%lx\n", avail_end);
@@ -1524,11 +1584,6 @@ init_x86_64(paddr_t first_avail)
 		idt_allocmap[x] = 1;
 	}
 
-	/* new-style interrupt gate for syscalls */
-	setgate(&idt[128], &IDTVEC(osyscall), 0, SDT_SYS386IGT, SEL_UPL,
-	    GSEL(GCODE_SEL, SEL_KPL));
-	idt_allocmap[128] = 1;
-
 	setregion(&region, gdtstore, GDT_SIZE - 1);
 	lgdt(&region);
 
@@ -1655,7 +1710,7 @@ amd64_pa_used(paddr_t addr)
 		return 1;
 
 	/* Low memory used for various bootstrap things */
-	if (addr >= 0 && addr < avail_start)
+	if (addr < avail_start)
 		return 1;
 
 	/*
@@ -1681,7 +1736,7 @@ need_resched(struct cpu_info *ci)
 	/* There's a risk we'll be called before the idle threads start */
 	if (ci->ci_curproc) {
 		aston(ci->ci_curproc);
-		cpu_unidle(ci);
+		cpu_kick(ci);
 	}
 }
 
@@ -1749,6 +1804,7 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 	bootarg32_t *q;
 	bios_ddb_t *bios_ddb;
 	bios_bootduid_t *bios_bootduid;
+	bios_bootsr_t *bios_bootsr;
 
 #undef BOOTINFO_DEBUG
 #ifdef BOOTINFO_DEBUG
@@ -1800,18 +1856,24 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 #endif
 #endif
 		case BOOTARG_CONSDEV:
-			if (q->ba_size >= sizeof(bios_consdev_t)) {
+			if (q->ba_size >= sizeof(bios_consdev_t) +
+			    offsetof(struct _boot_args32, ba_arg)) {
 				bios_consdev_t *cdp =
 				    (bios_consdev_t*)q->ba_arg;
 #if NCOM > 0
 				static const int ports[] =
 				    { 0x3f8, 0x2f8, 0x3e8, 0x2e8 };
 				int unit = minor(cdp->consdev);
-				if (major(cdp->consdev) == 8 && unit >= 0 &&
-				    unit < (sizeof(ports)/sizeof(ports[0]))) {
+				int consaddr = cdp->consaddr;
+				if (consaddr == -1 && unit >= 0 &&
+				    unit < (sizeof(ports)/sizeof(ports[0])))
+					consaddr = ports[unit];
+				if (major(cdp->consdev) == 8 &&
+				    consaddr != -1) {
 					comconsunit = unit;
-					comconsaddr = ports[unit];
+					comconsaddr = consaddr;
 					comconsrate = cdp->conspeed;
+					comconsiot = X86_BUS_SPACE_IO;
 
 					/* Probe the serial port this time. */
 					cninit();
@@ -1821,7 +1883,6 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 				printf(" console 0x%x:%d",
 				    cdp->consdev, cdp->conspeed);
 #endif
-				cnset(cdp->consdev);
 			}
 			break;
 		case BOOTARG_BOOTMAC:
@@ -1838,6 +1899,17 @@ getbootinfo(char *bootinfo, int bootinfo_size)
 		case BOOTARG_BOOTDUID:
 			bios_bootduid = (bios_bootduid_t *)q->ba_arg;
 			bcopy(bios_bootduid, bootduid, sizeof(bootduid));
+			break;
+
+		case BOOTARG_BOOTSR:
+			bios_bootsr = (bios_bootsr_t *)q->ba_arg;
+#if NSOFTRAID > 0
+			bcopy(&bios_bootsr->uuid, &sr_bootuuid,
+			    sizeof(sr_bootuuid));
+			bcopy(&bios_bootsr->maskkey, &sr_bootkey,
+			    sizeof(sr_bootkey));
+#endif
+			explicit_bzero(bios_bootsr, sizeof(bios_bootsr_t));
 			break;
 
 		default:

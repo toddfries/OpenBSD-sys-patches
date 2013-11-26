@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urndis.c,v 1.32 2011/07/20 13:11:41 jasper Exp $ */
+/*	$OpenBSD: if_urndis.c,v 1.44 2013/11/21 14:08:05 mpi Exp $ */
 
 /*
  * Copyright (c) 2010 Jonathan Armani <armani@openbsd.org>
@@ -19,8 +19,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/cdefs.h>
-
 #include "bpfilter.h"
 
 #include <sys/param.h>
@@ -29,7 +27,6 @@
 #include <sys/rwlock.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
-#include <sys/proc.h>
 #include <sys/socket.h>
 
 #include <sys/device.h>
@@ -47,7 +44,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -77,8 +73,8 @@ void urndis_watchdog(struct ifnet *);
 #endif
 
 void urndis_start(struct ifnet *);
-void urndis_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void urndis_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void urndis_rxeof(struct usbd_xfer *, void *, usbd_status);
+void urndis_txeof(struct usbd_xfer *, void *, usbd_status);
 int urndis_rx_list_init(struct urndis_softc *);
 int urndis_tx_list_init(struct urndis_softc *);
 
@@ -114,6 +110,8 @@ u_int32_t urndis_ctrl_keepalive(struct urndis_softc *);
 int urndis_encap(struct urndis_softc *, struct mbuf *, int);
 void urndis_decap(struct urndis_softc *, struct urndis_chain *, u_int32_t);
 
+const struct urndis_class *urndis_lookup(usb_interface_descriptor_t *);
+
 int urndis_match(struct device *, void *, void *);
 void urndis_attach(struct device *, struct device *, void *);
 int urndis_detach(struct device *, int);
@@ -131,13 +129,15 @@ struct cfattach urndis_ca = {
 	urndis_activate,
 };
 
-/*
- * Supported devices that we can't match by class IDs.
- */
-static const struct usb_devno urndis_devs[] = {
-	{ USB_VENDOR_HTC,	USB_PRODUCT_HTC_ANDROID },
-	{ USB_VENDOR_SAMSUNG2,	USB_PRODUCT_SAMSUNG2_ANDROID },
-	{ USB_VENDOR_SAMSUNG2,	USB_PRODUCT_SAMSUNG2_ANDROID2 }
+const struct urndis_class {
+	u_int8_t class;
+	u_int8_t subclass;
+	u_int8_t protocol;
+	const char *typestr;
+} urndis_class[] = {
+	{ UICLASS_CDC, UISUBCLASS_ABSTRACT_CONTROL_MODEL, 0xff, "Vendor" },
+	{ UICLASS_WIRELESS, UISUBCLASS_RF, UIPROTO_RNDIS, "RNDIS" },
+	{ UICLASS_MISC, UISUBCLASS_SYNC, UIPROTO_ACTIVESYNC, "Activesync" }
 };
 
 usbd_status
@@ -160,7 +160,7 @@ urndis_ctrl_send(struct urndis_softc *sc, void *buf, size_t len)
 {
 	usbd_status err;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return(0);
 
 	err = urndis_ctrl_msg(sc, UT_WRITE_CLASS_INTERFACE, UR_GET_STATUS,
@@ -341,8 +341,8 @@ urndis_ctrl_handle_query(struct urndis_softc *sc,
 	if (letoh32(msg->rm_infobuflen) + letoh32(msg->rm_infobufoffset) +
 	    RNDIS_HEADER_OFFSET > letoh32(msg->rm_len)) {
 		printf("%s: ctrl message error: invalid query info "
-		    "len/offset/end_position(%d/%d/%d) -> "
-		    "go out of buffer limit %d\n",
+		    "len/offset/end_position(%u/%u/%zu) -> "
+		    "go out of buffer limit %u\n",
 		    DEVNAME(sc),
 		    letoh32(msg->rm_infobuflen),
 		    letoh32(msg->rm_infobufoffset), 
@@ -805,7 +805,7 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 
 		if (len < sizeof(*msg)) {
 			printf("%s: urndis_decap invalid buffer len %u < "
-			    "minimum header %u\n",
+			    "minimum header %zu\n",
 			    DEVNAME(sc),
 			    len,
 			    sizeof(*msg));
@@ -832,7 +832,7 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 			return;
 		}
 		if (letoh32(msg->rm_len) < sizeof(*msg)) {
-			printf("%s: urndis_decap invalid msg len %u < %u\n",
+			printf("%s: urndis_decap invalid msg len %u < %zu\n",
 			    DEVNAME(sc),
 			    letoh32(msg->rm_len),
 			    sizeof(*msg));
@@ -851,7 +851,7 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 		    letoh32(msg->rm_datalen) + RNDIS_HEADER_OFFSET 
 		        > letoh32(msg->rm_len)) {
 			printf("%s: urndis_decap invalid data "
-			    "len/offset/end_position(%u/%u/%u) -> "
+			    "len/offset/end_position(%u/%u/%zu) -> "
 			    "go out of receive buffer limit %u\n",
 			    DEVNAME(sc),
 			    letoh32(msg->rm_datalen),
@@ -865,7 +865,7 @@ urndis_decap(struct urndis_softc *sc, struct urndis_chain *c, u_int32_t len)
 		if (letoh32(msg->rm_datalen) < sizeof(struct ether_header)) {
 			ifp->if_ierrors++;
 			printf("%s: urndis_decap invalid ethernet size "
-			    "%d < %d\n",
+			    "%u < %zu\n",
 			    DEVNAME(sc),
 			    letoh32(msg->rm_datalen),
 			    sizeof(struct ether_header));
@@ -993,7 +993,7 @@ urndis_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 	ifa = (struct ifaddr *)data;
 	error = 0;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	s = splnet();
@@ -1041,7 +1041,7 @@ urndis_watchdog(struct ifnet *ifp)
 
 	sc = ifp->if_softc;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	ifp->if_oerrors++;
@@ -1129,10 +1129,7 @@ urndis_stop(struct urndis_softc *sc)
 	ifp->if_flags &= ~(IFF_RUNNING | IFF_OACTIVE);
 
 	if (sc->sc_bulkin_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_bulkin_pipe);
-		if (err)
-			printf("%s: abort rx pipe failed: %s\n",
-			    DEVNAME(sc), usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_bulkin_pipe);
 		err = usbd_close_pipe(sc->sc_bulkin_pipe);
 		if (err)
 			printf("%s: close rx pipe failed: %s\n",
@@ -1141,10 +1138,7 @@ urndis_stop(struct urndis_softc *sc)
 	}
 
 	if (sc->sc_bulkout_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_bulkout_pipe);
-		if (err)
-			printf("%s: abort tx pipe failed: %s\n",
-			    DEVNAME(sc), usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_bulkout_pipe);
 		err = usbd_close_pipe(sc->sc_bulkout_pipe);
 		if (err)
 			printf("%s: close tx pipe failed: %s\n",
@@ -1183,7 +1177,7 @@ urndis_start(struct ifnet *ifp)
 
 	sc = ifp->if_softc;
 
-	if (sc->sc_dying || (ifp->if_flags & IFF_OACTIVE))
+	if (usbd_is_dying(sc->sc_udev) || (ifp->if_flags & IFF_OACTIVE))
 		return;
 
 	IFQ_POLL(&ifp->if_snd, m_head);
@@ -1216,8 +1210,8 @@ urndis_start(struct ifnet *ifp)
 }
 
 void
-urndis_rxeof(usbd_xfer_handle xfer,
-    usbd_private_handle priv,
+urndis_rxeof(struct usbd_xfer *xfer,
+    void *priv,
     usbd_status status)
 {
 	struct urndis_chain	*c;
@@ -1230,7 +1224,7 @@ urndis_rxeof(usbd_xfer_handle xfer,
 	ifp = GET_IFP(sc);
 	total_len = 0;
 
-	if (sc->sc_dying || !(ifp->if_flags & IFF_RUNNING))
+	if (usbd_is_dying(sc->sc_udev) || !(ifp->if_flags & IFF_RUNNING))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -1258,8 +1252,8 @@ done:
 }
 
 void
-urndis_txeof(usbd_xfer_handle xfer,
-    usbd_private_handle priv,
+urndis_txeof(struct usbd_xfer *xfer,
+    void *priv,
     usbd_status status)
 {
 	struct urndis_chain	*c;
@@ -1274,7 +1268,7 @@ urndis_txeof(usbd_xfer_handle xfer,
 
 	DPRINTF(("%s: urndis_txeof\n", DEVNAME(sc)));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	s = splnet();
@@ -1314,6 +1308,22 @@ urndis_txeof(usbd_xfer_handle xfer,
 	splx(s);
 }
 
+const struct urndis_class *
+urndis_lookup(usb_interface_descriptor_t *id)
+{
+	const struct urndis_class	*uc;
+	int				 i;
+
+	uc = urndis_class;
+	for (i = 0; i < nitems(urndis_class); i++, uc++) {
+		if (uc->class == id->bInterfaceClass &&
+		    uc->subclass == id->bInterfaceSubClass &&
+		    uc->protocol == id->bInterfaceProtocol)
+			return (uc);
+	}
+	return (NULL);
+}
+
 int
 urndis_match(struct device *parent, void *match, void *aux)
 {
@@ -1329,28 +1339,20 @@ urndis_match(struct device *parent, void *match, void *aux)
 	if (id == NULL)
 		return (UMATCH_NONE);
 
-	if (id->bInterfaceClass == UICLASS_WIRELESS &&
-	    id->bInterfaceSubClass == UISUBCLASS_RF &&
-	    id->bInterfaceProtocol == UIPROTO_RNDIS)
-		return (UMATCH_IFACECLASS_IFACESUBCLASS_IFACEPROTO);
-
-	return (usb_lookup(urndis_devs, uaa->vendor, uaa->product) != NULL) ?
-	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE;
+	return (urndis_lookup(id) ? 
+	    UMATCH_IFACECLASS_IFACESUBCLASS_IFACEPROTO : UMATCH_NONE);
 }
 
 void
 urndis_attach(struct device *parent, struct device *self, void *aux)
 {
+	const struct urndis_class	*uc;
 	struct urndis_softc		*sc;
 	struct usb_attach_arg		*uaa;
 	struct ifnet			*ifp;
 	usb_interface_descriptor_t	*id;
 	usb_endpoint_descriptor_t	*ed;
 	usb_config_descriptor_t		*cd;
-	usb_cdc_union_descriptor_t	*ud;
-	const usb_descriptor_t		*desc;
-	usbd_desc_iter_t		 iter;
-	int				 if_ctl, if_data;
 	int				 i, j, altcnt;
 	int				 s;
 	u_char				 eaddr[ETHER_ADDR_LEN];
@@ -1362,42 +1364,17 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 	uaa = aux;
 
 	sc->sc_udev = uaa->device;
-	sc->sc_iface_ctl = uaa->iface;
-	id = usbd_get_interface_descriptor(sc->sc_iface_ctl);
-	if_ctl = id->bInterfaceNumber;
-	sc->sc_ifaceno_ctl = if_ctl;
-	if_data = -1;
+	id = usbd_get_interface_descriptor(uaa->iface);
+	sc->sc_ifaceno_ctl = id->bInterfaceNumber;
 
-	usb_desc_iter_init(sc->sc_udev, &iter);
-	while ((desc = usb_desc_iter_next(&iter)) != NULL) {
-
-		if (desc->bDescriptorType != UDESC_CS_INTERFACE) {
+	for (i = 0; i < uaa->nifaces; i++) {
+		if (usbd_iface_claimed(sc->sc_udev, i))
 			continue;
-		}
-		switch (desc->bDescriptorSubtype) {
-		case UDESCSUB_CDC_UNION:
-			ud = (usb_cdc_union_descriptor_t *)desc;
-			/* XXX bail out when found first? */
-			if (if_data == -1)
-				if_data = ud->bSlaveInterface[0];
-			break;
-		}
-	}
 
-	if (if_data == -1) {
-		DPRINTF(("urndis_attach: no union interface\n"));
-		sc->sc_iface_data = sc->sc_iface_ctl;
-	} else {
-		DPRINTF(("urndis_attach: union interface: ctl %u, data %u\n",
-		    if_ctl, if_data));
-		for (i = 0; i < uaa->nifaces; i++) {
-			if (usbd_iface_claimed(sc->sc_udev, i))
-				continue;
-			id = usbd_get_interface_descriptor(uaa->ifaces[i]);
-			if (id && id->bInterfaceNumber == if_data) {
-				sc->sc_iface_data = uaa->ifaces[i];
-				usbd_claim_iface(sc->sc_udev, i);
-			}
+		if (uaa->ifaces[i] != uaa->iface) {
+			sc->sc_iface_data = uaa->ifaces[i];
+			usbd_claim_iface(sc->sc_udev, i);
+			break;
 		}
 	}
 
@@ -1406,14 +1383,16 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 
+	uc = urndis_lookup(id);
+	printf("%s: using %s", DEVNAME(sc), uc->typestr);
+
 	id = usbd_get_interface_descriptor(sc->sc_iface_data);
 	cd = usbd_get_config_descriptor(sc->sc_udev);
 	altcnt = usbd_get_no_alts(cd, id->bInterfaceNumber);
 
 	for (j = 0; j < altcnt; j++) {
 		if (usbd_set_interface(sc->sc_iface_data, j)) {
-			printf("%s: interface alternate setting %u failed\n",
-			    DEVNAME(sc), j);
+			printf(": interface alternate setting %u failed\n", j);
 			return;
 		}
 		/* Find endpoints. */
@@ -1423,8 +1402,8 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 			ed = usbd_interface2endpoint_descriptor(
 			    sc->sc_iface_data, i);
 			if (!ed) {
-				printf("%s: no descriptor for bulk endpoint "
-				    "%u\n", DEVNAME(sc), i);
+				printf(": no descriptor for bulk endpoint "
+				    "%u\n", i);
 				return;
 			}
 			if (UE_GET_DIR(ed->bEndpointAddress) == UE_DIR_IN &&
@@ -1448,9 +1427,9 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	if (sc->sc_bulkin_no == -1)
-		printf("%s: could not find data bulk in\n", DEVNAME(sc));
+		printf(": could not find data bulk in\n");
 	if (sc->sc_bulkout_no == -1 )
-		printf("%s: could not find data bulk out\n", DEVNAME(sc));
+		printf(": could not find data bulk out\n");
 	return;
 
 	found:
@@ -1474,7 +1453,7 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 
 	if (urndis_ctrl_query(sc, OID_802_3_PERMANENT_ADDRESS, NULL, 0,
 	    &buf, &bufsz) != RNDIS_STATUS_SUCCESS) {
-		printf("%s: unable to get hardware address\n", DEVNAME(sc));
+		printf(": unable to get hardware address\n");
 		urndis_stop(sc);
 		splx(s);
 		return;
@@ -1482,10 +1461,10 @@ urndis_attach(struct device *parent, struct device *self, void *aux)
 
 	if (bufsz == ETHER_ADDR_LEN) {
 		memcpy(eaddr, buf, ETHER_ADDR_LEN);
-		printf("%s: address %s\n", DEVNAME(sc), ether_sprintf(eaddr));
+		printf(", address %s\n", ether_sprintf(eaddr));
 		free(buf, M_TEMP);
 	} else {
-		printf("%s: invalid address\n", DEVNAME(sc));
+		printf(", invalid address\n");
 		free(buf, M_TEMP);
 		urndis_stop(sc);
 		splx(s);
@@ -1554,7 +1533,7 @@ urndis_activate(struct device *self, int devact)
 
 	switch (devact) {
 	case DVACT_DEACTIVATE:
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 

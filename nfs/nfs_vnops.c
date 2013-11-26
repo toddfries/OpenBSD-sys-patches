@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vnops.c,v 1.138 2011/07/09 00:24:44 beck Exp $	*/
+/*	$OpenBSD: nfs_vnops.c,v 1.148 2013/10/17 16:27:47 bluhm Exp $	*/
 /*	$NetBSD: nfs_vnops.c,v 1.62.4.1 1996/07/08 20:26:52 jtc Exp $	*/
 
 /*
@@ -61,6 +61,7 @@
 #include <sys/hash.h>
 #include <sys/queue.h>
 #include <sys/specdev.h>
+#include <sys/unistd.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -77,7 +78,6 @@
 
 #include <net/if.h>
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 
 #include <dev/rndvar.h>
 
@@ -1959,8 +1959,7 @@ nfs_readdir(void *v)
 	struct uio *uio = ap->a_uio;
 	int tresid, error = 0;
 	struct vattr vattr;
-	u_long *cookies = NULL;
-	int ncookies = 0, cnt;
+	int cnt;
 	u_int64_t  newoff = uio->uio_offset;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
 	struct uio readdir_uio;
@@ -1992,15 +1991,6 @@ nfs_readdir(void *v)
 
 	if (uio->uio_rw != UIO_READ)
 		return (EINVAL);
-
-	if (ap->a_cookies) {
-		ncookies = uio->uio_resid / 20;
-
-		cookies = malloc(sizeof(*cookies) * ncookies, M_TEMP,
-		    M_WAITOK);
-		*ap->a_ncookies = ncookies;
-		*ap->a_cookies = cookies;
-	}
 
 	if ((nmp->nm_flag & (NFSMNT_NFSV3 | NFSMNT_GOTFSINFO)) == NFSMNT_NFSV3)
 		(void)nfs_fsinfo(nmp, vp, cred, p);
@@ -2034,12 +2024,12 @@ nfs_readdir(void *v)
 			error = EINVAL;
 
 		while (error == 0 &&
-		    (ap->a_cookies == NULL || ncookies != 0) &&
 		    ndp < (struct nfs_dirent *)readdir_iovec.iov_base) {
 			struct dirent *dp = &ndp->dirent;
 			int reclen = dp->d_reclen;
 
 			dp->d_reclen -= NFS_DIRENT_OVERHEAD;
+			dp->d_off = fxdr_hyper(&ndp->cookie[0]);
 
 			if (uio->uio_resid < dp->d_reclen) {
 				eof = 0;
@@ -2047,17 +2037,10 @@ nfs_readdir(void *v)
 				break;
 			}
 
-			error = uiomove((caddr_t)dp, dp->d_reclen, uio);
-			if (error)
+			if ((error = uiomove(dp, dp->d_reclen, uio)))
 				break;
 
 			newoff = fxdr_hyper(&ndp->cookie[0]);
-
-			if (ap->a_cookies != NULL) {
-				*cookies = newoff;
-				cookies++;
-				ncookies--;
-			}
 
 			ndp = (struct nfs_dirent *)((u_int8_t *)ndp + reclen);
 		}
@@ -2066,18 +2049,7 @@ nfs_readdir(void *v)
 	free(data, M_TEMP);
 	data = NULL;
 
-	if (ap->a_cookies) {
-		if (error) {
-			free(*ap->a_cookies, M_TEMP);
-			*ap->a_cookies = NULL;
-			*ap->a_ncookies = 0;
-		} else {
-			*ap->a_ncookies -= ncookies;
-		}
-	}
-
-	if (!error)
-		uio->uio_offset = newoff;
+	uio->uio_offset = newoff;
 
 	if (!error && (eof || uio->uio_resid == tresid)) {
 		nfsstats.direofcache_misses++;
@@ -2175,7 +2147,7 @@ nfs_readdirrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 		nfsm_dissect(tl, u_int32_t *, NFSX_UNSIGNED);
 		more_dirs = fxdr_unsigned(int, *tl);
 
-		/* loop thru the dir entries, doctoring them to 4bsd form */
+		/* loop thru the dir entries, doctoring them to dirent form */
 		while (more_dirs && bigenough) {
 			if (info.nmi_v3) {
 				nfsm_dissect(tl, u_int32_t *,
@@ -2193,26 +2165,26 @@ nfs_readdirrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				m_freem(info.nmi_mrep);
 				goto nfsmout;
 			}
-			tlen = nfsm_rndup(len + 1);
+			tlen = DIRENT_RECSIZE(len) + NFS_DIRENT_OVERHEAD;
 			left = NFS_READDIRBLKSIZ - blksiz;
-			if ((tlen + NFS_DIRHDSIZ) > left) {
+			if (tlen > left) {
 				dp->d_reclen += left;
 				uiop->uio_iov->iov_base += left;
 				uiop->uio_iov->iov_len -= left;
 				uiop->uio_resid -= left;
 				blksiz = 0;
 			}
-			if ((tlen + NFS_DIRHDSIZ) > uiop->uio_resid)
+			if (tlen > uiop->uio_resid)
 				bigenough = 0;
 			if (bigenough) {
 				ndp = (struct nfs_dirent *)
 				    uiop->uio_iov->iov_base;
 				dp = &ndp->dirent;
-				dp->d_fileno = (int)fileno;
+				dp->d_fileno = fileno;
 				dp->d_namlen = len;
-				dp->d_reclen = tlen + NFS_DIRHDSIZ;
+				dp->d_reclen = tlen;
 				dp->d_type = DT_UNKNOWN;
-				blksiz += dp->d_reclen;
+				blksiz += tlen;
 				if (blksiz == NFS_READDIRBLKSIZ)
 					blksiz = 0;
 				uiop->uio_resid -= NFS_DIRHDSIZ;
@@ -2222,7 +2194,7 @@ nfs_readdirrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				uiop->uio_iov->iov_len -= NFS_DIRHDSIZ;
 				nfsm_mtouio(uiop, len);
 				cp = uiop->uio_iov->iov_base;
-				tlen -= len;
+				tlen -= NFS_DIRHDSIZ + len;
 				*cp = '\0';	/* null terminate */
 				uiop->uio_iov->iov_base += tlen;
 				uiop->uio_iov->iov_len -= tlen;
@@ -2372,9 +2344,9 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				m_freem(info.nmi_mrep);
 				goto nfsmout;
 			}
-			tlen = nfsm_rndup(len + 1);
+			tlen = DIRENT_RECSIZE(len) + NFS_DIRENT_OVERHEAD;
 			left = NFS_READDIRBLKSIZ - blksiz;
-			if ((tlen + NFS_DIRHDSIZ) > left) {
+			if (tlen > left) {
 				dp->d_reclen += left;
 				uiop->uio_iov->iov_base =
 				    (char *)uiop->uio_iov->iov_base + left;
@@ -2382,17 +2354,17 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				uiop->uio_resid -= left;
 				blksiz = 0;
 			}
-			if ((tlen + NFS_DIRHDSIZ) > uiop->uio_resid)
+			if (tlen > uiop->uio_resid)
 				bigenough = 0;
 			if (bigenough) {
 				ndirp = (struct nfs_dirent *)
 				    uiop->uio_iov->iov_base;
 				dp = &ndirp->dirent;
-				dp->d_fileno = (int)fileno;
+				dp->d_fileno = fileno;
 				dp->d_namlen = len;
-				dp->d_reclen = tlen + NFS_DIRHDSIZ;
+				dp->d_reclen = tlen;
 				dp->d_type = DT_UNKNOWN;
-				blksiz += dp->d_reclen;
+				blksiz += tlen;
 				if (blksiz == NFS_READDIRBLKSIZ)
 					blksiz = 0;
 				uiop->uio_resid -= NFS_DIRHDSIZ;
@@ -2404,7 +2376,7 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 				cnp->cn_namelen = len;
 				nfsm_mtouio(uiop, len);
 				cp = uiop->uio_iov->iov_base;
-				tlen -= len;
+				tlen -= NFS_DIRHDSIZ + len;
 				*cp = '\0';
 				uiop->uio_iov->iov_base += tlen;
 				uiop->uio_iov->iov_len -= tlen;
@@ -2455,7 +2427,8 @@ nfs_readdirplusrpc(struct vnode *vp, struct uio *uiop, struct ucred *cred,
 					info.nmi_md = mdsav2;
 					dp->d_type = IFTODT(
 						VTTOIF(np->n_vattr.va_type));
-					if (cnp->cn_namelen <= NCHNAMLEN) {
+					if (cnp->cn_namelen <=
+					    NAMECACHE_MAXLEN) {
 						ndp->ni_vp = newvp;
 						cache_purge(ndp->ni_dvp);
 						nfs_cache_enter(ndp->ni_dvp,
@@ -2796,15 +2769,18 @@ again:
 	if (NFS_ISV3(vp) && commit) {
 		s = splbio();
 		for (bp = LIST_FIRST(&vp->v_dirtyblkhd); bp != NULL; bp = nbp) {
-			nbp = LIST_NEXT(bp, b_vnbufs);
 			if (bvecpos >= NFS_COMMITBVECSIZ)
 				break;
 			if ((bp->b_flags & (B_BUSY | B_DELWRI | B_NEEDCOMMIT))
-				!= (B_DELWRI | B_NEEDCOMMIT))
+			    != (B_DELWRI | B_NEEDCOMMIT)) {
+				nbp = LIST_NEXT(bp, b_vnbufs);
 				continue;
+			}
 			bremfree(bp);
 			bp->b_flags |= B_WRITEINPROG;
 			buf_acquire(bp);
+			nbp = LIST_NEXT(bp, b_vnbufs);
+
 			/*
 			 * A list of these buffers is kept so that the
 			 * second loop knows which buffers have actually
@@ -2934,19 +2910,63 @@ loop:
 
 /*
  * Return POSIX pathconf information applicable to nfs.
- *
- * The NFS V2 protocol doesn't support this, so just return EINVAL
- * for V2.
+ * Fake it. For v3 we could ask the server, but such code
+ * hasn't been written yet.
  */
 /* ARGSUSED */
 int
 nfs_pathconf(void *v)
 {
-#if 0
 	struct vop_pathconf_args *ap = v;
-#endif
+	struct nfsmount *nmp = VFSTONFS(ap->a_vp->v_mount);
+	int error = 0;
 
-	return (EINVAL);
+	switch (ap->a_name) {
+	case _PC_LINK_MAX:
+		*ap->a_retval = LINK_MAX;
+		break;
+	case _PC_NAME_MAX:
+		*ap->a_retval = NAME_MAX;
+		break;
+	case _PC_CHOWN_RESTRICTED:
+		*ap->a_retval = 1;
+		break;
+	case _PC_NO_TRUNC:
+		*ap->a_retval = 1;
+		break;
+	case _PC_ALLOC_SIZE_MIN:
+		*ap->a_retval = NFS_FABLKSIZE;
+		break;
+	case _PC_FILESIZEBITS:
+		*ap->a_retval = 64;
+		break;
+	case _PC_REC_INCR_XFER_SIZE:
+		*ap->a_retval = min(nmp->nm_rsize, nmp->nm_wsize);
+		break;
+	case _PC_REC_MAX_XFER_SIZE:
+		*ap->a_retval = -1; /* means ``unlimited'' */
+		break;
+	case _PC_REC_MIN_XFER_SIZE:
+		*ap->a_retval = min(nmp->nm_rsize, nmp->nm_wsize);
+		break;
+	case _PC_REC_XFER_ALIGN:
+		*ap->a_retval = PAGE_SIZE;
+		break;
+	case _PC_SYMLINK_MAX:
+		*ap->a_retval = MAXPATHLEN;
+		break;
+	case _PC_2_SYMLINKS:
+		*ap->a_retval = 1;
+		break;
+	case _PC_TIMESTAMP_RESOLUTION:
+		*ap->a_retval = NFS_ISV3(ap->a_vp) ? 1 : 1000;
+		break;
+	default:
+		error = EINVAL;
+		break;
+	}
+
+	return (error);
 }
 
 /*
@@ -2972,7 +2992,7 @@ nfs_print(void *v)
 	struct vnode *vp = ap->a_vp;
 	struct nfsnode *np = VTONFS(vp);
 
-	printf("tag VT_NFS, fileid %ld fsid 0x%lx",
+	printf("tag VT_NFS, fileid %lld fsid 0x%lx",
 		np->n_vattr.va_fileid, np->n_vattr.va_fsid);
 #ifdef FIFO
 	if (vp->v_type == VFIFO)
@@ -3020,7 +3040,7 @@ nfs_writebp(struct buf *bp, int force)
 	buf_undirty(bp);
 
 	if ((oldflags & B_ASYNC) && !(oldflags & B_DELWRI) && p)
-		++p->p_stats->p_ru.ru_oublock;
+		++p->p_ru.ru_oublock;
 
 	bp->b_vp->v_numoutput++;
 	splx(s);
@@ -3095,7 +3115,7 @@ nfs_writebp(struct buf *bp, int force)
 		bp->b_flags |= B_RAW;
 		rtval = biowait(bp);
 		if (!(oldflags & B_DELWRI) && p) {
-			++p->p_stats->p_ru.ru_oublock;
+			++p->p_ru.ru_oublock;
 		}
 		brelse(bp);
 		return (rtval);

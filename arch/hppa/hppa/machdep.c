@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.205 2011/09/20 09:49:38 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.213 2013/11/23 07:20:52 uebayasi Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -892,39 +892,42 @@ boot(int howto)
 		/* (Unless the user explicitly asked for reboot.) */
 		if ((howto & RB_USERREQ) == 0)
 			howto |= RB_HALT;
-	} else {
+		goto haltsys;
+	}
 
-		boothowto = howto | (boothowto & RB_HALT);
+	boothowto = howto | (boothowto & RB_HALT);
 
-		if (!(howto & RB_NOSYNC)) {
-			waittime = 0;
-			vfs_shutdown();
-			/*
-			 * If we've been adjusting the clock, the todr
-			 * will be out of synch; adjust it now unless
-			 * the system was sitting in ddb.
-			 */
-			if ((howto & RB_TIMEBAD) == 0)
-				resettodr();
-			else
-				printf("WARNING: not updating battery clock\n");
-		}
-		if_downall();
+	if (!(howto & RB_NOSYNC)) {
+		waittime = 0;
+		vfs_shutdown();
+		/*
+		 * If we've been adjusting the clock, the todr
+		 * will be out of synch; adjust it now unless
+		 * the system was sitting in ddb.
+		 */
+		if ((howto & RB_TIMEBAD) == 0)
+			resettodr();
+		else
+			printf("WARNING: not updating battery clock\n");
+	}
+	if_downall();
 
-		/* XXX probably save howto into stable storage */
+	/* XXX probably save howto into stable storage */
 
-		uvm_shutdown();
-		splhigh();
+	uvm_shutdown();
+	splhigh();
 
-		if (howto & RB_DUMP)
-			dumpsys();
+	if (howto & RB_DUMP)
+		dumpsys();
 
-		doshutdownhooks();
+haltsys:
+	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
-		hppa_ipi_broadcast(HPPA_IPI_HALT);
+	hppa_ipi_broadcast(HPPA_IPI_HALT);
 #endif
-	}
 
 	/* in case we came on powerfail interrupt */
 	if (cold_hook)
@@ -1026,8 +1029,8 @@ dumpsys(void)
 {
 	int psize, bytes, i, n;
 	caddr_t maddr;
-	daddr64_t blkno;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	int error;
 
 	/* Save registers
@@ -1133,6 +1136,25 @@ copyout(const void *src, void *dst, size_t size)
 }
 
 /*
+ * Set up tf_sp and tf_r3 (the frame pointer) and copy out the
+ * frame marker and the old r3
+ */
+int
+setstack(struct trapframe *tf, u_long stack, register_t old_r3)
+{
+	static const register_t zero = 0;
+	int err;
+
+	tf->tf_r3 = stack;
+	err = copyout(&old_r3, (caddr_t)stack, sizeof(register_t));
+
+	tf->tf_sp = stack += HPPA_FRAME_SIZE;
+	return (copyout(&zero, (caddr_t)(stack + HPPA_FRAME_CRP),
+	    sizeof(register_t)) || err);
+}
+
+
+/*
  * Set registers on exec.
  */
 void
@@ -1141,25 +1163,35 @@ setregs(struct proc *p, struct exec_package *pack, u_long stack,
 {
 	struct trapframe *tf = p->p_md.md_regs;
 	struct pcb *pcb = &p->p_addr->u_pcb;
-	register_t zero;
 
+	bzero(tf, sizeof(*tf));
 	tf->tf_flags = TFF_SYS|TFF_LAST;
-	tf->tf_iioq_tail = 4 +
-	    (tf->tf_iioq_head = pack->ep_entry | HPPA_PC_PRIV_USER);
-	tf->tf_rp = 0;
+	tf->tf_iioq_head = pack->ep_entry | HPPA_PC_PRIV_USER;
+	tf->tf_iioq_tail = tf->tf_iioq_head + 4;
+	tf->tf_iisq_head = tf->tf_iisq_tail = pcb->pcb_space;
 	tf->tf_arg0 = (u_long)PS_STRINGS;
-	tf->tf_arg1 = tf->tf_arg2 = 0; /* XXX dynload stuff */
 
 	/* setup terminal stack frame */
-	stack = (stack + 0x1f) & ~0x1f;
-	tf->tf_r3 = stack;
-	tf->tf_sp = stack += HPPA_FRAME_SIZE;
-	zero = 0;
-	copyout(&zero, (caddr_t)(stack - HPPA_FRAME_SIZE), sizeof(register_t));
-	copyout(&zero, (caddr_t)(stack + HPPA_FRAME_CRP), sizeof(register_t));
+	setstack(tf, (stack + 0x3f) & ~0x3f, 0);
 
-	/* reset any of the pending FPU exceptions */
+	tf->tf_cr30 = (paddr_t)pcb->pcb_fpstate;
+
+	tf->tf_sr0 = tf->tf_sr1 = tf->tf_sr2 = tf->tf_sr3 =
+	tf->tf_sr4 = tf->tf_sr5 = tf->tf_sr6 = pcb->pcb_space;
+	tf->tf_pidr1 = tf->tf_pidr2 = pmap_sid2pid(tf->tf_sr0);
+
+	/*
+	 * theoretically these could be inherited,
+	 * but just in case.
+	 */
+	tf->tf_sr7 = HPPA_SID_KERNEL;
+	mfctl(CR_EIEM, tf->tf_eiem);
+	tf->tf_ipsw = PSL_C | PSL_Q | PSL_P | PSL_D | PSL_I /* | PSL_L */ |
+	    (curcpu()->ci_psw & PSL_O);
+
+	/* clear the FPU */
 	fpu_proc_flush(p);
+	bzero(&pcb->pcb_fpstate->hfp_regs, sizeof(pcb->pcb_fpstate->hfp_regs));
 	pcb->pcb_fpstate->hfp_regs.fpr_regs[0] =
 	    ((u_int64_t)HPPA_FPU_INIT) << 32;
 	pcb->pcb_fpstate->hfp_regs.fpr_regs[1] = 0;
@@ -1196,16 +1228,13 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	/* Save the FPU context first. */
 	fpu_proc_save(p);
 
-	ksc.sc_onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
-
 	/*
 	 * Allocate space for the signal handler context.
 	 */
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !ksc.sc_onstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(tf->tf_sp) && (psp->ps_sigonstack & sigmask(sig)))
 		scp = (register_t)p->p_sigstk.ss_sp;
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		scp = (tf->tf_sp + 63) & ~63;
 
 	sss = (sizeof(ksc) + 63) & ~63;
@@ -1221,6 +1250,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 		    tf->tf_iioq_head, tf->tf_iioq_tail, tf->tf_ipsw, PSL_BITS);
 #endif
 
+	bzero(&ksc, sizeof(ksc));
 	ksc.sc_mask = mask;
 	ksc.sc_fp = scp + sss;
 	ksc.sc_ps = tf->tf_ipsw;
@@ -1261,12 +1291,13 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	bcopy(&p->p_addr->u_pcb.pcb_fpstate->hfp_regs, ksc.sc_fpregs,
 	    sizeof(ksc.sc_fpregs));
 
-	sss += HPPA_FRAME_SIZE;
+	if (setstack(tf, scp + sss, tf->tf_r3))
+		sigexit(p, SIGILL);
+
 	tf->tf_arg0 = sig;
 	tf->tf_arg1 = sip;
 	tf->tf_arg2 = tf->tf_r4 = scp;
 	tf->tf_arg3 = (register_t)catcher;
-	tf->tf_sp = scp + sss;
 	tf->tf_ipsw &= ~(PSL_N|PSL_B|PSL_T);
 	tf->tf_iioq_head = HPPA_PC_PRIV_USER | p->p_sigcode;
 	tf->tf_iioq_tail = tf->tf_iioq_head + 4;
@@ -1276,7 +1307,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) && (!sigpid || p->p_pid == sigpid))
 		printf("sendsig(%d): sig %d scp %p fp %p sp 0x%x\n",
-		    p->p_pid, sig, scp, ksc.sc_fp, (register_t)scp + sss);
+		    p->p_pid, sig, scp, ksc.sc_fp, tf->tf_sp);
 #endif
 
 	if (copyout(&ksc, (void *)scp, sizeof(ksc)))
@@ -1287,11 +1318,6 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 		if (copyout(&ksi, (void *)sip, sizeof(ksi)))
 			sigexit(p, SIGILL);
 	}
-
-	if (copyout(&tf->tf_r3, (caddr_t)(tf->tf_sp - HPPA_FRAME_SIZE),
-	    sizeof(register_t)))
-		sigexit(p, SIGILL);
-	tf->tf_r3 = tf->tf_sp - HPPA_FRAME_SIZE;
 
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) && (!sigpid || p->p_pid == sigpid))
@@ -1327,10 +1353,6 @@ sys_sigreturn(struct proc *p, void *v, register_t *retval)
 	if ((ksc.sc_ps & (PSL_MBS|PSL_MBZ)) != PSL_MBS)
 		return (EINVAL);
 
-	if (ksc.sc_onstack)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = ksc.sc_mask &~ sigcantmask;
 
 	tf->tf_t1 = ksc.sc_regs[0];		/* r22 */

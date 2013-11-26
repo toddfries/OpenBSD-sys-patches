@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.27 2011/11/16 20:50:18 deraadt Exp $	*/
+/*	$OpenBSD: trap.c,v 1.32 2012/12/31 06:46:13 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.2 2003/05/04 23:51:56 fvdl Exp $	*/
 
 /*-
@@ -77,13 +77,8 @@
 #include <sys/acct.h>
 #include <sys/kernel.h>
 #include <sys/signal.h>
-#ifdef KTRACE
-#include <sys/ktrace.h>
-#endif
 #include <sys/syscall.h>
-
-#include "systrace.h"
-#include <dev/systrace.h>
+#include <sys/syscall_mi.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -325,6 +320,15 @@ copyfault:
 			goto we_re_toast;
 		cr2 = rcr2();
 		KERNEL_LOCK();
+		/* This will only trigger if SMEP is enabled */
+		if (cr2 <= VM_MAXUSER_ADDRESS && frame->tf_err & PGEX_I)
+			panic("attempt to execute user address %p "
+			    "in supervisor mode", (void *)cr2);
+		/* This will only trigger if SMAP is enabled */
+		if (pcb->pcb_onfault == NULL && cr2 <= VM_MAXUSER_ADDRESS &&
+		    frame->tf_err & PGEX_P)
+			panic("attempt to access user address %p "
+			    "in supervisor mode", (void *)cr2);
 		goto faultcommon;
 
 	case T_PAGEFLT|T_USER: {	/* page fault */
@@ -363,7 +367,7 @@ faultcommon:
 
 #ifdef DIAGNOSTIC
 		if (map == kernel_map && va == 0) {
-			printf("trap: bad kernel access at %lx\n", va);
+			printf("trap: bad kernel access at %lx\n", fa);
 			goto we_re_toast;
 		}
 #endif
@@ -395,7 +399,7 @@ faultcommon:
 				goto copyfault;
 			}
 			printf("uvm_fault(%p, 0x%lx, 0, %d) -> %x\n",
-			    map, va, ftype, error);
+			    map, fa, ftype, error);
 			goto we_re_toast;
 		}
 		if (error == ENOMEM) {
@@ -408,7 +412,7 @@ faultcommon:
 		} else {
 #ifdef TRAP_SIGDEBUG
 			printf("pid %d (%s): SEGV at rip %lx addr %lx\n",
-			    p->p_pid, p->p_comm, frame->tf_rip, va);
+			    p->p_pid, p->p_comm, frame->tf_rip, fa);
 			frame_dump(frame);
 #endif
 			sv.sival_ptr = (void *)fa;
@@ -494,7 +498,6 @@ syscall(struct trapframe *frame)
 	int nsys;
 	size_t argsize, argoff;
 	register_t code, args[9], rval[2], *argp;
-	int lock;
 
 	uvmexp.syscalls++;
 	p = curproc;
@@ -546,43 +549,16 @@ syscall(struct trapframe *frame)
 		if (argsize > 6) {
 			argsize -= 6;
 			params = (caddr_t)frame->tf_rsp + sizeof(register_t);
-			error = copyin(params, (caddr_t)&args[6],
-					argsize << 3);
-			if (error != 0)
+			if ((error = copyin(params, &args[6], argsize << 3)))
 				goto bad;
 		}
 	}
 
-	lock = !(callp->sy_flags & SY_NOLOCK);
-
-#ifdef SYSCALL_DEBUG
-	KERNEL_LOCK();
-	scdebug_call(p, code, argp);
-	KERNEL_UNLOCK();
-#endif
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL)) {
-		KERNEL_LOCK();
-		ktrsyscall(p, code, callp->sy_argsize, argp);
-		KERNEL_UNLOCK();
-	}
-#endif
 	rval[0] = 0;
 	rval[1] = frame->tf_rdx;
-#if NSYSTRACE > 0
-	if (ISSET(p->p_flag, P_SYSTRACE)) {
-		KERNEL_LOCK();
-		error = systrace_redirect(code, p, argp, rval);
-		KERNEL_UNLOCK();
-	} else
-#endif
-	{
-		if (lock)
-			KERNEL_LOCK();
-		error = (*callp->sy_call)(p, argp, rval);
-		if (lock)
-			KERNEL_UNLOCK();
-	}
+
+	error = mi_syscall(p, code, callp, argp, rval);
+
 	switch (error) {
 	case 0:
 		frame->tf_rax = rval[0];
@@ -607,19 +583,7 @@ syscall(struct trapframe *frame)
 		break;
 	}
 
-#ifdef SYSCALL_DEBUG
-	KERNEL_LOCK();
-	scdebug_ret(p, code, error, rval);
-	KERNEL_UNLOCK();
-#endif
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_LOCK();
-		ktrsysret(p, code, error, rval[0]);
-		KERNEL_UNLOCK();
-	}
-#endif
+	mi_syscall_return(p, code, error, rval);
 }
 
 void
@@ -634,15 +598,6 @@ child_return(void *arg)
 
 	KERNEL_UNLOCK();
 
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET)) {
-		KERNEL_LOCK();
-		ktrsysret(p,
-		    (p->p_flag & P_THREAD) ? SYS_rfork :
-		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
-		    0, 0);
-		KERNEL_UNLOCK();
-	}
-#endif
+	mi_child_return(p);
 }
+

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.luna88k,v 1.16 2010/12/31 21:38:08 miod Exp $
+#	$OpenBSD: files.luna88k,v 1.19 2013/11/16 22:45:37 aoyama Exp $
 #
 maxpartitions 16
 
@@ -14,7 +14,7 @@ device lcd
 attach lcd at mainbus
 file	arch/luna88k/dev/lcd.c				lcd needs-flag
 
-attach le at mainbus
+attach le at mainbus: le24
 file	arch/luna88k/dev/if_le.c			le
 
 device sio {[channel = -1]}
@@ -33,11 +33,13 @@ file	arch/luna88k/dev/siotty.c			siotty needs-flag
 device ws: wskbddev,wsmousedev
 attach ws at sio
 file arch/luna88k/dev/lunaws.c				ws
+file arch/luna88k/dev/omkbdmap.c			ws
 
 device fb: wsemuldisplaydev, rasops1
 attach fb at mainbus
 file arch/luna88k/dev/lunafb.c				fb
 file arch/luna88k/dev/omrasops.c			fb
+file arch/luna88k/dev/omrasops1.c			fb
 
 # Raster operations
 include "dev/rasops/files.rasops"

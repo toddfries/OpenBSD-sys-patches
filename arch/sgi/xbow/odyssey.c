@@ -1,4 +1,4 @@
-/*	$OpenBSD: odyssey.c,v 1.6 2010/04/07 18:16:03 miod Exp $ */
+/*	$OpenBSD: odyssey.c,v 1.9 2013/10/21 10:36:18 miod Exp $ */
 /*
  * Copyright (c) 2009, 2010 Joel Sing <jsing@openbsd.org>
  *
@@ -22,7 +22,7 @@
 /*
  * The details regarding the design and operation of this hardware, along with
  * the necessary magic numbers, are only available thanks to the reverse
- * engineering work undertaken by Stanislaw Skowronek <skylark@linux-mips.org>. 
+ * engineering work undertaken by Stanislaw Skowronek <skylark@linux-mips.org>.
  */
 
 #include <sys/param.h>
@@ -36,6 +36,7 @@
 
 #include <mips64/arcbios.h>
 
+#include <sgi/dev/gl.h>
 #include <sgi/xbow/odysseyreg.h>
 #include <sgi/xbow/odysseyvar.h>
 #include <sgi/xbow/widget.h>
@@ -118,7 +119,7 @@ int	odyssey_eraserows(void *, int, int, long);
 
 u_int32_t ieee754_sp(int32_t);
 
-/* 
+/*
  * Interfaces for wscons.
  */
 int 	odyssey_ioctl(void *, u_long, caddr_t, int, struct proc *);
@@ -128,7 +129,8 @@ int	odyssey_alloc_screen(void *, const struct wsscreen_descr *, void **,
 void	odyssey_free_screen(void *, void *);
 int	odyssey_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
-void	odyssey_burner(void *, u_int, u_int);
+int	odyssey_load_font(void *, void *, struct wsdisplay_font *);
+int	odyssey_list_font(void *, struct wsdisplay_font *);
 
 static struct odyssey_screen odyssey_consdata;
 static struct odyssey_softc odyssey_cons_sc;
@@ -138,16 +140,13 @@ struct wsscreen_descr odyssey_stdscreen = {
 };
 
 struct wsdisplay_accessops odyssey_accessops = {
-	odyssey_ioctl,
-	odyssey_mmap,
-	odyssey_alloc_screen,
-	odyssey_free_screen,
-	odyssey_show_screen,
-	NULL,			/* load_font */
-	NULL,			/* scrollback */
-	NULL,			/* getchar */
-	odyssey_burner,
-	NULL			/* pollc */
+	.ioctl = odyssey_ioctl,
+	.mmap = odyssey_mmap,
+	.alloc_screen = odyssey_alloc_screen,
+	.free_screen = odyssey_free_screen,
+	.show_screen = odyssey_show_screen,
+	.load_font = odyssey_load_font,
+	.list_font = odyssey_list_font
 };
 
 const struct wsscreen_descr *odyssey_scrlist[] = {
@@ -695,9 +694,20 @@ odyssey_show_screen(void *v, void *cookie, int waitok,
 	return (0);
 }
 
-void
-odyssey_burner(void *v, u_int on, u_int flags)
+int
+odyssey_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
 {
+	struct odyssey_screen *screen = (struct odyssey_screen *)v;
+
+	return rasops_load_font(&screen->ri, emulcookie, font);
+}
+
+int
+odyssey_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct odyssey_screen *screen = (struct odyssey_screen *)v;
+
+	return rasops_list_font(&screen->ri, font);
 }
 
 /*
@@ -896,7 +906,7 @@ odyssey_putchar(void *cookie, int row, int col, u_int uc, long attr)
 				    (l << 10)));
 
 			}
-		
+
 			if (font->fontwidth > 8)
 				ci = (chunk & (1 << (16 - j)) ? fg : bg);
 			else
@@ -904,7 +914,7 @@ odyssey_putchar(void *cookie, int row, int col, u_int uc, long attr)
 
 			bus_space_write_4(sc->iot, sc->ioh,
 			    ODYSSEY_CMD_FIFO, ri->ri_devcmap[ci]);
-			
+
 			l--;
 		}
 	}

@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.6 2011/07/08 08:49:53 drahn Exp $
+#	$OpenBSD: Makefile,v 1.8 2012/09/02 23:07:26 deraadt Exp $
 #	$NetBSD: Makefile,v 1.2 1997/04/17 07:46:24 thorpej Exp $
 
 S=	${.CURDIR}/../../../..
@@ -10,6 +10,7 @@ SRCS+=		boot.c conf.c cmd.c vars.c ctime.c strtol.c
 .PATH:		${S}/arch/macppc/stand
 SRCS+=		ofwmagic.S
 #CFLAGS+=	-DDEBUG -DNETIF_DEBUG
+CFLAGS+=	-fno-pie
 NOMAN=
 STRIPFLAG=
 BINMODE=	444
@@ -37,7 +38,7 @@ CPPFLAGS+=	-DRELOC=0x${RELOC} -DCONSPEED=57600
 LIBS!=          cd $(.CURDIR)/$(R); $(MAKE) libdep
 
 ${PROG}: ${OBJS} ${LIBSA} ${LIBZ}
-	${LD} -N -X -Ttext ${RELOC} -e ${ENTRY} -o ${PROG} \
+	${LD} -nopie -N -X -Ttext ${RELOC} -e ${ENTRY} -o ${PROG} \
 	    ${OBJS} ${LIBS}
 
 .include <bsd.prog.mk>

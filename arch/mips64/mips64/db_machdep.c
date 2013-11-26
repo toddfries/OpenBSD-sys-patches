@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.c,v 1.32 2010/11/27 19:57:23 miod Exp $ */
+/*	$OpenBSD: db_machdep.c,v 1.36 2012/09/29 21:37:03 miod Exp $ */
 
 /*
  * Copyright (c) 1998-2003 Opsycon AB (www.opsycon.se)
@@ -31,9 +31,11 @@
 #include <sys/proc.h>
 #include <dev/cons.h>
 
+#include <mips64/cache.h>
+
 #include <machine/autoconf.h>
-#include <machine/db_machdep.h>
 #include <machine/cpu.h>
+#include <machine/db_machdep.h>
 #include <machine/mips_opcode.h>
 #include <machine/pte.h>
 #include <machine/frame.h>
@@ -62,9 +64,9 @@ void  kdbpokew(vaddr_t, uint16_t);
 void  kdbpokeb(vaddr_t, uint8_t);
 int   kdb_trap(int, struct trap_frame *);
 
+void db_print_tlb(uint, uint64_t);
 void db_trap_trace_cmd(db_expr_t, int, db_expr_t, char *);
 void db_dump_tlb_cmd(db_expr_t, int, db_expr_t, char *);
-
 
 #ifdef MULTIPROCESSOR
 struct mutex ddb_mp_mutex = MUTEX_INITIALIZER(IPL_HIGH);
@@ -334,10 +336,8 @@ db_write_bytes(addr, size, data)
 	if (addr < VM_MAXUSER_ADDRESS) {
 		struct cpu_info *ci = curcpu();
 
-		/* XXX we don't know where this page is mapped... */
-		Mips_HitSyncDCache(ci, addr, PHYS_TO_XKPHYS(addr, CCA_CACHED),
-		    size);
-		Mips_InvalidateICache(ci, PHYS_TO_CKSEG0(addr & 0xffff), size);
+		Mips_HitSyncDCache(ci, addr, size);
+		Mips_InvalidateICache(ci, addr, size);
 	}
 }
 
@@ -459,8 +459,46 @@ db_trap_trace_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *m)
 	trapDump("ddb trap trace");
 }
 
+void
+db_print_tlb(uint tlbno, uint64_t tlblo)
+{
+	paddr_t pa;
+#ifndef CPU_R8000
+	/* short description of coherency attributes */
+	static const char *attr[] = {
+	    "CCA 0",
+	    "CCA 1",
+	    "NC   ",
+	    "C    ",
+	    "CEX  ",
+	    "CEXW ",
+	    "CCA 6",
+	    "NCACC"
+	};
+#endif
+
+	pa = pfn_to_pad(tlblo);
+#ifdef CPU_R8000
+	pa |= ptoa(tlbno % 128);
+#endif
+	if (tlblo & PG_V) {
+		db_printf("%016lx ", pa);
+		db_printf("%c", tlblo & PG_M ? 'M' : ' ');
+#ifndef CPU_R8000
+		db_printf("%c", tlblo & PG_G ? 'G' : ' ');
+		db_printf("%s ", attr[(tlblo >> 3) & 7]);
+#endif
+	} else {
+		db_printf("invalid                 ");
+	}
+}
+
 /*
  *	Dump TLB contents.
+ * Syntax: machine tlb [/p asid] [/c] [tlb#]
+ *	/p: only display tlb entries matching the given asid
+ *	/c: check for duplicate entries
+ *	tlb#: display <count> entries starting from this index
  */
 void
 db_dump_tlb_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *m)
@@ -468,27 +506,29 @@ db_dump_tlb_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *m)
 	int tlbno, last, check, pid;
 	struct tlb_entry tlb, tlbp;
 	struct cpu_info *ci = curcpu();
-char *attr[] = {
-	"WTNA", "WTA ", "UCBL", "CWB ", "RES ", "RES ", "UCNB", "BPAS"
-};
 
 	pid = -1;
 
 	if (m[0] == 'p') {
-		if (have_addr && addr < 256) {
+		if (have_addr && addr < PG_ASID_COUNT) {
 			pid = addr;
-			tlbno = 0;
-			count = ci->ci_hw.tlbsize;
 		}
+		tlbno = 0;
+		count = ci->ci_hw.tlbsize;
 	} else if (m[0] == 'c') {
 		last = ci->ci_hw.tlbsize;
 		for (tlbno = 0; tlbno < last; tlbno++) {
 			tlb_read(tlbno, &tlb);
 			for (check = tlbno + 1; check < last; check++) {
 				tlb_read(check, &tlbp);
-if ((tlbp.tlb_hi == tlb.tlb_hi && (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V)) ||
-(pfn_to_pad(tlb.tlb_lo0) == pfn_to_pad(tlbp.tlb_lo0) && tlb.tlb_lo0 & PG_V) ||
-(pfn_to_pad(tlb.tlb_lo1) == pfn_to_pad(tlbp.tlb_lo1) && tlb.tlb_lo1 & PG_V)) {
+				if ((tlbp.tlb_hi == tlb.tlb_hi &&
+				    (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V)) ||
+				    (pfn_to_pad(tlb.tlb_lo0) ==
+				     pfn_to_pad(tlbp.tlb_lo0) &&
+				     tlb.tlb_lo0 & PG_V) ||
+				    (pfn_to_pad(tlb.tlb_lo1) ==
+				     pfn_to_pad(tlbp.tlb_lo1) &&
+				     tlb.tlb_lo1 & PG_V)) {
 					db_printf("MATCH:\n");
 					db_dump_tlb_cmd(tlbno, 1, 1, "");
 					db_dump_tlb_cmd(check, 1, 1, "");
@@ -505,38 +545,39 @@ if ((tlbp.tlb_hi == tlb.tlb_hi && (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V)) ||
 		}
 	}
 	last = tlbno + count;
+	if (last > ci->ci_hw.tlbsize)
+		last = ci->ci_hw.tlbsize;
 
-	for (; tlbno < ci->ci_hw.tlbsize && tlbno < last; tlbno++) {
+	if (pid == -1)
+		db_printf("current asid: %d\n", tlb_get_pid());
+	for (; tlbno < last; tlbno++) {
 		tlb_read(tlbno, &tlb);
 
-		if (pid >= 0 && (tlb.tlb_hi & 0xff) != pid)
+		if (pid >= 0 &&
+		    (tlb.tlb_hi & PG_ASID_MASK) != (pid << PG_ASID_SHIFT))
 			continue;
 
 		if (tlb.tlb_lo0 & PG_V || tlb.tlb_lo1 & PG_V) {
-			db_printf("%2d v=%16llx", tlbno, tlb.tlb_hi & ~0xffL);
-			db_printf("/%02x ", tlb.tlb_hi & 0xff);
+			vaddr_t va;
+			uint asid;
 
-			if (tlb.tlb_lo0 & PG_V) {
-				db_printf("%16llx ", pfn_to_pad(tlb.tlb_lo0));
-				db_printf("%c", tlb.tlb_lo0 & PG_M ? 'M' : ' ');
-				db_printf("%c", tlb.tlb_lo0 & PG_G ? 'G' : ' ');
-				db_printf("%s ", attr[(tlb.tlb_lo0 >> 3) & 7]);
-			} else {
-				db_printf("invalid                 ");
-			}
+			asid = (tlb.tlb_hi & PG_ASID_MASK) >> PG_ASID_SHIFT;
+			va = tlb.tlb_hi & ~((vaddr_t)PG_ASID_MASK);
+#ifdef CPU_R8000
+			if ((int64_t)va < 0)
+				asid = 0;	/* KV1 addresses ignore ASID */
+			va |= ptoa((tlbno ^ asid) % 128);
+#endif
+			db_printf("%3d v=%016llx", tlbno, va);
+			db_printf("/%02x ", asid);
 
-			if (tlb.tlb_lo1 & PG_V) {
-				db_printf("%16llx ", pfn_to_pad(tlb.tlb_lo1));
-				db_printf("%c", tlb.tlb_lo1 & PG_M ? 'M' : ' ');
-				db_printf("%c", tlb.tlb_lo1 & PG_G ? 'G' : ' ');
-				db_printf("%s ", attr[(tlb.tlb_lo1 >> 3) & 7]);
-			} else {
-				db_printf("invalid                 ");
-			}
+			db_print_tlb(tlbno, tlb.tlb_lo0);
+#ifndef CPU_R8000
+			db_print_tlb(tlbno, tlb.tlb_lo1);
 			db_printf(" sz=%x", tlb.tlb_mask);
-		}
-		else if (pid < 0) {
-			db_printf("%2d v=invalid    ", tlbno);
+#endif
+		} else if (pid < 0) {
+			db_printf("%3d v=invalid    ", tlbno);
 		}
 		db_printf("\n");
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: est.c,v 1.37 2011/05/13 11:30:26 jasper Exp $ */
+/*	$OpenBSD: est.c,v 1.40 2012/10/08 09:01:21 jsg Exp $ */
 /*
  * Copyright (c) 2003 Michael Eriksson.
  * All rights reserved.
@@ -960,6 +960,10 @@ static struct fqlist *est_fqlist;
 extern int setperf_prio;
 extern int perflevel;
 
+void p4_get_bus_clock(struct cpu_info *);
+void p3_get_bus_clock(struct cpu_info *);
+void cyrix3_get_bus_clock(struct cpu_info *);
+
 #if NACPICPU > 0
 struct fqlist * est_acpi_init(void);
 void est_acpi_pss_changed(struct acpicpu_pss *, int);
@@ -978,7 +982,7 @@ est_acpi_init()
 	    == NULL)
 		goto nolist;
 
-	if ((acpilist->table = malloc(sizeof( struct est_op) * nstates,
+	if ((acpilist->table = malloc(sizeof(struct est_op) * nstates,
 	    M_DEVBUF, M_NOWAIT)) == NULL)
 		goto notable;
 
@@ -1018,7 +1022,7 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 		return;
 	}
 
-	if ((acpilist->table = malloc(sizeof( struct est_op) * npss,
+	if ((acpilist->table = malloc(sizeof(struct est_op) * npss,
 	    M_DEVBUF, M_NOWAIT)) == NULL) {
 		printf("est_acpi_pss_changed: cannot allocate memory for new "
 		    "operating points");
@@ -1044,8 +1048,9 @@ est_acpi_pss_changed(struct acpicpu_pss *pss, int npss)
 #endif
 
 void
-est_init(const char *cpu_device, int vendor)
+est_init(struct cpu_info *ci, int vendor)
 {
+	const char *cpu_device = ci->ci_dev.dv_xname;
 	int i, low, high;
 	u_int64_t msr;
 	u_int16_t idhi, idlo, cur;
@@ -1057,26 +1062,32 @@ est_init(const char *cpu_device, int vendor)
 	if (setperf_prio > 3)
 		return;
 
-	if ((cpu_ecxfeature & CPUIDECX_EST) == 0)
-		return;
-
-	msr = rdmsr(MSR_PERF_STATUS);
-	idhi = (msr >> 32) & 0xffff;
-	idlo = (msr >> 48) & 0xffff;
-	cur = msr & 0xffff;
-	crhi = (idhi  >> 8) & 0xff;
-	crlo = (idlo  >> 8) & 0xff;
-	crcur = (cur >> 8) & 0xff;
-
 #if NACPICPU > 0
 	est_fqlist = est_acpi_init();
 #endif
+
+	/* bus_clock is only used if we can't get values from ACPI */
+	if (est_fqlist == NULL) {
+		if (vendor == CPUVENDOR_VIA)
+			cyrix3_get_bus_clock(ci);
+		else if (ci->ci_family == 0xf)
+			p4_get_bus_clock(ci);
+		else if (ci->ci_family == 6)
+			p3_get_bus_clock(ci);
+	}
 
 	/*
 	 * Interpreting the values of PERF_STATUS is not valid
 	 * on recent processors so don't do it on anything unknown
 	 */
 	if (est_fqlist == NULL && bus_clock != 0) {
+		msr = rdmsr(MSR_PERF_STATUS);
+		idhi = (msr >> 32) & 0xffff;
+		idlo = (msr >> 48) & 0xffff;
+		cur = msr & 0xffff;
+		crhi = (idhi  >> 8) & 0xff;
+		crlo = (idlo  >> 8) & 0xff;
+		crcur = (cur >> 8) & 0xff;
 		/*
 		 * Find an entry which matches (vendor, bus_clock, idhi, idlo)
 		 */
@@ -1103,12 +1114,12 @@ est_init(const char *cpu_device, int vendor)
 			    cpu_device, msr);
 			return;
 		}
-		if   (crlo == 0 || crhi == crlo) {
+		if (crlo == 0 || crhi == crlo) {
 			/*
 			 * Don't complain about these cases, and silently
-			 * disable EST: - A lowest clock ratio of 0, which 
+			 * disable EST: - A lowest clock ratio of 0, which
 			 * seems to happen on all Pentium 4's that report EST.
-			 * - And equal highest and lowest clock ratio, which 
+			 * - An equal highest and lowest clock ratio, which
 			 * happens on at least the Core 2 Duo X6800, maybe on 
 			 * newer models too.
 			 */
@@ -1123,8 +1134,8 @@ est_init(const char *cpu_device, int vendor)
 
 		if ((fake_fqlist = malloc(sizeof(struct fqlist), M_DEVBUF,
 		    M_NOWAIT)) == NULL) {
-			printf("%s: EST: cannot allocate memory for fake list",
-			    cpu_device);
+			printf("%s: EST: cannot allocate memory for fake "
+			    "list\n", cpu_device);
 			return;
 		}
 

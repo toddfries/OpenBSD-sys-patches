@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.c,v 1.68 2011/12/04 20:08:09 kettenis Exp $	*/
+/*	$OpenBSD: pci_machdep.c,v 1.77 2013/11/06 10:40:36 mpi Exp $	*/
 /*	$NetBSD: pci_machdep.c,v 1.28 1997/06/06 23:29:17 thorpej Exp $	*/
 
 /*-
@@ -780,8 +780,14 @@ pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 
 	if (ih.line & APIC_INT_VIA_MSG) {
 		struct intrhand *ih;
-		pcireg_t reg;
+		pcireg_t reg, addr;
 		int off, vec;
+		int flags;
+
+		flags = level & IPL_MPSAFE;
+		level &= ~IPL_MPSAFE;
+
+		KASSERT(level <= IPL_TTY || flags & IPL_MPSAFE);
 
 		if (pci_get_capability(pc, tag, PCI_CAP_MSI, &off, &reg) == 0)
 			panic("%s: no msi capability", __func__);
@@ -798,6 +804,7 @@ pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 		ih->ih_arg = arg;
 		ih->ih_next = NULL;
 		ih->ih_level = level;
+		ih->ih_flags = flags;
 		ih->ih_irq = irq;
 		ih->ih_pin = tag.mode1;
 		ih->ih_vec = vec;
@@ -807,12 +814,14 @@ pci_intr_establish(pci_chipset_tag_t pc, pci_intr_handle_t ih, int level,
 		apic_intrhand[vec] = ih;
 		idt_vec_set(vec, apichandler[vec & 0xf]);
 
+		addr = 0xfee00000UL | (cpu_info_primary.ci_apicid << 12);
+
 		if (reg & PCI_MSI_MC_C64) {
-			pci_conf_write(pc, tag, off + PCI_MSI_MA, 0xfee00000);
+			pci_conf_write(pc, tag, off + PCI_MSI_MA, addr);
 			pci_conf_write(pc, tag, off + PCI_MSI_MAU32, 0);
 			pci_conf_write(pc, tag, off + PCI_MSI_MD64, vec);
 		} else {
-			pci_conf_write(pc, tag, off + PCI_MSI_MA, 0xfee00000);
+			pci_conf_write(pc, tag, off + PCI_MSI_MA, addr);
 			pci_conf_write(pc, tag, off + PCI_MSI_MD32, vec);
 		}
 		pci_conf_write(pc, tag, off, reg | PCI_MSI_MC_MSIE);
@@ -870,6 +879,7 @@ pci_intr_disestablish(pci_chipset_tag_t pc, void *cookie)
 
 struct extent *pciio_ex;
 struct extent *pcimem_ex;
+struct extent *pcibus_ex;
 
 void
 pci_init_extents(void)
@@ -921,11 +931,18 @@ pci_init_extents(void)
 		extent_alloc_region(pcimem_ex, IOM_BEGIN, IOM_SIZE,
 		    EX_CONFLICTOK | EX_NOWAIT);
 	}
+
+	if (pcibus_ex == NULL) {
+		pcibus_ex = extent_create("pcibus", 0, 0xff, M_DEVBUF,
+		    NULL, 0, EX_NOWAIT);
+	}
 }
 
 #include "acpi.h"
 #if NACPI > 0
 void acpi_pci_match(struct device *, struct pci_attach_args *);
+pcireg_t acpi_pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
+void acpi_pci_set_powerstate(pci_chipset_tag_t, pcitag_t, int, int);
 #endif
 
 void
@@ -933,5 +950,23 @@ pci_dev_postattach(struct device *dev, struct pci_attach_args *pa)
 {
 #if NACPI > 0
 	acpi_pci_match(dev, pa);
+#endif
+}
+
+pcireg_t
+pci_min_powerstate(pci_chipset_tag_t pc, pcitag_t tag)
+{
+#if NACPI > 0
+	return acpi_pci_min_powerstate(pc, tag);
+#else
+	return pci_get_powerstate(pc, tag);
+#endif
+}
+
+void
+pci_set_powerstate_md(pci_chipset_tag_t pc, pcitag_t tag, int state, int pre)
+{
+#if NACPI > 0
+	acpi_pci_set_powerstate(pc, tag, state, pre);
 #endif
 }

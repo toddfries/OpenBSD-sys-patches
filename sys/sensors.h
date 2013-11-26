@@ -1,4 +1,4 @@
-/*	$OpenBSD: sensors.h,v 1.31 2011/09/16 15:44:31 yuo Exp $	*/
+/*	$OpenBSD: sensors.h,v 1.33 2013/11/04 02:41:49 jsg Exp $	*/
 
 /*
  * Copyright (c) 2003, 2004 Alexander Yurchenko <grange@openbsd.org>
@@ -49,6 +49,9 @@ enum sensor_type {
 	SENSOR_HUMIDITY,		/* humidity (m%RH) */
 	SENSOR_FREQ,			/* frequency (muHz) */
 	SENSOR_ANGLE,			/* angle (mudegrees) */
+	SENSOR_DISTANCE,		/* distance (muMeter) */
+	SENSOR_PRESSURE,		/* pressure (mPa) */
+	SENSOR_ACCEL,			/* acceleration (mu m/s^2) */
 	SENSOR_MAX_TYPES
 };
 
@@ -72,6 +75,9 @@ static const char * const sensor_type_s[SENSOR_MAX_TYPES + 1] = {
 	"humidity",
 	"frequency",
 	"angle",
+	"distance",
+	"pressure",
+	"acceleration",
 	"undefined"
 };
 #endif	/* !_KERNEL */
@@ -158,7 +164,8 @@ int			 sensor_find(int, enum sensor_type, int, struct ksensor **);
 
 /* task scheduling */
 struct sensor_task;
-struct sensor_task	*sensor_task_register(void *, void (*)(void *), int);
+struct sensor_task	*sensor_task_register(void *, void (*)(void *),
+			     unsigned int);
 void			 sensor_task_unregister(struct sensor_task *);
 
 #endif	/* _KERNEL */

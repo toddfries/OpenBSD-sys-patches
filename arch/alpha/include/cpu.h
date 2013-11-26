@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.43 2011/03/23 16:54:34 pirofti Exp $ */
+/* $OpenBSD: cpu.h,v 1.50 2013/05/31 17:00:57 tedu Exp $ */
 /* $NetBSD: cpu.h,v 1.45 2000/08/21 02:03:12 thorpej Exp $ */
 
 /*-
@@ -92,12 +92,10 @@ typedef union alpha_t_float {
  * Exported definitions unique to Alpha cpu support.
  */
 
-#include <machine/alpha_cpu.h>
-#include <machine/frame.h>
-#include <machine/param.h>
-
 #ifdef _KERNEL
 
+#include <machine/alpha_cpu.h>
+#include <machine/frame.h>
 #include <machine/bus.h>
 #include <machine/intr.h>
 #include <sys/device.h>
@@ -176,10 +174,6 @@ struct cpu_info {
 	 * Public members.
 	 */
 	struct schedstate_percpu ci_schedstate;	/* scheduler state */
-#if defined(DIAGNOSTIC) || defined(LOCKDEBUG)
-	u_long ci_spin_locks;		/* # of spin locks held */
-	u_long ci_simple_locks;		/* # of simple locks held */
-#endif
 #ifdef DIAGNOSTIC
 	int	ci_mutex_level;
 #endif
@@ -198,7 +192,6 @@ struct cpu_info {
 	paddr_t ci_idle_pcb_paddr;	/* PA of idle PCB */
 	struct cpu_softc *ci_softc;	/* pointer to our device */
 	u_long ci_want_resched;		/* preempt current process */
-	u_long ci_astpending;		/* AST is pending */
 	u_long ci_intrdepth;		/* interrupt trap depth */
 	struct trapframe *ci_db_regs;	/* registers for debuggers */
 #if defined(MULTIPROCESSOR)
@@ -206,6 +199,9 @@ struct cpu_info {
 	u_long ci_ipis;			/* interprocessor interrupts pending */
 #endif
 	u_int32_t ci_randseed;
+#ifdef GPROF
+	struct gmonparam *ci_gmon;
+#endif
 };
 
 #define	CPUF_PRIMARY	0x01		/* CPU is primary CPU */
@@ -278,52 +274,35 @@ struct clockframe {
  * This is used during profiling to integrate system time.
  */
 #define	PROC_PC(p)	((p)->p_md.md_tf->tf_regs[FRAME_PC])
+#define	PROC_STACK(p)	(alpha_pal_rdusp())	/*XXX only works for curproc */
 
 /*
  * Preempt the current process if in interrupt from user mode,
  * or after the current trap/syscall if in system mode.
  */
-#ifdef MULTIPROCESSOR
 #define	need_resched(ci)						\
 do {									\
-	ci->ci_want_resched = 1;					\
-	aston(curcpu());						\
+	(ci)->ci_want_resched = 1;					\
+	if ((ci)->ci_curproc != NULL)					\
+		aston((ci)->ci_curproc);				\
 } while (/*CONSTCOND*/0)
 #define clear_resched(ci) (ci)->ci_want_resched = 0
-#else
-#define	need_resched(ci)						\
-do {									\
-	curcpu()->ci_want_resched = 1;					\
-	aston(curcpu());						\
-} while (/*CONSTCOND*/0)
-#define clear_resched(ci) curcpu()->ci_want_resched = 0
-#endif
 
 /*
  * Give a profiling tick to the current process when the user profiling
  * buffer pages are invalid.  On the Alpha, request an AST to send us
  * through trap, marking the proc as needing a profiling tick.
  */
-#ifdef notyet
-#define	need_proftick(p)						\
-do {									\
-	aston((p)->p_cpu);						\
-} while (/*CONSTCOND*/0)
-#else
-#define	need_proftick(p)						\
-do {									\
-	aston(curcpu());						\
-} while (/*CONSTCOND*/0)
-#endif
+#define	need_proftick(p)	aston(p)
 
 /*
  * Notify the current process (p) that it has a signal pending,
  * process as soon as possible.
  */
-#ifdef notyet
-#define	signotify(p)	aston((p)->p_cpu)
+#ifdef MULTIPROCESSOR
+#define	signotify(p)	do { aston(p); cpu_unidle((p)->p_cpu); } while (0)
 #else
-#define signotify(p)	aston(curcpu())
+#define signotify(p)	aston(p)
 #endif
 
 /*
@@ -332,7 +311,7 @@ do {									\
  * it sees a normal kernel entry?  I guess letting it happen later
  * follows the `asynchronous' part of the name...
  */
-#define	aston(ci)	((ci)->ci_astpending = 1)
+#define	aston(p)	(p)->p_md.md_astpending = 1
 #endif /* _KERNEL */
 
 /*

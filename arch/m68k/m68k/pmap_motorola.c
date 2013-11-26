@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap_motorola.c,v 1.66 2011/11/01 21:20:55 miod Exp $ */
+/*	$OpenBSD: pmap_motorola.c,v 1.69 2013/01/01 01:01:08 miod Exp $ */
 
 /*
  * Copyright (c) 1999 The NetBSD Foundation, Inc.
@@ -269,7 +269,6 @@ struct vm_map	st_map_store, pt_map_store;
 
 paddr_t    	avail_start;	/* PA of first available physical page */
 paddr_t		avail_end;	/* PA of last available physical page */
-vsize_t		mem_size;	/* memory size in bytes */
 vaddr_t		virtual_avail;  /* VA of first avail page (after kernel bss)*/
 vaddr_t		virtual_end;	/* VA of last avail page (end of kernel AS) */
 
@@ -454,7 +453,7 @@ pmap_init()
 	 * Allocate physical memory for kernel PT pages and their management.
 	 * We need 1 PT page per possible task plus some slop.
 	 */
-	npages = min(atop(MACHINE_MAX_KPTSIZE), maxproc+16);
+	npages = min(atop(MACHINE_MAX_KPTSIZE), maxprocess+16);
 	s = ptoa(npages) + round_page(npages * sizeof(struct kpt_page));
 
 	/*
@@ -495,7 +494,7 @@ pmap_init()
 	/*
 	 * Allocate the segment table map and the page table map.
 	 */
-	s = maxproc * MACHINE_STSIZE;
+	s = maxprocess * MACHINE_STSIZE;
 	st_map = uvm_km_suballoc(kernel_map, &addr, &addr2, s, 0, FALSE,
 	    &st_map_store);
 
@@ -519,17 +518,17 @@ pmap_init()
 	    Sysseg, Sysmap, Sysptmap));
 
 	addr = MACHINE_PTBASE;
-	if ((MACHINE_PTMAXSIZE / MACHINE_MAX_PTSIZE) < maxproc) {
+	if ((MACHINE_PTMAXSIZE / MACHINE_MAX_PTSIZE) < maxprocess) {
 		s = MACHINE_PTMAXSIZE;
 		/*
 		 * XXX We don't want to hang when we run out of
-		 * page tables, so we lower maxproc so that fork()
+		 * page tables, so we lower maxprocess so that fork()
 		 * will fail instead.  Note that root could still raise
 		 * this value via sysctl(3).
 		 */
-		maxproc = (MACHINE_PTMAXSIZE / MACHINE_MAX_PTSIZE);
+		maxprocess = (MACHINE_PTMAXSIZE / MACHINE_MAX_PTSIZE);
 	} else
-		s = (maxproc * MACHINE_MAX_PTSIZE);
+		s = (maxprocess * MACHINE_MAX_PTSIZE);
 	pt_map = uvm_km_suballoc(kernel_map, &addr, &addr2, s, 0,
 	    TRUE, &pt_map_store);
 
@@ -751,11 +750,10 @@ pmap_remove_flags(pmap, sva, eva, flags)
 				break;
 			}
 			if (pmap_pte_v(pte)) {
-				if ((flags & PRM_SKIPWIRED) &&
-				    pmap_pte_w(pte))
-					goto skip;
-				pmap_remove_mapping(pmap, sva, pte, flags);
-skip:
+				if ((flags & PRM_SKIPWIRED) == 0 ||
+				    !pmap_pte_w(pte))
+					pmap_remove_mapping(pmap, sva, pte,
+					    flags);
 			}
 			pte++;
 			sva += PAGE_SIZE;

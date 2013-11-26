@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_synch.c,v 1.100 2012/03/19 09:05:39 guenther Exp $	*/
+/*	$OpenBSD: kern_synch.c,v 1.111 2013/11/25 15:24:18 tedu Exp $	*/
 /*	$NetBSD: kern_synch.c,v 1.37 1996/04/22 01:38:37 christos Exp $	*/
 
 /*
@@ -57,6 +57,8 @@
 #include <sys/ktrace.h>
 #endif
 
+int	thrsleep(struct proc *, struct sys___thrsleep_args *);
+
 
 /*
  * We're only looking at 7 bits of the address; everything is
@@ -105,6 +107,8 @@ tsleep(const volatile void *ident, int priority, const char *wmesg, int timo)
 	struct sleep_state sls;
 	int error, error1;
 
+	KASSERT((priority & ~(PRIMASK | PCATCH)) == 0);
+
 	if (cold || panicstr) {
 		int s;
 		/*
@@ -144,6 +148,8 @@ msleep(const volatile void *ident, struct mutex *mtx, int priority,
 {
 	struct sleep_state sls;
 	int error, error1, spl;
+
+	KASSERT((priority & ~(PRIMASK | PCATCH | PNORELOCK)) == 0);
 
 	sleep_setup(&sls, ident, priority, wmesg);
 	sleep_setup_timeout(&sls, timo);
@@ -215,7 +221,7 @@ sleep_finish(struct sleep_state *sls, int do_sleep)
 
 	if (sls->sls_do_sleep && do_sleep) {
 		p->p_stat = SSLEEP;
-		p->p_stats->p_ru.ru_nvcsw++;
+		p->p_ru.ru_nvcsw++;
 		SCHED_ASSERT_LOCKED();
 		mi_switch();
 	} else if (!do_sleep) {
@@ -370,18 +376,8 @@ wakeup_n(const volatile void *ident, int n)
 			--n;
 			p->p_wchan = 0;
 			TAILQ_REMOVE(qp, p, p_runq);
-			if (p->p_stat == SSLEEP) {
-				/* OPTIMIZED EXPANSION OF setrunnable(p); */
-				if (p->p_slptime > 1)
-					updatepri(p);
-				p->p_slptime = 0;
-				p->p_stat = SRUN;
-				p->p_cpu = sched_choosecpu(p);
-				setrunqueue(p);
-				need_resched(p->p_cpu);
-				/* END INLINE EXPANSION */
-
-			}
+			if (p->p_stat == SSLEEP)
+				setrunnable(p);
 		}
 	}
 	SCHED_UNLOCK(s);
@@ -403,70 +399,80 @@ sys_sched_yield(struct proc *p, void *v, register_t *retval)
 	return (0);
 }
 
+int thrsleep_unlock(void *, int);
 int
-sys___thrsleep(struct proc *p, void *v, register_t *retval)
+thrsleep_unlock(void *lock, int lockflags)
+{
+	static _atomic_lock_t unlocked = _ATOMIC_LOCK_UNLOCKED;
+	_atomic_lock_t *atomiclock = lock;
+	uint32_t *ticket = lock;
+	uint32_t ticketvalue;
+	int error;
+
+	if (!lock)
+		return (0);
+
+	if (lockflags) {
+		if ((error = copyin(ticket, &ticketvalue, sizeof(ticketvalue))))
+			return (error);
+		ticketvalue++;
+		error = copyout(&ticketvalue, ticket, sizeof(ticketvalue));
+	} else {
+		error = copyout(&unlocked, atomiclock, sizeof(unlocked));
+	}
+	return (error);
+}
+
+static int globalsleepaddr;
+
+int
+thrsleep(struct proc *p, struct sys___thrsleep_args *v)
 {
 	struct sys___thrsleep_args /* {
 		syscallarg(const volatile void *) ident;
 		syscallarg(clockid_t) clock_id;
-		syscallarg(struct timespec *) tp;
+		syscallarg(const struct timespec *) tp;
 		syscallarg(void *) lock;
 		syscallarg(const int *) abort;
 	} */ *uap = v;
 	long ident = (long)SCARG(uap, ident);
-	_spinlock_lock_t *lock = SCARG(uap, lock);
-	static _spinlock_lock_t unlocked = _SPINLOCK_UNLOCKED;
+	struct timespec *tsp = (struct timespec *)SCARG(uap, tp);
+	void *lock = SCARG(uap, lock);
 	long long to_ticks = 0;
 	int abort, error;
+	clockid_t clock_id = SCARG(uap, clock_id) & 0x7;
+	int lockflags = SCARG(uap, clock_id) & 0x8;
 
-	if (!rthreads_enabled) {
-		*retval = ENOTSUP;
-		return (0);
-	}
-	if (ident == 0) {
-		*retval = EINVAL;
-		return (0);
-	}
-	if (SCARG(uap, tp) != NULL) {
-		struct timespec now, ats;
+	if (ident == 0)
+		return (EINVAL);
+	if (tsp != NULL) {
+		struct timespec now;
 
-		if ((error = copyin(SCARG(uap, tp), &ats, sizeof(ats))) ||
-		    (error = clock_gettime(p, SCARG(uap, clock_id), &now))) {
-			*retval = error;
-			return (0);
-		}
+		if ((error = clock_gettime(p, clock_id, &now)))
+			return (error);
 #ifdef KTRACE
 		if (KTRPOINT(p, KTR_STRUCT))
-			ktrabstimespec(p, &ats);
+			ktrabstimespec(p, tsp);
 #endif
 
-		if (timespeccmp(&ats, &now, <)) {
+		if (timespeccmp(tsp, &now, <)) {
 			/* already passed: still do the unlock */
-			if (lock) {
-				if ((error = copyout(&unlocked, lock,
-				    sizeof(unlocked))) != 0) {
-					*retval = error;
-					return (0);
-				}
-			}
-			*retval = EWOULDBLOCK;
-			return (0);
+			if ((error = thrsleep_unlock(lock, lockflags)))
+				return (error);
+			return (EWOULDBLOCK);
 		}
 
-		timespecsub(&ats, &now, &ats);
-		to_ticks = (long long)hz * ats.tv_sec +
-		    ats.tv_nsec / (tick * 1000);
+		timespecsub(tsp, &now, tsp);
+		to_ticks = (long long)hz * tsp->tv_sec +
+		    (tsp->tv_nsec + tick * 1000 - 1) / (tick * 1000) + 1;
 		if (to_ticks > INT_MAX)
 			to_ticks = INT_MAX;
-		if (to_ticks == 0)
-			to_ticks = 1;
 	}
 
 	p->p_thrslpid = ident;
 
-	if (lock) {
-		if ((error = copyout(&unlocked, lock, sizeof(unlocked))) != 0)
-			goto out;
+	if ((error = thrsleep_unlock(lock, lockflags))) {
+		goto out;
 	}
 
 	if (SCARG(uap, abort) != NULL) {
@@ -481,9 +487,13 @@ sys___thrsleep(struct proc *p, void *v, register_t *retval)
 
 	if (p->p_thrslpid == 0)
 		error = 0;
-	else
-		error = tsleep(&p->p_thrslpid, PUSER | PCATCH, "thrsleep",
+	else {
+		void *sleepaddr = &p->p_thrslpid;
+		if (ident == -1)
+			sleepaddr = &globalsleepaddr;
+		error = tsleep(sleepaddr, PUSER | PCATCH, "thrsleep",
 		    (int)to_ticks);
+	}
 
 out:
 	p->p_thrslpid = 0;
@@ -491,9 +501,33 @@ out:
 	if (error == ERESTART)
 		error = EINTR;
 
-	*retval = error;
-	return (0);
+	return (error);
 
+}
+
+int
+sys___thrsleep(struct proc *p, void *v, register_t *retval)
+{
+	struct sys___thrsleep_args /* {
+		syscallarg(const volatile void *) ident;
+		syscallarg(clockid_t) clock_id;
+		syscallarg(struct timespec *) tp;
+		syscallarg(void *) lock;
+		syscallarg(const int *) abort;
+	} */ *uap = v;
+	struct timespec ts;
+	int error;
+
+	if (SCARG(uap, tp) != NULL) {
+		if ((error = copyin(SCARG(uap, tp), &ts, sizeof(ts)))) {
+			*retval = error;
+			return (0);
+		}
+		SCARG(uap, tp) = &ts;
+	}
+
+	*retval = thrsleep(p, uap);
+	return (0);
 }
 
 int
@@ -508,10 +542,10 @@ sys___thrwakeup(struct proc *p, void *v, register_t *retval)
 	struct proc *q;
 	int found = 0;
 
-	if (!rthreads_enabled)
-		*retval = ENOTSUP;
-	else if (ident == 0)
+	if (ident == 0)
 		*retval = EINVAL;
+	else if (ident == -1)
+		wakeup(&globalsleepaddr);
 	else {
 		TAILQ_FOREACH(q, &p->p_p->ps_threads, p_thr_link) {
 			if (q->p_thrslpid == ident) {

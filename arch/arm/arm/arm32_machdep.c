@@ -1,4 +1,4 @@
-/*	$OpenBSD: arm32_machdep.c,v 1.39 2011/09/20 22:02:10 miod Exp $	*/
+/*	$OpenBSD: arm32_machdep.c,v 1.41 2013/09/12 11:42:22 patrick Exp $	*/
 /*	$NetBSD: arm32_machdep.c,v 1.42 2003/12/30 12:33:15 pk Exp $	*/
 
 /*
@@ -84,8 +84,17 @@ pv_addr_t kernelstack;
 /* the following is used externally (sysctl_hw) */
 char	machine[] = MACHINE;		/* from <machine/param.h> */
 
-/* Our exported CPU info; we can have only one. */
-struct cpu_info cpu_info_store;
+/* Statically defined CPU info. */
+struct cpu_info cpu_info_primary;
+struct cpu_info *cpu_info_list = &cpu_info_primary;
+
+#ifdef MULTIPROCESSOR
+/*
+ * Array of CPU info structures.  Must be statically-allocated because
+ * curproc, etc. are used early.
+ */
+struct cpu_info *cpu_info[MAXCPUS] = { &cpu_info_primary };
+#endif
 
 caddr_t	msgbufaddr;
 extern paddr_t msgbufphys;
@@ -126,7 +135,7 @@ void
 arm32_vector_init(vaddr_t va, int which)
 {
 	extern unsigned int page0[], page0_data[];
-	unsigned int *vectors = (int *) va;
+	unsigned int *vectors = (unsigned int *) va;
 	unsigned int *vectors_data = vectors + (page0_data - page0);
 	int vec;
 
@@ -238,7 +247,7 @@ cpu_startup()
 	cpu_setup();
 
 	/* Lock down zero page */
-	vector_page_setprot(VM_PROT_READ);
+	vector_page_setprot(VM_PROT_READ|VM_PROT_EXECUTE);
 
 	/*
 	 * Give pmap a chance to set up a few more things now the vm

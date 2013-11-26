@@ -1,4 +1,4 @@
-/*	$OpenBSD: cn30xxpow.c,v 1.1 2011/06/16 11:22:30 syuu Exp $	*/
+/*	$OpenBSD: cn30xxpow.c,v 1.3 2013/06/01 22:20:35 jasper Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -25,8 +25,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -153,7 +151,7 @@ cn30xxpow_work_response_async(uint64_t scraddr)
 {
 	uint64_t result;
 
-	OCTEON_SYNCIOBDMA;
+	mips_sync();
 	result = octeon_cvmseg_read_8(scraddr);
 
 	return (result & POW_IOBDMA_GET_WORK_RESULT_NO_WORK) ?

@@ -1,4 +1,4 @@
-/*	$OpenBSD: athnvar.h,v 1.30 2011/01/08 15:05:24 damien Exp $	*/
+/*	$OpenBSD: athnvar.h,v 1.34 2013/10/21 16:13:49 stsp Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -83,6 +83,7 @@ struct athn_tx_buf {
 	struct ieee80211_node		*bf_ni;
 	int				bf_txflags;
 #define ATHN_TXFLAG_PAPRD	(1 << 0)
+#define ATHN_TXFLAG_CAB		(1 << 1) 
 };
 
 struct athn_txq {
@@ -205,9 +206,15 @@ struct athn_addac {
 	const uint32_t	*vals;
 };
 
+struct athn_serdes {
+	int		nvals;
+	const uint32_t	*regs;
+	const uint32_t	*vals;
+};
+
 /* Rx queue software indexes. */
 #define ATHN_QID_LP		0
-#define ATHN_QID_HP		0
+#define ATHN_QID_HP		1
 
 /* Tx queue software indexes. */
 #define ATHN_QID_AC_BE		0
@@ -526,7 +533,7 @@ struct athn_softc {
 	const struct athn_gain		*rx_gain;
 	const struct athn_gain		*tx_gain;
 	const struct athn_addac		*addac;
-	const uint32_t			*serdes;
+	const struct athn_serdes	*serdes;
 	uint32_t			workaround;
 	uint32_t			obs_off;
 	uint32_t			gpio_input_en_off;

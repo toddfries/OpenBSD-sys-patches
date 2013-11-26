@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_bnxreg.h,v 1.37 2010/09/20 07:40:38 deraadt Exp $	*/
+/*	$OpenBSD: if_bnxreg.h,v 1.42 2013/10/30 04:08:07 dlg Exp $	*/
 
 /*-
  * Copyright (c) 2006 Broadcom Corporation
@@ -49,7 +49,7 @@
 #include <sys/timeout.h>
 #include <sys/pool.h>
 #include <sys/rwlock.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -58,7 +58,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -215,8 +214,6 @@
 #define BRCM_DEVICEID_BCM5708S		0x16AC
 
 #define HP_VENDORID					0x103C
-
-#define PCI_ANY_ID					(u_int16_t) (~0U)
 
 /* chip num:16-31, rev:12-15, metal:4-11, bond_id:0-3 */
 
@@ -4790,7 +4787,6 @@ struct bnx_softc {
 #define BNX_USING_MSI_FLAG 		0x20
 #define BNX_MFW_ENABLE_FLAG		0x40
 #define BNX_ACTIVE_FLAG			0x80
-#define BNX_ALLOC_PKTS_FLAG		0x100
 
 	/* PHY specific flags. */
 	u_int32_t		bnx_phy_flags;
@@ -4806,6 +4802,8 @@ struct bnx_softc {
 	/* Values that need to be shared with the PHY driver. */
 	u_int32_t		bnx_shared_hw_cfg;
 	u_int32_t		bnx_port_hw_cfg;
+
+	int			bnx_flowflags;
 
 	u_int16_t		bus_speed_mhz;		/* PCI bus speed */
 	struct flash_spec	*bnx_flash_info;	/* Flash NVRAM settings */
@@ -4867,6 +4865,7 @@ struct bnx_softc {
 
 	int			bnx_link;
 	struct timeout		bnx_timeout;
+	struct timeout		bnx_rxrefill;
 
 	/* Frame size and mbuf allocation size for RX frames. */
 	u_int32_t		max_frame_size;
@@ -4930,6 +4929,7 @@ struct bnx_softc {
 	u_int			tx_pkt_count;
 	struct bnx_pkt_list	tx_free_pkts;
 	struct bnx_pkt_list	tx_used_pkts;
+	struct task		tx_alloc_task;
 
 	/* S/W maintained mbuf RX chain structure. */
 	bus_dmamap_t		rx_mbuf_map[TOTAL_RX_BD];

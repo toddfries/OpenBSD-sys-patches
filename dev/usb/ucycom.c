@@ -1,4 +1,4 @@
-/*	$OpenBSD: ucycom.c,v 1.20 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: ucycom.c,v 1.24 2013/11/15 08:25:31 pirofti Exp $	*/
 /*	$NetBSD: ucycom.c,v 1.3 2005/08/05 07:27:47 skrll Exp $	*/
 
 /*
@@ -46,7 +46,6 @@
 #include <sys/device.h>
 #include <sys/tty.h>
 #include <sys/file.h>
-#include <sys/vnode.h>
 
 #include <dev/usb/usb.h>
 #include <dev/usb/usbhid.h>
@@ -100,7 +99,7 @@ int	ucycomdebug = 200;
 
 struct ucycom_softc {
 	struct uhidev		 sc_hdev;
-	usbd_device_handle	 sc_udev;
+	struct usbd_device	*sc_udev;
 
 	/* uhidev parameters */
 	size_t			 sc_flen;	/* feature report length */
@@ -121,9 +120,6 @@ struct ucycom_softc {
 	int			 sc_swflags;
 
 	struct device		*sc_subdev;
-
-	/* flags */
-	u_char			 sc_dying;
 };
 
 /* Callback routines */
@@ -189,7 +185,7 @@ ucycom_attach(struct device *parent, struct device *self, void *aux)
 	struct ucycom_softc *sc = (struct ucycom_softc *)self;
 	struct usb_attach_arg *uaa = aux;
 	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
-	usbd_device_handle dev = uha->parent->sc_udev;
+	struct usbd_device *dev = uha->parent->sc_udev;
 	struct ucom_attach_args uca;
 	int size, repid, err;
 	void *desc;
@@ -265,7 +261,7 @@ ucycom_open(void *addr, int portno)
 
 	DPRINTF(("ucycom_open: complete\n"));
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	/* Allocate an output report buffer */
@@ -298,7 +294,7 @@ ucycom_close(void *addr, int portno)
 	struct ucycom_softc *sc = addr;
 	int s;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	s = splusb();
@@ -394,7 +390,7 @@ ucycom_param(void *addr, int portno, struct termios *t)
 	uint8_t cfg;
 	int err;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	switch (t->c_ospeed) {
@@ -474,7 +470,7 @@ ucycom_param(void *addr, int portno, struct termios *t)
 void
 ucycom_intr(struct uhidev *addr, void *ibuf, u_int len)
 {
-	extern void ucomreadcb(usbd_xfer_handle, usbd_private_handle, usbd_status);
+	extern void ucomreadcb(struct usbd_xfer *, void *, usbd_status);
 	struct ucycom_softc *sc = (struct ucycom_softc *)addr;
 	uint8_t *cp = ibuf;
 	int n, st, s;
@@ -591,16 +587,13 @@ int
 ucycom_activate(struct device *self, int act)
 {
 	struct ucycom_softc *sc = (struct ucycom_softc *)self;
-	int rv = 0;
 
 	DPRINTFN(5,("ucycom_activate: %d\n", act));
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }

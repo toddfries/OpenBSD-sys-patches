@@ -1,4 +1,4 @@
-/*	$OpenBSD: ntfs.h,v 1.12 2010/12/21 20:14:43 thib Exp $	*/
+/*	$OpenBSD: ntfs.h,v 1.17 2013/11/24 16:02:30 jsing Exp $	*/
 /*	$NetBSD: ntfs.h,v 1.5 2003/04/24 07:50:19 christos Exp $	*/
 
 /*-
@@ -45,6 +45,12 @@ typedef u_int16_t wchar;
 #define	NTFS_BADCLUSINO		8
 #define	NTFS_UPCASEINO		10
 #define NTFS_MAXFILENAME	255
+
+/*
+ * UFS directories use 32bit inode numbers internally, regardless
+ * of what the system on top of it uses.
+ */
+typedef u_int32_t	ntfsino_t;
 
 struct fixuphdr {
 	u_int32_t       fh_magic;
@@ -240,6 +246,15 @@ typedef wchar (ntfs_wget_func_t)(const char **);
 typedef int (ntfs_wput_func_t)(char *, size_t, wchar);
 typedef int (ntfs_wcmp_func_t)(wchar, wchar);
 
+/*
+ * Maximum number of ntnodes to keep in memory. We do not want to leave
+ * large data structures hanging off vnodes indefinitely and the data
+ * needed to reload the ntnode should already be in the buffer cache.
+ */
+#define LOADED_NTNODE_HI 16
+struct ntnode;
+TAILQ_HEAD(ntnodeq, ntnode);
+
 #define	NTFS_SYSNODESNUM	0x0B
 struct ntfsmount {
 	struct mount   *ntm_mountp;	/* filesystem vfs structure */
@@ -259,6 +274,8 @@ struct ntfsmount {
 	ntfs_wget_func_t *ntm_wget;	/* decode string to Unicode string */
 	ntfs_wput_func_t *ntm_wput;	/* encode Unicode string to string */
 	ntfs_wcmp_func_t *ntm_wcmp;	/* compare to wide characters */
+	int		ntm_ntnodes;	/* Number of loaded ntnodes. */
+	struct ntnodeq	ntm_ntnodeq;	/* Queue of ntnodes (LRU). */
 };
 
 #define ntm_mftcn	ntm_bootfile.bf_mftcn
@@ -275,22 +292,24 @@ struct ntfsmount {
 #define	VTOF(v)		((struct fnode *)((v)->v_data))
 #define	FTOV(f)		((f)->f_vp)
 #define	FTONT(f)	((f)->f_ip)
-#define ntfs_cntobn(cn)	(daddr64_t)((cn) * (ntmp->ntm_spc))
+#define ntfs_cntobn(cn)	(daddr_t)((cn) * (ntmp->ntm_spc))
 #define ntfs_cntob(cn)	(off_t)((cn) * (ntmp)->ntm_spc * (ntmp)->ntm_bps)
 #define ntfs_btocn(off)	(cn_t)((off) / ((ntmp)->ntm_spc * (ntmp)->ntm_bps))
 #define ntfs_btocl(off)	(cn_t)((off + ntfs_cntob(1) - 1) / ((ntmp)->ntm_spc * (ntmp)->ntm_bps))
 #define ntfs_btocnoff(off)	(off_t)((off) % ((ntmp)->ntm_spc * (ntmp)->ntm_bps))
 #define ntfs_bntob(bn)	(int32_t)((bn) * (ntmp)->ntm_bps)
 
+#ifdef _KERNEL
 #if defined(NTFS_DEBUG)
 extern int ntfs_debug;
-#define DPRINTF(X, Y) do { if(ntfs_debug >= (X)) printf Y; } while(0)
-#define dprintf(a) DPRINTF(1, a)
-#define ddprintf(a) DPRINTF(2, a)
+#define DNPRINTF(n, x...) do { if(ntfs_debug >= (n)) printf(x); } while(0)
+#define DPRINTF(x...) DNPRINTF(1, x)
+#define DDPRINTF(x...) DNPRINTF(2, x)
 #else /* NTFS_DEBUG */
-#define DPRINTF(X, Y)
-#define dprintf(a)
-#define ddprintf(a)
+#define DNPRINTF(n, x...)
+#define DPRINTF(x...)
+#define DDPRINTF(x...)
 #endif
 
 extern struct vops ntfs_vops;
+#endif

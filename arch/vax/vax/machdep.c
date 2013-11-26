@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.120 2011/09/19 21:53:02 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.130 2013/11/24 22:08:25 miod Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -166,11 +166,12 @@ cpu_startup()
 	 * Good {morning,afternoon,evening,night}.
 	 * Also call CPU init on systems that need that.
 	 */
-	printf("%s%s [%08X %08X]\n", version, cpu_model, vax_cpudata, vax_siedata);
+	printf("%s%s [%08X %08X]\n", version,
+	    cpu_model, vax_cpudata, vax_siedata);
         if (dep_call->cpu_conf)
                 (*dep_call->cpu_conf)();
 
-	printf("real mem = %u (%uMB)\n", ptoa(physmem),
+	printf("real mem = %lu (%luMB)\n", ptoa(physmem),
 	    ptoa(physmem)/1024/1024);
 	mtpr(AST_NO, PR_ASTLVL);
 	spl0();
@@ -320,7 +321,7 @@ void
 consinit()
 {
 	/*
-	 * Init I/O memory resource map. Must be done before cninit()
+	 * Init I/O memory extent. Must be done before cninit()
 	 * is called; we may want to use iospace in the console routines.
 	 *
 	 * XXX console code uses the first page at iospace, so do not make
@@ -346,7 +347,7 @@ consinit()
  * Old sigcontext structure, still used by userland until setjmp is fixed.
  */
 struct	osigcontext {
-	int	sc_onstack;		/* sigstack state to restore */
+	int	__sc_unused;
 	int	sc_mask;		/* signal mask to restore */
 	int	sc_sp;			/* sp to restore */
 	int	sc_fp;			/* fp to restore */
@@ -394,10 +395,6 @@ sys_sigreturn(p, v, retval)
 	    (ksc.sc_ps & PSL_CM)) {
 		return (EINVAL);
 	}
-	if (ksc.sc_onstack & 01)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	/* Restore signal mask. */
 	p->p_sigmask = ksc.sc_mask & ~sigcantmask;
 
@@ -450,13 +447,12 @@ sendsig(catcher, sig, mask, code, type, val)
 	struct	trapframe *syscf;
 	struct	sigframe *sigf, gsigf;
 	unsigned int	cursp;
-	int	onstack;
 
 	syscf = p->p_addr->u_pcb.framep;
-	onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 
 	/* Allocate space for the signal handler context. */
-	if (onstack)
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(syscf->sp) && (psp->ps_sigonstack & sigmask(sig)))
 		cursp = ((int)p->p_sigstk.ss_sp + p->p_sigstk.ss_size);
 	else
 		cursp = syscf->sp;
@@ -475,7 +471,6 @@ sendsig(catcher, sig, mask, code, type, val)
 		initsiginfo(&gsigf.sf_si, sig, code, type, val);
 	}
 
-	gsigf.sf_sc.sc_onstack = p->p_sigstk.ss_flags & SS_ONSTACK;
 	gsigf.sf_sc.sc_mask = mask;
 	gsigf.sf_sc.sc_sp = syscf->sp; 
 	gsigf.sf_sc.sc_fp = syscf->fp; 
@@ -508,9 +503,6 @@ sendsig(catcher, sig, mask, code, type, val)
 	 */
 	syscf->sp = (unsigned)sigf;
 	syscf->ap = (unsigned)sigf + offsetof(struct sigframe, sf_pc);
-
-	if (onstack)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
 }
 
 int	waittime = -1;
@@ -535,7 +527,11 @@ boot(howto)
 		 * If we've been adjusting the clock, the todr will be out of
 		 * synch; adjust it now.
 		 */
-		resettodr();
+		if ((howto & RB_TIMEBAD) == 0) {
+			resettodr();
+		} else {
+			printf("WARNING: not updating battery clock\n");
+		}
 	}
 	if_downall();
 
@@ -546,10 +542,12 @@ boot(howto)
 	if (howto & RB_DUMP)
 		dumpsys();
 
-	/* Run any shutdown hooks. */
-	doshutdownhooks();
 
 haltsys:
+	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+
 	if (howto & RB_HALT) {
 		if (dep_call->cpu_halt)
 			(*dep_call->cpu_halt) ();
@@ -581,14 +579,14 @@ haltsys:
 		 * rely on that.
 		 */
 #ifdef notyet
-		asm("	movl	sp, (0x80000200)
-			movl	0x80000200, sp
-			mfpr	$0x10, -(sp)	# PR_PCBB
-			mfpr	$0x11, -(sp)	# PR_SCBB
-			mfpr	$0xc, -(sp)	# PR_SBR
-			mfpr	$0xd, -(sp)	# PR_SLR
-			mtpr	$0, $0x38	# PR_MAPEN
-		");
+		asm("	movl	sp, (0x80000200);"
+		"	movl	0x80000200, sp;"
+		"	mfpr	$0x10, -(sp);	# PR_PCBB"
+		"	mfpr	$0x11, -(sp);	# PR_SCBB"
+		"	mfpr	$0xc, -(sp);	# PR_SBR"
+		"	mfpr	$0xd, -(sp);	# PR_SLR"
+		"	mtpr	$0, $0x38;	# PR_MAPEN"
+		);
 #endif
 
 		if (dep_call->cpu_reboot)
@@ -600,8 +598,8 @@ haltsys:
 
 		mtpr(GC_CONS|GC_BTFL, PR_TXDB);
 	}
-	asm("movl %0, r5":: "g" (showto)); /* How to boot */
-	asm("movl %0, r11":: "r"(showto)); /* ??? */
+	asm("movl %0, %%r5":: "g" (showto)); /* How to boot */
+	asm("movl %0, %%r11":: "r"(showto)); /* ??? */
 	asm("halt");
 	for (;;) ;
 	/* NOTREACHED */
@@ -611,8 +609,8 @@ void
 dumpsys()
 {
 	int maj, psize, pg;
-	daddr64_t blkno;
-	int (*dump)(dev_t, daddr64_t, caddr_t, size_t);
+	daddr_t blkno;
+	int (*dump)(dev_t, daddr_t, caddr_t, size_t);
 	paddr_t maddr;
 	int error;
 	kcore_seg_t *kseg_p;
@@ -792,9 +790,9 @@ process_sstep(p, sstep)
  * Allocates a virtual range suitable for mapping in physical memory.
  * This differs from the bus_space routines in that it allocates on
  * physical page sizes instead of logical sizes. This implementation
- * uses resource maps when allocating space, which is allocated from 
- * the IOMAP submap. The implementation is similar to the uba resource
- * map handling. Size is given in pages.
+ * uses an extent to manage allocated space from the IOMAP submap.
+ * The implementation is similar to the uba resource map handling. Size
+ * is given in pages.
  * If the page requested is bigger than a logical page, space is
  * allocated from the kernel map instead.
  *
@@ -1056,7 +1054,7 @@ splassert_check(int wantipl, const char *func)
 }
 #endif
 
-void	start(struct rpb *);
+void	_start(struct rpb *);
 void	main(void);
 
 extern	paddr_t avail_end;
@@ -1090,7 +1088,7 @@ extern struct cpu_dep vxt_calls;
  * management is disabled, and no interrupt system is active.
  */
 void
-start(struct rpb *prpb)
+_start(struct rpb *prpb)
 {
 	extern vaddr_t scratch;
 	int preserve_cca = 0;
@@ -1344,9 +1342,7 @@ start(struct rpb *prpb)
 
 	proc0.p_addr = (struct user *)proc0paddr; /* XXX */
 	bzero((struct user *)proc0paddr, sizeof(struct user));
-
-	/* Clear the used parts of the uarea except for the pcb */
-	bzero(&proc0.p_addr->u_stats, sizeof(struct user) - sizeof(struct pcb));
+	proc0.p_addr->u_pcb.pcb_paddr = (paddr_t)proc0paddr - KERNBASE;
 
 	pmap_bootstrap();
 

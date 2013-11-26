@@ -1,4 +1,4 @@
-/*	$OpenBSD: esm.c,v 1.52 2010/07/02 01:35:13 tedu Exp $ */
+/*	$OpenBSD: esm.c,v 1.54 2013/07/04 16:55:18 sf Exp $ */
 
 /*
  * Copyright (c) 2005 Jordan Hargrave <jordan@openbsd.org>
@@ -87,7 +87,7 @@ enum sensor_type esm_typemap[] = {
 
 struct esm_sensor_map {
 	enum esm_sensor_type	type;
-	long			arg;
+	int			arg;
 	const char		*name;
 };
 
@@ -253,7 +253,7 @@ esm_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	sc->sc_wdog_period = 0;
-	wdog_register(sc, esm_watchdog);
+	wdog_register(esm_watchdog, sc);
 	printf("\n");
 
 	strlcpy(sc->sc_sensordev.xname, DEVNAME(sc),

@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.179 2012/03/15 20:06:03 deraadt Exp $
+#	$OpenBSD: RAMDISK,v 1.183 2013/10/28 12:33:32 mpi Exp $
 
 machine		i386		# architecture, used by config; REQUIRED
 
@@ -134,14 +134,14 @@ com*	at isapnp?
 #ahb*	at eisa?		# Adaptec 174[024] SCSI controllers
 #ahc0	at isa?			# Adaptec 284x SCSI controllers
 #ahc*	at eisa?		# Adaptec 274x, aic7770 SCSI controllers
-ahc*	at pci?			# Adaptec 2940 SCSI controllers
+#ahc*	at pci?			# Adaptec 2940 SCSI controllers
 #ahd*	at pci?			# Adaptec 79?? SCSI controllers
 #twe*	at pcu?			# 3ware Escalade RAID controllers
 #isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
 #aic0	at isa? port 0x340 irq 11 # Adaptec 152[02] SCSI controllers
 #aic*	at isapnp?
 #aic*	at pcmcia?		# PCMCIA based aic SCSI controllers
-siop*	at pci?			# NCR 538XX SCSI controllers(new)
+#siop*	at pci?			# NCR 538XX SCSI controllers(new)
 #adv*	at pci?			# AdvanSys 1200A/B and ULTRA SCSI
 #adw*	at pci?			# AdvanSys ULTRA WIDE SCSI
 #sea0	at isa? iomem 0xc8000 irq 5 # Seagate ST0[12] SCSI controllers
@@ -196,7 +196,6 @@ ep*	at isa?				# 3C509 ethernet cards
 le0	at isa? port 0x360 irq 15 drq 6	# IsoLan, NE2100, and DEPCA
 #ex0	at isa? port 0x320 irq 5	# Intel EtherExpress PRO/10
 #ep*	at eisa?			# 3C579 ethernet cards
-#fea*	at eisa?			# DEC DEFEA FDDI cards
 ep*	at isapnp?			# 3C509 PnP ethernet cards
 le*	at isapnp?
 de*	at pci?				# DC21X4X-based ethernet cards
@@ -207,7 +206,6 @@ ne*	at pcmcia?			# PCMCIA based NE2000 cards
 ep*	at pcmcia?			# PCMCIA based 3c5xx cards
 #sm*	at pcmcia?			# PCMCIA based sm cards
 #xe*	at pcmcia?			# Xircom ethernet
-#fpa*	at pci?				# DEC DEFPA FDDI cards
 xl*	at pci?				# 3C9xx ethernet cards
 rl*	at pci?				# RealTek 81[23]9 ethernet
 #epic*	at pci?				# SMC EPIC/100 ethernet
@@ -238,7 +236,6 @@ wi*	at pci?				# WaveLAN IEEE 802.11DS
 wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
 #an*	at pcmcia?			# Aironet IEEE 802.11DS
 #cnw*	at pcmcia?			# Xircom Netwave
-#ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
 
 # Media Independent Interface (mii) drivers
 exphy*	at mii?				# 3Com internal PHYs

@@ -1,4 +1,4 @@
-/* $OpenBSD: drm_agpsupport.c,v 1.20 2011/06/02 18:22:00 weerd Exp $ */
+/* $OpenBSD: drm_agpsupport.c,v 1.25 2013/08/12 04:11:52 jsg Exp $ */
 /*-
  * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
@@ -36,6 +36,8 @@
 
 #include "drmP.h"
 
+#if __OS_HAS_AGP
+
 struct drm_agp_mem	*drm_agp_lookup_entry(struct drm_device *, void *);
 void			 drm_agp_remove_entry(struct drm_device *,
 			     struct drm_agp_mem *);
@@ -49,9 +51,7 @@ drm_agp_info(struct drm_device * dev, struct drm_agp_info *info)
 		return (EINVAL);
 
 	kern = &dev->agp->info;
-#ifndef DRM_NO_AGP
 	agp_get_info(dev->agp->agpdev, kern);
-#endif
 	info->agp_version_major = 1;
 	info->agp_version_minor = 0;
 	info->mode = kern->ai_mode;
@@ -84,7 +84,6 @@ drm_agp_acquire_ioctl(struct drm_device *dev, void *data,
 int
 drm_agp_acquire(struct drm_device *dev)
 {
-#ifndef DRM_NO_AGP
 	int	retcode;
 
 	if (dev->agp == NULL || dev->agp->acquired)
@@ -95,7 +94,7 @@ drm_agp_acquire(struct drm_device *dev)
 		return (retcode);
 
 	dev->agp->acquired = 1;
-#endif
+
 	return (0);
 }
 
@@ -109,12 +108,11 @@ drm_agp_release_ioctl(struct drm_device *dev, void *data,
 int
 drm_agp_release(struct drm_device * dev)
 {
-#ifndef DRM_NO_AGP
 	if (dev->agp == NULL || !dev->agp->acquired)
 		return (EINVAL);
 	agp_release(dev->agp->agpdev);
 	dev->agp->acquired = 0;
-#endif
+
 	return (0);
 }
 
@@ -122,14 +120,13 @@ int
 drm_agp_enable(struct drm_device *dev, drm_agp_mode_t mode)
 {
 	int	retcode = 0;
-#ifndef DRM_NO_AGP
+
 	if (dev->agp == NULL || !dev->agp->acquired)
 		return (EINVAL);
-	
+
 	dev->agp->mode = mode.mode;
 	if ((retcode = agp_enable(dev->agp->agpdev, mode.mode)) == 0)
 		dev->agp->enabled = 1;
-#endif
 	return (retcode);
 }
 
@@ -145,7 +142,6 @@ drm_agp_enable_ioctl(struct drm_device *dev, void *data,
 int
 drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 {
-#ifndef DRM_NO_AGP
 	struct drm_agp_mem	*entry;
 	void			*handle;
 	struct agp_memory_info	 info;
@@ -168,7 +164,7 @@ drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 		drm_free(entry);
 		return (ENOMEM);
 	}
-	
+
 	entry->handle = handle;
 	entry->bound = 0;
 	entry->pages = pages;
@@ -180,7 +176,6 @@ drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 	DRM_LOCK();
 	TAILQ_INSERT_HEAD(&dev->agp->memory, entry, link);
 	DRM_UNLOCK();
-#endif
 
 	return (0);
 }
@@ -220,7 +215,16 @@ drm_agp_unbind(struct drm_device *dev, struct drm_agp_binding *request)
 
 	DRM_LOCK();
 	entry = drm_agp_lookup_entry(dev, (void *)request->handle);
-	if (entry == NULL || !entry->bound) {
+	/*
+	 * If the AGP bridge has an aperture base address of 0 and
+	 * the entry is bound with an offset of 0, entry->bound will
+	 * not reflect the reality.
+	 *
+	 * XXX This means that we may try to unbind unbound entries
+	 * with such an AGP bridge, but it should be safe because
+	 * agp_unbind_memory() has a correct check for bound memory.
+	 */
+	if (entry == NULL || (!entry->bound && dev->agp->base)) {
 		DRM_UNLOCK();
 		return (EINVAL);
 	}
@@ -248,7 +252,7 @@ drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request)
 {
 	struct drm_agp_mem	*entry;
 	int			 retcode, page;
-	
+
 	if (dev->agp == NULL || !dev->agp->acquired)
 		return (EINVAL);
 
@@ -320,7 +324,7 @@ int
 drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request)
 {
 	struct drm_agp_mem	*entry;
-	
+
 	if (dev->agp == NULL || !dev->agp->acquired)
 		return (EINVAL);
 
@@ -333,7 +337,7 @@ drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request)
 
 	drm_agp_remove_entry(dev, entry);
 	DRM_UNLOCK();
-   
+
 	return (0);
 }
 
@@ -349,11 +353,10 @@ drm_agp_free_ioctl(struct drm_device *dev, void *data,
 struct drm_agp_head *
 drm_agp_init(void)
 {
-#ifndef DRM_NO_AGP
-	struct device		*agpdev;
+	struct agp_softc	*agpdev;
 	struct drm_agp_head	*head = NULL;
 	int		 	 agp_available = 1;
-   
+
 	agpdev = agp_find_device(0);
 	if (agpdev == NULL)
 		agp_available = 0;
@@ -367,10 +370,10 @@ drm_agp_init(void)
 		head->agpdev = agpdev;
 		agp_get_info(agpdev, &head->info);
 		head->base = head->info.ai_aperture_base;
+		head->cant_use_aperture = (head->base == 0);
 		TAILQ_INIT(&head->memory);
 	}
 	return (head);
-#else
-	return (NULL);
-#endif
 }
+
+#endif /* __OS_HAS_AGP */

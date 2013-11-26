@@ -1,4 +1,4 @@
-/* $OpenBSD: pms.c,v 1.28 2012/03/05 18:42:55 shadchin Exp $ */
+/* $OpenBSD: pms.c,v 1.49 2013/10/30 18:00:56 shadchin Exp $ */
 /* $NetBSD: psm.c,v 1.11 2000/06/05 22:20:57 sommerfeld Exp $ */
 
 /*-
@@ -57,6 +57,10 @@ struct pms_protocol {
 #define PMS_INTELLI		1
 #define PMS_SYNAPTICS		2
 #define PMS_ALPS		3
+#define PMS_ELANTECH_V1		4
+#define PMS_ELANTECH_V2		5
+#define PMS_ELANTECH_V3		6
+#define PMS_ELANTECH_V4		7
 	u_int packetsize;
 	int (*enable)(struct pms_softc *);
 	int (*ioctl)(struct pms_softc *, u_long, caddr_t, int, struct proc *);
@@ -108,6 +112,32 @@ struct alps_softc {
 #define ALPS_PRESSURE		40
 };
 
+struct elantech_softc {
+	int flags;
+#define ELANTECH_F_REPORTS_PRESSURE	0x01
+#define ELANTECH_F_HAS_ROCKER		0x02
+#define ELANTECH_F_2FINGER_PACKET	0x04
+#define ELANTECH_F_HW_V1_OLD		0x08
+	int fw_version;
+
+	int min_x, min_y;
+	int max_x, max_y;
+	struct {
+		unsigned int x;
+		unsigned int y;
+	} mt[ELANTECH_MAX_FINGERS];
+	int fingers[ELANTECH_MAX_FINGERS];
+	int width;
+
+	u_char parity[256];
+	u_char p1, p2, p3;
+
+	/* Compat mode */
+	int wsmode;
+	int old_x, old_y;
+	u_int old_buttons;
+};
+
 struct pms_softc {		/* driver status information */
 	struct device sc_dev;
 
@@ -129,6 +159,7 @@ struct pms_softc {		/* driver status information */
 	const struct pms_protocol *protocol;
 	struct synaptics_softc *synaptics;
 	struct alps_softc *alps;
+	struct elantech_softc *elantech;
 
 	u_char packet[8];
 
@@ -209,6 +240,7 @@ int	pms_set_scaling(struct pms_softc *, int);
 int	pms_reset(struct pms_softc *);
 int	pms_dev_enable(struct pms_softc *);
 int	pms_dev_disable(struct pms_softc *);
+void	pms_protocol_lookup(struct pms_softc *);
 
 int	pms_enable_intelli(struct pms_softc *);
 
@@ -227,6 +259,22 @@ int	pms_ioctl_alps(struct pms_softc *, u_long, caddr_t, int, struct proc *);
 int	pms_sync_alps(struct pms_softc *, int);
 void	pms_proc_alps(struct pms_softc *);
 
+int	pms_enable_elantech_v1(struct pms_softc *);
+int	pms_enable_elantech_v2(struct pms_softc *);
+int	pms_enable_elantech_v3(struct pms_softc *);
+int	pms_enable_elantech_v4(struct pms_softc *);
+int	pms_ioctl_elantech(struct pms_softc *, u_long, caddr_t, int,
+    struct proc *);
+int	pms_sync_elantech_v1(struct pms_softc *, int);
+int	pms_sync_elantech_v2(struct pms_softc *, int);
+int	pms_sync_elantech_v3(struct pms_softc *, int);
+int	pms_sync_elantech_v4(struct pms_softc *, int);
+void	pms_proc_elantech_v1(struct pms_softc *);
+void	pms_proc_elantech_v2(struct pms_softc *);
+void	pms_proc_elantech_v3(struct pms_softc *);
+void	pms_proc_elantech_v4(struct pms_softc *);
+
+int	synaptics_knock(struct pms_softc *);
 int	synaptics_set_mode(struct pms_softc *, int);
 int	synaptics_query(struct pms_softc *, int, int *);
 int	synaptics_get_hwinfo(struct pms_softc *);
@@ -234,6 +282,19 @@ void	synaptics_sec_proc(struct pms_softc *);
 
 int	alps_sec_proc(struct pms_softc *);
 int	alps_get_hwinfo(struct pms_softc *);
+
+int	elantech_knock(struct pms_softc *);
+void	elantech_send_input(struct pms_softc *, int, int, int, int);
+int	elantech_get_hwinfo_v1(struct pms_softc *);
+int	elantech_get_hwinfo_v2(struct pms_softc *);
+int	elantech_get_hwinfo_v3(struct pms_softc *);
+int	elantech_get_hwinfo_v4(struct pms_softc *);
+int	elantech_ps2_cmd(struct pms_softc *, u_char);
+int	elantech_set_absolute_mode_v1(struct pms_softc *);
+int	elantech_set_absolute_mode_v2(struct pms_softc *);
+int	elantech_set_absolute_mode_v3(struct pms_softc *);
+int	elantech_set_absolute_mode_v4(struct pms_softc *);
+
 
 struct cfattach pms_ca = {
 	sizeof(struct pms_softc), pmsprobe, pmsattach, NULL,
@@ -266,15 +327,6 @@ const struct pms_protocol pms_protocols[] = {
 		pms_proc_mouse,
 		NULL
 	},
-	/* Microsoft IntelliMouse */
-	{
-		PMS_INTELLI, 4,
-		pms_enable_intelli,
-		pms_ioctl_mouse,
-		pms_sync_mouse,
-		pms_proc_mouse,
-		NULL
-	},
 	/* Synaptics touchpad */
 	{
 		PMS_SYNAPTICS, 6,
@@ -291,6 +343,51 @@ const struct pms_protocol pms_protocols[] = {
 		pms_ioctl_alps,
 		pms_sync_alps,
 		pms_proc_alps,
+		NULL
+	},
+	/* Elantech touchpad (hardware version 1) */
+	{
+		PMS_ELANTECH_V1, 4,
+		pms_enable_elantech_v1,
+		pms_ioctl_elantech,
+		pms_sync_elantech_v1,
+		pms_proc_elantech_v1,
+		NULL
+	},
+	/* Elantech touchpad (hardware version 2) */
+	{
+		PMS_ELANTECH_V2, 6,
+		pms_enable_elantech_v2,
+		pms_ioctl_elantech,
+		pms_sync_elantech_v2,
+		pms_proc_elantech_v2,
+		NULL
+	},
+	/* Elantech touchpad (hardware version 3) */
+	{
+		PMS_ELANTECH_V3, 6,
+		pms_enable_elantech_v3,
+		pms_ioctl_elantech,
+		pms_sync_elantech_v3,
+		pms_proc_elantech_v3,
+		NULL
+	},
+	/* Elantech touchpad (hardware version 4) */
+	{
+		PMS_ELANTECH_V4, 6,
+		pms_enable_elantech_v4,
+		pms_ioctl_elantech,
+		pms_sync_elantech_v4,
+		pms_proc_elantech_v4,
+		NULL
+	},
+	/* Microsoft IntelliMouse */
+	{
+		PMS_INTELLI, 4,
+		pms_enable_intelli,
+		pms_ioctl_mouse,
+		pms_sync_mouse,
+		pms_proc_mouse,
 		NULL
 	},
 };
@@ -416,6 +513,23 @@ pms_dev_disable(struct pms_softc *sc)
 	return (res);
 }
 
+void
+pms_protocol_lookup(struct pms_softc *sc)
+{
+	int i;
+
+	sc->protocol = &pms_protocols[0];
+	for (i = 1; i < nitems(pms_protocols); i++) {
+		pms_reset(sc);
+		if (pms_protocols[i].enable(sc)) {
+			sc->protocol = &pms_protocols[i];
+			break;
+		}
+	}
+
+	DPRINTF("%s: protocol type %d\n", DEVNAME(sc), sc->protocol->type);
+}
+
 int
 pms_enable_intelli(struct pms_softc *sc)
 {
@@ -537,7 +651,6 @@ pmsattach(struct device *parent, struct device *self, void *aux)
 	struct pms_softc *sc = (void *)self;
 	struct pckbc_attach_args *pa = aux;
 	struct wsmousedev_attach_args a;
-	int i;
 
 	sc->sc_kbctag = pa->pa_tag;
 
@@ -560,14 +673,8 @@ pmsattach(struct device *parent, struct device *self, void *aux)
 	sc->poll = 1;
 	sc->sc_dev_enable = 0;
 
-	sc->protocol = &pms_protocols[0];
-	for (i = 1; i < nitems(pms_protocols); i++) {
-		pms_reset(sc);
-		if (pms_protocols[i].enable(sc))
-			sc->protocol = &pms_protocols[i];
-	}
-
-	DPRINTF("%s: protocol type %d\n", DEVNAME(sc), sc->protocol->type);
+	/* See if the device understands an extended (touchpad) protocol. */
+	pms_protocol_lookup(sc);
 
 	/* no interrupts until enabled */
 	pms_change_state(sc, PMS_STATE_DISABLED, PMS_DEV_IGNORE);
@@ -596,8 +703,6 @@ pmsactivate(struct device *self, int act)
 int
 pms_change_state(struct pms_softc *sc, int newstate, int dev)
 {
-	int i;
-
 	if (dev != PMS_DEV_IGNORE) {
 		switch (newstate) {
 		case PMS_STATE_ENABLED:
@@ -630,21 +735,9 @@ pms_change_state(struct pms_softc *sc, int newstate, int dev)
 			pckbc_flush(sc->sc_kbctag, PCKBC_AUX_SLOT);
 
 		pms_reset(sc);
-
-		if (sc->protocol->type != PMS_STANDARD &&
+		if (sc->protocol->type == PMS_STANDARD ||
 		    sc->protocol->enable(sc) == 0)
-			sc->protocol = &pms_protocols[0];
-
-		if (sc->protocol->type == PMS_STANDARD)
-			for (i = 1; i < nitems(pms_protocols); i++) {
-				pms_reset(sc);
-				if (pms_protocols[i].enable(sc))
-					sc->protocol = &pms_protocols[i];
-			}
-
-#ifdef DEBUG
-		printf("%s: protocol type %d\n", DEVNAME(sc), sc->protocol->type);
-#endif
+			pms_protocol_lookup(sc);
 
 		pms_dev_enable(sc);
 		break;
@@ -652,7 +745,7 @@ pms_change_state(struct pms_softc *sc, int newstate, int dev)
 	case PMS_STATE_SUSPENDED:
 		pms_dev_disable(sc);
 
-		if (sc->protocol && sc->protocol->disable)
+		if (sc->protocol->disable)
 			sc->protocol->disable(sc);
 
 		pckbc_slot_enable(sc->sc_kbctag, PCKBC_AUX_SLOT, 0);
@@ -686,7 +779,7 @@ pms_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct pms_softc *sc = v;
 
-	if (sc->protocol && sc->protocol->ioctl)
+	if (sc->protocol->ioctl)
 		return (sc->protocol->ioctl(sc, cmd, data, flag, p));
 	else
 		return (-1);
@@ -734,7 +827,8 @@ pmsinput(void *vsc, int data)
 	sc->packet[sc->inputstate] = data;
 	if (sc->protocol->sync(sc, data)) {
 #ifdef DIAGNOSTIC
-		printf("%s: not in sync yet, discard input\n", DEVNAME(sc));
+		printf("%s: not in sync yet, discard input (state %d)\n",
+		    DEVNAME(sc), sc->inputstate);
 #endif
 		sc->inputstate = 0;
 		return;
@@ -817,6 +911,11 @@ synaptics_get_hwinfo(struct pms_softc *sc)
 	if (SYNAPTICS_EXT_MODEL_BUTTONS(syn->ext_model) > 8)
 		syn->ext_model &= ~0xf000;
 
+	if ((syn->model & SYNAPTICS_MODEL_NEWABS) == 0) {
+		printf("%s: don't support Synaptics OLDABS\n", DEVNAME(sc));
+		return (-1);
+	}
+
 	return (0);
 }
 
@@ -840,12 +939,9 @@ synaptics_sec_proc(struct pms_softc *sc)
 }
 
 int
-pms_enable_synaptics(struct pms_softc *sc)
+synaptics_knock(struct pms_softc *sc)
 {
-	struct synaptics_softc *syn = sc->synaptics;
-	struct wsmousedev_attach_args a;
 	u_char resp[3];
-	int mode;
 
 	if (pms_set_resolution(sc, 0) ||
 	    pms_set_resolution(sc, 0) ||
@@ -853,7 +949,38 @@ pms_enable_synaptics(struct pms_softc *sc)
 	    pms_set_resolution(sc, 0) ||
 	    pms_get_status(sc, resp) ||
 	    resp[1] != SYNAPTICS_ID_MAGIC)
-		return (0);
+		return (-1);
+
+	return (0);
+}
+
+int
+pms_enable_synaptics(struct pms_softc *sc)
+{
+	struct synaptics_softc *syn = sc->synaptics;
+	struct wsmousedev_attach_args a;
+	int mode, i;
+
+	if (synaptics_knock(sc)) {
+		if (sc->synaptics == NULL)
+			goto err;
+		/* 
+		 * Some synaptics touchpads don't resume quickly.
+		 * Retry a few times.
+		 */
+		for (i = 10; i > 0; --i) {
+			printf("%s: device not resuming, retrying\n",
+			    DEVNAME(sc));
+			pms_reset(sc);
+			if (synaptics_knock(sc) == 0)
+				break;
+			delay(100000);
+		}
+		if (i == 0) {
+			printf("%s: lost device\n", DEVNAME(sc));
+			goto err;
+		}
+	}
 
 	if (sc->synaptics == NULL) {
 		sc->synaptics = syn = malloc(sizeof(struct synaptics_softc),
@@ -861,16 +988,13 @@ pms_enable_synaptics(struct pms_softc *sc)
 		if (syn == NULL) {
 			printf("%s: synaptics: not enough memory\n",
 			    DEVNAME(sc));
-			return (0);
+			goto err;
 		}
 
-		if (synaptics_get_hwinfo(sc))
-			return (0);
-
-		if ((syn->model & SYNAPTICS_MODEL_NEWABS) == 0) {
-			printf("%s: don't support Synaptics OLDABS\n",
-			    DEVNAME(sc));
-			return (0);
+		if (synaptics_get_hwinfo(sc)) {
+			free(sc->synaptics, M_DEVBUF);
+			sc->synaptics = NULL;
+			goto err;
 		}
 
 		/* enable pass-through PS/2 port if supported */
@@ -896,15 +1020,20 @@ pms_enable_synaptics(struct pms_softc *sc)
 	if (syn->capabilities & SYNAPTICS_CAP_EXTENDED)
 		mode |= SYNAPTICS_W_MODE;
 	if (synaptics_set_mode(sc, mode))
-		return (0);
+		goto err;
 
 	/* enable advanced gesture mode if supported */
 	if ((syn->ext_capabilities & SYNAPTICS_EXT_CAP_ADV_GESTURE) &&
 	    (pms_spec_cmd(sc, SYNAPTICS_QUE_MODEL) ||
 	     pms_set_rate(sc, SYNAPTICS_CMD_SET_ADV_GESTURE_MODE)))
-		return (0);
+		goto err;
 
 	return (1);
+
+err:
+	pms_reset(sc);
+
+	return (0);
 }
 
 int
@@ -1131,8 +1260,9 @@ pms_enable_alps(struct pms_softc *sc)
 	    pms_get_status(sc, resp) ||
 	    resp[0] != PMS_ALPS_MAGIC1 ||
 	    resp[1] != PMS_ALPS_MAGIC2 ||
-	    (resp[2] != PMS_ALPS_MAGIC3_1 && resp[2] != PMS_ALPS_MAGIC3_2))
-		return (0);
+	    (resp[2] != PMS_ALPS_MAGIC3_1 && resp[2] != PMS_ALPS_MAGIC3_2 &&
+	    resp[2] != PMS_ALPS_MAGIC3_3))
+		goto err;
 
 	if (sc->alps == NULL) {
 		sc->alps = alps = malloc(sizeof(struct alps_softc),
@@ -1142,8 +1272,11 @@ pms_enable_alps(struct pms_softc *sc)
 			goto err;
 		}
 
-		if (alps_get_hwinfo(sc))
+		if (alps_get_hwinfo(sc)) {
+			free(sc->alps, M_DEVBUF);
+			sc->alps = NULL;
 			goto err;
+		}
 
 		printf("%s: ALPS %s, version 0x%04x\n", DEVNAME(sc),
 		    (alps->model & ALPS_DUALPOINT ? "Dualpoint" : "Glidepoint"),
@@ -1280,7 +1413,7 @@ void
 pms_proc_alps(struct pms_softc *sc)
 {
 	struct alps_softc *alps = sc->alps;
-	int x, y, z, dx, dy;
+	int x, y, z, w, dx, dy;
 	u_int buttons;
 	int fin, ges;
 
@@ -1328,9 +1461,15 @@ pms_proc_alps(struct pms_softc *sc)
 		if (ges && fin && !alps->old_fin)
 			z = 0;
 
-		wsmouse_input(sc->sc_wsmousedev, buttons, x, y, z, 0,
+		/* Generate a width value corresponding to one finger */
+		if (z > 0)
+			w = 4;
+		else
+			w = 0;
+
+		wsmouse_input(sc->sc_wsmousedev, buttons, x, y, z, w,
 		    WSMOUSE_INPUT_ABSOLUTE_X | WSMOUSE_INPUT_ABSOLUTE_Y |
-		    WSMOUSE_INPUT_ABSOLUTE_Z);
+		    WSMOUSE_INPUT_ABSOLUTE_Z | WSMOUSE_INPUT_ABSOLUTE_W);
 
 		alps->old_fin = fin;
 	} else {
@@ -1352,4 +1491,851 @@ pms_proc_alps(struct pms_softc *sc)
 		alps->old_y = y;
 		alps->old_buttons = buttons;
 	}
+}
+
+int
+elantech_set_absolute_mode_v1(struct pms_softc *sc)
+{
+	int i;
+	u_char resp[3];
+
+	/* Enable absolute mode. Magic numbers from Linux driver. */
+	if (pms_spec_cmd(sc, ELANTECH_CMD_WRITE_REG) ||
+	    pms_spec_cmd(sc, 0x10) ||
+	    pms_spec_cmd(sc, 0x16) ||
+	    pms_set_scaling(sc, 1) ||
+	    pms_spec_cmd(sc, ELANTECH_CMD_WRITE_REG) ||
+	    pms_spec_cmd(sc, 0x11) ||
+	    pms_spec_cmd(sc, 0x8f) ||
+	    pms_set_scaling(sc, 1))
+		return (-1);
+
+	/* Read back reg 0x10 to ensure hardware is ready. */
+	for (i = 0; i < 5; i++) {
+		if (pms_spec_cmd(sc, ELANTECH_CMD_READ_REG) ||
+		    pms_spec_cmd(sc, 0x10) ||
+		    pms_get_status(sc, resp) == 0)
+			break;
+		delay(2000);
+	}
+	if (i == 5)
+		return (-1);
+
+	if ((resp[0] & ELANTECH_ABSOLUTE_MODE) == 0)
+		return (-1);
+
+	return (0);
+}
+
+int
+elantech_set_absolute_mode_v2(struct pms_softc *sc)
+{
+	int i;
+	u_char resp[3];
+	u_char reg10 = (sc->elantech->fw_version == 0x20030 ? 0x54 : 0xc4);
+
+	/* Enable absolute mode. Magic numbers from Linux driver. */
+	if (elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, ELANTECH_CMD_WRITE_REG) ||
+	    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, 0x10) ||
+	    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, reg10) ||
+	    pms_set_scaling(sc, 1) ||
+	    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, ELANTECH_CMD_WRITE_REG) ||
+	    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, 0x11) ||
+	    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, 0x88) ||
+	    pms_set_scaling(sc, 1))
+		return (-1);
+
+	/* Read back reg 0x10 to ensure hardware is ready. */
+	for (i = 0; i < 5; i++) {
+		if (elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+		    elantech_ps2_cmd(sc, ELANTECH_CMD_READ_REG) ||
+		    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+		    elantech_ps2_cmd(sc, 0x10) ||
+		    pms_get_status(sc, resp) == 0)
+			break;
+		delay(2000);
+	}
+	if (i == 5)
+		return (-1);
+
+	return (0);
+}
+
+int
+elantech_set_absolute_mode_v3(struct pms_softc *sc)
+{
+	int i;
+	u_char resp[3];
+
+	/* Enable absolute mode. Magic numbers from Linux driver. */
+	if (elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, ELANTECH_CMD_READ_WRITE_REG) ||
+	    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, 0x10) ||
+	    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, 0x0b) ||
+	    pms_set_scaling(sc, 1))
+		return (-1);
+
+	/* Read back reg 0x10 to ensure hardware is ready. */
+	for (i = 0; i < 5; i++) {
+		if (elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+		    elantech_ps2_cmd(sc, ELANTECH_CMD_READ_WRITE_REG) ||
+		    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+		    elantech_ps2_cmd(sc, 0x10) ||
+		    pms_get_status(sc, resp) == 0)
+			break;
+		delay(2000);
+	}
+	if (i == 5)
+		return (-1);
+
+	return (0);
+}
+
+int
+elantech_set_absolute_mode_v4(struct pms_softc *sc)
+{
+	/* Enable absolute mode. Magic numbers from Linux driver. */
+	if (elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, ELANTECH_CMD_READ_WRITE_REG) ||
+	    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, 0x07) ||
+	    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, ELANTECH_CMD_READ_WRITE_REG) ||
+	    elantech_ps2_cmd(sc, ELANTECH_PS2_CUSTOM_COMMAND) ||
+	    elantech_ps2_cmd(sc, 0x01) ||
+	    pms_set_scaling(sc, 1))
+		return (-1);
+
+	/* v4 has no register 0x10 to read response from */
+
+	return (0);
+}
+
+int
+elantech_get_hwinfo_v1(struct pms_softc *sc)
+{
+	struct elantech_softc *elantech = sc->elantech;
+	int fw_version;
+	u_char capabilities[3];
+
+	if (synaptics_query(sc, ELANTECH_QUE_FW_VER, &fw_version))
+		return (-1);
+
+	if (fw_version < 0x20030 || fw_version == 0x20600) {
+		if (fw_version < 0x20000)
+			elantech->flags |= ELANTECH_F_HW_V1_OLD;
+	} else
+		return (-1);
+
+	elantech->fw_version = fw_version;
+
+	if (pms_spec_cmd(sc, ELANTECH_QUE_CAPABILITIES) ||
+	    pms_get_status(sc, capabilities))
+		return (-1);
+
+	if (capabilities[0] & ELANTECH_CAP_HAS_ROCKER)
+		elantech->flags |= ELANTECH_F_HAS_ROCKER;
+
+	if (elantech_set_absolute_mode_v1(sc))
+		return (-1);
+
+	elantech->min_x = ELANTECH_V1_X_MIN;
+	elantech->max_x = ELANTECH_V1_X_MAX;
+	elantech->min_y = ELANTECH_V1_Y_MIN;
+	elantech->max_y = ELANTECH_V1_Y_MAX;
+
+	return (0);
+}
+
+int
+elantech_get_hwinfo_v2(struct pms_softc *sc)
+{
+	struct elantech_softc *elantech = sc->elantech;
+	int fw_version, ic_ver;
+	u_char capabilities[3];
+	int i, fixed_dpi;
+	u_char resp[3];
+
+	if (synaptics_query(sc, ELANTECH_QUE_FW_VER, &fw_version))
+		return (-1);
+
+	ic_ver = (fw_version & 0x0f0000) >> 16;
+	if (ic_ver != 2 && ic_ver != 4)
+		return (-1);
+
+	elantech->fw_version = fw_version;
+	if (fw_version >= 0x20800)
+		elantech->flags |= ELANTECH_F_REPORTS_PRESSURE;
+
+	if (pms_spec_cmd(sc, ELANTECH_QUE_CAPABILITIES) ||
+	    pms_get_status(sc, capabilities))
+		return (-1);
+
+	if (elantech_set_absolute_mode_v2(sc))
+		return (-1);
+
+	if (fw_version == 0x20800 || fw_version == 0x20b00 ||
+	    fw_version == 0x20030) {
+		elantech->max_x = ELANTECH_V2_X_MAX;
+		elantech->max_y = ELANTECH_V2_Y_MAX;
+	} else {
+		if (pms_spec_cmd(sc, ELANTECH_QUE_FW_ID) ||
+		    pms_get_status(sc, resp))
+			return (-1);
+		fixed_dpi = resp[1] & 0x10;
+		i = (fw_version > 0x20800 && fw_version < 0x20900) ? 1 : 2;
+		if ((fw_version >> 16) == 0x14 && fixed_dpi) {
+			if (pms_spec_cmd(sc, ELANTECH_QUE_SAMPLE) ||
+			    pms_get_status(sc, resp))
+				return (-1);
+			elantech->max_x = (capabilities[1] - i) * resp[1] / 2;
+			elantech->max_y = (capabilities[2] - i) * resp[2] / 2;
+		} else if (fw_version == 0x040216) {
+			elantech->max_x = 819;
+			elantech->max_y = 405;
+		} else if (fw_version == 0x040219 || fw_version == 0x040215) {
+			elantech->max_x = 900;
+			elantech->max_y = 500;
+		} else {
+			elantech->max_x = (capabilities[1] - i) * 64;
+			elantech->max_y = (capabilities[2] - i) * 64;
+		}
+	}
+
+	return (0);
+}
+
+int
+elantech_get_hwinfo_v3(struct pms_softc *sc)
+{
+	struct elantech_softc *elantech = sc->elantech;
+	int fw_version;
+	u_char resp[3];
+
+	if (synaptics_query(sc, ELANTECH_QUE_FW_VER, &fw_version))
+		return (-1);
+
+	if (((fw_version & 0x0f0000) >> 16) != 5)
+		return (-1);
+
+	elantech->fw_version = fw_version;
+	elantech->flags |= ELANTECH_F_REPORTS_PRESSURE;
+
+	if (elantech_set_absolute_mode_v3(sc))
+		return (-1);
+
+	if (pms_spec_cmd(sc, ELANTECH_QUE_FW_ID) ||
+	    pms_get_status(sc, resp))
+		return (-1);
+
+	elantech->max_x = (resp[0] & 0x0f) << 8 | resp[1];
+	elantech->max_y = (resp[0] & 0xf0) << 4 | resp[2];
+
+	return (0);
+}
+
+int
+elantech_get_hwinfo_v4(struct pms_softc *sc)
+{
+	struct elantech_softc *elantech = sc->elantech;
+	int fw_version;
+	u_char capabilities[3];
+	u_char resp[3];
+
+	if (synaptics_query(sc, ELANTECH_QUE_FW_VER, &fw_version))
+		return (-1);
+
+	if (((fw_version & 0x0f0000) >> 16) != 6)
+		return (-1);
+
+	elantech->fw_version = fw_version;
+	elantech->flags |= ELANTECH_F_REPORTS_PRESSURE;
+
+	if (elantech_set_absolute_mode_v4(sc))
+		return (-1);
+
+	if (pms_spec_cmd(sc, ELANTECH_QUE_CAPABILITIES) ||
+	    pms_get_status(sc, capabilities))
+		return (-1);
+
+	if (pms_spec_cmd(sc, ELANTECH_QUE_FW_ID) ||
+	    pms_get_status(sc, resp))
+		return (-1);
+
+	elantech->max_x = (resp[0] & 0x0f) << 8 | resp[1];
+	elantech->max_y = (resp[0] & 0xf0) << 4 | resp[2];
+
+	if ((capabilities[1] < 2) || (capabilities[1] > elantech->max_x))
+		return (-1);
+
+	elantech->width = elantech->max_x / (capabilities[1] - 1);
+
+	return (0);
+}
+
+int
+elantech_ps2_cmd(struct pms_softc *sc, u_char command)
+{
+	u_char cmd[1];
+
+	cmd[0] = command;
+	return (pms_cmd(sc, cmd, 1, NULL, 0));
+}
+
+int
+elantech_knock(struct pms_softc *sc)
+{
+	u_char resp[3];
+
+	if (pms_dev_disable(sc) ||
+	    pms_set_scaling(sc, 1) ||
+	    pms_set_scaling(sc, 1) ||
+	    pms_set_scaling(sc, 1) ||
+	    pms_get_status(sc, resp) ||
+	    resp[0] != PMS_ELANTECH_MAGIC1 ||
+	    resp[1] != PMS_ELANTECH_MAGIC2 ||
+	    (resp[2] != PMS_ELANTECH_MAGIC3_1 &&
+	    resp[2] != PMS_ELANTECH_MAGIC3_2))
+		return (-1);
+
+	return (0);
+}
+
+int
+pms_enable_elantech_v1(struct pms_softc *sc)
+{
+	struct elantech_softc *elantech = sc->elantech;
+	int i;
+
+	if (elantech_knock(sc))
+		goto err;
+
+	if (sc->elantech == NULL) {
+		sc->elantech = elantech = malloc(sizeof(struct elantech_softc),
+		    M_DEVBUF, M_WAITOK | M_ZERO);
+		if (elantech == NULL) {
+			printf("%s: elantech: not enough memory\n",
+			    DEVNAME(sc));
+			goto err;
+		}
+
+		if (elantech_get_hwinfo_v1(sc)) {
+			free(sc->elantech, M_DEVBUF);
+			sc->elantech = NULL;
+			goto err;
+		}
+
+		printf("%s: Elantech Touchpad, version %d, firmware 0x%x\n",
+		    DEVNAME(sc), 1, sc->elantech->fw_version);
+	} else if (elantech_set_absolute_mode_v1(sc))
+		goto err;
+
+	for (i = 0; i < nitems(sc->elantech->parity); i++)
+		sc->elantech->parity[i] = sc->elantech->parity[i & (i - 1)] ^ 1;
+
+	return (1);
+
+err:
+	pms_reset(sc);
+
+	return (0);
+}
+
+int
+pms_enable_elantech_v2(struct pms_softc *sc)
+{
+	struct elantech_softc *elantech = sc->elantech;
+
+	if (elantech_knock(sc))
+		goto err;
+
+	if (sc->elantech == NULL) {
+		sc->elantech = elantech = malloc(sizeof(struct elantech_softc),
+		    M_DEVBUF, M_WAITOK | M_ZERO);
+		if (elantech == NULL) {
+			printf("%s: elantech: not enough memory\n",
+			    DEVNAME(sc));
+			goto err;
+		}
+
+		if (elantech_get_hwinfo_v2(sc)) {
+			free(sc->elantech, M_DEVBUF);
+			sc->elantech = NULL;
+			goto err;
+		}
+
+		printf("%s: Elantech Touchpad, version %d, firmware 0x%x\n",
+		    DEVNAME(sc), 2, sc->elantech->fw_version);
+	} else if (elantech_set_absolute_mode_v2(sc))
+		goto err;
+
+	return (1);
+
+err:
+	pms_reset(sc);
+
+	return (0);
+}
+
+int
+pms_enable_elantech_v3(struct pms_softc *sc)
+{
+	struct elantech_softc *elantech = sc->elantech;
+
+	if (elantech_knock(sc))
+		goto err;
+
+	if (sc->elantech == NULL) {
+		sc->elantech = elantech = malloc(sizeof(struct elantech_softc),
+		    M_DEVBUF, M_WAITOK | M_ZERO);
+		if (elantech == NULL) {
+			printf("%s: elantech: not enough memory\n",
+			    DEVNAME(sc));
+			goto err;
+		}
+
+		if (elantech_get_hwinfo_v3(sc)) {
+			free(sc->elantech, M_DEVBUF);
+			sc->elantech = NULL;
+			goto err;
+		}
+
+		printf("%s: Elantech Touchpad, version %d, firmware 0x%x\n",
+		    DEVNAME(sc), 3, sc->elantech->fw_version);
+	} else if (elantech_set_absolute_mode_v3(sc))
+		goto err;
+
+	return (1);
+
+err:
+	pms_reset(sc);
+
+	return (0);
+}
+
+int
+pms_enable_elantech_v4(struct pms_softc *sc)
+{
+	struct elantech_softc *elantech = sc->elantech;
+
+	if (elantech_knock(sc))
+		goto err;
+
+	if (sc->elantech == NULL) {
+		sc->elantech = elantech = malloc(sizeof(struct elantech_softc),
+		    M_DEVBUF, M_WAITOK | M_ZERO);
+		if (elantech == NULL) {
+			printf("%s: elantech: not enough memory\n",
+			    DEVNAME(sc));
+			goto err;
+		}
+
+		if (elantech_get_hwinfo_v4(sc)) {
+			free(sc->elantech, M_DEVBUF);
+			sc->elantech = NULL;
+			goto err;
+		}
+
+		printf("%s: Elantech Clickpad, version %d, firmware 0x%x\n",
+		    DEVNAME(sc), 4, sc->elantech->fw_version);
+	} else if (elantech_set_absolute_mode_v4(sc))
+		goto err;
+
+	return (1);
+
+err:
+	pms_reset(sc);
+
+	return (0);
+}
+
+int
+pms_ioctl_elantech(struct pms_softc *sc, u_long cmd, caddr_t data, int flag,
+    struct proc *p)
+{
+	struct elantech_softc *elantech = sc->elantech;
+	struct wsmouse_calibcoords *wsmc = (struct wsmouse_calibcoords *)data;
+	int wsmode;
+
+	switch (cmd) {
+	case WSMOUSEIO_GTYPE:
+		*(u_int *)data = WSMOUSE_TYPE_ELANTECH;
+		break;
+	case WSMOUSEIO_GCALIBCOORDS:
+		wsmc->minx = elantech->min_x;
+		wsmc->maxx = elantech->max_x;
+		wsmc->miny = elantech->min_y;
+		wsmc->maxy = elantech->max_y;
+		wsmc->swapxy = 0;
+		wsmc->resx = 0;
+		wsmc->resy = 0;
+		break;
+	case WSMOUSEIO_SETMODE:
+		wsmode = *(u_int *)data;
+		if (wsmode != WSMOUSE_COMPAT && wsmode != WSMOUSE_NATIVE)
+			return (EINVAL);
+		elantech->wsmode = wsmode;
+		break;
+	default:
+		return (-1);
+	}
+	return (0);
+}
+
+int
+pms_sync_elantech_v1(struct pms_softc *sc, int data)
+{
+	struct elantech_softc *elantech = sc->elantech;
+	u_char p;
+
+	switch (sc->inputstate) {
+	case 0:
+		if (elantech->flags & ELANTECH_F_HW_V1_OLD) {
+			elantech->p1 = (data & 0x20) >> 5;
+			elantech->p2 = (data & 0x10) >> 4;
+		} else {
+			elantech->p1 = (data & 0x10) >> 4;
+			elantech->p2 = (data & 0x20) >> 5;
+		}
+		elantech->p3 = (data & 0x04) >> 2;
+		return (0);
+	case 1:
+		p = elantech->p1;
+		break;
+	case 2:
+		p = elantech->p2;
+		break;
+	case 3:
+		p = elantech->p3;
+		break;
+	default:
+		return (-1);
+	}
+
+	if (data < 0 || data >= nitems(elantech->parity) ||
+	    elantech->parity[data] != p)
+		return (-1);
+
+	return (0);
+}
+
+int
+pms_sync_elantech_v2(struct pms_softc *sc, int data)
+{
+	struct elantech_softc *elantech = sc->elantech;
+
+	/* Variants reporting pressure always have the same constant bits. */
+	if (elantech->flags & ELANTECH_F_REPORTS_PRESSURE) {
+		if (sc->inputstate == 0 && (data & 0x0c) != 0x04)
+			return (-1);
+		if (sc->inputstate == 3 && (data & 0x0f) != 0x02)
+			return (-1);
+		return (0);
+	}
+
+	/* For variants not reporting pressure, 1 and 3 finger touch packets
+	 * have different constant bits than 2 finger touch pakets. */
+	switch (sc->inputstate) {
+	case 0:
+		if ((data & 0xc0) == 0x80) {
+			if ((data & 0x0c) != 0x0c)
+				return (-1);
+			elantech->flags |= ELANTECH_F_2FINGER_PACKET;
+		} else {
+			if ((data & 0x3c) != 0x3c)
+				return (-1);
+			elantech->flags &= ~ELANTECH_F_2FINGER_PACKET;
+		}
+		break;
+	case 1:
+	case 4:
+		if (elantech->flags & ELANTECH_F_2FINGER_PACKET)
+			break;
+		if ((data & 0xf0) != 0x00)
+			return (-1);
+		break;
+	case 3:
+		if (elantech->flags & ELANTECH_F_2FINGER_PACKET) {
+			if ((data & 0x0e) != 0x08)
+				return (-1);
+		} else {
+			if ((data & 0x3e) != 0x38)
+				return (-1);
+		}
+		break;
+	default:
+		break;
+	}
+
+	return (0);
+}
+
+int
+pms_sync_elantech_v3(struct pms_softc *sc, int data)
+{
+	switch (sc->inputstate) {
+	case 0:
+		if ((data & 0x0c) != 0x04 && (data & 0x0c) != 0x0c)
+			return (-1);
+		break;
+	case 3:
+		if ((data & 0xcf) != 0x02 && (data & 0xce) != 0x0c)
+			return (-1);
+		break;
+	}
+
+	return (0);
+}
+
+int
+pms_sync_elantech_v4(struct pms_softc *sc, int data)
+{
+	if (sc->inputstate == 0 && (data & 0x0c) != 0x04)
+		return (-1);
+	else
+		return (0);
+}
+
+void
+pms_proc_elantech_v1(struct pms_softc *sc)
+{
+	struct elantech_softc *elantech = sc->elantech;
+	int x, y, w, z;
+
+	if (elantech->flags & ELANTECH_F_HW_V1_OLD)
+		w = ((sc->packet[1] & 0x80) >> 7) +
+		    ((sc->packet[1] & 0x30) >> 4);
+	else
+		w = (sc->packet[0] & 0xc0) >> 6;
+
+	/* Hardware version 1 doesn't report pressure. */
+	if (w) {
+		x = ((sc->packet[1] & 0x0c) << 6) | sc->packet[2];
+		y = ((sc->packet[1] & 0x03) << 8) | sc->packet[3];
+		z = SYNAPTICS_PRESSURE;
+	} else {
+		x = elantech->old_x;
+		y = elantech->old_y;
+		z = 0;
+	}
+
+	elantech_send_input(sc, x, y, z, w);
+}
+
+void
+pms_proc_elantech_v2(struct pms_softc *sc)
+{
+	const u_char debounce_pkt[] = { 0x84, 0xff, 0xff, 0x02, 0xff, 0xff };
+	struct elantech_softc *elantech = sc->elantech;
+	int x, y, w, z;
+
+	/*
+	 * The hardware sends this packet when in debounce state.
+	 * The packet should be ignored.
+	 */
+	if (!memcmp(sc->packet, debounce_pkt, sizeof(debounce_pkt)))
+		return;
+
+	w = (sc->packet[0] & 0xc0) >> 6;
+	if (w == 1 || w == 3) {
+		x = ((sc->packet[1] & 0x0f) << 8) | sc->packet[2];
+		y = ((sc->packet[4] & 0x0f) << 8) | sc->packet[5];
+		if (elantech->flags & ELANTECH_F_REPORTS_PRESSURE)
+			z = ((sc->packet[1] & 0xf0) |
+			    (sc->packet[4] & 0xf0) >> 4);
+		else
+			z = SYNAPTICS_PRESSURE;
+	} else if (w == 2) {
+		x = (((sc->packet[0] & 0x10) << 4) | sc->packet[1]) << 2;
+		y = (((sc->packet[0] & 0x20) << 3) | sc->packet[2]) << 2;
+		z = SYNAPTICS_PRESSURE;
+	} else {
+		x = elantech->old_x;
+		y = elantech->old_y;
+		z = 0;
+	}
+
+	elantech_send_input(sc, x, y, z, w);
+}
+
+void
+pms_proc_elantech_v3(struct pms_softc *sc)
+{
+	const u_char debounce_pkt[] = { 0xc4, 0xff, 0xff, 0x02, 0xff, 0xff };
+	struct elantech_softc *elantech = sc->elantech;
+	int x, y, w, z;
+
+	/* The hardware sends this packet when in debounce state.
+	 * The packet should be ignored. */
+	if (!memcmp(sc->packet, debounce_pkt, sizeof(debounce_pkt)))
+		return;
+
+	x = ((sc->packet[1] & 0x0f) << 8 | sc->packet[2]);
+	y = ((sc->packet[4] & 0x0f) << 8 | sc->packet[5]);
+	z = 0;
+	w = (sc->packet[0] & 0xc0) >> 6;
+	if (w == 2) {
+		/*
+		 * Two-finger touch causes two packets -- a head packet
+		 * and a tail packet. We report a single event and ignore
+		 * the tail packet.
+		 */
+		if ((sc->packet[0] & 0x0c) != 0x04 &&
+		    (sc->packet[3] & 0xfc) != 0x02) {
+			/* not the head packet -- ignore */
+			return;
+		}
+	}
+
+	/* Prevent juming cursor if pad isn't touched or reports garbage. */
+	if (w == 0 ||
+	    ((x == 0 || y == 0 || x == elantech->max_x || y == elantech->max_y)
+	    && (x != elantech->old_x || y != elantech->old_y))) {
+		x = elantech->old_x;
+		y = elantech->old_y;
+	}
+
+	if (elantech->flags & ELANTECH_F_REPORTS_PRESSURE)
+		z = (sc->packet[1] & 0xf0) | ((sc->packet[4] & 0xf0) >> 4);
+	else if (w)
+		z = SYNAPTICS_PRESSURE;
+
+	elantech_send_input(sc, x, y, z, w);
+}
+
+void
+pms_proc_elantech_v4(struct pms_softc *sc)
+{
+	struct elantech_softc *elantech = sc->elantech;
+	int z, delta_x1 = 0, delta_x2 = 0, delta_y1 = 0, delta_y2 = 0;
+	int i, weight, finger, fingers = 0, id, sid;
+
+	switch (sc->packet[3] & 0x1f) {
+	case ELANTECH_V4_PKT_STATUS:
+		fingers = sc->packet[1] & 0x1f;
+		for (i = 0; i < ELANTECH_MAX_FINGERS; i++) {
+			finger = ((fingers & (1 << i)) != 0);
+			if (elantech->fingers[i] && !finger)
+				/* notify that we lifted */
+				elantech_send_input(sc, elantech->mt[i].x,
+				    elantech->mt[i].y, 0, 0);
+
+			elantech->fingers[i] = finger;
+		}
+
+		break;
+
+	case ELANTECH_V4_PKT_HEAD:
+		id = ((sc->packet[3] & 0xe0) >> 5) - 1;
+		if (id < 0)
+			return;
+
+		for (i = 0; i < ELANTECH_MAX_FINGERS; i++)
+			if (elantech->fingers[i])
+				fingers++;
+
+		elantech->mt[id].x = ((sc->packet[1] & 0x0f) << 8) |
+		    sc->packet[2];
+		elantech->mt[id].y = (((sc->packet[4] & 0x0f) << 8) |
+		    sc->packet[5]);
+		z = (sc->packet[1] & 0xf0) | ((sc->packet[4] & 0xf0) >> 4);
+
+		elantech_send_input(sc, elantech->mt[id].x, elantech->mt[id].y,
+		    z, fingers);
+
+		break;
+
+	case ELANTECH_V4_PKT_MOTION:
+		id = ((sc->packet[0] & 0xe0) >> 5) - 1;
+		if (id < 0)
+			return;
+
+		sid = ((sc->packet[3] & 0xe0) >> 5) - 1;
+		weight = (sc->packet[0] & 0x10) ? ELANTECH_V4_WEIGHT_VALUE : 1;
+
+		delta_x1 = (signed char)sc->packet[1];
+		delta_y1 = (signed char)sc->packet[2];
+		delta_x2 = (signed char)sc->packet[4];
+		delta_y2 = (signed char)sc->packet[5];
+
+		elantech->mt[id].x += delta_x1 * weight;
+		elantech->mt[id].y -= delta_y1 * weight;
+
+		for (i = 0; i < ELANTECH_MAX_FINGERS; i++)
+			if (elantech->fingers[i])
+				fingers++;
+
+		elantech_send_input(sc, elantech->mt[id].x, elantech->mt[id].y,
+		    1, fingers);
+
+		if (sid >= 0) {
+			elantech->mt[sid].x += delta_x2 * weight;
+			elantech->mt[sid].y -= delta_y2 * weight;
+			/* XXX: can only send one finger of input */
+			/*
+			elantech_send_input(sc, elantech->mt[sid].x,
+			    elantech->mt[sid].y, 1, fingers);
+			*/
+		}
+
+		break;
+
+	default:
+		printf("%s: unknown packet type 0x%x\n", DEVNAME(sc),
+		    sc->packet[3] & 0x1f);
+		return;
+	}
+}
+
+void
+elantech_send_input(struct pms_softc *sc, int x, int y, int z, int w)
+{
+	struct elantech_softc *elantech = sc->elantech;
+	int dx, dy;
+	u_int buttons = 0;
+
+	if (sc->packet[0] & 0x01)
+		buttons |= WSMOUSE_BUTTON(1);
+	if (sc->packet[0] & 0x02)
+		buttons |= WSMOUSE_BUTTON(3);
+
+	if (elantech->flags & ELANTECH_F_HAS_ROCKER) {
+		if (sc->packet[0] & 0x40) /* up */
+			buttons |= WSMOUSE_BUTTON(4);
+		if (sc->packet[0] & 0x80) /* down */
+			buttons |= WSMOUSE_BUTTON(5);
+	}
+
+	if (elantech->wsmode == WSMOUSE_NATIVE) {
+		wsmouse_input(sc->sc_wsmousedev, buttons, x, y, z, w,
+		    WSMOUSE_INPUT_ABSOLUTE_X |
+		    WSMOUSE_INPUT_ABSOLUTE_Y |
+		    WSMOUSE_INPUT_ABSOLUTE_Z |
+		    WSMOUSE_INPUT_ABSOLUTE_W);
+	} else {
+		dx = dy = 0;
+
+		if ((elantech->flags & ELANTECH_F_REPORTS_PRESSURE) &&
+		    z > SYNAPTICS_PRESSURE) {
+			dx = x - elantech->old_x;
+			dy = y - elantech->old_y;
+			dx /= SYNAPTICS_SCALE;
+			dy /= SYNAPTICS_SCALE;
+		}
+		if (dx || dy || buttons != elantech->old_buttons)
+			wsmouse_input(sc->sc_wsmousedev, buttons, dx, dy, 0, 0,
+			    WSMOUSE_INPUT_DELTA);
+		elantech->old_buttons = buttons;
+	}
+
+	elantech->old_x = x;
+	elantech->old_y = y;
 }

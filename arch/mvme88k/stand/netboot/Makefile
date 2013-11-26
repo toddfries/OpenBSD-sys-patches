@@ -1,6 +1,5 @@
-#	$OpenBSD: Makefile,v 1.15 2008/04/02 21:53:18 miod Exp $
+#	$OpenBSD: Makefile,v 1.21 2013/11/06 19:37:06 miod Exp $
 
-SIZE?=	size
 STRIP?= strip
 
 S=	${.CURDIR}/../../../..
@@ -16,19 +15,21 @@ CLEANFILES+=netboot netboot.bin
 .include "${S}/arch/mvme88k/stand/libsa/Makefile.inc"
 .include "${S}/arch/mvme88k/stand/libz/Makefile.inc"
 
-SRCS=   boot.c conf.c version.c devopen.c dev_net.c
+SRCS=	boot.c devices.c version.c
+SRCS+=	conf.c dev_net.c devopen.c netif.c
 SRCS+=	if_ie.c
-#SRCS+=  if_le.c
+SRCS+=	if_le.c
 OBJS=  ${SRCS:S/.c/.o/g}
 LIBS= ${LIBSA} ${LIBBUG} ${LIBZ}
-LDFLAGS+= -s -N -T ${STAGE2_RELOC}
+LDFLAGS=-N -T ${S}/arch/mvme88k/stand/ld.script -Ttext ${STAGE2_RELOC}
+LDFLAGS+= -warn-common
+NOPIE=
 
 all:	netboot.bin
 
-netboot: ${OBJS} ${NETBOOT_CRT} ${LIBS}
+netboot: ${NETBOOT_CRT} ${OBJS} ${LIBS}
 	${LD} ${LDFLAGS} -o $@ \
-		${NETBOOT_CRT} ${OBJS} ${LIBS} `cc -print-libgcc-file-name`
-#	@${SIZE} $@
+	    ${NETBOOT_CRT} ${OBJS} ${LIBS} `${CC} -print-libgcc-file-name`
 
 netboot.bin: netboot
 	${STRIP} netboot

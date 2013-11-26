@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.4 2012/03/15 18:57:22 miod Exp $ */
+/*	$OpenBSD: bus_dma.c,v 1.7 2012/10/03 19:42:54 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -63,7 +63,7 @@
 
 #include <uvm/uvm_extern.h>
 
-#include <mips64/archtype.h>
+#include <mips64/cache.h>
 #include <machine/cpu.h>
 #include <machine/autoconf.h>
 
@@ -306,9 +306,6 @@ void
 _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
     bus_size_t size, int op)
 {
-#define SYNC_R 0	/* WB invalidate, WT invalidate */
-#define SYNC_W 1	/* WB writeback + invalidate, WT unaffected */
-#define SYNC_X 2	/* WB writeback + invalidate, WT invalidate */
 	int nsegs;
 	int curseg;
 	struct cpu_info *ci = curcpu();
@@ -352,24 +349,16 @@ _dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
 			 * Otherwise, just invalidate (if noncoherent).
 			 */
 			if (op & BUS_DMASYNC_PREWRITE) {
-#ifdef TGT_COHERENT
-				Mips_IOSyncDCache(ci, vaddr, paddr,
-				    ssize, SYNC_W);
-#else
 				if (op & BUS_DMASYNC_PREREAD)
-					Mips_IOSyncDCache(ci, vaddr, paddr,
-					    ssize, SYNC_X);
+					Mips_IOSyncDCache(ci, vaddr,
+					    ssize, CACHE_SYNC_X);
 				else
-					Mips_IOSyncDCache(ci, vaddr, paddr,
-					    ssize, SYNC_W);
-#endif
+					Mips_IOSyncDCache(ci, vaddr,
+					    ssize, CACHE_SYNC_W);
 			} else
 			if (op & (BUS_DMASYNC_PREREAD | BUS_DMASYNC_POSTREAD)) {
-#ifdef TGT_COHERENT
-#else
-				Mips_IOSyncDCache(ci, vaddr, paddr,
-				    ssize, SYNC_R);
-#endif
+				Mips_IOSyncDCache(ci, vaddr,
+				    ssize, CACHE_SYNC_R);
 			}
 			size -= ssize;
 		}
@@ -436,11 +425,6 @@ _dmamem_map(bus_dma_tag_t t, bus_dma_segment_t *segs, int nsegs, size_t size,
 	paddr_t pa;
 	bus_addr_t addr;
 	int curseg, error;
-
-#ifdef TGT_COHERENT
-	if (ISSET(flags, BUS_DMA_COHERENT))
-		CLR(flags, BUS_DMA_COHERENT);
-#endif
 
 	if (nsegs == 1) {
 		pa = (*t->_device_to_pa)(segs[0].ds_addr);

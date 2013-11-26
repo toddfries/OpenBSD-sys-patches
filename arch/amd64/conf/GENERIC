@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.326 2011/09/20 20:25:45 matthieu Exp $
+#	$OpenBSD: GENERIC,v 1.353 2013/11/15 19:42:20 sasano Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -23,6 +23,7 @@ option		MTRR		# CPU memory range attributes control
 #option		"KGDB_DEVNAME=\"com\"",KGDBADDR=0x2f8,KGDBRATE=9600
 
 option		NTFS		# NTFS support
+option		HIBERNATE	# Hibernate support
 
 config		bsd	swap generic
 
@@ -34,6 +35,7 @@ ioapic*	at mainbus?
 isa0	at mainbus0
 isa0	at pcib?
 isa0	at amdpcib?
+isa0	at tcpcib?
 pci*	at mainbus0
 
 acpi0		at bios0
@@ -73,6 +75,7 @@ pci*	at ppb?
 pci*	at pchb?
 pcib*	at pci?			# PCI-ISA bridge
 amdpcib* at pci?		# AMD 8111 LPC bridge
+tcpcib*	at pci?			# Intel Atom E600 LPC bridge
 kate*	at pci?			# AMD K8 temperature sensor
 km*	at pci?			# AMD K10 temperature sensor
 amas*	at pci? disable		# AMD memory configuration
@@ -204,8 +207,6 @@ umass*	at uhub?		# USB Mass Storage devices
 uhidev*	at uhub?		# Human Interface Devices
 ums*	at uhidev?		# USB mouse
 wsmouse* at ums? mux 0
-uhts*	 at uhidev?		# USB HID touch screen
-wsmouse* at uhts? mux 0
 uts*	at uhub?		# USB touchscreen
 wsmouse* at uts? mux 0
 ukbd*	at uhidev?		# USB keyboard
@@ -218,15 +219,16 @@ atu*	at uhub?		# Atmel AT76c50x based 802.11b
 axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
+smsc*	at uhub?		# SMSC LAN95xx Ethernet
 cdce*	at uhub?		# CDC Ethernet
 urndis*	at uhub?		# Remote NDIS Ethernet
 upl*	at uhub?		# Prolific PL2301/PL2302 host-to-host `network'
+ugl*	at uhub?		# Genesys Logic GL620USB-A host-to-host `network'
 udav*	at uhub?		# Davicom DM9601 based Ethernet
 mos*	at uhub?		# MOSCHIP MCS7730/7830 10/100 Ethernet
 url*	at uhub?		# Realtek RTL8150L based adapters
 wi*	at uhub?		# WaveLAN IEEE 802.11DS
 urio*	at uhub?		# Diamond Multimedia Rio 500
-uscanner* at uhub? disable	# USB Scanners
 #uyap*	at uhub?		# Y@P firmware loader
 udsbr*	at uhub?		# D-Link DSB-R100 radio
 radio*	at udsbr?		# USB radio
@@ -245,9 +247,13 @@ rsu*	at uhub?		# RealTek RTL8188SU/RTL8191SU/RTL8192SU
 urtwn*	at uhub?		# RealTek RTL8188CU/RTL8192CU
 udcf*	at uhub?		# Gude Expert mouseCLOCK
 uthum*	at uhidev?		# TEMPerHUM sensor
+ugold*	at uhidev?		# gold TEMPer sensor
 utrh*	at uhidev?		# USBRH sensor
 utwitch* at uhidev?		# YUREX BBU sensor
 uow*	at uhub?		# Maxim/Dallas DS2490 1-Wire adapter
+uoakrh*	at uhidev?		# Toradex OAK temp and rel humidity
+uoaklux* at uhidev?		# Toradex OAK LUX
+uoakv*	at uhidev?		# Toradex OAK 10V sensor
 onewire* at uow?
 uvideo*	at uhub?		# USB Video
 video*	at uvideo?
@@ -255,10 +261,12 @@ udl*	at uhub?		# DisplayLink USB displays
 wsdisplay* at udl?
 
 puc*	at pci?			# PCI "universal" communication device
-#puc*	at cardbus?
+com*	at cardbus?
 
 sdhc*	at pci?			# SD Host Controller
 sdmmc*	at sdhc?		# SD/MMC bus
+rtsx*	at pci?			# Realtek SD Card Reader
+sdmmc*	at rtsx?		# SD/MMC bus
 
 # Bluetooth controllers
 #sbt*	at sdmmc? disable	# SDIO Bluetooth
@@ -286,7 +294,7 @@ pms*		at pckbc?		# PS/2 mouse for wsmouse
 vga0		at isa?
 option		X86EMU			# to POST video cards
 vga*		at pci?
-wsdisplay*	at vga?
+wsdisplay0	at vga? console 1
 wskbd*		at pckbd? mux 1
 wsmouse*	at pms? mux 0
 
@@ -299,15 +307,17 @@ agp*		at intagp?
 #option		DRM_DEBUG
 inteldrm*	at vga? 	# Intel i915, i945 DRM driver
 drm*		at inteldrm?
-radeondrm*	at vga? 	# ATI Radeon DRM driver
+radeondrm*	at pci? 	# ATI Radeon DRM driver
 drm*		at radeondrm?
+wsdisplay0	at radeondrm? console 1
+wsdisplay*	at radeondrm?
 
 pcppi0		at isa?
 
 com0	at isa? port 0x3f8 irq 4	# standard PC serial ports
 com1	at isa? port 0x2f8 irq 3
-#com2	at isa? port 0x3e8 irq 5
-#com3	at isa? port 0x2e8 irq 9	# (conflicts with some video cards)
+com2	at isa? port 0x3e8 irq 5
+com3	at isa? disable port 0x2e8 irq 9 # (conflicts with some video cards)
 
 com*	at pcmcia?			# PCMCIA modems/serial ports
 com*	at puc?
@@ -338,6 +348,7 @@ twe*	at pci?				# 3ware Escalade RAID controllers
 #aac*	at pci?				# Adaptec FSA RAID controllers
 ami*	at pci?				# AMI MegaRAID controllers
 mfi*	at pci?				# LSI MegaRAID SAS controllers
+mfii*	at pci?				# LSI MegaRAID SAS Fusion controllers
 #cac*	at pci?				# Compaq Smart ARRAY [234]* RAID controllers
 ciss*	at pci?				# Compaq Smart ARRAY [56]* RAID controllers
 iha*	at pci?				# Initio Ultra/UltraWide SCSI controllers
@@ -350,6 +361,7 @@ siop*	at pci?				# NCR 538XX SCSI controllers
 adw*	at pci?				# AdvanSys ULTRA WIDE SCSI
 pcscp*	at pci?				# AMD 53c974 PCscsi-PCI SCSI
 #trm*	at pci?				# Tekram DC-3x5U SCSI Controllers
+vmwpvs*	at pci?				# VMware ParaVirtual SCSI
 
 scsibus* at scsi?
 sd*	at scsibus?			# SCSI disk drives
@@ -391,7 +403,6 @@ ne*	at pcmcia?			# PCMCIA based NE2000 ethernet
 ep*	at pcmcia?			# PCMCIA based 3C5xx ethernet
 sm*	at pcmcia?			# PCMCIA based sm ethernet
 xe*	at pcmcia?			# Xircom ethernet
-#fpa*	at pci?				# DEC DEFPA FDDI
 xl*	at pci?				# 3C9xx ethernet
 xl*	at cardbus?			# 3C575/3C656 ethernet
 rl*	at pci?				# RealTek 81[23]9 ethernet
@@ -417,6 +428,7 @@ em*	at pci?				# Intel Pro/1000 ethernet
 ixgb*	at pci?				# Intel Pro/10Gb ethernet
 ix*	at pci?				# Intel 82598EB 10Gb ethernet
 myx*	at pci?				# Myricom Myri-10G 10Gb ethernet
+oce*	at pci?				# Emulex OneConnect 10Gb ethernet
 txp*	at pci?				# 3com 3CR990
 #nge*	at pci?				# NS DP83820/DP83821 GigE
 bge*	at pci?				# Broadcom BCM57xx (aka Tigon3)
@@ -436,6 +448,7 @@ tht*	at thtc?
 gem*	at pci?				# Sun 'gem' ethernet
 bce*	at pci?				# Broadcom BCM4401
 vic*	at pci?				# VMware VMXnet virtual interface
+vmx*	at pci?				# VMware VMXNET3 virtual interface
 et*	at pci?				# Agere/LSI ET1310
 age*	at pci?				# Attansic L1 Ethernet
 alc*	at pci?				# Attansic L1C/L1D/L2C Ethernet
@@ -459,7 +472,6 @@ wi*	at pcmcia?			# WaveLAN IEEE 802.11DS
 an*	at pci?				# Aironet IEEE 802.11DS
 an*	at pcmcia?			# Aironet IEEE 802.11DS
 cnw*	at pcmcia?			# Xircom Netwave
-ray*	at pcmcia?			# Raylink Aviator2.4/Pro 802.11FH
 iwi*	at pci?				# Intel PRO/Wireless 2200BG/2915ABG
 wpi*	at pci?				# Intel PRO/Wireless 3945ABG
 iwn*	at pci?				# Intel WiFi Link 4965/5000/1000/6000
@@ -574,11 +586,6 @@ nofn*	at pci?			# Hi/fn 7814/7851/7854 crypto card
 ubsec*	at pci?			# Bluesteel Networks 5xxx crypto card
 safe*	at pci?			# SafeNet SafeXcel 1141/1741
 
-# I2O
-iop*	at pci?			# I2O processor
-ioprbs*	at iop?			# I2O arrays
-iopsp*	at iop?			# I2O SCSI pass-through
-
 # 1-Wire devices
 option ONEWIREVERBOSE
 owid*	at onewire?		# ID
@@ -588,11 +595,15 @@ owctr*	at onewire?		# Counter device
 
 pseudo-device	pctr		1
 pseudo-device	nvram		1
-pseudo-device	sequencer	1
-#pseudo-device	raid		4	# RAIDframe disk driver
 pseudo-device	hotplug		1	# devices hot plugging
 pseudo-device	mtrr		1	# Memory range attributes control
 
 # mouse & keyboard multiplexor pseudo-devices
 pseudo-device	wsmux		2
 pseudo-device	crypto		1
+
+# Virtio devices
+virtio*		at pci?		# Virtio PCI device
+vioblk*		at virtio?	# Virtio block device
+vio*		at virtio?	# Virtio network device
+viomb*		at virtio?	# Virtio memory ballooning device

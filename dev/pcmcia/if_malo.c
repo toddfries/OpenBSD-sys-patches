@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_malo.c,v 1.73 2011/07/03 15:47:17 matthew Exp $ */
+/*      $OpenBSD: if_malo.c,v 1.75 2013/11/14 12:21:13 dlg Exp $ */
 
 /*
  * Copyright (c) 2007 Marcus Glocker <mglocker@openbsd.org>
@@ -29,7 +29,7 @@
 #include <sys/malloc.h>
 #include <sys/sockio.h>
 #include <sys/mbuf.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 
 #if NBPFILTER > 0
 #include <net/bpf.h>
@@ -253,8 +253,7 @@ malo_pcmcia_activate(struct device *dev, int act)
 		pcmcia_function_enable(psc->sc_pf);
 		psc->sc_ih = pcmcia_intr_establish(psc->sc_pf, IPL_NET,
 		    cmalo_intr, sc, sc->sc_dev.dv_xname);
-		workq_queue_task(NULL, &sc->sc_resume_wqt, 0,
-		    malo_pcmcia_resume, sc, NULL);
+		task_add(systq, &sc->sc_resume_t);
 		break;
 	case DVACT_DEACTIVATE:
 		if ((sc->sc_flags & MALO_DEVICE_ATTACHED) &&
@@ -302,6 +301,8 @@ cmalo_attach(void *arg)
 
 	/* disable interrupts */
 	cmalo_intr_mask(sc, 0);
+
+	task_set(&sc->sc_resume_t, malo_pcmcia_resume, sc, NULL);
 
 	/* load firmware */
 	if (cmalo_fw_alloc(sc) != 0)
@@ -971,7 +972,7 @@ cmalo_rx(struct malo_softc *sc)
 
 	/* prepare mbuf */
 	m = m_devget(sc->sc_data + rxdesc->pkgoffset,
-	    rxdesc->pkglen, ETHER_ALIGN, ifp, NULL);
+	    rxdesc->pkglen, ETHER_ALIGN, ifp);
 	if (m == NULL) {
 		DPRINTF(1, "RX m_devget failed\n");
 		ifp->if_ierrors++;

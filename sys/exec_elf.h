@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.h,v 1.49 2011/09/20 16:42:01 pirofti Exp $	*/
+/*	$OpenBSD: exec_elf.h,v 1.52 2013/05/08 20:55:14 guenther Exp $	*/
 /*
  * Copyright (c) 1995, 1996 Erik Theisen.  All rights reserved.
  *
@@ -426,6 +426,9 @@ typedef struct {
 #define PT_LOPROC	0x70000000	/* reserved range for processor */
 #define PT_HIPROC	0x7fffffff	/*  specific segment types */
 
+#define PT_OPENBSD_RANDOMIZE	0x65a3dbe6	/* fill with random data */
+
+
 /* Segment flags - p_flags */
 #define PF_X		0x1		/* Executable */
 #define PF_W		0x2		/* Writable */
@@ -477,11 +480,14 @@ typedef struct {
 #define DT_TEXTREL	22		/* Allow rel. mod. to unwritable seg */
 #define DT_JMPREL	23		/* add. of PLT's relocation entries */
 #define DT_BIND_NOW	24		/* Bind now regardless of env setting */
-#define DT_NUM		25		/* Number used. */
+#define DT_LOOS		0x6000000d	/* reserved range for OS */
+#define DT_HIOS		0x6ffff000	/*  specific dynamic array tags */
 #define DT_LOPROC	0x70000000	/* reserved range for processor */
 #define DT_HIPROC	0x7fffffff	/*  specific dynamic array tags */
 
 /* some other useful tags */
+#define DT_RELACOUNT	0x6ffffff9	/* if present, number of RELATIVE */
+#define DT_RELCOUNT	0x6ffffffa	/* relocs, which must come first */
 #define DT_FLAGS_1      0x6ffffffb
 
 /* Dynamic Flags - DT_FLAGS_1 .dynamic entry */
@@ -500,6 +506,8 @@ typedef struct {
 #define DF_1_NODUMP	0x00001000
 #define DF_1_CONLFAT	0x00002000
 
+/* ld.so: number of low tags that are used saved internally (0 .. DT_NUM-1) */
+#define DT_NUM		(DT_JMPREL+1)
 
 /* Standard ELF hashing function */
 unsigned int elf_hash(const unsigned char *name);
@@ -621,7 +629,6 @@ struct elf_args {
         u_long  arg_phaddr;		/* program header address */
         u_long  arg_phentsize;		/* Size of program header */
         u_long  arg_phnum;		/* Number of program headers */
-        u_long  arg_os;			/* OS tag */
 };
 
 #endif

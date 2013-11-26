@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_gif.c,v 1.55 2010/07/03 04:44:51 guenther Exp $	*/
+/*	$OpenBSD: if_gif.c,v 1.64 2013/10/19 14:46:30 mpi Exp $	*/
 /*	$KAME: if_gif.c,v 1.43 2001/02/20 08:51:07 itojun Exp $	*/
 
 /*
@@ -49,6 +49,7 @@
 #include <netinet/in_var.h>
 #include <netinet/in_gif.h>
 #include <netinet/ip.h>
+#include <netinet/ip_ether.h>
 #include <netinet/ip_var.h>
 #endif	/* INET */
 
@@ -56,6 +57,7 @@
 #ifndef INET
 #include <netinet/in.h>
 #endif
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/in6_gif.h>
@@ -104,15 +106,14 @@ gif_clone_create(struct if_clone *ifc, int unit)
 	sc->gif_if.if_start  = gif_start;
 	sc->gif_if.if_output = gif_output;
 	sc->gif_if.if_type   = IFT_GIF;
-	IFQ_SET_MAXLEN(&sc->gif_if.if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&sc->gif_if.if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&sc->gif_if.if_snd);
 	sc->gif_if.if_softc = sc;
 	if_attach(&sc->gif_if);
 	if_alloc_sadl(&sc->gif_if);
 
 #if NBPFILTER > 0
-	bpfattach(&sc->gif_if.if_bpf, &sc->gif_if, DLT_NULL,
-	    sizeof(u_int));
+	bpfattach(&sc->gif_if.if_bpf, &sc->gif_if, DLT_LOOP, sizeof(u_int32_t));
 #endif
 	s = splnet();
 	LIST_INSERT_HEAD(&gif_softc_list, sc, gif_list);
@@ -149,7 +150,6 @@ gif_start(struct ifnet *ifp)
 	struct gif_softc *sc = (struct gif_softc*)ifp;
 	struct mbuf *m;
 	int s;
-	sa_family_t family;
 
 	while (1) {
 		s = splnet();
@@ -167,16 +167,13 @@ gif_start(struct ifnet *ifp)
 			continue;
 		}
 
-		/* get tunnel address family */
-		family = sc->gif_psrc->sa_family;
-
 		/*
-		 * Check if the packet is comming via bridge and needs
+		 * Check if the packet is coming via bridge and needs
 		 * etherip encapsulation or not. bridge(4) directly calls
 		 * the start function and bypasses the if_output function
 		 * so we need to do the encap here.
 		 */
-		if (ifp->if_bridge && (m->m_flags & M_PROTO1)) {
+		if (ifp->if_bridgeport && (m->m_flags & M_PROTO1)) {
 			int error = 0;
 			/*
 			 * Remove multicast and broadcast flags or encapsulated
@@ -238,6 +235,7 @@ gif_start(struct ifnet *ifp)
 				break;
 			case IPPROTO_ETHERIP:
 				family = AF_LINK;
+				offset += sizeof(struct etherip_header);
 				break;
 			case IPPROTO_MPLS:
 				family = AF_MPLS;
@@ -293,7 +291,6 @@ gif_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	struct gif_softc *sc = (struct gif_softc*)ifp;
 	int error = 0;
 	int s;
-	sa_family_t family = dst->sa_family;
 
 	if (!(ifp->if_flags & IFF_UP) ||
 	    sc->gif_psrc == NULL || sc->gif_pdst == NULL ||
@@ -315,12 +312,12 @@ gif_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	switch (sc->gif_psrc->sa_family) {
 #ifdef INET
 	case AF_INET:
-		error = in_gif_output(ifp, family, &m);
+		error = in_gif_output(ifp, dst->sa_family, &m);
 		break;
 #endif
 #ifdef INET6
 	case AF_INET6:
-		error = in6_gif_output(ifp, family, &m);
+		error = in6_gif_output(ifp, dst->sa_family, &m);
 		break;
 #endif
 	default:
@@ -375,19 +372,6 @@ gif_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		switch (ifr->ifr_addr.sa_family) {
-#ifdef INET
-		case AF_INET:	/* IP supports Multicast */
-			break;
-#endif /* INET */
-#ifdef INET6
-		case AF_INET6:	/* IP6 supports Multicast */
-			break;
-#endif /* INET6 */
-		default:  /* Other protocols doesn't support Multicast */
-			error = EAFNOSUPPORT;
-			break;
-		}
 		break;
 
 	case SIOCSIFPHYADDR:
@@ -680,8 +664,7 @@ gif_checkloop(struct ifnet *ifp, struct mbuf *m)
 	 */
 	for (mtag = m_tag_find(m, PACKET_TAG_GIF, NULL); mtag;
 	    mtag = m_tag_find(m, PACKET_TAG_GIF, mtag)) {
-		if (!bcmp((caddr_t)(mtag + 1), &ifp,
-		    sizeof(struct ifnet *))) {
+		if (*(struct ifnet **)(mtag + 1) == ifp) {
 			log(LOG_NOTICE, "gif_output: "
 			    "recursively called too many times\n");
 			m_freem(m);
@@ -689,12 +672,12 @@ gif_checkloop(struct ifnet *ifp, struct mbuf *m)
 		}
 	}
 
-	mtag = m_tag_get(PACKET_TAG_GIF, sizeof(caddr_t), M_NOWAIT);
+	mtag = m_tag_get(PACKET_TAG_GIF, sizeof(struct ifnet *), M_NOWAIT);
 	if (mtag == NULL) {
 		m_freem(m);
 		return ENOMEM;
 	}
-	bcopy(&ifp, mtag + 1, sizeof(caddr_t));
+	*(struct ifnet **)(mtag + 1) = ifp;
 	m_tag_prepend(m, mtag);
 	return 0;
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: onewire.c,v 1.12 2011/07/03 15:47:16 matthew Exp $	*/
+/*	$OpenBSD: onewire.c,v 1.14 2013/11/18 20:21:51 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -415,7 +415,7 @@ onewire_createthread(void *arg)
 	struct onewire_softc *sc = arg;
 
 	if (kthread_create(onewire_thread, sc, &sc->sc_thread,
-	    "%s", sc->sc_dev.dv_xname) != 0)
+	    sc->sc_dev.dv_xname) != 0)
 		printf("%s: can't create kernel thread\n",
 		    sc->sc_dev.dv_xname);
 }
@@ -489,9 +489,7 @@ onewire_scan(struct onewire_softc *sc)
 
 out:
 	/* Detach disappeared devices */
-	for (d = TAILQ_FIRST(&sc->sc_devs);
-	    d != TAILQ_END(&sc->sc_dev); d = next) {
-		next = TAILQ_NEXT(d, d_list);
+	TAILQ_FOREACH_SAFE(d, &sc->sc_devs, d_list, next) {
 		if (!d->d_present) {
 			if (d->d_dev != NULL)
 				config_detach(d->d_dev, DETACH_FORCE);

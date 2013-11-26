@@ -1,4 +1,4 @@
-/*	$OpenBSD: uchcom.c,v 1.15 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: uchcom.c,v 1.19 2013/11/15 10:17:39 pirofti Exp $	*/
 /*	$NetBSD: uchcom.c,v 1.1 2007/09/03 17:57:37 tshiozak Exp $	*/
 
 /*
@@ -109,14 +109,13 @@ int	uchcomdebug = 0;
 struct uchcom_softc
 {
 	struct device		 sc_dev;
-	usbd_device_handle	 sc_udev;
+	struct usbd_device	*sc_udev;
 	struct device		*sc_subdev;
-	usbd_interface_handle	 sc_iface;
-	int			 sc_dying;
+	struct usbd_interface	*sc_iface;
 	/* */
 	int			 sc_intr_endpoint;
 	int			 sc_intr_size;
-	usbd_pipe_handle	 sc_intr_pipe;
+	struct usbd_pipe	*sc_intr_pipe;
 	u_char			*sc_intr_buf;
 	/* */
 	uint8_t			 sc_version;
@@ -166,12 +165,11 @@ void		uchcom_set(void *, int, int, int);
 int		uchcom_param(void *, int, struct termios *);
 int		uchcom_open(void *, int);
 void		uchcom_close(void *, int);
-void		uchcom_intr(usbd_xfer_handle, usbd_private_handle,
-		    usbd_status);
+void		uchcom_intr(struct usbd_xfer *, void *, usbd_status);
 
 int		uchcom_set_config(struct uchcom_softc *);
 int		uchcom_find_ifaces(struct uchcom_softc *,
-		    usbd_interface_handle *);
+		    struct usbd_interface **);
 int		uchcom_find_endpoints(struct uchcom_softc *,
 		    struct uchcom_endpoints *);
 void		uchcom_close_intr_pipe(struct uchcom_softc *);
@@ -259,11 +257,10 @@ uchcom_attach(struct device *parent, struct device *self, void *aux)
 	struct uchcom_softc *sc = (struct uchcom_softc *)self;
 	struct usb_attach_arg *uaa = aux;
 	struct ucom_attach_args uca;
-	usbd_device_handle dev = uaa->device;
+	struct usbd_device *dev = uaa->device;
 	struct uchcom_endpoints endpoints;
 
         sc->sc_udev = dev;
-	sc->sc_dying = 0;
 	sc->sc_dtr = sc->sc_rts = -1;
 	sc->sc_lsr = sc->sc_msr = 0;
 
@@ -309,7 +306,7 @@ uchcom_attach(struct device *parent, struct device *self, void *aux)
 	return;
 
 failed:
-	sc->sc_dying = 1;
+	usbd_deactivate(sc->sc_udev);
 }
 
 int
@@ -334,17 +331,14 @@ int
 uchcom_activate(struct device *self, int act)
 {
 	struct uchcom_softc *sc = (struct uchcom_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
 		uchcom_close_intr_pipe(sc);
-		sc->sc_dying = 1;
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return rv;
+	return 0;
 }
 
 int
@@ -363,7 +357,7 @@ uchcom_set_config(struct uchcom_softc *sc)
 }
 
 int
-uchcom_find_ifaces(struct uchcom_softc *sc, usbd_interface_handle *riface)
+uchcom_find_ifaces(struct uchcom_softc *sc, struct usbd_interface **riface)
 {
 	usbd_status err;
 
@@ -897,14 +891,11 @@ uchcom_close_intr_pipe(struct uchcom_softc *sc)
 {
 	usbd_status err;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (sc->sc_intr_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_intr_pipe);
-		if (err)
-			printf("%s: abort interrupt pipe failed: %s\n",
-			       sc->sc_dev.dv_xname, usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_intr_pipe);
 		err = usbd_close_pipe(sc->sc_intr_pipe);
 		if (err)
 			printf("%s: close interrupt pipe failed: %s\n",
@@ -923,7 +914,7 @@ uchcom_get_status(void *arg, int portno, u_char *rlsr, u_char *rmsr)
 {
 	struct uchcom_softc *sc = arg;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	*rlsr = sc->sc_lsr;
@@ -935,7 +926,7 @@ uchcom_set(void *arg, int portno, int reg, int onoff)
 {
 	struct uchcom_softc *sc = arg;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	switch (reg) {
@@ -959,7 +950,7 @@ uchcom_param(void *arg, int portno, struct termios *t)
 	struct uchcom_softc *sc = arg;
 	int ret;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return 0;
 
 	ret = uchcom_set_line_control(sc, t->c_cflag);
@@ -979,7 +970,7 @@ uchcom_open(void *arg, int portno)
 	int ret;
 	struct uchcom_softc *sc = arg;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return EIO;
 
 	ret = uchcom_setup_intr_pipe(sc);
@@ -998,7 +989,7 @@ uchcom_close(void *arg, int portno)
 {
 	struct uchcom_softc *sc = arg;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	uchcom_close_intr_pipe(sc);
@@ -1009,13 +1000,12 @@ uchcom_close(void *arg, int portno)
  * callback when the modem status is changed.
  */
 void
-uchcom_intr(usbd_xfer_handle xfer, usbd_private_handle priv,
-    usbd_status status)
+uchcom_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct uchcom_softc *sc = priv;
 	u_char *buf = sc->sc_intr_buf;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {

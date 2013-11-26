@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ie.c,v 1.39 2009/10/31 14:31:11 deraadt Exp $ */
+/*	$OpenBSD: if_ie.c,v 1.41 2013/09/05 20:55:57 bluhm Exp $ */
 
 /*-
  * Copyright (c) 1999 Steve Murphree, Jr. 
@@ -120,7 +120,6 @@ Mode of operation:
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -777,15 +776,15 @@ check_eh(sc, eh, to_bpf)
 		 */
 #if NBPFILTER > 0
 		*to_bpf = (sc->sc_arpcom.ac_if.if_bpf != 0) ||
-		    (sc->sc_arpcom.ac_if.if_bridge != NULL);
+		    (sc->sc_arpcom.ac_if.if_bridgeport != NULL);
 #else
-		*to_bpf = (sc->sc_arpcom.ac_if.if_bridge != NULL);
+		*to_bpf = (sc->sc_arpcom.ac_if.if_bridgeport != NULL);
 #endif
 		/* If for us, accept and hand up to BPF */
 		if (ether_equal(eh->ether_dhost, sc->sc_arpcom.ac_enaddr)) return 1;
 
 #if NBPFILTER > 0
-		if (*to_bpf && sc->sc_arpcom.ac_if.if_bridge == NULL)
+		if (*to_bpf && sc->sc_arpcom.ac_if.if_bridgeport == NULL)
 			*to_bpf = 2; /* we don't need to see it */
 #endif
 
@@ -817,9 +816,9 @@ check_eh(sc, eh, to_bpf)
 		 */
 #if NBPFILTER > 0
 		*to_bpf = (sc->sc_arpcom.ac_if.if_bpf != 0) ||
-		    (sc->sc_arpcom.ac_if.if_bridge != NULL);
+		    (sc->sc_arpcom.ac_if.if_bridgeport != NULL);
 #else
-		*to_bpf = (sc->sc_arpcom.ac_if.if_bridge != NULL);
+		*to_bpf = (sc->sc_arpcom.ac_if.if_bridgeport != NULL);
 #endif
 		/* We want to see multicasts. */
 		if (eh->ether_dhost[0] & 1)
@@ -831,7 +830,7 @@ check_eh(sc, eh, to_bpf)
 
 		/* Anything else goes to BPF but nothing else. */
 #if NBPFILTER > 0
-		if (*to_bpf && sc->sc_arpcom.ac_if.if_bridge == NULL)
+		if (*to_bpf && sc->sc_arpcom.ac_if.if_bridgeport == NULL)
 			*to_bpf = 2;
 #endif
 		return 1;

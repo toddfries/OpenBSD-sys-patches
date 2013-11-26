@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtl81x9.c,v 1.75 2011/06/21 16:52:45 tedu Exp $ */
+/*	$OpenBSD: rtl81x9.c,v 1.79 2013/08/21 05:21:43 dlg Exp $ */
 
 /*
  * Copyright (c) 1997, 1998
@@ -102,7 +102,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -651,7 +650,7 @@ rl_rxeof(struct rl_softc *sc)
 		wrap = (sc->rl_cdata.rl_rx_buf + RL_RXBUFLEN) - rxbufpos;
 
 		if (total_len > wrap) {
-			m = m_devget(rxbufpos, wrap, ETHER_ALIGN, ifp, NULL);
+			m = m_devget(rxbufpos, wrap, ETHER_ALIGN, ifp);
 			if (m != NULL) {
 				m_copyback(m, wrap, total_len - wrap,
 				    sc->rl_cdata.rl_rx_buf, M_NOWAIT);
@@ -662,8 +661,7 @@ rl_rxeof(struct rl_softc *sc)
 			}
 			cur_rx = (total_len - wrap + ETHER_CRC_LEN);
 		} else {
-			m = m_devget(rxbufpos, total_len, ETHER_ALIGN, ifp,
-			    NULL);
+			m = m_devget(rxbufpos, total_len, ETHER_ALIGN, ifp);
 			cur_rx += total_len + 4 + ETHER_CRC_LEN;
 		}
 
@@ -1125,7 +1123,7 @@ rl_attach(struct rl_softc *sc)
 {
 	struct ifnet	*ifp = &sc->sc_arpcom.ac_if;
 	int		rseg, i;
-	u_int16_t	rl_id, rl_did;
+	u_int16_t	rl_id;
 	caddr_t		kva;
 	int		addr_len;
 
@@ -1147,18 +1145,6 @@ rl_attach(struct rl_softc *sc)
 	    addr_len, 3, 1);
 
 	printf(", address %s\n", ether_sprintf(sc->sc_arpcom.ac_enaddr));
-
-	rl_read_eeprom(sc, (caddr_t)&rl_did, RL_EE_PCI_DID, addr_len, 1, 0);
-
-	if (rl_did == RT_DEVICEID_8139 || rl_did == ACCTON_DEVICEID_5030 ||
-	    rl_did == DELTA_DEVICEID_8139 || rl_did == ADDTRON_DEVICEID_8139 ||
-	    rl_did == DLINK_DEVICEID_8139 || rl_did == DLINK_DEVICEID_8139_2 ||
-	    rl_did == ABOCOM_DEVICEID_8139)
-		sc->rl_type = RL_8139;
-	else if (rl_did == RT_DEVICEID_8129)
-		sc->rl_type = RL_8129;
-	else
-		sc->rl_type = RL_UNKNOWN;	/* could be 8138 or other */
 
 	if (bus_dmamem_alloc(sc->sc_dmat, RL_RXBUFLEN + 32, PAGE_SIZE, 0,
 	    &sc->sc_rx_seg, 1, &rseg, BUS_DMA_NOWAIT | BUS_DMA_ZERO)) {
@@ -1213,7 +1199,6 @@ rl_attach(struct rl_softc *sc)
 	ifp->if_ioctl = rl_ioctl;
 	ifp->if_start = rl_start;
 	ifp->if_watchdog = rl_watchdog;
-	ifp->if_baudrate = 10000000;
 	IFQ_SET_READY(&ifp->if_snd);
 
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);

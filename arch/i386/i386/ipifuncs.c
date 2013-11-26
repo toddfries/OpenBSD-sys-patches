@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipifuncs.c,v 1.19 2010/10/02 23:14:33 deraadt Exp $	*/
+/*	$OpenBSD: ipifuncs.c,v 1.21 2013/03/20 21:23:05 kettenis Exp $	*/
 /* $NetBSD: ipifuncs.c,v 1.1.2.3 2000/06/26 02:04:06 sommerfeld Exp $ */
 
 /*-
@@ -31,8 +31,6 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
 
 /*
  * Interprocessor interrupt handlers.
@@ -101,6 +99,7 @@ void
 i386_ipi_halt(struct cpu_info *ci)
 {
 	SCHED_ASSERT_UNLOCKED();
+	npxsave_cpu(ci, 1);
 	disable_intr();
 	wbinvd();
 	ci->ci_flags &= ~CPUF_RUNNING;

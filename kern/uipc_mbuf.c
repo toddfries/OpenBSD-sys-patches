@@ -1,4 +1,4 @@
-/*	$OpenBSD: uipc_mbuf.c,v 1.165 2011/12/02 10:55:46 dlg Exp $	*/
+/*	$OpenBSD: uipc_mbuf.c,v 1.176 2013/11/09 06:38:42 dlg Exp $	*/
 /*	$NetBSD: uipc_mbuf.c,v 1.15.4.1 1996/06/13 17:11:44 cgd Exp $	*/
 
 /*
@@ -87,7 +87,6 @@
 #include <sys/socketvar.h>
 #include <net/if.h>
 
-#include <machine/cpu.h>
 
 #include <uvm/uvm.h>
 #include <uvm/uvm_extern.h>
@@ -99,6 +98,7 @@
 
 struct	mbstat mbstat;		/* mbuf stats */
 struct	pool mbpool;		/* mbuf pool */
+struct	pool mtagpool;
 
 /* mbuf cluster pools */
 u_int	mclsizes[] = {
@@ -127,6 +127,7 @@ void	m_cltick(void *);
 void	m_extfree(struct mbuf *);
 struct mbuf *m_copym0(struct mbuf *, int, int, int, int);
 void	nmbclust_update(void);
+void	m_zero(struct mbuf *);
 
 
 const char *mclpool_warnmsg =
@@ -148,6 +149,10 @@ mbinit(void)
 	pool_init(&mbpool, MSIZE, 0, 0, 0, "mbpl", NULL);
 	pool_set_constraints(&mbpool, &kp_dma_contig);
 	pool_setlowat(&mbpool, mblowat);
+
+	pool_init(&mtagpool, PACKET_TAG_MAXSIZE + sizeof(struct m_tag),
+	    0, 0, 0, "mtagpl", NULL);
+	pool_setipl(&mtagpool, IPL_NET);
 
 	for (i = 0; i < nitems(mclsizes); i++) {
 		snprintf(mclnames[i], sizeof(mclnames[0]), "mcl%dk",
@@ -378,7 +383,7 @@ m_cldrop(struct ifnet *ifp, int pi)
 	mclp = &ifp->if_data.ifi_mclpool[pi];
 	if (m_livelock == 0 && ISSET(ifp->if_flags, IFF_RUNNING) &&
 	    mclp->mcl_alive <= 4 && mclp->mcl_cwm < mclp->mcl_hwm &&
-	    mclp->mcl_grown < ticks) {
+	    mclp->mcl_grown - ticks < 0) {
 		/* About to run out, so increase the current watermark */
 		mclp->mcl_cwm++;
 		mclp->mcl_grown = ticks;
@@ -467,11 +472,17 @@ m_free_unlocked(struct mbuf *m)
 	struct mbuf *n;
 
 	mbstat.m_mtypes[m->m_type]--;
+	n = m->m_next;
+	if (m->m_flags & M_ZEROIZE) {
+		m_zero(m);
+		/* propagate M_ZEROIZE to the next mbuf in the chain */
+		if (n)
+			n->m_flags |= M_ZEROIZE;
+	}
 	if (m->m_flags & M_PKTHDR)
 		m_tag_delete_chain(m);
 	if (m->m_flags & M_EXT)
 		m_extfree(m);
-	n = m->m_next;
 	pool_put(&mbpool, m);
 
 	return (n);
@@ -537,7 +548,7 @@ m_defrag(struct mbuf *m, int how)
 	struct mbuf *m0;
 
 	if (m->m_next == NULL)
-		return 0;
+		return (0);
 
 #ifdef DIAGNOSTIC
 	if (!(m->m_flags & M_PKTHDR))
@@ -545,12 +556,12 @@ m_defrag(struct mbuf *m, int how)
 #endif
 
 	if ((m0 = m_gethdr(how, m->m_type)) == NULL)
-		return -1;
+		return (ENOBUFS);
 	if (m->m_pkthdr.len > MHLEN) {
 		MCLGETI(m0, how, NULL, m->m_pkthdr.len);
 		if (!(m0->m_flags & M_EXT)) {
 			m_free(m0);
-			return -1;
+			return (ENOBUFS);
 		}
 	}
 	m_copydata(m, 0, m->m_pkthdr.len, mtod(m0, caddr_t));
@@ -572,13 +583,13 @@ m_defrag(struct mbuf *m, int how)
 	 * original mbuf chain.
 	 */
 	if (m0->m_flags & M_EXT) {
-		bcopy(&m0->m_ext, &m->m_ext, sizeof(struct mbuf_ext));
+		memcpy(&m->m_ext, &m0->m_ext, sizeof(struct mbuf_ext));
 		MCLINITREFERENCE(m);
 		m->m_flags |= M_EXT|M_CLUSTER;
 		m->m_data = m->m_ext.ext_buf;
 	} else {
 		m->m_data = m->m_pktdat;
-		bcopy(m0->m_data, m->m_data, m0->m_len);
+		memcpy(m->m_data, m0->m_data, m0->m_len);
 	}
 	m->m_pkthdr.len = m->m_len = m0->m_len;
 	m->m_pkthdr.pf.hdr = NULL;	/* altq will cope */
@@ -586,7 +597,7 @@ m_defrag(struct mbuf *m, int how)
 	m0->m_flags &= ~(M_EXT|M_CLUSTER);	/* cluster is gone */
 	m_free(m0);
 
-	return 0;
+	return (0);
 }
 
 /*
@@ -695,11 +706,11 @@ m_copym0(struct mbuf *m0, int off, int len, int wait, int deep)
 				n->m_len = min(n->m_len, len);
 				n->m_len = min(n->m_len, m->m_len - off);
 				memcpy(mtod(n, caddr_t), mtod(m, caddr_t) + off,
-				    (unsigned)n->m_len);
+				    n->m_len);
 			}
 		} else
 			memcpy(mtod(n, caddr_t), mtod(m, caddr_t) + off,
-			    (unsigned)n->m_len);
+			    n->m_len);
 		if (len != M_COPYALL)
 			len -= n->m_len;
 		off += n->m_len;
@@ -1157,8 +1168,7 @@ extpacket:
  * Routine to copy from device local memory into mbufs.
  */
 struct mbuf *
-m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
-    void (*copy)(const void *, void *, size_t))
+m_devget(char *buf, int totlen, int off, struct ifnet *ifp)
 {
 	struct mbuf	*m;
 	struct mbuf	*top, **mp;
@@ -1183,6 +1193,11 @@ m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
 		if (top != NULL) {
 			MGET(m, M_DONTWAIT, MT_DATA);
 			if (m == NULL) {
+				/*
+				 * As we might get called by pfkey, make sure
+				 * we do not leak sensitive data.
+				 */
+				top->m_flags |= M_ZEROIZE;
 				m_freem(top);
 				return (NULL);
 			}
@@ -1208,11 +1223,7 @@ m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
 		}
 
 		m->m_len = len = min(totlen, len);
-
-		if (copy)
-			copy(buf, mtod(m, caddr_t), (size_t)len);
-		else
-			bcopy(buf, mtod(m, caddr_t), (size_t)len);
+		memcpy(mtod(m, void *), buf, (size_t)len);
 
 		buf += len;
 		*mp = m;
@@ -1225,20 +1236,18 @@ m_devget(char *buf, int totlen, int off, struct ifnet *ifp,
 void
 m_zero(struct mbuf *m)
 {
-	while (m) {
 #ifdef DIAGNOSTIC
-		if (M_READONLY(m))
-			panic("m_zero: M_READONLY");
+	if (M_READONLY(m))
+		panic("m_zero: M_READONLY");
 #endif /* DIAGNOSTIC */
-		if (m->m_flags & M_EXT)
-			memset(m->m_ext.ext_buf, 0, m->m_ext.ext_size);
-		else {
-			if (m->m_flags & M_PKTHDR)
-				memset(m->m_pktdat, 0, MHLEN);
-			else
-				memset(m->m_dat, 0, MLEN);
-		}
-		m = m->m_next;
+
+	if (m->m_flags & M_EXT)
+		explicit_bzero(m->m_ext.ext_buf, m->m_ext.ext_size);
+	else {
+		if (m->m_flags & M_PKTHDR)
+			explicit_bzero(m->m_pktdat, MHLEN);
+		else
+			explicit_bzero(m->m_dat, MLEN);
 	}
 }
 
@@ -1331,7 +1340,8 @@ m_dup_pkthdr(struct mbuf *to, struct mbuf *from, int wait)
 
 #ifdef DDB
 void
-m_print(void *v, int (*pr)(const char *, ...))
+m_print(void *v,
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	struct mbuf *m = v;
 
@@ -1339,7 +1349,7 @@ m_print(void *v, int (*pr)(const char *, ...))
 	(*pr)("m_type: %hi\tm_flags: %b\n", m->m_type, m->m_flags,
 	    "\20\1M_EXT\2M_PKTHDR\3M_EOR\4M_CLUSTER\5M_PROTO1\6M_VLANTAG"
 	    "\7M_LOOP\10M_FILDROP\11M_BCAST\12M_MCAST\13M_CONF\14M_AUTH"
-	    "\15M_TUNNEL\16M_AUTH_AH\17M_LINK0");
+	    "\15M_TUNNEL\16M_ZEROIZE\17M_LINK0");
 	(*pr)("m_next: %p\tm_nextpkt: %p\n", m->m_next, m->m_nextpkt);
 	(*pr)("m_data: %p\tm_len: %u\n", m->m_data, m->m_len);
 	(*pr)("m_dat: %p m_pktdat: %p\n", m->m_dat, m->m_pktdat);

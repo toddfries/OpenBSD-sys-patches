@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_prot.c,v 1.52 2012/02/20 22:23:39 guenther Exp $	*/
+/*	$OpenBSD: kern_prot.c,v 1.56 2013/04/06 03:44:34 tedu Exp $	*/
 /*	$NetBSD: kern_prot.c,v 1.33 1996/02/09 18:59:42 christos Exp $	*/
 
 /*
@@ -72,8 +72,6 @@ int
 sys_getthrid(struct proc *p, void *v, register_t *retval)
 {
 
-	if (!rthreads_enabled)
-		return (ENOTSUP);
 	*retval = p->p_pid + THREAD_PID_OFFSET;
 	return (0);
 }
@@ -391,8 +389,8 @@ sys_setresuid(struct proc *p, void *v, register_t *retval)
 		/*
 		 * Transfer proc count to new user.
 		 */
-		(void)chgproccnt(pc->p_ruid, -p->p_p->ps_refcnt);
-		(void)chgproccnt(ruid, p->p_p->ps_refcnt);
+		(void)chgproccnt(pc->p_ruid, -1);
+		(void)chgproccnt(ruid, 1);
 		pc->p_ruid = ruid;
 	}
 	if (euid != (uid_t)-1 && euid != pc->pc_ucred->cr_uid) {
@@ -596,8 +594,8 @@ sys_setuid(struct proc *p, void *v, register_t *retval)
 		 * Transfer proc count to new user.
 		 */
 		if (uid != pc->p_ruid) {
-			(void)chgproccnt(pc->p_ruid, -p->p_p->ps_refcnt);
-			(void)chgproccnt(uid, p->p_p->ps_refcnt);
+			(void)chgproccnt(pc->p_ruid, -1);
+			(void)chgproccnt(uid, 1);
 		}
 		pc->p_ruid = uid;
 		pc->p_svuid = uid;
@@ -745,6 +743,8 @@ groupmember(gid_t gid, struct ucred *cred)
 	gid_t *gp;
 	gid_t *egp;
 
+	if (cred->cr_gid == gid)
+		return (1);
 	egp = &(cred->cr_groups[cred->cr_ngroups]);
 	for (gp = cred->cr_groups; gp < egp; gp++)
 		if (*gp == gid)
@@ -763,7 +763,7 @@ suser(struct proc *p, u_int flags)
 
 	if (cred->cr_uid == 0) {
 		if (!(flags & SUSER_NOACCT))
-			p->p_acflag |= ASU;
+			p->p_p->ps_acflag |= ASU;
 		return (0);
 	}
 	return (EPERM);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahd_pci.c,v 1.18 2009/05/31 04:47:59 deraadt Exp $	*/
+/*	$OpenBSD: ahd_pci.c,v 1.23 2013/11/18 17:40:39 guenther Exp $	*/
 
 /*
  * Copyright (c) 2004 Milos Urbanek, Kenneth R. Westerback & Marco Peereboom
@@ -69,11 +69,6 @@
  *
  */
 
-#include <sys/cdefs.h>
-/*
-__FBSDID("$FreeBSD: src/sys/dev/aic7xxx/aic79xx_pci.c,v 1.18 2004/02/04 16:38:38 gibbs Exp $");
-*/
-
 #include <dev/ic/aic79xx_openbsd.h>
 #include <dev/ic/aic79xx_inline.h>
 #include <dev/ic/aic79xx.h>
@@ -103,6 +98,7 @@ ahd_compose_id(u_int device, u_int vendor, u_int subdevice, u_int subvendor)
 #define ID_AIC7901			0x800F9005FFFF9005ull
 #define ID_AHA_29320A			0x8000900500609005ull
 #define ID_AHA_29320ALP			0x8017900500449005ull
+#define ID_AHA_29320LPE			0x8017900500459005ull
 
 #define ID_AIC7901A			0x801E9005FFFF9005ull
 #define ID_AHA_29320LP			0x8014900500449005ull
@@ -161,6 +157,11 @@ struct ahd_pci_identity ahd_pci_ident_table [] =
 	},
 	{
 		ID_AHA_29320ALP,
+		ID_ALL_MASK,
+		ahd_aic7901_setup
+	},
+	{
+		ID_AHA_29320LPE,
 		ID_ALL_MASK,
 		ahd_aic7901_setup
 	},
@@ -282,9 +283,11 @@ static const char *pci_bus_modes[] =
 
 int	ahd_pci_probe(struct device *, void *, void *);
 void	ahd_pci_attach(struct device *, struct device *, void *);
+int	ahd_activate(struct device *, int);
 
 struct cfattach ahd_pci_ca = {
-	        sizeof(struct ahd_softc), ahd_pci_probe, ahd_pci_attach
+        sizeof(struct ahd_softc), ahd_pci_probe, ahd_pci_attach,
+	NULL, ahd_activate
 };
 
 int	ahd_check_extport(struct ahd_softc *ahd);
@@ -537,6 +540,22 @@ ahd_pci_attach(struct device *parent, struct device *self, void *aux)
 
 	/* complete the attach */
 	ahd_attach(ahd);
+}
+
+int
+ahd_activate(struct device *self, int act)
+{
+	int ret = 0;
+
+	ret = config_activate_children(self, act);
+
+	switch (act) {
+	case DVACT_POWERDOWN:
+		ahd_shutdown(self);
+		break;
+	}
+
+	return (ret);
 }
 
 /*
@@ -890,26 +909,26 @@ static const char *pci_status_source[] =
 
 static const char *split_status_strings[] =
 {
-	"%s: Received split response in %s.\n",
-	"%s: Received split completion error message in %s\n",
-	"%s: Receive overrun in %s\n",
-	"%s: Count not complete in %s\n",
-	"%s: Split completion data bucket in %s\n",
-	"%s: Split completion address error in %s\n",
-	"%s: Split completion byte count error in %s\n",
-	"%s: Signaled Target-abort to early terminate a split in %s\n"
+	"Received split response",
+	"Received split completion error message",
+	"Receive overrun",
+	"Count not complete",
+	"Split completion data bucket",
+	"Split completion address error",
+	"Split completion byte count error",
+	"Signaled Target-abort to early terminate a split"
 };
 
 static const char *pci_status_strings[] =
 {
-	"%s: Data Parity Error has been reported via PERR# in %s\n",
-	"%s: Target initial wait state error in %s\n",
-	"%s: Split completion read data parity error in %s\n",
-	"%s: Split completion address attribute parity error in %s\n",
-	"%s: Received a Target Abort in %s\n",
-	"%s: Received a Master Abort in %s\n",
-	"%s: Signal System Error Detected in %s\n",
-	"%s: Address or Write Phase Parity Error Detected in %s.\n"
+	"Data Parity Error has been reported via PERR#",
+	"Target initial wait state error",
+	"Split completion read data parity error",
+	"Split completion address attribute parity error",
+	"Received a Target Abort",
+	"Received a Master Abort",
+	"Signal System Error Detected",
+	"Address or Write Phase Parity Error Detected"
 };
 
 void
@@ -954,12 +973,13 @@ ahd_pci_intr(struct ahd_softc *ahd)
 		for (bit = 0; bit < 8; bit++) {
 
 			if ((pci_status[i] & (0x1 << bit)) != 0) {
-				static const char *s;
-
-				s = pci_status_strings[bit];
 				if (i == 7/*TARG*/ && bit == 3)
-					s = "%s: Signaled Target Abort\n";
-				printf(s, ahd_name(ahd), pci_status_source[i]);
+					printf("%s: Signaled Target Abort\n",
+					    ahd_name(ahd));
+				else
+					printf("%s: %s in %s\n", ahd_name(ahd),
+					    pci_status_strings[bit],
+					    pci_status_source[i]);
 			}
 		}	
 	}
@@ -1018,21 +1038,17 @@ ahd_pci_split_intr(struct ahd_softc *ahd, u_int intstat)
 		for (bit = 0; bit < 8; bit++) {
 
 			if ((split_status[i] & (0x1 << bit)) != 0) {
-				static const char *s;
-
-				s = split_status_strings[bit];
-				printf(s, ahd_name(ahd),
-				       split_status_source[i]);
+				printf("%s: %s in %s\n", ahd_name(ahd),
+				    split_status_strings[bit],
+				    split_status_source[i]);
 			}
 
 			if (i > 1)
 				continue;
 
 			if ((sg_split_status[i] & (0x1 << bit)) != 0) {
-				static const char *s;
-
-				s = split_status_strings[bit];
-				printf(s, ahd_name(ahd), "SG");
+				printf("%s: %s in %s\n", ahd_name(ahd),
+				    split_status_strings[bit], "SG");
 			}
 		}
 	}

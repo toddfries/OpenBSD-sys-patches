@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.194 2011/11/19 13:54:53 mikeb Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.216 2013/11/21 16:16:08 mpi Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -37,11 +37,11 @@
 #include "ether.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/systm.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/timeout.h>
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <sys/device.h>
@@ -49,20 +49,13 @@
 #include <sys/sysctl.h>
 #include <sys/syslog.h>
 
-#include <machine/cpu.h>
-
 #include <net/if.h>
 #include <net/if_types.h>
-#include <net/if_llc.h>
 #include <net/route.h>
 #include <net/netisr.h>
 
 /* for arc4random() */
 #include <dev/rndvar.h>
-
-#if NFDDI > 0
-#include <net/if_fddi.h>
-#endif
 
 #include <crypto/sha1.h>
 
@@ -80,6 +73,7 @@
 #endif
 
 #ifdef INET6
+#include <netinet6/in6_var.h>
 #include <netinet/icmp6.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
@@ -167,6 +161,7 @@ struct carp_softc {
 	u_int32_t sc_lsmask;		/* load sharing mask */
 	int sc_lscount;			/* # load sharing interfaces (max 32) */
 	int sc_delayed_arp;		/* delayed ARP request countdown */
+	int sc_realmac;			/* using real mac */
 
 	struct in_addr sc_peer;
 
@@ -306,8 +301,8 @@ carp_hmac_prepare_ctx(struct carp_vhost_entry *vhe, u_int8_t ctx)
 	}
 
 	/* the rest of the precomputation */
-	if (vhe->vhe_leader && bcmp(sc->sc_ac.ac_enaddr, vhe->vhe_enaddr,
-	    ETHER_ADDR_LEN) != 0)
+	if (!sc->sc_realmac && vhe->vhe_leader &&
+	    bcmp(sc->sc_ac.ac_enaddr, vhe->vhe_enaddr, ETHER_ADDR_LEN) != 0)
 		SHA1Update(&vhe->vhe_sha1[ctx], sc->sc_ac.ac_enaddr,
 		    ETHER_ADDR_LEN);
 
@@ -445,7 +440,7 @@ carp_setroute(struct carp_softc *sc, int cmd)
 			bcopy(ifa->ifa_addr, &sa, sizeof(sa));
 			satosin(&sa)->sin_addr.s_addr = satosin(ifa->ifa_netmask
 			    )->sin_addr.s_addr & satosin(&sa)->sin_addr.s_addr;
-			rt = (struct rtentry *)rt_lookup(&sa,
+			rt = rt_lookup(&sa,
 			    ifa->ifa_netmask, sc->sc_if.if_rdomain);
 			nr_ourif = (rt && rt->rt_ifp == &sc->sc_if);
 
@@ -894,7 +889,7 @@ carp_clone_create(ifc, unit)
 	ifp->if_addrlen = ETHER_ADDR_LEN;
 	ifp->if_hdrlen = ETHER_HDR_LEN;
 	ifp->if_mtu = ETHERMTU;
-	IFQ_SET_MAXLEN(&ifp->if_snd, ifqmaxlen);
+	IFQ_SET_MAXLEN(&ifp->if_snd, IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 	if_attach(ifp);
 
@@ -1028,8 +1023,7 @@ carp_destroy_vhosts(struct carp_softc *sc)
 	/* XXX bow out? */
 	struct carp_vhost_entry *vhe, *nvhe;
 
-	for (vhe = LIST_FIRST(&sc->carp_vhosts);
-	     vhe != LIST_END(&sc->carp_vhosts); vhe = nvhe) {
+	for (vhe = LIST_FIRST(&sc->carp_vhosts); vhe != NULL; vhe = nvhe) {
 		nvhe = LIST_NEXT(vhe, vhost_entries);
 		free(vhe, M_DEVBUF);
 	}
@@ -1242,7 +1236,7 @@ carp_send_ad(void *v)
 		m->m_pkthdr.len = len;
 		m->m_pkthdr.rcvif = NULL;
 		m->m_pkthdr.pf.prio = CARP_IFQ_PRIO;
-		/* XXX m->m_pkthdr.rdomain = sc->sc_if.if_rdomain; */
+		m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
 		m->m_len = len;
 		MH_ALIGN(m, m->m_len);
 		m->m_flags |= M_MCAST;
@@ -1508,16 +1502,10 @@ carp_iamatch6(struct ifnet *ifp, u_char *src, struct sockaddr_dl **sdl)
 #endif /* INET6 */
 
 struct ifnet *
-carp_ourether(void *v, struct ether_header *eh, int src)
+carp_ourether(void *v, u_int8_t *ena)
 {
 	struct carp_if *cif = (struct carp_if *)v;
 	struct carp_softc *vh;
-	u_int8_t *ena;
-
-	if (src)
-		ena = (u_int8_t *)&eh->ether_shost;
-	else
-		ena = (u_int8_t *)&eh->ether_dhost;
 
 	TAILQ_FOREACH(vh, &cif->vhif_vrs, sc_list) {
 		struct carp_vhost_entry *vhe;
@@ -1579,7 +1567,7 @@ carp_input(struct mbuf *m, u_int8_t *shost, u_int8_t *dhost, u_int16_t etype)
 	bcopy(dhost, &eh.ether_dhost, sizeof(eh.ether_dhost));
 	eh.ether_type = etype;
 
-	if ((ifp = carp_ourether(cif, &eh, 0)))
+	if ((ifp = carp_ourether(cif, dhost)))
 		;
 	else if (m->m_flags & (M_BCAST|M_MCAST)) {
 		struct carp_softc *vh;
@@ -1710,6 +1698,12 @@ carp_setrun(struct carp_vhost_entry *vhe, sa_family_t af)
 		carp_set_state_all(sc, INIT);
 		return;
 	}
+
+	if (bcmp(((struct arpcom *)sc->sc_carpdev)->ac_enaddr,
+	    sc->sc_ac.ac_enaddr, ETHER_ADDR_LEN) == 0)
+		sc->sc_realmac = 1;
+	else
+		sc->sc_realmac = 0;
 
 	if (sc->sc_if.if_flags & IFF_UP && vhe->vhid > 0 &&
 	    (sc->sc_naddrs || sc->sc_naddrs6) && !sc->sc_suppress) {
@@ -1864,6 +1858,8 @@ carp_set_ifp(struct carp_softc *sc, struct ifnet *ifp)
 		if (ncif != NULL)
 			ifp->if_carp = (caddr_t)ncif;
 		sc->sc_carpdev = ifp;
+		sc->sc_if.if_capabilities = ifp->if_capabilities &
+		    IFCAP_CSUM_MASK;
 		cif = (struct carp_if *)ifp->if_carp;
 		TAILQ_FOREACH(vr, &cif->vhif_vrs, sc_list) {
 			if (vr == sc)
@@ -1969,9 +1965,11 @@ carp_addr_updated(void *v)
 	TAILQ_FOREACH(ifa, &sc->sc_if.if_addrlist, ifa_list) {
 		if (ifa->ifa_addr->sa_family == AF_INET)
 			new_naddrs++;
+#ifdef INET6
 		else if (ifa->ifa_addr->sa_family == AF_INET6 &&
 		    !IN6_IS_ADDR_LINKLOCAL(&ifatoia6(ifa)->ia_addr.sin6_addr))
 			new_naddrs6++;
+#endif /* INET6 */
 	}
 
 	/* We received address changes from if_addrhooks callback */
@@ -2015,7 +2013,7 @@ int
 carp_set_addr(struct carp_softc *sc, struct sockaddr_in *sin)
 {
 	struct ifnet *ifp = sc->sc_carpdev;
-	struct in_ifaddr *ia, *ia_if;
+	struct in_ifaddr *ia;
 	int error = 0;
 
 	/* XXX is this necessary? */
@@ -2029,24 +2027,17 @@ carp_set_addr(struct carp_softc *sc, struct sockaddr_in *sin)
 	}
 
 	/* we have to do this by hand to ensure we don't match on ourselves */
-	ia_if = NULL;
-	for (ia = TAILQ_FIRST(&in_ifaddr); ia;
-	    ia = TAILQ_NEXT(ia, ia_list)) {
-
+	TAILQ_FOREACH(ia, &in_ifaddr, ia_list) {
 		/* and, yeah, we need a multicast-capable iface too */
 		if (ia->ia_ifp != &sc->sc_if &&
 		    ia->ia_ifp->if_type != IFT_CARP &&
 		    (ia->ia_ifp->if_flags & IFF_MULTICAST) &&
 		    ia->ia_ifp->if_rdomain == sc->sc_if.if_rdomain &&
-		    (sin->sin_addr.s_addr & ia->ia_netmask) ==
-		    ia->ia_net) {
-			if (!ia_if)
-				ia_if = ia;
-		}
+		    (sin->sin_addr.s_addr & ia->ia_netmask) == ia->ia_net)
+			break;
 	}
 
-	if (ia_if) {
-		ia = ia_if;
+	if (ia) {
 		if (ifp) {
 			if (ifp != ia->ia_ifp)
 				return (EADDRNOTAVAIL);
@@ -2100,7 +2091,7 @@ int
 carp_set_addr6(struct carp_softc *sc, struct sockaddr_in6 *sin6)
 {
 	struct ifnet *ifp = sc->sc_carpdev;
-	struct in6_ifaddr *ia, *ia_if;
+	struct in6_ifaddr *ia;
 	int error = 0;
 
 	if (IN6_IS_ADDR_UNSPECIFIED(&sin6->sin6_addr)) {
@@ -2113,8 +2104,7 @@ carp_set_addr6(struct carp_softc *sc, struct sockaddr_in6 *sin6)
 	}
 
 	/* we have to do this by hand to ensure we don't match on ourselves */
-	ia_if = NULL;
-	for (ia = in6_ifaddr; ia; ia = ia->ia_next) {
+	TAILQ_FOREACH(ia, &in6_ifaddr, ia_list) {
 		int i;
 
 		for (i = 0; i < 4; i++) {
@@ -2128,14 +2118,12 @@ carp_set_addr6(struct carp_softc *sc, struct sockaddr_in6 *sin6)
 		if (ia->ia_ifp != &sc->sc_if &&
 		    ia->ia_ifp->if_type != IFT_CARP &&
 		    (ia->ia_ifp->if_flags & IFF_MULTICAST) &&
-		    (i == 4)) {
-			if (!ia_if)
-				ia_if = ia;
-		}
+		    ia->ia_ifp->if_rdomain == sc->sc_if.if_rdomain &&
+		    (i == 4))
+			break;
 	}
 
-	if (ia_if) {
-		ia = ia_if;
+	if (ia) {
 		if (sc->sc_carpdev) {
 			if (sc->sc_carpdev != ia->ia_ifp)
 				return (EADDRNOTAVAIL);
@@ -2227,7 +2215,7 @@ carp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		case AF_INET:
 			sc->sc_if.if_flags |= IFF_UP;
 			/*
-			 * emulate arp_ifinit() without doing a gratious arp
+			 * emulate arp_ifinit() without doing a gratuitous arp
 			 * request so that the routes are setup correctly.
 			 */
 			ifa->ifa_rtrequest = arp_rtrequest;
@@ -2270,7 +2258,7 @@ carp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 
 	case SIOCSVH:
 		vhe = LIST_FIRST(&sc->carp_vhosts);
-		if ((error = suser(p, p->p_acflag)) != 0)
+		if ((error = suser(p, 0)) != 0)
 			break;
 		if ((error = copyin(ifr->ifr_data, &carpr, sizeof carpr)))
 			break;
@@ -2352,7 +2340,7 @@ carp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		}
 		carpr.carpr_advbase = sc->sc_advbase;
 		carpr.carpr_balancing = sc->sc_balancing;
-		if (suser(p, p->p_acflag) == 0)
+		if (suser(p, 0) == 0)
 			bcopy(sc->sc_key, carpr.carpr_key,
 			    sizeof(carpr.carpr_key));
 		carpr.carpr_peer.s_addr = sc->sc_peer.s_addr;

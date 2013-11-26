@@ -1,8 +1,8 @@
-/*	$OpenBSD: pf_ioctl.c,v 1.248 2011/12/12 21:30:27 mikeb Exp $ */
+/*	$OpenBSD: pf_ioctl.c,v 1.265 2013/11/13 18:25:57 deraadt Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
- * Copyright (c) 2002,2003 Henning Brauer
+ * Copyright (c) 2002 - 2013 Henning Brauer <henning@openbsd.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -49,7 +49,6 @@
 #include <sys/time.h>
 #include <sys/timeout.h>
 #include <sys/pool.h>
-#include <sys/proc.h>
 #include <sys/malloc.h>
 #include <sys/kthread.h>
 #include <sys/rwlock.h>
@@ -61,7 +60,6 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/ip_var.h>
@@ -102,6 +100,10 @@ int			 pf_disable_altq(struct pf_altq *);
 #endif /* ALTQ */
 int			 pf_begin_rules(u_int32_t *, const char *);
 int			 pf_rollback_rules(u_int32_t, char *);
+int			 pf_free_queues(char *);
+int			 pf_remove_queues(void);
+int			 pf_create_queues(void);
+int			 pf_commit_queues(char *);
 int			 pf_setup_pfsync_matching(struct pf_ruleset *);
 void			 pf_hash_rule(MD5_CTX *, struct pf_rule *);
 void			 pf_hash_rule_addr(MD5_CTX *, struct pf_rule_addr *);
@@ -117,6 +119,9 @@ int			 pf_rule_copyin(struct pf_rule *, struct pf_rule *,
 u_int32_t		 pf_oqname2qid(char *);
 void			 pf_oqid2qname(u_int32_t, char *);
 void			 pf_oqid_unref(u_int32_t);
+u_int16_t		 pf_qname2qid(char *, int);
+void			 pf_qid2qname(u_int16_t, char *);
+void			 pf_qid_unref(u_int16_t);
 
 struct pf_rule		 pf_default_rule, pf_default_rule_new;
 struct rwlock		 pf_consistency_lock = RWLOCK_INITIALIZER("pfcnslk");
@@ -139,12 +144,13 @@ struct {
 
 #define	TAGID_MAX	 50000
 TAILQ_HEAD(pf_tags, pf_tagname)	pf_tags = TAILQ_HEAD_INITIALIZER(pf_tags),
-				pf_oqids = TAILQ_HEAD_INITIALIZER(pf_oqids);
+				pf_oqids = TAILQ_HEAD_INITIALIZER(pf_oqids),
+				pf_qids = TAILQ_HEAD_INITIALIZER(pf_qids);
 
 #if (PF_QNAME_SIZE != PF_TAG_NAME_SIZE)
 #error PF_QNAME_SIZE must be equal to PF_TAG_NAME_SIZE
 #endif
-u_int16_t		 tagname2tag(struct pf_tags *, char *);
+u_int16_t		 tagname2tag(struct pf_tags *, char *, int);
 void			 tag2tagname(struct pf_tags *, u_int16_t, char *);
 void			 tag_unref(struct pf_tags *, u_int16_t);
 int			 pf_rtlabel_add(struct pf_addr_wrap *);
@@ -173,6 +179,8 @@ pfattach(int num)
 	    "pfruleitempl", NULL);
 	pool_init(&pf_altq_pl, sizeof(struct pf_altq), 0, 0, 0, "pfaltqpl",
 	    &pool_allocator_nointr);
+	pool_init(&pf_queue_pl, sizeof(struct pf_queuespec), 0, 0, 0, 
+	    "pfqueuepl", NULL);
 	pfr_initialize();
 	pfi_initialize();
 	pf_osfp_initialize();
@@ -187,6 +195,10 @@ pfattach(int num)
 	RB_INIT(&tree_src_tracking);
 	RB_INIT(&pf_anchors);
 	pf_init_ruleset(&pf_main_ruleset);
+	TAILQ_INIT(&pf_queues[0]);
+	TAILQ_INIT(&pf_queues[1]);
+	pf_queues_active = &pf_queues[0];
+	pf_queues_inactive = &pf_queues[1];
 	TAILQ_INIT(&pf_altqs[0]);
 	TAILQ_INIT(&pf_altqs[1]);
 	pf_altqs_active = &pf_altqs[0];
@@ -325,6 +337,9 @@ pf_purge_rule(struct pf_ruleset *ruleset, struct pf_rule *rule)
 {
 	u_int32_t		 nr;
 
+	if (ruleset == NULL || ruleset->anchor == NULL)
+		return;
+
 	pf_rm_rule(ruleset->rules.active.ptr, rule);
 	ruleset->rules.active.rcount--;
 
@@ -339,7 +354,7 @@ pf_purge_rule(struct pf_ruleset *ruleset, struct pf_rule *rule)
 }
 
 u_int16_t
-tagname2tag(struct pf_tags *head, char *tagname)
+tagname2tag(struct pf_tags *head, char *tagname, int create)
 {
 	struct pf_tagname	*tag, *p = NULL;
 	u_int16_t		 new_tagid = 1;
@@ -349,6 +364,9 @@ tagname2tag(struct pf_tags *head, char *tagname)
 			tag->ref++;
 			return (tag->tag);
 		}
+
+	if (!create)
+		return (0);
 
 	/*
 	 * to avoid fragmentation, we do a linear search from the beginning
@@ -414,9 +432,9 @@ tag_unref(struct pf_tags *head, u_int16_t tag)
 }
 
 u_int16_t
-pf_tagname2tag(char *tagname)
+pf_tagname2tag(char *tagname, int create)
 {
-	return (tagname2tag(&pf_tags, tagname));
+	return (tagname2tag(&pf_tags, tagname, create));
 }
 
 void
@@ -474,11 +492,29 @@ pf_rtlabel_copyout(struct pf_addr_wrap *a)
 	}
 }
 
+u_int16_t
+pf_qname2qid(char *qname, int create)
+{
+	return (tagname2tag(&pf_qids, qname, create));
+}
+
+void
+pf_qid2qname(u_int16_t qid, char *p)
+{
+	tag2tagname(&pf_qids, qid, p);
+}
+
+void
+pf_qid_unref(u_int16_t qid)
+{
+	tag_unref(&pf_qids, (u_int16_t)qid);
+}
+
 #ifdef ALTQ
 u_int32_t
 pf_oqname2qid(char *qname)
 {
-	return ((u_int32_t)tagname2tag(&pf_oqids, qname));
+	return ((u_int32_t)tagname2tag(&pf_oqids, qname, 1));
 }
 
 void
@@ -680,7 +716,86 @@ pf_rollback_rules(u_int32_t ticket, char *anchor)
 		rs->rules.inactive.rcount--;
 	}
 	rs->rules.inactive.open = 0;
+	return (pf_free_queues(anchor));
+}
+
+int
+pf_free_queues(char *anchor)
+{
+	struct pf_queuespec	*q;
+
+	/* queue defs only in the main ruleset */
+	if (anchor[0])
+		return (0);
+
+	while ((q = TAILQ_FIRST(pf_queues_inactive)) != NULL) {
+		TAILQ_REMOVE(pf_queues_inactive, q, entries);
+		pfi_kif_unref(q->kif, PFI_KIF_REF_RULE);
+		pool_put(&pf_queue_pl, q);
+	}
 	return (0);
+}
+
+int
+pf_remove_queues(void)
+{
+	struct pf_queuespec	*q;
+	int			 error = 0;
+
+	/* remove queues */
+	TAILQ_FOREACH_REVERSE(q, pf_queues_active, pf_queuehead, entries)
+		if ((error = hfsc_delqueue(q)) != 0)
+			return (error);
+
+	/* put back interfaces in normal queueing mode */	
+	TAILQ_FOREACH(q, pf_queues_active, entries)
+		if (q->parent_qid == 0)
+			if ((error = hfsc_detach(q->kif->pfik_ifp)) != 0)
+				return (error);
+
+	return (0);
+}
+
+int
+pf_create_queues(void)
+{
+	struct pf_queuespec	*q;
+	int			 error = 0;
+
+	/* find root queues and attach hfsc to these interfaces */
+	TAILQ_FOREACH(q, pf_queues_active, entries)
+		if (q->parent_qid == 0)
+			if ((error = hfsc_attach(q->kif->pfik_ifp)) != 0)
+				return (error);
+
+	/* and now everything */
+	TAILQ_FOREACH(q, pf_queues_active, entries)
+		if ((error = hfsc_addqueue(q)) != 0)
+			return (error);
+
+	return (0);
+}
+
+int
+pf_commit_queues(char *anchor)
+{
+	struct pf_queuehead	*qswap;
+	int error;
+
+	/* queue defs only in the main ruleset */
+	if (anchor[0])
+		return (0);
+
+	if ((error = pf_remove_queues()) != 0)
+		return (error);
+
+	/* swap */
+	qswap = pf_queues_active;
+	pf_queues_active = pf_queues_inactive;
+	pf_queues_inactive = qswap;
+	pf_free_queues(anchor);
+
+	return (pf_create_queues());
 }
 
 #define PF_MD5_UPD(st, elm)						\
@@ -814,7 +929,7 @@ pf_commit_rules(u_int32_t ticket, char *anchor)
 	rs->rules.inactive.open = 0;
 	pf_remove_if_empty_ruleset(rs);
 	splx(s);
-	return (0);
+	return (pf_commit_queues(anchor));
 }
 
 int
@@ -905,9 +1020,12 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		case DIOCGETLIMIT:
 		case DIOCGETALTQS:
 		case DIOCGETALTQ:
-		case DIOCGETQSTATS:
+		case DIOCGETALTQSTATS:
 		case DIOCGETRULESETS:
 		case DIOCGETRULESET:
+		case DIOCGETQUEUES:
+		case DIOCGETQUEUE:
+		case DIOCGETQSTATS:
 		case DIOCRGETTABLES:
 		case DIOCRGETTSTATS:
 		case DIOCRCLRTSTATS:
@@ -947,9 +1065,12 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		case DIOCGETLIMIT:
 		case DIOCGETALTQS:
 		case DIOCGETALTQ:
-		case DIOCGETQSTATS:
+		case DIOCGETALTQSTATS:
 		case DIOCGETRULESETS:
 		case DIOCGETRULESET:
+		case DIOCGETQUEUES:
+		case DIOCGETQUEUE:
+		case DIOCGETQSTATS:
 		case DIOCNATLOOK:
 		case DIOCRGETTABLES:
 		case DIOCRGETTSTATS:
@@ -1002,6 +1123,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				pf_status.stateid = time_second;
 				pf_status.stateid = pf_status.stateid << 32;
 			}
+			pf_create_queues();
 			DPFPRINTF(LOG_NOTICE, "pf: started");
 		}
 		break;
@@ -1012,10 +1134,110 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		else {
 			pf_status.running = 0;
 			pf_status.since = time_second;
+			pf_remove_queues();
 			DPFPRINTF(LOG_NOTICE, "pf: stopped");
 		}
 		break;
 
+	case DIOCGETQUEUES: {
+		struct pfioc_queue	*pq = (struct pfioc_queue *)addr;
+		struct pf_queuespec	*qs;
+		u_int32_t		 nr = 0;
+
+		pq->ticket = pf_main_ruleset.rules.active.ticket;
+
+		/* save state to not run over them all each time? */
+		qs = TAILQ_FIRST(pf_queues_active);
+		while (qs != NULL) {
+			qs = TAILQ_NEXT(qs, entries);
+			nr++;
+		}
+		pq->nr = nr;
+		break;
+	}
+
+	case DIOCGETQUEUE: {
+		struct pfioc_queue	*pq = (struct pfioc_queue *)addr;
+		struct pf_queuespec	*qs;
+		u_int32_t		 nr = 0;
+
+		if (pq->ticket != pf_main_ruleset.rules.active.ticket) {
+			error = EBUSY;
+			break;
+		}
+
+		/* save state to not run over them all each time? */
+		qs = TAILQ_FIRST(pf_queues_active);
+		while ((qs != NULL) && (nr++ < pq->nr))
+			qs = TAILQ_NEXT(qs, entries);
+		if (qs == NULL) {
+			error = EBUSY;
+			break;
+		}
+		bcopy(qs, &pq->queue, sizeof(pq->queue));
+		break;
+	}
+
+	case DIOCGETQSTATS: {
+		struct pfioc_qstats	*pq = (struct pfioc_qstats *)addr;
+		struct pf_queuespec	*qs;
+		u_int32_t		 nr;
+		int			 nbytes;
+
+		if (pq->ticket != pf_main_ruleset.rules.active.ticket) {
+			error = EBUSY;
+			break;
+		}
+		nbytes = pq->nbytes;
+		nr = 0;
+
+		/* save state to not run over them all each time? */
+		qs = TAILQ_FIRST(pf_queues_active);
+		while ((qs != NULL) && (nr++ < pq->nr))
+			qs = TAILQ_NEXT(qs, entries);
+		if (qs == NULL) {
+			error = EBUSY;
+			break;
+		}
+		bcopy(qs, &pq->queue, sizeof(pq->queue));
+		error = hfsc_qstats(qs, pq->buf, &nbytes);
+		if (error == 0)
+			pq->nbytes = nbytes;
+		break;
+	}
+
+	case DIOCADDQUEUE: {
+		struct pfioc_queue	*q = (struct pfioc_queue *)addr;
+		struct pf_queuespec	*qs;
+
+		if (q->ticket != pf_main_ruleset.rules.inactive.ticket) {
+			error = EBUSY;
+			break;
+		}
+		qs = pool_get(&pf_queue_pl, PR_WAITOK|PR_LIMITFAIL|PR_ZERO);
+		if (qs == NULL) {
+			error = ENOMEM;
+			break;
+		}
+		bcopy(&q->queue, qs, sizeof(*qs));
+		qs->qid = pf_qname2qid(qs->qname, 1);
+		if (qs->parent[0] && (qs->parent_qid =
+		    pf_qname2qid(qs->parent, 0)) == 0)
+			return (ESRCH);
+		qs->kif = pfi_kif_get(qs->ifname);
+		if (!qs->kif->pfik_ifp) {
+			error = ESRCH;
+			break;
+		}
+		/* XXX resolve bw percentage specs */
+		pfi_kif_ref(qs->kif, PFI_KIF_REF_RULE);
+		if (qs->qlimit == 0)
+			qs->qlimit = HFSC_DEFAULT_QLIMIT;
+		TAILQ_INSERT_TAIL(pf_queues_inactive, qs, entries);
+
+		break;
+	}
+	
 	case DIOCADDRULE: {
 		struct pfioc_rule	*pr = (struct pfioc_rule *)addr;
 		struct pf_ruleset	*ruleset;
@@ -1045,7 +1267,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			break;
 		}
 		rule->cuid = p->p_cred->p_ruid;
-		rule->cpid = p->p_pid;
+		rule->cpid = p->p_p->ps_pid;
 
 		switch (rule->af) {
 		case 0:
@@ -1088,9 +1310,9 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			error = EINVAL;
 		if (rule->rt && !rule->direction)
 			error = EINVAL;
-		if ((rule->prio[0] != PF_PRIO_NOTSET && rule->prio[0] >
-		    IFQ_MAXPRIO) || (rule->prio[1] != PF_PRIO_NOTSET &&
-                    rule->prio[1] > IFQ_MAXPRIO))
+		if (rule->scrub_flags & PFSTATE_SETPRIO &&
+		    (rule->set_prio[0] > IFQ_MAXPRIO ||
+		    rule->set_prio[1] > IFQ_MAXPRIO))
 			error = EINVAL;
 
 		if (error) {
@@ -1147,6 +1369,14 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			break;
 		}
 		bcopy(rule, &pr->rule, sizeof(struct pf_rule));
+		bzero(&pr->rule.entries, sizeof(pr->rule.entries));
+		pr->rule.kif = NULL;
+		pr->rule.nat.kif = NULL;
+		pr->rule.rdr.kif = NULL;
+		pr->rule.route.kif = NULL;
+		pr->rule.rcv_kif = NULL;
+		pr->rule.anchor = NULL;
+		pr->rule.overload_tbl = NULL;
 		if (pf_anchor_copyout(ruleset, rule, pr)) {
 			error = EBUSY;
 			break;
@@ -1213,7 +1443,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			}
 			pf_rule_copyin(&pcr->rule, newrule, ruleset);
 			newrule->cuid = p->p_cred->p_ruid;
-			newrule->cpid = p->p_pid;
+			newrule->cpid = p->p_p->ps_pid;
 
 			switch (newrule->af) {
 			case 0:
@@ -1346,18 +1576,19 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		for (s = RB_MIN(pf_state_tree_id, &tree_id); s;
 		    s = nexts) {
 			nexts = RB_NEXT(pf_state_tree_id, &tree_id, s);
-			sk = s->key[PF_SK_WIRE];
 
 			if (s->direction == PF_OUT) {
+				sk = s->key[PF_SK_STACK];
 				srcaddr = &sk->addr[1];
 				dstaddr = &sk->addr[0];
-				srcport = sk->port[0];
+				srcport = sk->port[1];
 				dstport = sk->port[0];
 			} else {
+				sk = s->key[PF_SK_WIRE];
 				srcaddr = &sk->addr[0];
 				dstaddr = &sk->addr[1];
 				srcport = sk->port[0];
-				dstport = sk->port[0];
+				dstport = sk->port[1];
 			}
 			if ((!psk->psk_af || sk->af == psk->psk_af)
 			    && (!psk->psk_proto || psk->psk_proto ==
@@ -1390,6 +1621,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		break;
 	}
 
+#if NPFSYNC > 0
 	case DIOCADDSTATE: {
 		struct pfioc_state	*ps = (struct pfioc_state *)addr;
 		struct pfsync_state	*sp = &ps->state;
@@ -1401,6 +1633,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		error = pfsync_state_import(sp, PFSYNC_SI_IOCTL);
 		break;
 	}
+#endif
 
 	case DIOCGETSTATE: {
 		struct pfioc_state	*ps = (struct pfioc_state *)addr;
@@ -1417,7 +1650,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			break;
 		}
 
-		pfsync_state_export(&ps->state, s);
+		pf_state_export(&ps->state, s);
 		break;
 	}
 
@@ -1442,7 +1675,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			if (state->timeout != PFTM_UNLINKED) {
 				if ((nr+1) * sizeof(*p) > (unsigned)ps->ps_len)
 					break;
-				pfsync_state_export(pstore, state);
+				pf_state_export(pstore, state);
 				error = copyout(pstore, p, sizeof(*p));
 				if (error) {
 					free(pstore, M_TEMP);
@@ -1592,6 +1825,12 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 			error = EBUSY;
 			goto fail;
 		}
+		/* Fragments reference mbuf clusters. */
+		if (pl->index == PF_LIMIT_FRAGS && pl->limit > nmbclust) {
+			error = EINVAL;
+			goto fail;
+		}
+
 		pf_pool_limits[pl->index].limit_new = pl->limit;
 		pl->limit = pf_pool_limits[pl->index].limit;
 		break;
@@ -1739,8 +1978,8 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 		error = ENODEV;
 		break;
 
-	case DIOCGETQSTATS: {
-		struct pfioc_qstats	*pq = (struct pfioc_qstats *)addr;
+	case DIOCGETALTQSTATS: {
+		struct pfioc_altqstats	*pq = (struct pfioc_altqstats *)addr;
 		struct pf_altq		*altq;
 		u_int32_t		 nr;
 		int			 nbytes;
@@ -2232,6 +2471,7 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 				break;
 			}
 		}
+
 		/*
 		 * Checked already in DIOCSETLIMIT, but check again as the
 		 * situation might have changed.
@@ -2329,15 +2569,18 @@ pfioctl(dev_t dev, u_long cmd, caddr_t addr, int flags, struct proc *p)
 
 		p = psn->psn_src_nodes;
 		RB_FOREACH(n, pf_src_tree, &tree_src_tracking) {
-			int	secs = time_second, diff;
+			int	secs = time_uptime, diff;
 
 			if ((nr + 1) * sizeof(*p) > (unsigned)psn->psn_len)
 				break;
 
 			bcopy(n, pstore, sizeof(*pstore));
+			bzero(&pstore->entry, sizeof(pstore->entry));
+			pstore->rule.ptr = NULL;
+			pstore->kif = NULL;
 			if (n->rule.ptr != NULL)
 				pstore->rule.nr = n->rule.ptr->nr;
-			pstore->creation = time_uptime - pstore->creation;
+			pstore->creation = secs - pstore->creation;
 			if (pstore->expire > secs)
 				pstore->expire -= secs;
 			else
@@ -2559,28 +2802,32 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	to->max_src_conn_rate.limit = from->max_src_conn_rate.limit;
 	to->max_src_conn_rate.seconds = from->max_src_conn_rate.seconds;
 
-#ifdef ALTQ
-	/* set queue IDs */
+	/* set queue IDs. little ugly due to both altq and new system... */
 	if (to->qname[0] != 0) {
-		if ((to->qid = pf_oqname2qid(to->qname)) == 0)
-			return (EBUSY);
-		else if (to->pqname[0] != 0) {
-			if ((to->pqid = pf_oqname2qid(to->pqname)) == 0)
+		if ((to->qid = pf_qname2qid(to->qname, 0)) == 0)
+#ifdef ALTQ
+			if ((to->qid = pf_oqname2qid(to->qname)) == 0)
+#endif
 				return (EBUSY);
+		if (to->pqname[0] != 0) {
+			if ((to->pqid = pf_qname2qid(to->pqname, 0)) == 0)
+#ifdef ALTQ
+				if ((to->pqid = pf_oqname2qid(to->pqname)) == 0)
+#endif
+					return (EBUSY);
 		} else
 			to->pqid = to->qid;
 	}
-#endif
 	to->rt_listid = from->rt_listid;
 	to->prob = from->prob;
 	to->return_icmp = from->return_icmp;
 	to->return_icmp6 = from->return_icmp6;
 	to->max_mss = from->max_mss;
 	if (to->tagname[0])
-		if ((to->tag = pf_tagname2tag(to->tagname)) == 0)
+		if ((to->tag = pf_tagname2tag(to->tagname, 1)) == 0)
 			return (EBUSY);
 	if (to->match_tagname[0])
-		if ((to->match_tag = pf_tagname2tag(to->match_tagname)) == 0)
+		if ((to->match_tag = pf_tagname2tag(to->match_tagname, 1)) == 0)
 			return (EBUSY);
 	to->scrub_flags = from->scrub_flags;
 	to->uid = from->uid;
@@ -2593,8 +2840,6 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 #if NPFLOG > 0
 	if (!to->log)
 		to->logif = 0;
-	if (to->logif >= PFLOGIFS_MAX)
-		return (EINVAL);
 #endif
 	to->quick = from->quick;
 	to->ifnot = from->ifnot;
@@ -2620,8 +2865,8 @@ pf_rule_copyin(struct pf_rule *from, struct pf_rule *to,
 	to->divert.port = from->divert.port;
 	to->divert_packet.addr = from->divert_packet.addr;
 	to->divert_packet.port = from->divert_packet.port;
-	to->prio[0] = from->prio[0];
-	to->prio[1] = from->prio[1];
+	to->set_prio[0] = from->set_prio[0];
+	to->set_prio[1] = from->set_prio[1];
 
 	return (0);
 }

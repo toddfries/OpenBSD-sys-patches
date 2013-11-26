@@ -1,4 +1,4 @@
-/*	$OpenBSD: cmd_i386.c,v 1.30 2010/07/02 00:36:52 weingart Exp $	*/
+/*	$OpenBSD: cmd_i386.c,v 1.33 2013/10/23 05:05:19 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 1997-1999 Michael Shalayeff
@@ -42,6 +42,7 @@
 extern const char version[];
 
 int Xboot(void);
+int Xcomaddr(void);
 int Xdiskinfo(void);
 int Xmemory(void);
 int Xregs(void);
@@ -51,6 +52,7 @@ int bootbuf(void *, int);
 
 const struct cmd_table cmd_machine[] = {
 	{ "boot",	CMDT_CMD, Xboot },
+	{ "comaddr",	CMDT_CMD, Xcomaddr },
 	{ "diskinfo",	CMDT_CMD, Xdiskinfo },
 	{ "memory",	CMDT_CMD, Xmemory },
 #ifdef DEBUG
@@ -156,18 +158,21 @@ Xmemory(void)
 
 			size = strtoll(p + 1, &p, 0);
 			/* Size the size */
-			switch(*p) {
+			switch (*p) {
 				case 'G':
+				case 'g':
 					size *= 1024;
 				case 'M':
+				case 'm':
 					size *= 1024;
 				case 'K':
+				case 'k':
 					size *= 1024;
 					p++;
 			}
 
 			/* Handle (possibly non-existant) address part */
-			switch(*p) {
+			switch (*p) {
 				case '@':
 					addr = strtoll(p + 1, NULL, 0);
 					break;
@@ -203,6 +208,17 @@ Xmemory(void)
 	}
 
 	dump_biosmem(NULL);
+
+	return 0;
+}
+
+int
+Xcomaddr(void)
+{
+	extern int com_addr;
+
+	if (cmd.argc >= 2)
+		com_addr = (int)strtol(cmd.argv[1], NULL, 0);
 
 	return 0;
 }

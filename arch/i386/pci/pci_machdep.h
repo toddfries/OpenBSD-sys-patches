@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci_machdep.h,v 1.23 2011/10/10 19:42:36 miod Exp $	*/
+/*	$OpenBSD: pci_machdep.h,v 1.26 2013/11/06 10:40:36 mpi Exp $	*/
 /*	$NetBSD: pci_machdep.h,v 1.7 1997/06/06 23:29:18 thorpej Exp $	*/
 
 /*
@@ -82,6 +82,7 @@ int		pci_mode_detect(void);
 
 extern struct extent *pciio_ex;
 extern struct extent *pcimem_ex;
+extern struct extent *pcibus_ex;
 void		pci_init_extents(void);
 
 /*
@@ -108,6 +109,9 @@ void		pci_decompose_tag(pci_chipset_tag_t, pcitag_t,
 #define	pci_probe_device_hook(c, a)	(0)
 
 void 		pci_dev_postattach(struct device *, struct pci_attach_args *);
+
+pcireg_t	pci_min_powerstate(pci_chipset_tag_t, pcitag_t);
+void		pci_set_powerstate_md(pci_chipset_tag_t, pcitag_t, int, int);
 
 /*
  * Section 6.2.4, `Miscellaneous Functions' of the PIC Specification,

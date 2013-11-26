@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_vfsops.c,v 1.93 2011/07/09 00:24:44 beck Exp $	*/
+/*	$OpenBSD: nfs_vfsops.c,v 1.98 2013/09/20 23:51:44 fgsch Exp $	*/
 /*	$NetBSD: nfs_vfsops.c,v 1.46.4.1 1996/05/25 22:40:35 fvdl Exp $	*/
 
 /*
@@ -44,6 +44,7 @@
 #include <sys/vnode.h>
 #include <sys/kernel.h>
 #include <sys/mount.h>
+#include <sys/swap.h>
 #include <sys/buf.h>
 #include <sys/mbuf.h>
 #include <sys/dirent.h>
@@ -234,6 +235,8 @@ nfsmout:
 	return (error);
 }
 
+struct nfs_diskless nfs_diskless;
+
 /*
  * Mount a remote root fs via. NFS.  It goes like this:
  * - Call nfs_boot_init() to fill in the nfs_diskless struct
@@ -245,7 +248,6 @@ nfsmout:
 int
 nfs_mountroot(void)
 {
-	struct nfs_diskless nd;
 	struct vattr attr;
 	struct mount *mp;
 	struct vnode *vp;
@@ -259,17 +261,16 @@ nfs_mountroot(void)
 	 * Call nfs_boot_init() to fill in the nfs_diskless struct.
 	 * Side effect:	 Finds and configures a network interface.
 	 */
-	bzero((caddr_t) &nd, sizeof(nd));
-	nfs_boot_init(&nd, procp);
+	nfs_boot_init(&nfs_diskless, procp);
 
 	/*
 	 * Create the root mount point.
 	 */
-	if (nfs_boot_getfh(&nd.nd_boot, "root", &nd.nd_root, -1))
+	if (nfs_boot_getfh(&nfs_diskless.nd_boot, "root", &nfs_diskless.nd_root, -1))
 		panic("nfs_mountroot: root");
-	mp = nfs_mount_diskless(&nd.nd_root, "/", 0);
+	mp = nfs_mount_diskless(&nfs_diskless.nd_root, "/", 0);
 	nfs_root(mp, &rootvp);
-	printf("root on %s\n", nd.nd_root.ndm_host);
+	printf("root on %s\n", nfs_diskless.nd_root.ndm_host);
 
 	/*
 	 * Link it into the mount list.
@@ -288,13 +289,13 @@ nfs_mountroot(void)
 
 #ifdef notyet
 	/* Set up swap credentials. */
-	proc0.p_ucred->cr_uid = ntohl(nd.swap_ucred.cr_uid);
-	proc0.p_ucred->cr_gid = ntohl(nd.swap_ucred.cr_gid);
-	if ((proc0.p_ucred->cr_ngroups = ntohs(nd.swap_ucred.cr_ngroups)) >
+	proc0.p_ucred->cr_uid = ntohl(nfs_diskless.swap_ucred.cr_uid);
+	proc0.p_ucred->cr_gid = ntohl(nfs_diskless.swap_ucred.cr_gid);
+	if ((proc0.p_ucred->cr_ngroups = ntohs(nfs_diskless.swap_ucred.cr_ngroups)) >
 		NGROUPS)
 		proc0.p_ucred->cr_ngroups = NGROUPS;
 	for (i = 0; i < proc0.p_ucred->cr_ngroups; i++)
-	    proc0.p_ucred->cr_groups[i] = ntohl(nd.swap_ucred.cr_groups[i]);
+	    proc0.p_ucred->cr_groups[i] = ntohl(nfs_diskless.swap_ucred.cr_groups[i]);
 #endif
 
 	/*
@@ -303,9 +304,9 @@ nfs_mountroot(void)
 	 * On a "dataless" configuration (swap on disk) we will have:
 	 *	(swdevt[0].sw_dev != NODEV) identifying the swap device.
 	 */
-	if (bdevvp(swapdev, &swapdev_vp))
-		panic("nfs_mountroot: can't setup swap vp");
 	if (swdevt[0].sw_dev != NODEV) {
+		if (bdevvp(swapdev, &swapdev_vp))
+			panic("nfs_mountroot: can't setup swap vp");
 		printf("swap on device 0x%x\n", swdevt[0].sw_dev);
 		return (0);
 	}
@@ -317,9 +318,9 @@ nfs_mountroot(void)
 	 *
 	 * Wait 5 retries, finally no swap is cool. -mickey
 	 */
-	error = nfs_boot_getfh(&nd.nd_boot, "swap", &nd.nd_swap, 5);
+	error = nfs_boot_getfh(&nfs_diskless.nd_boot, "swap", &nfs_diskless.nd_swap, 5);
 	if (!error) {
-		mp = nfs_mount_diskless(&nd.nd_swap, "/swap", 0);
+		mp = nfs_mount_diskless(&nfs_diskless.nd_swap, "/swap", 0);
 		nfs_root(mp, &vp);
 		vfs_unbusy(mp);
 
@@ -333,11 +334,10 @@ nfs_mountroot(void)
 		/*
 		 * Next line is a hack to make swapmount() work on NFS
 		 * swap files.
-		 * XXX-smurph
 		 */
 		swdevt[0].sw_dev = NETDEV;
 		/* end hack */
-		swdevt[0].sw_vp = vp;
+		nfs_diskless.sw_vp = vp;
 
 		/*
 		 * Find out how large the swap file is.
@@ -347,7 +347,7 @@ nfs_mountroot(void)
 			printf("nfs_mountroot: getattr for swap\n");
 		n = (long) (attr.va_size >> DEV_BSHIFT);
 
-		printf("swap on %s\n", nd.nd_swap.ndm_host);
+		printf("swap on %s\n", nfs_diskless.nd_swap.ndm_host);
 #ifdef	DEBUG
 		printf("swap size: 0x%lx (blocks)\n", n);
 #endif
@@ -356,8 +356,6 @@ nfs_mountroot(void)
 
 	printf("WARNING: no swap\n");
 	swdevt[0].sw_dev = NODEV;
-	swdevt[0].sw_vp = NULL;
-
 	return (0);
 }
 
@@ -367,7 +365,6 @@ nfs_mountroot(void)
 struct mount *
 nfs_mount_diskless(struct nfs_dlmount *ndmntp, char *mntname, int mntflag)
 {
-	struct nfs_args args;
 	struct mount *mp;
 	struct mbuf *m;
 	int error;
@@ -376,35 +373,13 @@ nfs_mount_diskless(struct nfs_dlmount *ndmntp, char *mntname, int mntflag)
 		panic("nfs_mount_diskless: vfs_rootmountalloc failed");
 	mp->mnt_flag |= mntflag;
 
-	/* Initialize mount args. */
-	bzero((caddr_t) &args, sizeof(args));
-	args.addr     = (struct sockaddr *)&ndmntp->ndm_saddr;
-	args.addrlen  = args.addr->sa_len;
-	args.sotype   = SOCK_DGRAM;
-	args.fh	      = ndmntp->ndm_fh;
-	args.fhsize   = NFSX_V2FH;
-	args.hostname = ndmntp->ndm_host;
-
-#ifdef	NFS_BOOT_OPTIONS
-	args.flags    |= NFS_BOOT_OPTIONS;
-#endif
-#ifdef	NFS_BOOT_RWSIZE
-	/*
-	 * Reduce rsize,wsize for interfaces that consistently
-	 * drop fragments of long UDP messages.	 (i.e. wd8003).
-	 * You can always change these later via remount.
-	 */
-	args.flags   |= NFSMNT_WSIZE | NFSMNT_RSIZE;
-	args.wsize    = NFS_BOOT_RWSIZE;
-	args.rsize    = NFS_BOOT_RWSIZE;
-#endif
-
 	/* Get mbuf for server sockaddr. */
 	m = m_get(M_WAIT, MT_SONAME);
-	bcopy((caddr_t)args.addr, mtod(m, caddr_t),
-	    (m->m_len = args.addr->sa_len));
+	bcopy((caddr_t)ndmntp->ndm_args.addr, mtod(m, caddr_t),
+	    (m->m_len = ndmntp->ndm_args.addr->sa_len));
 
-	error = mountnfs(&args, mp, m, mntname, args.hostname);
+	error = mountnfs(&ndmntp->ndm_args, mp, m, mntname,
+	    ndmntp->ndm_args.hostname);
 	if (error)
 		panic("nfs_mountroot: mount %s failed: %d", mntname, error);
 
@@ -560,8 +535,8 @@ nfs_decode_args(struct nfsmount *nmp, struct nfs_args *argp,
  * VFS Operations.
  *
  * mount system call
- * It seems a bit dumb to copyinstr() the host and path here and then
- * bcopy() them in mountnfs(), but I wanted to detect errors before
+ * It seems a bit dumb to copyinstr() the host here and then
+ * bcopy() it in mountnfs(), but I wanted to detect errors before
  * doing the sockargs() call because sockargs() allocates an mbuf and
  * an error after that means that I have to release the mbuf.
  */
@@ -573,23 +548,21 @@ nfs_mount(struct mount *mp, const char *path, void *data,
 	int error;
 	struct nfs_args args;
 	struct mbuf *nam;
-	char pth[MNAMELEN], hst[MNAMELEN];
+	char hst[MNAMELEN];
 	size_t len;
 	u_char nfh[NFSX_V3FHMAX];
 
-	error = copyin (data, &args, sizeof (args.version));
+	error = copyin(data, &args, sizeof(args.version));
 	if (error)
 		return (error);
 	if (args.version == 3) {
 		error = copyin (data, (caddr_t)&args,
 				sizeof (struct nfs_args3));
 		args.flags &= ~(NFSMNT_INTERNAL|NFSMNT_NOAC);
-	}
-	else if (args.version == NFS_ARGSVERSION) {
+	} else if (args.version == NFS_ARGSVERSION) {
 		error = copyin(data, (caddr_t)&args, sizeof (struct nfs_args));
 		args.flags &= ~NFSMNT_NOAC; /* XXX - compatibility */
-	}
-	else
+	} else
 		return (EPROGMISMATCH);
 	if (error)
 		return (error);
@@ -621,10 +594,6 @@ nfs_mount(struct mount *mp, const char *path, void *data,
 	error = copyin((caddr_t)args.fh, (caddr_t)nfh, args.fhsize);
 	if (error)
 		return (error);
-	error = copyinstr(path, pth, MNAMELEN-1, &len);
-	if (error)
-		return (error);
-	bzero(&pth[len], MNAMELEN - len);
 	error = copyinstr(args.hostname, hst, MNAMELEN-1, &len);
 	if (error)
 		return (error);
@@ -634,7 +603,7 @@ nfs_mount(struct mount *mp, const char *path, void *data,
 	if (error)
 		return (error);
 	args.fh = nfh;
-	error = mountnfs(&args, mp, nam, pth, hst);
+	error = mountnfs(&args, mp, nam, path, hst);
 	return (error);
 }
 
@@ -642,8 +611,8 @@ nfs_mount(struct mount *mp, const char *path, void *data,
  * Common code for mount and mountroot
  */
 int
-mountnfs(struct nfs_args *argp, struct mount *mp, struct mbuf *nam, char *pth,
-    char *hst)
+mountnfs(struct nfs_args *argp, struct mount *mp, struct mbuf *nam,
+    const char *pth, char *hst)
 {
 	struct nfsmount *nmp;
 	int error;
@@ -675,8 +644,9 @@ mountnfs(struct nfs_args *argp, struct mount *mp, struct mbuf *nam, char *pth,
 	nmp->nm_acdirmax = NFS_MAXATTRTIMO;
 	bcopy((caddr_t)argp->fh, (caddr_t)nmp->nm_fh, argp->fhsize);
 	strncpy(&mp->mnt_stat.f_fstypename[0], mp->mnt_vfc->vfc_name, MFSNAMELEN);
-	bcopy(hst, mp->mnt_stat.f_mntfromname, MNAMELEN);
 	bcopy(pth, mp->mnt_stat.f_mntonname, MNAMELEN);
+	bcopy(hst, mp->mnt_stat.f_mntfromname, MNAMELEN);
+	bcopy(hst, mp->mnt_stat.f_mntfromspec, MNAMELEN);
 	bcopy(argp, &mp->mnt_stat.mount_info.nfs_args, sizeof(*argp));
 	nmp->nm_nam = nam;
 	nfs_decode_args(nmp, argp, &mp->mnt_stat.mount_info.nfs_args);

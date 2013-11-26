@@ -1,4 +1,4 @@
-/*	$OpenBSD: adb.c,v 1.34 2011/06/16 10:51:48 mpi Exp $	*/
+/*	$OpenBSD: adb.c,v 1.39 2013/08/10 08:13:32 mpi Exp $	*/
 /*	$NetBSD: adb.c,v 1.6 1999/08/16 06:28:09 tsubai Exp $	*/
 /*	$NetBSD: adb_direct.c,v 1.14 2000/06/08 22:10:45 tsubai Exp $	*/
 
@@ -44,11 +44,6 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
- * 3. All advertising materials mentioning features or use of this software
- *    must display the following acknowledgement:
- *	This product includes software developed by Bradley A. Grantham.
- * 4. The name of the author may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -175,17 +170,6 @@ int	adb_debug;		/* Output debugging messages */
 #define ADB_TICKLE_TICKS	4
 
 /*
- * A structure for storing information about each ADB device.
- */
-struct ADBDevEntry {
-	void	(*ServiceRtPtr)(void);
-	void	*DataAreaAddr;
-	int	devType;
-	int	origAddr;
-	int	currentAddr;
-};
-
-/*
  * Eventually used for two separate queues, the queue between
  * the upper and lower halves, and the outgoing packet queue.
  */
@@ -219,9 +203,6 @@ u_char	adbOutputBuffer[ADB_MAX_MSG_LENGTH];	/* data output buffer */
 
 int	adbSentChars;		/* how many characters we have sent */
 
-struct	ADBDevEntry ADBDevTable[16];	/* our ADB device table */
-int	ADBNumDevices;		/* num. of ADB devices found with adb_reinit */
-
 struct	adbCommand adbInbound[ADB_QUEUE];	/* incoming queue */
 int	adbInCount;			/* how many packets in in queue */
 int	adbInHead;			/* head of in queue */
@@ -233,6 +214,8 @@ int	adb_cuda_serial;		/* the current packet */
 struct	timeout adb_cuda_timeout;
 struct	timeout adb_softintr_timeout;
 int	adbempty;			/* nonzero if no adb devices */
+
+extern struct cfdriver adb_cd;
 
 volatile u_char *Via1Base;
 
@@ -248,9 +231,9 @@ int	send_adb_cuda(u_char *, u_char *, void *, void *, int);
 void	adb_cuda_tickle(void);
 void	adb_pass_up(struct adbCommand *);
 void	adb_op_comprout(caddr_t, caddr_t, int);
-void	adb_reinit(void);
-int	count_adbs(void);
-int	get_ind_adb_info(ADBDataBlock *, int);
+void	adb_reinit(struct adb_softc *);
+int	count_adbs(struct adb_softc *);
+int	get_ind_adb_info(struct adb_softc *, ADBDataBlock *, int);
 int	get_adb_info(ADBDataBlock *, int);
 int	adb_op(Ptr, Ptr, Ptr, short);
 void	adb_hw_setup(void);
@@ -958,7 +941,7 @@ adb_hw_setup(void)
  *
  */
 void
-adb_reinit(void)
+adb_reinit(struct adb_softc *sc)
 {
 	u_char send_string[ADB_MAX_MSG_LENGTH];
 	ADBDataBlock data;	/* temp. holder for getting device info */
@@ -969,12 +952,11 @@ adb_reinit(void)
 	int saveptr;		/* point to next free relocation address */
 	int device;
 	int nonewtimes;		/* times thru loop w/o any new devices */
+	int ADBNumDevices = 0;
 
 	/* Make sure we are not interrupted while building the table. */
 	if (adbHardware != ADB_HW_PMU)	/* ints must be on for PB? */
 		s = splhigh();
-
-	ADBNumDevices = 0;	/* no devices yet */
 
 	/* Let intr routines know we are running reinit */
 	adbStarting = 1;
@@ -984,7 +966,7 @@ adb_reinit(void)
 	 * that is defined at the beginning of this file - no mallocs.
 	 */
 	for (i = 0; i < 16; i++)
-		ADBDevTable[i].devType = 0;
+		sc->sc_devtable[i].handler_id = 0;
 
 	adb_hw_setup();		/* init the VIA bits and hard reset ADB */
 
@@ -1030,12 +1012,12 @@ adb_reinit(void)
 			/* found a device */
 			++ADBNumDevices;
 			KASSERT(ADBNumDevices < 16);
-			ADBDevTable[ADBNumDevices].devType =
+			sc->sc_devtable[ADBNumDevices].handler_id =
 				(int)send_string[2];
-			ADBDevTable[ADBNumDevices].origAddr = i;
-			ADBDevTable[ADBNumDevices].currentAddr = i;
-			ADBDevTable[ADBNumDevices].DataAreaAddr = NULL;
-			ADBDevTable[ADBNumDevices].ServiceRtPtr = NULL;
+			sc->sc_devtable[ADBNumDevices].orig_addr = i;
+			sc->sc_devtable[ADBNumDevices].curr_addr = i;
+			sc->sc_devtable[ADBNumDevices].data = NULL;
+			sc->sc_devtable[ADBNumDevices].handler = NULL;
 		}
 	}
 
@@ -1054,7 +1036,7 @@ adb_reinit(void)
 	nonewtimes = 0;		/* no loops w/o new devices */
 	while (saveptr > 0 && nonewtimes++ < 11) {
 		for (i = 1; i <= ADBNumDevices; i++) {
-			device = ADBDevTable[i].currentAddr;
+			device = sc->sc_devtable[i].curr_addr;
 #ifdef ADB_DEBUG
 			if (adb_debug & 0x80)
 				printf_intr("moving device 0x%02x to 0x%02x "
@@ -1101,7 +1083,7 @@ adb_reinit(void)
 
 				/* new device found */
 				/* update data for previously moved device */
-				ADBDevTable[i].currentAddr = saveptr;
+				sc->sc_devtable[i].curr_addr = saveptr;
 #ifdef ADB_DEBUG
 				if (adb_debug & 0x80)
 					printf_intr("old device at index %i\n",i);
@@ -1115,14 +1097,14 @@ adb_reinit(void)
 					++ADBNumDevices;
 					KASSERT(ADBNumDevices < 16);
 				}
-				ADBDevTable[ADBNumDevices].devType =
+				sc->sc_devtable[ADBNumDevices].handler_id =
 					(int)send_string[2];
-				ADBDevTable[ADBNumDevices].origAddr = device;
-				ADBDevTable[ADBNumDevices].currentAddr = device;
+				sc->sc_devtable[ADBNumDevices].orig_addr = device;
+				sc->sc_devtable[ADBNumDevices].curr_addr = device;
 				/* These will be set correctly in adbsys.c */
 				/* Until then, unsol. data will be ignored. */
-				ADBDevTable[ADBNumDevices].DataAreaAddr = NULL;
-				ADBDevTable[ADBNumDevices].ServiceRtPtr = NULL;
+				sc->sc_devtable[ADBNumDevices].data = NULL;
+				sc->sc_devtable[ADBNumDevices].handler = NULL;
 				/* find next unused address */
 				for (x = saveptr; x > 0; x--) {
 					if (-1 == get_adb_info(&data, x)) {
@@ -1157,7 +1139,7 @@ adb_reinit(void)
 #ifdef ADB_DEBUG
 	if (adb_debug) {
 		for (i = 1; i <= ADBNumDevices; i++) {
-			x = get_ind_adb_info(&data, i);
+			x = get_ind_adb_info(sc, &data, i);
 			if (x != -1)
 				printf_intr("index 0x%x, addr 0x%x, type 0x%x\n",
 				    i, x, data.devType);
@@ -1278,7 +1260,7 @@ adb_op_comprout(caddr_t buffer, caddr_t compdata, int cmd)
 }
 
 int
-count_adbs(void)
+count_adbs(struct adb_softc *sc)
 {
 	int i;
 	int found;
@@ -1286,48 +1268,52 @@ count_adbs(void)
 	found = 0;
 
 	for (i = 1; i < 16; i++)
-		if (0 != ADBDevTable[i].devType)
+		if (0 != sc->sc_devtable[i].handler_id)
 			found++;
 
 	return found;
 }
 
 int
-get_ind_adb_info(ADBDataBlock * info, int index)
+get_ind_adb_info(struct adb_softc *sc, ADBDataBlock * info, int index)
 {
 	if ((index < 1) || (index > 15))	/* check range 1-15 */
 		return (-1);
 
 #ifdef ADB_DEBUG
 	if (adb_debug & 0x80)
-		printf_intr("index 0x%x devType is: 0x%x\n", index,
-		    ADBDevTable[index].devType);
+		printf_intr("index 0x%x handler id 0x%x\n", index,
+		    sc->sc_devtable[index].handler_id);
 #endif
-	if (0 == ADBDevTable[index].devType)	/* make sure it's a valid entry */
+	if (0 == sc->sc_devtable[index].handler_id)	/* make sure it's a valid entry */
 		return (-1);
 
-	info->devType = ADBDevTable[index].devType;
-	info->origADBAddr = ADBDevTable[index].origAddr;
-	info->dbServiceRtPtr = (Ptr)ADBDevTable[index].ServiceRtPtr;
-	info->dbDataAreaAddr = (Ptr)ADBDevTable[index].DataAreaAddr;
+	info->devType = sc->sc_devtable[index].handler_id;
+	info->origADBAddr = sc->sc_devtable[index].orig_addr;
+	info->dbServiceRtPtr = (Ptr)sc->sc_devtable[index].handler;
+	info->dbDataAreaAddr = (Ptr)sc->sc_devtable[index].data;
 
-	return (ADBDevTable[index].currentAddr);
+	return (sc->sc_devtable[index].curr_addr);
 }
 
 int
 get_adb_info(ADBDataBlock * info, int adbAddr)
 {
+	struct adb_softc *sc = adb_cd.cd_devs[0];
 	int i;
+
+	if (sc == NULL)
+		return (-1);
 
 	if ((adbAddr < 1) || (adbAddr > 15))	/* check range 1-15 */
 		return (-1);
 
 	for (i = 1; i < 15; i++)
-		if (ADBDevTable[i].currentAddr == adbAddr) {
-			info->devType = ADBDevTable[i].devType;
-			info->origADBAddr = ADBDevTable[i].origAddr;
-			info->dbServiceRtPtr = (Ptr)ADBDevTable[i].ServiceRtPtr;
-			info->dbDataAreaAddr = ADBDevTable[i].DataAreaAddr;
+		if (sc->sc_devtable[i].curr_addr == adbAddr) {
+			info->devType = sc->sc_devtable[i].handler_id;
+			info->origADBAddr = sc->sc_devtable[i].orig_addr;
+			info->dbServiceRtPtr = (Ptr)sc->sc_devtable[i].handler;
+			info->dbDataAreaAddr = sc->sc_devtable[i].data;
 			return 0;	/* found */
 		}
 
@@ -1337,16 +1323,20 @@ get_adb_info(ADBDataBlock * info, int adbAddr)
 int
 set_adb_info(ADBSetInfoBlock * info, int adbAddr)
 {
+	struct adb_softc *sc = adb_cd.cd_devs[0];
 	int i;
+
+	if (sc == NULL)
+		return (-1);
 
 	if ((adbAddr < 1) || (adbAddr > 15))	/* check range 1-15 */
 		return (-1);
 
 	for (i = 1; i < 15; i++)
-		if (ADBDevTable[i].currentAddr == adbAddr) {
-			ADBDevTable[i].ServiceRtPtr =
+		if (sc->sc_devtable[i].curr_addr == adbAddr) {
+			sc->sc_devtable[i].handler =
 			    (void *)(info->siServiceRtPtr);
-			ADBDevTable[i].DataAreaAddr = info->siDataAreaAddr;
+			sc->sc_devtable[i].data = info->siDataAreaAddr;
 			return 0;	/* found */
 		}
 
@@ -1363,6 +1353,7 @@ adb_read_date_time(time_t *time)
 	int result;
 	int retcode;
 	volatile int flag = 0;
+	u_int32_t t;
 
 	switch (adbHardware) {
 	case ADB_HW_PMU:
@@ -1385,7 +1376,8 @@ adb_read_date_time(time_t *time)
 			;
 
 		delay(20); /* completion occurs too soon? */
-		memcpy(time, output + 1, 4);
+		memcpy(&t, output + 1, sizeof(t));
+		*time = (time_t)t;
 		retcode = 0;
 		break;
 
@@ -1412,18 +1404,21 @@ adb_set_date_time(time_t time)
 	u_char output[ADB_MAX_MSG_LENGTH];
 	int result;
 	volatile int flag = 0;
+	u_int32_t t;
 
 	time += DIFF19041970;
 	switch (adbHardware) {
 
 	case ADB_HW_CUDA:
+		t = time;		/* XXX eventually truncates */
+
 		output[0] = 0x06;	/* 6 byte message */
 		output[1] = 0x01;	/* to pram/rtc device */
 		output[2] = 0x09;	/* set date/time */
-		output[3] = (u_char)(time >> 24);
-		output[4] = (u_char)(time >> 16);
-		output[5] = (u_char)(time >> 8);
-		output[6] = (u_char)(time);
+		output[3] = (u_char)(t >> 24);
+		output[4] = (u_char)(t >> 16);
+		output[5] = (u_char)(t >> 8);
+		output[6] = (u_char)(t);
 		result = send_adb_cuda((u_char *)output, (u_char *)0,
 		    (void *)adb_op_comprout, (void *)&flag, (int)0);
 		if (result != 0)	/* exit if not sent */
@@ -1591,7 +1586,6 @@ adbattach(struct device *parent, struct device *self, void *aux)
 	struct confargs nca;
 	char name[32];
 	int node;
-
 	ADBDataBlock adbdata;
 	struct adb_attach_args aa_args;
 	int totaladbs;
@@ -1624,7 +1618,13 @@ adbattach(struct device *parent, struct device *self, void *aux)
 	}
 
 	adb_polling = 1;
-	adb_reinit();
+	if (!adbempty) {
+		adb_reinit(sc);
+		totaladbs = count_adbs(sc);
+		printf(": irq %d, %s, %d target%s", ca->ca_intr[0], ca->ca_name,
+		    totaladbs, (totaladbs == 1) ? "" : "s");
+	}
+	printf("\n");
 
 	mac_intr_establish(parent, ca->ca_intr[0], IST_LEVEL, IPL_HIGH,
 	    adb_intr, sc, sc->sc_dev.dv_xname);
@@ -1632,28 +1632,6 @@ adbattach(struct device *parent, struct device *self, void *aux)
 	/* init powerpc globals which control RTC functionality */
 	time_read = adb_read_date_time;
 	time_write = adb_set_date_time;
-
-#ifdef ADB_DEBUG
-	if (adb_debug)
-		printf("adb: done with adb_reinit\n");
-#endif
-	totaladbs = count_adbs();
-
-	printf(" irq %d: %s, %d target%s\n", ca->ca_intr[0], ca->ca_name,
-	    totaladbs, (totaladbs == 1) ? "" : "s");
-
-	/* for each ADB device */
-	for (adbindex = 1; adbindex <= totaladbs; adbindex++) {
-		/* Get the ADB information */
-		adbaddr = get_ind_adb_info(&adbdata, adbindex);
-
-		aa_args.name = adb_device_name;
-		aa_args.origaddr = adbdata.origADBAddr;
-		aa_args.adbaddr = adbaddr;
-		aa_args.handler_id = adbdata.devType;
-
-		(void)config_found(self, &aa_args, adbprint);
-	}
 
 #if NAPM > 0
 	if (adbHardware == ADB_HW_PMU) {
@@ -1679,6 +1657,27 @@ adbattach(struct device *parent, struct device *self, void *aux)
 		adb_cuda_fileserver_mode();
 	if (adbHardware == ADB_HW_PMU)
 		pmu_fileserver_mode(1);
+
+	/*
+	 * XXX If the machine doesn't have an ADB bus (PowerBook5,6+)
+	 * yes it sounds stupid to attach adb(4), but don't try to send
+	 * ADB commands otherwise the PMU may shutdown the machine...
+	 */
+	if (adbempty)
+		return;
+
+	/* for each ADB device */
+	for (adbindex = 1; adbindex <= totaladbs; adbindex++) {
+		/* Get the ADB information */
+		adbaddr = get_ind_adb_info(sc, &adbdata, adbindex);
+
+		aa_args.name = adb_device_name;
+		aa_args.origaddr = adbdata.origADBAddr;
+		aa_args.adbaddr = adbaddr;
+		aa_args.handler_id = adbdata.devType;
+
+		(void)config_found(self, &aa_args, adbprint);
+	}
 
 	if (adbHardware == ADB_HW_CUDA)
 		adb_cuda_autopoll();

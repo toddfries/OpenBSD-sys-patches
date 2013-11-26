@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_interface.c,v 1.27 2011/04/04 22:37:30 miod Exp $	*/
+/*	$OpenBSD: db_interface.c,v 1.29 2013/07/04 19:06:48 sf Exp $	*/
 /*	$NetBSD: db_interface.c,v 1.22 1996/05/03 19:42:00 christos Exp $	*/
 
 /*
@@ -57,6 +57,11 @@
 #include <dev/acpi/acpidebug.h>
 #endif /* NACPI > 0 */
 
+#include "wsdisplay.h"
+#if NWSDISPLAY > 0
+#include <dev/wscons/wsdisplayvar.h>
+#endif
+
 extern label_t	*db_recover;
 extern char *trap_type[];
 extern int trap_types;
@@ -100,6 +105,10 @@ int
 kdb_trap(int type, int code, db_regs_t *regs)
 {
 	int s;
+
+#if NWSDISPLAY > 0
+	wsdisplay_switchtoconsole();
+#endif
 
 	switch (type) {
 	case T_BPTFLT:	/* breakpoint */
@@ -188,12 +197,10 @@ db_sysregs_cmd(db_expr_t addr, int have_addr, db_expr_t count, char *modif)
 	uint16_t ldtr, tr;
 
 	__asm__ __volatile__("sidt %0" : "=m" (idtr));
-	db_printf("idtr:   0x%08x/%04x\n",
-	    (unsigned int)(idtr >> 16), idtr & 0xffff);
+	db_printf("idtr:   0x%08llx/%04llx\n", idtr >> 16, idtr & 0xffff);
 
 	__asm__ __volatile__("sgdt %0" : "=m" (gdtr));
-	db_printf("gdtr:   0x%08x/%04x\n",
-	    (unsigned int)(gdtr >> 16), gdtr & 0xffff);
+	db_printf("gdtr:   0x%08llx/%04llx\n", gdtr >> 16, gdtr & 0xffff);
 
 	__asm__ __volatile__("sldt %0" : "=g" (ldtr));
 	db_printf("ldtr:   0x%04x\n", ldtr);

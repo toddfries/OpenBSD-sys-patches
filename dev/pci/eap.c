@@ -1,4 +1,4 @@
-/*      $OpenBSD: eap.c,v 1.43 2011/07/03 15:47:17 matthew Exp $ */
+/*      $OpenBSD: eap.c,v 1.46 2013/05/24 07:58:46 ratchov Exp $ */
 /*	$NetBSD: eap.c,v 1.46 2001/09/03 15:07:37 reinoud Exp $ */
 
 /*
@@ -128,6 +128,7 @@ struct eap_softc {
 	void	(*sc_iintr)(void *, int); /* midi input ready handler */
 	void	(*sc_ointr)(void *);	/* midi output ready handler */
 	void	*sc_arg;
+	int	sc_uctrl;
 	struct device *sc_mididev;
 #endif
 
@@ -339,7 +340,7 @@ eap1370_write_codec(struct eap_softc *sc, int a, int d)
 static __inline void
 eap1371_ready_codec(struct eap_softc *sc, u_int8_t a, u_int32_t wd)
 {
-	int to, s;
+	int to;
 	u_int32_t src, t;
 
 	for (to = 0; to < EAP_WRITE_TIMEOUT; to++) {
@@ -351,7 +352,7 @@ eap1371_ready_codec(struct eap_softc *sc, u_int8_t a, u_int32_t wd)
 		printf("%s: eap1371_ready_codec timeout 1\n",
 		    sc->sc_dev.dv_xname);
 
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	src = eap1371_src_wait(sc) & E1371_SRC_CTLMASK;
 	EWRITE4(sc, E1371_SRC, src | E1371_SRC_STATE_OK);
 
@@ -380,7 +381,7 @@ eap1371_ready_codec(struct eap_softc *sc, u_int8_t a, u_int32_t wd)
 	eap1371_src_wait(sc);
 	EWRITE4(sc, E1371_SRC, src);
 
-	splx(s);
+	mtx_leave(&audio_lock);
 }
 
 int
@@ -496,8 +497,8 @@ eap_attach(struct device *parent, struct device *self, void *aux)
 		return;
 	}
 	intrstr = pci_intr_string(pc, ih);
-	sc->sc_ih = pci_intr_establish(pc, ih, IPL_AUDIO, eap_intr, sc,
-	    sc->sc_dev.dv_xname);
+	sc->sc_ih = pci_intr_establish(pc, ih, IPL_AUDIO | IPL_MPSAFE,
+	    eap_intr, sc, sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL) {
 		printf(": couldn't establish interrupt");
 		if (intrstr != NULL)
@@ -716,15 +717,14 @@ eap1371_reset_codec(void *sc_)
 {
 	struct eap_softc *sc = sc_;
 	u_int32_t icsc;
-	int s;
 
-	s = splaudio();
+	mtx_enter(&audio_lock);
 	icsc = EREAD4(sc, EAP_ICSC);
 	EWRITE4(sc, EAP_ICSC, icsc | E1371_SYNC_RES);
 	delay(20);
 	EWRITE4(sc, EAP_ICSC, icsc & ~E1371_SYNC_RES);
 	delay(1);
-	splx(s);
+	mtx_leave(&audio_lock);
 
 	return;
 }
@@ -735,9 +735,12 @@ eap_intr(void *p)
 	struct eap_softc *sc = p;
 	u_int32_t intr, sic;
 
+	mtx_enter(&audio_lock);
 	intr = EREAD4(sc, EAP_ICSS);
-	if (!(intr & EAP_INTR))
+	if (!(intr & EAP_INTR)) {
+		mtx_leave(&audio_lock);
 		return (0);
+	}
 	sic = EREAD4(sc, EAP_SIC);
 	DPRINTFN(5, ("eap_intr: ICSS=0x%08x, SIC=0x%08x\n", intr, sic));
 	if (intr & EAP_I_ADC) {
@@ -776,17 +779,25 @@ eap_intr(void *p)
 			sc->sc_pintr(sc->sc_parg);
 	}
 #if NMIDI > 0
-	if ((intr & EAP_I_UART) && sc->sc_iintr != NULL) {
+	if (intr & EAP_I_UART) {
 		u_int32_t data;
 
 		if (EREAD1(sc, EAP_UART_STATUS) & EAP_US_RXINT) {
 			while (EREAD1(sc, EAP_UART_STATUS) & EAP_US_RXRDY) {
 				data = EREAD1(sc, EAP_UART_DATA);
-				sc->sc_iintr(sc->sc_arg, data);
+				if (sc->sc_iintr)
+					sc->sc_iintr(sc->sc_arg, data);
 			}
+		}
+		if (EREAD1(sc, EAP_UART_STATUS) & EAP_US_TXINT) {
+			sc->sc_uctrl &= ~EAP_UC_TXINTEN;
+			EWRITE1(sc, EAP_UART_CONTROL, sc->sc_uctrl);
+			if (sc->sc_ointr) 
+				sc->sc_ointr(sc->sc_arg);
 		}
 	}
 #endif
+	mtx_leave(&audio_lock);
 	return (1);
 }
 
@@ -1070,7 +1081,7 @@ eap_trigger_output(
 	    "blksize=%d intr=%p(%p)\n", addr, start, end, blksize, intr, arg));
 	sc->sc_pintr = intr;
 	sc->sc_parg = arg;
-
+	mtx_enter(&audio_lock);
 	sic = EREAD4(sc, EAP_SIC);
 	sic &= ~(EAP_P2_S_EB | EAP_P2_S_MB | EAP_INC_BITS);
 	sic |= EAP_SET_P2_ST_INC(0) | EAP_SET_P2_END_INC(param->precision * param->factor / 8);
@@ -1110,7 +1121,7 @@ eap_trigger_output(
 	EWRITE4(sc, EAP_ICSC, icsc | EAP_DAC2_EN);
 
 	DPRINTFN(1, ("eap_trigger_output: set ICSC = 0x%08x\n", icsc));
-
+	mtx_leave(&audio_lock);
 	return (0);
 }
 
@@ -1139,7 +1150,7 @@ eap_trigger_input(
 	    addr, start, end, blksize, intr, arg));
 	sc->sc_rintr = intr;
 	sc->sc_rarg = arg;
-
+	mtx_enter(&audio_lock);
 	sic = EREAD4(sc, EAP_SIC);
 	sic &= ~(EAP_R1_S_EB | EAP_R1_S_MB);
 	sampshift = 0;
@@ -1178,7 +1189,7 @@ eap_trigger_input(
 	EWRITE4(sc, EAP_ICSC, icsc | EAP_ADC_EN);
 
 	DPRINTFN(1, ("eap_trigger_input: set ICSC = 0x%08x\n", icsc));
-
+	mtx_leave(&audio_lock);
 	return (0);
 }
 
@@ -1189,11 +1200,13 @@ eap_halt_output(void *addr)
 	u_int32_t icsc;
 	
 	DPRINTF(("eap: eap_halt_output\n"));
+	mtx_enter(&audio_lock);
 	icsc = EREAD4(sc, EAP_ICSC);
 	EWRITE4(sc, EAP_ICSC, icsc & ~EAP_DAC2_EN);
 #ifdef DIAGNOSTIC
 	sc->sc_prun = 0;
 #endif
+	mtx_leave(&audio_lock);
 	return (0);
 }
 
@@ -1204,11 +1217,13 @@ eap_halt_input(void *addr)
 	u_int32_t icsc;
     
 	DPRINTF(("eap: eap_halt_input\n"));
+	mtx_enter(&audio_lock);
 	icsc = EREAD4(sc, EAP_ICSC);
 	EWRITE4(sc, EAP_ICSC, icsc & ~EAP_ADC_EN);
 #ifdef DIAGNOSTIC
 	sc->sc_rrun = 0;
 #endif
+	mtx_leave(&audio_lock);
 	return (0);
 }
 
@@ -1670,22 +1685,16 @@ eap_midi_open(void *addr, int flags,
     void *arg)
 {
 	struct eap_softc *sc = addr;
-	u_int32_t uctrl;
 
 	sc->sc_iintr = iintr;
 	sc->sc_ointr = ointr;
 	sc->sc_arg = arg;
 
 	EWRITE4(sc, EAP_ICSC, EREAD4(sc, EAP_ICSC) | EAP_UART_EN);
-	uctrl = 0;
+	sc->sc_uctrl = 0;
 	if (flags & FREAD)
-		uctrl |= EAP_UC_RXINTEN;
-#if 0
-	/* I don't understand ../midi.c well enough to use output interrupts */
-	if (flags & FWRITE)
-		uctrl |= EAP_UC_TXINTEN; */
-#endif
-	EWRITE1(sc, EAP_UART_CONTROL, uctrl);
+		sc->sc_uctrl |= EAP_UC_RXINTEN;
+	EWRITE1(sc, EAP_UART_CONTROL, sc->sc_uctrl);
 
 	return (0);
 }
@@ -1707,23 +1716,20 @@ int
 eap_midi_output(void *addr, int d)
 {
 	struct eap_softc *sc = addr;
-	int x;
 
-	for (x = 0; x != MIDI_BUSY_WAIT; x++) {
-		if (EREAD1(sc, EAP_UART_STATUS) & EAP_US_TXRDY) {
-			EWRITE1(sc, EAP_UART_DATA, d);
-			return (0);
-		}
-		delay(MIDI_BUSY_DELAY);
-	}
-	return (EIO);
+	if (!(EREAD1(sc, EAP_UART_STATUS) & EAP_US_TXRDY))
+		return 0;
+	EWRITE1(sc, EAP_UART_DATA, d);
+	sc->sc_uctrl |= EAP_UC_TXINTEN;
+	EWRITE1(sc, EAP_UART_CONTROL, sc->sc_uctrl);
+	return 1;
 }
 
 void
 eap_midi_getinfo(void *addr, struct midi_info *mi)
 {
 	mi->name = "AudioPCI MIDI UART";
-	mi->props = MIDI_PROP_CAN_INPUT;
+	mi->props = MIDI_PROP_CAN_INPUT | MIDI_PROP_OUT_INTR;
 }
 
 #endif

@@ -1,12 +1,12 @@
-#	$OpenBSD: Makefile,v 1.2 2006/08/17 06:31:10 miod Exp $
+#	$OpenBSD: Makefile,v 1.4 2013/01/01 17:17:44 miod Exp $
 #	$NetBSD: Makefile,v 1.2 1997/05/14 07:57:13 thorpej Exp $
 
 PROG=	mkboot
 NOMAN=
-
-.include "${.CURDIR}/../Makefile.inc"
+NOPIE=
 
 CFLAGS+=	-I${.CURDIR}/../include
+CPPFLAGS=
 
 install:
 

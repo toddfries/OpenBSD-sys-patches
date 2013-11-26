@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.21 2011/07/05 04:48:02 guenther Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.27 2013/11/20 23:57:07 miod Exp $	*/
 /*	OpenBSD: machdep.c,v 1.105 2005/04/11 15:13:01 deraadt Exp 	*/
 
 /*
@@ -172,7 +172,7 @@ cpu_startup()
 
 	/*
 	 * Allocate DVMA space and dump into a privately managed
-	 * resource map for double mappings which is usable from
+	 * extent for double mappings which is usable from
 	 * interrupt contexts.
 	 */
 	if (uvm_km_valloc_wait(phys_map, (dvma_end-dvma_base)) != dvma_base)
@@ -274,7 +274,7 @@ setregs(p, pack, stack, retval)
 
 #ifdef DEBUG
 int sigdebug = 0;
-int sigpid = 0;
+pid_t sigpid = 0;
 #define SDB_FOLLOW	0x01
 #define SDB_KSTACK	0x02
 #define SDB_FPSTATE	0x04
@@ -364,22 +364,21 @@ sendsig(catcher, sig, mask, code, type, val)
 	struct sigacts *psp = p->p_sigacts;
 	struct sigframe *fp;
 	struct trapframe *tf;
-	int caddr, oonstack, oldsp, newsp;
+	int caddr, oldsp, newsp;
 	struct sigframe sf;
 
 	tf = p->p_md.md_tf;
 	oldsp = tf->tf_out[6];
-	oonstack = p->p_sigstk.ss_flags & SS_ONSTACK;
+
 	/*
 	 * Compute new user stack addresses, subtract off
 	 * one signal frame, and align.
 	 */
-	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 && !oonstack &&
-	    (psp->ps_sigonstack & sigmask(sig))) {
+	if ((p->p_sigstk.ss_flags & SS_DISABLE) == 0 &&
+	    !sigonstack(oldsp) && (psp->ps_sigonstack & sigmask(sig)))
 		fp = (struct sigframe *)(p->p_sigstk.ss_sp +
 					 p->p_sigstk.ss_size);
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	} else
+	else
 		fp = (struct sigframe *)oldsp;
 	fp = (struct sigframe *)((int)(fp - 1) & ~7);
 
@@ -393,13 +392,13 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * and then copy it out.  We probably ought to just build it
 	 * directly in user space....
 	 */
+	bzero(&sf, sizeof(sf));
 	sf.sf_signo = sig;
 	sf.sf_sip = NULL;
 
 	/*
 	 * Build the signal context to be used by sigreturn.
 	 */
-	sf.sf_sc.sc_onstack = oonstack;
 	sf.sf_sc.sc_mask = mask;
 	sf.sf_sc.sc_sp = oldsp;
 	sf.sf_sc.sc_pc = tf->tf_pc;
@@ -508,10 +507,6 @@ sys_sigreturn(p, v, retval)
 	tf->tf_global[1] = ksc.sc_g1;
 	tf->tf_out[0] = ksc.sc_o0;
 	tf->tf_out[6] = ksc.sc_sp;
-	if (ksc.sc_onstack & 1)
-		p->p_sigstk.ss_flags |= SS_ONSTACK;
-	else
-		p->p_sigstk.ss_flags &= ~SS_ONSTACK;
 	p->p_sigmask = ksc.sc_mask & ~sigcantmask;
 	return (EJUSTRETURN);
 }
@@ -538,7 +533,7 @@ boot(howto)
 	if ((howto & RB_NOSYNC) == 0 && waittime < 0) {
 		extern struct proc proc0;
 
-		/* XXX protect against curproc->p_stats.foo refs in sync() */
+		/* make sure there's a process to charge for I/O in sync() */
 		if (curproc == NULL)
 			curproc = &proc0;
 		waittime = 0;
@@ -564,8 +559,9 @@ boot(howto)
 		dumpsys();
 
 haltsys:
-	/* Run any shutdown hooks */
 	doshutdownhooks();
+	if (!TAILQ_EMPTY(&alldevs))
+		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
 
 	if ((howto & RB_HALT) || (howto & RB_POWERDOWN)) {
 		printf("halted\n\n");

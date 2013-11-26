@@ -1,4 +1,4 @@
-/*	$OpenBSD: cn30xxfau.c,v 1.1 2011/06/16 11:22:30 syuu Exp $	*/
+/*	$OpenBSD: cn30xxfau.c,v 1.4 2013/06/01 22:20:35 jasper Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -25,8 +25,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -56,7 +54,7 @@ cn30xxfau_op_load(uint64_t args)
 	    ((uint64_t)(CN30XXFAU_MAJORDID & 0x1f) << 43) |
 	    ((uint64_t)(CN30XXFAU_SUBDID & 0x7) << 40) |
 	    ((uint64_t)(args & 0xfffffffffULL) << 0);
-	return octeon_read_csr(addr);
+	return octeon_xkphys_read_8(addr);
 }
 
 static void
@@ -69,7 +67,7 @@ cn30xxfau_op_store(uint64_t args, int64_t value)
 	    ((uint64_t)(CN30XXFAU_MAJORDID & 0x1f) << 43) |
 	    ((uint64_t)(CN30XXFAU_SUBDID & 0x7) << 40) |
 	    ((uint64_t)(args & 0xfffffffffULL) << 0);
-	octeon_write_csr(addr, value);
+	octeon_xkphys_write_8(addr, value);
 }
 
 /* ---- operation primitives */
@@ -121,7 +119,7 @@ cn30xxfau_op_init(struct cn30xxfau_desc *fd, size_t scroff, size_t regno)
 uint64_t
 cn30xxfau_op_save(struct cn30xxfau_desc *fd)
 {
-	OCTEON_SYNCIOBDMA/* XXX */;
+	mips_sync();
 	return octeon_cvmseg_read_8(fd->fd_scroff);
 }
 
@@ -136,7 +134,7 @@ cn30xxfau_op_inc_8(struct cn30xxfau_desc *fd, int64_t v)
 {
 	cn30xxfau_op_iobdma_store_data(fd->fd_scroff, v, 0, OCT_FAU_OP_SIZE_64/* XXX */,
 	    fd->fd_regno);
-	OCTEON_SYNCIOBDMA/* XXX */;
+	mips_sync();
 	return octeon_cvmseg_read_8(fd->fd_scroff)/* XXX */;
 }
 
@@ -146,7 +144,7 @@ cn30xxfau_op_incwait_8(struct cn30xxfau_desc *fd, int v)
 	cn30xxfau_op_iobdma_store_data(fd->fd_scroff, v, 1, OCT_FAU_OP_SIZE_64/* XXX */,
 	    fd->fd_regno);
 	/* XXX */
-	OCTEON_SYNCIOBDMA/* XXX */;
+	mips_sync();
 	/* XXX */
 	return octeon_cvmseg_read_8(fd->fd_scroff)/* XXX */;
 }

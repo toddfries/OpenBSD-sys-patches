@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_ah.c,v 1.99 2011/01/11 15:42:05 deraadt Exp $ */
+/*	$OpenBSD: ip_ah.c,v 1.107 2013/06/11 18:15:53 deraadt Exp $ */
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and
@@ -81,7 +81,14 @@
 #define DPRINTF(x)
 #endif
 
+int	ah_output_cb(void *);
+int	ah_input_cb(void *);
+int	ah_massage_headers(struct mbuf **, int, int, int, int);
+
 struct ahstat ahstat;
+
+unsigned char ipseczeroes[IPSEC_ZEROES_SIZE]; /* zeroes! */
+
 
 /*
  * ah_attach() is called from the transformation initialization code.
@@ -99,7 +106,7 @@ int
 ah_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 {
 	struct auth_hash *thash = NULL;
-	struct cryptoini cria;
+	struct cryptoini cria, crin;
 
 	/* Authentication operation. */
 	switch (ii->ii_authalg) {
@@ -149,7 +156,6 @@ ah_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 
 	tdbp->tdb_xform = xsp;
 	tdbp->tdb_authalgxform = thash;
-	tdbp->tdb_bitmap = 0;
 	tdbp->tdb_rpl = AH_HMAC_INITIAL_RPL;
 
 	DPRINTF(("ah_init(): initialized TDB with hash algorithm %s\n",
@@ -165,6 +171,12 @@ ah_init(struct tdb *tdbp, struct xformsw *xsp, struct ipsecinit *ii)
 	cria.cri_alg = tdbp->tdb_authalgxform->type;
 	cria.cri_klen = ii->ii_authkeylen * 8;
 	cria.cri_key = ii->ii_authkey;
+
+	if ((tdbp->tdb_wnd > 0) && (tdbp->tdb_flags & TDBF_ESN)) {
+		bzero(&crin, sizeof(crin));
+		crin.cri_alg = CRYPTO_ESN;
+		cria.cri_next = &crin;
+	}
 
 	return crypto_newsession(&tdbp->tdb_cryptoid, &cria, 0);
 }
@@ -488,7 +500,7 @@ ah_massage_headers(struct mbuf **m0, int proto, int skip, int alg, int out)
 							addr[i].s6_addr16[1] = 0;
 
 					finaldst = addr[rh0->ip6r0_segleft - 1];
-					ovbcopy(&addr[0], &addr[1],
+					memmove(&addr[1], &addr[0],
 					    sizeof(struct in6_addr) *
 					    (rh0->ip6r0_segleft - 1));
 
@@ -543,58 +555,55 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 	struct auth_hash *ahx = (struct auth_hash *) tdb->tdb_authalgxform;
 	struct tdb_crypto *tc;
 	struct m_tag *mtag;
-	u_int32_t btsx;
+	u_int32_t btsx, esn;
 	u_int8_t hl;
 	int rplen;
 
 	struct cryptodesc *crda = NULL;
 	struct cryptop *crp;
 
-	if (!(tdb->tdb_flags & TDBF_NOREPLAY))
-		rplen = AH_FLENGTH + sizeof(u_int32_t);
-	else
-		rplen = AH_FLENGTH;
+	rplen = AH_FLENGTH + sizeof(u_int32_t);
 
 	/* Save the AH header, we use it throughout. */
 	m_copydata(m, skip + offsetof(struct ah, ah_hl), sizeof(u_int8_t),
 	    (caddr_t) &hl);
 
 	/* Replay window checking, if applicable. */
-	if ((tdb->tdb_wnd > 0) && (!(tdb->tdb_flags & TDBF_NOREPLAY))) {
+	if (tdb->tdb_wnd > 0) {
 		m_copydata(m, skip + offsetof(struct ah, ah_rpl),
 		    sizeof(u_int32_t), (caddr_t) &btsx);
 		btsx = ntohl(btsx);
 
-		switch (checkreplaywindow32(btsx, 0, &(tdb->tdb_rpl),
-		    tdb->tdb_wnd, &(tdb->tdb_bitmap), 0)) {
+		switch (checkreplaywindow(tdb, btsx, &esn, 0)) {
 		case 0: /* All's well. */
 			break;
-
 		case 1:
+			m_freem(m);
 			DPRINTF(("ah_input(): replay counter wrapped for "
 			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
 			    ntohl(tdb->tdb_spi)));
-
 			ahstat.ahs_wrap++;
-			m_freem(m);
 			return ENOBUFS;
-
 		case 2:
+			m_freem(m);
+			DPRINTF(("ah_input(): old packet received in "
+			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
+			    ntohl(tdb->tdb_spi)));
+			ahstat.ahs_replay++;
+			return ENOBUFS;
 		case 3:
+			m_freem(m);
 			DPRINTF(("ah_input(): duplicate packet received in "
 			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
 			    ntohl(tdb->tdb_spi)));
-
-			m_freem(m);
-			return ENOBUFS;
-
-		default:
-			DPRINTF(("ah_input(): bogus value from "
-			    "checkreplaywindow32() in SA %s/%08x\n",
-			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
-
 			ahstat.ahs_replay++;
+			return ENOBUFS;
+		default:
 			m_freem(m);
+			DPRINTF(("ah_input(): bogus value from "
+			    "checkreplaywindow() in SA %s/%08x\n",
+			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
+			ahstat.ahs_replay++;
 			return ENOBUFS;
 		}
 	}
@@ -651,6 +660,12 @@ ah_input(struct mbuf *m, struct tdb *tdb, int skip, int protoff)
 	crda->crd_alg = ahx->type;
 	crda->crd_key = tdb->tdb_amxkey;
 	crda->crd_klen = tdb->tdb_amxkeylen * 8;
+
+	if ((tdb->tdb_wnd > 0) && (tdb->tdb_flags & TDBF_ESN)) {
+		esn = htonl(esn);
+		bcopy(&esn, crda->crd_esn, 4);
+		crda->crd_flags |= CRD_F_ESN;
+	}
 
 #ifdef notyet
 	/* Find out if we've already done crypto. */
@@ -745,7 +760,7 @@ ah_input_cb(void *op)
 	struct cryptop *crp;
 	struct m_tag *mtag;
 	struct tdb *tdb;
-	u_int32_t btsx;
+	u_int32_t btsx, esn;
 	u_int8_t prot;
 	caddr_t ptr;
 
@@ -767,7 +782,7 @@ ah_input_cb(void *op)
 		return (EINVAL);
 	}
 
-	s = spltdb();
+	s = splsoftnet();
 
 	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {
@@ -799,10 +814,7 @@ ah_input_cb(void *op)
 		crp = NULL;
 	}
 
-	if (!(tdb->tdb_flags & TDBF_NOREPLAY))
-		rplen = AH_FLENGTH + sizeof(u_int32_t);
-	else
-		rplen = AH_FLENGTH;
+	rplen = AH_FLENGTH + sizeof(u_int32_t);
 
 	/* Copy authenticator off the packet. */
 	m_copydata(m, skip + rplen, ahx->authsize, calc);
@@ -841,42 +853,42 @@ ah_input_cb(void *op)
 	free(tc, M_XDATA);
 
 	/* Replay window checking, if applicable. */
-	if ((tdb->tdb_wnd > 0) && (!(tdb->tdb_flags & TDBF_NOREPLAY))) {
+	if (tdb->tdb_wnd > 0) {
 		m_copydata(m, skip + offsetof(struct ah, ah_rpl),
 		    sizeof(u_int32_t), (caddr_t) &btsx);
 		btsx = ntohl(btsx);
 
-		switch (checkreplaywindow32(btsx, 0, &(tdb->tdb_rpl),
-		    tdb->tdb_wnd, &(tdb->tdb_bitmap), 1)) {
+		switch (checkreplaywindow(tdb, btsx, &esn, 1)) {
 		case 0: /* All's well. */
 #if NPFSYNC > 0
 			pfsync_update_tdb(tdb,0);
 #endif
 			break;
-
 		case 1:
 			DPRINTF(("ah_input(): replay counter wrapped for "
 			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
 			    ntohl(tdb->tdb_spi)));
-
 			ahstat.ahs_wrap++;
 			error = ENOBUFS;
 			goto baddone;
-
 		case 2:
+			DPRINTF(("ah_input_cb(): old packet received in "
+			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
+			    ntohl(tdb->tdb_spi)));
+			ahstat.ahs_replay++;
+			error = ENOBUFS;
+			goto baddone;
 		case 3:
 			DPRINTF(("ah_input_cb(): duplicate packet received in "
 			    "SA %s/%08x\n", ipsp_address(tdb->tdb_dst),
 			    ntohl(tdb->tdb_spi)));
-
+			ahstat.ahs_replay++;
 			error = ENOBUFS;
 			goto baddone;
-
 		default:
 			DPRINTF(("ah_input_cb(): bogus value from "
-			    "checkreplaywindow32() in SA %s/%08x\n",
+			    "checkreplaywindow() in SA %s/%08x\n",
 			    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
-
 			ahstat.ahs_replay++;
 			error = ENOBUFS;
 			goto baddone;
@@ -1001,7 +1013,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 
 			hdr.af = tdb->tdb_dst.sa.sa_family;
 			hdr.spi = tdb->tdb_spi;
-			hdr.flags |= M_AUTH | M_AUTH_AH;
+			hdr.flags |= M_AUTH;
 
 			bpf_mtap_hdr(encif->if_bpf, (char *)&hdr,
 			    ENC_HDRLEN, m, BPF_DIRECTION_OUT);
@@ -1015,8 +1027,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	 * Check for replay counter wrap-around in automatic (not
 	 * manual) keying.
 	 */
-	if ((tdb->tdb_rpl == 0) && (tdb->tdb_wnd > 0) &&
-	    (!(tdb->tdb_flags & TDBF_NOREPLAY))) {
+	if ((tdb->tdb_rpl == 0) && (tdb->tdb_wnd > 0)) {
 		DPRINTF(("ah_output(): SA %s/%08x should have expired\n",
 		    ipsp_address(tdb->tdb_dst), ntohl(tdb->tdb_spi)));
 		m_freem(m);
@@ -1024,10 +1035,7 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 		return EINVAL;
 	}
 
-	if (!(tdb->tdb_flags & TDBF_NOREPLAY))
-		rplen = AH_FLENGTH + sizeof(u_int32_t);
-	else
-		rplen = AH_FLENGTH;
+	rplen = AH_FLENGTH + sizeof(u_int32_t);
 
 	switch (tdb->tdb_dst.sa.sa_family) {
 #ifdef INET
@@ -1143,12 +1151,11 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	/* Zeroize authenticator. */
 	m_copyback(m, skip + rplen, ahx->authsize, ipseczeroes, M_NOWAIT);
 
-	if (!(tdb->tdb_flags & TDBF_NOREPLAY)) {
-		ah->ah_rpl = htonl(tdb->tdb_rpl++);
+	tdb->tdb_rpl++;
+	ah->ah_rpl = htonl((u_int32_t)(tdb->tdb_rpl & 0xffffffff));
 #if NPFSYNC > 0
-		pfsync_update_tdb(tdb,1);
+	pfsync_update_tdb(tdb,1);
 #endif
-	}
 
 	/* Get crypto descriptors. */
 	crp = crypto_getreq(1);
@@ -1170,6 +1177,14 @@ ah_output(struct mbuf *m, struct tdb *tdb, struct mbuf **mp, int skip,
 	crda->crd_alg = ahx->type;
 	crda->crd_key = tdb->tdb_amxkey;
 	crda->crd_klen = tdb->tdb_amxkeylen * 8;
+
+	if ((tdb->tdb_wnd > 0) && (tdb->tdb_flags & TDBF_ESN)) {
+		u_int32_t esn;
+
+		esn = htonl((u_int32_t)(tdb->tdb_rpl >> 32));
+		bcopy(&esn, crda->crd_esn, 4);
+		crda->crd_flags |= CRD_F_ESN;
+	}
 
 	/* Allocate IPsec-specific opaque crypto info. */
 	if ((tdb->tdb_flags & TDBF_SKIPCRYPTO) == 0)
@@ -1290,7 +1305,7 @@ ah_output_cb(void *op)
 		return (EINVAL);
 	}
 
-	s = spltdb();
+	s = splsoftnet();
 
 	tdb = gettdb(tc->tc_rdomain, tc->tc_spi, &tc->tc_dst, tc->tc_proto);
 	if (tdb == NULL) {

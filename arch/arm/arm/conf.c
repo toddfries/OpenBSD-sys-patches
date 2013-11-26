@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.31 2011/10/06 20:49:27 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.37 2013/11/04 14:11:29 deraadt Exp $	*/
 /*	$NetBSD: conf.c,v 1.10 2002/04/19 01:04:38 wiz Exp $	*/
 
 /*
@@ -88,7 +88,6 @@
  * Disk/Filesystem pseudo-devices
  */
 #include "rd.h"				/* memory disk driver */
-#include "raid.h"			/* RAIDframe */
 #include "vnd.h"			/* vnode disk driver */
 
 /*
@@ -118,7 +117,6 @@ cdev_decl(pci);
 #include "audio.h"
 #include "video.h"
 #include "midi.h"
-#include "sequencer.h"
 
 /*
  * USB devices
@@ -129,12 +127,6 @@ cdev_decl(pci);
 #include "uhid.h"
 #include "ulpt.h"
 #include "urio.h"
-#include "uscanner.h"
-
-/*
- * Bluetooth devices
- */
-#include "bthub.h"
 
 /*
  * WSCONS devices
@@ -230,7 +222,7 @@ struct bdevsw bdevsw[] = {
 	bdev_lkm_dummy(),		/* 68: */
 	bdev_lkm_dummy(),		/* 69: */
 	bdev_lkm_dummy(),		/* 70: */
-	bdev_disk_init(NRAID,raid),	/* 71: RAIDframe disk driver */
+	bdev_notdef(),			/* 71 was: RAIDframe disk driver */
 	bdev_lkm_dummy(),		/* 72: */
 	bdev_lkm_dummy(),		/* 73: */
 	bdev_lkm_dummy(),		/* 74: */
@@ -264,15 +256,12 @@ struct bdevsw bdevsw[] = {
 #define ptctty          ptytty
 #define ptcioctl        ptyioctl
 
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 #include "systrace.h"
 
 #include "hotplug.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 #ifdef CONF_HAVE_GPIO
 #include "gpio.h"
@@ -338,18 +327,14 @@ struct cdevsw cdevsw[] = {
 	cdev_lkm_dummy(),			/* 48: reserved */
 	cdev_lkm_dummy(),			/* 49: reserved */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50: system call tracing */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),				/* 51: reserved */
-#endif
  	cdev_bio_init(NBIO,bio),		/* 52: ioctl tunnel */
 	cdev_notdef(),				/* 53: reserved */
 	cdev_notdef(),				/* 54 was FOOTBRIDGE console */
 	cdev_lkm_dummy(),			/* 55: Reserved for bypass device */	
 	cdev_notdef(),				/* 56: reserved */
 	cdev_midi_init(NMIDI,midi),		/* 57: MIDI I/O */
-	cdev_midi_init(NSEQUENCER,sequencer),	/* 58: sequencer I/O */
+	cdev_notdef(),				/* 58 was: sequencer I/O */
 	cdev_notdef(),				/* 59: reserved */
 	cdev_wsdisplay_init(NWSDISPLAY,wsdisplay), /* 60: frame buffers, etc.*/
 	cdev_mouse_init(NWSKBD,wskbd),		/* 61: keyboards */
@@ -360,15 +345,15 @@ struct cdevsw cdevsw[] = {
 	cdev_ulpt_init(NULPT,ulpt),		/* 66: USB printer */
 	cdev_urio_init(NURIO,urio),		/* 67: Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),		/* 68: USB tty */
-	cdev_usbdev_init(NUSCANNER,uscanner),	/* 69: USB scanner */
+	cdev_notdef(),				/* 69: was USB scanners */
 	cdev_usbdev_init(NUGEN,ugen),		/* 70: USB generic driver */
-	cdev_disk_init(NRAID,raid),    		/* 71: RAIDframe disk driver */
+	cdev_notdef(),    			/* 71 was: RAIDframe disk driver */
 	cdev_lkm_dummy(),			/* 72: reserved */
 	cdev_lkm_dummy(),			/* 73: reserved */
 	cdev_lkm_dummy(),			/* 74: reserved */
 	cdev_lkm_dummy(),			/* 75: reserved */
 	cdev_lkm_dummy(),			/* 76: reserved */
-	cdev_notdef(),                          /* 77: removed device */
+	cdev_fuse_init(NFUSE,fuse),		/* 77: fuse */
 	cdev_notdef(),                          /* 78: removed device */
 	cdev_notdef(),                          /* 79: removed device */
 	cdev_notdef(),                          /* 80: removed device */
@@ -396,7 +381,7 @@ struct cdevsw cdevsw[] = {
 	cdev_ptm_init(NPTY,ptm),		/* 98: pseudo-tty ptm device */
 	cdev_spkr_init(NSPKR,spkr),		/* 99: PC speaker */
 	cdev_vscsi_init(NVSCSI,vscsi),		/* 100: vscsi */
-	cdev_bthub_init(NBTHUB,bthub),		/* 101: bthub */
+	cdev_notdef(),
 	cdev_disk_init(1,diskmap),		/* 102: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),		/* 103: pppx */
 };

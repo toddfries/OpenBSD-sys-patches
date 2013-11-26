@@ -1,4 +1,4 @@
-#	$OpenBSD: Makefile,v 1.14 2007/12/26 18:52:59 kettenis Exp $
+#	$OpenBSD: Makefile,v 1.16 2012/08/31 16:13:20 pascal Exp $
 
 .include "${.CURDIR}/../Makefile.inc"
 
@@ -40,4 +40,4 @@ install:
 
 CPPFLAGS+=-DHEAP_LIMIT=${HEAP_LIMIT} ${DEBUGFLAGS} -DNO_NET
 CPPFLAGS+=-I${S}/stand/boot
-CFLAGS+=${SACFLAGS} -D__INTERNAL_LIBSA_CREAD -DCOMPAT_UFS
+CFLAGS+=${SACFLAGS} -D__INTERNAL_LIBSA_CREAD -DCOMPAT_UFS -fno-pie

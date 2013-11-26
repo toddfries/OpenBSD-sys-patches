@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_nfe.c,v 1.98 2011/04/05 18:01:21 henning Exp $	*/
+/*	$OpenBSD: if_nfe.c,v 1.102 2013/08/07 01:06:36 bluhm Exp $	*/
 
 /*-
  * Copyright (c) 2006, 2007 Damien Bergamini <damien.bergamini@free.fr>
@@ -43,7 +43,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -100,10 +99,13 @@ void	nfe_reset_tx_ring(struct nfe_softc *, struct nfe_tx_ring *);
 void	nfe_free_tx_ring(struct nfe_softc *, struct nfe_tx_ring *);
 int	nfe_ifmedia_upd(struct ifnet *);
 void	nfe_ifmedia_sts(struct ifnet *, struct ifmediareq *);
-void	nfe_setmulti(struct nfe_softc *);
+void	nfe_iff(struct nfe_softc *);
 void	nfe_get_macaddr(struct nfe_softc *, uint8_t *);
 void	nfe_set_macaddr(struct nfe_softc *, const uint8_t *);
 void	nfe_tick(void *);
+#ifndef SMALL_KERNEL
+int	nfe_wol(struct ifnet*, int);
+#endif
 
 struct cfattach nfe_ca = {
 	sizeof (struct nfe_softc), nfe_match, nfe_attach, NULL,
@@ -341,12 +343,17 @@ nfe_attach(struct device *parent, struct device *self, void *aux)
 	ifp->if_ioctl = nfe_ioctl;
 	ifp->if_start = nfe_start;
 	ifp->if_watchdog = nfe_watchdog;
-	ifp->if_baudrate = IF_Gbps(1);
 	IFQ_SET_MAXLEN(&ifp->if_snd, NFE_IFQ_MAXLEN);
 	IFQ_SET_READY(&ifp->if_snd);
 	strlcpy(ifp->if_xname, sc->sc_dev.dv_xname, IFNAMSIZ);
 
 	ifp->if_capabilities = IFCAP_VLAN_MTU;
+
+#ifndef SMALL_KERNEL
+	ifp->if_capabilities |= IFCAP_WOL;
+	ifp->if_wol = nfe_wol;
+	nfe_wol(ifp, 0);
+#endif
 
 	if (sc->sc_flags & NFE_USE_JUMBO)
 		ifp->if_hardmtu = NFE_JUMBO_MTU;
@@ -550,24 +557,14 @@ nfe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	case SIOCSIFFLAGS:
 		if (ifp->if_flags & IFF_UP) {
-			/*
-			 * If only the PROMISC or ALLMULTI flag changes, then
-			 * don't do a full re-init of the chip, just update
-			 * the Rx filter.
-			 */
-			if ((ifp->if_flags & IFF_RUNNING) &&
-			    ((ifp->if_flags ^ sc->sc_if_flags) &
-			     (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
-				nfe_setmulti(sc);
-			} else {
-				if (!(ifp->if_flags & IFF_RUNNING))
-					nfe_init(ifp);
-			}
+			if (ifp->if_flags & IFF_RUNNING)
+				error = ENETRESET;
+			else
+				nfe_init(ifp);
 		} else {
 			if (ifp->if_flags & IFF_RUNNING)
 				nfe_stop(ifp, 1);
 		}
-		sc->sc_if_flags = ifp->if_flags;
 		break;
 
 	case SIOCSIFMEDIA:
@@ -581,7 +578,7 @@ nfe_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 
 	if (error == ENETRESET) {
 		if (ifp->if_flags & IFF_RUNNING)
-			nfe_setmulti(sc);
+			nfe_iff(sc);
 		error = 0;
 	}
 
@@ -1155,15 +1152,14 @@ nfe_init(struct ifnet *ifp)
 	NFE_WRITE(sc, NFE_STATUS, sc->mii_phyaddr << 24 | NFE_STATUS_MAGIC);
 
 	NFE_WRITE(sc, NFE_SETUP_R4, NFE_R4_MAGIC);
-	NFE_WRITE(sc, NFE_WOL_CTL, NFE_WOL_ENABLE);
 
 	sc->rxtxctl &= ~NFE_RXTX_BIT2;
 	NFE_WRITE(sc, NFE_RXTX_CTL, sc->rxtxctl);
 	DELAY(10);
 	NFE_WRITE(sc, NFE_RXTX_CTL, NFE_RXTX_BIT1 | sc->rxtxctl);
 
-	/* set Rx filter */
-	nfe_setmulti(sc);
+	/* program promiscuous mode and multicast filters */
+	nfe_iff(sc);
 
 	nfe_ifmedia_upd(ifp);
 
@@ -1201,11 +1197,13 @@ nfe_stop(struct ifnet *ifp, int disable)
 	/* abort Tx */
 	NFE_WRITE(sc, NFE_TX_CTL, 0);
 
-	/* disable Rx */
-	NFE_WRITE(sc, NFE_RX_CTL, 0);
+	if ((sc->sc_flags & NFE_WOL) == 0) {
+		/* disable Rx */
+		NFE_WRITE(sc, NFE_RX_CTL, 0);
 
-	/* disable interrupts */
-	NFE_WRITE(sc, NFE_IRQ_MASK, 0);
+		/* disable interrupts */
+		NFE_WRITE(sc, NFE_IRQ_MASK, 0);
+	}
 
 	/* reset Tx and Rx rings */
 	nfe_reset_tx_ring(sc, &sc->txq);
@@ -1701,43 +1699,47 @@ nfe_ifmedia_sts(struct ifnet *ifp, struct ifmediareq *ifmr)
 }
 
 void
-nfe_setmulti(struct nfe_softc *sc)
+nfe_iff(struct nfe_softc *sc)
 {
+	struct ifnet *ifp = &sc->sc_arpcom.ac_if;
 	struct arpcom *ac = &sc->sc_arpcom;
-	struct ifnet *ifp = &ac->ac_if;
 	struct ether_multi *enm;
 	struct ether_multistep step;
 	uint8_t addr[ETHER_ADDR_LEN], mask[ETHER_ADDR_LEN];
-	uint32_t filter = NFE_RXFILTER_MAGIC;
+	uint32_t filter;
 	int i;
 
-	if ((ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
+	filter = NFE_RXFILTER_MAGIC;
+	ifp->if_flags &= ~IFF_ALLMULTI;
+
+	if (ifp->if_flags & IFF_PROMISC || ac->ac_multirangecnt > 0) {
+		ifp->if_flags |= IFF_ALLMULTI;
+		if (ifp->if_flags & IFF_PROMISC)
+			filter |= NFE_PROMISC;
+		else
+			filter |= NFE_U2M;
 		bzero(addr, ETHER_ADDR_LEN);
 		bzero(mask, ETHER_ADDR_LEN);
-		goto done;
+	} else {
+		filter |= NFE_U2M;
+
+		bcopy(etherbroadcastaddr, addr, ETHER_ADDR_LEN);
+		bcopy(etherbroadcastaddr, mask, ETHER_ADDR_LEN);
+
+		ETHER_FIRST_MULTI(step, ac, enm);
+		while (enm != NULL) {
+			for (i = 0; i < ETHER_ADDR_LEN; i++) {
+				addr[i] &=  enm->enm_addrlo[i];
+				mask[i] &= ~enm->enm_addrlo[i];
+			}
+
+			ETHER_NEXT_MULTI(step, enm);
+		}
+
+		for (i = 0; i < ETHER_ADDR_LEN; i++)
+			mask[i] |= addr[i];
 	}
 
-	bcopy(etherbroadcastaddr, addr, ETHER_ADDR_LEN);
-	bcopy(etherbroadcastaddr, mask, ETHER_ADDR_LEN);
-
-	ETHER_FIRST_MULTI(step, ac, enm);
-	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			bzero(addr, ETHER_ADDR_LEN);
-			bzero(mask, ETHER_ADDR_LEN);
-			goto done;
-		}
-		for (i = 0; i < ETHER_ADDR_LEN; i++) {
-			addr[i] &=  enm->enm_addrlo[i];
-			mask[i] &= ~enm->enm_addrlo[i];
-		}
-		ETHER_NEXT_MULTI(step, enm);
-	}
-	for (i = 0; i < ETHER_ADDR_LEN; i++)
-		mask[i] |= addr[i];
-
-done:
 	addr[0] |= 0x01;	/* make sure multicast bit is set */
 
 	NFE_WRITE(sc, NFE_MULTIADDR_HI,
@@ -1748,8 +1750,6 @@ done:
 	    mask[3] << 24 | mask[2] << 16 | mask[1] << 8 | mask[0]);
 	NFE_WRITE(sc, NFE_MULTIMASK_LO,
 	    mask[5] <<  8 | mask[4]);
-
-	filter |= (ifp->if_flags & IFF_PROMISC) ? NFE_PROMISC : NFE_U2M;
 	NFE_WRITE(sc, NFE_RXFILTER, filter);
 }
 
@@ -1803,3 +1803,21 @@ nfe_tick(void *arg)
 
 	timeout_add_sec(&sc->sc_tick_ch, 1);
 }
+
+#ifndef SMALL_KERNEL
+int
+nfe_wol(struct ifnet *ifp, int enable)
+{
+	struct nfe_softc *sc = ifp->if_softc;
+
+	if (enable) {
+		sc->sc_flags |= NFE_WOL;
+		NFE_WRITE(sc, NFE_WOL_CTL, NFE_WOL_ENABLE);
+	} else {
+		sc->sc_flags &= ~NFE_WOL;
+		NFE_WRITE(sc, NFE_WOL_CTL, 0);
+	}
+
+	return 0;
+}
+#endif

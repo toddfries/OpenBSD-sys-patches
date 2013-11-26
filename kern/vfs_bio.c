@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_bio.c,v 1.134 2011/09/19 14:48:04 beck Exp $	*/
+/*	$OpenBSD: vfs_bio.c,v 1.152 2013/08/08 23:25:06 syl Exp $	*/
 /*	$NetBSD: vfs_bio.c,v 1.44 1996/06/11 11:15:36 pk Exp $	*/
 
 /*
@@ -69,6 +69,7 @@
 #define	BQ_CLEAN	1		/* LRU queue with clean buffers */
 
 TAILQ_HEAD(bqueues, buf) bufqueues[BQUEUES];
+int nobuffers;
 int needbuffer;
 struct bio_ops bioops;
 
@@ -85,32 +86,17 @@ void buf_put(struct buf *);
 #define	binsheadfree(bp, dp)	TAILQ_INSERT_HEAD(dp, bp, b_freelist)
 #define	binstailfree(bp, dp)	TAILQ_INSERT_TAIL(dp, bp, b_freelist)
 
-struct buf *bio_doread(struct vnode *, daddr64_t, int, int);
-struct buf *buf_get(struct vnode *, daddr64_t, size_t);
+struct buf *bio_doread(struct vnode *, daddr_t, int, int);
+struct buf *buf_get(struct vnode *, daddr_t, size_t);
 void bread_cluster_callback(struct buf *);
 
-/*
- * We keep a few counters to monitor the utilization of the buffer cache
- *
- *  numbufpages   - number of pages totally allocated.
- *  numdirtypages - number of pages on BQ_DIRTY queue.
- *  lodirtypages  - low water mark for buffer cleaning daemon.
- *  hidirtypages  - high water mark for buffer cleaning daemon.
- *  numcleanpages - number of pages on BQ_CLEAN queue.
- *		    Used to track the need to speedup the cleaner and 
- *		    as a reserve for special processes like syncer.
- *  maxcleanpages - the highest page count on BQ_CLEAN.
- */
-
-struct bcachestats bcstats;
-long lodirtypages;
-long hidirtypages;
-long locleanpages;
-long hicleanpages;
-long maxcleanpages;
-long backoffpages;	/* backoff counter for page allocations */
-long buflowpages;	/* bufpages low water mark */
-long bufhighpages; 	/* bufpages high water mark */
+struct bcachestats bcstats;  /* counters */
+long lodirtypages;      /* dirty page count low water mark */
+long hidirtypages;      /* dirty page count high water mark */
+long lopages;	      	/* page recycling low water mark */
+long hipages;   	/* page recycling high water mark */
+long buflowpages;	/* bufpages absolute low water mark */
+long bufhighpages; 	/* bufpages absolute high water mark */
 long bufbackpages; 	/* number of pages we back off when asked to shrink */
 
 vsize_t bufkvm;
@@ -170,11 +156,6 @@ buf_put(struct buf *bp)
 
 	LIST_REMOVE(bp, b_list);
 	bcstats.numbufs--;
-	if (backoffpages) {
-		backoffpages -= atop(bp->b_bufsize);
-		if (backoffpages < 0)
-			backoffpages = 0;
-	}
 
 	if (buf_dealloc_mem(bp) != 0)
 		return;
@@ -191,24 +172,37 @@ bufinit(void)
 	struct bqueues *dp;
 
 	dmapages = uvm_pagecount(&dma_constraint);
+	/* take away a guess at how much of this the kernel will consume */
+	dmapages -= (atop(physmem) - atop(uvmexp.free));
 
 	/*
-	 * If MD code doesn't say otherwise, use 10% of kvm for mappings and
-	 * 10% of dmaable pages for cache pages.
+	 * If MD code doesn't say otherwise, use up to 10% of DMA'able
+	 * memory for buffers.
 	 */
 	if (bufcachepercent == 0)
 		bufcachepercent = 10;
+
+	/*
+	 * XXX these values and their same use in kern_sysctl
+	 * need to move into buf.h
+	 */
+	KASSERT(bufcachepercent <= 90);
+	KASSERT(bufcachepercent >= 5);
 	if (bufpages == 0)
 		bufpages = dmapages * bufcachepercent / 100;
+	if (bufpages < BCACHE_MIN)
+		bufpages = BCACHE_MIN;
+	KASSERT(bufpages < dmapages);
 
 	bufhighpages = bufpages;
 
 	/*
-	 * set the base backoff level for the buffer cache to bufpages.
-	 * we will not allow uvm to steal back more than this number of
-	 * pages
+	 * Set the base backoff level for the buffer cache.  We will
+	 * not allow uvm to steal back more than this number of pages.
 	 */
-	buflowpages = dmapages * 10 / 100;
+	buflowpages = dmapages * 5 / 100;
+	if (buflowpages < BCACHE_MIN)
+		buflowpages = BCACHE_MIN;
 
 	/*
 	 * set bufbackpages to 100 pages, or 10 percent of the low water mark
@@ -219,6 +213,10 @@ bufinit(void)
 	if (bufbackpages > 100)
 		bufbackpages = 100;
 
+	/*
+	 * If the MD code does not say otherwise, reserve 10% of kva
+	 * space for mapping buffers.
+	 */
 	if (bufkvm == 0)
 		bufkvm = (VM_MAX_KERNEL_ADDRESS - VM_MIN_KERNEL_ADDRESS) / 10;
 
@@ -236,6 +234,7 @@ bufinit(void)
 
 	pool_init(&bufpool, sizeof(struct buf), 0, 0, 0, "bufpl", NULL);
 	pool_setipl(&bufpool, IPL_BIO);
+
 	for (dp = bufqueues; dp < &bufqueues[BQUEUES]; dp++)
 		TAILQ_INIT(dp);
 
@@ -245,17 +244,21 @@ bufinit(void)
  	 */
 	buf_mem_init(bufkvm);
 
-	hidirtypages = (bufpages / 4) * 3;
-	lodirtypages = bufpages / 2;
+	/*
+	 * Set the dirty page high water mark to be less than the low
+	 * water mark for pages in the buffer cache. This ensures we
+	 * can always back off by throwing away clean pages, and give
+	 * ourselves a chance to write out the dirty pages eventually.
+	 */
+	hidirtypages = (buflowpages / 4) * 3;
+	lodirtypages = buflowpages / 2;
 
 	/*
-	 * When we hit 95% of pages being clean, we bring them down to
-	 * 90% to have some slack.
+	 * We are allowed to use up to the reserve. When we hit it,
+	 * we free 10% of the cache size to allow room to recycle.
 	 */
-	hicleanpages = bufpages - (bufpages / 20);
-	locleanpages = bufpages - (bufpages / 10);
-
-	maxcleanpages = locleanpages;
+	hipages = bufpages - RESERVE_PAGES;
+	lopages = hipages - (hipages / 10);
 }
 
 /*
@@ -264,35 +267,31 @@ bufinit(void)
 void
 bufadjust(int newbufpages)
 {
-	/*
-	 * XXX - note, bufkvm was allocated once, based on 10% of physmem
-	 * see above.
-	 */
 	struct buf *bp;
-	int s;
+	int s, growing = 0;
+
+	if (newbufpages < buflowpages)
+		newbufpages = buflowpages;
 
 	s = splbio();
+	if (newbufpages >= bufpages)
+		growing = 1;
 	bufpages = newbufpages;
 
-	hidirtypages = (bufpages / 4) * 3;
-	lodirtypages = bufpages / 2;
+	/*
+	 * We are allowed to use up to the reserve. When we hit it,
+	 * we free 10% of the cache size to allow room to recycle.
+	 */
+	hipages = bufpages - RESERVE_PAGES;
+	lopages = hipages - (hipages / 10);
 
 	/*
-	 * When we hit 95% of pages being clean, we bring them down to
-	 * 90% to have some slack.
+	 * If we are shrinking the cache we are under some memory pressure.
+	 * If we have more buffers allocated than our new low water mark,
+	 * immediately free them.
 	 */
-	hicleanpages = bufpages - (bufpages / 20);
-	locleanpages = bufpages - (bufpages / 10);
-
-	maxcleanpages = locleanpages;
-
-	/*
-	 * If we we have more buffers allocated than bufpages,
-	 * free them up to get back down. this may possibly consume
-	 * all our clean pages...
-	 */
-	while ((bp = TAILQ_FIRST(&bufqueues[BQ_CLEAN])) &&
-	    (bcstats.numbufpages > bufpages)) {
+	while (!growing && (bp = TAILQ_FIRST(&bufqueues[BQ_CLEAN])) &&
+	    (bcstats.numbufpages > lopages)) {
 		bremfree(bp);
 		if (bp->b_vp) {
 			RB_REMOVE(buf_rb_bufs,
@@ -303,23 +302,13 @@ bufadjust(int newbufpages)
 	}
 
 	/*
-	 * Wake up cleaner if we're getting low on pages. We might
-	 * now have too much dirty, or have fallen below our low
-	 * water mark on clean pages so we need to free more stuff
-	 * up.
+	 * Wake up the cleaner if we have lots of dirty pages,
+	 * or if we are getting low on buffer cache kva.
 	 */
-	if (bcstats.numdirtypages >= hidirtypages ||
-	    bcstats.numcleanpages <= locleanpages)
+	if (!growing && (UNCLEAN_PAGES >= hidirtypages ||
+	    bcstats.kvaslots_avail <= 2 * RESERVE_SLOTS))
 		wakeup(&bd_req);
 
-	/*
-	 * if immediate action has not freed up enough goo for us
-	 * to proceed - we tsleep and wait for the cleaner above
-	 * to do it's work and get us reduced down to sanity.
-	 */
-	while (bcstats.numbufpages > bufpages) {
-		tsleep(&needbuffer, PRIBIO, "needbuffer", 0);
-	}
 	splx(s);
 }
 
@@ -330,34 +319,37 @@ int
 bufbackoff(struct uvm_constraint_range *range, long size)
 {
 	/*
-	 * Back off the amount of buffer cache pages. Called by the page
-	 * daemon to consume buffer cache pages rather than swapping.
+	 * Back off "size" buffer cache pages. Called by the page
+	 * daemon to consume buffer cache pages rather than scanning.
 	 *
-	 * On success, it frees N pages from the buffer cache, and sets
-	 * a flag so that the next N allocations from buf_get will recycle
-	 * a buffer rather than allocate a new one. It then returns 0 to the
-	 * caller. 
+	 * It returns 0 to the pagedaemon to indicate that it has
+	 * succeeded in freeing enough pages. It returns -1 to
+	 * indicate that it could not and the pagedaemon should take
+	 * other measures.
 	 *
-	 * on failure, it could free no pages from the buffer cache, does
-	 * nothing and returns -1 to the caller. 
 	 */
-	long d;
+	long pdelta, oldbufpages;
 
-	if (bufpages <= buflowpages) 
+	/*
+	 * Back off by at least bufbackpages. If the page daemon gave us
+	 * a larger size, back off by that much.
+	 */
+	pdelta = (size > bufbackpages) ? size : bufbackpages;
+
+	if (bufpages <= buflowpages)
 		return(-1);
-
-	if (bufpages - bufbackpages >= buflowpages)
-		d = bufbackpages;
+	if (bufpages - pdelta < buflowpages)
+		pdelta = bufpages - buflowpages;
+	oldbufpages = bufpages;
+	bufadjust(bufpages - pdelta);
+	if (oldbufpages - bufpages < size)
+		return (-1); /* we did not free what we were asked */
 	else
-		d = bufpages - buflowpages;
-	backoffpages = bufbackpages;
-	bufadjust(bufpages - d);
-	backoffpages = bufbackpages;
-	return(0);
+		return(0);
 }
 
 struct buf *
-bio_doread(struct vnode *vp, daddr64_t blkno, int size, int async)
+bio_doread(struct vnode *vp, daddr_t blkno, int size, int async)
 {
 	struct buf *bp;
 	struct mount *mp;
@@ -375,7 +367,7 @@ bio_doread(struct vnode *vp, daddr64_t blkno, int size, int async)
 		bcstats.numreads++;
 		VOP_STRATEGY(bp);
 		/* Pay for the read. */
-		curproc->p_stats->p_ru.ru_inblock++;		/* XXX */
+		curproc->p_ru.ru_inblock++;			/* XXX */
 	} else if (async) {
 		brelse(bp);
 	}
@@ -402,7 +394,7 @@ bio_doread(struct vnode *vp, daddr64_t blkno, int size, int async)
  * This algorithm described in Bach (p.54).
  */
 int
-bread(struct vnode *vp, daddr64_t blkno, int size, struct buf **bpp)
+bread(struct vnode *vp, daddr_t blkno, int size, struct buf **bpp)
 {
 	struct buf *bp;
 
@@ -418,7 +410,7 @@ bread(struct vnode *vp, daddr64_t blkno, int size, struct buf **bpp)
  * Trivial modification to the breada algorithm presented in Bach (p.55).
  */
 int
-breadn(struct vnode *vp, daddr64_t blkno, int size, daddr64_t rablks[],
+breadn(struct vnode *vp, daddr_t blkno, int size, daddr_t rablks[],
     int rasizes[], int nrablks, struct buf **bpp)
 {
 	struct buf *bp;
@@ -479,11 +471,11 @@ bread_cluster_callback(struct buf *bp)
 }
 
 int
-bread_cluster(struct vnode *vp, daddr64_t blkno, int size, struct buf **rbpp)
+bread_cluster(struct vnode *vp, daddr_t blkno, int size, struct buf **rbpp)
 {
 	struct buf *bp, **xbpp;
 	int howmany, maxra, i, inc;
-	daddr64_t sblkno;
+	daddr_t sblkno;
 
 	*rbpp = bio_doread(vp, blkno, size, 0);
 
@@ -554,7 +546,7 @@ bread_cluster(struct vnode *vp, daddr64_t blkno, int size, struct buf **rbpp)
 	bcstats.pendingreads++;
 	bcstats.numreads++;
 	VOP_STRATEGY(bp);
-	curproc->p_stats->p_ru.ru_inblock++;
+	curproc->p_ru.ru_inblock++;
 
 out:
 	return (biowait(*rbpp));
@@ -617,14 +609,22 @@ bwrite(struct buf *bp)
 	if (wasdelayed) {
 		reassignbuf(bp);
 	} else
-		curproc->p_stats->p_ru.ru_oublock++;
-	
+		curproc->p_ru.ru_oublock++;
+
 
 	/* Initiate disk write.  Make sure the appropriate party is charged. */
 	bp->b_vp->v_numoutput++;
 	splx(s);
 	SET(bp->b_flags, B_WRITEINPROG);
 	VOP_STRATEGY(bp);
+
+	/*
+	 * If the queue is above the high water mark, wait till
+	 * the number of outstanding write bufs drops below the low
+	 * water mark.
+	 */
+	if (bp->b_bq)
+		bufq_wait(bp->b_bq, bp);
 
 	if (async)
 		return (0);
@@ -671,7 +671,7 @@ bdwrite(struct buf *bp)
 		s = splbio();
 		reassignbuf(bp);
 		splx(s);
-		curproc->p_stats->p_ru.ru_oublock++;	/* XXX */
+		curproc->p_ru.ru_oublock++;		/* XXX */
 	}
 
 	/* If this is a tape block, write the block now. */
@@ -802,8 +802,6 @@ brelse(struct buf *bp)
 		}
 
 		bcstats.numcleanpages += atop(bp->b_bufsize);
-		if (maxcleanpages < bcstats.numcleanpages)
-			maxcleanpages = bcstats.numcleanpages;
 		binsheadfree(bp, &bufqueues[BQ_CLEAN]);
 	} else {
 		/*
@@ -813,8 +811,6 @@ brelse(struct buf *bp)
 
 		if (!ISSET(bp->b_flags, B_DELWRI)) {
 			bcstats.numcleanpages += atop(bp->b_bufsize);
-			if (maxcleanpages < bcstats.numcleanpages)
-				maxcleanpages = bcstats.numcleanpages;
 			bufq = &bufqueues[BQ_CLEAN];
 		} else {
 			bcstats.numdirtypages += atop(bp->b_bufsize);
@@ -834,9 +830,16 @@ brelse(struct buf *bp)
 	CLR(bp->b_flags, (B_AGE | B_ASYNC | B_NOCACHE | B_DEFERRED));
 	buf_release(bp);
 
+	/* Wake up syncer and cleaner processes waiting for buffers. */
+	if (nobuffers) {
+		nobuffers = 0;
+		wakeup(&nobuffers);
+	}
+
 	/* Wake up any processes waiting for any buffer to become free. */
-	if (needbuffer) {
-		needbuffer--;
+	if (needbuffer && bcstats.numbufpages < hipages &&
+	    bcstats.kvaslots_avail > RESERVE_SLOTS) {
+		needbuffer = 0;
 		wakeup(&needbuffer);
 	}
 
@@ -854,7 +857,7 @@ brelse(struct buf *bp)
  * chain. If it's there, return a pointer to it, unless it's marked invalid.
  */
 struct buf *
-incore(struct vnode *vp, daddr64_t blkno)
+incore(struct vnode *vp, daddr_t blkno)
 {
 	struct buf *bp;
 	struct buf b;
@@ -881,7 +884,7 @@ incore(struct vnode *vp, daddr64_t blkno)
  * cached blocks be of the correct size.
  */
 struct buf *
-getblk(struct vnode *vp, daddr64_t blkno, int size, int slpflag, int slptimeo)
+getblk(struct vnode *vp, daddr_t blkno, int size, int slpflag, int slptimeo)
 {
 	struct buf *bp;
 	struct buf b;
@@ -947,42 +950,45 @@ geteblk(int size)
  * Allocate a buffer.
  */
 struct buf *
-buf_get(struct vnode *vp, daddr64_t blkno, size_t size)
+buf_get(struct vnode *vp, daddr_t blkno, size_t size)
 {
-	static int gcount = 0;
 	struct buf *bp;
 	int poolwait = size == 0 ? PR_NOWAIT : PR_WAITOK;
 	int npages;
 	int s;
 
-	/*
-	 * if we were previously backed off, slowly climb back up
-	 * to the high water mark again.
-	 */
-	if ((backoffpages == 0) && (bufpages < bufhighpages)) {
-		if ( gcount == 0 )  {
-			bufadjust(bufpages + bufbackpages);
-			gcount += bufbackpages;
-		} else
-			gcount--;
-	}
-
 	s = splbio();
 	if (size) {
 		/*
-		 * Wake up cleaner if we're getting low on pages.
+		 * Wake up the cleaner if we have lots of dirty pages,
+		 * or if we are getting low on buffer cache kva.
 		 */
-		if (bcstats.numdirtypages >= hidirtypages ||
-		    bcstats.numcleanpages <= locleanpages)
+		if (UNCLEAN_PAGES >= hidirtypages ||
+			bcstats.kvaslots_avail <= 2 * RESERVE_SLOTS)
 			wakeup(&bd_req);
 
+		npages = atop(round_page(size));
+
 		/*
-		 * If we're above the high water mark for clean pages,
+		 * If our allocation would take us over the
+		 * high water mark, see if we can grow the
+		 * cache.
+		 */
+		if (bcstats.numbufpages + npages > hipages &&
+		    bufpages < bufhighpages) {
+			int i = bufbackpages;
+			if (bufpages + i > bufhighpages)
+				i = bufhighpages - bufpages;
+			bufadjust(bufpages + i);
+		}
+
+		/*
+		 * If we're still above the high water mark for pages,
 		 * free down to the low water mark.
 		 */
-		if (bcstats.numcleanpages > hicleanpages) {
-			while (bcstats.numcleanpages > locleanpages) {
-				bp = TAILQ_FIRST(&bufqueues[BQ_CLEAN]);
+		if (bcstats.numbufpages + npages > hipages) {
+			while ((bcstats.numbufpages > lopages) &&
+			    (bp = TAILQ_FIRST(&bufqueues[BQ_CLEAN]))) {
 				bremfree(bp);
 				if (bp->b_vp) {
 					RB_REMOVE(buf_rb_bufs,
@@ -993,31 +999,26 @@ buf_get(struct vnode *vp, daddr64_t blkno, size_t size)
 			}
 		}
 
-		npages = atop(round_page(size));
-
 		/*
-		 * Free some buffers until we have enough space.
+		 * If we get here, we tried to free the world down
+		 * above, and couldn't get down - Wake the cleaner
+		 * and wait for it to push some buffers out.
 		 */
-		while ((bcstats.numbufpages + npages > bufpages)
-		    || backoffpages) {
-			int freemax = 5;
-			int i = freemax;
-			while ((bp = TAILQ_FIRST(&bufqueues[BQ_CLEAN])) && i--) {
-				bremfree(bp);
-				if (bp->b_vp) {
-					RB_REMOVE(buf_rb_bufs,
-					    &bp->b_vp->v_bufs_tree, bp);
-					brelvp(bp);
-				}
-				buf_put(bp);
-			}
-			if (freemax == i &&
-			    (bcstats.numbufpages + npages > bufpages)) {
-				needbuffer++;
-				tsleep(&needbuffer, PRIBIO, "needbuffer", 0);
-				splx(s);
-				return (NULL);
-			}
+		if ((bcstats.numbufpages + npages > hipages ||
+		    bcstats.kvaslots_avail <= RESERVE_SLOTS) &&
+		    curproc != syncerproc && curproc != cleanerproc) {
+			wakeup(&bd_req);
+			needbuffer++;
+			tsleep(&needbuffer, PRIBIO, "needbuffer", 0);
+			splx(s);
+			return (NULL);
+		}
+		if (bcstats.numbufpages + npages > bufpages) {
+			/* cleaner or syncer */
+			nobuffers = 1;
+			tsleep(&nobuffers, PRIBIO, "nobuffers", 0);
+			splx(s);
+			return (NULL);
 		}
 	}
 
@@ -1034,7 +1035,7 @@ buf_get(struct vnode *vp, daddr64_t blkno, size_t size)
 	LIST_INIT(&bp->b_dep);
 	bp->b_bcount = size;
 
-	buf_acquire_unmapped(bp);
+	buf_acquire_nomap(bp);
 
 	if (vp != NULL) {
 		/*
@@ -1081,22 +1082,36 @@ void
 buf_daemon(struct proc *p)
 {
 	struct timeval starttime, timediff;
-	struct buf *bp;
-	int s;
+	struct buf *bp = NULL;
+	int s, pushed = 0;
 
 	cleanerproc = curproc;
 
 	s = splbio();
 	for (;;) {
-		if (bcstats.numdirtypages < hidirtypages)
+		if (bp == NULL || (pushed >= 16 &&
+		    UNCLEAN_PAGES < hidirtypages &&
+		    bcstats.kvaslots_avail > 2 * RESERVE_SLOTS)){
+			pushed = 0;
+			/*
+			 * Wake up anyone who was waiting for buffers
+			 * to be released.
+			 */
+			if (needbuffer) {
+				needbuffer = 0;
+				wakeup(&needbuffer);
+			}
 			tsleep(&bd_req, PRIBIO - 7, "cleaner", 0);
+		}
 
 		getmicrouptime(&starttime);
 
 		while ((bp = TAILQ_FIRST(&bufqueues[BQ_DIRTY]))) {
 			struct timeval tv;
 
-			if (bcstats.numdirtypages < lodirtypages)
+			if (UNCLEAN_PAGES < lodirtypages &&
+			    bcstats.kvaslots_avail > 2 * RESERVE_SLOTS &&
+			    pushed >= 16)
 				break;
 
 			bremfree(bp);
@@ -1125,6 +1140,7 @@ buf_daemon(struct proc *p)
 			}
 
 			bawrite(bp);
+			pushed++;
 
 			/* Never allow processing to run for more than 1 sec */
 			getmicrouptime(&tv);
@@ -1223,12 +1239,14 @@ biodone(struct buf *bp)
 }
 
 #ifdef DDB
-void	bcstats_print(int (*)(const char *, ...));
+void	bcstats_print(int (*)(const char *, ...)
+    __attribute__((__format__(__kprintf__,1,2))));
 /*
  * bcstats_print: ddb hook to print interesting buffer cache counters
  */
 void
-bcstats_print(int (*pr)(const char *, ...))
+bcstats_print(
+    int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2))))
 {
 	(*pr)("Current Buffer Cache status:\n");
 	(*pr)("numbufs %lld busymapped %lld, delwri %lld\n",

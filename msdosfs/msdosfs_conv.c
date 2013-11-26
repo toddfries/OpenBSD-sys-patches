@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_conv.c,v 1.14 2009/08/13 22:34:29 jasper Exp $	*/
+/*	$OpenBSD: msdosfs_conv.c,v 1.16 2013/10/01 20:22:13 sf Exp $	*/
 /*	$NetBSD: msdosfs_conv.c,v 1.24 1997/10/17 11:23:54 ws Exp $	*/
 
 /*-
@@ -209,7 +209,7 @@ dos2unixtime(u_int dd, u_int dt, u_int dh, struct timespec *tsp)
 		 */
 		month = (dd & DD_MONTH_MASK) >> DD_MONTH_SHIFT;
 		if (month == 0) {
-			printf("dos2unixtime(): month value out of range (%ld)\n",
+			printf("dos2unixtime(): month value out of range (%u)\n",
 			    month);
 			month = 1;
 		}
@@ -403,7 +403,7 @@ dos2unixfn(u_char dn[11], u_char *un, int lower)
  *	3 if conversion was successful and generation number was inserted
  */
 int
-unix2dosfn(u_char *un, u_char dn[12], int unlen, u_int gen)
+unix2dosfn(u_char *un, u_char dn[11], int unlen, u_int gen)
 {
 	int i, j, l;
 	int conv = 1;
@@ -416,7 +416,6 @@ unix2dosfn(u_char *un, u_char dn[12], int unlen, u_int gen)
 	 */
 	for (i = 0; i < 11; i++)
 		dn[i] = ' ';
-	dn[11] = 0;
 	
 	/*
 	 * The filenames "." and ".." are handled specially, since they

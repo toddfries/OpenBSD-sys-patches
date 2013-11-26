@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.h,v 1.21 2011/10/25 18:38:06 miod Exp $	*/
+/*	$OpenBSD: pmap.h,v 1.23 2013/11/02 23:10:30 miod Exp $	*/
 /*
  * Mach Operating System
  * Copyright (c) 1991 Carnegie Mellon University
@@ -45,7 +45,7 @@ typedef struct pv_entry *pv_entry_t;
 extern	pmap_t		kernel_pmap;
 extern	struct pmap	kernel_pmap_store;
 extern	caddr_t		vmmap;
-extern	apr_t		default_apr;
+extern	apr_t		kernel_apr, userland_apr;
 
 #define	pmap_kernel()			(&kernel_pmap_store)
 #define pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
@@ -61,10 +61,12 @@ void	pmap_bootstrap(paddr_t, paddr_t);
 void	pmap_bootstrap_cpu(cpuid_t);
 void	pmap_cache_ctrl(vaddr_t, vaddr_t, u_int);
 void	pmap_page_uncache(paddr_t);
+int	pmap_set_modify(pmap_t, vaddr_t);
+void	pmap_unmap_firmware(void);
+boolean_t pmap_unsetbit(struct vm_page *, int);
+
 #define pmap_unuse_final(p)		/* nothing */
 #define	pmap_remove_holes(map)		do { /* nothing */ } while (0)
-int	pmap_set_modify(pmap_t, vaddr_t);
-boolean_t pmap_unsetbit(struct vm_page *, int);
 
 int	pmap_translation_info(pmap_t, vaddr_t, paddr_t *, uint32_t *);
 /*

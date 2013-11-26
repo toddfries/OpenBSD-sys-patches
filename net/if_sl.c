@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_sl.c,v 1.44 2011/07/06 02:42:28 henning Exp $	*/
+/*	$OpenBSD: if_sl.c,v 1.50 2013/10/23 15:12:42 mpi Exp $	*/
 /*	$NetBSD: if_sl.c,v 1.39.4.1 1996/06/02 16:26:31 thorpej Exp $	*/
 
 /*
@@ -63,7 +63,6 @@
 #include "bpfilter.h"
 
 #include <sys/param.h>
-#include <sys/proc.h>
 #include <sys/mbuf.h>
 #include <sys/dkstat.h>
 #include <sys/socket.h>
@@ -72,11 +71,8 @@
 #include <sys/tty.h>
 #include <sys/kernel.h>
 #include <sys/conf.h>
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 #include <sys/systm.h>
-#endif
 
-#include <machine/cpu.h>
 
 #include <net/if.h>
 #include <net/if_types.h>
@@ -86,7 +82,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #else
 #error Huh? Slip without inet?
@@ -154,10 +149,7 @@
 #if (SLMTU < 3)
 #error Huh?  SLMTU way too small.
 #endif
-#define	SLIP_HIWAT	roundup(50,CBSIZE)
-#if !(defined(__NetBSD__) || defined(__OpenBSD__))		/* XXX - cgd */
-#define	CLISTRESERVE	1024	/* Can't let clists get too low */
-#endif	/* !NetBSD */
+#define	SLIP_HIWAT	100
 
 /*
  * SLIP ABORT ESCAPE MECHANISM:
@@ -310,7 +302,6 @@ slopen(dev, tp)
 			tp->t_state |= TS_ISOPEN | TS_XCLUDE;
 			splx(s);
 			ttyflush(tp, FREAD | FWRITE);
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 			/*
 			 * make sure tty output queue is large enough
 			 * to hold a full-sized packet (including frame
@@ -329,7 +320,6 @@ slopen(dev, tp)
 			} else
 				sc->sc_oldbufsize = sc->sc_oldbufquot = 0;
 			splx(s);
-#endif /* NetBSD */
 			return (0);
 		}
 	return (ENXIO);
@@ -360,13 +350,11 @@ slclose(tp)
 		sc->sc_mbuf = NULL;
 		sc->sc_ep = sc->sc_mp = sc->sc_pktstart = NULL;
 
-#if defined(__NetBSD__) || defined(__OpenBSD__)
 		/* if necessary, install a new outq buffer of the appropriate size */
 		if (sc->sc_oldbufsize != 0) {
 			clfree(&tp->t_outq);
 			clalloc(&tp->t_outq, sc->sc_oldbufsize, sc->sc_oldbufquot);
 		}
-#endif
 		splx(s);
 	}
 }
@@ -496,9 +484,6 @@ slstart(tp)
 	u_char bpfbuf[SLMTU + SLIP_HDRLEN];
 	int len = 0;
 #endif
-#if !(defined(__NetBSD__) || defined(__OpenBSD__))	/* XXX - cgd */
-	extern int cfreecount;
-#endif
 
 	for (;;) {
 		/*
@@ -517,7 +502,6 @@ slstart(tp)
 		if (sc == NULL)
 			return;
 
-#if defined(__NetBSD__) || defined(__OpenBSD__)		/* XXX - cgd */
 		/*
 		 * Do not remove the packet from the IP queue if it
 		 * doesn't look like the packet will fit into the
@@ -526,7 +510,6 @@ slstart(tp)
 		 */
 		if (tp->t_outq.c_cn - tp->t_outq.c_cc < 2*SLMTU+2)
 			return;
-#endif /* NetBSD */
 
 		/*
 		 * Get a packet and send it to the interface.
@@ -590,18 +573,6 @@ slstart(tp)
 #endif
 		getmicrotime(&sc->sc_lastpacket);
 
-#if !(defined(__NetBSD__) || defined(__OpenBSD__))		/* XXX - cgd */
-		/*
-		 * If system is getting low on clists, just flush our
-		 * output queue (if the stuff was important, it'll get
-		 * retransmitted).
-		 */
-		if (cfreecount < CLISTRESERVE + SLMTU) {
-			m_freem(m);
-			sc->sc_if.if_collisions++;
-			continue;
-		}
-#endif /* !__NetBSD__ */
 		/*
 		 * The extra FRAME_END will start up a new packet, and thus
 		 * will flush any accumulated garbage.  We do this whenever
@@ -637,11 +608,7 @@ slstart(tp)
 					 * Put n characters at once
 					 * into the tty output queue.
 					 */
-#if defined(__NetBSD__) || defined(__OpenBSD__)		/* XXX - cgd */
 					if (b_to_q((u_char *)bp, cp - bp,
-#else
-					if (b_to_q((char *)bp, cp - bp,
-#endif
 					    &tp->t_outq))
 						break;
 					sc->sc_if.if_obytes += cp - bp;
@@ -926,7 +893,6 @@ slioctl(ifp, cmd, data)
 {
 	struct sl_softc *sc = ifp->if_softc;
 	struct ifaddr *ifa = (struct ifaddr *)data;
-	struct ifreq *ifr;
 	int s = splnet(), error = 0;
 	struct sl_stats *slsp;
 
@@ -946,22 +912,6 @@ slioctl(ifp, cmd, data)
 
 	case SIOCADDMULTI:
 	case SIOCDELMULTI:
-		ifr = (struct ifreq *)data;
-		if (ifr == 0) {
-			error = EAFNOSUPPORT;		/* XXX */
-			break;
-		}
-		switch (ifr->ifr_addr.sa_family) {
-
-#ifdef INET
-		case AF_INET:
-			break;
-#endif
-
-		default:
-			error = EAFNOSUPPORT;
-			break;
-		}
 		break;
 
 	case SIOCGSLSTATS:

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kernel.h,v 1.12 2007/05/16 17:27:30 art Exp $	*/
+/*	$OpenBSD: kernel.h,v 1.15 2013/10/06 01:27:49 guenther Exp $	*/
 /*	$NetBSD: kernel.h,v 1.11 1995/03/03 01:24:16 cgd Exp $	*/
 
 /*-
@@ -47,11 +47,7 @@ extern char domainname[MAXHOSTNAMELEN];
 extern int domainnamelen;
 
 /* 1.2 */
-extern struct timeval boottime;
-#ifndef __HAVE_TIMECOUNTER
-extern volatile struct timeval mono_time;
-extern volatile struct timeval time;
-#endif
+extern struct timespec boottime;
 extern struct timezone tz;			/* XXX */
 
 extern int tick;		/* usec per tick (1000000 / hz) */
@@ -65,3 +61,5 @@ extern int lbolt;		/* once a second sleep address */
 extern int tickdelta;
 extern long timedelta;
 
+extern struct timeval adjtimedelta;	/* unapplied time correction */
+extern struct bintime naptime;		/* time spent suspended */

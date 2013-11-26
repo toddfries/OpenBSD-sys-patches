@@ -1,4 +1,4 @@
-/*	$OpenBSD: cfxga.c,v 1.21 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: cfxga.c,v 1.25 2013/10/21 10:36:25 miod Exp $	*/
 
 /*
  * Copyright (c) 2005, 2006, Matthieu Herrb and Miodrag Vallat
@@ -114,19 +114,20 @@ void	cfxga_burner(void *, u_int, u_int);
 void	cfxga_free_screen(void *, void *);
 int	cfxga_ioctl(void *, u_long, caddr_t, int, struct proc *);
 paddr_t	cfxga_mmap(void *, off_t, int);
+int	cfxga_load_font(void *, void *, struct wsdisplay_font *);
+int	cfxga_list_font(void *, struct wsdisplay_font *);
 int	cfxga_show_screen(void *, void *, int, void (*)(void *, int, int),
 	    void *);
 
 struct wsdisplay_accessops cfxga_accessops = {
-	cfxga_ioctl,
-	cfxga_mmap,
-	cfxga_alloc_screen,
-	cfxga_free_screen,
-	cfxga_show_screen,
-	NULL,
-	NULL,
-	NULL,
-	cfxga_burner
+	.ioctl = cfxga_ioctl,
+	.mmap = cfxga_mmap,
+	.alloc_screen = cfxga_alloc_screen,
+	.free_screen = cfxga_free_screen,
+	.show_screen = cfxga_show_screen,
+	.load_font = cfxga_load_font,
+	.list_font = cfxga_list_font,
+	.burn_screen = cfxga_burner
 };
 
 /*
@@ -316,13 +317,16 @@ int
 cfxga_activate(struct device *dev, int act)
 {
 	struct cfxga_softc *sc = (void *)dev;
+	int ret = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
 		pcmcia_function_disable(sc->sc_pf);
 		break;
+	case DVACT_POWERDOWN:
+		ret = config_activate_children(self, act);
 	}
-	return (0);
+	return (ret);
 }
 
 void 
@@ -658,6 +662,30 @@ cfxga_show_screen(void *v, void *cookie, int waitok,
 	cfxga_reset_and_repaint(sc);	/* will turn video on if scr != NULL */
 
 	return (0);
+}
+
+int
+cfxga_load_font(void *v, void *emulcookie, struct wsdisplay_font *font)
+{
+	struct cfxga_softc *sc = v;
+	struct cfxga_screen *scr = sc->sc_active;
+
+	if (scr == NULL)
+		return ENXIO;
+
+	return rasops_load_font(&scr->scr_ri, emulcookie, font);
+}
+
+int
+cfxga_list_font(void *v, struct wsdisplay_font *font)
+{
+	struct cfxga_softc *sc = v;
+	struct cfxga_screen *scr = sc->sc_active;
+
+	if (scr == NULL)
+		return ENXIO;
+
+	return rasops_list_font(&scr->scr_ri, font);
 }
 
 /*
@@ -1047,8 +1075,8 @@ cfxga_copycols(void *cookie, int row, int src, int dst, int num)
 	int sx, dx, y, cx, cy;
 
 	/* Copy columns in backing store. */
-	ovbcopy(scr->scr_mem + row * ri->ri_cols + src,
-	    scr->scr_mem + row * ri->ri_cols + dst,
+	memmove(scr->scr_mem + row * ri->ri_cols + dst,
+	    scr->scr_mem + row * ri->ri_cols + src,
 	    num * sizeof(struct wsdisplay_charcell));
 
 	if (scr != scr->scr_sc->sc_active)
@@ -1070,8 +1098,8 @@ cfxga_copyrows(void *cookie, int src, int dst, int num)
 	int x, sy, dy, cx, cy;
 
 	/* Copy rows in backing store. */
-	ovbcopy(scr->scr_mem + src * ri->ri_cols,
-	    scr->scr_mem + dst * ri->ri_cols,
+	memmove(scr->scr_mem + dst * ri->ri_cols,
+	    scr->scr_mem + src * ri->ri_cols,
 	    num * ri->ri_cols * sizeof(struct wsdisplay_charcell));
 
 	if (scr != scr->scr_sc->sc_active)
@@ -1141,8 +1169,8 @@ cfxga_eraserows(void *cookie, int row, int num, long attr)
 		scr->scr_mem[row * ri->ri_cols + x].attr = attr;
 	}
 	for (y = 1; y < num; y++)
-		ovbcopy(scr->scr_mem + row * ri->ri_cols,
-		    scr->scr_mem + (row + y) * ri->ri_cols,
+		memmove(scr->scr_mem + (row + y) * ri->ri_cols,
+		    scr->scr_mem + row * ri->ri_cols,
 		    ri->ri_cols * sizeof(struct wsdisplay_charcell));
 
 	if (scr != scr->scr_sc->sc_active)

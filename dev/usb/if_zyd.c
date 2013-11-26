@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zyd.c,v 1.88 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: if_zyd.c,v 1.93 2013/11/06 15:55:15 jeremy Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -25,7 +25,6 @@
 
 #include <sys/param.h>
 #include <sys/sockio.h>
-#include <sys/proc.h>
 #include <sys/mbuf.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
@@ -50,7 +49,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #endif
@@ -232,10 +230,10 @@ int		zyd_set_rxfilter(struct zyd_softc *);
 void		zyd_set_chan(struct zyd_softc *, struct ieee80211_channel *);
 int		zyd_set_beacon_interval(struct zyd_softc *, int);
 uint8_t		zyd_plcp_signal(int);
-void		zyd_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void		zyd_intr(struct usbd_xfer *, void *, usbd_status);
 void		zyd_rx_data(struct zyd_softc *, const uint8_t *, uint16_t);
-void		zyd_rxeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void		zyd_txeof(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void		zyd_rxeof(struct usbd_xfer *, void *, usbd_status);
+void		zyd_txeof(struct usbd_xfer *, void *, usbd_status);
 int		zyd_tx(struct zyd_softc *, struct mbuf *,
 		    struct ieee80211_node *);
 void		zyd_start(struct ifnet *);
@@ -768,7 +766,7 @@ int
 zyd_cmd(struct zyd_softc *sc, uint16_t code, const void *idata, int ilen,
     void *odata, int olen, u_int flags)
 {
-	usbd_xfer_handle xfer;
+	struct usbd_xfer *xfer;
 	struct zyd_cmd cmd;
 	uint16_t xferflags;
 	usbd_status error;
@@ -797,11 +795,11 @@ zyd_cmd(struct zyd_softc *sc, uint16_t code, const void *idata, int ilen,
 			splx(s);
 		printf("%s: could not send command (error=%s)\n",
 		    sc->sc_dev.dv_xname, usbd_errstr(error));
-		(void)usbd_free_xfer(xfer);
+		usbd_free_xfer(xfer);
 		return EIO;
 	}
 	if (!(flags & ZYD_CMD_FLAG_READ)) {
-		(void)usbd_free_xfer(xfer);
+		usbd_free_xfer(xfer);
 		return 0;	/* write: don't wait for reply */
 	}
 	/* wait at most one second for command reply */
@@ -809,7 +807,7 @@ zyd_cmd(struct zyd_softc *sc, uint16_t code, const void *idata, int ilen,
 	sc->odata = NULL;	/* in case answer is received too late */
 	splx(s);
 
-	(void)usbd_free_xfer(xfer);
+	usbd_free_xfer(xfer);
 	return error;
 }
 
@@ -1644,6 +1642,9 @@ zyd_set_multi(struct zyd_softc *sc)
 	uint32_t lo, hi;
 	uint8_t bit;
 
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	if ((ifp->if_flags & (IFF_ALLMULTI | IFF_PROMISC)) != 0) {
 		lo = hi = 0xffffffff;
 		goto done;
@@ -1651,11 +1652,6 @@ zyd_set_multi(struct zyd_softc *sc)
 	lo = hi = 0;
 	ETHER_FIRST_MULTI(step, ac, enm);
 	while (enm != NULL) {
-		if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-			ifp->if_flags |= IFF_ALLMULTI;
-			lo = hi = 0xffffffff;
-			goto done;
-		}
 		bit = enm->enm_addrlo[5] >> 2;
 		if (bit < 32)
 			lo |= 1 << bit;
@@ -1822,7 +1818,7 @@ zyd_plcp_signal(int rate)
 }
 
 void
-zyd_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+zyd_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct zyd_softc *sc = (struct zyd_softc *)priv;
 	const struct zyd_cmd *cmd;
@@ -1985,7 +1981,7 @@ zyd_rx_data(struct zyd_softc *sc, const uint8_t *buf, uint16_t len)
 }
 
 void
-zyd_rxeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+zyd_rxeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct zyd_rx_data *data = priv;
 	struct zyd_softc *sc = data->sc;
@@ -2044,7 +2040,7 @@ skip:	/* setup a new transfer */
 }
 
 void
-zyd_txeof(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+zyd_txeof(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct zyd_tx_data *data = priv;
 	struct zyd_softc *sc = data->sc;

@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.282 2012/03/06 12:48:07 mikeb Exp $
+#	$OpenBSD: files.pci,v 1.299 2013/11/04 14:07:14 deraadt Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -15,6 +15,7 @@ file	dev/pci/pci_subr.c		pci
 # Generic VGA
 attach	vga at pci with vga_pci
 file	dev/pci/vga_pci.c		vga_pci
+file	dev/pci/vga_pci_common.c	vga_pci | vgafb
 
 device	tga: wsemuldisplaydev, rasops8, rasops32
 attach	tga at pci
@@ -84,10 +85,9 @@ attach	jmb at pci
 file	dev/pci/jmb.c			jmb
 
 # Advanced Host Controller Interface for Serial ATA
-device	ahci: scsi, atascsi
 attach	ahci at pci with ahci_pci
 attach	ahci at jmb with ahci_jmb
-file	dev/pci/ahci.c			ahci | ahci_pci | ahci_jmb needs-flag
+file	dev/pci/ahci_pci.c		ahci_pci | ahci_jmb
 
 # AMI MegaRAID Express x00/Elite 1500/Express 1x00 RAID Controllers
 attach	ami at pci with ami_pci
@@ -97,14 +97,15 @@ file	dev/pci/ami_pci.c		ami_pci
 attach	mfi at pci with mfi_pci
 file	dev/pci/mfi_pci.c		mfi_pci
 
+# LSI MegaRAID SAS Fusion RAID controllers
+device	mfii: scsi
+attach	mfii at pci
+file	dev/pci/mfii.c			mfii
+
 # IBM ServeRAID controllers
 device	ips: scsi
 attach	ips at pci
 file	dev/pci/ips.c			ips
-
-# I2O
-attach	iop at pci with iop_pci
-file	dev/pci/iop_pci.c		iop_pci
 
 # Ensoniq AudioPCI S5016, 1371
 device	eap: audio, auconv, mulaw, ac97, midibus
@@ -244,11 +245,6 @@ file	dev/pci/if_de.c			de
 attach	ep at pci with ep_pci
 file	dev/pci/if_ep_pci.c		ep_pci
 
-# Digital DEFPA PCI FDDI Controller
-device	fpa: pdq, fddi, ifnet
-attach	fpa at pci
-file	dev/pci/if_fpa.c		fpa
-
 # AMD PCnet-PCI Ethernet controller family
 device pcn: ether, ifnet, ifmedia, mii
 attach pcn at pci
@@ -366,6 +362,7 @@ file	dev/pci/if_ix.c			ix
 file	dev/pci/ixgbe.c			ix
 file	dev/pci/ixgbe_82598.c		ix
 file	dev/pci/ixgbe_82599.c		ix
+file	dev/pci/ixgbe_x540.c		ix
 file	dev/pci/ixgbe_phy.c		ix
 
 # Neterion Xframe 10 Gigabit ethernet 
@@ -396,6 +393,11 @@ file	dev/pci/if_che.c		cheg | che
 device	myx: ether, ifnet, ifmedia
 attach	myx at pci
 file	dev/pci/if_myx.c		myx
+
+# Emulex OneConnect 10Gb Ethernet
+device	oce: ether, ifnet, ifmedia
+attach	oce at pci
+file	dev/pci/if_oce.c		oce
 
 # DEC/Intel 21143 and "tulip" clone ethernet
 attach	dc at pci with dc_pci
@@ -441,11 +443,6 @@ file	dev/pci/nofn.c			nofn
 device	ubsec: crypto
 attach	ubsec at pci
 file	dev/pci/ubsec.c			ubsec
-
-# Netoctave NSP2000
-device	noct: crypto
-attach	noct at pci
-file	dev/pci/noct.c			noct
 
 # Safenet SafeXcel 1141
 device	safe: crypto
@@ -742,10 +739,20 @@ attach	art at musycc
 file	dev/pci/if_art.c		art
 file	dev/pci/bt8370.c		art
 
-# VMware Virtual NIC
+# VMware VMXnet virtual interface
 device	vic: ether, ifnet, ifmedia
 attach	vic at pci
 file	dev/pci/if_vic.c		vic
+
+# VMware VMXNET3 virtual interface
+device	vmx: ether, ifnet, ifmedia
+attach	vmx at pci
+file	dev/pci/if_vmx.c		vmx
+
+# VMware Paravirtual SCSI controller
+device	vmwpvs: scsi
+attach	vmwpvs at pci
+file	dev/pci/vmwpvs.c		vmwpvs
 
 # Atheros L2 Ethernet
 device	lii: ether, ifnet, ifmedia, mii
@@ -807,6 +814,32 @@ attach	itherm at pci
 file	dev/pci/itherm.c		itherm
 
 # AMD Geode CS5536 PCI-ISA bridge
-device	glxpcib: isabus, gpiobus, i2cbus
+device	glxpcib{}: isabus, gpiobus, i2cbus
 attach	glxpcib at pci
 file	dev/pci/glxpcib.c		glxpcib
+
+# Realtek RTS5209 Card Reader
+attach	rtsx at pci with rtsx_pci
+file	dev/pci/rtsx_pci.c		rtsx
+
+# VirtIO
+device	virtio {}
+file	dev/pci/virtio.c		virtio
+
+attach	virtio at pci with virtio_pci
+file	dev/pci/virtio_pci.c		virtio_pci
+
+device	vio
+attach	vio at virtio
+file	dev/pci/if_vio.c		vio
+
+device	vioblk: scsi
+attach	vioblk at virtio
+file	dev/pci/vioblk.c		vioblk
+
+device	viomb
+attach	viomb at virtio
+file	dev/pci/viomb.c			viomb
+
+include "dev/pci/files.agp"
+include "dev/pci/drm/files.drm"

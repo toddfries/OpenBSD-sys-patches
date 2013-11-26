@@ -1,4 +1,4 @@
-#	$OpenBSD: files.sparc,v 1.91 2011/09/04 08:03:32 miod Exp $
+#	$OpenBSD: files.sparc,v 1.94 2013/09/24 20:10:49 miod Exp $
 #	$NetBSD: files.sparc,v 1.44 1997/08/31 21:29:16 pk Exp $
 
 # @(#)files.sparc	8.1 (Berkeley) 7/19/93
@@ -64,7 +64,7 @@ file	arch/sparc/sparc/memreg.c
 device	zs {[channel = -1]}
 attach	zs at mainbus, obio
 file	arch/sparc/dev/zs.c			zs needs-flag
-file	arch/sparc/dev/z8530sc.c		zs
+file	dev/ic/z8530sc.c			zs
 
 device	fdc {}
 attach	fdc at mainbus, obio
@@ -87,7 +87,7 @@ include	"dev/sun/files.sun"
 
 device	zstty: tty
 attach	zstty at zs
-file	arch/sparc/dev/z8530tty.c		zstty needs-flag
+file	dev/ic/z8530tty.c			zstty needs-flag
 file	arch/sparc/dev/zs_kgdb.c		kgdb
 
 device	zskbd: wskbddev, sunkbd
@@ -239,7 +239,7 @@ attach	zx at sbus
 file	arch/sparc/dev/zx.c		zx
 
 # device definition in sys/conf/files
-attach	le at sbus, ledma, lebuffer, obio
+attach	le at sbus, ledma, lebuffer, obio: le24
 file	arch/sparc/dev/if_le.c		le
 
 attach	ie at obio, vmes, vmel
@@ -361,7 +361,7 @@ file	arch/sparc/dev/tctrl.c		tctrl needs-flag
 
 # Prestoserve NVRAM
 device	presto: disk
-attach	presto at sbus
+attach	presto at mainbus, sbus
 file	arch/sparc/dev/presto.c		presto needs-flag
 
 # PCMCIA devices

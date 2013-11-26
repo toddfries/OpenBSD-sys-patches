@@ -1,4 +1,4 @@
-/*	$OpenBSD: msdosfs_lookup.c,v 1.24 2011/07/04 04:30:41 tedu Exp $	*/
+/*	$OpenBSD: msdosfs_lookup.c,v 1.26 2013/06/11 16:42:16 deraadt Exp $	*/
 /*	$NetBSD: msdosfs_lookup.c,v 1.34 1997/10/18 22:12:27 ws Exp $	*/
 
 /*-
@@ -85,7 +85,7 @@ msdosfs_lookup(void *v)
 	struct vnode **vpp = ap->a_vpp;
 	struct componentname *cnp = ap->a_cnp;
 	struct proc *p = cnp->cn_proc;
-	daddr64_t bn;
+	daddr_t bn;
 	int error;
 	int lockparent;
 	int wantparent;
@@ -104,7 +104,7 @@ msdosfs_lookup(void *v)
 	struct msdosfsmount *pmp;
 	struct buf *bp = 0;
 	struct direntry *dep;
-	u_char dosfilename[12];
+	u_char dosfilename[11];
 	u_char *adjp;
 	int adjlen;
 	int flags;
@@ -193,9 +193,10 @@ msdosfs_lookup(void *v)
 		slotcount = 0;
 	
 #ifdef MSDOSFS_DEBUG
-	printf("msdosfs_lookup(): dos version of filename %s, length %d\n",
+	printf("msdosfs_lookup(): dos version of filename '%.11s', length %d\n",
 	    dosfilename, cnp->cn_namelen);
 #endif
+
 	/*
 	 * We want to search the directory pointed to by vdp for the name
 	 * pointed to by cnp->cn_nameptr.
@@ -600,7 +601,7 @@ createde(struct denode *dep, struct denode *ddep, struct denode **depp,
 	struct direntry *ndep;
 	struct msdosfsmount *pmp = ddep->de_pmp;
 	struct buf *bp;
-	daddr64_t bn;
+	daddr_t bn;
 	int blsize;
 	
 #ifdef MSDOSFS_DEBUG
@@ -720,7 +721,7 @@ dosdirempty(struct denode *dep)
 	int blsize;
 	int error;
 	uint32_t cn;
-	daddr64_t bn;
+	daddr_t bn;
 	struct buf *bp;
 	struct msdosfsmount *pmp = dep->de_pmp;
 	struct direntry *dentp;
@@ -882,7 +883,7 @@ readep(struct msdosfsmount *pmp, uint32_t dirclust, uint32_t diroffset,
     struct buf **bpp, struct direntry **epp)
 {
 	int error;
-	daddr64_t bn;
+	daddr_t bn;
 	int blsize;
 
 	blsize = pmp->pm_bpcluster;
@@ -930,13 +931,13 @@ removede(struct denode *pdep, struct denode *dep)
 	int error;
 	struct direntry *ep;
 	struct buf *bp;
-	daddr64_t bn;
+	daddr_t bn;
 	int blsize;
 	struct msdosfsmount *pmp = pdep->de_pmp;
 	uint32_t offset = pdep->de_fndoffset;
 	
 #ifdef MSDOSFS_DEBUG
-	printf("removede(): filename %s, dep %08x, offset %08x\n",
+	printf("removede(): filename %.11s, dep %08x, offset %08x\n",
 	    dep->de_Name, dep, offset);
 #endif
 
@@ -997,7 +998,7 @@ uniqdosname(struct denode *dep, struct componentname *cnp, u_char *cp)
 	int gen;
 	int blsize;
 	uint32_t cn;
-	daddr64_t bn;
+	daddr_t bn;
 	struct buf *bp;
 	int error;
 
@@ -1059,7 +1060,7 @@ findwin95(struct denode *dep)
 	struct direntry *dentp;
 	int blsize;
 	uint32_t cn;
-	daddr64_t bn;
+	daddr_t bn;
 	struct buf *bp;
 
 	/*

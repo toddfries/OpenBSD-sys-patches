@@ -1,4 +1,4 @@
-/*	$OpenBSD: umsm.c,v 1.85 2012/01/14 10:26:11 sthen Exp $	*/
+/*	$OpenBSD: umsm.c,v 1.95 2013/11/15 10:17:39 pirofti Exp $	*/
 
 /*
  * Copyright (c) 2008 Yojiro UO <yuo@nui.org>
@@ -61,22 +61,21 @@ int umsm_activate(struct device *, int);
 
 int umsm_open(void *, int);
 void umsm_close(void *, int);
-void umsm_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+void umsm_intr(struct usbd_xfer *, void *, usbd_status);
 void umsm_get_status(void *, int, u_char *, u_char *);
 void umsm_set(void *, int, int, int);
 
 struct umsm_softc {
 	struct device		 sc_dev;
-	usbd_device_handle	 sc_udev;
-	usbd_interface_handle	 sc_iface;
+	struct usbd_device	*sc_udev;
+	struct usbd_interface	*sc_iface;
 	int			 sc_iface_no;
 	struct device		*sc_subdev;
-	u_char			 sc_dying;
 	uint16_t		 sc_flag;
 
 	/* interrupt ep */
 	int			 sc_intr_number;
-	usbd_pipe_handle	 sc_intr_pipe;
+	struct usbd_pipe	*sc_intr_pipe;
 	u_char			*sc_intr_buf;
 	int			 sc_isize;
 
@@ -86,8 +85,8 @@ struct umsm_softc {
 	u_char			 sc_rts;	/* current RTS state */
 };
 
-usbd_status umsm_huawei_changemode(usbd_device_handle);
-usbd_status umsm_truinstall_changemode(usbd_device_handle);
+usbd_status umsm_huawei_changemode(struct usbd_device *);
+usbd_status umsm_truinstall_changemode(struct usbd_device *);
 usbd_status umsm_umass_changemode(struct umsm_softc *);
 
 struct ucom_methods umsm_methods = {
@@ -138,8 +137,11 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E182 }, DEV_UMASS5},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E1820 }, DEV_UMASS5},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E220 }, DEV_HUAWEI},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E303 }, DEV_UMASS5},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E353_INIT }, DEV_UMASS5},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E510 }, DEV_HUAWEI},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E618 }, DEV_HUAWEI},
+	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_E392_INIT }, DEV_UMASS5},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_EM770W }, 0},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_Mobile }, DEV_HUAWEI},
 	{{ USB_VENDOR_HUAWEI,	USB_PRODUCT_HUAWEI_K3765_INIT }, DEV_UMASS5},
@@ -157,8 +159,10 @@ static const struct umsm_type umsm_devs[] = {
 
 	/* XXX Some qualcomm devices are missing */
 	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_DRIVER }, DEV_UMASS1},
+	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_DRIVER2 }, DEV_UMASS4},
 	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_HSDPA }, 0},
 	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_HSDPA2 }, 0},
+	{{ USB_VENDOR_QUALCOMM,	USB_PRODUCT_QUALCOMM_MSM_HSDPA3 }, 0},
 
 	{{ USB_VENDOR_QUANTA2, USB_PRODUCT_QUANTA2_UMASS }, DEV_UMASS4},
 	{{ USB_VENDOR_QUANTA2, USB_PRODUCT_QUANTA2_Q101 }, 0},
@@ -240,6 +244,7 @@ static const struct umsm_type umsm_devs[] = {
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_C01SW }, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_USB305}, 0},
 	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_TRUINSTALL }, DEV_TRUINSTALL},
+	{{ USB_VENDOR_SIERRA, USB_PRODUCT_SIERRA_MC8355}, 0},
 
 	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMASS }, DEV_UMASS3},
 	{{ USB_VENDOR_TCTMOBILE, USB_PRODUCT_TCTMOBILE_UMSM }, 0},
@@ -364,7 +369,7 @@ umsm_attach(struct device *parent, struct device *self, void *aux)
 		if (ed == NULL) {
 			printf("%s: no endpoint descriptor found for %d\n",
 			    sc->sc_dev.dv_xname, i);
-			sc->sc_dying = 1;
+			usbd_deactivate(sc->sc_udev);
 			return;
 		}
 
@@ -383,7 +388,7 @@ umsm_attach(struct device *parent, struct device *self, void *aux)
 	}
 	if (uca.bulkin == -1 || uca.bulkout == -1) {
 		printf("%s: missing endpoint\n", sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -418,7 +423,7 @@ umsm_detach(struct device *self, int flags)
 		sc->sc_intr_pipe = NULL;
 	}
 
-	sc->sc_dying = 1;
+	usbd_deactivate(sc->sc_udev);
 	if (sc->sc_subdev != NULL) {
 		rv = config_detach(sc->sc_subdev, flags);
 		sc->sc_subdev = NULL;
@@ -431,16 +436,13 @@ int
 umsm_activate(struct device *self, int act)
 {
 	struct umsm_softc *sc = (struct umsm_softc *)self;
-	int rv = 0;
 
 	switch (act) {
 	case DVACT_DEACTIVATE:
-		if (sc->sc_subdev != NULL)
-			rv = config_deactivate(sc->sc_subdev);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
-	return (rv);
+	return (0);
 }
 
 int
@@ -449,7 +451,7 @@ umsm_open(void *addr, int portno)
 	struct umsm_softc *sc = addr;
 	int err;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (ENXIO);
 
 	if (sc->sc_intr_number != -1 && sc->sc_intr_pipe == NULL) {
@@ -480,15 +482,11 @@ umsm_close(void *addr, int portno)
 	struct umsm_softc *sc = addr;
 	int err;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (sc->sc_intr_pipe != NULL) {
-		err = usbd_abort_pipe(sc->sc_intr_pipe);
-       		if (err)
-			printf("%s: abort interrupt pipe failed: %s\n",
-			    sc->sc_dev.dv_xname,
-			    usbd_errstr(err));
+		usbd_abort_pipe(sc->sc_intr_pipe);
 		err = usbd_close_pipe(sc->sc_intr_pipe);
 		if (err)
 			printf("%s: close interrupt pipe failed: %s\n",
@@ -500,15 +498,15 @@ umsm_close(void *addr, int portno)
 }
 
 void
-umsm_intr(usbd_xfer_handle xfer, usbd_private_handle priv,
+umsm_intr(struct usbd_xfer *xfer, void *priv,
 	usbd_status status)
 {
 	struct umsm_softc *sc = priv;
-	usb_cdc_notification_t *buf;
+	struct usb_cdc_notification *buf;
 	u_char mstatus;
 
-	buf = (usb_cdc_notification_t *)sc->sc_intr_buf;
-	if (sc->sc_dying)
+	buf = (struct usb_cdc_notification *)sc->sc_intr_buf;
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
@@ -607,7 +605,7 @@ umsm_set(void *addr, int portno, int reg, int onoff)
 }
 
 usbd_status
-umsm_huawei_changemode(usbd_device_handle dev)
+umsm_huawei_changemode(struct usbd_device *dev)
 {
 	usb_device_request_t req;
 	usbd_status err;
@@ -626,7 +624,7 @@ umsm_huawei_changemode(usbd_device_handle dev)
 }
 
 usbd_status
-umsm_truinstall_changemode(usbd_device_handle dev)
+umsm_truinstall_changemode(struct usbd_device *dev)
 {
 	usb_device_request_t req;
 	usbd_status err;
@@ -652,14 +650,14 @@ umsm_umass_changemode(struct umsm_softc *sc)
 #define UMASS_SERVICE_ACTION_OUT	0x9f
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
-	usbd_xfer_handle xfer;
-	usbd_pipe_handle cmdpipe;
+	struct usbd_xfer *xfer;
+	struct usbd_pipe *cmdpipe;
 	usbd_status err;
 	u_int32_t n;
 	void *bufp;
 	int target_ep, i;
 
-	umass_bbb_cbw_t	cbw;
+	struct umass_bbb_cbw cbw;
 	static int dCBWTag = 0x12345678;
 
 	USETDW(cbw.dCBWSignature, CBWSIGNATURE);
@@ -762,11 +760,14 @@ umsm_umass_changemode(struct umsm_softc *sc)
 		else {
 			n = UMASS_BBB_CBW_SIZE;
 			memcpy(bufp, &cbw, UMASS_BBB_CBW_SIZE);
-			err = usbd_bulk_transfer(xfer, cmdpipe, USBD_NO_COPY,
-			    USBD_NO_TIMEOUT, bufp, &n, "umsm");
-			if (err)
+			usbd_setup_xfer(xfer, cmdpipe, 0, bufp, n,
+			    USBD_NO_COPY | USBD_SYNCHRONOUS, 0, NULL);
+			err = usbd_transfer(xfer);
+			if (err) {
+				usbd_clear_endpoint_stall(cmdpipe);
 				DPRINTF(("%s: send error:%s", __func__,
 				    usbd_errstr(err)));
+			}
 		}
 		usbd_close_pipe(cmdpipe);
 		usbd_free_buffer(xfer);

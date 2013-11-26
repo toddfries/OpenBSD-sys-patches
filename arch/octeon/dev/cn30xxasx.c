@@ -1,4 +1,4 @@
-/*	$OpenBSD: cn30xxasx.c,v 1.2 2011/06/24 02:13:23 yasuoka Exp $	*/
+/*	$OpenBSD: cn30xxasx.c,v 1.4 2013/09/19 00:15:59 jmatthew Exp $	*/
 
 /*
  * Copyright (c) 2007 Internet Initiative Japan, Inc.
@@ -25,8 +25,6 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
-#include <sys/cdefs.h>
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -177,10 +175,10 @@ cn30xxasx_enable_intr(struct cn30xxasx_softc *sc, int enable)
 #endif
 
 int
-cn30xxasx_clk_set(struct cn30xxasx_softc *sc, int setting)
+cn30xxasx_clk_set(struct cn30xxasx_softc *sc, int tx_setting, int rx_setting)
 {
-	_ASX_WR8(sc, ASX0_TX_CLK_SET0_OFFSET + 8 * sc->sc_port, setting);
-	_ASX_WR8(sc, ASX0_RX_CLK_SET0_OFFSET + 8 * sc->sc_port, setting);
+	_ASX_WR8(sc, ASX0_TX_CLK_SET0_OFFSET + 8 * sc->sc_port, tx_setting);
+	_ASX_WR8(sc, ASX0_RX_CLK_SET0_OFFSET + 8 * sc->sc_port, rx_setting);
 	return 0;
 }
 

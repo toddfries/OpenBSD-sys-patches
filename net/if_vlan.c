@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vlan.c,v 1.91 2011/11/27 00:46:07 haesbaert Exp $	*/
+/*	$OpenBSD: if_vlan.c,v 1.101 2013/11/08 09:18:27 mpi Exp $	*/
 
 /*
  * Copyright 1998 Massachusetts Institute of Technology
@@ -57,7 +57,6 @@
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/systm.h>
-#include <sys/proc.h>
 
 #include "bpfilter.h"
 #if NBPFILTER > 0
@@ -75,7 +74,6 @@
 
 #include <net/if_vlan_var.h>
 
-extern struct	ifaddr	**ifnet_addrs;
 u_long vlan_tagmask, svlan_tagmask;
 
 #define TAG_HASH_SIZE		32
@@ -175,13 +173,7 @@ void
 vlan_ifdetach(void *ptr)
 {
 	struct ifvlan *ifv = (struct ifvlan *)ptr;
-	/*
-	 * Destroy the vlan interface because the parent has been
-	 * detached. Set the dh_cookie to NULL because we're running
-	 * inside of dohooks which is told to disestablish the hook
-	 * for us (otherwise we would kill the TAILQ element...).
-	 */
-	ifv->dh_cookie = NULL;
+
 	vlan_clone_destroy(&ifv->ifv_if);
 }
 
@@ -196,7 +188,6 @@ vlan_start(struct ifnet *ifp)
 	ifv = ifp->if_softc;
 	p = ifv->ifv_p;
 
-	ifp->if_flags |= IFF_OACTIVE;
 	for (;;) {
 		IFQ_DEQUEUE(&ifp->if_snd, m);
 		if (m == NULL)
@@ -263,7 +254,6 @@ vlan_start(struct ifnet *ifp)
 		ifp->if_opackets++;
 		if_start(p);
 	}
-	ifp->if_flags &= ~IFF_OACTIVE;
 
 	return;
 }
@@ -424,9 +414,7 @@ vlan_config(struct ifvlan *ifv, struct ifnet *p, u_int16_t tag)
 	 */
 	if (p->if_capabilities & IFCAP_VLAN_HWTAGGING)
 		ifv->ifv_if.if_capabilities = p->if_capabilities &
-		    (IFCAP_CSUM_IPv4|IFCAP_CSUM_TCPv4|
-		    IFCAP_CSUM_UDPv4);
-		/* (IFCAP_CSUM_TCPv6|IFCAP_CSUM_UDPv6); */
+		    IFCAP_CSUM_MASK;
 
 	/*
 	 * Hardware VLAN tagging only works with the default VLAN
@@ -439,8 +427,8 @@ vlan_config(struct ifvlan *ifv, struct ifnet *p, u_int16_t tag)
 	 * Set up our ``Ethernet address'' to reflect the underlying
 	 * physical interface's.
 	 */
-	ifa1 = ifnet_addrs[ifv->ifv_if.if_index];
-	ifa2 = ifnet_addrs[p->if_index];
+	ifa1 = ifv->ifv_if.if_lladdr;
+	ifa2 = p->if_lladdr;
 	sdl1 = (struct sockaddr_dl *)ifa1->ifa_addr;
 	sdl2 = (struct sockaddr_dl *)ifa2->ifa_addr;
 	sdl1->sdl_type = IFT_ETHER;
@@ -458,7 +446,7 @@ vlan_config(struct ifvlan *ifv, struct ifnet *p, u_int16_t tag)
 	    vlan_vlandev_state, ifv);
 
 	/* Register callback if parent wants to unregister */
-	ifv->dh_cookie = hook_establish(p->if_detachhooks, 1,
+	ifv->dh_cookie = hook_establish(p->if_detachhooks, 0,
 	    vlan_ifdetach, ifv);
 
 	vlan_vlandev_state(ifv);
@@ -489,17 +477,15 @@ vlan_unconfig(struct ifnet *ifp, struct ifnet *newp)
 
 	s = splnet();
 	LIST_REMOVE(ifv, ifv_list);
-	if (ifv->lh_cookie != NULL)
-		hook_disestablish(p->if_linkstatehooks, ifv->lh_cookie);
-	/* The cookie is NULL if disestablished externally */
-	if (ifv->dh_cookie != NULL)
-		hook_disestablish(p->if_detachhooks, ifv->dh_cookie);
+	splx(s);
+
+	hook_disestablish(p->if_linkstatehooks, ifv->lh_cookie);
+	hook_disestablish(p->if_detachhooks, ifv->dh_cookie);
 	/* Reset link state */
 	if (newp != NULL) {
 		ifp->if_link_state = LINK_STATE_INVALID;
 		if_link_state_change(ifp);
 	}
-	splx(s);
 
 	/*
  	 * Since the interface is being unconfigured, we need to
@@ -515,7 +501,7 @@ vlan_unconfig(struct ifnet *ifp, struct ifnet *newp)
 	ifv->ifv_flags = 0;
 
 	/* Clear our MAC address. */
-	ifa = ifnet_addrs[ifv->ifv_if.if_index];
+	ifa = ifv->ifv_if.if_lladdr;
 	sdl = (struct sockaddr_dl *)ifa->ifa_addr;
 	sdl->sdl_type = IFT_ETHER;
 	sdl->sdl_alen = ETHER_ADDR_LEN;

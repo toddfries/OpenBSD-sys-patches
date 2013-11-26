@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_vfsops.c,v 1.26 2010/09/23 18:43:37 oga Exp $	*/
+/*	$OpenBSD: procfs_vfsops.c,v 1.29 2013/04/15 15:32:19 jsing Exp $	*/
 /*	$NetBSD: procfs_vfsops.c,v 1.25 1996/02/09 22:40:53 christos Exp $	*/
 
 /*
@@ -71,7 +71,6 @@ int
 procfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *ndp,
     struct proc *p)
 {
-	size_t size;
 	struct procfsmount *pmnt;
 	struct procfs_args args;
 	int error;
@@ -85,7 +84,7 @@ procfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *n
 		return (EOPNOTSUPP);
 
 	if (data != NULL) {
-		error = copyin(data, &args, sizeof args);
+		error = copyin(data, &args, sizeof(args));
 		if (error != 0)
 			return (error);
 
@@ -101,10 +100,12 @@ procfs_mount(struct mount *mp, const char *path, void *data, struct nameidata *n
 	mp->mnt_data = pmnt;
 	vfs_getnewfsid(mp);
 
-	(void) copyinstr(path, mp->mnt_stat.f_mntonname, MNAMELEN - 1, &size);
-	bzero(mp->mnt_stat.f_mntonname + size, MNAMELEN - size);
+	bzero(mp->mnt_stat.f_mntonname, MNAMELEN);
+	strlcpy(mp->mnt_stat.f_mntonname, path, MNAMELEN);
 	bzero(mp->mnt_stat.f_mntfromname, MNAMELEN);
 	bcopy("procfs", mp->mnt_stat.f_mntfromname, sizeof("procfs"));
+	bzero(mp->mnt_stat.f_mntfromspec, MNAMELEN);
+	bcopy("procfs", mp->mnt_stat.f_mntfromspec, sizeof("procfs"));
 	bcopy(&args, &mp->mnt_stat.mount_info.procfs_args, sizeof(args));
 
 #ifdef notyet
@@ -176,12 +177,13 @@ procfs_statfs(struct mount *mp, struct statfs *sbp, struct proc *p)
 	sbp->f_blocks = vmtotals.t_vm;
 	sbp->f_bfree = vmtotals.t_vm - vmtotals.t_avm;
 	sbp->f_bavail = 0;
-	sbp->f_files = maxproc;			/* approx */
-	sbp->f_ffree = maxproc - nprocs;	/* approx */
+	sbp->f_files = maxprocess;		/* approx */
+	sbp->f_ffree = maxprocess - nprocesses;	/* approx */
 	if (sbp != &mp->mnt_stat) {
 		bcopy(&mp->mnt_stat.f_fsid, &sbp->f_fsid, sizeof(sbp->f_fsid));
 		bcopy(mp->mnt_stat.f_mntonname, sbp->f_mntonname, MNAMELEN);
 		bcopy(mp->mnt_stat.f_mntfromname, sbp->f_mntfromname, MNAMELEN);
+		bcopy(mp->mnt_stat.f_mntfromspec, sbp->f_mntfromspec, MNAMELEN);
 		bcopy(&mp->mnt_stat.mount_info.procfs_args,
 		    &sbp->mount_info.procfs_args, sizeof(struct procfs_args));
 	}

@@ -1,4 +1,4 @@
-/*	$OpenBSD: nfs_bio.c,v 1.72 2010/08/07 03:50:02 krw Exp $	*/
+/*	$OpenBSD: nfs_bio.c,v 1.75 2013/09/14 02:28:03 guenther Exp $	*/
 /*	$NetBSD: nfs_bio.c,v 1.25.4.2 1996/07/08 20:47:04 jtc Exp $	*/
 
 /*
@@ -75,7 +75,7 @@ nfs_bioread(struct vnode *vp, struct uio *uio, int ioflag, struct ucred *cred)
 	struct vattr vattr;
 	struct proc *p;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	daddr64_t lbn, bn, rabn;
+	daddr_t lbn, bn, rabn;
 	caddr_t baddr;
 	int got_buf = 0, nra, error = 0, n = 0, on = 0, not_readin;
 	off_t offdiff;
@@ -255,8 +255,9 @@ nfs_write(void *v)
 	struct buf *bp;
 	struct vattr vattr;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);
-	daddr64_t lbn, bn;
+	daddr_t lbn, bn;
 	int n, on, error = 0, extended = 0, wrotedta = 0, truncated = 0;
+	ssize_t overrun;
 
 #ifdef DIAGNOSTIC
 	if (uio->uio_rw != UIO_WRITE)
@@ -291,15 +292,10 @@ nfs_write(void *v)
 		return (EINVAL);
 	if (uio->uio_resid == 0)
 		return (0);
-	/*
-	 * Maybe this should be above the vnode op call, but so long as
-	 * file servers have no limits, i don't think it matters
-	 */
-	if (p && uio->uio_offset + uio->uio_resid >
-	      p->p_rlimit[RLIMIT_FSIZE].rlim_cur) {
-		psignal(p, SIGXFSZ);
-		return (EFBIG);
-	}
+
+	/* do the filesize rlimit check */
+	if ((error = vn_fsizechk(vp, uio, ioflag, &overrun)))
+		return (error);
 
 	/*
 	 * update the cache write creds for this node.
@@ -329,8 +325,10 @@ nfs_write(void *v)
 		bn = lbn * (biosize / DEV_BSIZE);
 again:
 		bp = nfs_getcacheblk(vp, bn, biosize, p);
-		if (!bp)
-			return (EINTR);
+		if (!bp) {
+			error = EINTR;
+			goto out;
+		}
 		np->n_flag |= NMODIFIED;
 		if (uio->uio_offset + n > np->n_size) {
 			np->n_size = uio->uio_offset + n;
@@ -347,8 +345,10 @@ again:
 		if (bp->b_dirtyend > 0 &&
 		    (on > bp->b_dirtyend || (on + n) < bp->b_dirtyoff)) {
 			bp->b_proc = p;
-			if (VOP_BWRITE(bp) == EINTR)
-				return (EINTR);
+			if (VOP_BWRITE(bp) == EINTR) {
+				error = EINTR;
+				goto out;
+			}
 			goto again;
 		}
 
@@ -356,7 +356,7 @@ again:
 		if (error) {
 			bp->b_flags |= B_ERROR;
 			brelse(bp);
-			return (error);
+			goto out;
 		}
 		if (bp->b_dirtyend > 0) {
 			bp->b_dirtyoff = min(on, bp->b_dirtyoff);
@@ -396,7 +396,7 @@ again:
 			bp->b_proc = p;
 			error = VOP_BWRITE(bp);
 			if (error)
-				return (error);
+				goto out;
 		} else if ((n + on) == biosize) {
 			bp->b_proc = NULL;
 			bp->b_flags |= B_ASYNC;
@@ -406,11 +406,16 @@ again:
 		}
 	} while (uio->uio_resid > 0 && n > 0);
 
+/*out: XXX belongs here??? */
 	if (wrotedta)
 		VN_KNOTE(vp, NOTE_WRITE | (extended ? NOTE_EXTEND : 0) |
 		    (truncated ? NOTE_TRUNCATE : 0));
 
-	return (0);
+out:
+	/* correct the result for writes clamped by vn_fsizechk() */
+	uio->uio_resid += overrun;
+
+	return (error);
 }
 
 /*
@@ -421,7 +426,7 @@ again:
  * NULL.
  */
 struct buf *
-nfs_getcacheblk(struct vnode *vp, daddr64_t bn, int size, struct proc *p)
+nfs_getcacheblk(struct vnode *vp, daddr_t bn, int size, struct proc *p)
 {
 	struct buf *bp;
 	struct nfsmount *nmp = VFSTONFS(vp->v_mount);

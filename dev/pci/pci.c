@@ -1,4 +1,4 @@
-/*	$OpenBSD: pci.c,v 1.94 2011/10/10 19:42:37 miod Exp $	*/
+/*	$OpenBSD: pci.c,v 1.100 2013/11/06 10:41:16 mpi Exp $	*/
 /*	$NetBSD: pci.c,v 1.31 1997/06/06 23:48:04 thorpej Exp $	*/
 
 /*
@@ -51,11 +51,13 @@ void pciattach(struct device *, struct device *, void *);
 int pcidetach(struct device *, int);
 int pciactivate(struct device *, int);
 void pci_suspend(struct pci_softc *);
+void pci_powerdown(struct pci_softc *);
 void pci_resume(struct pci_softc *);
 
 #define NMAPREG			((PCI_MAPREG_END - PCI_MAPREG_START) / \
 				    sizeof(pcireg_t))
 struct pci_dev {
+	struct device *pd_dev;
 	LIST_ENTRY(pci_dev) pd_next;
 	pcitag_t pd_tag;        /* pci register tag */
 	pcireg_t pd_csr;
@@ -68,6 +70,7 @@ struct pci_dev {
 	pcireg_t pd_msi_mau32;
 	pcireg_t pd_msi_md;
 	int pd_pmcsr_state;
+	int pd_vga_decode;
 };
 
 #ifdef APERTURE
@@ -87,7 +90,6 @@ int	pci_ndomains;
 struct proc *pci_vga_proc;
 struct pci_softc *pci_vga_pci;
 pcitag_t pci_vga_tag;
-int	pci_vga_count;
 
 int	pci_dopm;
 
@@ -101,7 +103,6 @@ int pci_enumerate_bus(struct pci_softc *,
     int (*)(struct pci_attach_args *), struct pci_attach_args *);
 #endif
 int	pci_reserve_resources(struct pci_attach_args *);
-int	pci_count_vga(struct pci_attach_args *);
 int	pci_primary_vga(struct pci_attach_args *);
 
 /*
@@ -175,6 +176,7 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_ioex = pba->pba_ioex;
 	sc->sc_memex = pba->pba_memex;
 	sc->sc_pmemex = pba->pba_pmemex;
+	sc->sc_busex = pba->pba_busex;
 	sc->sc_domain = pba->pba_domain;
 	sc->sc_bus = pba->pba_bus;
 	sc->sc_bridgetag = pba->pba_bridgetag;
@@ -182,10 +184,17 @@ pciattach(struct device *parent, struct device *self, void *aux)
 	sc->sc_maxndevs = pci_bus_maxdevs(pba->pba_pc, pba->pba_bus);
 	sc->sc_intrswiz = pba->pba_intrswiz;
 	sc->sc_intrtag = pba->pba_intrtag;
+
+	/* Reserve our own bus number. */
+	if (sc->sc_busex)
+		extent_alloc_region(sc->sc_busex, sc->sc_bus, 1, EX_NOWAIT);
+
 	pci_enumerate_bus(sc, pci_reserve_resources, NULL);
-	pci_enumerate_bus(sc, pci_count_vga, NULL);
+
+	/* Find the VGA device that's currently active. */
 	if (pci_enumerate_bus(sc, pci_primary_vga, NULL))
 		pci_vga_pci = sc;
+
 	pci_enumerate_bus(sc, NULL, NULL);
 }
 
@@ -207,6 +216,10 @@ pciactivate(struct device *self, int act)
 	case DVACT_SUSPEND:
 		rv = config_activate_children(self, act);
 		pci_suspend((struct pci_softc *)self);
+		break;
+	case DVACT_POWERDOWN:
+		rv = config_activate_children(self, act);
+		pci_powerdown((struct pci_softc *)self);
 		break;
 	case DVACT_RESUME:
 		pci_resume((struct pci_softc *)self);
@@ -259,13 +272,34 @@ pci_suspend(struct pci_softc *sc)
 			}
 			pd->pd_msi_mc = reg;
 		}
+	}
+}
+
+void
+pci_powerdown(struct pci_softc *sc)
+{
+	struct pci_dev *pd;
+	pcireg_t bhlc;
+
+	LIST_FOREACH(pd, &sc->sc_devs, pd_next) {
+		/*
+		 * Only handle header type 0 here; PCI-PCI bridges and
+		 * CardBus bridges need special handling, which will
+		 * be done in their specific drivers.
+		 */
+		bhlc = pci_conf_read(sc->sc_pc, pd->pd_tag, PCI_BHLC_REG);
+		if (PCI_HDRTYPE_TYPE(bhlc) != 0)
+			continue;
 
 		if (pci_dopm) {
-			/* Place the device into D3. */
+			/*
+			 * Place the device into the lowest possible
+			 * power state.
+			 */
 			pd->pd_pmcsr_state = pci_get_powerstate(sc->sc_pc,
 			    pd->pd_tag);
 			pci_set_powerstate(sc->sc_pc, pd->pd_tag,
-			    PCI_PMCSR_STATE_D3);
+			    pci_min_powerstate(sc->sc_pc, pd->pd_tag));
 		}
 	}
 }
@@ -287,11 +321,10 @@ pci_resume(struct pci_softc *sc)
 		if (PCI_HDRTYPE_TYPE(bhlc) != 0)
 			continue;
 
-		if (pci_dopm) {
-			/* Restore power. */
+		/* Restore power. */
+		if (pci_dopm)
 			pci_set_powerstate(sc->sc_pc, pd->pd_tag,
 			    pd->pd_pmcsr_state);
-		}
 
 		/* Restore the registers saved above. */
 		for (i = 0; i < NMAPREG; i++)
@@ -369,7 +402,6 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	pci_chipset_tag_t pc = sc->sc_pc;
 	struct pci_attach_args pa;
 	struct pci_dev *pd;
-	struct device *dev;
 	pcireg_t id, class, intr, bhlcr, cap;
 	int pin, bus, device, function;
 	int off, ret = 0;
@@ -398,6 +430,7 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 	pa.pa_ioex = sc->sc_ioex;
 	pa.pa_memex = sc->sc_memex;
 	pa.pa_pmemex = sc->sc_pmemex;
+	pa.pa_busex = sc->sc_busex;
 	pa.pa_domain = sc->sc_domain;
 	pa.pa_bus = bus;
 	pa.pa_device = device;
@@ -516,9 +549,16 @@ pci_probe_device(struct pci_softc *sc, pcitag_t tag,
 			pci_conf_write(pc, tag, PCI_COMMAND_STATUS_REG, csr);
 		splx(s);
 
-		if ((dev = config_found_sm(&sc->sc_dev, &pa, pciprint,
-		    pcisubmatch)))
-			pci_dev_postattach(dev, &pa);
+		if ((PCI_CLASS(class) == PCI_CLASS_DISPLAY &&
+		    PCI_SUBCLASS(class) == PCI_SUBCLASS_DISPLAY_VGA) ||
+		    (PCI_CLASS(class) == PCI_CLASS_PREHISTORIC &&
+		    PCI_SUBCLASS(class) == PCI_SUBCLASS_PREHISTORIC_VGA))
+			pd->pd_vga_decode = 1;
+
+		pd->pd_dev = config_found_sm(&sc->sc_dev, &pa, pciprint,
+		    pcisubmatch);
+		if (pd->pd_dev)
+			pci_dev_postattach(pd->pd_dev, &pa);
 	}
 
 	return (ret);
@@ -656,7 +696,13 @@ int
 pci_set_powerstate(pci_chipset_tag_t pc, pcitag_t tag, int state)
 {
 	pcireg_t reg;
-	int offset;
+	int offset, ostate = state;
+
+	/*
+	 * Warn the firmware that we are going to put the device
+	 * into the given state.
+	 */
+	pci_set_powerstate_md(pc, tag, state, 1);
 
 	if (pci_get_capability(pc, tag, PCI_CAP_PWRMGMT, &offset, 0)) {
 		if (state == PCI_PMCSR_STATE_D3) {
@@ -674,17 +720,23 @@ pci_set_powerstate(pci_chipset_tag_t pc, pcitag_t tag, int state)
 		}
 		reg = pci_conf_read(pc, tag, offset + PCI_PMCSR);
 		if ((reg & PCI_PMCSR_STATE_MASK) != state) {
-			int ostate = reg & PCI_PMCSR_STATE_MASK;
+			ostate = reg & PCI_PMCSR_STATE_MASK;
 
 			pci_conf_write(pc, tag, offset + PCI_PMCSR,
 			    (reg & ~PCI_PMCSR_STATE_MASK) | state);
 			if (state == PCI_PMCSR_STATE_D3 ||
 			    ostate == PCI_PMCSR_STATE_D3)
 				delay(10 * 1000);
-			return (ostate);
 		}
 	}
-	return (state);
+
+	/*
+	 * Warn the firmware that the device is now in the given
+	 * state.
+	 */
+	pci_set_powerstate_md(pc, tag, state, 0);
+
+	return (ostate);
 }
 
 #ifndef PCI_MACHDEP_ENUMERATE_BUS
@@ -746,11 +798,15 @@ pci_reserve_resources(struct pci_attach_args *pa)
 {
 	pci_chipset_tag_t pc = pa->pa_pc;
 	pcitag_t tag = pa->pa_tag;
-	pcireg_t bhlc, blr, type;
+	pcireg_t bhlc, blr, type, bir;
 	bus_addr_t base, limit;
 	bus_size_t size;
 	int reg, reg_start, reg_end;
+	int bus, dev, func;
+	int sec, sub;
 	int flags;
+
+	pci_decompose_tag(pc, tag, &bus, &dev, &func);
 
 	bhlc = pci_conf_read(pc, tag, PCI_BHLC_REG);
 	switch (PCI_HDRTYPE_TYPE(bhlc)) {
@@ -783,17 +839,15 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		switch (type) {
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_32BIT:
 		case PCI_MAPREG_TYPE_MEM | PCI_MAPREG_MEM_TYPE_64BIT:
-#ifdef BUS_SPACE_MAP_PREFETCHABLE
 			if (ISSET(flags, BUS_SPACE_MAP_PREFETCHABLE) &&
 			    pa->pa_pmemex && extent_alloc_region(pa->pa_pmemex,
 			    base, size, EX_NOWAIT) == 0) {
 				break;
 			}
-#endif
 			if (pa->pa_memex && extent_alloc_region(pa->pa_memex,
 			    base, size, EX_NOWAIT)) {
-				printf("mem address conflict 0x%x/0x%x\n",
-				    base, size);
+				printf("%d:%d:%d: mem address conflict 0x%x/0x%x\n",
+				    bus, dev, func, base, size);
 				pci_conf_write(pc, tag, reg, 0);
 				if (type & PCI_MAPREG_MEM_TYPE_64BIT)
 					pci_conf_write(pc, tag, reg + 4, 0);
@@ -802,8 +856,8 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		case PCI_MAPREG_TYPE_IO:
 			if (pa->pa_ioex && extent_alloc_region(pa->pa_ioex,
 			    base, size, EX_NOWAIT)) {
-				printf("io address conflict 0x%x/0x%x\n",
-				    base, size);
+				printf("%d:%d:%d: io address conflict 0x%x/0x%x\n",
+				    bus, dev, func, base, size);
 				pci_conf_write(pc, tag, reg, 0);
 			}
 			break;
@@ -829,8 +883,8 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		size = 0;
 	if (pa->pa_ioex && base > 0 && size > 0) {
 		if (extent_alloc_region(pa->pa_ioex, base, size, EX_NOWAIT)) {
-			printf("bridge io address conflict 0x%x/0x%x\n",
-			       base, size);
+			printf("%d:%d:%d: bridge io address conflict 0x%x/0x%x\n",
+			    bus, dev, func, base, size);
 			blr &= 0xffff0000;
 			blr |= 0x000000f0;
 			pci_conf_write(pc, tag, PPB_REG_IOSTATUS, blr);
@@ -847,8 +901,8 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		size = 0;
 	if (pa->pa_memex && base > 0 && size > 0) {
 		if (extent_alloc_region(pa->pa_memex, base, size, EX_NOWAIT)) {
-			printf("bridge mem address conflict 0x%x/0x%x\n",
-			       base, size);
+			printf("%d:%d:%d: bridge mem address conflict 0x%x/0x%x\n",
+			    bus, dev, func, base, size);
 			pci_conf_write(pc, tag, PPB_REG_MEM, 0x0000fff0);
 		}
 	}
@@ -863,15 +917,27 @@ pci_reserve_resources(struct pci_attach_args *pa)
 		size = 0;
 	if (pa->pa_pmemex && base > 0 && size > 0) {
 		if (extent_alloc_region(pa->pa_pmemex, base, size, EX_NOWAIT)) {
-			printf("bridge mem address conflict 0x%x/0x%x\n",
-			       base, size);
+			printf("%d:%d:%d: bridge mem address conflict 0x%x/0x%x\n",
+			    bus, dev, func, base, size);
 			pci_conf_write(pc, tag, PPB_REG_PREFMEM, 0x0000fff0);
 		}
 	} else if (pa->pa_memex && base > 0 && size > 0) {
 		if (extent_alloc_region(pa->pa_memex, base, size, EX_NOWAIT)) {
-			printf("bridge mem address conflict 0x%x/0x%x\n",
-			       base, size);
+			printf("%d:%d:%d: bridge mem address conflict 0x%x/0x%x\n",
+			    bus, dev, func, base, size);
 			pci_conf_write(pc, tag, PPB_REG_PREFMEM, 0x0000fff0);
+		}
+	}
+
+	/* Figure out the bus range handled by the bridge. */
+	bir = pci_conf_read(pc, tag, PPB_REG_BUSINFO);
+	sec = PPB_BUSINFO_SECONDARY(bir);
+	sub = PPB_BUSINFO_SUBORDINATE(bir);
+	if (pa->pa_busex && sub >= sec) {
+		if (extent_alloc_region(pa->pa_busex, sec, sub - sec + 1,
+		    EX_NOWAIT)) {
+			printf("%d:%d:%d: bridge bus conflict %d-%d\n",
+			    bus, dev, func, sec, sub);
 		}
 	}
 
@@ -967,6 +1033,25 @@ pci_matchbyid(struct pci_attach_args *pa, const struct pci_matchid *ids,
 		    PCI_PRODUCT(pa->pa_id) == pm->pm_pid)
 			return (1);
 	return (0);
+}
+
+void
+pci_disable_legacy_vga(struct device *dev)
+{
+	struct pci_softc *pci;
+	struct pci_dev *pd;
+
+	/* XXX Until we attach the drm drivers directly to pci. */
+	while (dev->dv_parent->dv_cfdata->cf_driver != &pci_cd)
+		dev = dev->dv_parent;
+
+	pci = (struct pci_softc *)dev->dv_parent;
+	LIST_FOREACH(pd, &pci->sc_devs, pd_next) {
+		if (pd->pd_dev == dev) {
+			pd->pd_vga_decode = 0;
+			break;
+		}
+	}
 }
 
 #ifdef USER_PCICONF
@@ -1212,20 +1297,32 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 	case PCIOCGETVGA:
 	{
 		struct pci_vga *vga = (struct pci_vga *)data;
-		int bus, device, function;
+		struct pci_dev *pd;
+		int bus, dev, func;
 
-		pci_decompose_tag(pci_vga_pci->sc_pc, pci_vga_tag,
-		    &bus, &device, &function);
+		vga->pv_decode = 0;
+		LIST_FOREACH(pd, &pci->sc_devs, pd_next) {
+			pci_decompose_tag(pc, pd->pd_tag, NULL, &dev, &func);
+			if (dev == sel->pc_dev && func == sel->pc_func) {
+				if (pd->pd_vga_decode)
+					vga->pv_decode = PCI_VGA_IO_ENABLE |
+					    PCI_VGA_MEM_ENABLE;
+				break;
+			}
+		}
+
+		pci_decompose_tag(pci_vga_pci->sc_pc,
+		    pci_vga_tag, &bus, &dev, &func);
 		vga->pv_sel.pc_bus = bus;
-		vga->pv_sel.pc_dev = device;
-		vga->pv_sel.pc_func = function;
+		vga->pv_sel.pc_dev = dev;
+		vga->pv_sel.pc_func = func;
 		error = 0;
 		break;
 	}
 	case PCIOCSETVGA:
 	{
 		struct pci_vga *vga = (struct pci_vga *)data;
-		int bus, device, function;
+		int bus, dev, func;
 
 		switch (vga->pv_lock) {
 		case PCI_VGA_UNLOCK:
@@ -1254,11 +1351,10 @@ pciioctl(dev_t dev, u_long cmd, caddr_t data, int flag, struct proc *p)
 		}
 		pci_vga_proc = p;
 
-		pci_decompose_tag(pci_vga_pci->sc_pc, pci_vga_tag,
-		    &bus, &device, &function);
-		if (bus != vga->pv_sel.pc_bus ||
-		    device != vga->pv_sel.pc_dev ||
-		    function != vga->pv_sel.pc_func) {
+		pci_decompose_tag(pci_vga_pci->sc_pc,
+		    pci_vga_tag, &bus, &dev, &func);
+		if (bus != vga->pv_sel.pc_bus || dev != vga->pv_sel.pc_dev ||
+		    func != vga->pv_sel.pc_func) {
 			pci_disable_vga(pci_vga_pci->sc_pc, pci_vga_tag);
 			if (pci != pci_vga_pci) {
 				pci_unroute_vga(pci_vga_pci);
@@ -1333,24 +1429,6 @@ pci_unroute_vga(struct pci_softc *sc)
 	pci_unroute_vga((struct pci_softc *)sc->sc_dev.dv_parent->dv_parent);
 }
 #endif /* USER_PCICONF */
-
-int
-pci_count_vga(struct pci_attach_args *pa)
-{
-	/* XXX For now, only handle the first PCI domain. */
-	if (pa->pa_domain != 0)
-		return (0);
-
-	if ((PCI_CLASS(pa->pa_class) != PCI_CLASS_DISPLAY ||
-	    PCI_SUBCLASS(pa->pa_class) != PCI_SUBCLASS_DISPLAY_VGA) &&
-	    (PCI_CLASS(pa->pa_class) != PCI_CLASS_PREHISTORIC ||
-	    PCI_SUBCLASS(pa->pa_class) != PCI_SUBCLASS_PREHISTORIC_VGA))
-		return (0);
-
-	pci_vga_count++;
-
-	return (0);
-}
 
 int
 pci_primary_vga(struct pci_attach_args *pa)

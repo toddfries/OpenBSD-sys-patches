@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.53 2012/01/03 23:41:51 bluhm Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.63 2013/11/19 09:00:43 mpi Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -46,9 +46,9 @@
 #include <net/route.h>
 
 #include <netinet/in.h>
-#include <netinet/in_var.h>
 #include <netinet/if_ether.h>
 
+#include <netinet6/in6_var.h>
 #include <netinet/ip6.h>
 #include <netinet6/ip6_var.h>
 #include <netinet6/in6_ifattach.h>
@@ -189,8 +189,6 @@ found:
 	/* IEEE802/EUI64 cases - what others? */
 	case IFT_ETHER:
 	case IFT_CARP:
-	case IFT_FDDI:
-	case IFT_ATM:
 	case IFT_IEEE1394:
 	case IFT_IEEE80211:
 		/* look at IEEE802/EUI64 only */
@@ -653,11 +651,9 @@ in6_ifattach(struct ifnet *ifp, struct ifnet *altifp)
 void
 in6_ifdetach(struct ifnet *ifp)
 {
-	struct in6_ifaddr *ia, *oia;
 	struct ifaddr *ifa, *next;
 	struct rtentry *rt;
 	struct sockaddr_in6 sin6;
-	struct in6_multi_mship *imm;
 
 #ifdef MROUTING
 	/* remove ip6_mrouter stuff */
@@ -668,77 +664,10 @@ in6_ifdetach(struct ifnet *ifp)
 	nd6_purge(ifp);
 
 	/* nuke any of IPv6 addresses we have */
-	for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
-	    ifa != TAILQ_END(&ifp->if_addrlist); ifa = next) {
-		next = TAILQ_NEXT(ifa, ifa_list);
+	TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrlist, ifa_list, next) {
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 		in6_purgeaddr(ifa);
-	}
-
-	/* undo everything done by in6_ifattach(), just in case */
-	for (ifa = TAILQ_FIRST(&ifp->if_addrlist);
-	    ifa != TAILQ_END(&ifp->if_addrlist); ifa = next) {
-		next = TAILQ_NEXT(ifa, ifa_list);
-
-		if (ifa->ifa_addr->sa_family != AF_INET6
-		 || !IN6_IS_ADDR_LINKLOCAL(&satosin6(&ifa->ifa_addr)->sin6_addr)) {
-			continue;
-		}
-
-		ia = (struct in6_ifaddr *)ifa;
-
-		/*
-		 * leave from multicast groups we have joined for the interface
-		 */
-		while (!LIST_EMPTY(&ia->ia6_memberships)) {
-			imm = LIST_FIRST(&ia->ia6_memberships);
-			LIST_REMOVE(imm, i6mm_chain);
-			in6_leavegroup(imm);
-		}
-
-		/* remove from the routing table */
-		if ((ia->ia_flags & IFA_ROUTE) &&
-		    (rt = rtalloc1((struct sockaddr *)&ia->ia_addr, 0,
-		    ifp->if_rdomain))) {
-			struct rt_addrinfo info;
-			u_int8_t prio;
-
-			bzero(&info, sizeof(info));
-			info.rti_flags = rt->rt_flags;
-			prio = rt->rt_priority;
-			info.rti_info[RTAX_DST] =
-			    (struct sockaddr *)&ia->ia_addr;
-			info.rti_info[RTAX_GATEWAY] =
-			    (struct sockaddr *)&ia->ia_addr;
-			info.rti_info[RTAX_NETMASK] =
-			    (struct sockaddr *)&ia->ia_prefixmask;
-			rtfree(rt);
-			rtrequest1(RTM_DELETE, &info, prio, NULL,
-			    ifp->if_rdomain);
-		}
-
-		/* remove from the linked list */
-		ifa_del(ifp, &ia->ia_ifa);
-		IFAFREE(&ia->ia_ifa);
-
-		/* also remove from the IPv6 address chain(itojun&jinmei) */
-		oia = ia;
-		if (oia == (ia = in6_ifaddr))
-			in6_ifaddr = ia->ia_next;
-		else {
-			while (ia->ia_next && (ia->ia_next != oia))
-				ia = ia->ia_next;
-			if (ia->ia_next)
-				ia->ia_next = oia->ia_next;
-			else {
-				nd6log((LOG_ERR,
-				    "%s: didn't unlink in6ifaddr from list\n",
-				    ifp->if_xname));
-			}
-		}
-
-		IFAFREE(&oia->ia_ifa);
 	}
 
 	/* cleanup multicast address kludge table, if there is any */
@@ -760,7 +689,7 @@ in6_ifdetach(struct ifnet *ifp)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_addr = in6addr_linklocal_allnodes;
 	sin6.sin6_addr.s6_addr16[1] = htons(ifp->if_index);
-	rt = rtalloc1((struct sockaddr *)&sin6, 0, ifp->if_rdomain);
+	rt = rtalloc1(sin6tosa(&sin6), 0, ifp->if_rdomain);
 	if (rt && rt->rt_ifp == ifp) {
 		struct rt_addrinfo info;
 

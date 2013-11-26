@@ -1,4 +1,4 @@
-/*	$OpenBSD: ciss_pci.c,v 1.16 2012/03/11 13:33:06 jsg Exp $	*/
+/*	$OpenBSD: ciss_pci.c,v 1.18 2013/08/25 02:15:10 jsg Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -39,9 +39,11 @@
 
 int	ciss_pci_match(struct device *, void *, void *);
 void	ciss_pci_attach(struct device *, struct device *, void *);
+int	ciss_activate(struct device *, int);
 
 struct cfattach ciss_pci_ca = {
-	sizeof(struct ciss_softc), ciss_pci_match, ciss_pci_attach
+	sizeof(struct ciss_softc), ciss_pci_match, ciss_pci_attach,
+	NULL, ciss_activate
 };
 
 const struct pci_matchid ciss_pci_devices[] = {
@@ -68,20 +70,29 @@ const struct pci_matchid ciss_pci_devices[] = {
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP212 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP220I },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP222 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP230I },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP410 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP410I },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP411 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP420 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP420I },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP421 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP430 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP430I },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP431 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP530 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP531 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP600 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP700M },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP711M },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP712M },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP721M },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP731M },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP800 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP812 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP822 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP830 },
+	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAP830I },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSAV100 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSA_1 },
 	{ PCI_VENDOR_HP,	PCI_PRODUCT_HP_HPSA_2 },
@@ -191,4 +202,20 @@ ciss_pci_attach(struct device *parent, struct device *self, void *aux)
 	/* enable interrupts now */
 	bus_space_write_4(sc->iot, sc->ioh, CISS_IMR,
 	    bus_space_read_4(sc->iot, sc->ioh, CISS_IMR) & ~sc->iem);
+}
+
+int
+ciss_activate(struct device *self, int act)
+{
+	int ret = 0;
+
+	ret = config_activate_children(self, act);
+
+	switch (act) {
+	case DVACT_POWERDOWN:
+		ciss_shutdown(self);
+		break;
+	}
+
+	return (ret);
 }

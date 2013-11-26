@@ -1,4 +1,4 @@
-/*	$OpenBSD: cl.c,v 1.52 2010/06/28 14:13:29 deraadt Exp $ */
+/*	$OpenBSD: cl.c,v 1.54 2013/10/07 17:53:57 miod Exp $ */
 
 /*
  * Copyright (c) 1995 Dale Rahn. All rights reserved.
@@ -1466,7 +1466,7 @@ cl_mintr(arg)
 		((msvr & 0x40) != 0x0)
 		);
 #endif
-		ttymodem(tp, ((msvr & 0x40) != 0x0) );
+		(*linesw[tp->t_line].l_modem)(tp, ((msvr & 0x40) != 0x0) );
 	}
 	if (misr & 0x80) {
 #ifdef VERBOSE_LOG_MESSAGES
@@ -1790,11 +1790,11 @@ time_t *ptime;
 u_char *msg;
 {
 /*
-	if (*ptime != time.tv_sec) {
+	if (*ptime != time_second) {
 */
 	{
 /*
-		*ptime = time.tv_sec;
+		*ptime = time_second;
 */
 		log(LOG_WARNING, "%s%d[%d]: %s overrun\n", cl_cd.cd_name,
 			0 /* fix */, channel, msg);

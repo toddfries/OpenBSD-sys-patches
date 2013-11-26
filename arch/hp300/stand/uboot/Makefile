@@ -1,10 +1,13 @@
-#	$OpenBSD: Makefile,v 1.6 2007/11/26 10:01:42 deraadt Exp $
+#	$OpenBSD: Makefile,v 1.9 2013/02/02 13:34:29 miod Exp $
 
 PROG=	uboot
+OBJCOPY?=	objcopy
+SIZE?=	size
 
 NOMAN=
+NOPIE=
 
-.include "${.CURDIR}/../Makefile.inc"
+CPPFLAGS+=	${SA_CPPFLAGS}
 
 CFLAGS+=-I${.CURDIR}/../include \
 	-I${.CURDIR}/../libsa -I${.CURDIR}/../.. -I${.CURDIR}/../../.. \
@@ -18,15 +21,16 @@ SRCS=	srt0.S uboot.c tgets.c netio.c clock.c conf.c prf.c
 
 LIBS=	${LIBCOMMON} ${LIBSAZ} ${LIBZ}
 
-CLEANFILES+=	uboot.lif
+CLEANFILES+=	${PROG}.bin ${PROG}.lif
 
-uboot.lif:	uboot
-	${MKBOOT_PROG} uboot $@
+uboot.lif:	${PROG}
+	${OBJCOPY} -S -O binary ${PROG} ${PROG}.bin
+	${MKBOOT_PROG} -l 0x${RELOC} ${PROG}.bin $@
 
 uboot:	${OBJS} ${LIBS}
-	${LD} -N -T ${RELOC} -e begin ${OBJS} ${LIBS} \
+	${LD} -N -Ttext ${RELOC} -e begin --warn-common ${OBJS} ${LIBS} \
 	    `${CC} -print-libgcc-file-name` -o $@
-	@size $@
+	@${SIZE} $@
 	@echo $@ total size should not exceed 1044480 bytes
 
 install:	uboot.lif ${MKBOOT_PROG}

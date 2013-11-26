@@ -1,4 +1,4 @@
-/*	$OpenBSD: intr.c,v 1.31 2011/10/29 19:17:30 kettenis Exp $	*/
+/*	$OpenBSD: intr.c,v 1.35 2013/06/26 19:53:50 kettenis Exp $	*/
 /*	$NetBSD: intr.c,v 1.3 2003/03/03 22:16:20 fvdl Exp $	*/
 
 /*
@@ -38,7 +38,6 @@
 
 /* #define	INTRDEBUG */
 
-#include <sys/cdefs.h>
 #include <sys/param.h> 
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -344,6 +343,7 @@ intr_establish(int legacy_irq, struct pic *pic, int pin, int type, int level,
 	int slot, error, idt_vec;
 	struct intrsource *source;
 	struct intrstub *stubp;
+	int flags;
 
 #ifdef DIAGNOSTIC
 	if (legacy_irq != -1 && (legacy_irq < 0 || legacy_irq > 15))
@@ -352,6 +352,11 @@ intr_establish(int legacy_irq, struct pic *pic, int pin, int type, int level,
 	if (legacy_irq == -1 && pic == &i8259_pic)
 		panic("intr_establish: non-legacy IRQ on i8259");
 #endif
+
+	flags = level & IPL_MPSAFE;
+	level &= ~IPL_MPSAFE;
+
+	KASSERT(level <= IPL_TTY || level >= IPL_CLOCK || flags & IPL_MPSAFE);
 
 	error = intr_allocate_slot(pic, legacy_irq, pin, level, &ci, &slot,
 	    &idt_vec);
@@ -427,6 +432,7 @@ intr_establish(int legacy_irq, struct pic *pic, int pin, int type, int level,
 	ih->ih_arg = arg;
 	ih->ih_next = *p;
 	ih->ih_level = level;
+	ih->ih_flags = flags; 
 	ih->ih_pin = pin;
 	ih->ih_cpu = ci;
 	ih->ih_slot = slot;
@@ -524,6 +530,29 @@ intr_disestablish(struct intrhand *ih)
 	simple_unlock(&ci->ci_slock);
 }
 
+int
+intr_handler(struct intrframe *frame, struct intrhand *ih)
+{
+	int rc;
+#ifdef MULTIPROCESSOR
+	int need_lock;
+
+	if (ih->ih_flags & IPL_MPSAFE)
+		need_lock = 0;
+	else
+		need_lock = frame->if_ppl < IPL_SCHED;
+
+	if (need_lock)
+		__mp_lock(&kernel_lock);
+#endif
+	rc = (*ih->ih_fun)(ih->ih_arg ? ih->ih_arg : frame);
+#ifdef MULTIPROCESSOR
+	if (need_lock)
+		__mp_unlock(&kernel_lock);
+#endif
+	return rc;
+}
+
 #define CONCAT(x,y)	__CONCAT(x,y)
 
 /*
@@ -608,20 +637,6 @@ cpu_intr_init(struct cpu_info *ci)
 }
 
 #ifdef MULTIPROCESSOR
-void
-x86_intlock(struct intrframe iframe)
-{
-	if (iframe.if_ppl < IPL_SCHED)
-		__mp_lock(&kernel_lock);
-}
-
-void
-x86_intunlock(struct intrframe iframe)
-{
-	if (iframe.if_ppl < IPL_SCHED)
-		__mp_unlock(&kernel_lock);
-}
-
 void
 x86_softintlock(void)
 {

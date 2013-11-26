@@ -1,4 +1,4 @@
-/*	$OpenBSD: diskprobe.c,v 1.32 2010/04/23 15:25:20 jsing Exp $	*/
+/*	$OpenBSD: diskprobe.c,v 1.37 2013/11/05 15:17:56 krw Exp $	*/
 
 /*
  * Copyright (c) 1997 Tobias Weingartner
@@ -34,12 +34,18 @@
 #include <sys/queue.h>
 #include <sys/reboot.h>
 #include <sys/disklabel.h>
-#include <stand/boot/bootarg.h>
-#include <machine/biosvar.h>
+
 #include <lib/libz/zlib.h>
+#include <machine/biosvar.h>
+#include <stand/boot/bootarg.h>
+
 #include "disk.h"
 #include "biosdev.h"
 #include "libsa.h"
+
+#ifdef SOFTRAID
+#include "softraid.h"
+#endif
 
 #define MAX_CKSUMLEN MAXBSIZE / DEV_BSIZE	/* Max # of blks to cksum */
 
@@ -183,6 +189,10 @@ diskprobe(void)
 #endif
 	hardprobe();
 
+#ifdef SOFTRAID
+	srprobe();
+#endif
+
 	/* Checksumming of hard disks */
 	for (i = 0; disksum(i++) && i < MAX_CKSUMLEN; )
 		;
@@ -256,19 +266,19 @@ cdprobe(void)
 
 	strncpy(dip->disklabel.d_packname, "fictitious",
 	    sizeof(dip->disklabel.d_packname));
-	dip->disklabel.d_secperunit = 100;
+	DL_SETDSIZE(&dip->disklabel, 100);
 
 	dip->disklabel.d_bbsize = 2048;
 	dip->disklabel.d_sbsize = 2048;
 
 	/* 'a' partition covering the "whole" disk */
-	dip->disklabel.d_partitions[0].p_offset = 0;
-	dip->disklabel.d_partitions[0].p_size = 100;
+	DL_SETPOFFSET(&dip->disklabel.d_partitions[0], 0);
+	DL_SETPSIZE(&dip->disklabel.d_partitions[0], 100);
 	dip->disklabel.d_partitions[0].p_fstype = FS_UNUSED;
 
 	/* The raw partition is special */
-	dip->disklabel.d_partitions[RAW_PART].p_offset = 0;
-	dip->disklabel.d_partitions[RAW_PART].p_size = 100;
+	DL_SETPOFFSET(&dip->disklabel.d_partitions[RAW_PART], 0);
+	DL_SETPSIZE(&dip->disklabel.d_partitions[RAW_PART], 100);
 	dip->disklabel.d_partitions[RAW_PART].p_fstype = FS_UNUSED;
 
 	dip->disklabel.d_npartitions = MAXPARTITIONS;

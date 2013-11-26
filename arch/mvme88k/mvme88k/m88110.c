@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88110.c,v 1.76 2011/10/25 18:38:06 miod Exp $	*/
+/*	$OpenBSD: m88110.c,v 1.83 2013/11/16 18:45:20 miod Exp $	*/
 
 /*
  * Copyright (c) 2010, 2011, Miodrag Vallat.
@@ -94,12 +94,16 @@ extern	void m88110_copypage(vaddr_t, vaddr_t);
 
 cpuid_t	m88110_init(void);
 cpuid_t	m88410_init(void);
+void	m88110_batc_setup(cpuid_t, apr_t);
 void	m88110_setup_board_config(void);
 void	m88410_setup_board_config(void);
 void	m88110_cpu_configuration_print(int);
 void	m88410_cpu_configuration_print(int);
 void	m88110_shutdown(void);
 cpuid_t	m88110_cpu_number(void);
+apr_t	m88110_apr_cmode(void);
+apr_t	m88410_apr_cmode(void);
+apr_t	m88110_pte_cmode(void);
 void	m88110_set_sapr(apr_t);
 void	m88110_set_uapr(apr_t);
 void	m88110_tlbis(cpuid_t, vaddr_t, pt_entry_t);
@@ -122,12 +126,15 @@ void	m88410_initialize_cpu(cpuid_t);
  * This is the function table for the MC88110 built-in CMMUs without
  * external 88410.
  */
-struct cmmu_p cmmu88110 = {
+const struct cmmu_p cmmu88110 = {
 	m88110_init,
+	m88110_batc_setup,
 	m88110_setup_board_config,
 	m88110_cpu_configuration_print,
 	m88110_shutdown,
 	m88110_cpu_number,
+	m88110_apr_cmode,
+	m88110_pte_cmode,
 	m88110_set_sapr,
 	m88110_set_uapr,
 	m88110_tlbis,
@@ -147,12 +154,15 @@ struct cmmu_p cmmu88110 = {
  * This is the function table for the MC88110 built-in CMMUs with
  * external 88410.
  */
-struct cmmu_p cmmu88410 = {
+const struct cmmu_p cmmu88410 = {
 	m88410_init,
+	m88110_batc_setup,
 	m88410_setup_board_config,
 	m88410_cpu_configuration_print,
 	m88110_shutdown,
 	m88110_cpu_number,
+	m88410_apr_cmode,
+	m88110_pte_cmode,
 	m88110_set_sapr,
 	m88110_set_uapr,
 	m88110_tlbis,
@@ -171,23 +181,43 @@ struct cmmu_p cmmu88410 = {
 size_t mc88410_linesz[2] = { 5, 5 };		/* log2 of L2 cache line size */
 size_t mc88410_cachesz[2] = { 256, 256 };	/* L2 cache size in KB */
 
-void patc_clear(void);
+static inline
+void m88110_dbatc_set(uint, batc_t);
+static inline
+void m88110_ibatc_set(uint, batc_t);
+void m88110_patc_clear(void);
 
 void m88110_cmmu_wb_locked(paddr_t, psize_t);
 void m88110_cmmu_wbinv_locked(paddr_t, psize_t);
 void m88110_cmmu_inv_locked(paddr_t, psize_t);
 
+static inline
 void
-patc_clear(void)
+m88110_dbatc_set(uint batno, batc_t val)
 {
-	int i;
+	set_dir(batno);
+	set_dbp(val);
+}
 
-	for (i = 0; i < 32; i++) {
-		set_dir(i << 5);
+static inline
+void
+m88110_ibatc_set(uint batno, batc_t val)
+{
+	set_iir(batno);
+	set_ibp(val);
+}
+
+void
+m88110_patc_clear(void)
+{
+	uint patcno;
+
+	for (patcno = 0; patcno < 32; patcno++) {
+		set_dir(patcno << 5);
 		set_dppu(0);
 		set_dppl(0);
 
-		set_iir(i << 5);
+		set_iir(patcno << 5);
 		set_ippu(0);
 		set_ippl(0);
 	}
@@ -283,6 +313,76 @@ m88410_init(void)
 	return (cpu);
 }
 
+void
+m88110_batc_setup(cpuid_t cpu, apr_t cmode)
+{
+	paddr_t s_text, e_text, s_data, e_data,	e_rodata;
+	uint batcno;
+	batc_t batc, proto;
+	extern caddr_t kernelstart;
+	extern caddr_t etext;
+	extern caddr_t erodata;
+	extern caddr_t end;
+
+	proto = BATC_SO | BATC_V;
+	if (cmode & CACHE_WT)
+		proto |= BATC_WT;
+	if (cmode & CACHE_INH)
+		proto |= BATC_INH;
+
+	s_text = round_batc((paddr_t)&kernelstart);
+	s_data = e_text = round_batc((paddr_t)&etext);
+	e_rodata = round_batc((paddr_t)&erodata);
+#if 0 /* not until pmap makes sure kvm starts on a BATC boundary */
+	e_data = round_batc((paddr_t)&end);
+#else
+	e_data = trunc_batc((paddr_t)&end);
+#endif
+
+	/* map s_text..e_text with IBATC */
+	batcno = 0;
+	while (s_text != e_text) {
+		batc = (s_text >> BATC_BLKSHIFT) << BATC_VSHIFT;
+		batc |= (s_text >> BATC_BLKSHIFT) << BATC_PSHIFT;
+		batc |= proto;
+#ifdef DEBUG
+		printf("cpu%d ibat%d %p(%08x)\n", cpu, batcno, s_text, batc);
+#endif
+		global_ibatc[batcno] = batc;
+		s_text += BATC_BLKBYTES;
+		if (++batcno == BATC_MAX)
+			break;
+	}
+
+	/* map e_text..e_data with DBATC */
+	if (cmode & CACHE_GLOBAL)
+		proto |= BATC_GLOBAL;
+	batcno = 0;
+	while (s_data != e_data) {
+		batc = (s_data >> BATC_BLKSHIFT) << BATC_VSHIFT;
+		batc |= (s_data >> BATC_BLKSHIFT) << BATC_PSHIFT;
+		batc |= proto;
+		if (s_data < e_rodata)
+			batc |= BATC_PROT;
+#if defined(MULTIPROCESSOR)	/* XXX */
+		else
+			break;
+#endif
+#ifdef DEBUG
+		printf("cpu%d dbat%d %p(%08x)\n", cpu, batcno, s_data, batc);
+#endif
+		global_dbatc[batcno] = batc;
+		s_data += BATC_BLKBYTES;
+		if (++batcno == BATC_MAX)
+			break;
+	}
+
+	for (batcno = 0; batcno < BATC_MAX; batcno++) {
+		m88110_dbatc_set(batcno, global_dbatc[batcno]);
+		m88110_ibatc_set(batcno, global_ibatc[batcno]);
+	}
+}
+
 cpuid_t
 m88110_cpu_number(void)
 {
@@ -314,7 +414,7 @@ m88110_initialize_cpu(cpuid_t cpu)
 	}
 
 	/* clear PATCs */
-	patc_clear();
+	m88110_patc_clear();
 
 	ictl = BATC_512K | CMMU_ICTL_DID | CMMU_ICTL_CEN | CMMU_ICTL_BEN;
 
@@ -440,6 +540,24 @@ m88110_shutdown(void)
 {
 }
 
+apr_t
+m88110_apr_cmode(void)
+{
+	return CACHE_DFL;
+}
+
+apr_t
+m88410_apr_cmode(void)
+{
+	return CACHE_WT;
+}
+
+apr_t
+m88110_pte_cmode(void)
+{
+	return CACHE_WT;
+}
+
 void
 m88110_set_sapr(apr_t ap)
 {
@@ -454,7 +572,7 @@ m88110_set_sapr(apr_t ap)
 	set_isap(ap);
 	set_dsap(ap);
 
-	patc_clear();
+	m88110_patc_clear();
 
 	set_icmd(CMMU_ICMD_INV_UATC);
 	set_icmd(CMMU_ICMD_INV_SATC);
@@ -942,8 +1060,10 @@ m88110_dma_cachectl(paddr_t _pa, psize_t _size, int op)
 			bcopy(lines + MC88110_CACHE_LINE, (void *)pa2, sz2);
 		if (sz1 != 0)
 			m88110_cmmu_wbinv_locked(pa1, MC88110_CACHE_LINE);
-		if (sz2 != 0)
+		if (sz2 != 0) {
+			pa2 = trunc_cache_line(pa2);
 			m88110_cmmu_wbinv_locked(pa2, MC88110_CACHE_LINE);
+		}
 	} else {
 		while (size != 0) {
 			count = (pa & PAGE_MASK) == 0 && size >= PAGE_SIZE ?
@@ -1019,6 +1139,12 @@ m88410_dma_cachectl_local(paddr_t _pa, psize_t _size, int op)
 			bcopy(lines, (void *)pa1, sz1);
 		if (sz2 != 0)
 			bcopy(lines + MC88110_CACHE_LINE, (void *)pa2, sz2);
+		if (sz1 != 0)
+			m88110_cmmu_wbinv_locked(pa1, MC88110_CACHE_LINE);
+		if (sz2 != 0) {
+			pa2 = trunc_cache_line(pa2);
+			m88110_cmmu_wbinv_locked(pa2, MC88110_CACHE_LINE);
+		}
 	} else {
 		while (size != 0) {
 			count = (pa & PAGE_MASK) == 0 && size >= PAGE_SIZE ?
@@ -1063,7 +1189,7 @@ m88410_dma_cachectl(paddr_t _pa, psize_t _size, int op)
 	m88410_dma_cachectl_local(_pa, _size, op);
 #ifdef MULTIPROCESSOR
 	/*
-	 * Since snooping is enabled, all we need is to propagate invalidate 
+	 * Since snooping is enabled, all we need is to propagate invalidate
 	 * requests if necessary.
 	 *
 	 * Note that we round the range to integral cache lines, in order

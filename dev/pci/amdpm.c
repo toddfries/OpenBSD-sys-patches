@@ -1,4 +1,4 @@
-/*	$OpenBSD: amdpm.c,v 1.26 2011/04/09 04:33:40 deraadt Exp $	*/
+/*	$OpenBSD: amdpm.c,v 1.31 2013/10/01 20:06:00 sf Exp $	*/
 
 /*
  * Copyright (c) 2006 Alexander Yurchenko <grange@openbsd.org>
@@ -51,9 +51,7 @@
 #include <sys/kernel.h>
 #include <sys/rwlock.h>
 #include <sys/timeout.h>
-#ifdef __HAVE_TIMECOUNTER
 #include <sys/timetc.h>
-#endif
 
 #include <machine/bus.h>
 
@@ -73,7 +71,6 @@
 #define AMDPM_SMBUS_DELAY	100
 #define AMDPM_SMBUS_TIMEOUT	1
 
-#ifdef __HAVE_TIMECOUNTER
 u_int amdpm_get_timecount(struct timecounter *tc);
 
 #ifndef AMDPM_FREQUENCY
@@ -88,7 +85,6 @@ static struct timecounter amdpm_timecounter = {
 	"AMDPM",		/* name */
 	1000			/* quality */
 };
-#endif
 
 #define	AMDPM_CONFREG	0x40
 
@@ -189,8 +185,8 @@ int	amdpm_i2c_exec(void *, i2c_op_t, i2c_addr_t, const void *, size_t,
 int	amdpm_intr(void *);
 
 struct cfattach amdpm_ca = {
-	sizeof(struct amdpm_softc), amdpm_match, amdpm_attach, NULL,
-	amdpm_activate
+	sizeof(struct amdpm_softc), amdpm_match, amdpm_attach,
+	NULL, amdpm_activate
 };
 
 struct cfdriver amdpm_cd = {
@@ -247,12 +243,11 @@ amdpm_attach(struct device *parent, struct device *self, void *aux)
 			return;	
 		}
 
-#ifdef __HAVE_TIMECOUNTER
 		if ((cfg_reg & AMDPM_TMRRST) == 0 &&
 		    (cfg_reg & AMDPM_STOPTMR) == 0 &&
 		    (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_PBC768_PMC ||
 		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_8111_PMC)) {
-			printf(": %d-bit timer at %dHz",
+			printf(": %d-bit timer at %lluHz",
 			    (cfg_reg & AMDPM_TMR32) ? 32 : 24,
 			    amdpm_timecounter.tc_frequency);
 
@@ -261,7 +256,6 @@ amdpm_attach(struct device *parent, struct device *self, void *aux)
 				amdpm_timecounter.tc_counter_mask = 0xffffffffu;
 			tc_init(&amdpm_timecounter);
 		}	
-#endif
 		if (PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_PBC768_PMC ||
 		    PCI_PRODUCT(pa->pa_id) == PCI_PRODUCT_AMD_8111_PMC) {
 			if ((cfg_reg & AMDPM_RNGEN) ==0) {
@@ -318,8 +312,15 @@ int
 amdpm_activate(struct device *self, int act)
 {
 	struct amdpm_softc *sc = (struct amdpm_softc *)self;
+	int ret = 0;
 
 	switch (act) {
+	case DVACT_QUIESCE:
+		ret = config_activate_children(self, act);
+		break;
+	case DVACT_SUSPEND:
+		ret = config_activate_children(self, act);
+		break;
 	case DVACT_RESUME:
 		if (timeout_initialized(&sc->sc_rnd_ch)) {
 			pcireg_t cfg_reg;
@@ -331,9 +332,13 @@ amdpm_activate(struct device *self, int act)
 			    AMDPM_CONFREG, cfg_reg | AMDPM_RNGEN);
 		
 		}
+		ret = config_activate_children(self, act);
+		break;
+	case DVACT_POWERDOWN:
+		ret = config_activate_children(self, act);
 		break;
 	}
-	return (0);
+	return (ret);
 }
 
 void
@@ -350,7 +355,6 @@ amdpm_rnd_callout(void *v)
 	timeout_add(&sc->sc_rnd_ch, 1);
 }
 
-#ifdef __HAVE_TIMECOUNTER
 u_int
 amdpm_get_timecount(struct timecounter *tc)
 {
@@ -371,7 +375,6 @@ amdpm_get_timecount(struct timecounter *tc)
 #endif
 	return (u2);
 }
-#endif
 
 int
 amdpm_i2c_acquire_bus(void *cookie, int flags)
@@ -463,6 +466,8 @@ amdpm_i2c_exec(void *cookie, i2c_op_t op, i2c_addr_t addr,
 		ctl = AMDPM_SMBCTL_CMD_BDATA;
 	else if (len == 2)
 		ctl = AMDPM_SMBCTL_CMD_WDATA;
+	else
+		panic("%s: unexpected len %zd", __func__, len);
 
 	if ((flags & I2C_F_POLL) == 0)
 		ctl |= AMDPM_SMBCTL_CYCEN;
@@ -499,7 +504,7 @@ timeout:
 	/*
 	 * Transfer timeout. Kill the transaction and clear status bits.
 	 */
-	printf("%s: exec: op %d, addr 0x%02x, cmdlen %d, len %d, "
+	printf("%s: exec: op %d, addr 0x%02x, cmdlen %zu, len %zu, "
 	    "flags 0x%02x: timeout, status 0x%b\n",
 	    sc->sc_dev.dv_xname, op, addr, cmdlen, len, flags,
 	    st, AMDPM_SMBSTAT_BITS);

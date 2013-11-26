@@ -1,4 +1,4 @@
-/*	$OpenBSD: z8530kbd.c,v 1.15 2011/03/18 21:01:17 miod Exp $	*/
+/*	$OpenBSD: z8530kbd.c,v 1.17 2013/05/10 16:00:08 mikeb Exp $	*/
 /*	$NetBSD: z8530tty.c,v 1.77 2001/05/30 15:24:24 lukem Exp $	*/
 
 /*-
@@ -117,7 +117,7 @@
 #include <dev/sun/sunkbdreg.h>
 #include <dev/sun/sunkbdvar.h>
 
-#include <sparc/dev/z8530reg.h>
+#include <dev/ic/z8530reg.h>
 #include <machine/z8530var.h>
 
 #include <dev/cons.h>
@@ -213,8 +213,6 @@ static void zs_modem(struct zskbd_softc *, int);
 static void zs_hwiflow(struct zskbd_softc *);
 static void zs_maskintr(struct zskbd_softc *);
 
-struct zskbd_softc *zskbd_device_lookup(struct cfdriver *, int);
-
 /* Low-level routines. */
 static void zskbd_rxint(struct zs_chanstate *);
 static void zskbd_stint(struct zs_chanstate *, int);
@@ -239,14 +237,6 @@ struct wskbd_consops zskbd_consops = {
 };
 
 #define	ZSKBDUNIT(x)	(minor(x) & 0x7ffff)
-
-struct zskbd_softc *
-zskbd_device_lookup(cf, unit)
-	struct cfdriver *cf;
-	int unit;
-{
-	return (struct zskbd_softc *)device_lookup(cf, unit);
-}
 
 /*
  * zskbd_match: how is this zs channel configured?
@@ -304,7 +294,7 @@ zskbd_attach(parent, self, aux)
 
 	tty_unit = ss->sc_dev.dv_unit;
 	channel = args->channel;
-	cs = &zsc->zsc_cs[channel];
+	cs = zsc->zsc_cs[channel];
 	cs->cs_private = zst;
 	cs->cs_ops = &zsops_kbd;
 

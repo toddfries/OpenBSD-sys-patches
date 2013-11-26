@@ -1,3 +1,5 @@
+/*	$OpenBSD: hibernate_machdep.c,v 1.29 2013/10/20 20:03:03 mlarkin Exp $	*/
+
 /*
  * Copyright (c) 2011 Mike Larkin <mlarkin@openbsd.org>
  *
@@ -43,11 +45,6 @@
 #include "ahci.h"
 #include "sd.h"
 
-#if NWD > 0
-#include <dev/ata/atavar.h>
-#include <dev/ata/wdvar.h>
-#endif
-
 /* Hibernate support */
 void    hibernate_enter_resume_4k_pte(vaddr_t, paddr_t);
 void    hibernate_enter_resume_4k_pde(vaddr_t);
@@ -62,6 +59,8 @@ extern	struct hibernate_state *hibernate_state;
 
 /*
  * i386 MD Hibernate functions
+ *
+ * see i386 hibernate.h for lowmem layout used during hibernate
  */
 
 /*
@@ -70,23 +69,29 @@ extern	struct hibernate_state *hibernate_state;
 hibio_fn
 get_hibernate_io_function(void)
 {
+	char *blkname = findblkname(major(swdevt[0].sw_dev));
+
+	if (blkname == NULL)
+		return NULL;
 #if NWD > 0
-	/* XXX - Only support wd hibernate presently */
-	if (strcmp(findblkname(major(swdevt[0].sw_dev)), "wd") == 0)
+	if (strcmp(blkname, "wd") == 0) {
+		extern int wd_hibernate_io(dev_t dev, daddr_t blkno,
+		    vaddr_t addr, size_t size, int op, void *page);
 		return wd_hibernate_io;
+	}
 #endif
 #if NAHCI > 0 && NSD > 0
-	if (strcmp(findblkname(major(swdevt[0].sw_dev)), "sd") == 0) {
+	if (strcmp(blkname, "sd") == 0) {
 		extern struct cfdriver sd_cd;
 		extern int ahci_hibernate_io(dev_t dev, daddr_t blkno,
-		    vaddr_t addr, size_t size, int wr, void *page);
+		    vaddr_t addr, size_t size, int op, void *page);
 		struct device *dv;
 
 		dv = disk_lookup(&sd_cd, DISKUNIT(swdevt[0].sw_dev));
 		if (dv && dv->dv_parent && dv->dv_parent->dv_parent &&
 		    strcmp(dv->dv_parent->dv_parent->dv_cfdata->cf_driver->cd_name,
 		    "ahci") == 0)
-		return ahci_hibernate_io;
+			return ahci_hibernate_io;
 	}
 #endif
 	return NULL;
@@ -154,7 +159,7 @@ hibernate_enter_resume_4m_pde(vaddr_t va, paddr_t pa)
 	pt_entry_t *pde, npde;
 
 	pde = s4pde_4m(va);
-	npde = (pa & PMAP_PA_MASK_4M) | PG_RW | PG_V | PG_u | PG_M | PG_PS;
+	npde = (pa & PMAP_PA_MASK_4M) | PG_RW | PG_V | PG_M | PG_PS;
 	*pde = npde;
 }
 
@@ -167,7 +172,7 @@ hibernate_enter_resume_4k_pte(vaddr_t va, paddr_t pa)
 	pt_entry_t *pte, npte;
 
 	pte = s4pte_4k(va);
-	npte = (pa & PMAP_PA_MASK) | PG_RW | PG_V | PG_u | PG_M;
+	npte = (pa & PMAP_PA_MASK) | PG_RW | PG_V | PG_M;
 	*pte = npte;
 }
 
@@ -180,7 +185,7 @@ hibernate_enter_resume_4k_pde(vaddr_t va)
 	pt_entry_t *pde, npde;
 
 	pde = s4pde_4k(va);
-	npde = (HIBERNATE_PT_PAGE & PMAP_PA_MASK) | PG_RW | PG_V | PG_u | PG_M;
+	npde = (HIBERNATE_PT_PAGE & PMAP_PA_MASK) | PG_RW | PG_V | PG_M;
 	*pde = npde;
 }
 
@@ -224,6 +229,8 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 	 */
 	kern_start_4m_va = (paddr_t)&start & ~(PAGE_MASK_4M);
 	kern_end_4m_va = (paddr_t)&end & ~(PAGE_MASK_4M);
+
+	/* i386 kernels load at 2MB phys (on the 0th 4mb page) */
 	phys_page_number = 0;
 
 	for (page = kern_start_4m_va; page <= kern_end_4m_va;
@@ -262,21 +269,6 @@ hibernate_populate_resume_pt(union hibernate_info *hib_info,
 /*
  * MD-specific resume preparation (creating resume time pagetables,
  * stacks, etc).
- *
- * On i386, we use the piglet whose address is contained in hib_info
- * as per the following layout:
- *
- * offset from piglet base      use
- * -----------------------      --------------------
- * 0                            i/o allocation area
- * PAGE_SIZE                    i/o read area
- * 2*PAGE_SIZE                  temp/scratch page
- * 5*PAGE_SIZE			resume stack
- * 6*PAGE_SIZE                  hiballoc arena
- * 7*PAGE_SIZE to 87*PAGE_SIZE  zlib inflate area
- * ...
- * HIBERNATE_CHUNK_SIZE         chunk table
- * 2*HIBERNATE_CHUNK_SIZE	bounce/copy area
  */
 void
 hibernate_prepare_resume_machdep(union hibernate_info *hib_info)
@@ -285,15 +277,13 @@ hibernate_prepare_resume_machdep(union hibernate_info *hib_info)
 	vaddr_t va;
 
 	/*
-	 * At this point, we are sure that the piglet's phys
-	 * space is going to have been unused by the suspending
-	 * kernel, but the vaddrs used by the suspending kernel
-	 * may or may not be available to us here in the
-	 * resuming kernel, so we allocate a new range of VAs
-	 * for the piglet. Those VAs will be temporary and will
-	 * cease to exist as soon as we switch to the resume
-	 * PT, so we need to ensure that any VAs required during
-	 * inflate are also entered into that map.
+	 * At this point, we are sure that the piglet's phys space is going to
+	 * have been unused by the suspending kernel, but the vaddrs used by
+	 * the suspending kernel may or may not be available to us here in the
+	 * resuming kernel, so we allocate a new range of VAs for the piglet.
+	 * Those VAs will be temporary and will cease to exist as soon as we
+	 * switch to the resume PT, so we need to ensure that any VAs required
+	 * during inflate are also entered into that map.
 	 */
 
         hib_info->piglet_va = (vaddr_t)km_alloc(HIBERNATE_CHUNK_SIZE*3,
@@ -326,3 +316,35 @@ hibernate_inflate_skip(union hibernate_info *hib_info, paddr_t dest)
 
 	return (0);
 }
+
+void
+hibernate_enable_intr_machdep(void)
+{
+	enable_intr();
+}
+
+void
+hibernate_disable_intr_machdep(void)
+{
+	disable_intr();
+}
+
+#ifdef MULTIPROCESSOR
+/*
+ * Quiesce CPUs in a multiprocessor machine before resuming. We need to do
+ * this since the APs will be hatched (but waiting for CPUF_GO), and we don't
+ * want the APs to be executing code and causing side effects during the
+ * unpack operation.
+ */
+void
+hibernate_quiesce_cpus(void)
+{
+        KASSERT(CPU_IS_PRIMARY(curcpu()));
+
+	/* Start the hatched (but idling) APs */
+	cpu_boot_secondary_processors();
+
+	/* Now shut them down */
+	acpi_sleep_mp();
+}
+#endif /* MULTIPROCESSOR */

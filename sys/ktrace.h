@@ -1,4 +1,4 @@
-/*	$OpenBSD: ktrace.h,v 1.13 2012/03/19 09:05:39 guenther Exp $	*/
+/*	$OpenBSD: ktrace.h,v 1.17 2013/09/14 02:28:02 guenther Exp $	*/
 /*	$NetBSD: ktrace.h,v 1.12 1996/02/04 02:12:29 christos Exp $	*/
 
 /*
@@ -48,12 +48,12 @@
  * ktrace record header
  */
 struct ktr_header {
-	size_t	ktr_len;		/* length of buf */
+	uint	ktr_type;		/* trace record type */
 	pid_t	ktr_pid;		/* process id */
+	pid_t	ktr_tid;		/* thread id */
+	struct	timespec ktr_time;	/* timestamp */
 	char	ktr_comm[MAXCOMLEN+1];	/* command name */
-	short	ktr_type;		/* trace record type */
-	struct	timeval ktr_time;	/* timestamp */
-	caddr_t	ktr_buf;
+	size_t	ktr_len;		/* length of buf */
 };
 
 /*
@@ -65,6 +65,11 @@ struct ktr_header {
 /*
  * ktrace record types
  */
+
+ /*
+ * KTR_START - start of trace record, one per ktrace(KTROP_SET) syscall
+ */
+#define KTR_START	0x4b545200	/* "KTR" */
 
 /*
  * KTR_SYSCALL - system call record
@@ -146,6 +151,19 @@ struct sockaddr;
 struct stat;
 
 /*
+ * KTR_USER - user record
+ */
+#define KTR_USER	9
+#define KTR_USER_MAXIDLEN	20
+#define KTR_USER_MAXLEN		2048	/* maximum length of passed data */
+struct ktr_user {
+	char    ktr_id[KTR_USER_MAXIDLEN];      /* string id of caller */
+	/*
+	 * Followed by ktr_len - sizeof(struct ktr_user) of user data.
+	 */
+};
+
+/*
  * kernel trace points (in p_traceflag)
  */
 #define KTRFAC_MASK	0x00ffffff
@@ -157,6 +175,7 @@ struct stat;
 #define KTRFAC_CSW	(1<<KTR_CSW)
 #define KTRFAC_EMUL	(1<<KTR_EMUL)
 #define KTRFAC_STRUCT   (1<<KTR_STRUCT)
+#define KTRFAC_USER	(1<<KTR_USER)
 
 /*
  * trace flags (also in p_traceflags)
@@ -170,17 +189,20 @@ struct stat;
 
 __BEGIN_DECLS
 int	ktrace(const char *, int, int, pid_t);
+int	utrace(const char *, const void *, size_t);
 __END_DECLS
 
 #else
 
 void ktrcsw(struct proc *, int, int);
 void ktremul(struct proc *, char *);
-void ktrgenio(struct proc *, int, enum uio_rw, struct iovec *, int, int);
+void ktrgenio(struct proc *, int, enum uio_rw, struct iovec *, ssize_t);
 void ktrnamei(struct proc *, char *);
 void ktrpsig(struct proc *, int, sig_t, int, int, siginfo_t *);
 void ktrsyscall(struct proc *, register_t, size_t, register_t []);
 void ktrsysret(struct proc *, register_t, int, register_t);
+void ktr_kuser(const char *, void *, size_t);
+int ktruser(struct proc *, const char *, const void *, size_t);
 
 void ktrcleartrace(struct process *);
 void ktrsettrace(struct process *, int, struct vnode *, struct ucred *);
@@ -202,5 +224,7 @@ void    ktrstruct(struct proc *, const char *, const void *, size_t);
 	ktrstruct((p), "sigaction", (s), sizeof(struct sigaction))
 #define ktrrlimit(p, s) \
 	ktrstruct((p), "rlimit", (s), sizeof(struct rlimit))
+#define ktrfdset(p, s, l) \
+	ktrstruct((p), "fdset", (s), l)
 
 #endif	/* !_KERNEL */

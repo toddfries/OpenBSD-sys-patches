@@ -1,4 +1,4 @@
-/*	$OpenBSD: ipifuncs.c,v 1.16 2011/03/18 03:10:47 guenther Exp $	*/
+/*	$OpenBSD: ipifuncs.c,v 1.20 2013/10/18 15:09:22 mlarkin Exp $	*/
 /*	$NetBSD: ipifuncs.c,v 1.1 2003/04/26 18:39:28 fvdl Exp $ */
 
 /*-
@@ -32,8 +32,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>			/* RCS ID & Copyright macro defns */
-
 /*
  * Interprocessor interrupt handlers.
  */
@@ -64,6 +62,11 @@ void x86_64_ipi_halt(struct cpu_info *);
 void x86_64_ipi_synch_fpu(struct cpu_info *);
 void x86_64_ipi_flush_fpu(struct cpu_info *);
 
+#ifdef HIBERNATE
+void x86_64_ipi_halt_realmode(struct cpu_info *);
+extern void hibernate_drop_to_real_mode(void);
+#endif /* HIBERNATE */
+
 #if NMTRR > 0
 void x86_64_ipi_reload_mtrr(struct cpu_info *);
 #else
@@ -84,6 +87,11 @@ void (*ipifunc[X86_NIPI])(struct cpu_info *) =
 #else
 	NULL,
 #endif
+#ifdef HIBERNATE
+	x86_64_ipi_halt_realmode,
+#else
+	NULL,
+#endif /* HIBERNATE */
 };
 
 void
@@ -95,6 +103,7 @@ void
 x86_64_ipi_halt(struct cpu_info *ci)
 {
 	SCHED_ASSERT_UNLOCKED();
+	fpusave_cpu(ci, 1);
 	disable_intr();
 	wbinvd();
 	ci->ci_flags &= ~CPUF_RUNNING;
@@ -127,3 +136,19 @@ x86_64_ipi_reload_mtrr(struct cpu_info *ci)
 		mem_range_softc.mr_op->reload(&mem_range_softc);
 }
 #endif
+
+#ifdef HIBERNATE
+void
+x86_64_ipi_halt_realmode(struct cpu_info *ci)
+{
+	/* Halt CPUs and park in real mode */
+
+	fpusave_cpu(ci, 1);
+	disable_intr();
+	wbinvd();
+	ci->ci_flags &= ~CPUF_RUNNING;
+	wbinvd();
+
+	hibernate_drop_to_real_mode();
+}
+#endif /* HIBERNATE */

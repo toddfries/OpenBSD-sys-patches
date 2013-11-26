@@ -1,4 +1,4 @@
-/*	$OpenBSD: ufs_vnops.c,v 1.102 2011/09/18 23:20:28 bluhm Exp $	*/
+/*	$OpenBSD: ufs_vnops.c,v 1.110 2013/11/23 19:07:51 guenther Exp $	*/
 /*	$NetBSD: ufs_vnops.c,v 1.18 1996/05/11 18:28:04 mycroft Exp $	*/
 
 /*
@@ -446,7 +446,7 @@ ufs_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred,
 	uid_t ouid;
 	gid_t ogid;
 	int error = 0;
-	daddr64_t change;
+	daddr_t change;
 	enum ufs_quota_flags quota_flags = 0;
 
 	if (uid == (uid_t)VNOVAL)
@@ -1365,20 +1365,31 @@ ufs_symlink(void *v)
 /*
  * Vnode op for reading directories.
  * 
- * The routine below assumes that the on-disk format of a directory
- * is the same as that defined by <sys/dirent.h>. If the on-disk
- * format changes, then it will be necessary to do a conversion
- * from the on-disk format that read returns to the format defined
- * by <sys/dirent.h>.
+ * This routine converts the on-disk struct direct entries to the
+ * struct dirent entries expected by userland and the rest of the kernel.
  */
 int
 ufs_readdir(void *v)
 {
 	struct vop_readdir_args *ap = v;
-	struct uio *uio = ap->a_uio;
-	int error;
-	size_t count, lost, entries;
+	struct uio auio, *uio = ap->a_uio;
+	struct iovec aiov;
+	union {
+		struct	dirent dn;
+		char __pad[roundup(sizeof(struct dirent), 8)];
+	} u;
 	off_t off = uio->uio_offset;
+	struct direct *dp;
+	char *edp;
+	caddr_t diskbuf;
+	size_t count, entries;
+	int readcnt, error;
+#if (BYTE_ORDER == LITTLE_ENDIAN)
+	int ofmt = ap->a_vp->v_mount->mnt_maxsymlinklen <= 0;
+#endif
+
+	if (uio->uio_rw != UIO_READ)
+		return (EINVAL);
 
 	count = uio->uio_resid;
 	entries = (uio->uio_offset + count) & (DIRBLKSIZ - 1);
@@ -1387,92 +1398,77 @@ ufs_readdir(void *v)
 	if (count <= entries)
 		return (EINVAL);
 
-	count -= entries;
-	lost = uio->uio_resid - count;
-	uio->uio_resid = count;
-	uio->uio_iov->iov_len = count;
-#	if (BYTE_ORDER == LITTLE_ENDIAN)
-		if (ap->a_vp->v_mount->mnt_maxsymlinklen > 0) {
-			error = VOP_READ(ap->a_vp, uio, 0, ap->a_cred);
-		} else {
-			struct dirent *dp, *edp;
-			struct uio auio;
-			struct iovec aiov;
-			caddr_t dirbuf;
-			int readcnt;
-			u_char tmp;
+	/*
+	 * Convert and copy back the on-disk struct direct format to
+	 * the user-space struct dirent format, one entry at a time
+	 */
 
-			auio = *uio;
-			auio.uio_iov = &aiov;
-			auio.uio_iovcnt = 1;
-			auio.uio_segflg = UIO_SYSSPACE;
-			aiov.iov_len = count;
-			dirbuf = malloc(count, M_TEMP, M_WAITOK);
-			aiov.iov_base = dirbuf;
-			error = VOP_READ(ap->a_vp, &auio, 0, ap->a_cred);
-			if (error == 0) {
-				readcnt = count - auio.uio_resid;
-				edp = (struct dirent *)&dirbuf[readcnt];
-				for (dp = (struct dirent *)dirbuf; dp < edp; ) {
-					tmp = dp->d_namlen;
-					dp->d_namlen = dp->d_type;
-					dp->d_type = tmp;
-					if (dp->d_reclen > 0) {
-						dp = (struct dirent *)
-						    ((char *)dp + dp->d_reclen);
-					} else {
-						error = EIO;
-						break;
-					}
-				}
-				if (dp >= edp)
-					error = uiomove(dirbuf, readcnt, uio);
-			}
-			free(dirbuf, M_TEMP);
+	/* read from disk, stopping on a block boundary, max 64kB */
+	readcnt = max(count, 64*1024) - entries;
+
+	auio = *uio;
+	auio.uio_iov = &aiov;
+	auio.uio_iovcnt = 1;
+	auio.uio_resid = readcnt;
+	auio.uio_segflg = UIO_SYSSPACE;
+	aiov.iov_len = readcnt;
+	diskbuf = malloc(readcnt, M_TEMP, M_WAITOK);
+	aiov.iov_base = diskbuf;
+	error = VOP_READ(ap->a_vp, &auio, 0, ap->a_cred);
+	readcnt -= auio.uio_resid;
+	dp = (struct direct *)diskbuf;
+	edp = &diskbuf[readcnt];
+
+	memset(&u, 0, sizeof(u));
+
+	/*
+	 * While
+	 *  - we haven't failed to VOP_READ or uiomove()
+	 *  - there's space in the read buf for the head of an entry
+	 *  - that entry has a valid d_reclen, and
+	 *  - there's space for the *entire* entry
+	 * then we're good to process this one.
+	 */
+	while (error == 0 &&
+	    (char *)dp + offsetof(struct direct, d_name) < edp &&
+	    dp->d_reclen > offsetof(struct direct, d_name) &&
+	    (char *)dp + dp->d_reclen <= edp) {
+		u.dn.d_reclen = roundup(dp->d_namlen+1 +
+		    offsetof(struct dirent, d_name), 8);
+		if (u.dn.d_reclen > uio->uio_resid)
+			break;
+		off += dp->d_reclen;
+		u.dn.d_off = off;
+		u.dn.d_fileno = dp->d_ino;
+#if (BYTE_ORDER == LITTLE_ENDIAN)
+		if (ofmt) {
+			u.dn.d_type = dp->d_namlen;
+			u.dn.d_namlen = dp->d_type;
+		} else
+#endif
+		{
+			u.dn.d_type = dp->d_type;
+			u.dn.d_namlen = dp->d_namlen;
 		}
-#	else
-		error = VOP_READ(ap->a_vp, uio, 0, ap->a_cred);
-#	endif
-	if (!error && ap->a_ncookies) {
-		struct dirent *dp, *dpstart;
-		off_t offstart;
-		u_long *cookies;
-		int ncookies;
+		memcpy(u.dn.d_name, dp->d_name, u.dn.d_namlen);
+		bzero(u.dn.d_name + u.dn.d_namlen, u.dn.d_reclen
+		    - u.dn.d_namlen - offsetof(struct dirent, d_name));
 
-		/*
-		 * Only the NFS server and emulations use cookies, and they
-		 * load the directory block into system space, so we can
-		 * just look at it directly.
-		 */
-		if (uio->uio_segflg != UIO_SYSSPACE || uio->uio_iovcnt != 1)
-			panic("ufs_readdir: lost in space");
-
-		dpstart = (struct dirent *)
-			((char *)uio->uio_iov->iov_base -
-			(uio->uio_offset - off));
-                offstart = off;
-                for (dp = dpstart, ncookies = 0; off < uio->uio_offset; ) {
-                        if (dp->d_reclen == 0)
-                                break;
-                        off += dp->d_reclen;
-                        ncookies++;
-                        dp = (struct dirent *)((caddr_t)dp + dp->d_reclen);
-                }
-                lost += uio->uio_offset - off;
-                uio->uio_offset = off;
-                cookies = malloc(ncookies * sizeof(u_long), M_TEMP, M_WAITOK);
-                *ap->a_ncookies = ncookies;
-                *ap->a_cookies = cookies;
-                for (off = offstart, dp = dpstart; off < uio->uio_offset; ) {
-			off += dp->d_reclen;
-                        *cookies = off;
-			cookies++;
-                        dp = (struct dirent *)((caddr_t)dp + dp->d_reclen);
-		}
+		error = uiomove(&u.dn, u.dn.d_reclen, uio);
+		dp = (struct direct *)((char *)dp + dp->d_reclen);
 	}
 
-	uio->uio_resid += lost;
-	*ap->a_eofflag = DIP(VTOI(ap->a_vp), size) <= uio->uio_offset;
+	/*
+	 * If there was room for an entry in what we read but its
+	 * d_reclen is bogus, fail
+	 */
+	if ((char *)dp + offsetof(struct direct, d_name) < edp &&
+	    dp->d_reclen <= offsetof(struct direct, d_name))
+		error = EIO;
+	free(diskbuf, M_TEMP);
+
+	uio->uio_offset = off;
+	*ap->a_eofflag = DIP(VTOI(ap->a_vp), size) <= off;
 
 	return (error);
 }
@@ -1716,30 +1712,54 @@ int
 ufs_pathconf(void *v)
 {
 	struct vop_pathconf_args *ap = v;
+	int error = 0;
 
 	switch (ap->a_name) {
 	case _PC_LINK_MAX:
 		*ap->a_retval = LINK_MAX;
-		return (0);
+		break;
 	case _PC_NAME_MAX:
 		*ap->a_retval = NAME_MAX;
-		return (0);
-	case _PC_PATH_MAX:
-		*ap->a_retval = PATH_MAX;
-		return (0);
-	case _PC_PIPE_BUF:
-		*ap->a_retval = PIPE_BUF;
-		return (0);
+		break;
 	case _PC_CHOWN_RESTRICTED:
 		*ap->a_retval = 1;
-		return (0);
+		break;
 	case _PC_NO_TRUNC:
 		*ap->a_retval = 1;
-		return (0);
+		break;
+	case _PC_ALLOC_SIZE_MIN:
+		*ap->a_retval = ap->a_vp->v_mount->mnt_stat.f_bsize;
+		break;
+	case _PC_FILESIZEBITS:
+		*ap->a_retval = 64;
+		break;
+	case _PC_REC_INCR_XFER_SIZE:
+		*ap->a_retval = ap->a_vp->v_mount->mnt_stat.f_iosize;
+		break;
+	case _PC_REC_MAX_XFER_SIZE:
+		*ap->a_retval = -1; /* means ``unlimited'' */
+		break;
+	case _PC_REC_MIN_XFER_SIZE:
+		*ap->a_retval = ap->a_vp->v_mount->mnt_stat.f_iosize;
+		break;
+	case _PC_REC_XFER_ALIGN:
+		*ap->a_retval = PAGE_SIZE;
+		break;
+	case _PC_SYMLINK_MAX:
+		*ap->a_retval = MAXPATHLEN;
+		break;
+	case _PC_2_SYMLINKS:
+		*ap->a_retval = 1;
+		break;
+	case _PC_TIMESTAMP_RESOLUTION:
+		*ap->a_retval = 1;
+		break;
 	default:
-		return (EINVAL);
+		error = EINVAL;
+		break;
 	}
-	/* NOTREACHED */
+
+	return (error);
 }
 
 /*

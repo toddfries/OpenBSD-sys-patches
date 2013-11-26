@@ -1,4 +1,4 @@
-/* $OpenBSD: trap.c,v 1.59 2011/11/16 20:50:17 deraadt Exp $ */
+/* $OpenBSD: trap.c,v 1.64 2012/12/31 06:46:13 guenther Exp $ */
 /* $NetBSD: trap.c,v 1.52 2000/05/24 16:48:33 thorpej Exp $ */
 
 /*-
@@ -94,17 +94,12 @@
 #include <sys/signalvar.h>
 #include <sys/user.h>
 #include <sys/syscall.h>
+#include <sys/syscall_mi.h>
 #include <sys/buf.h>
 #ifndef NO_IEEE
 #include <sys/device.h>
 #endif
-#ifdef KTRACE
-#include <sys/ktrace.h>
-#endif
 #include <sys/ptrace.h>
-
-#include "systrace.h"
-#include <dev/systrace.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -249,17 +244,8 @@ trap(a0, a1, a2, entry, framep)
 	ucode = 0;
 	v = 0;
 	user = (framep->tf_regs[FRAME_PS] & ALPHA_PSL_USERMODE) != 0;
-	if (user)  {
+	if (user)
 		p->p_md.md_tf = framep;
-#if	0
-/* This is to catch some weird stuff on the UDB (mj) */
-		if (framep->tf_regs[FRAME_PC] > 0 && 
-		    framep->tf_regs[FRAME_PC] < 0x120000000) {
-			printf("PC Out of Whack\n");
-			printtrap(a0, a1, a2, entry, framep, 1, user);
-		}
-#endif
-	}
 
 	switch (entry) {
 	case ALPHA_KENTRY_UNA:
@@ -578,8 +564,9 @@ syscall(code, framep)
 	default:
 		if (nargs > 10)		/* XXX */
 			panic("syscall: too many args (%d)", nargs);
-		error = copyin((caddr_t)(alpha_pal_rdusp()), &args[6],
-		    (nargs - 6) * sizeof(u_long));
+		if ((error = copyin((caddr_t)(alpha_pal_rdusp()), &args[6],
+		    (nargs - 6) * sizeof(u_long))))
+			goto bad;
 	case 6:	
 		args[5] = framep->tf_regs[FRAME_A5];
 	case 5:	
@@ -595,23 +582,11 @@ syscall(code, framep)
 	case 0:
 		break;
 	}
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSCALL))
-		ktrsyscall(p, code, callp->sy_argsize, args + hidden);
-#endif
-#ifdef SYSCALL_DEBUG
-	scdebug_call(p, code, args + hidden);
-#endif
-	if (error == 0) {
-		rval[0] = 0;
-		rval[1] = 0;
-#if NSYSTRACE > 0
-		if (ISSET(p->p_flag, P_SYSTRACE))
-			error = systrace_redirect(code, p, args + hidden, rval);
-		else
-#endif
-			error = (*callp->sy_call)(p, args + hidden, rval);
-	}
+
+	rval[0] = 0;
+	rval[1] = 0;
+
+	error = mi_syscall(p, code, callp, args + hidden, rval);
 
 	switch (error) {
 	case 0:
@@ -625,24 +600,16 @@ syscall(code, framep)
 	case EJUSTRETURN:
 		break;
 	default:
-		if (p->p_emul->e_errno)
-			error = p->p_emul->e_errno[error];
+	bad:
 		framep->tf_regs[FRAME_V0] = error;
 		framep->tf_regs[FRAME_A3] = 1;
 		break;
 	}
 
-#ifdef SYSCALL_DEBUG
-	scdebug_ret(p, code, error, rval);
-#endif
 	/* Do any deferred user pmap operations. */
 	PMAP_USERRET(vm_map_pmap(&p->p_vmspace->vm_map));
 
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p, code, error, rval[0]);
-#endif
+	mi_syscall_return(p, code, error, rval);
 }
 
 /*
@@ -665,14 +632,7 @@ child_return(arg)
 	/* Do any deferred user pmap operations. */
 	PMAP_USERRET(vm_map_pmap(&p->p_vmspace->vm_map));
 
-	userret(p);
-#ifdef KTRACE
-	if (KTRPOINT(p, KTR_SYSRET))
-		ktrsysret(p,
-		    (p->p_flag & P_THREAD) ? SYS_rfork :
-		    (p->p_p->ps_flags & PS_PPWAIT) ? SYS_vfork : SYS_fork,
-		    0, 0);
-#endif
+	mi_child_return(p);
 }
 
 /*
@@ -721,12 +681,11 @@ void
 ast(framep)
 	struct trapframe *framep;
 {
-	struct proc *p;
+	struct cpu_info *ci = curcpu();
+	struct proc *p = ci->ci_curproc;
 
-	curcpu()->ci_astpending = 0;
-
-	p = curproc;
 	p->p_md.md_tf = framep;
+	p->p_md.md_astpending = 0;
 
 #ifdef DIAGNOSTIC
 	if ((framep->tf_regs[FRAME_PS] & ALPHA_PSL_USERMODE) == 0)
@@ -739,7 +698,7 @@ ast(framep)
 		ADDUPROF(p);
 	}
 
-	if (curcpu()->ci_want_resched)
+	if (ci->ci_want_resched)
 		preempt(NULL);
 
 	/* Do any deferred user pmap operations. */

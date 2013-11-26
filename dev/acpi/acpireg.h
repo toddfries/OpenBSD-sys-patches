@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpireg.h,v 1.27 2012/01/07 20:13:17 kettenis Exp $	*/
+/*	$OpenBSD: acpireg.h,v 1.29 2013/11/06 10:40:36 mpi Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  * Copyright (c) 2005 Marco Peereboom <marco@openbsd.org>
@@ -702,6 +702,14 @@ struct acpi_ivrs {
 #define ACPI_STATE_S5		5
 
 /*
+ * Device Power States
+ */
+#define ACPI_STATE_D0		0
+#define ACPI_STATE_D1		1
+#define ACPI_STATE_D2		2
+#define ACPI_STATE_D3		3
+
+/*
  * ACPI Device IDs
  */
 #define ACPI_DEV_TIM	"PNP0100"	/* System timer */
@@ -735,6 +743,7 @@ struct acpi_ivrs {
 #define ACPI_DEV_THZ	"THERMALZONE"	/* Thermal Zone */
 #define ACPI_DEV_FFB	"FIXEDBUTTON"	/* Fixed Feature Button */
 #define ACPI_DEV_ASUS	"ASUS010"	/* ASUS Hotkeys */
+#define ACPI_DEV_ASUS1	"ATK0100"	/* ASUS Special Device */
 #define ACPI_DEV_IBM	"IBM0068"	/* IBM ThinkPad support */
 #define ACPI_DEV_LENOVO	"LEN0068"	/* Lenovo ThinkPad support */
 #define ACPI_DEV_ASUSAIBOOSTER	"ATK0110"	/* ASUSTeK AI Booster */

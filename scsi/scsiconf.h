@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.149 2011/07/17 22:46:48 matthew Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.157 2013/09/27 11:43:19 krw Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -54,7 +54,6 @@
 #include <sys/timeout.h>
 #include <sys/workq.h>
 #include <sys/mutex.h>
-#include <machine/cpu.h>
 #include <scsi/scsi_debug.h>
 
 static __inline void _lto2b(u_int32_t val, u_int8_t *bytes);
@@ -66,13 +65,6 @@ static __inline u_int32_t _3btol(u_int8_t *bytes);
 static __inline u_int32_t _4btol(u_int8_t *bytes);
 static __inline u_int64_t _5btol(u_int8_t *bytes);
 static __inline u_int64_t _8btol(u_int8_t *bytes);
-
-static __inline void _lto2l(u_int32_t val, u_int8_t *bytes);
-static __inline void _lto3l(u_int32_t val, u_int8_t *bytes);
-static __inline void _lto4l(u_int32_t val, u_int8_t *bytes);
-static __inline u_int32_t _2ltol(u_int8_t *bytes);
-static __inline u_int32_t _3ltol(u_int8_t *bytes);
-static __inline u_int32_t _4ltol(u_int8_t *bytes);
 
 static __inline void
 _lto2b(u_int32_t val, u_int8_t *bytes)
@@ -169,61 +161,6 @@ _8btol(u_int8_t *bytes)
 	    (((u_int64_t)bytes[5]) << 16) |
 	    (((u_int64_t)bytes[6]) << 8) |
 	    ((u_int64_t)bytes[7]);
-	return (rv);
-}
-
-static __inline void
-_lto2l(u_int32_t val, u_int8_t *bytes)
-{
-
-	bytes[0] = val & 0xff;
-	bytes[1] = (val >> 8) & 0xff;
-}
-
-static __inline void
-_lto3l(u_int32_t val, u_int8_t *bytes)
-{
-
-	bytes[0] = val & 0xff;
-	bytes[1] = (val >> 8) & 0xff;
-	bytes[2] = (val >> 16) & 0xff;
-}
-
-static __inline void
-_lto4l(u_int32_t val, u_int8_t *bytes)
-{
-
-	bytes[0] = val & 0xff;
-	bytes[1] = (val >> 8) & 0xff;
-	bytes[2] = (val >> 16) & 0xff;
-	bytes[3] = (val >> 24) & 0xff;
-}
-
-static __inline u_int32_t
-_2ltol(u_int8_t *bytes)
-{
-	u_int32_t rv;
-
-	rv = bytes[0] | (bytes[1] << 8);
-	return (rv);
-}
-
-static __inline u_int32_t
-_3ltol(u_int8_t *bytes)
-{
-	u_int32_t rv;
-
-	rv = bytes[0] | (bytes[1] << 8) | (bytes[2] << 16);
-	return (rv);
-}
-
-static __inline u_int32_t
-_4ltol(u_int8_t *bytes)
-{
-	u_int32_t rv;
-
-	rv = bytes[0] | (bytes[1] << 8) |
-	    (bytes[2] << 16) | (bytes[3] << 24);
 	return (rv);
 }
 
@@ -452,7 +389,7 @@ struct scsi_attach_args {
  * (via the scsi_link structure)
  */
 struct scsi_xfer {
-	LIST_ENTRY(scsi_xfer) free_list;
+	SIMPLEQ_ENTRY(scsi_xfer) xfer_list;
 	int	flags;
 	struct	scsi_link *sc_link;	/* all about our device and adapter */
 	int	retries;		/* the number of times to retry */
@@ -476,6 +413,7 @@ struct scsi_xfer {
 
 	void *io;			/* adapter io resource */
 };
+SIMPLEQ_HEAD(scsi_xfer_list, scsi_xfer);
 
 /*
  * Per-request Flag values
@@ -534,7 +472,6 @@ const void *scsi_inqmatch(struct scsi_inquiry_data *, const void *, int,
     workq_add_task(NULL, (_fl), (_f), (_a1), (_a2))
 
 void	scsi_init(void);
-daddr64_t scsi_size(struct scsi_link *, int, u_int32_t *);
 int	scsi_test_unit_ready(struct scsi_link *, int, int);
 int	scsi_inquire(struct scsi_link *, struct scsi_inquiry_data *, int);
 int	scsi_inquire_vpd(struct scsi_link *, void *, u_int, u_int8_t, int);
@@ -621,13 +558,19 @@ void	scsi_default_put(void *, void *);
  */
 void	scsi_ioh_set(struct scsi_iohandler *, struct scsi_iopool *,
 	    void (*)(void *, void *), void *);
-void	scsi_ioh_add(struct scsi_iohandler *);
-void	scsi_ioh_del(struct scsi_iohandler *);
+int	scsi_ioh_add(struct scsi_iohandler *);
+int	scsi_ioh_del(struct scsi_iohandler *);
 
 void	scsi_xsh_set(struct scsi_xshandler *, struct scsi_link *,
 	    void (*)(struct scsi_xfer *));
-void	scsi_xsh_add(struct scsi_xshandler *);
-void	scsi_xsh_del(struct scsi_xshandler *);
+int	scsi_xsh_add(struct scsi_xshandler *);
+int	scsi_xsh_del(struct scsi_xshandler *);
+
+/*
+ * utility functions
+ */
+int	scsi_pending_start(struct mutex *, u_int *);
+int	scsi_pending_finish(struct mutex *, u_int *);
 
 /*
  * Utility functions for SCSI HBA emulation.

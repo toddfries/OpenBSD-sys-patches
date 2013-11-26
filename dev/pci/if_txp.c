@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_txp.c,v 1.104 2011/04/05 18:01:21 henning Exp $	*/
+/*	$OpenBSD: if_txp.c,v 1.108 2013/11/26 09:50:33 mpi Exp $	*/
 
 /*
  * Copyright (c) 2001
@@ -51,7 +51,6 @@
 #ifdef INET
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
-#include <netinet/in_var.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
 #endif
@@ -225,10 +224,9 @@ txp_attachhook(void *vsc)
 	ifp->if_ioctl = txp_ioctl;
 	ifp->if_start = txp_start;
 	ifp->if_watchdog = txp_watchdog;
-	ifp->if_baudrate = 10000000;
+	ifp->if_baudrate = IF_Mbps(10);
 	IFQ_SET_MAXLEN(&ifp->if_snd, TX_ENTRIES);
 	IFQ_SET_READY(&ifp->if_snd);
-	ifp->if_capabilities = 0;
 	bcopy(sc->sc_dev.dv_xname, ifp->if_xname, IFNAMSIZ);
 
 	txp_capabilities(sc);
@@ -1860,7 +1858,9 @@ txp_set_filter(struct txp_softc *sc)
 		goto setit;
 	}
 
-again:
+	if (ac->ac_multirangecnt > 0)
+		ifp->if_flags |= IFF_ALLMULTI;
+
 	filter = TXP_RXFILT_DIRECT;
 
 	if (ifp->if_flags & IFF_BROADCAST)
@@ -1873,21 +1873,6 @@ again:
 
 		ETHER_FIRST_MULTI(step, ac, enm);
 		while (enm != NULL) {
-			if (bcmp(enm->enm_addrlo, enm->enm_addrhi, ETHER_ADDR_LEN)) {
-				/*
-				 * We must listen to a range of multicast
-				 * addresses.  For now, just accept all
-				 * multicasts, rather than trying to set only
-				 * those filter bits needed to match the range.
-				 * (At this time, the only use of address
-				 * ranges is for IP multicast routing, for
-				 * which the range is big enough to require
-				 * all bits set.)
-				 */
-				ifp->if_flags |= IFF_ALLMULTI;
-				goto again;
-			}
-
 			mcnt++;
 			hashbit = (u_int16_t)(ether_crc32_be(enm->enm_addrlo,
 			    ETHER_ADDR_LEN) & (64 - 1));
@@ -1924,7 +1909,7 @@ txp_capabilities(struct txp_softc *sc)
 	sc->sc_tx_capability = ext->ext_1 & OFFLOAD_MASK;
 	sc->sc_rx_capability = ext->ext_2 & OFFLOAD_MASK;
 
-	ifp->if_capabilities |= IFCAP_VLAN_MTU;
+	ifp->if_capabilities = IFCAP_VLAN_MTU;
 
 #if NVLAN > 0
 	if (rsp->rsp_par2 & rsp->rsp_par3 & OFFLOAD_VLAN) {

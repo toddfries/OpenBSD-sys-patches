@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.143 2012/02/10 18:41:36 phessler Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.159 2013/11/20 23:52:42 dlg Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -91,99 +91,6 @@ void sr_map_root(void);
 void disk_attach_callback(void *, void *);
 
 /*
- * Seek sort for disks.  We depend on the driver which calls us using b_resid
- * as the current cylinder number.
- *
- * The argument ap structure holds a b_actf activity chain pointer on which we
- * keep two queues, sorted in ascending cylinder order.  The first queue holds
- * those requests which are positioned after the current cylinder (in the first
- * request); the second holds requests which came in after their cylinder number
- * was passed.  Thus we implement a one way scan, retracting after reaching the
- * end of the drive to the first request on the second queue, at which time it
- * becomes the first queue.
- *
- * A one-way scan is natural because of the way UNIX read-ahead blocks are
- * allocated.
- */
-
-void
-disksort(struct buf *ap, struct buf *bp)
-{
-	struct buf *bq;
-
-	/* If the queue is empty, then it's easy. */
-	if (ap->b_actf == NULL) {
-		bp->b_actf = NULL;
-		ap->b_actf = bp;
-		return;
-	}
-
-	/*
-	 * If we lie after the first (currently active) request, then we
-	 * must locate the second request list and add ourselves to it.
-	 */
-	bq = ap->b_actf;
-	if (bp->b_cylinder < bq->b_cylinder) {
-		while (bq->b_actf) {
-			/*
-			 * Check for an ``inversion'' in the normally ascending
-			 * cylinder numbers, indicating the start of the second
-			 * request list.
-			 */
-			if (bq->b_actf->b_cylinder < bq->b_cylinder) {
-				/*
-				 * Search the second request list for the first
-				 * request at a larger cylinder number.  We go
-				 * before that; if there is no such request, we
-				 * go at end.
-				 */
-				do {
-					if (bp->b_cylinder <
-					    bq->b_actf->b_cylinder)
-						goto insert;
-					if (bp->b_cylinder ==
-					    bq->b_actf->b_cylinder &&
-					    bp->b_blkno < bq->b_actf->b_blkno)
-						goto insert;
-					bq = bq->b_actf;
-				} while (bq->b_actf);
-				goto insert;		/* after last */
-			}
-			bq = bq->b_actf;
-		}
-		/*
-		 * No inversions... we will go after the last, and
-		 * be the first request in the second request list.
-		 */
-		goto insert;
-	}
-	/*
-	 * Request is at/after the current request...
-	 * sort in the first request list.
-	 */
-	while (bq->b_actf) {
-		/*
-		 * We want to go after the current request if there is an
-		 * inversion after it (i.e. it is the end of the first
-		 * request list), or if the next request is a larger cylinder
-		 * than our request.
-		 */
-		if (bq->b_actf->b_cylinder < bq->b_cylinder ||
-		    bp->b_cylinder < bq->b_actf->b_cylinder ||
-		    (bp->b_cylinder == bq->b_actf->b_cylinder &&
-		    bp->b_blkno < bq->b_actf->b_blkno))
-			goto insert;
-		bq = bq->b_actf;
-	}
-	/*
-	 * Neither a second list nor a larger request... we go at the end of
-	 * the first list, which is the same as the end of the whole schebang.
-	 */
-insert:	bp->b_actf = bq->b_actf;
-	bq->b_actf = bp;
-}
-
-/*
  * Compute checksum for disk label.
  */
 u_int
@@ -238,7 +145,7 @@ checkdisklabel(void *rlp, struct disklabel *lp, u_int64_t boundstart,
 	struct disklabel *dlp = rlp;
 	struct __partitionv0 *v0pp;
 	struct partition *pp;
-	daddr64_t disksize;
+	u_int64_t disksize;
 	int error = 0;
 	int i;
 
@@ -354,13 +261,13 @@ checkdisklabel(void *rlp, struct disklabel *lp, u_int64_t boundstart,
 
 #ifdef DEBUG
 	if (DL_GETDSIZE(lp) != disksize)
-		printf("on-disk disklabel has incorrect disksize (%lld)\n",
+		printf("on-disk disklabel has incorrect disksize (%llu)\n",
 		    DL_GETDSIZE(lp));
 	if (DL_GETPSIZE(&lp->d_partitions[RAW_PART]) != disksize)
-		printf("on-disk disklabel RAW_PART has incorrect size (%lld)\n",
+		printf("on-disk disklabel RAW_PART has incorrect size (%llu)\n",
 		    DL_GETPSIZE(&lp->d_partitions[RAW_PART]));
 	if (DL_GETPOFFSET(&lp->d_partitions[RAW_PART]) != 0)
-		printf("on-disk disklabel RAW_PART offset != 0 (%lld)\n",
+		printf("on-disk disklabel RAW_PART offset != 0 (%llu)\n",
 		    DL_GETPOFFSET(&lp->d_partitions[RAW_PART]));
 #endif
 	DL_SETDSIZE(lp, disksize);
@@ -385,12 +292,12 @@ checkdisklabel(void *rlp, struct disklabel *lp, u_int64_t boundstart,
  */
 int
 readdoslabel(struct buf *bp, void (*strat)(struct buf *),
-    struct disklabel *lp, int *partoffp, int spoofonly)
+    struct disklabel *lp, daddr_t *partoffp, int spoofonly)
 {
 	u_int64_t dospartoff = 0, dospartend = DL_GETBEND(lp);
 	int i, ourpart = -1, wander = 1, n = 0, loop = 0, offset;
 	struct dos_partition dp[NDOSPART], *dp2;
-	daddr64_t part_blkno = DOSBBSECTOR;
+	daddr_t part_blkno = DOSBBSECTOR;
 	u_int32_t extoff = 0;
 	int error;
 
@@ -429,13 +336,13 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 		bcopy(bp->b_data + offset, dp, sizeof(dp));
 
 		if (n == 0 && part_blkno == DOSBBSECTOR) {
-			u_int16_t fattest;
+			u_int16_t mbrtest;
 
 			/* Check the end of sector marker. */
-			fattest = ((bp->b_data[510] << 8) & 0xff00) |
+			mbrtest = ((bp->b_data[510] << 8) & 0xff00) |
 			    (bp->b_data[511] & 0xff);
-			if (fattest != 0x55aa)
-				goto notfat;
+			if (mbrtest != 0x55aa)
+				goto notmbr;
 		}
 
 		if (ourpart == -1) {
@@ -542,13 +449,13 @@ donot:
 			DL_SETPSIZE(pp, letoh32(dp2->dp_size));
 		}
 	}
-	if (partoffp)
-		/* dospartoff has been set and we must not modify *lp. */
-		goto notfat;
 
-	lp->d_npartitions = MAXPARTITIONS;
+notmbr:
+	if (partoffp == NULL)
+		/* Must not modify *lp when partoffp is set. */
+		lp->d_npartitions = MAXPARTITIONS;
 
-	if (n == 0 && part_blkno == DOSBBSECTOR) {
+	if (n == 0 && part_blkno == DOSBBSECTOR && ourpart == -1) {
 		u_int16_t fattest;
 
 		/* Check for a valid initial jmp instruction. */
@@ -578,20 +485,25 @@ donot:
 		if (fattest < 512 || fattest > 4096 || (fattest % 512 != 0))
 			goto notfat;
 
-		/* Looks like a FAT filesystem. Spoof 'i'. */
+		if (partoffp)
+			return (ENXIO);	/* No place for disklabel on FAT! */
+
 		DL_SETPSIZE(&lp->d_partitions['i' - 'a'],
 		    DL_GETPSIZE(&lp->d_partitions[RAW_PART]));
 		DL_SETPOFFSET(&lp->d_partitions['i' - 'a'], 0);
 		lp->d_partitions['i' - 'a'].p_fstype = FS_MSDOS;
+
+		spoofonly = 1;	/* No disklabel to read from disk. */
 	}
+
 notfat:
 	/* record the OpenBSD partition's placement for the caller */
 	if (partoffp)
 		*partoffp = dospartoff;
 	else {
 		DL_SETBSTART(lp, dospartoff);
-		DL_SETBEND(lp,
-		    dospartend < DL_GETDSIZE(lp) ? dospartend : DL_GETDSIZE(lp));
+		DL_SETBEND(lp, (dospartend < DL_GETDSIZE(lp)) ? dospartend :
+		    DL_GETDSIZE(lp));
 	}
 
 	/* don't read the on-disk label if we are in spoofed-only mode */
@@ -640,22 +552,18 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 
 	/* XXX missing check if other dos partitions will be overwritten */
 
-	while (openmask != 0) {
-		i = ffs(openmask) - 1;
-		openmask &= ~(1 << i);
-		if (nlp->d_npartitions <= i)
-			return (EBUSY);
+	for (i = 0; i < MAXPARTITIONS; i++) {
 		opp = &olp->d_partitions[i];
 		npp = &nlp->d_partitions[i];
-		if (DL_GETPOFFSET(npp) != DL_GETPOFFSET(opp) ||
-		    DL_GETPSIZE(npp) < DL_GETPSIZE(opp))
+		if ((openmask & (1 << i)) &&
+		    (DL_GETPOFFSET(npp) != DL_GETPOFFSET(opp) ||
+		    DL_GETPSIZE(npp) < DL_GETPSIZE(opp)))
 			return (EBUSY);
 		/*
 		 * Copy internally-set partition information
 		 * if new label doesn't include it.		XXX
 		 */
 		if (npp->p_fstype == FS_UNUSED && opp->p_fstype != FS_UNUSED) {
-			npp->p_fstype = opp->p_fstype;
 			npp->p_fragblock = opp->p_fragblock;
 			npp->p_cpg = opp->p_cpg;
 		}
@@ -692,7 +600,7 @@ int
 bounds_check_with_label(struct buf *bp, struct disklabel *lp)
 {
 	struct partition *p = &lp->d_partitions[DISKPART(bp->b_dev)];
-	daddr64_t partblocks, sz;
+	daddr_t partblocks, sz;
 
 	/* Avoid division by zero, negative offsets, and negative sizes. */
 	if (lp->d_secpercyl == 0 || bp->b_blkno < 0 || bp->b_bcount < 0)
@@ -719,9 +627,6 @@ bounds_check_with_label(struct buf *bp, struct disklabel *lp)
 		bp->b_bcount = sz << DEV_BSHIFT;
 	}
 
-	/* calculate cylinder for disksort to order transfers with */
-	bp->b_cylinder = (bp->b_blkno + DL_SECTOBLK(lp, DL_GETPOFFSET(p))) /
-	    DL_SECTOBLK(lp, lp->d_secpercyl);
 	return (0);
 
  bad:
@@ -751,13 +656,12 @@ diskerr(struct buf *bp, char *dname, char *what, int pri, int blkdone,
     struct disklabel *lp)
 {
 	int unit = DISKUNIT(bp->b_dev), part = DISKPART(bp->b_dev);
-	int (*pr)(const char *, ...);
+    	int (*pr)(const char *, ...) __attribute__((__format__(__kprintf__,1,2)));
 	char partname = 'a' + part;
-	daddr64_t sn;
+	daddr_t sn;
 
 	if (pri != LOG_PRINTF) {
-		static const char fmt[] = "";
-		log(pri, fmt);
+		log(pri, "%s", "");
 		pr = addlog;
 	} else
 		pr = printf;
@@ -765,22 +669,23 @@ diskerr(struct buf *bp, char *dname, char *what, int pri, int blkdone,
 	    bp->b_flags & B_READ ? "read" : "writ");
 	sn = bp->b_blkno;
 	if (bp->b_bcount <= DEV_BSIZE)
-		(*pr)("%lld", sn);
+		(*pr)("%lld", (long long)sn);
 	else {
 		if (blkdone >= 0) {
 			sn += blkdone;
-			(*pr)("%lld of ", sn);
+			(*pr)("%lld of ", (long long)sn);
 		}
-		(*pr)("%lld-%lld", bp->b_blkno,
-		    bp->b_blkno + (bp->b_bcount - 1) / DEV_BSIZE);
+		(*pr)("%lld-%lld", (long long)bp->b_blkno,
+		    (long long)(bp->b_blkno + (bp->b_bcount - 1) / DEV_BSIZE));
 	}
 	if (lp && (blkdone >= 0 || bp->b_bcount <= lp->d_secsize)) {
-		sn += DL_GETPOFFSET(&lp->d_partitions[part]);
-		(*pr)(" (%s%d bn %lld; cn %lld", dname, unit, sn,
-		    sn / lp->d_secpercyl);
-		sn %= lp->d_secpercyl;
-		(*pr)(" tn %lld sn %lld)", sn / lp->d_nsectors,
-		    sn % lp->d_nsectors);
+		sn += DL_SECTOBLK(lp, DL_GETPOFFSET(&lp->d_partitions[part]));
+		(*pr)(" (%s%d bn %lld; cn %lld", dname, unit, (long long)sn,
+		    (long long)(sn / DL_SECTOBLK(lp, lp->d_secpercyl)));
+		sn %= DL_SECTOBLK(lp, lp->d_secpercyl);
+		(*pr)(" tn %lld sn %lld)",
+		    (long long)(sn / DL_SECTOBLK(lp, lp->d_nsectors)),
+		    (long long)(sn % DL_SECTOBLK(lp, lp->d_nsectors)));
 	}
 }
 
@@ -881,8 +786,10 @@ disk_attach_callback(void *arg1, void *arg2)
 		goto done;
 
 	/* Read disklabel. */
-	if (disk_readlabel(&dl, dev, errbuf, sizeof(errbuf)) == NULL)
+	if (disk_readlabel(&dl, dev, errbuf, sizeof(errbuf)) == NULL) {
+		add_timer_randomness(dl.d_checksum);
 		dk->dk_flags |= DKF_LABELVALID;
+	}
 
 done:
 	dk->dk_flags |= DKF_OPENED;
@@ -1054,7 +961,7 @@ dk_mountroot(void)
 
 	error = disk_readlabel(&dl, rootdev, errbuf, sizeof(errbuf));
 	if (error)
-		panic(error);
+		panic("%s", error);
 
 	if (DL_GETPSIZE(&dl.d_partitions[part]) == 0)
 		panic("root filesystem has size 0");

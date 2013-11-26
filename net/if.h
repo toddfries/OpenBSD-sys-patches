@@ -1,4 +1,4 @@
-/*	$OpenBSD: if.h,v 1.131 2011/12/02 03:15:31 haesbaert Exp $	*/
+/*	$OpenBSD: if.h,v 1.153 2013/11/21 17:32:12 mikeb Exp $	*/
 /*	$NetBSD: if.h,v 1.23 1996/05/07 02:40:27 thorpej Exp $	*/
 
 /*
@@ -35,67 +35,29 @@
 #ifndef _NET_IF_H_
 #define _NET_IF_H_
 
-#include <sys/queue.h>
-#include <sys/tree.h>
+#include <sys/cdefs.h>
 
 /*
- * Always include ALTQ glue here -- we use the ALTQ interface queue
- * structure even when ALTQ is not configured into the kernel so that
- * the size of struct ifnet does not changed based on the option.  The
- * ALTQ queue structure is API-compatible with the legacy ifqueue.
+ * Length of interface external name, including terminating '\0'.
+ * Note: this is the same size as a generic device's external name.
  */
-#include <altq/if_altq.h>
+#define	IF_NAMESIZE	16
 
-/*
- * Structures defining a network interface, providing a packet
- * transport mechanism (ala level 0 of the PUP protocols).
- *
- * Each interface accepts output datagrams of a specified maximum
- * length, and provides higher level routines with input datagrams
- * received from its medium.
- *
- * Output occurs when the routine if_output is called, with four parameters:
- *	(*ifp->if_output)(ifp, m, dst, rt)
- * Here m is the mbuf chain to be sent and dst is the destination address.
- * The output routine encapsulates the supplied datagram if necessary,
- * and then transmits it on its medium.
- *
- * On input, each interface unwraps the data received by it, and either
- * places it on the input queue of an internetwork datagram routine
- * and posts the associated software interrupt, or passes the datagram to a raw
- * packet input routine.
- *
- * Routines exist for locating interfaces by their addresses
- * or for locating an interface on a certain network, as well as more general
- * routing and gateway routines maintaining information used to locate
- * interfaces.  These routines live in the files if.c and route.c
- */
-/*  XXX fast fix for SNMP, going away soon */
-#include <sys/time.h>
-
-struct mbuf;
-struct proc;
-struct rtentry;
-struct socket;
-struct ether_header;
-struct arpcom;
-struct rt_addrinfo;
-struct ifnet;
-
-/*
- * Structure describing a `cloning' interface.
- */
-struct if_clone {
-	LIST_ENTRY(if_clone) ifc_list;	/* on list of cloners */
-	const char *ifc_name;		/* name of device, e.g. `gif' */
-	size_t ifc_namelen;		/* length of name */
-
-	int	(*ifc_create)(struct if_clone *, int);
-	int	(*ifc_destroy)(struct ifnet *);
+struct if_nameindex {
+	unsigned int	if_index;
+	char		*if_name;
 };
 
-#define	IF_CLONE_INITIALIZER(name, create, destroy)			\
-	{ { 0 }, name, sizeof(name) - 1, create, destroy }
+#ifndef _KERNEL
+__BEGIN_DECLS
+unsigned int if_nametoindex(const char *);
+char	*if_indextoname(unsigned int, char *);
+struct	if_nameindex *if_nameindex(void);
+void	if_freenameindex(struct if_nameindex *);
+__END_DECLS
+#endif
+
+#if __BSD_VISIBLE
 
 /*
  * Structure used to query names of interface cloners.
@@ -109,7 +71,7 @@ struct if_clonereq {
 #define MCLPOOLS	7		/* number of cluster pools */
 
 struct mclpool {
-	u_int	mcl_grown;
+	int	mcl_grown;
 	u_short	mcl_alive;
 	u_short mcl_hwm;
 	u_short mcl_cwm;
@@ -148,24 +110,9 @@ struct	if_data {
 	struct mclpool	ifi_mclpool[MCLPOOLS];
 };
 
-#define IFQ_NQUEUES	ALTQ_IFQ_NQUEUES
+#define IFQ_NQUEUES	8
 #define IFQ_MAXPRIO	IFQ_NQUEUES - 1
 #define IFQ_DEFPRIO	3
-
-/*
- * Structure defining a queue for a network interface.
- * XXX keep in sync with struct ifaltq.
- */
-struct	ifqueue {
-	struct {
-		struct	mbuf *head;
-		struct	mbuf *tail;
-	}	ifq_q[IFQ_NQUEUES];
-	int	ifq_len;
-	int	ifq_maxlen;
-	int	ifq_drops;
-	struct	timeout *ifq_congestion;
-};
 
 /*
  * Values for if_link_state.
@@ -193,8 +140,7 @@ struct if_status_description {
 #define LINK_STATE_DESC_MATCH(_ifs, _t, _s)				\
 	(((_ifs)->ifs_type == (_t) || (_ifs)->ifs_type == 0) &&		\
 	    (_ifs)->ifs_state == (_s))
-		
-	
+
 
 #define LINK_STATE_DESCRIPTIONS {					\
 	{ IFT_ETHER, LINK_STATE_DOWN, "no carrier" },			\
@@ -219,99 +165,13 @@ struct if_status_description {
 	{ 0, 0, NULL }							\
 }
 
-/*
- * Structure defining a queue for a network interface.
- *
- * (Would like to call this struct ``if'', but C isn't PL/1.)
- */
-TAILQ_HEAD(ifnet_head, ifnet);		/* the actual queue head */
-
-/*
- * Length of interface external name, including terminating '\0'.
- * Note: this is the same size as a generic device's external name.
- */
-#define	IFNAMSIZ	16
-#define	IF_NAMESIZE	IFNAMSIZ
+/* Traditional BSD name for length of interface external name. */
+#define	IFNAMSIZ	IF_NAMESIZE
 
 /*
  * Length of interface description, including terminating '\0'.
  */
 #define	IFDESCRSIZE	64
-
-struct ifnet {				/* and the entries */
-	void	*if_softc;		/* lower-level data for this if */
-	TAILQ_ENTRY(ifnet) if_list;	/* all struct ifnets are chained */
-	TAILQ_ENTRY(ifnet) if_txlist;	/* list of ifnets ready to tx */
-	TAILQ_HEAD(, ifaddr) if_addrlist; /* linked list of addresses per if */
-	TAILQ_HEAD(, ifg_list) if_groups; /* linked list of groups per if */
-	struct hook_desc_head *if_addrhooks; /* address change callbacks */
-	struct hook_desc_head *if_linkstatehooks; /* link change callbacks */
-	struct hook_desc_head *if_detachhooks; /* detach callbacks */
-	char	if_xname[IFNAMSIZ];	/* external name (name + unit) */
-	int	if_pcount;		/* number of promiscuous listeners */
-	caddr_t	if_bpf;			/* packet filter structure */
-	caddr_t	if_bridge;		/* bridge structure */
-	caddr_t	if_tp;			/* used by trunk ports */
-	caddr_t	if_pf_kif;		/* pf interface abstraction */
-	union {
-		caddr_t	carp_s;		/* carp structure (used by !carp ifs) */
-		struct ifnet *carp_d;	/* ptr to carpdev (used by carp ifs) */
-	} if_carp_ptr;
-#define if_carp		if_carp_ptr.carp_s
-#define if_carpdev	if_carp_ptr.carp_d
-	u_short	if_index;		/* numeric abbreviation for this if */
-	short	if_timer;		/* time 'til if_watchdog called */
-	short	if_flags;		/* up/down, broadcast, etc. */
-	int	if_xflags;		/* extra softnet flags */
-	struct	if_data if_data;	/* stats and other data about if */
-	u_int32_t if_hardmtu;		/* maximum MTU device supports */
-	u_int	if_rdomain;		/* routing instance */
-	char	if_description[IFDESCRSIZE]; /* interface description */
-	u_short	if_rtlabelid;		/* next route label */
-	u_int8_t if_priority;
-
-	/* procedure handles */
-					/* output routine (enqueue) */
-	int	(*if_output)(struct ifnet *, struct mbuf *, struct sockaddr *,
-		     struct rtentry *);
-
-					/* link level output function */
-	int	(*if_ll_output)(struct ifnet *, struct mbuf *,
-		    struct sockaddr *, struct rtentry *);
-					/* initiate output routine */
-	void	(*if_start)(struct ifnet *);
-					/* ioctl routine */
-	int	(*if_ioctl)(struct ifnet *, u_long, caddr_t);
-					/* stop routine */
-	int	(*if_stop)(struct ifnet *, int);
-					/* timer routine */
-	void	(*if_watchdog)(struct ifnet *);
-	int	(*if_wol)(struct ifnet *, int);
-	struct	ifaltq if_snd;		/* output queue (includes altq) */
-	struct sockaddr_dl *if_sadl;	/* pointer to our sockaddr_dl */
-
-	void	*if_afdata[AF_MAX];
-};
-#define	if_mtu		if_data.ifi_mtu
-#define	if_type		if_data.ifi_type
-#define	if_addrlen	if_data.ifi_addrlen
-#define	if_hdrlen	if_data.ifi_hdrlen
-#define	if_metric	if_data.ifi_metric
-#define	if_link_state	if_data.ifi_link_state
-#define	if_baudrate	if_data.ifi_baudrate
-#define	if_ipackets	if_data.ifi_ipackets
-#define	if_ierrors	if_data.ifi_ierrors
-#define	if_opackets	if_data.ifi_opackets
-#define	if_oerrors	if_data.ifi_oerrors
-#define	if_collisions	if_data.ifi_collisions
-#define	if_ibytes	if_data.ifi_ibytes
-#define	if_obytes	if_data.ifi_obytes
-#define	if_imcasts	if_data.ifi_imcasts
-#define	if_omcasts	if_data.ifi_omcasts
-#define	if_iqdrops	if_data.ifi_iqdrops
-#define	if_noproto	if_data.ifi_noproto
-#define	if_lastchange	if_data.ifi_lastchange
-#define	if_capabilities	if_data.ifi_capabilities
 
 #define	IFF_UP		0x1		/* interface is up */
 #define	IFF_BROADCAST	0x2		/* broadcast address valid */
@@ -337,7 +197,7 @@ struct ifnet {				/* and the entries */
 
 #define IFXF_TXREADY		0x1		/* interface is ready to tx */
 #define	IFXF_NOINET6		0x2		/* don't do inet6 */
-#define	IFXF_INET6_PRIVACY	0x4		/* autoconf privacy extension */
+#define	IFXF_INET6_NOPRIVACY	0x4		/* don't autoconf privacy */
 #define	IFXF_MPLS		0x8		/* supports MPLS */
 #define	IFXF_WOL		0x10		/* wake on lan enabled */
 
@@ -361,84 +221,8 @@ struct ifnet {				/* and the entries */
 #define	IFCAP_CSUM_UDPv6	0x00000100	/* can do IPv6/UDP checksums */
 #define	IFCAP_WOL		0x00008000	/* can do wake on lan */
 
-/*
- * Output queues (ifp->if_snd) and internetwork datagram level (pup level 1)
- * input routines have queues of messages stored on ifqueue structures
- * (defined above).  Entries are added to and deleted from these structures
- * by these macros, which should be called with ipl raised to splnet().
- */
-#define	IF_QFULL(ifq)		((ifq)->ifq_len >= (ifq)->ifq_maxlen)
-#define	IF_DROP(ifq)		((ifq)->ifq_drops++)
-#define	IF_ENQUEUE(ifq, m)						\
-do {									\
-	(m)->m_nextpkt = NULL;						\
-	if ((ifq)->ifq_q[(m)->m_pkthdr.pf.prio].tail == NULL)		\
-		(ifq)->ifq_q[(m)->m_pkthdr.pf.prio].head = m;		\
-	else								\
-		(ifq)->ifq_q[(m)->m_pkthdr.pf.prio].tail->m_nextpkt = m; \
-	(ifq)->ifq_q[(m)->m_pkthdr.pf.prio].tail = m;			\
-	(ifq)->ifq_len++;						\
-} while (/* CONSTCOND */0)
-#define	IF_PREPEND(ifq, m)						\
-do {									\
-	(m)->m_nextpkt = (ifq)->ifq_q[(m)->m_pkthdr.pf.prio].head;	\
-	if ((ifq)->ifq_q[(m)->m_pkthdr.pf.prio].tail == NULL)		\
-		(ifq)->ifq_q[(m)->m_pkthdr.pf.prio].tail = (m);		\
-	(ifq)->ifq_q[(m)->m_pkthdr.pf.prio].head = (m);			\
-	(ifq)->ifq_len++;						\
-} while (/* CONSTCOND */0)
-
-#define	IF_POLL(ifq, m)							\
-do {									\
-	int	if_dequeue_prio = IFQ_MAXPRIO;				\
-	do {								\
-		(m) = (ifq)->ifq_q[if_dequeue_prio].head;		\
-	} while (!(m) && --if_dequeue_prio >= 0); 			\
-} while (/* CONSTCOND */0)
-
-#define	IF_DEQUEUE(ifq, m)						\
-do {									\
-	int	if_dequeue_prio = IFQ_MAXPRIO;				\
-	do {								\
-		(m) = (ifq)->ifq_q[if_dequeue_prio].head;		\
-		if (m) {						\
-			if (((ifq)->ifq_q[if_dequeue_prio].head =	\
-			    (m)->m_nextpkt) == NULL)			\
-				(ifq)->ifq_q[if_dequeue_prio].tail = NULL; \
-			(m)->m_nextpkt = NULL;				\
-			(ifq)->ifq_len--;				\
-		}							\
-	} while (!(m) && --if_dequeue_prio >= 0);			\
-} while (/* CONSTCOND */0)
-
-#define	IF_INPUT_ENQUEUE(ifq, m)					\
-do {									\
-	if (IF_QFULL(ifq)) {						\
-		IF_DROP(ifq);						\
-		m_freem(m);						\
-		if (!(ifq)->ifq_congestion)				\
-			if_congestion(ifq);				\
-	} else								\
-		IF_ENQUEUE(ifq, m);					\
-} while (/* CONSTCOND */0)
-
-#define	IF_PURGE(ifq)							\
-do {									\
-	struct mbuf *__m0;						\
-									\
-	for (;;) {							\
-		IF_DEQUEUE((ifq), __m0);				\
-		if (__m0 == NULL)					\
-			break;						\
-		else							\
-			m_freem(__m0);					\
-	}								\
-} while (/* CONSTCOND */0)
-#define	IF_LEN(ifq)		((ifq)->ifq_len)
-#define	IF_IS_EMPTY(ifq)	((ifq)->ifq_len == 0)
-
-#define	IFQ_MAXLEN	256
-#define	IFNET_SLOWHZ	1		/* granularity is 1 second */
+#define IFCAP_CSUM_MASK		(IFCAP_CSUM_IPv4 | IFCAP_CSUM_TCPv4 | \
+    IFCAP_CSUM_UDPv4 | IFCAP_CSUM_TCPv6 | IFCAP_CSUM_UDPv6)
 
 /* symbolic names for terminal (per-protocol) CTL_IFQ_ nodes */
 #define IFQCTL_LEN 1
@@ -455,35 +239,6 @@ do {									\
 	{ "drops", CTLTYPE_INT }, \
 	{ "congestion", CTLTYPE_INT }, \
 }
-
-/*
- * The ifaddr structure contains information about one address
- * of an interface.  They are maintained by the different address families,
- * are allocated and attached when an address is set, and are linked
- * together so all addresses for an interface can be located.
- */
-struct ifaddr {
-	struct	sockaddr *ifa_addr;	/* address of interface */
-	struct	sockaddr *ifa_dstaddr;	/* other end of p-to-p link */
-#define	ifa_broadaddr	ifa_dstaddr	/* broadcast address interface */
-	struct	sockaddr *ifa_netmask;	/* used to determine subnet */
-	struct	ifnet *ifa_ifp;		/* back-pointer to interface */
-	TAILQ_ENTRY(ifaddr) ifa_list;	/* list of addresses for interface */
-					/* check or clean routes (+ or -)'d */
-	void	(*ifa_rtrequest)(int, struct rtentry *, struct rt_addrinfo *);
-	u_int	ifa_flags;		/* mostly rt_flags for cloning */
-	u_int	ifa_refcnt;		/* count of references */
-	int	ifa_metric;		/* cost of going out this interface */
-};
-#define	IFA_ROUTE	RTF_UP		/* route installed */
-
-struct ifaddr_item {
-	RB_ENTRY(ifaddr_item)	 ifai_entry;
-	struct sockaddr		*ifai_addr;
-	struct ifaddr		*ifai_ifa;
-	struct ifaddr_item	*ifai_next;
-	u_int			 ifai_rdomain;
-};
 
 /*
  * Message format for use in obtaining information about interfaces
@@ -522,7 +277,6 @@ struct ifa_msghdr {
 	int	ifam_metric;	/* value of ifa_metric */
 };
 
-
 /*
  * Message format announcing the arrival or departure of a network interface.
  */
@@ -545,25 +299,6 @@ struct if_announcemsghdr {
 
 #define	IFG_ALL		"all"		/* group contains all interfaces */
 #define	IFG_EGRESS	"egress"	/* if(s) default route(s) point to */
-
-struct ifg_group {
-	char				 ifg_group[IFNAMSIZ];
-	u_int				 ifg_refcnt;
-	caddr_t				 ifg_pf_kif;
-	int				 ifg_carp_demoted;
-	TAILQ_HEAD(, ifg_member)	 ifg_members;
-	TAILQ_ENTRY(ifg_group)		 ifg_next;
-};
-
-struct ifg_member {
-	TAILQ_ENTRY(ifg_member)	 ifgm_next;
-	struct ifnet		*ifgm_ifp;
-};
-
-struct ifg_list {
-	struct ifg_group	*ifgl_group;
-	TAILQ_ENTRY(ifg_list)	 ifgl_next;
-};
 
 struct ifg_req {
 	union {
@@ -616,14 +351,23 @@ struct	ifreq {
 #define	ifr_flags	ifr_ifru.ifru_flags	/* flags */
 #define	ifr_metric	ifr_ifru.ifru_metric	/* metric */
 #define	ifr_mtu		ifr_ifru.ifru_metric	/* mtu (overload) */
+#define	ifr_hardmtu	ifr_ifru.ifru_metric	/* hardmtu (overload) */
 #define	ifr_media	ifr_ifru.ifru_metric	/* media options (overload) */
 #define	ifr_rdomainid	ifr_ifru.ifru_metric	/* VRF instance (overload) */
+#define ifr_vnetid	ifr_ifru.ifru_metric	/* Virtual Net Id (overload) */
+#define ifr_ttl		ifr_ifru.ifru_metric	/* tunnel TTL (overload) */
 #define	ifr_data	ifr_ifru.ifru_data	/* for use by interface */
 };
 
 struct ifaliasreq {
 	char	ifra_name[IFNAMSIZ];		/* if name, e.g. "en0" */
-	struct	sockaddr ifra_addr;
+	union {
+		struct	sockaddr ifrau_addr;
+		int	ifrau_align;
+	 } ifra_ifrau;
+#ifndef ifra_addr
+#define ifra_addr	ifra_ifrau.ifrau_addr
+#endif
 	struct	sockaddr ifra_dstaddr;
 #define	ifra_broadaddr	ifra_dstaddr
 	struct	sockaddr ifra_mask;
@@ -674,188 +418,12 @@ struct if_laddrreq {
 	struct sockaddr_storage dstaddr; /* out */
 };
 
-struct if_nameindex {
-	unsigned int	if_index;
-	char		*if_name;
-};
-
-#ifndef _KERNEL
-__BEGIN_DECLS
-unsigned int if_nametoindex(const char *);
-char	*if_indextoname(unsigned int, char *);
-struct	if_nameindex *if_nameindex(void);
-void	if_freenameindex(struct if_nameindex *);
-__END_DECLS
-#endif
-
 #include <net/if_arp.h>
 
 #ifdef _KERNEL
-#define	IFAFREE(ifa) \
-do { \
-	if ((ifa)->ifa_refcnt <= 0) \
-		ifafree(ifa); \
-	else \
-		(ifa)->ifa_refcnt--; \
-} while (/* CONSTCOND */0)
+#include <net/if_var.h>
+#endif
 
-#ifdef ALTQ
+#endif /* __BSD_VISIBLE */
 
-#define	IFQ_ENQUEUE(ifq, m, pattr, err)					\
-do {									\
-	if (ALTQ_IS_ENABLED((ifq))) {					\
-		m->m_pkthdr.pf.prio = IFQ_MAXPRIO;			\
-		ALTQ_ENQUEUE((ifq), (m), (pattr), (err));		\
-	} else {							\
-		if (IF_QFULL((ifq))) {					\
-			m_freem((m));					\
-			(err) = ENOBUFS;				\
-		} else {						\
-			IF_ENQUEUE((ifq), (m));				\
-			(err) = 0;					\
-		}							\
-	}								\
-	if ((err))							\
-		(ifq)->ifq_drops++;					\
-} while (/* CONSTCOND */0)
-
-#define	IFQ_DEQUEUE(ifq, m)						\
-do {									\
-	if (OLDTBR_IS_ENABLED((ifq)))					\
-		(m) = oldtbr_dequeue((ifq), ALTDQ_REMOVE);			\
-	else if (ALTQ_IS_ENABLED((ifq)))				\
-		ALTQ_DEQUEUE((ifq), (m));				\
-	else								\
-		IF_DEQUEUE((ifq), (m));					\
-} while (/* CONSTCOND */0)
-
-#define	IFQ_POLL(ifq, m)						\
-do {									\
-	if (TBR_IS_ENABLED((ifq)))					\
-		(m) = oldtbr_dequeue((ifq), ALTDQ_POLL);			\
-	else if (ALTQ_IS_ENABLED((ifq)))				\
-		ALTQ_POLL((ifq), (m));					\
-	else								\
-		IF_POLL((ifq), (m));					\
-} while (/* CONSTCOND */0)
-
-#define	IFQ_PURGE(ifq)							\
-do {									\
-	if (ALTQ_IS_ENABLED((ifq)))					\
-		ALTQ_PURGE((ifq));					\
-	else								\
-		IF_PURGE((ifq));					\
-} while (/* CONSTCOND */0)
-
-#define	IFQ_SET_READY(ifq)						\
-do {									\
-	((ifq)->altq_flags |= ALTQF_READY);				\
-} while (/* CONSTCOND */0)
-
-#else /* !ALTQ */
-
-#define	IFQ_ENQUEUE(ifq, m, pattr, err)					\
-do {									\
-	if (IF_QFULL((ifq))) {						\
-		m_freem((m));						\
-		(err) = ENOBUFS;					\
-	} else {							\
-		IF_ENQUEUE((ifq), (m));					\
-		(err) = 0;						\
-	}								\
-	if ((err))							\
-		(ifq)->ifq_drops++;					\
-} while (/* CONSTCOND */0)
-
-#define	IFQ_DEQUEUE(ifq, m)	IF_DEQUEUE((ifq), (m))
-
-#define	IFQ_POLL(ifq, m)	IF_POLL((ifq), (m))
-
-#define	IFQ_PURGE(ifq)		IF_PURGE((ifq))
-
-#define	IFQ_SET_READY(ifq)	/* nothing */
-
-#endif /* ALTQ */
-
-#define	IFQ_LEN(ifq)			IF_LEN(ifq)
-#define	IFQ_IS_EMPTY(ifq)		((ifq)->ifq_len == 0)
-#define	IFQ_INC_LEN(ifq)		((ifq)->ifq_len++)
-#define	IFQ_DEC_LEN(ifq)		(--(ifq)->ifq_len)
-#define	IFQ_INC_DROPS(ifq)		((ifq)->ifq_drops++)
-#define	IFQ_SET_MAXLEN(ifq, len)	((ifq)->ifq_maxlen = (len))
-
-/* default interface priorities */
-#define IF_WIRED_DEFAULT_PRIORITY 0
-#define IF_WIRELESS_DEFAULT_PRIORITY 4
-
-extern int ifqmaxlen;
-extern struct ifnet_head ifnet;
-extern struct ifnet **ifindex2ifnet;
-extern struct ifnet *lo0ifp;
-extern int if_indexlim;
-
-#define	ether_input_mbuf(ifp, m)        ether_input((ifp), NULL, (m))
-
-void	ether_ifattach(struct ifnet *);
-void	ether_ifdetach(struct ifnet *);
-int	ether_ioctl(struct ifnet *, struct arpcom *, u_long, caddr_t);
-void	ether_input(struct ifnet *, struct ether_header *, struct mbuf *);
-int	ether_output(struct ifnet *,
-	    struct mbuf *, struct sockaddr *, struct rtentry *);
-char	*ether_sprintf(u_char *);
-
-void	if_alloc_sadl(struct ifnet *);
-void	if_free_sadl(struct ifnet *);
-void	if_attach(struct ifnet *);
-void	if_attachdomain(void);
-void	if_attachtail(struct ifnet *);
-void	if_attachhead(struct ifnet *);
-void	if_detach(struct ifnet *);
-void	if_down(struct ifnet *);
-void	if_downall(void);
-void	if_link_state_change(struct ifnet *);
-void	if_slowtimo(void *);
-void	if_up(struct ifnet *);
-int	ifconf(u_long, caddr_t);
-void	ifinit(void);
-int	ifioctl(struct socket *, u_long, caddr_t, struct proc *);
-int	ifpromisc(struct ifnet *, int);
-struct	ifg_group *if_creategroup(const char *);
-int	if_addgroup(struct ifnet *, const char *);
-int	if_delgroup(struct ifnet *, const char *);
-void	if_group_routechange(struct sockaddr *, struct sockaddr *);
-struct	ifnet *ifunit(const char *);
-void	if_start(struct ifnet *);
-void	ifnewlladdr(struct ifnet *);
-
-struct	ifaddr *ifa_ifwithaddr(struct sockaddr *, u_int);
-struct	ifaddr *ifa_ifwithaf(int, u_int);
-struct	ifaddr *ifa_ifwithdstaddr(struct sockaddr *, u_int);
-struct	ifaddr *ifa_ifwithnet(struct sockaddr *, u_int);
-struct	ifaddr *ifa_ifwithroute(int, struct sockaddr *,
-					struct sockaddr *, u_int);
-struct	ifaddr *ifaof_ifpforaddr(struct sockaddr *, struct ifnet *);
-void	ifafree(struct ifaddr *);
-void	link_rtrequest(int, struct rtentry *, struct rt_addrinfo *);
-
-void	if_clone_attach(struct if_clone *);
-void	if_clone_detach(struct if_clone *);
-
-int	if_clone_create(const char *);
-int	if_clone_destroy(const char *);
-
-void	if_congestion(struct ifqueue *);
-int     sysctl_ifq(int *, u_int, void *, size_t *, void *, size_t,
-	    struct ifqueue *);
-
-int	loioctl(struct ifnet *, u_long, caddr_t);
-void	loopattach(int);
-int	looutput(struct ifnet *,
-	    struct mbuf *, struct sockaddr *, struct rtentry *);
-void	lortrequest(int, struct rtentry *, struct rt_addrinfo *);
-void	ifa_add(struct ifnet *, struct ifaddr *);
-void	ifa_del(struct ifnet *, struct ifaddr *);
-void	ifa_update_broadaddr(struct ifnet *, struct ifaddr *,
-	    struct sockaddr *);
-#endif /* _KERNEL */
 #endif /* _NET_IF_H_ */

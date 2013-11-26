@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_resource.c,v 1.38 2012/03/19 09:05:39 guenther Exp $	*/
+/*	$OpenBSD: kern_resource.c,v 1.46 2013/10/25 04:42:48 guenther Exp $	*/
 /*	$NetBSD: kern_resource.c,v 1.38 1996/10/23 07:19:38 matthias Exp $	*/
 
 /*-
@@ -51,6 +51,9 @@
 #include <sys/syscallargs.h>
 
 #include <uvm/uvm_extern.h>
+
+void	tuagg_sub(struct tusage *, struct proc *);
+void	tuagg(struct process *, struct proc *);
 
 /*
  * Patchable maximum data and stack limits.
@@ -233,12 +236,11 @@ dosetrlimit(struct proc *p, u_int which, struct rlimit *limp)
 	rlim_t maxlim;
 	int error;
 
-	if (which >= RLIM_NLIMITS)
+	if (which >= RLIM_NLIMITS || limp->rlim_cur > limp->rlim_max)
 		return (EINVAL);
 
 	alimp = &p->p_rlimit[which];
-	if (limp->rlim_cur > alimp->rlim_max ||
-	    limp->rlim_max > alimp->rlim_max)
+	if (limp->rlim_max > alimp->rlim_max)
 		if ((error = suser(p, 0)) != 0)
 			return (error);
 	if (p->p_p->ps_limit->p_refcnt > 1) {
@@ -246,7 +248,7 @@ dosetrlimit(struct proc *p, u_int which, struct rlimit *limp)
 
 		/* limcopy() can sleep, so copy before decrementing refcnt */
 		p->p_p->ps_limit = limcopy(l);
-		l->p_refcnt--;
+		limfree(l);
 		alimp = &p->p_rlimit[which];
 	}
 
@@ -261,7 +263,7 @@ dosetrlimit(struct proc *p, u_int which, struct rlimit *limp)
 		maxlim = maxfiles;
 		break;
 	case RLIMIT_NPROC:
-		maxlim = maxproc;
+		maxlim = maxprocess;
 		break;
 	default:
 		maxlim = RLIM_INFINITY;
@@ -334,45 +336,89 @@ sys_getrlimit(struct proc *p, void *v, register_t *retval)
 	return (error);
 }
 
+void
+tuagg_sub(struct tusage *tup, struct proc *p)
+{
+	timespecadd(&tup->tu_runtime, &p->p_rtime, &tup->tu_runtime);
+	tup->tu_uticks += p->p_uticks;
+	tup->tu_sticks += p->p_sticks;
+	tup->tu_iticks += p->p_iticks;
+}
+
 /*
- * Transform the running time and tick information in proc p into user,
- * system, and interrupt time usage.
+ * Aggregate a single thread's immediate time counts into the running
+ * totals for the thread and process
  */
 void
-calcru(struct proc *p, struct timeval *up, struct timeval *sp,
-    struct timeval *ip)
+tuagg_unlocked(struct process *pr, struct proc *p)
+{
+	tuagg_sub(&pr->ps_tu, p);
+	tuagg_sub(&p->p_tu, p);
+	timespecclear(&p->p_rtime);
+	p->p_uticks = 0;
+	p->p_sticks = 0;
+	p->p_iticks = 0;
+}
+
+void
+tuagg(struct process *pr, struct proc *p)
+{
+	int s;
+
+	SCHED_LOCK(s);
+	tuagg_unlocked(pr, p);
+	SCHED_UNLOCK(s);
+}
+
+/*
+ * Transform the running time and tick information in a struct tusage
+ * into user, system, and interrupt time usage.
+ */
+void
+calctsru(struct tusage *tup, struct timespec *up, struct timespec *sp,
+    struct timespec *ip)
 {
 	u_quad_t st, ut, it;
 	int freq;
-	int s;
 
-	s = splstatclock();
-	st = p->p_sticks;
-	ut = p->p_uticks;
-	it = p->p_iticks;
-	splx(s);
+	st = tup->tu_sticks;
+	ut = tup->tu_uticks;
+	it = tup->tu_iticks;
 
 	if (st + ut + it == 0) {
-		timerclear(up);
-		timerclear(sp);
+		timespecclear(up);
+		timespecclear(sp);
 		if (ip != NULL)
-			timerclear(ip);
+			timespecclear(ip);
 		return;
 	}
 
 	freq = stathz ? stathz : hz;
 
-	st = st * 1000000 / freq;
-	sp->tv_sec = st / 1000000;
-	sp->tv_usec = st % 1000000;
-	ut = ut * 1000000 / freq;
-	up->tv_sec = ut / 1000000;
-	up->tv_usec = ut % 1000000;
+	st = st * 1000000000 / freq;
+	sp->tv_sec = st / 1000000000;
+	sp->tv_nsec = st % 1000000000;
+	ut = ut * 1000000000 / freq;
+	up->tv_sec = ut / 1000000000;
+	up->tv_nsec = ut % 1000000000;
 	if (ip != NULL) {
-		it = it * 1000000 / freq;
-		ip->tv_sec = it / 1000000;
-		ip->tv_usec = it % 1000000;
+		it = it * 1000000000 / freq;
+		ip->tv_sec = it / 1000000000;
+		ip->tv_nsec = it % 1000000000;
 	}
+}
+
+void
+calcru(struct tusage *tup, struct timeval *up, struct timeval *sp,
+    struct timeval *ip)
+{
+	struct timespec u, s, i;
+
+	calctsru(tup, &u, &s, ip != NULL ? &i : NULL);
+	TIMESPEC_TO_TIMEVAL(up, &u);
+	TIMESPEC_TO_TIMEVAL(sp, &s);
+	if (ip != NULL)
+		TIMESPEC_TO_TIMEVAL(ip, &i);
 }
 
 /* ARGSUSED */
@@ -383,51 +429,52 @@ sys_getrusage(struct proc *p, void *v, register_t *retval)
 		syscallarg(int) who;
 		syscallarg(struct rusage *) rusage;
 	} */ *uap = v;
-	struct process *pr = p->p_p;
 	struct rusage ru;
-	struct rusage *rup;
+	int error;
 
-	switch (SCARG(uap, who)) {
+	error = dogetrusage(p, SCARG(uap, who), &ru);
+	if (error == 0)
+		error = copyout(&ru, SCARG(uap, rusage), sizeof(ru));
+	return (error);
+}
+
+int
+dogetrusage(struct proc *p, int who, struct rusage *rup)
+{
+	struct process *pr = p->p_p;
+	struct proc *q;
+
+	switch (who) {
 
 	case RUSAGE_SELF:
-		calcru(p, &p->p_stats->p_ru.ru_utime,
-		    &p->p_stats->p_ru.ru_stime, NULL);
-		ru = p->p_stats->p_ru;
-		rup = &ru;
+		/* start with the sum of dead threads, if any */
+		if (pr->ps_ru != NULL)
+			*rup = *pr->ps_ru;
+		else
+			bzero(rup, sizeof(*rup));
 
-		/* XXX add on already dead threads */
-
-		/* add on other living threads */
-		{
-			struct proc *q;
-
-			TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
-				if (q == p || P_ZOMBIE(q))
-					continue;
-				/*
-				 * XXX this is approximate: no call
-				 * to calcru in other running threads
-				 */
-				ruadd(rup, &q->p_stats->p_ru);
-			}
+		/* add on all living threads */
+		TAILQ_FOREACH(q, &pr->ps_threads, p_thr_link) {
+			ruadd(rup, &q->p_ru);
+			tuagg(pr, q);
 		}
+
+		calcru(&pr->ps_tu, &rup->ru_utime, &rup->ru_stime, NULL);
 		break;
 
 	case RUSAGE_THREAD:
-		rup = &p->p_stats->p_ru;
-		calcru(p, &rup->ru_utime, &rup->ru_stime, NULL);
-		ru = *rup;
+		*rup = p->p_ru;
+		calcru(&p->p_tu, &rup->ru_utime, &rup->ru_stime, NULL);
 		break;
 
 	case RUSAGE_CHILDREN:
-		rup = &p->p_stats->p_cru;
+		*rup = pr->ps_cru;
 		break;
 
 	default:
 		return (EINVAL);
 	}
-	return (copyout((caddr_t)rup, (caddr_t)SCARG(uap, rusage),
-	    sizeof (struct rusage)));
+	return (0);
 }
 
 void

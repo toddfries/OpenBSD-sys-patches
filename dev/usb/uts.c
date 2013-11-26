@@ -1,4 +1,4 @@
-/*	$OpenBSD: uts.c,v 1.30 2011/07/03 15:47:17 matthew Exp $ */
+/*	$OpenBSD: uts.c,v 1.32 2013/11/07 10:33:43 pirofti Exp $ */
 
 /*
  * Copyright (c) 2007 Robert Nagy <robert@openbsd.org>
@@ -62,14 +62,14 @@ struct tsscale {
 
 struct uts_softc {
 	struct device		sc_dev;
-	usbd_device_handle	sc_udev;
-	usbd_interface_handle	sc_iface;
+	struct usbd_device	*sc_udev;
+	struct usbd_interface	*sc_iface;
 	int			sc_iface_number;
 	int			sc_product;
 	int			sc_vendor;
 
 	int			sc_intr_number;
-	usbd_pipe_handle	sc_intr_pipe;
+	struct usbd_pipe	*sc_intr_pipe;
 	u_char			*sc_ibuf;
 	int			sc_isize;
 	u_int8_t		sc_pkts;
@@ -78,7 +78,6 @@ struct uts_softc {
 
 	int	sc_enabled;
 	int	sc_buttons;
-	int	sc_dying;
 	int	sc_oldx;
 	int	sc_oldy;
 	int	sc_rawmode;
@@ -100,8 +99,8 @@ const struct usb_devno uts_devs[] = {
 	{ USB_VENDOR_GUNZE,		USB_PRODUCT_GUNZE_TOUCHPANEL }
 };
 
-void uts_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
-void uts_get_pos(usbd_private_handle addr, struct uts_pos *tp);
+void uts_intr(struct usbd_xfer *, void *, usbd_status);
+void uts_get_pos(void *addr, struct uts_pos *tp);
 
 int	uts_enable(void *);
 void	uts_disable(void *);
@@ -173,7 +172,7 @@ uts_attach(struct device *parent, struct device *self, void *aux)
 	if (usbd_set_config_index(uaa->device, UTS_CONFIG_INDEX, 1) != 0) {
 		printf("%s: could not set configuartion no\n",
 		    sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -182,7 +181,7 @@ uts_attach(struct device *parent, struct device *self, void *aux)
 	if (cdesc == NULL) {
 		printf("%s: failed to get configuration descriptor\n",
 		    sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -190,7 +189,7 @@ uts_attach(struct device *parent, struct device *self, void *aux)
 	if (usbd_device2interface_handle(uaa->device, 0, &sc->sc_iface) != 0) {
 		printf("%s: failed to get interface\n",
 		    sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -203,7 +202,7 @@ uts_attach(struct device *parent, struct device *self, void *aux)
 		if (ed == NULL) {
 			printf("%s: no endpoint descriptor for %d\n",
 			    sc->sc_dev.dv_xname, i);
-			sc->sc_dying = 1;
+			usbd_deactivate(sc->sc_udev);
 			return;
 		}
 
@@ -217,7 +216,7 @@ uts_attach(struct device *parent, struct device *self, void *aux)
 	if (sc->sc_intr_number== -1) {
 		printf("%s: Could not find interrupt in\n",
 		    sc->sc_dev.dv_xname);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		return;
 	}
 
@@ -257,7 +256,7 @@ uts_activate(struct device *self, int act)
 	case DVACT_DEACTIVATE:
 		if (sc->sc_wsmousedev != NULL)
 			rv = config_deactivate(sc->sc_wsmousedev);
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		break;
 	}
 
@@ -270,7 +269,7 @@ uts_enable(void *v)
 	struct uts_softc *sc = v;
 	int err;
 
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return (EIO);
 
 	if (sc->sc_enabled)
@@ -374,7 +373,7 @@ uts_ioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *l)
 }
 
 void
-uts_get_pos(usbd_private_handle addr, struct uts_pos *tp)
+uts_get_pos(void *addr, struct uts_pos *tp)
 {
 	struct uts_softc *sc = addr;
 	u_char *p = sc->sc_ibuf;
@@ -449,7 +448,7 @@ uts_get_pos(usbd_private_handle addr, struct uts_pos *tp)
 }
 
 void
-uts_intr(usbd_xfer_handle xfer, usbd_private_handle addr, usbd_status status)
+uts_intr(struct usbd_xfer *xfer, void *addr, usbd_status status)
 {
 	struct uts_softc *sc = addr;
 	u_int32_t len;

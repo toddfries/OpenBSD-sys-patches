@@ -1,4 +1,4 @@
-/*	$OpenBSD: locore.S,v 1.2 2010/02/14 22:39:33 miod Exp $ */
+/*	$OpenBSD: locore.S,v 1.5 2013/06/05 01:28:04 pirofti Exp $ */
 
 /*
  * Copyright (c) 2001-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -31,6 +31,7 @@
 #include <machine/param.h>
 #include <machine/asm.h>
 #include <machine/cpu.h>
+#include <mips64/mips_cpu.h>
 #include <machine/regnum.h>
 #include <machine/cpustate.h>
 
@@ -73,3 +74,22 @@ start:
 	PTR_L	sp, 0(sp)
 	jr	ra
 	nop
+
+#ifdef HIBERNATE
+
+	/* Switch to hibernate resume pagetable */
+LEAF(hibernate_activate_resume_pt_machdep, 0)				/* { */
+	/* XXX TBD */
+	j	ra
+END(hibernate_activate_resume_pt_machdep)				/* } */
+
+LEAF(hibernate_switch_stack_machdep, 0)					/* { */
+	/* XXX TBD */
+	j	ra
+END(hibernate_switch_stack_machdep)					/* } */
+
+LEAF(hibernate_resume_machdep, 0)					/* { */
+	j	ra
+END(hibernate_resume_machdep)					/* } */
+
+#endif /* HIBERNATE */

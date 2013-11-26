@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pdaemon.c,v 1.59 2011/07/06 19:50:38 beck Exp $	*/
+/*	$OpenBSD: uvm_pdaemon.c,v 1.64 2013/05/30 16:29:46 tedu Exp $	*/
 /*	$NetBSD: uvm_pdaemon.c,v 1.23 2000/08/20 10:24:14 bjh21 Exp $	*/
 
 /* 
@@ -208,6 +208,7 @@ uvm_pageout(void *arg)
 	 */
 
 	for (;;) {
+		long size;
 	  	work_done = 0; /* No work done this iteration. */
 
 		uvm_lock_fpageq();
@@ -242,18 +243,24 @@ uvm_pageout(void *arg)
 		}
 
 		/*
-		 * get pages from the buffer cache, or scan if needed
+		 * Reclaim pages from the buffer cache if possible.
+		 */
+		size = 0;
+		if (pma != NULL)
+			size += pma->pm_size >> PAGE_SHIFT;
+		if (uvmexp.free - BUFPAGES_DEFICIT < uvmexp.freetarg)
+			size += uvmexp.freetarg - uvmexp.free -
+			    BUFPAGES_DEFICIT;
+		(void) bufbackoff(&constraint, size * 2);
+
+		/*
+		 * Scan if needed to meet our targets.
 		 */
 		if (pma != NULL ||
 		    ((uvmexp.free - BUFPAGES_DEFICIT) < uvmexp.freetarg) ||
 		    ((uvmexp.inactive + BUFPAGES_INACT) < uvmexp.inactarg)) {
-			if (bufbackoff(&constraint,
-			    (pma ? pma->pm_size : -1)) == 0)
-				work_done = 1;
-			else {
-				uvmpd_scan();
-				work_done = 1; /* we hope... */
-			}
+			uvmpd_scan();
+			work_done = 1; /* XXX we hope... */
 		}
 
 		/*
@@ -439,13 +446,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			}
 
 			/*
-			 * first we attempt to lock the object that this page
-			 * belongs to.  if our attempt fails we skip on to
-			 * the next page (no harm done).  it is important to
-			 * "try" locking the object as we are locking in the
-			 * wrong order (pageq -> object) and we don't want to
-			 * deadlock.
-			 *
 			 * the only time we expect to see an ownerless page
 			 * (i.e. a page with no uobject and !PQ_ANON) is if an
 			 * anon has loaned a page from a uvm_object and the
@@ -458,10 +458,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			if ((p->pg_flags & PQ_ANON) || p->uobject == NULL) {
 				anon = p->uanon;
 				KASSERT(anon != NULL);
-				if (!simple_lock_try(&anon->an_lock)) {
-					/* lock failed, skip this page */
-					continue;
-				}
 
 				/*
 				 * if the page is ownerless, claim it in the
@@ -476,7 +472,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 					/* anon now owns it */
 				}
 				if (p->pg_flags & PG_BUSY) {
-					simple_unlock(&anon->an_lock);
 					uvmexp.pdbusy++;
 					/* someone else owns page, skip it */
 					continue;
@@ -485,12 +480,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			} else {
 				uobj = p->uobject;
 				KASSERT(uobj != NULL);
-				if (!simple_lock_try(&uobj->vmobjlock)) {
-					/* lock failed, skip this page */
-					continue;
-				}
 				if (p->pg_flags & PG_BUSY) {
-					simple_unlock(&uobj->vmobjlock);
 					uvmexp.pdbusy++;
 					/* someone else owns page, skip it */
 					continue;
@@ -499,7 +489,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			}
 
 			/*
-			 * we now have the object and the page queues locked.
+			 * we now have the page queues locked.
 			 * the page is not busy.   if the page is clean we
 			 * can free it now and continue.
 			 */
@@ -507,9 +497,7 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			if (p->pg_flags & PG_CLEAN) {
 				if (p->pg_flags & PQ_SWAPBACKED) {
 					/* this page now lives only in swap */
-					simple_lock(&uvm.swap_data_lock);
 					uvmexp.swpgonly++;
-					simple_unlock(&uvm.swap_data_lock);
 				}
 
 				/* zap all mappings with pmap_page_protect... */
@@ -528,11 +516,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 
 					/* remove from object */
 					anon->an_page = NULL;
-					simple_unlock(&anon->an_lock);
-				} else {
-					/* pagefree has already removed the
-					 * page from the object */
-					simple_unlock(&uobj->vmobjlock);
 				}
 				continue;
 			}
@@ -543,11 +526,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			 */
 
 			if (free + uvmexp.paging > uvmexp.freetarg << 2) {
-				if (anon) {
-					simple_unlock(&anon->an_lock);
-				} else {
-					simple_unlock(&uobj->vmobjlock);
-				}
 				continue;
 			}
 
@@ -563,11 +541,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			    uvmexp.swpgonly == uvmexp.swpages) {
 				dirtyreacts++;
 				uvm_pageactivate(p);
-				if (anon) {
-					simple_unlock(&anon->an_lock);
-				} else {
-					simple_unlock(&uobj->vmobjlock);
-				}
 				continue;
 			}
 
@@ -643,12 +616,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 						    &p->pg_flags,
 						    PG_BUSY);
 						UVM_PAGE_OWN(p, NULL);
-						if (anon)
-							simple_unlock(
-							    &anon->an_lock);
-						else
-							simple_unlock(
-							    &uobj->vmobjlock);
 						continue;
 					}
 					swcpages = 0;	/* cluster is empty */
@@ -685,11 +652,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 
 		if (swap_backed) {
 			if (p) {	/* if we just added a page to cluster */
-				if (anon)
-					simple_unlock(&anon->an_lock);
-				else
-					simple_unlock(&uobj->vmobjlock);
-
 				/* cluster not full yet? */
 				if (swcpages < swnpages)
 					continue;
@@ -729,19 +691,14 @@ uvmpd_scan_inactive(struct pglist *pglst)
 		 * with cluster pages at this level.
 		 *
 		 * note locking semantics of uvm_pager_put with PGO_PDFREECLUST:
-		 *  IN: locked: uobj (if !swap_backed), page queues
-		 * OUT: locked: uobj (if !swap_backed && result !=VM_PAGER_PEND)
-		 *     !locked: pageqs, uobj (if swap_backed || VM_PAGER_PEND)
-		 *
-		 * [the bit about VM_PAGER_PEND saves us one lock-unlock pair]
+		 *  IN: locked: page queues
+		 * OUT: locked: 
+		 *     !locked: pageqs
 		 */
 
-		/* locked: uobj (if !swap_backed), page queues */
 		uvmexp.pdpageouts++;
 		result = uvm_pager_put(swap_backed ? NULL : uobj, p,
 		    &ppsp, &npages, PGO_ALLPAGES|PGO_PDFREECLUST, start, 0);
-		/* locked: uobj (if !swap_backed && result != PEND) */
-		/* unlocked: pageqs, object (if swap_backed ||result == PEND) */
 
 		/*
 		 * if we did i/o to swap, zero swslot to indicate that we are
@@ -816,14 +773,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			/* relock p's object: page queues not lock yet, so
 			 * no need for "try" */
 
-			/* !swap_backed case: already locked... */
-			if (swap_backed) {
-				if (anon)
-					simple_lock(&anon->an_lock);
-				else
-					simple_lock(&uobj->vmobjlock);
-			}
-
 #ifdef DIAGNOSTIC
 			if (result == VM_PAGER_UNLOCK)
 				panic("pagedaemon: pageout returned "
@@ -832,7 +781,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 
 			/* handle PG_WANTED now */
 			if (p->pg_flags & PG_WANTED)
-				/* still holding object lock */
 				wakeup(p);
 
 			atomic_clearbits_int(&p->pg_flags, PG_BUSY|PG_WANTED);
@@ -849,7 +797,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 				anon->an_page = NULL;
 				p->uanon = NULL;
 
-				simple_unlock(&anon->an_lock);
 				uvm_anfree(anon);	/* kills anon */
 				pmap_page_protect(p, VM_PROT_NONE);
 				anon = NULL;
@@ -883,11 +830,6 @@ uvmpd_scan_inactive(struct pglist *pglst)
 			 * the inactive queue can't be re-queued [note: not
 			 * true for active queue]).
 			 */
-
-			if (anon)
-				simple_unlock(&anon->an_lock);
-			else if (uobj)
-				simple_unlock(&uobj->vmobjlock);
 
 			if (nextpg && (nextpg->pg_flags & PQ_INACTIVE) == 0) {
 				nextpg = TAILQ_FIRST(pglst);	/* reload! */
@@ -974,7 +916,7 @@ uvmpd_scan(void)
 	 * our inactive target.
 	 */
 
-	inactive_shortage = uvmexp.inactarg - uvmexp.inactive;
+	inactive_shortage = uvmexp.inactarg - uvmexp.inactive - BUFPAGES_INACT;
 
 	/*
 	 * detect if we're not going to be able to page anything out
@@ -994,16 +936,11 @@ uvmpd_scan(void)
 	     p = nextpg) {
 		nextpg = TAILQ_NEXT(p, pageq);
 		if (p->pg_flags & PG_BUSY)
-			continue;	/* quick check before trying to lock */
+			continue;
 
-		/*
-		 * lock the page's owner.
-		 */
 		/* is page anon owned or ownerless? */
 		if ((p->pg_flags & PQ_ANON) || p->uobject == NULL) {
 			KASSERT(p->uanon != NULL);
-			if (!simple_lock_try(&p->uanon->an_lock))
-				continue;
 
 			/* take over the page? */
 			if ((p->pg_flags & PQ_ANON) == 0) {
@@ -1011,9 +948,6 @@ uvmpd_scan(void)
 				p->loan_count--;
 				atomic_setbits_int(&p->pg_flags, PQ_ANON);
 			}
-		} else {
-			if (!simple_lock_try(&p->uobject->vmobjlock))
-				continue;
 		}
 
 		/*
@@ -1021,10 +955,6 @@ uvmpd_scan(void)
 		 */
 
 		if ((p->pg_flags & PG_BUSY) != 0) {
-			if (p->pg_flags & PQ_ANON)
-				simple_unlock(&p->uanon->an_lock);
-			else
-				simple_unlock(&p->uobject->vmobjlock);
 			continue;
 		}
 
@@ -1064,9 +994,5 @@ uvmpd_scan(void)
 			uvmexp.pddeact++;
 			inactive_shortage--;
 		}
-		if (p->pg_flags & PQ_ANON)
-			simple_unlock(&p->uanon->an_lock);
-		else
-			simple_unlock(&p->uobject->vmobjlock);
 	}
 }

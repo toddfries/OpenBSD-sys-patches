@@ -1,4 +1,4 @@
-/*	$OpenBSD: ofw_machdep.c,v 1.35 2010/04/21 03:03:26 deraadt Exp $	*/
+/*	$OpenBSD: ofw_machdep.c,v 1.43 2013/08/28 20:47:10 mpi Exp $	*/
 /*	$NetBSD: ofw_machdep.c,v 1.1 1996/09/30 16:34:50 ws Exp $	*/
 
 /*
@@ -31,18 +31,16 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
+#include "akbd.h"
+#include "ukbd.h"
+#include "wsdisplay.h"
+#include "zstty.h"
+
 #include <sys/param.h>
-#include <sys/buf.h>
 #include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/disk.h>
-#include <sys/disklabel.h>
-#include <sys/fcntl.h>
-#include <sys/ioctl.h>
-#include <sys/malloc.h>
-#include <sys/stat.h>
 #include <sys/systm.h>
-#include <sys/timeout.h>
 
 #include <uvm/uvm_extern.h>
 
@@ -50,15 +48,22 @@
 #include <machine/autoconf.h>
 
 #include <dev/ofw/openfirm.h>
+#include <dev/ofw/ofw_pci.h>
 
 #include <macppc/macppc/ofw_machdep.h>
 
-#include "ukbd.h"
-#include "akbd.h"
-#include "zstty.h"
-#include <dev/usb/ukbdvar.h>
+#if NAKBD > 0
 #include <dev/adb/akbdvar.h>
-#include <dev/usb/usbdevs.h>
+#endif
+
+#if NUKBD > 0
+#include <dev/usb/ukbdvar.h>
+#endif
+
+#if NWSDISPLAY > 0
+#include <dev/wscons/wsdisplayvar.h>
+#include <dev/rasops/rasops.h>
+#endif
 
 /* XXX, called from asm */
 int save_ofw_mapping(void);
@@ -82,6 +87,16 @@ struct firmware ofw_firmware = {
 
 #define	OFMEM_REGIONS	32
 static struct mem_region OFmem[OFMEM_REGIONS + 1], OFavail[OFMEM_REGIONS + 3];
+
+#if NWSDISPLAY > 0
+struct ofwfb {
+	struct rasops_info	ofw_ri;
+	struct wsscreen_descr	ofw_wsd;
+};
+
+/* Early boot framebuffer */
+static struct ofwfb ofwfb;
+#endif
 
 /*
  * This is called during initppc, before the system is really initialized.
@@ -183,44 +198,11 @@ save_ofw_mapping()
 	return 0;
 }
 
-#include <dev/pci/pcivar.h>
-#include <arch/macppc/pci/vgafb_pcivar.h>
-static pcitag_t ofw_make_tag( void *cpv, int bus, int dev, int fnc);
-
-/* ARGSUSED */
-static pcitag_t
-ofw_make_tag(void *cpv, int bus, int dev, int fnc)
-{
-        return (bus << 16) | (dev << 11) | (fnc << 8);
-}
-
-#define       OFW_PCI_PHYS_HI_BUSMASK         0x00ff0000
-#define       OFW_PCI_PHYS_HI_BUSSHIFT        16
-#define       OFW_PCI_PHYS_HI_DEVICEMASK      0x0000f800
-#define       OFW_PCI_PHYS_HI_DEVICESHIFT     11
-#define       OFW_PCI_PHYS_HI_FUNCTIONMASK    0x00000700
-#define       OFW_PCI_PHYS_HI_FUNCTIONSHIFT   8
-
-#define pcibus(x) \
-	(((x) & OFW_PCI_PHYS_HI_BUSMASK) >> OFW_PCI_PHYS_HI_BUSSHIFT)
-#define pcidev(x) \
-	(((x) & OFW_PCI_PHYS_HI_DEVICEMASK) >> OFW_PCI_PHYS_HI_DEVICESHIFT)
-#define pcifunc(x) \
-	(((x) & OFW_PCI_PHYS_HI_FUNCTIONMASK) >> OFW_PCI_PHYS_HI_FUNCTIONSHIFT)
-
-
-struct ppc_bus_space ppc_membus;
-int cons_displaytype=0;
-bus_space_tag_t cons_membus = &ppc_membus;
 bus_space_handle_t cons_display_mem_h;
-bus_space_handle_t cons_display_ctl_h;
-int cons_height, cons_width, cons_linebytes, cons_depth;
-int cons_display_ofh;
-u_int32_t cons_addr;
+static int display_ofh;
 int cons_brightness;
 int cons_backlight_available;
-
-#include "vgafb_pci.h"
+int fbnode;
 
 struct usb_kbd_ihandles {
         struct usb_kbd_ihandles *next;
@@ -375,29 +357,20 @@ ofw_find_keyboard()
 }
 
 void
-of_display_console()
+of_display_console(void)
 {
-#if NVGAFB_PCI > 0
+	struct ofw_pci_register addr[8];
+	int cons_height, cons_width, cons_linebytes, cons_depth;
+	uint32_t cons_addr;
 	char name[32];
-	int len;
+	int len, err;
 	int stdout_node;
-	int display_node;
-	int err;
-	u_int32_t memtag, iotag;
-	struct ppc_pci_chipset pa;
-	struct {
-		u_int32_t phys_hi, phys_mid, phys_lo;
-		u_int32_t size_hi, size_lo;
-	} addr [8];
-
-	pa.pc_make_tag = &ofw_make_tag;
 
 	stdout_node = OF_instance_to_package(OF_stdout);
 	len = OF_getprop(stdout_node, "name", name, 20);
 	name[len] = 0;
 	printf("console out [%s]", name);
-	cons_displaytype=1;
-	cons_display_ofh = OF_stdout;
+	display_ofh = OF_stdout;
 	err = OF_getprop(stdout_node, "width", &cons_width, 4);
 	if ( err != 4) {
 		cons_width = 0;
@@ -421,15 +394,15 @@ of_display_console()
 
 	ofw_find_keyboard();
 
-	display_node = stdout_node;
+	fbnode = stdout_node;
 	len = OF_getprop(stdout_node, "assigned-addresses", addr, sizeof(addr));
 	if (len == -1) {
-		display_node = OF_parent(stdout_node);
-		len = OF_getprop(display_node, "name", name, 20);
+		fbnode = OF_parent(stdout_node);
+		len = OF_getprop(fbnode, "name", name, 20);
 		name[len] = 0;
 
 		printf("using parent %s:", name);
-		len = OF_getprop(display_node, "assigned-addresses",
+		len = OF_getprop(fbnode, "assigned-addresses",
 			addr, sizeof(addr));
 		if (len < sizeof(addr[0])) {
 			panic(": no address");
@@ -439,60 +412,77 @@ of_display_console()
 	if (OF_getnodebyname(0, "backlight") != 0)
 		cons_backlight_available = 1;
 
-	memtag = ofw_make_tag(NULL, pcibus(addr[0].phys_hi),
-		pcidev(addr[0].phys_hi),
-		pcifunc(addr[0].phys_hi));
-	iotag = ofw_make_tag(NULL, pcibus(addr[1].phys_hi),
-		pcidev(addr[1].phys_hi),
-		pcifunc(addr[1].phys_hi));
-
 #if 1
 	printf(": memaddr %x size %x, ", addr[0].phys_lo, addr[0].size_lo);
 	printf(": consaddr %x, ", cons_addr);
 	printf(": ioaddr %x, size %x", addr[1].phys_lo, addr[1].size_lo);
-	printf(": memtag %x, iotag %x", memtag, iotag);
 	printf(": width %d linebytes %d height %d depth %d\n",
 		cons_width, cons_linebytes, cons_height, cons_depth);
 #endif
 
-	{
-		int i;
+#if NWSDISPLAY > 0
+{
+	struct ofwfb *fb = &ofwfb;
+	struct rasops_info *ri = &fb->ofw_ri;
+	long defattr;
 
-		cons_membus->bus_base = 0x80000000;
+	ri->ri_width = cons_width;
+	ri->ri_height = cons_height;
+	ri->ri_depth = cons_depth;
+	ri->ri_stride = cons_linebytes;
+	ri->ri_flg = RI_CENTER | RI_FULLCLEAR | RI_CLEAR;
+	ri->ri_bits = (void *)mapiodev(cons_addr, cons_linebytes * cons_height);
+	ri->ri_hw = fb;
+
+	if (cons_depth == 8)
+		of_setcolors(rasops_cmap, 0, 256);
+
+	rasops_init(ri, 160, 160);
+
+	strlcpy(fb->ofw_wsd.name, "std", sizeof(fb->ofw_wsd.name));
+	fb->ofw_wsd.capabilities = ri->ri_caps;
+	fb->ofw_wsd.ncols = ri->ri_cols;
+	fb->ofw_wsd.nrows = ri->ri_rows;
+	fb->ofw_wsd.textops = &ri->ri_ops;
 #if 0
-		err = bus_space_map( cons_membus, cons_addr, addr[0].size_lo,
-			0, &cons_display_mem_h);
-		printf("mem map err %x",err);
-		bus_space_map( cons_membus, addr[1].phys_lo, addr[1].size_lo,
-			0, &cons_display_ctl_h);
+	fb->ofw_wsd.fontwidth = ri->ri_font->fontwidth;
+	fb->ofw_wsd.fontheight = ri->ri_font->fontheight;
 #endif
 
-		vgafb_pci_console(cons_membus,
-			addr[1].phys_lo, addr[1].size_lo,
-			cons_membus,
-			cons_addr, addr[0].size_lo,
-			&pa, pcibus(addr[1].phys_hi), pcidev(addr[1].phys_hi),
-			pcifunc(addr[1].phys_hi));
-
-#if 1
-		for (i = 0; i < cons_linebytes * cons_height; i++) {
-			bus_space_write_1(cons_membus,
-				cons_display_mem_h, i, 0);
-
-		}
+	ri->ri_ops.alloc_attr(ri, 0, 0, 0, &defattr);
+	wsdisplay_cnattach(&fb->ofw_wsd, ri, 0, 0, defattr);
+}
 #endif
-	}
+}
 
-	if (cons_backlight_available == 1)
-		of_setbrightness(DEFAULT_BRIGHTNESS);
+void
+ofwconsswitch(struct rasops_info *ri)
+{
+#if NWSDISPLAY > 0
+	ri->ri_width = ofwfb.ofw_ri.ri_width;
+	ri->ri_height = ofwfb.ofw_ri.ri_height;
+	ri->ri_depth = ofwfb.ofw_ri.ri_depth;
+	ri->ri_stride = ofwfb.ofw_ri.ri_stride;
+
+	ri->ri_bits = ofwfb.ofw_ri.ri_bits /* XXX */;
 #endif
+}
+
+void
+of_setbacklight(int on)
+{
+	if (cons_backlight_available == 0)
+		return;
+
+	if (on)
+		OF_call_method_1("backlight-on", display_ofh, 0);
+	else
+		OF_call_method_1("backlight-off", display_ofh, 0);
 }
 
 void
 of_setbrightness(int brightness)
 {
-
-#if NVGAFB_PCI > 0
 	if (cons_backlight_available == 0)
 		return;
 
@@ -507,10 +497,18 @@ of_setbrightness(int brightness)
 	 * The OF method is called "set-contrast" but affects brightness.
 	 * Don't ask.
 	 */
-	OF_call_method_1("set-contrast", cons_display_ofh, 1, cons_brightness);
+	OF_call_method_1("set-contrast", display_ofh, 1, cons_brightness);
 
 	/* XXX this routine should also save the brightness settings in the nvram */
-#endif
+}
+
+uint8_t of_cmap[256];
+
+void
+of_setcolors(const uint8_t *cmap, unsigned int index, unsigned int count)
+{
+	bcopy(cmap, of_cmap, sizeof(of_cmap));
+	OF_call_method_1("set-colors", display_ofh, 3, &of_cmap, index, count);
 }
 
 #include <dev/cons.h>

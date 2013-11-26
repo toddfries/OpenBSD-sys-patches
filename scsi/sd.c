@@ -1,4 +1,4 @@
-/*	$OpenBSD: sd.c,v 1.239 2011/10/10 20:39:20 kettenis Exp $	*/
+/*	$OpenBSD: sd.c,v 1.251 2013/11/01 17:36:19 krw Exp $	*/
 /*	$NetBSD: sd.c,v 1.111 1997/04/02 02:29:41 mycroft Exp $	*/
 
 /*-
@@ -47,6 +47,7 @@
  * Ported to run under 386BSD by Julian Elischer (julian@dialix.oz.au) Sept 1992
  */
 
+#include <sys/stdint.h>
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -104,10 +105,10 @@ void	viscpy(u_char *, u_char *, int);
 int	sd_ioctl_inquiry(struct sd_softc *, struct dk_inquiry *);
 int	sd_ioctl_cache(struct sd_softc *, long, struct dk_cache *);
 
-void	sd_cmd_rw6(struct scsi_xfer *, int, daddr64_t, u_int);
-void	sd_cmd_rw10(struct scsi_xfer *, int, daddr64_t, u_int);
-void	sd_cmd_rw12(struct scsi_xfer *, int, daddr64_t, u_int);
-void	sd_cmd_rw16(struct scsi_xfer *, int, daddr64_t, u_int);
+void	sd_cmd_rw6(struct scsi_xfer *, int, u_int64_t, u_int);
+void	sd_cmd_rw10(struct scsi_xfer *, int, u_int64_t, u_int);
+void	sd_cmd_rw12(struct scsi_xfer *, int, u_int64_t, u_int);
+void	sd_cmd_rw16(struct scsi_xfer *, int, u_int64_t, u_int);
 
 void	sd_buf_done(struct scsi_xfer *);
 
@@ -224,7 +225,7 @@ sdattach(struct device *parent, struct device *self, void *aux)
 
 	switch (result) {
 	case SDGP_RESULT_OK:
-		printf("%s: %lldMB, %lu bytes/sector, %lld sectors",
+		printf("%s: %lluMB, %lu bytes/sector, %llu sectors",
 		    sc->sc_dev.dv_xname,
 		    dp->disksize / (1048576 / dp->secsize), dp->secsize,
 		    dp->disksize);
@@ -286,14 +287,23 @@ sdactivate(struct device *self, int act)
 	switch (act) {
 	case DVACT_SUSPEND:
 		/*
+		 * We flush the cache, since we our next step before
+		 * DVACT_POWERDOWN might be a hibernate operation.
+		 */
+		if ((sc->flags & SDF_DIRTY) != 0)
+			sd_flush(sc, SCSI_AUTOCONF);
+		break;
+	case DVACT_POWERDOWN:
+		/*
 		 * Stop the disk.  Stopping the disk should flush the
 		 * cache, but we are paranoid so we flush the cache
 		 * first.
 		 */
 		if ((sc->flags & SDF_DIRTY) != 0)
 			sd_flush(sc, SCSI_AUTOCONF);
-		scsi_start(sc->sc_link, SSS_STOP,
-		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_AUTOCONF);
+		if (boothowto & RB_POWERDOWN)
+			scsi_start(sc->sc_link, SSS_STOP,
+			    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_AUTOCONF);
 		break;
 	case DVACT_RESUME:
 		scsi_start(sc->sc_link, SSS_START,
@@ -521,8 +531,8 @@ sdstrategy(struct buf *bp)
 		goto bad;
 	}
 
-	SC_DEBUG(sc->sc_link, SDEV_DB2, ("sdstrategy: %ld bytes @ blk %d\n",
-	    bp->b_bcount, bp->b_blkno));
+	SC_DEBUG(sc->sc_link, SDEV_DB2, ("sdstrategy: %ld bytes @ blk %lld\n",
+	    bp->b_bcount, (long long)bp->b_blkno));
 	/*
 	 * If the device has been made invalid, error out
 	 */
@@ -562,7 +572,7 @@ sdstrategy(struct buf *bp)
 }
 
 void
-sd_cmd_rw6(struct scsi_xfer *xs, int read, daddr64_t secno, u_int nsecs)
+sd_cmd_rw6(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw *cmd = (struct scsi_rw *)xs->cmd;
 
@@ -574,7 +584,7 @@ sd_cmd_rw6(struct scsi_xfer *xs, int read, daddr64_t secno, u_int nsecs)
 }
 
 void
-sd_cmd_rw10(struct scsi_xfer *xs, int read, daddr64_t secno, u_int nsecs)
+sd_cmd_rw10(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw_big *cmd = (struct scsi_rw_big *)xs->cmd;
 
@@ -586,7 +596,7 @@ sd_cmd_rw10(struct scsi_xfer *xs, int read, daddr64_t secno, u_int nsecs)
 }
 
 void
-sd_cmd_rw12(struct scsi_xfer *xs, int read, daddr64_t secno, u_int nsecs)
+sd_cmd_rw12(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw_12 *cmd = (struct scsi_rw_12 *)xs->cmd;
 
@@ -598,7 +608,7 @@ sd_cmd_rw12(struct scsi_xfer *xs, int read, daddr64_t secno, u_int nsecs)
 }
 
 void
-sd_cmd_rw16(struct scsi_xfer *xs, int read, daddr64_t secno, u_int nsecs)
+sd_cmd_rw16(struct scsi_xfer *xs, int read, u_int64_t secno, u_int nsecs)
 {
 	struct scsi_rw_16 *cmd = (struct scsi_rw_16 *)xs->cmd;
 
@@ -628,7 +638,7 @@ sdstart(struct scsi_xfer *xs)
 	struct scsi_link *link = xs->sc_link;
 	struct sd_softc *sc = link->device_softc;
 	struct buf *bp;
-	daddr64_t secno;
+	u_int64_t secno;
 	int nsecs;
 	int read;
 	struct partition *p;
@@ -649,7 +659,8 @@ sdstart(struct scsi_xfer *xs)
 		return;
 	}
 
-	secno = bp->b_blkno / (sc->sc_dk.dk_label->d_secsize / DEV_BSIZE);
+	secno = DL_BLKTOSEC(sc->sc_dk.dk_label, bp->b_blkno);
+
 	p = &sc->sc_dk.dk_label->d_partitions[DISKPART(bp->b_dev)];
 	secno += DL_GETPOFFSET(p);
 	nsecs = howmany(bp->b_bcount, sc->sc_dk.dk_label->d_secsize);
@@ -732,8 +743,10 @@ sd_buf_done(struct scsi_xfer *xs)
 			bp->b_resid = xs->resid;
 			break;
 		}
-		if (error != ERESTART)
+		if (error != ERESTART) {
+			bp->b_error = error;
 			xs->retries = 0;
+		}
 		goto retry;
 
 	case XS_BUSY:
@@ -752,7 +765,8 @@ retry:
 		/* FALLTHROUGH */
 
 	default:
-		bp->b_error = EIO;
+		if (bp->b_error == 0)
+			bp->b_error = EIO;
 		bp->b_flags |= B_ERROR;
 		bp->b_resid = bp->b_bcount;
 		break;
@@ -1128,16 +1142,6 @@ sd_shutdown(void *arg)
 	 */
 	if ((sc->flags & SDF_DIRTY) != 0)
 		sd_flush(sc, SCSI_AUTOCONF);
-	if (boothowto & RB_POWERDOWN)
-		scsi_start(sc->sc_link, SSS_STOP,
-		    SCSI_IGNORE_ILLEGAL_REQUEST | SCSI_AUTOCONF);
-
-	/*
-	 * There should be no outstanding IO at this point, but lets stop
-	 * it just in case.
-	 */
-	timeout_del(&sc->sc_timeout);
-	scsi_xsh_del(&sc->sc_xsh);
 }
 
 /*
@@ -1190,12 +1194,13 @@ sd_interpret_sense(struct scsi_xfer *xs)
 	return (retval);
 }
 
-daddr64_t
+daddr_t
 sdsize(dev_t dev)
 {
+	struct disklabel *lp;
 	struct sd_softc *sc;
 	int part, omask;
-	int64_t size;
+	daddr_t size;
 
 	sc = sdlookup(DISKUNIT(dev));
 	if (sc == NULL)
@@ -1212,13 +1217,14 @@ sdsize(dev_t dev)
 		size = -1;
 		goto exit;
 	}
+
+	lp = sc->sc_dk.dk_label;
 	if ((sc->sc_link->flags & SDEV_MEDIA_LOADED) == 0)
 		size = -1;
-	else if (sc->sc_dk.dk_label->d_partitions[part].p_fstype != FS_SWAP)
+	else if (lp->d_partitions[part].p_fstype != FS_SWAP)
 		size = -1;
 	else
-		size = DL_GETPSIZE(&sc->sc_dk.dk_label->d_partitions[part]) *
-			(sc->sc_dk.dk_label->d_secsize / DEV_BSIZE);
+		size = DL_SECTOBLK(lp, DL_GETPSIZE(&lp->d_partitions[part]));
 	if (omask == 0 && sdclose(dev, 0, S_IFBLK, NULL) != 0)
 		size = -1;
 
@@ -1235,22 +1241,24 @@ static int sddoingadump;
  * at offset 'dumplo' into the partition.
  */
 int
-sddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
+sddump(dev_t dev, daddr_t blkno, caddr_t va, size_t size)
 {
 	struct sd_softc *sc;	/* disk unit to do the I/O */
 	struct disklabel *lp;	/* disk's disklabel */
 	int	unit, part;
-	int	sectorsize;	/* size of a disk sector */
-	daddr64_t	nsects;		/* number of sectors in partition */
-	daddr64_t	sectoff;	/* sector offset of partition */
-	int	totwrt;		/* total number of sectors left to write */
-	int	nwrt;		/* current number of sectors to write */
+	u_int32_t sectorsize;	/* size of a disk sector */
+	u_int64_t nsects;	/* number of sectors in partition */
+	u_int64_t sectoff;	/* sector offset of partition */
+	u_int64_t totwrt;	/* total number of sectors left to write */
+	u_int32_t nwrt;		/* current number of sectors to write */
 	struct scsi_xfer *xs;	/* ... convenience */
 	int rv;
 
 	/* Check if recursive dump; if so, punt. */
 	if (sddoingadump)
 		return EFAULT;
+	if (blkno < 0)
+		return EINVAL;
 
 	/* Mark as active early. */
 	sddoingadump = 1;
@@ -1278,21 +1286,26 @@ sddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 	sectorsize = lp->d_secsize;
 	if ((size % sectorsize) != 0)
 		return EFAULT;
+	if ((blkno % DL_BLKSPERSEC(lp)) != 0)
+		return EFAULT;
 	totwrt = size / sectorsize;
-	blkno = dbtob(blkno) / sectorsize;	/* blkno in DEV_BSIZE units */
+	blkno = DL_BLKTOSEC(lp, blkno);
 
 	nsects = DL_GETPSIZE(&lp->d_partitions[part]);
 	sectoff = DL_GETPOFFSET(&lp->d_partitions[part]);
 
 	/* Check transfer bounds against partition size. */
-	if ((blkno < 0) || ((blkno + totwrt) > nsects))
+	if ((blkno + totwrt) > nsects)
 		return EINVAL;
 
 	/* Offset block number to start of partition. */
 	blkno += sectoff;
 
 	while (totwrt > 0) {
-		nwrt = totwrt;		/* XXX */
+		if (totwrt > UINT32_MAX)
+			nwrt = UINT32_MAX;
+		else
+			nwrt = totwrt;
 
 #ifndef	SD_DUMP_NOT_TRUSTED
 		xs = scsi_xs_get(sc->sc_link, SCSI_NOSLEEP);
@@ -1312,7 +1325,8 @@ sddump(dev_t dev, daddr64_t blkno, caddr_t va, size_t size)
 			return (ENXIO);
 #else	/* SD_DUMP_NOT_TRUSTED */
 		/* Let's just talk about this first... */
-		printf("sd%d: dump addr 0x%x, blk %d\n", unit, va, blkno);
+		printf("sd%d: dump addr 0x%x, blk %lld\n", unit, va,
+		    (long long)blkno);
 		delay(500 * 1000);	/* half a second */
 #endif	/* SD_DUMP_NOT_TRUSTED */
 

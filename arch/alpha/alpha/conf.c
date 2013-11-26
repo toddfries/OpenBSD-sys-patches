@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.67 2011/10/06 20:49:27 deraadt Exp $	*/
+/*	$OpenBSD: conf.c,v 1.74 2013/11/04 17:14:26 deraadt Exp $	*/
 /*	$NetBSD: conf.c,v 1.16 1996/10/18 21:26:57 cgd Exp $	*/
 
 /*-
@@ -51,7 +51,6 @@ bdev_decl(fd);
 #include "sd.h"
 #include "uk.h"
 #include "vnd.h"
-#include "raid.h"
 #include "rd.h"
 #include "bktr.h"
 #include "radio.h"
@@ -74,7 +73,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 13 */
 	bdev_lkm_dummy(),		/* 14 */
 	bdev_lkm_dummy(),		/* 15 */
-	bdev_disk_init(NRAID,raid),	/* 16 */
+	bdev_notdef(),			/* 16 was: RAIDframe disk driver */
 };
 int	nblkdev = nitems(bdevsw);
 
@@ -84,7 +83,6 @@ cdev_decl(mm);
 #include "pty.h"
 #include "tun.h"
 #include "bpfilter.h"
-#include "iop.h"
 #include "ch.h"
 #include "scc.h"
 cdev_decl(scc);
@@ -98,8 +96,6 @@ cdev_decl(com);
 #include "wsmux.h"
 #include "midi.h"
 cdev_decl(midi);
-#include "sequencer.h"
-cdev_decl(music);
 
 #include "spkr.h"
 cdev_decl(spkr);
@@ -112,10 +108,6 @@ cdev_decl(wd);
 cdev_decl(fd);
 #include "cy.h"
 cdev_decl(cy);
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 #include "ksyms.h"
 
 /* USB Devices */
@@ -125,18 +117,17 @@ cdev_decl(nnpfs_dev);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
-#include "uscanner.h"
 #include "pf.h"
 #ifdef USER_PCICONF
 #include "pci.h"
 cdev_decl(pci);
 #endif
-#include "bthub.h"
 
 #include "systrace.h"
 #include "hotplug.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct cdevsw	cdevsw[] =
 {
@@ -182,8 +173,8 @@ struct cdevsw	cdevsw[] =
 	cdev_ksyms_init(NKSYMS,ksyms),	/* 39: Kernel symbols device */
 	cdev_spkr_init(NSPKR,spkr),	/* 40: PC speaker */
 	cdev_midi_init(NMIDI,midi),     /* 41: MIDI I/O */
-        cdev_midi_init(NSEQUENCER,sequencer),   /* 42: sequencer I/O */
-	cdev_disk_init(NRAID,raid),	/* 43: RAIDframe disk driver */
+        cdev_notdef(),   		/* 42 was: sequencer I/O */
+	cdev_notdef(),			/* 43 was: RAIDframe disk driver */
 	cdev_video_init(NVIDEO,video),	/* 44: generic video I/O */
 	cdev_usb_init(NUSB,usb),	/* 45: USB controller */
 	cdev_usbdev_init(NUHID,uhid),	/* 46: USB generic HID */
@@ -191,18 +182,14 @@ struct cdevsw	cdevsw[] =
 	cdev_usbdev_init(NUGEN,ugen),	/* 48: USB generic driver */
 	cdev_tty_init(NUCOM, ucom),	/* 49: USB tty */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 #ifdef USER_PCICONF
 	cdev_pci_init(NPCI,pci),	/* 52: PCI user */
 #else
 	cdev_notdef(),
 #endif
 	cdev_bio_init(NBIO,bio),	/* 53: ioctl tunnel */
-	cdev_iop_init(NIOP, iop),	/* 54: I2O IOP control interface */
+	cdev_notdef(),
 	cdev_ptm_init(NPTY,ptm),	/* 55: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 56: devices hot plugging */
 	cdev_crypto_init(NCRYPTO,crypto), /* 57: /dev/crypto */
@@ -210,11 +197,12 @@ struct cdevsw	cdevsw[] =
 	cdev_radio_init(NRADIO,radio), /* 59: generic radio I/O */
 	cdev_mouse_init(NWSMUX, wsmux),	/* 60: ws multiplexor */
 	cdev_vscsi_init(NVSCSI, vscsi),	/* 61: vscsi */
-	cdev_bthub_init(NBTHUB, bthub), /* 62: bthub */
+	cdev_notdef(),
 	cdev_disk_init(1,diskmap),	/* 63: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 64: pppx */
 	cdev_urio_init(NURIO,urio),	/* 65: USB Diamond Rio 500 */
-	cdev_usbdev_init(NUSCANNER,uscanner),	/* 66: USB scanners */
+	cdev_notdef(),			/* 66: was USB scanners */
+	cdev_fuse_init(NFUSE,fuse),	/* 67: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 

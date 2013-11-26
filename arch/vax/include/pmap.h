@@ -1,4 +1,4 @@
-/*      $OpenBSD: pmap.h,v 1.32 2011/03/23 16:54:37 pirofti Exp $     */
+/*      $OpenBSD: pmap.h,v 1.37 2013/11/24 22:08:23 miod Exp $     */
 /*	$NetBSD: pmap.h,v 1.37 1999/08/01 13:48:07 ragge Exp $	   */
 
 /* 
@@ -52,27 +52,25 @@
 /*
  * Some constants to make life easier.
  */
-#define LTOHPS		(PGSHIFT - VAX_PGSHIFT)
+#define LTOHPS		(PAGE_SHIFT - VAX_PGSHIFT)
 #define LTOHPN		(1 << LTOHPS)
-#define USRPTSIZE ((MAXTSIZ + 40*1024*1024 + MAXSSIZ) / VAX_NBPG)
-#define	NPTEPGS	(USRPTSIZE / (sizeof(pt_entry_t) * LTOHPN))
 
 /*
  * Pmap structure
- *  pm_stack holds lowest allocated memory for the process stack.
  */
 
-typedef struct pmap {
-	vaddr_t	pm_stack;	/* Base of alloced p1 pte space */
-	int		 ref_count;	/* reference count	  */
+struct pmap {
+	pt_entry_t	*pm_p1ap;	/* Base of alloced p1 pte space */
+	u_int		 pm_count;	/* reference count */
+	struct pcb	*pm_pcbs;	/* PCBs using this pmap */
 	pt_entry_t	*pm_p0br;	/* page 0 base register */
-	long		 pm_p0lr;	/* page 0 length register */
+	u_long		 pm_p0lr;	/* page 0 length register */
 	pt_entry_t	*pm_p1br;	/* page 1 base register */
-	long		 pm_p1lr;	/* page 1 length register */
-	int		 pm_lock;	/* Lock entry in MP environment */
+	u_long		 pm_p1lr;	/* page 1 length register */
 	struct pmap_statistics	 pm_stats;	/* Some statistics */
-	u_char		 pm_refcnt[NPTEPGS];	/* Refcount per pte page */
-} *pmap_t;
+};
+
+typedef struct pmap *pmap_t;
 
 /*
  * For each vm_page_t, there is a list of all currently valid virtual
@@ -81,18 +79,9 @@ typedef struct pmap {
 
 struct pv_entry {
 	struct pv_entry *pv_next;	/* next pv_entry */
-	pt_entry_t	*pv_pte;	/* pte for this physical page */
 	struct pmap	*pv_pmap;	/* pmap this entry belongs to */
+	vaddr_t		 pv_va;		/* address of the virtual mapping */
 };
-
-/* Mapping macros used when allocating SPT */
-#define MAPVIRT(ptr, count)					\
-	(vaddr_t)ptr = virtual_avail;				\
-	virtual_avail += (count) * VAX_NBPG;
-
-#define MAPPHYS(ptr, count, perm)				\
-	(paddr_t)ptr = avail_start + KERNBASE;			\
-	avail_start += (count) * VAX_NBPG;
 
 extern	struct pmap kernel_pmap_store;
 
@@ -103,7 +92,7 @@ extern	struct pmap kernel_pmap_store;
  * (and vice versa).
  */
 #define pmap_map_direct(pg)	(VM_PAGE_TO_PHYS(pg) | KERNBASE)
-#define pmap_unmap_direct(va) PHYS_TO_VM_PAGE((va) & ~KERNBASE)
+#define pmap_unmap_direct(va)	PHYS_TO_VM_PAGE((va) & ~KERNBASE)
 #define	__HAVE_PMAP_DIRECT
 
 #define PMAP_STEAL_MEMORY
@@ -114,25 +103,25 @@ extern	struct pmap kernel_pmap_store;
 
 /* Routines that are best to define as macros */
 #define pmap_copy(a,b,c,d,e)		/* Dont do anything */
+#define pmap_collect(pm)		/* nothing */
 #define pmap_update(pm)			/* nothing */
-#define pmap_collect(pmap)		/* No need so far */
 #define pmap_remove(pmap, start, slut)	pmap_protect(pmap, start, slut, 0)
 #define pmap_resident_count(pmap)	((pmap)->pm_stats.resident_count)
-#define pmap_deactivate(p)		/* Dont do anything */
-#define pmap_reference(pmap)		(pmap)->ref_count++
+#define pmap_wired_count(pmap)		((pmap)->pm_stats.wired_count)
+#define pmap_reference(pmap)		(pmap)->pm_count++
 
 /* These can be done as efficient inline macros */
 #define pmap_copy_page(srcpg, dstpg) do {				\
 	paddr_t __src = VM_PAGE_TO_PHYS(srcpg);				\
 	paddr_t __dst = VM_PAGE_TO_PHYS(dstpg);				\
-	__asm__("addl3 $0x80000000,%0,r0;addl3 $0x80000000,%1,r1;	\
-	    movc3 $4096,(r0),(r1)"					\
+	__asm__("addl3 $0x80000000,%0,%%r0;addl3 $0x80000000,%1,%%r1;	\
+	    movc3 $4096,(%%r0),(%%r1)"					\
 	    :: "r"(__src),"r"(__dst):"r0","r1","r2","r3","r4","r5");	\
 } while (0)
 
 #define pmap_zero_page(pg) do {						\
 	paddr_t __pa = VM_PAGE_TO_PHYS(pg);				\
-	__asm__("addl3 $0x80000000,%0,r0;movc5 $0,(r0),$0,$4096,(r0)"	\
+	__asm__("addl3 $0x80000000,%0,%%r0;movc5 $0,(%%r0),$0,$4096,(%%r0)" \
 	    :: "r"(__pa): "r0","r1","r2","r3","r4","r5");		\
 } while (0)
 

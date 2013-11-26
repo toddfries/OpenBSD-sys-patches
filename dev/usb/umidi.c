@@ -1,4 +1,4 @@
-/*	$OpenBSD: umidi.c,v 1.32 2011/07/03 15:47:17 matthew Exp $	*/
+/*	$OpenBSD: umidi.c,v 1.38 2013/11/10 10:22:39 pirofti Exp $	*/
 /*	$NetBSD: umidi.c,v 1.16 2002/07/11 21:14:32 augustss Exp $	*/
 /*
  * Copyright (c) 2001 The NetBSD Foundation, Inc.
@@ -38,8 +38,6 @@
 #include <sys/conf.h>
 #include <sys/file.h>
 #include <sys/selinfo.h>
-#include <sys/proc.h>
-#include <sys/vnode.h>
 #include <sys/poll.h>
 
 #include <dev/usb/usb.h>
@@ -52,6 +50,7 @@
 #include <dev/usb/umidivar.h>
 #include <dev/usb/umidi_quirks.h>
 
+#include <dev/audio_if.h>
 #include <dev/midi_if.h>
 
 #ifdef UMIDI_DEBUG
@@ -115,8 +114,8 @@ static usbd_status start_input_transfer(struct umidi_endpoint *);
 static usbd_status start_output_transfer(struct umidi_endpoint *);
 static int out_jack_output(struct umidi_jack *, int);
 static void out_jack_flush(struct umidi_jack *);
-static void in_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
-static void out_intr(usbd_xfer_handle, usbd_private_handle, usbd_status);
+static void in_intr(struct usbd_xfer *, void *, usbd_status);
+static void out_intr(struct usbd_xfer *, void *, usbd_status);
 static int out_build_packet(int, struct umidi_packet *, uByte, u_char *);
 
 
@@ -225,7 +224,7 @@ umidi_attach(struct device *parent, struct device *self, void *aux)
 	return;
 error:
 	printf("%s: disabled.\n", sc->sc_dev.dv_xname);
-	sc->sc_dying = 1;
+	usbd_deactivate(sc->sc_udev);
 }
 
 int
@@ -236,7 +235,7 @@ umidi_activate(struct device *self, int act)
 	switch (act) {
 	case DVACT_DEACTIVATE:
 		DPRINTFN(1,("umidi_activate (deactivate)\n"));
-		sc->sc_dying = 1;
+		usbd_deactivate(sc->sc_udev);
 		deactivate_all_mididevs(sc);
 		break;
 	}
@@ -278,7 +277,7 @@ umidi_open(void *addr,
 		return ENXIO;
 	if (mididev->opened)
 		return EBUSY;
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return EIO;
 
 	mididev->opened = 1;
@@ -313,7 +312,7 @@ umidi_output(void *addr, int d)
 	struct umidi_mididev *mididev = addr;
 
 	if (!mididev->out_jack || !mididev->opened)
-		return EIO;
+		return 1;
 
 	return out_jack_output(mididev->out_jack, d);
 }
@@ -745,9 +744,7 @@ alloc_all_jacks(struct umidi_softc *sc)
 		jack->binded = 0;
 		jack->arg = NULL;
 		jack->u.out.intr = NULL;
-#ifdef DIAGNOSTIC
-		jack->wait = 0;
-#endif
+		jack->intr = 0;
 		jack->cable_number = i;
 		jack++;
 	}
@@ -795,7 +792,7 @@ free_all_jacks(struct umidi_softc *sc)
 {
 	int s;
 
-	s = splaudio();
+	s = splusb();
 	if (sc->sc_out_jacks) {
 		free(sc->sc_jacks, M_USBDEV);
 		sc->sc_jacks = sc->sc_in_jacks = sc->sc_out_jacks = NULL;
@@ -1113,7 +1110,7 @@ start_input_transfer(struct umidi_endpoint *ep)
 {
 	usbd_status err;
 	usbd_setup_xfer(ep->xfer, ep->pipe,
-			(usbd_private_handle)ep,
+			(void *)ep,
 			ep->buffer, ep->packetsize,
 			USBD_SHORT_XFER_OK | USBD_NO_COPY, USBD_NO_TIMEOUT, in_intr);
 	err = usbd_transfer(ep->xfer);
@@ -1130,7 +1127,7 @@ start_output_transfer(struct umidi_endpoint *ep)
 {
 	usbd_status err;
 	usbd_setup_xfer(ep->xfer, ep->pipe,
-			(usbd_private_handle)ep,
+			(void *)ep,
 			ep->buffer, ep->used,
 			USBD_NO_COPY, USBD_NO_TIMEOUT, out_intr);
 	err = usbd_transfer(ep->xfer);
@@ -1164,57 +1161,32 @@ out_jack_output(struct umidi_jack *j, int d)
 	struct umidi_softc *sc = ep->sc;
 	int s;
 
-	if (sc->sc_dying)
-		return EIO;
+	if (usbd_is_dying(sc->sc_udev))
+		return 1;
 	if (!j->opened)
-		return ENODEV;
-		
+		return 1;
 	s = splusb();
-	if (ep->used == ep->packetsize) {
-#ifdef DIAGNOSTIC
-		if (j->wait == 0) {
-			j->wait = 1;
-#endif
+	if (ep->busy) {
+		if (!j->intr) {
 			SIMPLEQ_INSERT_TAIL(&ep->intrq, j, intrq_entry);
 			ep->pending++;
-#ifdef DIAGNOSTIC
-		} else {
-			printf("umidi: (again) %d: already on intrq\n", 
-			    j->cable_number);
-		}
-#endif
+			j->intr = 1;
+		}		
 		splx(s);
-		return EAGAIN;
+		return 0;
 	}
-	
-	if (!out_build_packet(j->cable_number, &j->packet, d, 
-	    ep->buffer + ep->used)) {
+	if (!out_build_packet(j->cable_number, &j->packet, d,
+		ep->buffer + ep->used)) {
 		splx(s);
-		return EINPROGRESS;
+		return 1;
 	}
 	ep->used += UMIDI_PACKET_SIZE;
-	if (ep->used < ep->packetsize) {
-		splx(s);
-		return EINPROGRESS;
-	}
-#ifdef DIAGNOSTIC
-	if (j->wait == 0) {
-		j->wait = 1;		
-#endif
-		SIMPLEQ_INSERT_TAIL(&ep->intrq, j, intrq_entry);
-		ep->pending++;
-#ifdef DIAGNOSTIC
-	} else {
-		printf("umidi: (ok) %d: already on intrq\n", 
-		    j->cable_number);
-	}
-#endif
-	if (!ep->busy) {
+	if (ep->used == ep->packetsize) {
 		ep->busy = 1;
 		start_output_transfer(ep);
 	}
 	splx(s);
-	return 0;
+	return 1;
 }
 
 static void
@@ -1223,7 +1195,7 @@ out_jack_flush(struct umidi_jack *j)
 	struct umidi_endpoint *ep = j->endpoint;
 	int s;
 
-	if (ep->sc->sc_dying || !j->opened)
+	if (usbd_is_dying(ep->sc->sc_udev) || !j->opened)
 		return;
 		
 	s = splusb();	
@@ -1236,14 +1208,14 @@ out_jack_flush(struct umidi_jack *j)
 
 
 static void
-in_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+in_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	int cn, evlen, remain, i;
 	unsigned char *buf;
 	struct umidi_endpoint *ep = (struct umidi_endpoint *)priv;
 	struct umidi_jack *jack;
 
-	if (ep->sc->sc_dying)
+	if (usbd_is_dying(ep->sc->sc_udev))
 		return;
 
 	usbd_get_xfer_status(xfer, NULL, NULL, &remain, NULL);
@@ -1257,8 +1229,10 @@ in_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 		if (cn < ep->num_jacks && (jack = ep->jacks[cn]) &&
 		    jack->binded && jack->opened &&  jack->u.in.intr) {
 		    	evlen = packet_length[GET_CIN(buf[0])];
+			mtx_enter(&audio_lock);
 			for (i=0; i<evlen; i++)
 				(*jack->u.in.intr)(jack->arg, buf[i+1]);
+			mtx_leave(&audio_lock);
 		}
 		buf += UMIDI_PACKET_SIZE;
 		remain -= UMIDI_PACKET_SIZE;
@@ -1267,17 +1241,18 @@ in_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 }
 
 static void
-out_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
+out_intr(struct usbd_xfer *xfer, void *priv, usbd_status status)
 {
 	struct umidi_endpoint *ep = (struct umidi_endpoint *)priv;
 	struct umidi_softc *sc = ep->sc;
 	struct umidi_jack *j;
 	unsigned pending;
 	
-	if (sc->sc_dying)
+	if (usbd_is_dying(sc->sc_udev))
 		return;
 
 	ep->used = 0;
+	ep->busy = 0;
 	for (pending = ep->pending; pending > 0; pending--) {
 		j = SIMPLEQ_FIRST(&ep->intrq);
 #ifdef DIAGNOSTIC
@@ -1288,17 +1263,11 @@ out_intr(usbd_xfer_handle xfer, usbd_private_handle priv, usbd_status status)
 #endif
 		SIMPLEQ_REMOVE_HEAD(&ep->intrq, intrq_entry);
 		ep->pending--;
-#ifdef DIAGNOSTIC
-		j->wait = 0;
-#endif
+		j->intr = 0;
+		mtx_enter(&audio_lock);
 		if (j->opened && j->u.out.intr)
 			(*j->u.out.intr)(j->arg);
-	}
-
-	if (ep->used == 0) {
-		ep->busy = 0;
-	} else {
-		start_output_transfer(ep);
+		mtx_leave(&audio_lock);
 	}
 }
 

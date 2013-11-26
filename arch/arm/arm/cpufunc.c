@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpufunc.c,v 1.16 2011/11/08 17:06:51 deraadt Exp $	*/
+/*	$OpenBSD: cpufunc.c,v 1.24 2013/09/03 16:48:26 patrick Exp $	*/
 /*	$NetBSD: cpufunc.c,v 1.65 2003/11/05 12:53:15 scw Exp $	*/
 
 /*
@@ -108,8 +108,10 @@ struct cpu_functions arm8_cpufuncs = {
 	cpufunc_control,		/* control		*/
 	cpufunc_domains,		/* domain		*/
 	arm8_setttb,			/* setttb		*/
-	cpufunc_faultstatus,		/* faultstatus		*/
-	cpufunc_faultaddress,		/* faultaddress		*/
+	cpufunc_dfsr,			/* dfsr			*/
+	cpufunc_dfar,			/* dfar			*/
+	cpufunc_ifsr,			/* ifsr			*/
+	cpufunc_ifar,			/* ifar			*/
 
 	/* TLB functions */
 
@@ -132,6 +134,11 @@ struct cpu_functions arm8_cpufuncs = {
 
 	arm8_cache_purgeID,		/* idcache_wbinv_all	*/
 	(void *)arm8_cache_purgeID,	/* idcache_wbinv_range	*/
+
+	cpufunc_nullop,			/* sdcache_wbinv_all	*/
+	(void *)cpufunc_nullop,		/* sdcache_wbinv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_inv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_wb_range	*/
 
 	/* Other functions */
 
@@ -158,8 +165,10 @@ struct cpu_functions arm9_cpufuncs = {
 	cpufunc_control,		/* control		*/
 	cpufunc_domains,		/* Domain		*/
 	arm9_setttb,			/* Setttb		*/
-	cpufunc_faultstatus,		/* Faultstatus		*/
-	cpufunc_faultaddress,		/* Faultaddress		*/
+	cpufunc_dfsr,			/* dfsr			*/
+	cpufunc_dfar,			/* dfar			*/
+	cpufunc_ifsr,			/* ifsr			*/
+	cpufunc_ifar,			/* ifar			*/
 
 	/* TLB functions */
 
@@ -183,6 +192,11 @@ struct cpu_functions arm9_cpufuncs = {
 
 	arm9_idcache_wbinv_all,		/* idcache_wbinv_all	*/
 	arm9_idcache_wbinv_range,	/* idcache_wbinv_range	*/
+
+	cpufunc_nullop,			/* sdcache_wbinv_all	*/
+	(void *)cpufunc_nullop,		/* sdcache_wbinv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_inv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_wb_range	*/
 
 	/* Other functions */
 
@@ -209,8 +223,10 @@ struct cpu_functions armv5_ec_cpufuncs = {
 	cpufunc_control,		/* control		*/
 	cpufunc_domains,		/* Domain		*/
 	armv5_ec_setttb,		/* Setttb		*/
-	cpufunc_faultstatus,		/* Faultstatus		*/
-	cpufunc_faultaddress,		/* Faultaddress		*/
+	cpufunc_dfsr,			/* dfsr			*/
+	cpufunc_dfar,			/* dfar			*/
+	cpufunc_ifsr,			/* ifsr			*/
+	cpufunc_ifar,			/* ifar			*/
 
 	/* TLB functions */
 
@@ -235,6 +251,11 @@ struct cpu_functions armv5_ec_cpufuncs = {
 	armv5_ec_idcache_wbinv_all,	/* idcache_wbinv_all	*/
 	armv5_ec_idcache_wbinv_range,	/* idcache_wbinv_range	*/
 
+	cpufunc_nullop,			/* sdcache_wbinv_all	*/
+	(void *)cpufunc_nullop,		/* sdcache_wbinv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_inv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_wb_range	*/
+
 	/* Other functions */
 
 	cpufunc_nullop,			/* flush_prefetchbuf	*/
@@ -244,7 +265,7 @@ struct cpu_functions armv5_ec_cpufuncs = {
 
 	/* Soft functions */
 	arm10_context_switch,		/* context_switch	*/
-	arm10_setup			/* cpu setup		*/
+	arm9e_setup			/* cpu setup		*/
 };
 #endif /* CPU_ARM9E || CPU_ARM10 */
 
@@ -261,8 +282,10 @@ struct cpu_functions arm10_cpufuncs = {
 	cpufunc_control,		/* control		*/
 	cpufunc_domains,		/* Domain		*/
 	armv5_setttb,			/* Setttb		*/
-	cpufunc_faultstatus,		/* Faultstatus		*/
-	cpufunc_faultaddress,		/* Faultaddress		*/
+	cpufunc_dfsr,			/* dfsr			*/
+	cpufunc_dfar,			/* dfar			*/
+	cpufunc_ifsr,			/* ifsr			*/
+	cpufunc_ifar,			/* ifar			*/
 
 	/* TLB functions */
 
@@ -285,6 +308,11 @@ struct cpu_functions arm10_cpufuncs = {
 
 	armv5_idcache_wbinv_all,	/* idcache_wbinv_all	*/
 	armv5_idcache_wbinv_range,	/* idcache_wbinv_range	*/
+
+	cpufunc_nullop,			/* sdcache_wbinv_all	*/
+	(void *)cpufunc_nullop,		/* sdcache_wbinv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_inv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_wb_range	*/
 
 	/* Other functions */
 
@@ -311,8 +339,10 @@ struct cpu_functions arm11_cpufuncs = {
 	cpufunc_control,		/* control			*/
 	cpufunc_domains,		/* Domain			*/
 	arm11_setttb,			/* Setttb			*/
-	cpufunc_faultstatus,		/* Faultstatus			*/
-	cpufunc_faultaddress,		/* Faultaddress			*/
+	cpufunc_dfsr,			/* dfsr			*/
+	cpufunc_dfar,			/* dfar			*/
+	cpufunc_ifsr,			/* ifsr			*/
+	cpufunc_ifar,			/* ifar			*/
 
 	/* TLB functions */
 
@@ -335,6 +365,11 @@ struct cpu_functions arm11_cpufuncs = {
 
 	armv5_idcache_wbinv_all,	/* idcache_wbinv_all	*/
 	armv5_idcache_wbinv_range,	/* idcache_wbinv_range	*/
+
+	cpufunc_nullop,			/* sdcache_wbinv_all	*/
+	(void *)cpufunc_nullop,		/* sdcache_wbinv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_inv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_wb_range	*/
 
 	/* Other functions */
 
@@ -361,8 +396,10 @@ struct cpu_functions armv7_cpufuncs = {
 	cpufunc_control,		/* control		*/
 	cpufunc_domains,		/* Domain		*/
 	armv7_setttb,			/* Setttb		*/
-	cpufunc_faultstatus,		/* Faultstatus		*/
-	cpufunc_faultaddress,		/* Faultaddress		*/
+	cpufunc_dfsr,			/* dfsr			*/
+	cpufunc_dfar,			/* dfar			*/
+	cpufunc_ifsr,			/* ifsr			*/
+	cpufunc_ifar,			/* ifar			*/
 
 	/* TLB functions */
 
@@ -380,11 +417,16 @@ struct cpu_functions armv7_cpufuncs = {
 
 	armv7_dcache_wbinv_all,		/* dcache_wbinv_all	*/
 	armv7_dcache_wbinv_range,	/* dcache_wbinv_range	*/
-/*XXX*/	armv7_dcache_wbinv_range,	/* dcache_inv_range	*/
+	armv7_dcache_inv_range,		/* dcache_inv_range	*/
 	armv7_dcache_wb_range,		/* dcache_wb_range	*/
 
 	armv7_idcache_wbinv_all,	/* idcache_wbinv_all	*/
 	armv7_idcache_wbinv_range,	/* idcache_wbinv_range	*/
+
+	cpufunc_nullop,			/* sdcache_wbinv_all	*/
+	(void *)cpufunc_nullop,		/* sdcache_wbinv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_inv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_wb_range	*/
 
 	/* Other functions */
 
@@ -412,8 +454,10 @@ struct cpu_functions sa11x0_cpufuncs = {
 	cpufunc_control,		/* control		*/
 	cpufunc_domains,		/* domain		*/
 	sa1_setttb,			/* setttb		*/
-	cpufunc_faultstatus,		/* faultstatus		*/
-	cpufunc_faultaddress,		/* faultaddress		*/
+	cpufunc_dfsr,			/* dfsr			*/
+	cpufunc_dfar,			/* dfar			*/
+	cpufunc_ifsr,			/* ifsr			*/
+	cpufunc_ifar,			/* ifar			*/
 
 	/* TLB functions */
 
@@ -436,6 +480,11 @@ struct cpu_functions sa11x0_cpufuncs = {
 
 	sa1_cache_purgeID,		/* idcache_wbinv_all	*/
 	sa1_cache_purgeID_rng,		/* idcache_wbinv_range	*/
+
+	cpufunc_nullop,			/* sdcache_wbinv_all	*/
+	(void *)cpufunc_nullop,		/* sdcache_wbinv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_inv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_wb_range	*/
 
 	/* Other functions */
 
@@ -462,8 +511,10 @@ struct cpu_functions ixp12x0_cpufuncs = {
 	cpufunc_control,		/* control		*/
 	cpufunc_domains,		/* domain		*/
 	sa1_setttb,			/* setttb		*/
-	cpufunc_faultstatus,		/* faultstatus		*/
-	cpufunc_faultaddress,		/* faultaddress		*/
+	cpufunc_dfsr,			/* dfsr			*/
+	cpufunc_dfar,			/* dfar			*/
+	cpufunc_ifsr,			/* ifsr			*/
+	cpufunc_ifar,			/* ifar			*/
 
 	/* TLB functions */
 
@@ -486,6 +537,11 @@ struct cpu_functions ixp12x0_cpufuncs = {
 
 	sa1_cache_purgeID,		/* idcache_wbinv_all	*/
 	sa1_cache_purgeID_rng,		/* idcache_wbinv_range	*/
+
+	cpufunc_nullop,			/* sdcache_wbinv_all	*/
+	(void *)cpufunc_nullop,		/* sdcache_wbinv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_inv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_wb_range	*/
 
 	/* Other functions */
 
@@ -513,8 +569,10 @@ struct cpu_functions xscale_cpufuncs = {
 	xscale_control,			/* control		*/
 	cpufunc_domains,		/* domain		*/
 	xscale_setttb,			/* setttb		*/
-	cpufunc_faultstatus,		/* faultstatus		*/
-	cpufunc_faultaddress,		/* faultaddress		*/
+	cpufunc_dfsr,			/* dfsr			*/
+	cpufunc_dfar,			/* dfar			*/
+	cpufunc_ifsr,			/* ifsr			*/
+	cpufunc_ifar,			/* ifar			*/
 
 	/* TLB functions */
 
@@ -537,6 +595,11 @@ struct cpu_functions xscale_cpufuncs = {
 
 	xscale_cache_purgeID,		/* idcache_wbinv_all	*/
 	xscale_cache_purgeID_rng,	/* idcache_wbinv_range	*/
+
+	cpufunc_nullop,			/* sdcache_wbinv_all	*/
+	(void *)cpufunc_nullop,		/* sdcache_wbinv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_inv_range	*/
+	(void *)cpufunc_nullop,		/* sdcache_wb_range	*/
 
 	/* Other functions */
 
@@ -700,105 +763,94 @@ int	arm_dcache_l2_nsets;
 int	arm_dcache_l2_assoc;
 int	arm_dcache_l2_linesize;
 
+/*
+ * Base 2 logarithm of an int. returns 0 for 0 (yeye, I know).
+ */
 static int
-log2(int size)
+log2(unsigned int i)
 {
-	int i = 0;
-	while (size != 0)
-	for (i = 0; size != 0; i++)
-		size >>= 1;
-	return i;
+	int ret = 0;
+
+	while (i >>= 1)
+		ret++;
+
+	return (ret);
 }
 
 void
 arm_get_cachetype_cp15v7(void)
 {
-	extern int pmap_cachevivt;
 	uint32_t cachereg;
 	uint32_t cache_level_id;
-	uint32_t line_size, ways, sets, size;
-	uint32_t sel;
-	uint32_t ctr;
+	uint32_t sets;
+	uint32_t sel, level;
 
-	__asm __volatile("mrc p15, 0, %0, c0, c0, 1"
-		: "=r" (ctr) :);
-
-	switch ((ctr >> 14) & 3) {
-	case 2:
-		pmap_cachevivt = 0;
-	#if 0
-		pmap_alias_dist = 0x4000;
-		pmap_alias_bits = 0x3000;
-	#endif
-		break;
-	case 3:
-		pmap_cachevivt = 0;
-		break;
-	default:
-		break;
-	}
-
+	/* CLIDR - Cache Level ID Register */
 	__asm __volatile("mrc p15, 1, %0, c0, c0, 1"
 		: "=r" (cache_level_id) :);
+	cpu_drain_writebuf();
 
-	/* dcache L1 */
-	sel = 0;
-	__asm __volatile("mcr p15, 2, %0, c0, c0, 0"
-		:: "r" (sel));
-	__asm __volatile("mrc p15, 1, %0, c0, c0, 0"
-		: "=r" (cachereg) :);
-	line_size = 1 << ((cachereg & 7)+4);
-	ways = ((0x00000ff8 & cachereg) >> 3) + 1;
-	sets = ((0x0ffff000 & cachereg) >> 13) + 1;
-	arm_pcache_unified = (cache_level_id & 0x7) == 2;
-	arm_pdcache_line_size = line_size;
-	arm_pdcache_ways = ways;
-	size = line_size * ways * sets;
-	arm_pdcache_size = size;
+	/* L1 Cache available. */
+	level = 0;
+	if (cache_level_id & (0x7 << level)) {
+		/* Unified cache. */
+		if (cache_level_id & (0x4 << level))
+			arm_pcache_unified = 1;
 
-	switch (cachereg & 0xc0000000) {
-	case 0x00000000:
-		arm_pcache_type = 0;
-		break;
-	case 0x40000000:
-	case 0xc0000000:
-		arm_pcache_type = CPU_CT_CTYPE_WB1;
-		break;
-	case 0x80000000:
-		arm_pcache_type = CPU_CT_CTYPE_WT;
-		break;
+		/* Unified or data cache separate. */
+		if (cache_level_id & (0x4 << level) ||
+		    cache_level_id & (0x2 << level)) {
+			sel = level << 1 | 0 << 0; /* L1 | unified/data cache */
+			/* CSSELR - Cache Size Selection Register */
+			__asm __volatile("mcr p15, 2, %0, c0, c0, 0"
+				:: "r" (sel));
+			cpu_drain_writebuf();
+			/* CCSIDR - Cache Size Identification Register */
+			__asm __volatile("mrc p15, 1, %0, c0, c0, 0"
+			: "=r" (cachereg) :);
+			cpu_drain_writebuf();
+			sets = ((cachereg >> 13) & 0x7fff) + 1;
+			arm_pdcache_line_size = 1 << ((cachereg & 0x7) + 4);
+			arm_pdcache_ways = ((cachereg >> 3) & 0x3ff) + 1;
+			arm_pdcache_size = arm_pdcache_line_size * arm_pdcache_ways * sets;
+			switch (cachereg & 0xc0000000) {
+			case 0x00000000:
+				arm_pcache_type = 0;
+				break;
+			case 0x40000000:
+			case 0xc0000000:
+				arm_pcache_type = CPU_CT_CTYPE_WB1;
+				break;
+			case 0x80000000:
+				arm_pcache_type = CPU_CT_CTYPE_WT;
+				break;
+			}
+		}
+
+		/* Instruction cache separate. */
+		if (cache_level_id & (0x1 << level)) {
+			sel = level << 1 | 1 << 0; /* L1 | instruction cache */
+			/* CSSELR - Cache Size Selection Register */
+			__asm __volatile("mcr p15, 2, %0, c0, c0, 0"
+				:: "r" (sel));
+			cpu_drain_writebuf();
+			/* CCSIDR - Cache Size Identification Register */
+			__asm __volatile("mrc p15, 1, %0, c0, c0, 0"
+			: "=r" (cachereg) :);
+			cpu_drain_writebuf();
+			sets = ((cachereg >> 13) & 0x7fff) + 1;
+			arm_picache_line_size = 1 << ((cachereg & 0x7) + 4);
+			arm_picache_ways = ((cachereg >> 3) & 0x3ff) + 1;
+			arm_picache_size = arm_picache_line_size * arm_picache_ways * sets;
+		}
 	}
 
-	/* icache L1 */
-	sel = 1;
-	__asm __volatile("mcr p15, 2, %0, c0, c0, 0"
-		:: "r" (sel));
-	__asm __volatile("mrc p15, 1, %0, c0, c0, 0"
-		: "=r" (cachereg) :);
-	line_size = 1 << ((cachereg & 7)+4);
-	ways = ((0x00000ff8 & cachereg) >> 3) + 1;
-	sets = ((0x0ffff000 & cachereg) >> 13) + 1;
-	arm_picache_line_size = line_size;
-	size = line_size * ways * sets;
-	arm_picache_size = size;
-	arm_picache_ways = ways;
-
 	arm_dcache_align = arm_pdcache_line_size;
-
 	arm_dcache_align_mask = arm_dcache_align - 1;
 
-	/* ucache L2 */
-	sel = 1;
-	__asm __volatile("mcr p15, 2, %0, c0, c0, 0"
-		:: "r" (sel));
-	__asm __volatile("mrc p15, 1, %0, c0, c0, 0"
-		: "=r" (cachereg) :);
-	line_size = 1 << ((cachereg & 7)+4);
-	ways = ((0x00000ff8 & cachereg) >> 3) + 1;
-	sets = ((0x0ffff000 & cachereg) >> 13) + 1;
-	arm_dcache_l2_nsets = log2(sets);
-	arm_dcache_l2_assoc = log2(ways);
-	arm_dcache_l2_linesize = log2(line_size);
+	arm_dcache_l2_nsets = arm_pdcache_size/arm_pdcache_ways/arm_pdcache_line_size;
+	arm_dcache_l2_assoc = log2(arm_pdcache_ways);
+	arm_dcache_l2_linesize = log2(arm_pdcache_line_size);
 }
 
 /* 
@@ -816,23 +868,22 @@ void
 armv7_dcache_wbinv_all()
 {
 	int sets, ways, lvl;
-	int nincr, nsets, nways;
+	int nsets, nways;
 	uint32_t wayincr, setincr;
 	uint32_t wayval, setval;
 	uint32_t word;
 
-	nsets = arm_picache_size/arm_picache_ways/arm_picache_line_size;
-	nways = arm_picache_ways;
-	nincr = arm_picache_line_size;
+	nsets = arm_dcache_l2_nsets;
+	nways = arm_pdcache_ways;
 
-	wayincr = 1 << (32 - arm_picache_ways);
-	setincr = arm_picache_line_size;
+	setincr = armv7_dcache_sets_inc;
+	wayincr = armv7_dcache_index_inc;
 
 #if 0
-	printf("l1 nsets %d nways %d nincr %d wayincr %x setincr %x\n",
-	    nsets, nways, nincr, wayincr, setincr);
+	printf("l1 nsets %d nways %d wayincr %x setincr %x\n",
+	    nsets, nways, wayincr, setincr);
 #endif
-	
+
 	lvl = 0; /* L1 */
 	setval = 0;
 	for (sets = 0; sets < nsets; sets++)  {
@@ -843,43 +894,14 @@ armv7_dcache_wbinv_all()
 			/* Clean D cache SE with Set/Index */
 			__asm __volatile("mcr	p15, 0, %0, c7, c10, 2"
 			    : : "r" (word));
-			wayval += nincr;
+			wayval += wayincr;
 		}
 		setval += setincr;
 	}
 	/* drain the write buffer */
-	__asm __volatile("mcr	p15, 0, %0, c7, c10, 4" : : "r" (0));
+	cpu_drain_writebuf();
 
-	/* L2 */
-	nsets = 1 << arm_dcache_l2_nsets;
-	nways = 1 << arm_dcache_l2_assoc;
-	nincr = 1 << arm_dcache_l2_linesize;
-
-	wayincr = 1 << (32 - arm_picache_ways);
-	setincr = arm_picache_line_size;
-
-#if 0
-	printf("l2 nsets %d nways %d nincr %d wayincr %x setincr %x\n",
-	    nsets, nways, nincr, wayincr, setincr);
-#endif
-	
-	lvl = 1 << 1; /* L2 */
-	setval = 0;
-	for (sets = 0; sets < nsets; sets++)  {
-		wayval = 0;
-		for (ways = 0; ways < nways; ways++) {
-			word = wayval | setval | lvl;
-
-			/* Clean D cache SE with Set/Index */
-			__asm __volatile("mcr	p15, 0, %0, c7, c10, 2"
-			    : : "r" (word));
-			wayval += nincr;
-		}
-		setval += setincr;
-	}
-	/* drain the write buffer */
-	__asm __volatile("mcr	p15, 0, %0, c7, c10, 4" : : "r" (0));
-
+	/* L2 cache flushing removed. Our current L2 caches are separate. */
 }
 #endif /* CPU_ARMv7 */
 
@@ -975,7 +997,11 @@ set_cpufuncs()
 	}
 #endif /* CPU_ARM11 */
 #ifdef CPU_ARMv7
-	if ((cputype & CPU_ID_CORTEX_A8_MASK) == CPU_ID_CORTEX_A8) {
+	if ((cputype & CPU_ID_CORTEX_A5_MASK) == CPU_ID_CORTEX_A5 ||
+	    (cputype & CPU_ID_CORTEX_A7_MASK) == CPU_ID_CORTEX_A7 ||
+	    (cputype & CPU_ID_CORTEX_A8_MASK) == CPU_ID_CORTEX_A8 ||
+	    (cputype & CPU_ID_CORTEX_A9_MASK) == CPU_ID_CORTEX_A9 ||
+	    (cputype & CPU_ID_CORTEX_A15_MASK) == CPU_ID_CORTEX_A15) {
 		cpufuncs = armv7_cpufuncs;
 		cpu_reset_needs_v4_MMU_disable = 1;	/* V4 or higher */
 		arm_get_cachetype_cp15v7();
@@ -1234,7 +1260,7 @@ arm9_setup()
 
 #if defined(CPU_ARM9E) || defined(CPU_ARM10)
 void
-arm10_setup()
+arm9e_setup()
 {
 	int cpuctrl, cpuctrlmask;
 
@@ -1258,9 +1284,6 @@ arm10_setup()
 	/* Now really make sure they are clean.  */
 	__asm __volatile ("mcr\tp15, 0, r0, c7, c7, 0" : : );
 
-	/* Allow detection code to find the VFP if it's fitted.  */
-	__asm __volatile ("mcr\tp15, 0, %0, c1, c0, 2" : : "r" (0x0fffffff));
-
 	/* Set the control register */
 	curcpu()->ci_ctrl = cpuctrl;
 	cpu_control(0xffffffff, cpuctrl);
@@ -1269,6 +1292,17 @@ arm10_setup()
 	cpu_idcache_wbinv_all();
 }
 #endif	/* CPU_ARM9E || CPU_ARM10 */
+
+#if defined(CPU_ARM10)
+void
+arm10_setup()
+{
+	arm9e_setup();
+
+	/* Allow detection code to find the VFP if it's fitted.  */
+	__asm __volatile ("mcr\tp15, 0, %0, c1, c0, 2" : : "r" (0x0fffffff));
+}
+#endif	/* CPU_ARM10 */
 
 #ifdef CPU_ARM11
 void
@@ -1314,7 +1348,8 @@ armv7_setup()
 	    | CPU_CONTROL_ROM_ENABLE | CPU_CONTROL_BPRD_ENABLE
 	    | CPU_CONTROL_BEND_ENABLE | CPU_CONTROL_AFLT_ENABLE
 	    | CPU_CONTROL_ROUNDROBIN | CPU_CONTROL_CPCLK
-	    | CPU_CONTROL_VECRELOC | CPU_CONTROL_FI | CPU_CONTROL_VE;
+	    | CPU_CONTROL_VECRELOC | CPU_CONTROL_FI | CPU_CONTROL_VE
+	    | CPU_CONTROL_TRE | CPU_CONTROL_AFE;
 
 	if (vector_page == ARM_VECTORS_HIGH)
 		cpuctrl |= CPU_CONTROL_VECRELOC;
@@ -1330,7 +1365,7 @@ armv7_setup()
 
 	/* Set the control register */
 	curcpu()->ci_ctrl = cpuctrl;
-	cpu_control(0xffffffff, cpuctrl);
+	cpu_control(cpuctrlmask, cpuctrl);
 
 	/* And again. */
 	cpu_idcache_wbinv_all();

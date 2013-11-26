@@ -1,4 +1,4 @@
-/*	$OpenBSD: iommu.c,v 1.64 2011/05/18 23:36:31 ariane Exp $	*/
+/*	$OpenBSD: iommu.c,v 1.66 2013/01/15 03:14:01 kettenis Exp $	*/
 /*	$NetBSD: iommu.c,v 1.47 2002/02/08 20:03:45 eeh Exp $	*/
 
 /*
@@ -149,7 +149,13 @@ iommu_init(char *name, struct iommu_state *is, int tsbsize, u_int32_t iovabase)
 	 * be hard-wired, so we read the start and size from the PROM and
 	 * just use those values.
 	 */
-	is->is_cr = IOMMUCR_EN;
+	if (strncmp(name, "pyro", 4) == 0) {
+		is->is_cr = IOMMUREG_READ(is, iommu_cr);
+		is->is_cr &= ~IOMMUCR_FIRE_BE;
+		is->is_cr |= (IOMMUCR_FIRE_SE | IOMMUCR_FIRE_CM_EN |
+		    IOMMUCR_FIRE_TE);
+	} else 
+		is->is_cr = IOMMUCR_EN;
 	is->is_tsbsize = tsbsize;
 	if (iovabase == (u_int32_t)-1) {
 		is->is_dvmabase = IOTSB_VSTART(is->is_tsbsize);
@@ -1128,7 +1134,7 @@ iommu_dvmamap_append_range(bus_dma_tag_t t, bus_dmamap_t map, paddr_t pa,
 			 */
 
 			seg->ds_addr = sgstart;
-			seg->ds_len = boundary - (sgstart & bd_mask);
+			seg->ds_len = boundary - (sgstart & ~bd_mask);
 
 			sgstart += seg->ds_len; /* sgend stays the same */
 			length -= seg->ds_len;

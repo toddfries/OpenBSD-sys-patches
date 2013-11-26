@@ -1,4 +1,4 @@
-/*	$OpenBSD: conf.c,v 1.62 2012/03/17 21:32:02 kettenis Exp $	*/
+/*	$OpenBSD: conf.c,v 1.70 2013/11/04 14:11:29 deraadt Exp $	*/
 /*	$NetBSD: conf.c,v 1.17 2001/03/26 12:33:26 lukem Exp $ */
 
 /*
@@ -65,7 +65,6 @@
 #include "cd.h"
 #include "uk.h"
 #include "wd.h"
-#include "raid.h"
 
 #ifdef notyet
 #include "fb.h"
@@ -82,9 +81,13 @@
 #include "magma.h"		/* has NMTTY and NMBPP */
 #include "spif.h"		/* has NSTTY and NSBPP */
 #include "uperf.h"
-#include "hvctl.h"
+#include "vldcp.h"
+#include "vdsp.h"
 
 #include "fdc.h"		/* has NFDC and NFD; see files.sparc */
+
+#include "drm.h"
+cdev_decl(drm);
 
 #include "wsdisplay.h"
 #include "wskbd.h"
@@ -104,16 +107,8 @@ cdev_decl(pci);
 #include "ulpt.h"
 #include "urio.h"
 #include "ucom.h"
-#include "uscanner.h"
-
-#include "bthub.h"
 
 #include "pf.h"
-
-#ifdef NNPFS
-#include <nnpfs/nnnpfs.h>
-cdev_decl(nnpfs_dev);
-#endif
 
 #include "ksyms.h"
 #include "inet.h"
@@ -122,6 +117,7 @@ cdev_decl(nnpfs_dev);
 #include "hotplug.h"
 #include "vscsi.h"
 #include "pppx.h"
+#include "fuse.h"
 
 struct bdevsw	bdevsw[] =
 {
@@ -150,7 +146,7 @@ struct bdevsw	bdevsw[] =
 	bdev_lkm_dummy(),		/* 22 */
 	bdev_lkm_dummy(),		/* 23 */
 	bdev_lkm_dummy(),		/* 24 */
-	bdev_disk_init(NRAID,raid),	/* 25: RAIDframe disk driver */
+	bdev_notdef(),			/* 25 was: RAIDframe disk driver */
 };
 int	nblkdev = nitems(bdevsw);
 
@@ -207,11 +203,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 48 */
 	cdev_notdef(),			/* 49 */
 	cdev_systrace_init(NSYSTRACE,systrace),	/* 50 system call tracing */
-#ifdef NNPFS
-	cdev_nnpfs_init(NNNPFS,nnpfs_dev),	/* 51: nnpfs communication device */
-#else
 	cdev_notdef(),			/* 51 */
-#endif
 #ifdef USER_PCICONF
 	cdev_pci_init(NPCI,pci),	/* 52: PCI user */
 #else
@@ -252,7 +244,7 @@ struct cdevsw	cdevsw[] =
 	cdev_notdef(),			/* 84 */
 	cdev_notdef(),			/* 85 */
 	cdev_notdef(),			/* 86 */
-	cdev_notdef(),			/* 87 */
+	cdev_drm_init(NDRM,drm),	/* 87: drm */
 	cdev_notdef(),			/* 88 */
 	cdev_notdef(),			/* 89 */
 	cdev_usb_init(NUSB,usb),	/* 90: USB controller */
@@ -261,7 +253,7 @@ struct cdevsw	cdevsw[] =
 	cdev_ulpt_init(NULPT,ulpt),	/* 93: USB printers */
 	cdev_urio_init(NURIO,urio),	/* 94: USB Diamond Rio 500 */
 	cdev_tty_init(NUCOM,ucom),	/* 95: USB tty */
-	cdev_usbdev_init(NUSCANNER,uscanner), /* 96: USB scanners */
+	cdev_notdef(),			/* 96: was USB scanners */
 	cdev_notdef(),			/* 97 */
 	cdev_notdef(),			/* 98 */
 	cdev_notdef(),			/* 99 */
@@ -286,7 +278,7 @@ struct cdevsw	cdevsw[] =
 	cdev_lkm_dummy(),		/* 118 */
 	cdev_random_init(1,random),	/* 119: random data source */
 	cdev_bio_init(NBIO,bio),	/* 120: ioctl tunnel */
-	cdev_disk_init(NRAID,raid),	/* 121: RAIDframe disk driver */
+	cdev_notdef(),			/* 121 was: RAIDframe disk driver */
 	cdev_tty_init(NPCONS,pcons),	/* 122: PROM console */
 	cdev_ptm_init(NPTY,ptm),	/* 123: pseudo-tty ptm device */
 	cdev_hotplug_init(NHOTPLUG,hotplug), /* 124: devices hot plugging */
@@ -294,10 +286,12 @@ struct cdevsw	cdevsw[] =
 	cdev_tty_init(NSBBC,sbbc),	/* 126: SBBC console */
 	cdev_tty_init(NVCCTTY,vcctty),	/* 127: virtual console concentrator */
 	cdev_vscsi_init(NVSCSI,vscsi),	/* 128: vscsi */
-	cdev_bthub_init(NBTHUB,bthub),	/* 129: bluetooth hub */
+	cdev_notdef(),
 	cdev_disk_init(1,diskmap),	/* 130: disk mapper */
 	cdev_pppx_init(NPPPX,pppx),	/* 131: pppx */
-	cdev_gen_init(NHVCTL,hvctl)	/* 132: hvctl */
+	cdev_gen_init(NVLDCP,vldcp),	/* 132: vldcp */
+	cdev_vdsp_init(NVDSP,vdsp),	/* 133: vdsp */
+	cdev_fuse_init(NFUSE,fuse),	/* 134: fuse */
 };
 int	nchrdev = nitems(cdevsw);
 
