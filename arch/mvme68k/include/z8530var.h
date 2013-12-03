@@ -1,12 +1,18 @@
-/*	$OpenBSD: nfsrvcache.h,v 1.8 2013/11/26 20:41:27 beck Exp $	*/
-/*	$NetBSD: nfsrvcache.h,v 1.10 1996/02/18 11:54:08 fvdl Exp $	*/
+/*	$OpenBSD: z8530var.h,v 1.1 2013/12/01 21:56:42 miod Exp $	*/
+/*	$NetBSD: z8530var.h,v 1.1 1997/10/18 00:01:30 gwr Exp $	*/
 
 /*
- * Copyright (c) 1989, 1993
+ * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
- * This code is derived from software contributed to Berkeley by
- * Rick Macklem at The University of Guelph.
+ * This software was developed by the Computer Systems Engineering group
+ * at Lawrence Berkeley Laboratory under DARPA contract BG 91-66 and
+ * contributed to Berkeley.
+ *
+ * All advertising materials mentioning features or use of this software
+ * must display the following acknowledgement:
+ *	This product includes software developed by the University of
+ *	California, Lawrence Berkeley Laboratory.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,50 +38,31 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	@(#)nfsrvcache.h	8.3 (Berkeley) 3/30/95
+ *	@(#)zsvar.h	8.1 (Berkeley) 6/11/93
  */
 
-#ifndef _NFS_NFSRVCACHE_H_
-#define _NFS_NFSRVCACHE_H_
+#include <dev/ic/z8530sc.h>
 
-#define	NFSRVCACHESIZ	2048
+struct zsc_softc {
+	struct device 		 zsc_dev;	/* required first: base device */
+	struct zs_chanstate 	*zsc_cs[2];	/* channel A and B soft state */
+	struct zs_chanstate	 zsc_cs_store[2];
 
-struct nfsrvcache {
-	TAILQ_ENTRY(nfsrvcache)	rc_lru;		/* LRU chain */
-	LIST_ENTRY(nfsrvcache)	rc_hash;	/* Hash chain */
-	u_int32_t		rc_xid;		/* rpc id number */
-	union {
-		struct mbuf *ru_repmb;	/* Reply mbuf list OR */
-		int ru_repstat;		/* Reply status */
-	} rc_un;
-	union nethostaddr	rc_haddr;	/* Host address */
-	u_int16_t		rc_proc;	/* rpc proc number */
-	u_char			rc_state;	/* Current state of request */
-	u_char			rc_flag;	/* Flag bits */
+	struct intrhand		 zsc_ih;
+	void			*zsc_softih;	/* softintr cookie */
 };
 
-#define	rc_reply	rc_un.ru_repmb
-#define	rc_status	rc_un.ru_repstat
-#define	rc_inetaddr	rc_haddr.had_inetaddr
-#define	rc_nam		rc_haddr.had_nam
+/*
+ * Functions to read and write individual registers in a channel.
+ */
 
-/* Cache entry states */
-#define	RC_UNUSED	0
-#define	RC_INPROG	1
-#define	RC_DONE		2
+uint8_t zs_read_reg(struct zs_chanstate *, uint8_t);
+uint8_t zs_read_csr(struct zs_chanstate *);
+uint8_t zs_read_data(struct zs_chanstate *);
 
-/* Return values */
-#define	RC_DROPIT	0
-#define	RC_REPLY	1
-#define	RC_DOIT		2
-#define	RC_CHECKIT	3
+void  zs_write_reg(struct zs_chanstate *, uint8_t, uint8_t);
+void  zs_write_csr(struct zs_chanstate *, uint8_t);
+void  zs_write_data(struct zs_chanstate *, uint8_t);
 
-/* Flag bits */
-#define	RC_LOCKED	0x01
-#define	RC_WANTED	0x02
-#define	RC_REPSTATUS	0x04
-#define	RC_REPMBUF	0x08
-#define	RC_INETADDR	0x20
-#define	RC_NAM		0x40
-
-#endif
+#define	splzs()		_splraise(PSL_S | PSL_IPL4)
+#define	IPL_ZS		4

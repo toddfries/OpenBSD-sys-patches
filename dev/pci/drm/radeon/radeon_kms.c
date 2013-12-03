@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_kms.c,v 1.11 2013/11/17 13:41:26 kettenis Exp $	*/
+/*	$OpenBSD: radeon_kms.c,v 1.14 2013/11/30 12:58:39 kettenis Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -217,10 +217,8 @@ static struct drm_driver_info kms_driver = {
 	.irq_handler = radeon_driver_irq_handler_kms,
 	.gem_init_object = radeon_gem_object_init,
 	.gem_free_object = radeon_gem_object_free,
-#ifdef notyet
 	.gem_open_object = radeon_gem_object_open,
 	.gem_close_object = radeon_gem_object_close,
-#endif
 	.gem_size = sizeof(struct radeon_bo),
 	.dma_ioctl = radeon_dma_ioctl_kms,
 	.dumb_create = radeon_mode_dumb_create,
@@ -961,22 +959,16 @@ int radeon_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 		break;
 	case RADEON_INFO_VA_START:
 		/* this is where we report if vm is supported or not */
-		return -EINVAL;
-#ifdef notyet
 		if (rdev->family < CHIP_CAYMAN)
 			return -EINVAL;
 		value = RADEON_VA_RESERVED_SIZE;
 		break;
-#endif
 	case RADEON_INFO_IB_VM_MAX_SIZE:
 		/* this is where we report if vm is supported or not */
-		return -EINVAL;
-#ifdef notyet
 		if (rdev->family < CHIP_CAYMAN)
 			return -EINVAL;
 		value = RADEON_IB_VM_MAX_SIZE;
 		break;
-#endif
 	case RADEON_INFO_MAX_PIPES:
 		if (rdev->family >= CHIP_TAHITI)
 			value = rdev->config.si.max_cu_per_sh;
@@ -1045,6 +1037,7 @@ int radeon_driver_firstopen_kms(struct drm_device *dev)
  */
 void radeon_driver_lastclose_kms(struct drm_device *dev)
 {
+	drm_fb_helper_restore();
 #ifdef notyet
 	vga_switcheroo_process_delayed_switch();
 #endif

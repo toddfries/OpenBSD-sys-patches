@@ -1,4 +1,4 @@
-/* $OpenBSD: fuse_vnops.c,v 1.9 2013/10/07 18:25:32 syl Exp $ */
+/* $OpenBSD: fuse_vnops.c,v 1.11 2013/12/03 09:59:40 syl Exp $ */
 /*
  * Copyright (c) 2012-2013 Sylvestre Gallon <ccna.syl@gmail.com>
  *
@@ -762,6 +762,7 @@ fusefs_reclaim(void *v)
 	struct fusefs_node *ip = VTOI(vp);
 	struct fusefs_filehandle *fufh = NULL;
 	struct fusefs_mnt *fmp;
+	struct fusebuf *fbuf;
 	int type;
 
 	fmp = (struct fusefs_mnt *)ip->ufs_ino.i_ump;
@@ -779,6 +780,17 @@ fusefs_reclaim(void *v)
 	 * Purge old data structures associated with the inode.
 	 */
 	ip->parent = 0;
+
+	/*
+	 * if the fuse connection is opened
+	 * ask libfuse to free the vnodes
+	 */
+	if (fmp->sess_init) {
+		fbuf = fb_setup(0, ip->ufs_ino.i_number, FBT_RECLAIM, ap->a_p);
+		if (fb_queue(fmp->dev, fbuf))
+			printf("fusefs: libfuse vnode reclaim failed\n");
+		fb_delete(fbuf);
+	}
 
 	/*
 	 * Remove the inode from its hash chain.
@@ -893,6 +905,8 @@ fusefs_read(void *v)
 	ip = VTOI(vp);
 	fmp = (struct fusefs_mnt *)ip->ufs_ino.i_ump;
 
+	if (!fmp->sess_init)
+		return (ENXIO);
 	if (uio->uio_resid == 0)
 		return (error);
 	if (uio->uio_offset < 0)
@@ -942,6 +956,8 @@ fusefs_write(void *v)
 	ip = VTOI(vp);
 	fmp = (struct fusefs_mnt *)ip->ufs_ino.i_ump;
 
+	if (!fmp->sess_init)
+		return (ENXIO);
 	if (uio->uio_resid == 0)
 		return (error);
 

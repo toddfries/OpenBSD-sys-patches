@@ -1,4 +1,4 @@
-/*	$OpenBSD: linux_exec.c,v 1.38 2013/11/03 13:52:44 pirofti Exp $	*/
+/*	$OpenBSD: linux_exec.c,v 1.40 2013/12/02 19:47:28 deraadt Exp $	*/
 /*	$NetBSD: linux_exec.c,v 1.13 1996/04/05 00:01:10 christos Exp $	*/
 
 /*-
@@ -218,7 +218,7 @@ linux_elf_probe(struct proc *p, struct exec_package *epp, char *itp,
 	 * If this is a static binary, do not allow it to run, as it
 	 * has not been identified. We'll give non-static binaries a
 	 * chance to run, as the Linux ld.so name is usually unique
-	 * enough to clear any amibiguity.
+	 * enough to clear any ambiguity.
 	 */
 	if (itp == NULL)
 		return (EINVAL);
@@ -227,9 +227,10 @@ recognized:
 	if (itp) {
 		if ((error = emul_find(p, NULL, linux_emul_path, itp, &bp, 0)))
 			return (error);
-		if ((error = copystr(bp, itp, MAXPATHLEN, &len)))
-			return (error);
+		error = copystr(bp, itp, MAXPATHLEN, &len);
 		free(bp, M_TEMP);
+		if (error)
+			return (error);
 	}
 	epp->ep_emul = &emul_linux_elf;
 	*pos = ELF32_NO_ADDR;
