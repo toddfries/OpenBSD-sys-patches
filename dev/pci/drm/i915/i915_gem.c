@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem.c,v 1.53 2013/12/01 14:23:48 kettenis Exp $	*/
+/*	$OpenBSD: i915_gem.c,v 1.58 2013/12/09 20:09:55 kettenis Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -1059,6 +1059,7 @@ static int __wait_seqno(struct intel_ring_buffer *ring, u32 seqno,
 	(i915_seqno_passed(ring->get_seqno(ring, false), seqno) || \
 	atomic_read(&dev_priv->mm.wedged))
 	do {
+		end = timeout_jiffies;
 		mtx_enter(&dev_priv->irq_lock);
 		do {
 			if (EXIT_COND) {
@@ -1067,20 +1068,19 @@ static int __wait_seqno(struct intel_ring_buffer *ring, u32 seqno,
 			}
 			ret = msleep(ring, &dev_priv->irq_lock,
 			    PZERO | (interruptible ? PCATCH : 0),
-			    "gemwt", timeout_jiffies);
+			    "gemwt", end);
 			nanouptime(&now);
 			timespecsub(&now, &before, &sleep_time);
-			timeout_jiffies = timespec_to_jiffies(&wait_time);
-			timeout_jiffies -= timespec_to_jiffies(&sleep_time);
-			if (timeout_jiffies <= 0) {
-				timeout_jiffies = 0;
+			if (timespeccmp(&sleep_time, &wait_time, >=)) {
+				end = 0;
 				break;
 			}
+			end = timeout_jiffies -
+			    timespec_to_jiffies(&sleep_time);
 		} while (ret == 0);
 		mtx_leave(&dev_priv->irq_lock);
 		switch (ret) {
 		case 0:
-			end = timeout_jiffies;
 			break;
 		case ERESTART:
 			end = -ERESTARTSYS;
@@ -1339,55 +1339,41 @@ i915_gem_mmap_ioctl(struct drm_device *dev, void *data,
 		    struct drm_file *file)
 {
 	struct drm_i915_gem_mmap *args = data;
-	struct drm_obj *obj;
+	struct drm_gem_object *obj;
 	vaddr_t addr;
-	voff_t offset;
-	vsize_t end, nsize;
+	vsize_t size;
 	int ret;
+
+	size = round_page(args->size);
+	if (size == 0)
+		return -EINVAL;
+
+	if (args->offset + size < args->offset)
+		return -EINVAL;
+	if (args->offset & PAGE_MASK)
+		return -EINVAL;
 
 	obj = drm_gem_object_lookup(dev, file, args->handle);
 	if (obj == NULL)
 		return -ENOENT;
 
-	/* Since we are doing purely uvm-related operations here we do
-	 * not need to hold the object, a reference alone is sufficient
-	 */
-
-	/* Check size. Also ensure that the object is not purgeable */
-	if (args->size == 0 || args->offset > obj->size || args->size >
-	    obj->size || (args->offset + args->size) > obj->size ||
-	    i915_gem_object_is_purgeable(to_intel_bo(obj))) {
-		ret = -EINVAL;
-		goto done;
-	}
-
-	end = round_page(args->offset + args->size);
-	offset = trunc_page(args->offset);
-	nsize = end - offset;
-
-	/*
-	 * We give our reference from object_lookup to the mmap, so only
-	 * must free it in the case that the map fails.
-	 */
 	addr = 0;
-	ret = uvm_map(&curproc->p_vmspace->vm_map, &addr, nsize, obj->uao,
-	    offset, 0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
+	ret = uvm_map(&curproc->p_vmspace->vm_map, &addr, size,
+	    obj->uao, args->offset, 0, UVM_MAPFLAG(UVM_PROT_RW, UVM_PROT_RW,
 	    UVM_INH_SHARE, UVM_ADV_RANDOM, 0));
 	if (ret == 0)
 		uao_reference(obj->uao);
-
-done:
 	drm_gem_object_unreference_unlocked(obj);
 	if (ret)
 		return ret;
 
-	args->addr_ptr = (uint64_t) addr + (args->offset & PAGE_MASK);
+	args->addr_ptr = (uint64_t) addr;
 
 	return 0;
 }
 
 int
-i915_gem_fault(struct drm_obj *gem_obj, struct uvm_faultinfo *ufi,
+i915_gem_fault(struct drm_gem_object *gem_obj, struct uvm_faultinfo *ufi,
     off_t offset, vaddr_t vaddr, vm_page_t *pps, int npages, int centeridx,
     vm_prot_t access_type, int flags)
 {
@@ -1402,7 +1388,13 @@ i915_gem_fault(struct drm_obj *gem_obj, struct uvm_faultinfo *ufi,
 
 	dev_priv->entries++;
 
-	KASSERT(obj->base.map);
+	if (!obj->base.map) {
+		uvmfault_unlockall(ufi, ufi->entry->aref.ar_amap,
+		    &obj->base.uobj, NULL);
+		dev_priv->entries--;
+		return (VM_PAGER_BAD);
+	}
+
 	offset -= obj->base.map->ext;
 
 	if (rw_enter(&dev->dev_lock, RW_NOSLEEP | RW_READ) != 0) {
@@ -3249,7 +3241,7 @@ i915_gem_object_set_to_gtt_domain(struct drm_i915_gem_object *obj, bool write)
 	/* It should now be out of any other write domains, and we can update
 	 * the domain values for our changes.
 	 */
-	WARN_ON((obj->base.write_domain & ~I915_GEM_DOMAIN_GTT) != 0);
+	BUG_ON((obj->base.write_domain & ~I915_GEM_DOMAIN_GTT) != 0);
 	obj->base.read_domains |= I915_GEM_DOMAIN_GTT;
 	if (write) {
 		obj->base.read_domains = I915_GEM_DOMAIN_GTT;
@@ -3892,14 +3884,14 @@ struct drm_i915_gem_object *i915_gem_alloc_object(struct drm_device *dev,
 	return obj;
 }
 
-int i915_gem_init_object(struct drm_obj *obj)
+int i915_gem_init_object(struct drm_gem_object *obj)
 {
 	BUG();
 
 	return 0;
 }
 
-void i915_gem_free_object(struct drm_obj *gem_obj)
+void i915_gem_free_object(struct drm_gem_object *gem_obj)
 {
 	struct drm_i915_gem_object *obj = to_intel_bo(gem_obj);
 	struct drm_device *dev = obj->base.dev;

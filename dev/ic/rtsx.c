@@ -1,4 +1,4 @@
-/*	$OpenBSD: rtsx.c,v 1.5 2013/11/06 13:51:02 stsp Exp $	*/
+/*	$OpenBSD: rtsx.c,v 1.7 2013/12/08 18:31:03 stsp Exp $	*/
 
 /*
  * Copyright (c) 2006 Uwe Stuehler <uwe@openbsd.org>
@@ -175,7 +175,7 @@ rtsx_attach(struct rtsx_softc *sc, bus_space_tag_t iot,
 	if (rtsx_init(sc, 1))
 		return 1;
 
-	if (rtsx_read_cfg(sc, 0, RTSX_SDIOCFG_REG, &sdio_cfg)) {
+	if (rtsx_read_cfg(sc, 0, RTSX_SDIOCFG_REG, &sdio_cfg) == 0) {
 		if ((sdio_cfg & RTSX_SDIOCFG_SDIO_ONLY) ||
 		    (sdio_cfg & RTSX_SDIOCFG_HAVE_SDIO))
 			sc->flags |= RTSX_F_SDIO_SUPPORT;
@@ -315,15 +315,9 @@ rtsx_activate(struct device *self, int act)
 	int rv = 0;
 
 	switch (act) {
-	case DVACT_QUIESCE:
-		rv = config_activate_children(self, act);
-		break;
 	case DVACT_SUSPEND:
 		rv = config_activate_children(self, act);
 		rtsx_save_regs(sc);
-		break;
-	case DVACT_POWERDOWN:
-		rv = config_activate_children(self, act);
 		break;
 	case DVACT_RESUME:
 		rtsx_restore_regs(sc);
@@ -334,6 +328,9 @@ rtsx_activate(struct device *self, int act)
 		else
 			rtsx_card_eject(sc);
 
+		rv = config_activate_children(self, act);
+		break;
+	default:
 		rv = config_activate_children(self, act);
 		break;
 	}
