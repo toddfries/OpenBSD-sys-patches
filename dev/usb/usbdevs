@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.614 2013/11/17 13:53:45 jsg Exp $
+$OpenBSD: usbdevs,v 1.618 2013/12/17 12:51:14 deraadt Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -148,6 +148,7 @@ vendor SAMSUNG2		0x04e8	Samsung Electronics
 vendor ANNABOOKS	0x04ed	Annabooks
 vendor JVC		0x04f1	JVC
 vendor CHICONY		0x04f2	Chicony Electronics
+vendor ELAN		0x04f3	Elan
 vendor BROTHER		0x04f9	Brother Industries
 vendor DALLAS		0x04fa	Dallas Semiconductor
 vendor ACER		0x0502	Acer
@@ -409,6 +410,7 @@ vendor KURUSUGAWA	0x0b7e	Kurusugawa Electronics
 vendor SMART		0x0b8c	Smart Technologies
 vendor ASIX		0x0b95	ASIX Electronics
 vendor O2MICRO		0x0b97	O2 Micro
+vendor SACOM		0x0ba0	System SACOM Industry Co.,Ltd
 vendor USR		0x0baf	U.S. Robotics
 vendor AMBIT		0x0bb2	Ambit Microsystems
 vendor HTC		0x0bb4	HTC
@@ -1569,6 +1571,9 @@ product EICON DIVA852		0x4905	Diva 852 ISDN TA
 product EIZO HUB		0x0000	hub
 product EIZO MONITOR		0x0001	monitor
 
+/* Elan Microelectronics products */
+product ELAN BARCODE		0x0001	Barcode Scanner
+
 /* ELCON Systemtechnik products */
 product ELCON PLAN		0x0002	Goldpfeil P-LAN
 
@@ -1902,6 +1907,7 @@ product FUJITSUCOMP KEYBOARD7	0x00a2	Type 7 Keyboard
 /* XXX The above is a North American PC style keyboard possibly */
 product FUJITSUCOMP MOUSE	0x0100	Type 6 Mouse
 product FUJITSUCOMP FX5204PS	0x0423	Smart Power Strip FX-5204PS
+product FUJITSUCOMP FX5251WB	0x042a	Base Station FX-5251WB
 
 /* Fujitsu Siemens Computers products */
 product FSC E5400		0x1009	PrismGT USB 2.0 WLAN
@@ -2474,6 +2480,8 @@ product LOGITECH QUICKCAMPRO2	0xd001	QuickCam Pro
 /* Longcheer products */
 product LONGCHEER D21LCMASS	0x9401	Emobile D21LC Mass only mode
 product LONGCHEER D21LC		0x9404	Emobile D21LC
+product LONGCHEER 510FU		0x9801	IIJmobile 510FU
+product LONGCHEER 510FUMASS	0x98ff	IIJmobile 510FU Mass only mode
 
 /* Longshine products */
 product ABOCOM LCS8138TX	0x401a	LCS-8138TX
@@ -3466,6 +3474,9 @@ product ROCKFIRE GAMEPAD	0x2033	Gamepad 203USB
 
 /* RT Systems */
 product	RTSYSTEMS CT57B		0x9e52	CT57B Radio Cable
+
+/* SACOM products */
+product	SACOM USB485BL		0x800d	USB-485-BL
 
 /* Sagem products */
 product SAGEM SERIAL		0x0027	Serial

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttycom.h,v 1.11 2009/05/06 18:21:23 stevesk Exp $	*/
+/*	$OpenBSD: ttycom.h,v 1.13 2013/12/16 18:46:39 millert Exp $	*/
 /*	$NetBSD: ttycom.h,v 1.4 1996/05/19 17:17:53 jonathan Exp $	*/
 
 /*-
@@ -42,10 +42,7 @@
 
 #include <sys/ioccom.h>
 
-/*
- * Tty ioctl's except for those supported only for backwards compatibility
- * with the old tty driver.
- */
+/* Tty ioctl's. */
 
 /*
  * Window/terminal size structure.  This information is stored by the kernel
@@ -118,6 +115,7 @@ struct tstamps {
 #define	TIOCUCNTL	_IOW('t', 102, int)	/* pty: set/clr usr cntl mode */
 #define	TIOCSTAT	_IOW('t', 101, int)	/* generate status message */
 #define		UIOCCMD(n)	_IO('u', n)	/* usr cntl op "n" */
+#define	TIOCGSID	_IOR('t', 99, int)	/* get sid of tty */
 #define	TIOCCONS	_IOW('t', 98, int)	/* become virtual console */
 #define	TIOCSCTTY	 _IO('t', 97)		/* become controlling tty */
 #define	TIOCEXT		_IOW('t', 96, int)	/* pty: external processing */

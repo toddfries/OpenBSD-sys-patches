@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.353 2013/11/15 19:42:20 sasano Exp $
+#	$OpenBSD: GENERIC,v 1.355 2013/12/20 21:50:49 matthew Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -596,7 +596,6 @@ owctr*	at onewire?		# Counter device
 pseudo-device	pctr		1
 pseudo-device	nvram		1
 pseudo-device	hotplug		1	# devices hot plugging
-pseudo-device	mtrr		1	# Memory range attributes control
 
 # mouse & keyboard multiplexor pseudo-devices
 pseudo-device	wsmux		2
@@ -607,3 +606,4 @@ virtio*		at pci?		# Virtio PCI device
 vioblk*		at virtio?	# Virtio block device
 vio*		at virtio?	# Virtio network device
 viomb*		at virtio?	# Virtio memory ballooning device
+vioscsi*	at virtio?	# Virtio SCSI device

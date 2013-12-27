@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1698 2013/11/22 20:55:07 kettenis Exp 
+ *	OpenBSD: pcidevs,v 1.1700 2013/12/23 12:18:37 brad Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -1828,6 +1828,8 @@
 #define	PCI_PRODUCT_ATHEROS_AR9287	0x002e		/* AR9287 */
 #define	PCI_PRODUCT_ATHEROS_AR9300	0x0030		/* AR9300 */
 #define	PCI_PRODUCT_ATHEROS_AR9485	0x0032		/* AR9485 */
+#define	PCI_PRODUCT_ATHEROS_AR9462	0x0034		/* AR9462 */
+#define	PCI_PRODUCT_ATHEROS_AR9565	0x0036		/* AR9565 */
 #define	PCI_PRODUCT_ATHEROS_AR5210_AP	0x0207		/* AR5210 */
 #define	PCI_PRODUCT_ATHEROS_AR5212_IBM	0x1014		/* AR5212 */
 #define	PCI_PRODUCT_ATHEROS_AR5210_DEFAULT	0x1107		/* AR5210 */
@@ -5388,6 +5390,7 @@
 #define	PCI_PRODUCT_QUMRANET_VIO_BLOCK	0x1001		/* Virtio Storage */
 #define	PCI_PRODUCT_QUMRANET_VIO_MEM	0x1002		/* Virtio Memory */
 #define	PCI_PRODUCT_QUMRANET_VIO_CONS	0x1003		/* Virtio Console */
+#define	PCI_PRODUCT_QUMRANET_VIO_SCSI	0x1004		/* Virtio SCSI */
 
 /* Ross -> Pequr -> ServerWorks -> Broadcom ServerWorks products */
 #define	PCI_PRODUCT_RCC_CMIC_LE	0x0000		/* CMIC-LE */

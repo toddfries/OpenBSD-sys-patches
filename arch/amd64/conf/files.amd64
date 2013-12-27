@@ -1,4 +1,4 @@
-#	$OpenBSD: files.amd64,v 1.71 2013/11/04 14:07:15 deraadt Exp $
+#	$OpenBSD: files.amd64,v 1.73 2013/12/19 21:30:02 deraadt Exp $
 
 maxpartitions 16
 maxusers 2 16 128
@@ -16,6 +16,7 @@ file	arch/amd64/amd64/aesni.c		crypto
 file	arch/amd64/amd64/amd64errata.c
 file	arch/amd64/amd64/mem.c
 file	arch/amd64/amd64/amd64_mem.c		mtrr
+file	arch/amd64/amd64/mtrr.c			mtrr
 file	arch/amd64/amd64/pmap.c
 file	arch/amd64/amd64/process_machdep.c
 file	arch/amd64/amd64/sys_machdep.c
@@ -34,7 +35,6 @@ file	arch/amd64/amd64/lock_machdep.c		multiprocessor
 file	arch/amd64/amd64/intr.c
 file	arch/amd64/amd64/bus_space.c
 file	arch/amd64/amd64/bus_dma.c
-file	arch/amd64/amd64/sg_dma.c		!small_kernel
 
 file	arch/amd64/amd64/mptramp.S		multiprocessor
 file	arch/amd64/amd64/ipifuncs.c		multiprocessor
@@ -195,8 +195,6 @@ file	dev/isa/fd.c				fd needs-flag
 pseudo-device	pctr
 file	arch/amd64/amd64/pctr.c		pctr needs-flag
 
-pseudo-device	mtrr
-file	arch/amd64/amd64/mtrr.c		mtrr needs-flag
 
 pseudo-device	nvram
 file	arch/amd64/amd64/nvram.c	nvram needs-flag
