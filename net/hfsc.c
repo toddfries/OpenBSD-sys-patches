@@ -1,4 +1,4 @@
-/*	$OpenBSD: hfsc.c,v 1.4 2013/11/01 23:00:02 pelikan Exp $	*/
+/*	$OpenBSD: hfsc.c,v 1.7 2014/01/03 19:58:54 pelikan Exp $	*/
 
 /*
  * Copyright (c) 2012-2013 Henning Brauer <henning@openbsd.org>
@@ -44,6 +44,7 @@
 
 #include <sys/param.h>
 #include <sys/malloc.h>
+#include <sys/pool.h>
 #include <sys/mbuf.h>
 #include <sys/socket.h>
 #include <sys/systm.h>
@@ -151,9 +152,13 @@ hfsc_attach(struct ifnet *ifp)
 int
 hfsc_detach(struct ifnet *ifp)
 {
-	timeout_del(&ifp->if_snd.ifq_hfsc->hif_defer);
-	free(ifp->if_snd.ifq_hfsc, M_DEVBUF);
+	struct hfsc_if *hif = ifp->if_snd.ifq_hfsc;
+
+	timeout_del(&hif->hif_defer);
 	ifp->if_snd.ifq_hfsc = NULL;
+
+	hfsc_ellist_destroy(hif->hif_eligible);
+	free(hif, M_DEVBUF);
 
 	return (0);
 }
@@ -261,9 +266,8 @@ hfsc_class_create(struct hfsc_if *hif, struct hfsc_sc *rsc,
 	if (hif->hif_classes >= HFSC_MAX_CLASSES)
 		return (NULL);
 
-	cl = malloc(sizeof(struct hfsc_class), M_DEVBUF, M_WAITOK|M_ZERO);
-	cl->cl_q = malloc(sizeof(struct hfsc_classq), M_DEVBUF,
-	    M_WAITOK|M_ZERO);
+	cl = pool_get(&hfsc_class_pl, PR_WAITOK | PR_ZERO);
+	cl->cl_q = pool_get(&hfsc_classq_pl, PR_WAITOK | PR_ZERO);
 	cl->cl_actc = hfsc_actlist_alloc();
 
 	if (qlimit == 0)
@@ -303,21 +307,18 @@ hfsc_class_create(struct hfsc_if *hif, struct hfsc_sc *rsc,
 #endif /* RED_NOTYET */
 
 	if (rsc != NULL && (rsc->m1 != 0 || rsc->m2 != 0)) {
-		cl->cl_rsc = malloc(sizeof(struct hfsc_internal_sc), M_DEVBUF,
-		    M_WAITOK);
+		cl->cl_rsc = pool_get(&hfsc_internal_sc_pl, PR_WAITOK);
 		hfsc_sc2isc(rsc, cl->cl_rsc);
 		hfsc_rtsc_init(&cl->cl_deadline, cl->cl_rsc, 0, 0);
 		hfsc_rtsc_init(&cl->cl_eligible, cl->cl_rsc, 0, 0);
 	}
 	if (fsc != NULL && (fsc->m1 != 0 || fsc->m2 != 0)) {
-		cl->cl_fsc = malloc(sizeof(struct hfsc_internal_sc), M_DEVBUF,
-		    M_WAITOK);
+		cl->cl_fsc = pool_get(&hfsc_internal_sc_pl, PR_WAITOK);
 		hfsc_sc2isc(fsc, cl->cl_fsc);
 		hfsc_rtsc_init(&cl->cl_virtual, cl->cl_fsc, 0, 0);
 	}
 	if (usc != NULL && (usc->m1 != 0 || usc->m2 != 0)) {
-		cl->cl_usc = malloc(sizeof(struct hfsc_internal_sc), M_DEVBUF,
-		    M_WAITOK);
+		cl->cl_usc = pool_get(&hfsc_internal_sc_pl, PR_WAITOK);
 		hfsc_sc2isc(usc, cl->cl_usc);
 		hfsc_rtsc_init(&cl->cl_ulimit, cl->cl_usc, 0, 0);
 	}
@@ -379,14 +380,14 @@ err_ret:
 	}
 #endif
 	if (cl->cl_fsc != NULL)
-		free(cl->cl_fsc, M_DEVBUF);
+		pool_put(&hfsc_internal_sc_pl, cl->cl_fsc);
 	if (cl->cl_rsc != NULL)
-		free(cl->cl_rsc, M_DEVBUF);
+		pool_put(&hfsc_internal_sc_pl, cl->cl_rsc);
 	if (cl->cl_usc != NULL)
-		free(cl->cl_usc, M_DEVBUF);
+		pool_put(&hfsc_internal_sc_pl, cl->cl_usc);
 	if (cl->cl_q != NULL)
-		free(cl->cl_q, M_DEVBUF);
-	free(cl, M_DEVBUF);
+		pool_put(&hfsc_classq_pl, cl->cl_q);
+	pool_put(&hfsc_class_pl, cl);
 	return (NULL);
 }
 
@@ -443,13 +444,13 @@ hfsc_class_destroy(struct hfsc_class *cl)
 		cl->cl_hif->hif_defaultclass = NULL;
 
 	if (cl->cl_usc != NULL)
-		free(cl->cl_usc, M_DEVBUF);
+		pool_put(&hfsc_internal_sc_pl, cl->cl_usc);
 	if (cl->cl_fsc != NULL)
-		free(cl->cl_fsc, M_DEVBUF);
+		pool_put(&hfsc_internal_sc_pl, cl->cl_fsc);
 	if (cl->cl_rsc != NULL)
-		free(cl->cl_rsc, M_DEVBUF);
-	free(cl->cl_q, M_DEVBUF);
-	free(cl, M_DEVBUF);
+		pool_put(&hfsc_internal_sc_pl, cl->cl_rsc);
+	pool_put(&hfsc_classq_pl, cl->cl_q);
+	pool_put(&hfsc_class_pl, cl);
 
 	return (0);
 }
@@ -676,7 +677,7 @@ hfsc_purgeq(struct hfsc_class *cl)
 {
 	struct mbuf *m;
 
-	if (cl->cl_q->qlen > 0)
+	if (cl->cl_q->qlen == 0)
 		return;
 
 	while ((m = hfsc_getq(cl)) != NULL) {

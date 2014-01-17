@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.c,v 1.105 2013/11/11 09:15:35 mpi Exp $	*/
+/*	$OpenBSD: nd6.c,v 1.109 2014/01/13 23:03:52 bluhm Exp $	*/
 /*	$KAME: nd6.c,v 1.280 2002/06/08 19:52:07 itojun Exp $	*/
 
 /*
@@ -637,7 +637,8 @@ nd6_purge(struct ifnet *ifp)
 }
 
 struct rtentry *
-nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp)
+nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp,
+    u_int rtableid)
 {
 	struct rtentry *rt;
 	struct sockaddr_in6 sin6;
@@ -647,7 +648,7 @@ nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp)
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_addr = *addr6;
 
-	rt = rtalloc1(sin6tosa(&sin6), create, ifp->if_rdomain);
+	rt = rtalloc1(sin6tosa(&sin6), create, rtableid);
 	if (rt && (rt->rt_flags & RTF_LLINFO) == 0) {
 		/*
 		 * This is the case for the default route.
@@ -690,7 +691,7 @@ nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp)
 			info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
 			info.rti_info[RTAX_NETMASK] = sin6tosa(&all1_sa);
 			if ((e = rtrequest1(RTM_ADD, &info, RTP_CONNECTED,
-			    &rt, ifp->if_rdomain)) != 0) {
+			    &rt, rtableid)) != 0) {
 #if 0
 				char ip[INET6_ADDRSTRLEN];
 				log(LOG_ERR,
@@ -779,7 +780,8 @@ nd6_is_addr_neighbor(struct sockaddr_in6 *addr, struct ifnet *ifp)
 	 * Even if the address matches none of our addresses, it might be
 	 * in the neighbor cache.
 	 */
-	if ((rt = nd6_lookup(&addr->sin6_addr, 0, ifp)) != NULL)
+	if ((rt = nd6_lookup(&addr->sin6_addr, 0, ifp,
+	    ifp->if_rdomain)) != NULL)
 		return (1);
 
 	return (0);
@@ -902,7 +904,8 @@ nd6_free(struct rtentry *rt, int gc)
  * XXX cost-effective methods?
  */
 void
-nd6_nud_hint(struct rtentry *rt, struct in6_addr *dst6, int force)
+nd6_nud_hint(struct rtentry *rt, struct in6_addr *dst6, int force,
+    u_int rtableid)
 {
 	struct llinfo_nd6 *ln;
 
@@ -913,7 +916,7 @@ nd6_nud_hint(struct rtentry *rt, struct in6_addr *dst6, int force)
 	if (!rt) {
 		if (!dst6)
 			return;
-		if (!(rt = nd6_lookup(dst6, 0, NULL)))
+		if (!(rt = nd6_lookup(dst6, 0, NULL, rtableid)))
 			return;
 	}
 
@@ -1077,7 +1080,7 @@ nd6_rtrequest(int req, struct rtentry *rt)
 		 * Case 2: This route may come from cloning, or a manual route
 		 * add with a LL address.
 		 */
-		R_Malloc(ln, struct llinfo_nd6 *, sizeof(*ln));
+		ln = malloc(sizeof(*ln), M_RTABLE, M_NOWAIT | M_ZERO);
 		rt->rt_llinfo = (caddr_t)ln;
 		if (!ln) {
 			log(LOG_DEBUG, "nd6_rtrequest: malloc failed\n");
@@ -1085,7 +1088,6 @@ nd6_rtrequest(int req, struct rtentry *rt)
 		}
 		nd6_inuse++;
 		nd6_allocated++;
-		Bzero(ln, sizeof(*ln));
 		ln->ln_rt = rt;
 		timeout_set(&ln->ln_timer_ch, nd6_llinfo_timer, ln);
 		/* this is required for "ndp" command. - shin */
@@ -1152,7 +1154,7 @@ nd6_rtrequest(int req, struct rtentry *rt)
 			ln->ln_state = ND6_LLINFO_REACHABLE;
 			ln->ln_byhint = 0;
 			if (macp) {
-				Bcopy(macp, LLADDR(SDL(gate)), ifp->if_addrlen);
+				memcpy(LLADDR(SDL(gate)), macp, ifp->if_addrlen);
 				SDL(gate)->sdl_alen = ifp->if_addrlen;
 			}
 			if (nd6_useloopback) {
@@ -1229,7 +1231,7 @@ nd6_rtrequest(int req, struct rtentry *rt)
 		rt->rt_flags &= ~RTF_LLINFO;
 		if (ln->ln_hold)
 			m_freem(ln->ln_hold);
-		Free((caddr_t)ln);
+		free(ln, M_RTABLE);
 	}
 }
 
@@ -1262,18 +1264,18 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 		s = splsoftnet();
 		/* First purge the addresses referenced by a prefix. */
 		LIST_FOREACH_SAFE(pr, &nd_prefix, ndpr_entry, npr) {
-			struct in6_ifaddr *ia, *ia_next;
+			struct in6_ifaddr *ia6, *ia6_next;
 
 			if (IN6_IS_ADDR_LINKLOCAL(&pr->ndpr_prefix.sin6_addr))
 				continue; /* XXX */
 
 			/* do we really have to remove addresses as well? */
-			TAILQ_FOREACH_SAFE(ia, &in6_ifaddr, ia_list, ia_next) {
-				if ((ia->ia6_flags & IN6_IFF_AUTOCONF) == 0)
+			TAILQ_FOREACH_SAFE(ia6, &in6_ifaddr, ia_list, ia6_next) {
+				if ((ia6->ia6_flags & IN6_IFF_AUTOCONF) == 0)
 					continue;
 
-				if (ia->ia6_ndpr == pr)
-					in6_purgeaddr(&ia->ia_ifa);
+				if (ia6->ia6_ndpr == pr)
+					in6_purgeaddr(&ia6->ia_ifa);
 			}
 		}
 		/*
@@ -1321,7 +1323,7 @@ nd6_ioctl(u_long cmd, caddr_t data, struct ifnet *ifp)
 		}
 
 		s = splsoftnet();
-		if ((rt = nd6_lookup(&nb_addr, 0, ifp)) == NULL ||
+		if ((rt = nd6_lookup(&nb_addr, 0, ifp, ifp->if_rdomain)) == NULL ||
 		    (ln = (struct llinfo_nd6 *)rt->rt_llinfo) == NULL) {
 			error = EINVAL;
 			splx(s);
@@ -1378,7 +1380,7 @@ nd6_cache_lladdr(struct ifnet *ifp, struct in6_addr *from, char *lladdr,
 	 * description on it in NS section (RFC 2461 7.2.3).
 	 */
 
-	rt = nd6_lookup(from, 0, ifp);
+	rt = nd6_lookup(from, 0, ifp, ifp->if_rdomain);
 	if (!rt) {
 #if 0
 		/* nothing must be done if there's no lladdr */
@@ -1386,7 +1388,7 @@ nd6_cache_lladdr(struct ifnet *ifp, struct in6_addr *from, char *lladdr,
 			return NULL;
 #endif
 
-		rt = nd6_lookup(from, RT_REPORT, ifp);
+		rt = nd6_lookup(from, RT_REPORT, ifp, ifp->if_rdomain);
 		is_newentry = 1;
 	} else {
 		/* do nothing if static ndp is set */
@@ -1698,7 +1700,8 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m0,
 		 * it is tolerable, because this should be a rare case.
 		 */
 		if (nd6_is_addr_neighbor(dst, ifp) &&
-		    (rt = nd6_lookup(&dst->sin6_addr, RT_REPORT, ifp)) != NULL)
+		    (rt = nd6_lookup(&dst->sin6_addr, RT_REPORT, ifp,
+		     ifp->if_rdomain)) != NULL)
 			ln = (struct llinfo_nd6 *)rt->rt_llinfo;
 	}
 	if (!ln || !rt) {

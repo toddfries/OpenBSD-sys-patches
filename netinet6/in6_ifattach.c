@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6_ifattach.c,v 1.64 2013/11/28 10:16:44 mpi Exp $	*/
+/*	$OpenBSD: in6_ifattach.c,v 1.67 2014/01/13 23:03:52 bluhm Exp $	*/
 /*	$KAME: in6_ifattach.c,v 1.124 2001/07/18 08:32:51 jinmei Exp $	*/
 
 /*
@@ -67,7 +67,7 @@ int ip6_auto_linklocal = 1;	/* enable by default */
 
 int get_last_resort_ifid(struct ifnet *, struct in6_addr *);
 int get_hw_ifid(struct ifnet *, struct in6_addr *);
-int get_ifid(struct ifnet *, struct ifnet *, struct in6_addr *);
+int get_ifid(struct ifnet *, struct in6_addr *);
 int in6_ifattach_loopback(struct ifnet *);
 
 #define EUI64_GBIT	0x01
@@ -257,11 +257,9 @@ found:
  * Get interface identifier for the specified interface.  If it is not
  * available on ifp0, borrow interface identifier from other information
  * sources.
- *
- * altifp - secondary EUI64 source
  */
 int
-get_ifid(struct ifnet *ifp0, struct ifnet *altifp, struct in6_addr *in6)
+get_ifid(struct ifnet *ifp0, struct in6_addr *in6)
 {
 	struct ifnet *ifp;
 
@@ -269,13 +267,6 @@ get_ifid(struct ifnet *ifp0, struct ifnet *altifp, struct in6_addr *in6)
 	if (get_hw_ifid(ifp0, in6) == 0) {
 		nd6log((LOG_DEBUG, "%s: got interface identifier from itself\n",
 		    ifp0->if_xname));
-		goto success;
-	}
-
-	/* try secondary EUI64 source. this basically is for ATM PVC */
-	if (altifp && get_hw_ifid(altifp, in6) == 0) {
-		nd6log((LOG_DEBUG, "%s: got interface identifier from %s\n",
-		    ifp0->if_xname, altifp->if_xname));
 		goto success;
 	}
 
@@ -318,13 +309,13 @@ success:
 }
 
 /*
- * altifp - secondary EUI64 source
+ * ifid - used as EUI64 if not NULL, overrides other EUI64 sources
  */
 
 int
-in6_ifattach_linklocal(struct ifnet *ifp, struct ifnet *altifp)
+in6_ifattach_linklocal(struct ifnet *ifp, struct in6_addr *ifid)
 {
-	struct in6_ifaddr *ia;
+	struct in6_ifaddr *ia6;
 	struct in6_aliasreq ifra;
 	struct nd_prefix pr0;
 	int i, s, error;
@@ -348,8 +339,15 @@ in6_ifattach_linklocal(struct ifnet *ifp, struct ifnet *altifp)
 	if ((ifp->if_flags & IFF_LOOPBACK) != 0) {
 		ifra.ifra_addr.sin6_addr.s6_addr32[2] = 0;
 		ifra.ifra_addr.sin6_addr.s6_addr32[3] = htonl(1);
+	} else if (ifid) {
+		ifra.ifra_addr.sin6_addr = *ifid;
+		ifra.ifra_addr.sin6_addr.s6_addr16[0] = htons(0xfe80);
+		ifra.ifra_addr.sin6_addr.s6_addr16[1] = htons(ifp->if_index);
+		ifra.ifra_addr.sin6_addr.s6_addr32[1] = 0;
+		ifra.ifra_addr.sin6_addr.s6_addr[8] &= ~EUI64_GBIT;
+		ifra.ifra_addr.sin6_addr.s6_addr[8] |= EUI64_UBIT;
 	} else {
-		if (get_ifid(ifp, altifp, &ifra.ifra_addr.sin6_addr) != 0) {
+		if (get_ifid(ifp, &ifra.ifra_addr.sin6_addr) != 0) {
 			nd6log((LOG_ERR,
 			    "%s: no ifid available\n", ifp->if_xname));
 			return (-1);
@@ -400,17 +398,17 @@ in6_ifattach_linklocal(struct ifnet *ifp, struct ifnet *altifp)
 	 * XXX: Some P2P interfaces seem not to send packets just after
 	 * becoming up, so we skip p2p interfaces for safety.
 	 */
-	ia = in6ifa_ifpforlinklocal(ifp, 0); /* ia must not be NULL */
+	ia6 = in6ifa_ifpforlinklocal(ifp, 0); /* ia6 must not be NULL */
 #ifdef DIAGNOSTIC
-	if (!ia) {
-		panic("ia == NULL in in6_ifattach_linklocal");
+	if (!ia6) {
+		panic("ia6 == NULL in in6_ifattach_linklocal");
 		/* NOTREACHED */
 	}
 #endif
 	if (in6if_do_dad(ifp) && ((ifp->if_flags & IFF_POINTOPOINT) ||
 	    (ifp->if_type == IFT_CARP)) == 0) {
-		ia->ia6_flags &= ~IN6_IFF_NODAD;
-		ia->ia6_flags |= IN6_IFF_TENTATIVE;
+		ia6->ia6_flags &= ~IN6_IFF_NODAD;
+		ia6->ia6_flags |= IN6_IFF_TENTATIVE;
 	}
 
 	/*
@@ -565,13 +563,11 @@ in6_nigroup(struct ifnet *ifp, const char *name, int namelen,
  * XXX multiple loopback interface needs more care.  for instance,
  * nodelocal address needs to be configured onto only one of them.
  * XXX multiple link-local address case
- *
- * altifp - secondary EUI64 source
  */
 void
-in6_ifattach(struct ifnet *ifp, struct ifnet *altifp)
+in6_ifattach(struct ifnet *ifp)
 {
-	struct in6_ifaddr *ia;
+	struct in6_ifaddr *ia6;
 	struct in6_addr in6;
 
 	/* some of the interfaces are inherently not IPv6 capable */
@@ -632,9 +628,9 @@ in6_ifattach(struct ifnet *ifp, struct ifnet *altifp)
 	 * assign a link-local address, if there's none.
 	 */
 	if (ip6_auto_linklocal) {
-		ia = in6ifa_ifpforlinklocal(ifp, 0);
-		if (ia == NULL) {
-			if (in6_ifattach_linklocal(ifp, altifp) == 0) {
+		ia6 = in6ifa_ifpforlinklocal(ifp, 0);
+		if (ia6 == NULL) {
+			if (in6_ifattach_linklocal(ifp, NULL) == 0) {
 				/* linklocal address assigned */
 			} else {
 				/* failed to assign linklocal address. bark? */
@@ -687,6 +683,26 @@ in6_ifdetach(struct ifnet *ifp)
 	 * (Or can we just delay calling nd6_purge until at this point?)
 	 */
 	nd6_purge(ifp);
+
+	/* remove route to interface local allnodes multicast (ff01::1) */
+	bzero(&sin6, sizeof(sin6));
+	sin6.sin6_len = sizeof(struct sockaddr_in6);
+	sin6.sin6_family = AF_INET6;
+	sin6.sin6_addr = in6addr_intfacelocal_allnodes;
+	sin6.sin6_addr.s6_addr16[1] = htons(ifp->if_index);
+	rt = rtalloc1(sin6tosa(&sin6), 0, ifp->if_rdomain);
+	if (rt && rt->rt_ifp == ifp) {
+		struct rt_addrinfo info;
+
+		bzero(&info, sizeof(info));
+		info.rti_flags = rt->rt_flags;
+		info.rti_info[RTAX_DST] = rt_key(rt);
+		info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
+		info.rti_info[RTAX_NETMASK] = rt_mask(rt);
+		rtrequest1(RTM_DELETE, &info, rt->rt_priority, NULL,
+		    ifp->if_rdomain);
+		rtfree(rt);
+	}
 
 	/* remove route to link-local allnodes multicast (ff02::1) */
 	bzero(&sin6, sizeof(sin6));

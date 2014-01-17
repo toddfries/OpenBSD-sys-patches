@@ -1,4 +1,4 @@
-/*	$OpenBSD: disksubr.c,v 1.28 2013/10/23 11:19:32 deraadt Exp $	*/
+/*	$OpenBSD: disksubr.c,v 1.30 2014/01/06 21:00:55 miod Exp $	*/
 
 /*
  * Copyright (c) 1999 Michael Shalayeff
@@ -134,10 +134,8 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 
 	if (dlp->partitions[0].blocks == 0)
 		return (EINVAL);
-	fsoffs = (long long)dlp->partitions[0].first *
-	    (dlp->dp.dp_secbytes / DEV_BSIZE);
-	fsend = fsoffs + dlp->partitions[0].blocks *
-	    (dlp->dp.dp_secbytes / DEV_BSIZE);
+	fsoffs = (long long)dlp->partitions[0].first;
+	fsend = fsoffs + dlp->partitions[0].blocks;
 
 	/* Only came here to find the offset... */
 	if (partoffp) {
@@ -153,11 +151,6 @@ readsgilabel(struct buf *bp, void (*strat)(struct buf *),
 		return (EINVAL);	/* sgilabel checksum error */
 
 	/* Spoof info from sgi label, in case there is no OpenBSD label. */
-	DL_SETDSIZE(lp, (DL_GETDSIZE(lp)*lp->d_secsize) / dlp->dp.dp_secbytes);
-	lp->d_secsize = dlp->dp.dp_secbytes;
-	lp->d_nsectors = dlp->dp.dp_secs;
-	lp->d_ntracks = dlp->dp.dp_trks0;
-	lp->d_ncylinders = dlp->dp.dp_cyls;
 	lp->d_npartitions = MAXPARTITIONS;
 
 	for (i = 0; i < 16; i++) {

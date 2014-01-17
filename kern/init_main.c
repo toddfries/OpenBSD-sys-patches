@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.192 2013/12/01 16:40:56 krw Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.197 2014/01/01 07:08:10 fgsch Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -107,7 +107,7 @@ extern void nfs_init(void);
 const char	copyright[] =
 "Copyright (c) 1982, 1986, 1989, 1991, 1993\n"
 "\tThe Regents of the University of California.  All rights reserved.\n"
-"Copyright (c) 1995-2013 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
+"Copyright (c) 1995-2014 OpenBSD. All rights reserved.  http://www.OpenBSD.org\n";
 
 /* Components of the first process -- never freed. */
 struct	session session0;
@@ -132,10 +132,7 @@ int	ncpusfound = 1;			/* number of cpus we find */
 __volatile int start_init_exec;		/* semaphore for start_init() */
 
 #if !defined(NO_PROPOLICE)
-#ifdef __ELF__
-long	__guard_local __dso_hidden;
-#endif
-long	__guard[8];
+long	__guard_local __attribute__((section(".openbsd.randomdata")));
 #endif
 
 /* XXX return int so gcc -Werror won't complain */
@@ -192,7 +189,6 @@ main(void *framep)
 	struct proc *p;
 	struct process *pr;
 	struct pdevinit *pdev;
-	struct timeval rtv;
 	quad_t lim;
 	int s, i;
 	extern struct pdevinit pdevinit[];
@@ -340,11 +336,12 @@ main(void *framep)
 	sleep_queue_init();
 	sched_init_cpu(curcpu());
 
+	random_start();
+	srandom(arc4random());
+
 	/* Initialize work queues */
 	workq_init();
 	taskq_init();
-
-	random_start();
 
 	/* Initialize the interface/address trees */
 	ifinit();
@@ -415,16 +412,11 @@ main(void *framep)
 #endif
 
 #if !defined(NO_PROPOLICE)
-	{
-		volatile long newguard[8];
+	if (__guard_local == 0) {
+		volatile long newguard;
 
-		arc4random_buf((long *)newguard, sizeof(newguard));
-
-#ifdef __ELF__
-		__guard_local = newguard[0];
-#endif
-		for (i = nitems(__guard) - 1; i; i--)
-			__guard[i] = newguard[i];
+		arc4random_buf((void *)&newguard, sizeof newguard);
+		__guard_local = newguard;
 	}
 #endif
 
@@ -446,6 +438,8 @@ main(void *framep)
 	if (fork1(p, SIGCHLD, FORK_FORK, NULL, 0, start_init, NULL, NULL,
 	    &initproc))
 		panic("fork init");
+
+	randompid = 1;
 
 	/*
 	 * Create any kernel threads whose creation was deferred because
@@ -529,11 +523,6 @@ main(void *framep)
 	/* Create the aiodone daemon kernel thread. */ 
 	if (kthread_create(uvm_aiodone_daemon, NULL, NULL, "aiodoned"))
 		panic("fork aiodoned");
-
-	microtime(&rtv);
-	srandom((u_int32_t)(rtv.tv_sec ^ rtv.tv_usec) ^ arc4random());
-
-	randompid = 1;
 
 #if defined(MULTIPROCESSOR)
 	/* Boot the secondary processors. */

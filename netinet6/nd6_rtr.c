@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6_rtr.c,v 1.74 2013/11/11 09:15:35 mpi Exp $	*/
+/*	$OpenBSD: nd6_rtr.c,v 1.77 2014/01/13 23:03:52 bluhm Exp $	*/
 /*	$KAME: nd6_rtr.c,v 1.97 2001/02/07 11:09:13 itojun Exp $	*/
 
 /*
@@ -242,7 +242,7 @@ nd6_ra_input(struct mbuf *m, int off, int icmp6len)
 	struct nd_defrouter dr0;
 	u_int32_t advreachable = nd_ra->nd_ra_reachable;
 
-	Bzero(&dr0, sizeof(dr0));
+	memset(&dr0, 0, sizeof(dr0));
 	dr0.rtaddr = saddr6;
 	dr0.flags  = nd_ra->nd_ra_flags_reserved;
 	dr0.rtlifetime = ntohs(nd_ra->nd_ra_router_lifetime);
@@ -455,10 +455,10 @@ defrouter_addreq(struct nd_defrouter *new)
 	int s;
 	int error;
 
-	Bzero(&def, sizeof(def));
-	Bzero(&mask, sizeof(mask));
-	Bzero(&gate, sizeof(gate)); /* for safety */
-	Bzero(&info, sizeof(info));
+	memset(&def, 0, sizeof(def));
+	memset(&mask, 0, sizeof(mask));
+	memset(&gate, 0, sizeof(gate)); /* for safety */
+	memset(&info, 0, sizeof(info));
 
 	def.sin6_len = mask.sin6_len = gate.sin6_len =
 	    sizeof(struct sockaddr_in6);
@@ -560,10 +560,10 @@ defrouter_delreq(struct nd_defrouter *dr)
 		panic("dr == NULL in defrouter_delreq");
 #endif
 
-	Bzero(&info, sizeof(info));
-	Bzero(&def, sizeof(def));
-	Bzero(&mask, sizeof(mask));
-	Bzero(&gw, sizeof(gw));	/* for safety */
+	memset(&info, 0, sizeof(info));
+	memset(&def, 0, sizeof(def));
+	memset(&mask, 0, sizeof(mask));
+	memset(&gw, 0, sizeof(gw));	/* for safety */
 
 	def.sin6_len = mask.sin6_len = gw.sin6_len =
 	    sizeof(struct sockaddr_in6);
@@ -669,7 +669,8 @@ defrouter_select(void)
 	 */
 	TAILQ_FOREACH(dr, &nd_defrouter, dr_entry) {
 		if (!selected_dr &&
-		    (rt = nd6_lookup(&dr->rtaddr, 0, dr->ifp)) &&
+		    (rt = nd6_lookup(&dr->rtaddr, 0, dr->ifp,
+		     dr->ifp->if_rdomain)) &&
 		    (ln = (struct llinfo_nd6 *)rt->rt_llinfo) &&
 		    ND6_IS_LLINFO_PROBREACH(ln)) {
 			selected_dr = dr;
@@ -697,7 +698,8 @@ defrouter_select(void)
 		else
 			selected_dr = TAILQ_NEXT(installed_dr, dr_entry);
 	} else if (installed_dr &&
-	    (rt = nd6_lookup(&installed_dr->rtaddr, 0, installed_dr->ifp)) &&
+	    (rt = nd6_lookup(&installed_dr->rtaddr, 0, installed_dr->ifp,
+	     installed_dr->ifp->if_rdomain)) &&
 	    (ln = (struct llinfo_nd6 *)rt->rt_llinfo) &&
 	    ND6_IS_LLINFO_PROBREACH(ln) &&
 	    rtpref(selected_dr) <= rtpref(installed_dr)) {
@@ -903,7 +905,7 @@ void
 purge_detached(struct ifnet *ifp)
 {
 	struct nd_prefix *pr, *pr_next;
-	struct in6_ifaddr *ia;
+	struct in6_ifaddr *ia6;
 	struct ifaddr *ifa, *ifa_next;
 
 	LIST_FOREACH_SAFE(pr, &nd_prefix, ndpr_entry, pr_next) {
@@ -923,9 +925,9 @@ purge_detached(struct ifnet *ifp)
 		TAILQ_FOREACH_SAFE(ifa, &ifp->if_addrlist, ifa_list, ifa_next) {
 			if (ifa->ifa_addr->sa_family != AF_INET6)
 				continue;
-			ia = ifatoia6(ifa);
-			if ((ia->ia6_flags & IN6_IFF_AUTOCONF) ==
-			    IN6_IFF_AUTOCONF && ia->ia6_ndpr == pr) {
+			ia6 = ifatoia6(ifa);
+			if ((ia6->ia6_flags & IN6_IFF_AUTOCONF) ==
+			    IN6_IFF_AUTOCONF && ia6->ia6_ndpr == pr) {
 				in6_purgeaddr(ifa);
 			}
 		}
@@ -1174,33 +1176,33 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 	 * should reject autoconfiguration of a new address.
 	 */
 	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
-		struct in6_ifaddr *ifa6;
+		struct in6_ifaddr *ia6;
 		int ifa_plen;
 		u_int32_t storedlifetime;
 
 		if (ifa->ifa_addr->sa_family != AF_INET6)
 			continue;
 
-		ifa6 = ifatoia6(ifa);
+		ia6 = ifatoia6(ifa);
 
 		/*
 		 * Spec is not clear here, but I believe we should concentrate
 		 * on unicast (i.e. not anycast) addresses.
 		 * XXX: other ia6_flags? detached or duplicated?
 		 */
-		if ((ifa6->ia6_flags & IN6_IFF_ANYCAST) != 0)
+		if ((ia6->ia6_flags & IN6_IFF_ANYCAST) != 0)
 			continue;
 
-		ifa_plen = in6_mask2len(&ifa6->ia_prefixmask.sin6_addr, NULL);
+		ifa_plen = in6_mask2len(&ia6->ia_prefixmask.sin6_addr, NULL);
 		if (ifa_plen != new->ndpr_plen ||
-		    !in6_are_prefix_equal(&ifa6->ia_addr.sin6_addr,
+		    !in6_are_prefix_equal(&ia6->ia_addr.sin6_addr,
 		    &new->ndpr_prefix.sin6_addr, ifa_plen))
 			continue;
 
 		if (ia6_match == NULL) /* remember the first one */
-			ia6_match = ifa6;
+			ia6_match = ia6;
 
-		if ((ifa6->ia6_flags & IN6_IFF_AUTOCONF) == 0) {
+		if ((ia6->ia6_flags & IN6_IFF_AUTOCONF) == 0) {
 			statique = 1;
 			continue;
 		}
@@ -1228,25 +1230,25 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 		 * See the discussion in the IETF ipngwg ML in August 2001,
 		 * with the Subject "StoredLifetime in RFC 2462".
 		 */
-		lt6_tmp = ifa6->ia6_lifetime;
+		lt6_tmp = ia6->ia6_lifetime;
 
 		/* RFC 4941 temporary addresses (privacy extension). */
-		if (ifa6->ia6_flags & IN6_IFF_PRIVACY) {
+		if (ia6->ia6_flags & IN6_IFF_PRIVACY) {
 			/* Do we still have a non-deprecated address? */
-			if ((ifa6->ia6_flags & IN6_IFF_DEPRECATED) == 0)
+			if ((ia6->ia6_flags & IN6_IFF_DEPRECATED) == 0)
 				tempaddr_preferred = 1;
 			/* Don't extend lifetime for temporary addresses. */
 			if (new->ndpr_vltime >= lt6_tmp.ia6t_vltime)
 				continue;
 			if (new->ndpr_pltime >= lt6_tmp.ia6t_pltime)
 				continue;
-		} else if ((ifa6->ia6_flags & IN6_IFF_DEPRECATED) == 0)
+		} else if ((ia6->ia6_flags & IN6_IFF_DEPRECATED) == 0)
 			/* We have a regular SLAAC address. */
 			autoconf = 1;
 
 		if (lt6_tmp.ia6t_vltime == ND6_INFINITE_LIFETIME)
 			storedlifetime = ND6_INFINITE_LIFETIME;
-		else if (time_second - ifa6->ia6_updatetime >
+		else if (time_second - ia6->ia6_updatetime >
 			 lt6_tmp.ia6t_vltime) {
 			/*
 			 * The case of "invalid" address.  We should usually
@@ -1255,7 +1257,7 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 			storedlifetime = 0;
 		} else
 			storedlifetime = lt6_tmp.ia6t_vltime -
-				(time_second - ifa6->ia6_updatetime);
+				(time_second - ia6->ia6_updatetime);
 		if (TWOHOUR < new->ndpr_vltime ||
 		    storedlifetime < new->ndpr_vltime) {
 			lt6_tmp.ia6t_vltime = new->ndpr_vltime;
@@ -1285,8 +1287,8 @@ prelist_update(struct nd_prefix *new, struct nd_defrouter *dr, struct mbuf *m)
 
 		in6_init_address_ltimes(pr, &lt6_tmp);
 
-		ifa6->ia6_lifetime = lt6_tmp;
-		ifa6->ia6_updatetime = time_second;
+		ia6->ia6_lifetime = lt6_tmp;
+		ia6->ia6_updatetime = time_second;
 	}
 
 	if ((!autoconf || ((ifp->if_xflags & IFXF_INET6_NOPRIVACY) == 0 &&
@@ -1398,7 +1400,7 @@ find_pfxlist_reachable_router(struct nd_prefix *pr)
 
 	LIST_FOREACH(pfxrtr, &pr->ndpr_advrtrs, pfr_entry) {
 		if ((rt = nd6_lookup(&pfxrtr->router->rtaddr, 0,
-		    pfxrtr->router->ifp)) &&
+		    pfxrtr->router->ifp, pfxrtr->router->ifp->if_rdomain)) &&
 		    (ln = (struct llinfo_nd6 *)rt->rt_llinfo) &&
 		    ND6_IS_LLINFO_PROBREACH(ln))
 			break;	/* found */
@@ -1424,7 +1426,7 @@ void
 pfxlist_onlink_check(void)
 {
 	struct nd_prefix *pr;
-	struct in6_ifaddr *ifa;
+	struct in6_ifaddr *ia6;
 	char addr[INET6_ADDRSTRLEN];
 
 	/*
@@ -1530,11 +1532,11 @@ pfxlist_onlink_check(void)
 	 * always be attached.
 	 * The precise detection logic is same as the one for prefixes.
 	 */
-	TAILQ_FOREACH(ifa, &in6_ifaddr, ia_list) {
-		if (!(ifa->ia6_flags & IN6_IFF_AUTOCONF))
+	TAILQ_FOREACH(ia6, &in6_ifaddr, ia_list) {
+		if (!(ia6->ia6_flags & IN6_IFF_AUTOCONF))
 			continue;
 
-		if (ifa->ia6_ndpr == NULL) {
+		if (ia6->ia6_ndpr == NULL) {
 			/*
 			 * This can happen when we first configure the address
 			 * (i.e. the address exists, but the prefix does not).
@@ -1543,29 +1545,29 @@ pfxlist_onlink_check(void)
 			continue;
 		}
 
-		if (find_pfxlist_reachable_router(ifa->ia6_ndpr))
+		if (find_pfxlist_reachable_router(ia6->ia6_ndpr))
 			break;
 	}
-	if (ifa) {
-		TAILQ_FOREACH(ifa, &in6_ifaddr, ia_list) {
-			if ((ifa->ia6_flags & IN6_IFF_AUTOCONF) == 0)
+	if (ia6) {
+		TAILQ_FOREACH(ia6, &in6_ifaddr, ia_list) {
+			if ((ia6->ia6_flags & IN6_IFF_AUTOCONF) == 0)
 				continue;
 
-			if (ifa->ia6_ndpr == NULL) /* XXX: see above. */
+			if (ia6->ia6_ndpr == NULL) /* XXX: see above. */
 				continue;
 
-			if (find_pfxlist_reachable_router(ifa->ia6_ndpr))
-				ifa->ia6_flags &= ~IN6_IFF_DETACHED;
+			if (find_pfxlist_reachable_router(ia6->ia6_ndpr))
+				ia6->ia6_flags &= ~IN6_IFF_DETACHED;
 			else
-				ifa->ia6_flags |= IN6_IFF_DETACHED;
+				ia6->ia6_flags |= IN6_IFF_DETACHED;
 		}
 	}
 	else {
-		TAILQ_FOREACH(ifa, &in6_ifaddr, ia_list) {
-			if ((ifa->ia6_flags & IN6_IFF_AUTOCONF) == 0)
+		TAILQ_FOREACH(ia6, &in6_ifaddr, ia_list) {
+			if ((ia6->ia6_flags & IN6_IFF_AUTOCONF) == 0)
 				continue;
 
-			ifa->ia6_flags &= ~IN6_IFF_DETACHED;
+			ia6->ia6_flags &= ~IN6_IFF_DETACHED;
 		}
 	}
 }
@@ -1799,7 +1801,7 @@ in6_ifadd(struct nd_prefix *pr, int privacy)
 	struct ifnet *ifp = pr->ndpr_ifp;
 	struct ifaddr *ifa;
 	struct in6_aliasreq ifra;
-	struct in6_ifaddr *ia, *ib;
+	struct in6_ifaddr *ia6;
 	int error, s, plen0;
 	struct in6_addr mask, rand_ifid;
 	int prefixlen = pr->ndpr_plen;
@@ -1828,7 +1830,7 @@ in6_ifadd(struct nd_prefix *pr, int privacy)
 	 */
 	ifa = &in6ifa_ifpforlinklocal(ifp, 0)->ia_ifa; /* 0 is OK? */
 	if (ifa)
-		ib = ifatoia6(ifa);
+		ia6 = ifatoia6(ifa);
 	else
 		return NULL;
 
@@ -1841,7 +1843,7 @@ in6_ifadd(struct nd_prefix *pr, int privacy)
 #endif
 
 	/* prefixlen + ifidlen must be equal to 128 */
-	plen0 = in6_mask2len(&ib->ia_prefixmask.sin6_addr, NULL);
+	plen0 = in6_mask2len(&ia6->ia_prefixmask.sin6_addr, NULL);
 	if (prefixlen != plen0) {
 		nd6log((LOG_INFO, "in6_ifadd: wrong prefixlen for %s "
 		    "(prefix=%d ifid=%d)\n",
@@ -1883,13 +1885,13 @@ in6_ifadd(struct nd_prefix *pr, int privacy)
 		    (rand_ifid.s6_addr32[3] & ~mask.s6_addr32[3]);
 	} else {
 		ifra.ifra_addr.sin6_addr.s6_addr32[0] |=
-		    (ib->ia_addr.sin6_addr.s6_addr32[0] & ~mask.s6_addr32[0]);
+		    (ia6->ia_addr.sin6_addr.s6_addr32[0] & ~mask.s6_addr32[0]);
 		ifra.ifra_addr.sin6_addr.s6_addr32[1] |=
-		    (ib->ia_addr.sin6_addr.s6_addr32[1] & ~mask.s6_addr32[1]);
+		    (ia6->ia_addr.sin6_addr.s6_addr32[1] & ~mask.s6_addr32[1]);
 		ifra.ifra_addr.sin6_addr.s6_addr32[2] |=
-		    (ib->ia_addr.sin6_addr.s6_addr32[2] & ~mask.s6_addr32[2]);
+		    (ia6->ia_addr.sin6_addr.s6_addr32[2] & ~mask.s6_addr32[2]);
 		ifra.ifra_addr.sin6_addr.s6_addr32[3] |=
-		    (ib->ia_addr.sin6_addr.s6_addr32[3] & ~mask.s6_addr32[3]);
+		    (ia6->ia_addr.sin6_addr.s6_addr32[3] & ~mask.s6_addr32[3]);
 	}
 
 	/* new prefix mask. */
@@ -1934,9 +1936,8 @@ in6_ifadd(struct nd_prefix *pr, int privacy)
 		return (NULL);	/* ifaddr must not have been allocated. */
 	}
 
-	ia = in6ifa_ifpwithaddr(ifp, &ifra.ifra_addr.sin6_addr);
-
-	return (ia);		/* this is always non-NULL */
+	/* this is always non-NULL */
+	return (in6ifa_ifpwithaddr(ifp, &ifra.ifra_addr.sin6_addr));
 }
 
 int

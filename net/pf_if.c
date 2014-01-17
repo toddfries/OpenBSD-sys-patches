@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_if.c,v 1.68 2013/10/17 16:27:42 bluhm Exp $ */
+/*	$OpenBSD: pf_if.c,v 1.70 2014/01/08 22:38:29 bluhm Exp $ */
 
 /*
  * Copyright 2005 Henning Brauer <henning@openbsd.org>
@@ -242,9 +242,15 @@ pfi_detach_ifnet(struct ifnet *ifp)
 	hook_disestablish(ifp->if_addrhooks, kif->pfik_ah_cookie);
 	pfi_kif_update(kif);
 
+	if (HFSC_ENABLED(&ifp->if_snd)) {
+		pf_remove_queues(ifp);
+		pf_free_queues(pf_queues_active, ifp);
+	}
+
 	kif->pfik_ifp = NULL;
 	ifp->if_pf_kif = NULL;
 	pfi_kif_unref(kif, PFI_KIF_REF_NONE);
+
 	splx(s);
 }
 
@@ -468,16 +474,16 @@ pfi_table_update(struct pfr_ktable *kt, struct pfi_kif *kif, int net, int flags)
 void
 pfi_instance_add(struct ifnet *ifp, int net, int flags)
 {
-	struct ifaddr	*ia;
+	struct ifaddr	*ifa;
 	int		 got4 = 0, got6 = 0;
 	int		 net2, af;
 
 	if (ifp == NULL)
 		return;
-	TAILQ_FOREACH(ia, &ifp->if_addrlist, ifa_list) {
-		if (ia->ifa_addr == NULL)
+	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
+		if (ifa->ifa_addr == NULL)
 			continue;
-		af = ia->ifa_addr->sa_family;
+		af = ifa->ifa_addr->sa_family;
 		if (af != AF_INET && af != AF_INET6)
 			continue;
 		if ((flags & PFI_AFLAG_BROADCAST) && af == AF_INET6)
@@ -490,7 +496,7 @@ pfi_instance_add(struct ifnet *ifp, int net, int flags)
 			continue;
 		if ((flags & PFI_AFLAG_NETWORK) && af == AF_INET6 &&
 		    IN6_IS_ADDR_LINKLOCAL(
-		    &((struct sockaddr_in6 *)ia->ifa_addr)->sin6_addr))
+		    &((struct sockaddr_in6 *)ifa->ifa_addr)->sin6_addr))
 			continue;
 		if (flags & PFI_AFLAG_NOALIAS) {
 			if (af == AF_INET && got4)
@@ -506,19 +512,19 @@ pfi_instance_add(struct ifnet *ifp, int net, int flags)
 		if (net2 == 128 && (flags & PFI_AFLAG_NETWORK)) {
 			if (af == AF_INET)
 				net2 = pfi_unmask(&((struct sockaddr_in *)
-				    ia->ifa_netmask)->sin_addr);
+				    ifa->ifa_netmask)->sin_addr);
 			else if (af == AF_INET6)
 				net2 = pfi_unmask(&((struct sockaddr_in6 *)
-				    ia->ifa_netmask)->sin6_addr);
+				    ifa->ifa_netmask)->sin6_addr);
 		}
 		if (af == AF_INET && net2 > 32)
 			net2 = 32;
 		if (flags & PFI_AFLAG_BROADCAST)
-			pfi_address_add(ia->ifa_broadaddr, af, net2);
+			pfi_address_add(ifa->ifa_broadaddr, af, net2);
 		else if (flags & PFI_AFLAG_PEER)
-			pfi_address_add(ia->ifa_dstaddr, af, net2);
+			pfi_address_add(ifa->ifa_dstaddr, af, net2);
 		else
-			pfi_address_add(ia->ifa_addr, af, net2);
+			pfi_address_add(ifa->ifa_addr, af, net2);
 	}
 }
 

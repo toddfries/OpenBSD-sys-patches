@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.528 2013/11/01 17:36:19 krw Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.531 2014/01/05 20:23:57 mlarkin Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -164,6 +164,11 @@ extern struct proc *npxproc;
 #include <dev/ic/comreg.h>
 #include <dev/ic/comvar.h>
 #endif /* NCOM > 0 */
+
+#ifdef HIBERNATE
+#include <machine/hibernate_var.h>
+#endif /* HIBERNATE */
+
 
 void	replacesmap(void);
 int     intr_handler(struct intrframe *, struct intrhand *);
@@ -3220,9 +3225,27 @@ init386(paddr_t first_avail)
 				e = 0xfffff000;
 			}
 
-			/* skip first 16 pages for tramps and hibernate */
+			/* skip first 16 pages due to SMI corruption */
 			if (a < 16 * NBPG)
 				a = 16 * NBPG;
+
+#ifdef MULTIPROCESSOR
+			/* skip MP trampoline code page */
+			if (a < MP_TRAMPOLINE + NBPG)
+				a = MP_TRAMPOLINE + NBPG;
+#endif /* MULTIPROCESSOR */
+
+#if NACPI > 0 && !defined(SMALL_KERNEL)
+			/* skip ACPI resume trampoline code page */
+			if (a < ACPI_TRAMPOLINE + NBPG)
+				a = ACPI_TRAMPOLINE + NBPG;
+#endif /* ACPI */
+
+#ifdef HIBERNATE
+			/* skip hibernate reserved pages */
+			if (a < HIBERNATE_HIBALLOC_PAGE + PAGE_SIZE)
+				a = HIBERNATE_HIBALLOC_PAGE + PAGE_SIZE;
+#endif /* HIBERNATE */
 
 			/* skip shorter than page regions */
 			if (a >= e || (e - a) < NBPG) {

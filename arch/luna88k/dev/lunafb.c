@@ -1,4 +1,4 @@
-/* $OpenBSD: lunafb.c,v 1.17 2013/10/21 10:36:15 miod Exp $ */
+/* $OpenBSD: lunafb.c,v 1.21 2014/01/15 11:13:53 aoyama Exp $ */
 /* $NetBSD: lunafb.c,v 1.7.6.1 2002/08/07 01:48:34 lukem Exp $ */
 
 /*-
@@ -76,16 +76,6 @@ struct bt458 {
 #define	OMFB_RAMDAC	0xC1100000	/* Bt454/Bt458 RAMDAC */
 #define	OMFB_SIZE	(0xB1300000 - 0xB1080000 + PAGE_SIZE)
 
-struct om_hwdevconfig {
-	int	dc_wid;			/* width of frame buffer */
-	int	dc_ht;			/* height of frame buffer */
-	int	dc_depth;		/* depth, bits per pixel */
-	int	dc_rowbytes;		/* bytes in a FB scan line */
-	int	dc_cmsize;		/* colormap size */
-	vaddr_t	dc_videobase;		/* base of flat frame buffer */
-	struct rasops_info dc_ri;	/* raster blitter variables */
-};
-
 struct hwcmap {
 #define CMAP_SIZE 256
 	u_int8_t r[CMAP_SIZE];
@@ -93,10 +83,44 @@ struct hwcmap {
 	u_int8_t b[CMAP_SIZE];
 };
 
+static const struct {
+	u_int8_t r;
+	u_int8_t g;
+	u_int8_t b;
+} ansicmap[16] = {
+	{    0,    0,    0},
+	{ 0x80,    0,    0},
+	{    0, 0x80,    0},
+	{ 0x80, 0x80,    0},
+	{    0,    0, 0x80},
+	{ 0x80,    0, 0x80},
+	{    0, 0x80, 0x80},
+	{ 0xc0, 0xc0, 0xc0},
+	{ 0x80, 0x80, 0x80},
+	{ 0xff,    0,    0},
+	{    0, 0xff,    0},
+	{ 0xff, 0xff,    0},
+	{    0,    0, 0xff},
+	{ 0xff,    0, 0xff},
+	{    0, 0xff, 0xff},
+	{ 0xff, 0xff, 0xff},
+};
+
+struct om_hwdevconfig {
+	int	dc_wid;			/* width of frame buffer */
+	int	dc_ht;			/* height of frame buffer */
+	int	dc_depth;		/* depth, bits per pixel */
+	int	dc_rowbytes;		/* bytes in a FB scan line */
+	int	dc_depth_checked;	/* depth is really checked or not */
+	int	dc_cmsize;		/* colormap size */
+	struct hwcmap dc_cmap;		/* software copy of colormap */
+	vaddr_t	dc_videobase;		/* base of flat frame buffer */
+	struct rasops_info dc_ri;	/* raster blitter variables */
+};
+
 struct omfb_softc {
 	struct device sc_dev;		/* base device */
 	struct om_hwdevconfig *sc_dc;	/* device configuration */
-	struct hwcmap sc_cmap;		/* software copy of colormap */
 	int nscreens;
 };
 
@@ -107,12 +131,12 @@ struct om_hwdevconfig omfb_console_dc;
 void omfb_getdevconfig(paddr_t, struct om_hwdevconfig *);
 
 /* in omrasops.c */
-int	om_cursor(void *, int, int, int);
-int	om_putchar(void *, int, int, u_int, long);
 int	om_copycols(void *, int, int, int, int);
 int	om_copyrows(void *, int, int, int num);
 int	om_erasecols(void *, int, int, int, long);
 int	om_eraserows(void *, int, int, long);
+void	setup_omrasops1(struct rasops_info *);
+void	setup_omrasops4(struct rasops_info *);
 
 struct wsscreen_descr omfb_stdscreen = {
 	"std"
@@ -135,6 +159,10 @@ int	omfb_show_screen(void *, void *, int, void (*) (void *, int, int),
 	    void *);
 int	omfb_load_font(void *, void *, struct wsdisplay_font *);
 int	omfb_list_font(void *, struct wsdisplay_font *);
+int	omfb_set_gfxmode(struct omfb_softc *, struct wsdisplay_gfx_mode *);
+
+void	omfb_set_default_cmap(struct om_hwdevconfig *);
+void	omfb_clear_framebuffer(struct om_hwdevconfig *);
 
 const struct wsdisplay_accessops omfb_accessops = {
 	.ioctl = omfbioctl,
@@ -157,16 +185,14 @@ struct cfdriver fb_cd = {
         NULL, "fb", DV_DULL
 };
 
-/* hardware plane bits; retrieved at boot, will be updated in omfbmatch() */
+/* hardware plane bits; retrieved at boot, will be updated */
 extern int hwplanebits;
 
 int omfb_console;
 int omfb_cnattach(void);
 
 int
-omfbmatch(parent, cf, aux)
-	struct device *parent;
-	void *cf, *aux;
+omfbmatch(struct device *parent, void *cf, void *aux)
 {
 	struct mainbus_attach_args *ma = aux;
 
@@ -179,33 +205,11 @@ omfbmatch(parent, cf, aux)
 	if (hwplanebits == 0)
 		return (0);
 #endif
-
-	/*
-	 * Check how many planes we have.  This is for 1, 4, and 8 bpp
-	 * boards, must be checked different way for 24 bpp board...
-	 */
-	if (hwplanebits > 0) {
-		int i;
-		u_int32_t *max, save;
-
-		for (i = 0; i < 8; i++) {
-			max = (u_int32_t *)trunc_page(OMFB_FB_RADDR
-				+ OMFB_FB_PLANESIZE * i);
-			save = *max;
-			*(volatile uint32_t *)max = 0x5a5a5a5a;
-			if (*max != 0x5a5a5a5a)
-				break;
-			*max = save;
-		}
-		hwplanebits = i;	/* should be 1, 4, or 8 */
-	}
 	return (1);
 }
 
 void
-omfbattach(parent, self, args)
-	struct device *parent, *self;
-	void *args;
+omfbattach(struct device *parent, struct device *self, void *args)
 {
 	struct omfb_softc *sc = (struct omfb_softc *)self;
 	struct wsemuldisplaydev_attach_args waa;
@@ -220,11 +224,7 @@ omfbattach(parent, self, args)
 		omfb_getdevconfig(OMFB_FB_WADDR, sc->sc_dc);
 	}
 	printf(": %d x %d, %dbpp\n", sc->sc_dc->dc_wid, sc->sc_dc->dc_ht,
-		hwplanebits);
-
-	/* WHITE on BLACK */
-	memset(&sc->sc_cmap, 255, sizeof(struct hwcmap));
-	sc->sc_cmap.r[0] = sc->sc_cmap.g[0] = sc->sc_cmap.b[0] = 0;
+	    hwplanebits);
 
 	waa.console = omfb_console;
 	waa.scrdata = &omfb_screenlist;
@@ -236,7 +236,7 @@ omfbattach(parent, self, args)
 }
 
 /* EXPORT */ int
-omfb_cnattach()
+omfb_cnattach(void)
 {
 	struct om_hwdevconfig *dc = &omfb_console_dc;
 	struct rasops_info *ri = &dc->dc_ri;
@@ -250,12 +250,7 @@ omfb_cnattach()
 }
 
 int
-omfbioctl(v, cmd, data, flag, p)
-	void *v;
-	u_long cmd;
-	caddr_t data;
-	int flag;
-	struct proc *p;
+omfbioctl(void *v, u_long cmd, caddr_t data, int flag, struct proc *p)
 {
 	struct omfb_softc *sc = v;
 	struct om_hwdevconfig *dc = sc->sc_dc;
@@ -288,6 +283,9 @@ omfbioctl(v, cmd, data, flag, p)
 		*(u_int *)data = WSDISPLAYIO_DEPTH_1;
 		break;
 
+        case WSDISPLAYIO_SETGFXMODE:
+                return omfb_set_gfxmode(sc, (struct wsdisplay_gfx_mode *)data);
+
 	case WSDISPLAYIO_SVIDEO:
 	case WSDISPLAYIO_GVIDEO:
 		break;
@@ -310,10 +308,7 @@ omfbioctl(v, cmd, data, flag, p)
  */
 
 paddr_t
-omfbmmap(v, offset, prot)
-	void *v;
-	off_t offset;
-	int prot;
+omfbmmap(void *v, off_t offset, int prot)
 {
 	struct omfb_softc *sc = v;
 	struct om_hwdevconfig *dc = sc->sc_dc;
@@ -326,16 +321,14 @@ omfbmmap(v, offset, prot)
 	if (offset >= 0 && offset < OMFB_SIZE)
 		cookie = (paddr_t)(trunc_page(dc->dc_videobase) + offset);
 #else
-	if (offset >= 0 && offset < dc->dc_rowbytes * dc->dc_ht)
+	if (offset >= 0 && offset < dc->dc_rowbytes * dc->dc_ht * hwplanebits)
 		cookie = (paddr_t)(trunc_page(OMFB_FB_RADDR) + offset);
 #endif
 	return cookie;
 }
 
 int
-omgetcmap(sc, p)
-	struct omfb_softc *sc;
-	struct wsdisplay_cmap *p;
+omgetcmap(struct omfb_softc *sc, struct wsdisplay_cmap *p)
 {
 	u_int index = p->index, count = p->count;
         unsigned int cmsize;
@@ -350,13 +343,13 @@ omgetcmap(sc, p)
 	if (index >= cmsize || count > cmsize - index)
 		return (EINVAL);
 
-	error = copyout(&sc->sc_cmap.r[index], p->red, count);
+	error = copyout(&sc->sc_dc->dc_cmap.r[index], p->red, count);
 	if (error != 0)
 		return (error);
-	error = copyout(&sc->sc_cmap.g[index], p->green, count);
+	error = copyout(&sc->sc_dc->dc_cmap.g[index], p->green, count);
 	if (error != 0)
 		return (error);
-	error = copyout(&sc->sc_cmap.b[index], p->blue, count);
+	error = copyout(&sc->sc_dc->dc_cmap.b[index], p->blue, count);
 	if (error != 0)
 		return (error);
 
@@ -364,10 +357,9 @@ omgetcmap(sc, p)
 }
 
 int
-omsetcmap(sc, p)
-	struct omfb_softc *sc;
-	struct wsdisplay_cmap *p;
+omsetcmap(struct omfb_softc *sc, struct wsdisplay_cmap *p)
 {
+	struct hwcmap cmap;
 	u_int index = p->index, count = p->count;
         unsigned int cmsize, i;
 	int error;
@@ -381,106 +373,82 @@ omsetcmap(sc, p)
 	if (index >= cmsize || count > cmsize - index)
 		return (EINVAL);
 
-	error = copyin(p->red, &sc->sc_cmap.r[index], count);
+	error = copyin(p->red, &cmap.r[index], count);
 	if (error != 0)
 		return (error);
-	error = copyin(p->green, &sc->sc_cmap.g[index], count);
+	error = copyin(p->green, &cmap.g[index], count);
 	if (error != 0)
 		return (error);
-	error = copyin(p->blue, &sc->sc_cmap.b[index], count);
+	error = copyin(p->blue, &cmap.b[index], count);
 	if (error != 0)
 		return (error);
+
+	memcpy(&sc->sc_dc->dc_cmap.r[index], &cmap.r[index], count);
+	memcpy(&sc->sc_dc->dc_cmap.g[index], &cmap.g[index], count);
+	memcpy(&sc->sc_dc->dc_cmap.b[index], &cmap.b[index], count);
 
 	if (hwplanebits == 4) {
 		struct bt454 *odac = (struct bt454 *)OMFB_RAMDAC;
 		odac->bt_addr = (u_int8_t)index;
 		for (i = index; i < index + count; i++) {
-			odac->bt_cmap = sc->sc_cmap.r[i];
-			odac->bt_cmap = sc->sc_cmap.g[i];
-			odac->bt_cmap = sc->sc_cmap.b[i];
+			odac->bt_cmap = sc->sc_dc->dc_cmap.r[i];
+			odac->bt_cmap = sc->sc_dc->dc_cmap.g[i];
+			odac->bt_cmap = sc->sc_dc->dc_cmap.b[i];
 		}
 	}
 	else if (hwplanebits == 8) {
 		struct bt458 *ndac = (struct bt458 *)OMFB_RAMDAC;
 		ndac->bt_addr = (u_int8_t)index;
 		for (i = index; i < index + count; i++) {
-			ndac->bt_cmap = sc->sc_cmap.r[i];
-			ndac->bt_cmap = sc->sc_cmap.g[i];
-			ndac->bt_cmap = sc->sc_cmap.b[i];
+			ndac->bt_cmap = sc->sc_dc->dc_cmap.r[i];
+			ndac->bt_cmap = sc->sc_dc->dc_cmap.g[i];
+			ndac->bt_cmap = sc->sc_dc->dc_cmap.b[i];
 		}
 	}
 	return (0);
 }
 
 void
-omfb_getdevconfig(paddr, dc)
-	paddr_t paddr;
-	struct om_hwdevconfig *dc;
+omfb_getdevconfig(paddr_t paddr, struct om_hwdevconfig *dc)
 {
-	int bpp, i;
 	struct rasops_info *ri;
 	union {
 		struct { short h, v; } p;
 		u_int32_t u;
 	} rfcnt;
 
-#if 0	/* Workaround for making Xorg mono server work */
-	switch (hwplanebits) {
-	case 8:
-		bpp = 8;	/* XXX check monochrome bit in DIPSW */
-		break;
-	default:
-	case 4:
-		bpp = 4;	/* XXX check monochrome bit in DIPSW */
-		break;
-	case 1:
-		bpp = 1;
-		break;
+	/*
+	 * If this is the first time call, check how many planes we really
+	 * have.  This method is for 1, 4, and 8 bpp boards, must be checked
+	 * different way for 24 bpp board...
+	 */
+	if ((hwplanebits > 0) && (dc->dc_depth_checked == 0)) {
+		int i;
+		u_int32_t *max, save;
+
+		for (i = 0; i < 8; i++) {
+			max = (u_int32_t *)trunc_page(OMFB_FB_RADDR
+			    + OMFB_FB_PLANESIZE * i);
+			save = *max;
+			*(volatile uint32_t *)max = 0x5a5a5a5a;
+			if (*max != 0x5a5a5a5a)
+				break;
+			*max = save;
+		}
+		hwplanebits = i;	/* should be 1, 4, or 8 */
+
+		dc->dc_depth_checked = 1;
 	}
-#else
-	bpp = 1;
-#endif
+
 	dc->dc_wid = 1280;
 	dc->dc_ht = 1024;
-	dc->dc_depth = bpp;
+	dc->dc_depth = hwplanebits;
 	dc->dc_rowbytes = 2048 / 8;
-	dc->dc_cmsize = (bpp == 1) ? 0 : 1 << bpp;
+	dc->dc_cmsize = (hwplanebits == 1) ? 0 : 1 << hwplanebits;
 	dc->dc_videobase = paddr;
 
-	/* WHITE on BLACK */
-
-	if ((hwplanebits == 1) || (hwplanebits == 4)) {
-		struct bt454 *odac = (struct bt454 *)OMFB_RAMDAC;
-
-		odac->bt_addr = 0;
-		odac->bt_cmap = 0;
-		odac->bt_cmap = 0;
-		odac->bt_cmap = 0;
-		for (i = 1; i < 16; i++) {
-			odac->bt_cmap = 255;
-			odac->bt_cmap = 255;
-			odac->bt_cmap = 255;
-		}
-	} else if (hwplanebits == 8) {
-		struct bt458 *ndac = (struct bt458 *)OMFB_RAMDAC;
-
-#if 0		/* This doesn't work.  Don't touch ROM setting for now. */
-		ndac->bt_addr = 0x04;
-		ndac->bt_ctrl = 0xff; /* all planes will be read */
-		ndac->bt_ctrl = 0x00; /* all planes have non-blink */
-		ndac->bt_ctrl = 0x43; /* pallete enabled, ovly plane */
-		ndac->bt_ctrl = 0x00; /* no test mode */
-#endif
-		ndac->bt_addr = 0;
-		ndac->bt_cmap = 0;
-		ndac->bt_cmap = 0;
-		ndac->bt_cmap = 0;
-		for (i = 1; i < 256; i++) {
-			ndac->bt_cmap = 255;
-			ndac->bt_cmap = 255;
-			ndac->bt_cmap = 255;
-		}
-	}
+	/* set default colormap */
+	omfb_set_default_cmap(dc);
 
 	/* adjust h/v origin on screen */
 	rfcnt.p.h = 7;
@@ -489,11 +457,7 @@ omfb_getdevconfig(paddr, dc)
 	*(volatile u_int32_t *)OMFB_RFCNT = rfcnt.u;
 
 	/* clear the screen */
-	*(volatile u_int32_t *)OMFB_PLANEMASK = 0xff;
-	((volatile u_int32_t *)OMFB_ROPFUNC)[5] = ~0;	/* ROP copy */
-	for (i = 0; i < dc->dc_ht * dc->dc_rowbytes / sizeof(u_int32_t); i++)
-		*((volatile u_int32_t *)dc->dc_videobase + i) = 0;
-	*(volatile u_int32_t *)OMFB_PLANEMASK = 0x01;
+	omfb_clear_framebuffer(dc);
 
 	/* initialize the raster */
 	ri = &dc->dc_ri;
@@ -507,27 +471,27 @@ omfb_getdevconfig(paddr, dc)
 
 	rasops_init(ri, 35, 80);
 
-	omfb_stdscreen.ncols = ri->ri_cols;
-	omfb_stdscreen.nrows = ri->ri_rows;
-	ri->ri_ops.cursor = om_cursor;
-	ri->ri_ops.putchar = om_putchar;
 	ri->ri_ops.copycols = om_copycols;
 	ri->ri_ops.erasecols = om_erasecols;
 	ri->ri_ops.copyrows = om_copyrows;
 	ri->ri_ops.eraserows = om_eraserows;
+	omfb_stdscreen.ncols = ri->ri_cols;
+	omfb_stdscreen.nrows = ri->ri_rows;
 	omfb_stdscreen.textops = &ri->ri_ops;
 	omfb_stdscreen.fontwidth = ri->ri_font->fontwidth;
 	omfb_stdscreen.fontheight = ri->ri_font->fontheight;
-	omfb_stdscreen.capabilities = ri->ri_caps & ~WSSCREEN_UNDERLINE;
+
+	/* set up depth-depend functions and so on */
+	if ((hwplanebits == 4) || (hwplanebits == 8)) {
+		setup_omrasops4(ri);
+	} else {
+		setup_omrasops1(ri);
+	}
 }
 
 int
-omfb_alloc_screen(v, type, cookiep, curxp, curyp, attrp)
-	void *v;
-	const struct wsscreen_descr *type;
-	void **cookiep;
-	int *curxp, *curyp;
-	long *attrp;
+omfb_alloc_screen(void *v, const struct wsscreen_descr *type, void **cookiep,
+    int *curxp, int *curyp, long *attrp)
 {
 	struct omfb_softc *sc = v;
 	struct rasops_info *ri = &sc->sc_dc->dc_ri;
@@ -544,9 +508,7 @@ omfb_alloc_screen(v, type, cookiep, curxp, curyp, attrp)
 }
 
 void
-omfb_free_screen(v, cookie)
-	void *v;
-	void *cookie;
+omfb_free_screen(void *v, void *cookie)
 {
 	struct omfb_softc *sc = v;
 
@@ -554,12 +516,8 @@ omfb_free_screen(v, cookie)
 }
 
 int
-omfb_show_screen(v, cookie, waitok, cb, cbarg)
-	void *v;
-	void *cookie;
-	int waitok;
-	void (*cb)(void *, int, int);
-	void *cbarg;
+omfb_show_screen(void *v, void *cookie, int waitok,
+    void (*cb)(void *, int, int), void *cbarg)
 {
 	return 0;
 }
@@ -580,4 +538,141 @@ omfb_list_font(void *v, struct wsdisplay_font *font)
 	struct rasops_info *ri = &sc->sc_dc->dc_ri;
 
 	return rasops_list_font(ri, font);
+}
+
+/*
+ * Change `pseudo' depth, set the default colormap, and clear frame buffer.
+ * Note: when called with depth == 0, change to the original hardware depth. 
+ */
+int
+omfb_set_gfxmode(struct omfb_softc *sc, struct wsdisplay_gfx_mode *wsd_gfxmode)
+{
+        /* LUNA's fb is fixed size */
+        if ((wsd_gfxmode->width != sc->sc_dc->dc_wid)
+                || (wsd_gfxmode->height != sc->sc_dc->dc_ht))
+                        return -1;
+
+	/* if depth == 0, set the original hardware depth */
+	if (wsd_gfxmode->depth == 0)
+		wsd_gfxmode->depth = hwplanebits;
+
+        switch (wsd_gfxmode->depth) {
+        case 1:
+		/* all frame buffer support this */
+		sc->sc_dc->dc_depth = 1;
+		sc->sc_dc->dc_cmsize = 0;
+                break;
+        case 4:
+		if ((hwplanebits == 4) || (hwplanebits == 8)) {
+			sc->sc_dc->dc_depth = 4;
+			sc->sc_dc->dc_cmsize = 16;
+			break;
+		} else
+			return -1;
+        case 8:
+		if (hwplanebits == 8) {
+			sc->sc_dc->dc_depth = 8;
+			sc->sc_dc->dc_cmsize = 256;
+			break;
+		} else
+			return -1;
+        default:
+                return -1;
+        }
+
+	omfb_set_default_cmap(sc->sc_dc);
+	omfb_clear_framebuffer(sc->sc_dc);
+
+        return 0;
+}
+
+/*
+ * Clear all planes of frame buffer
+ */
+void
+omfb_clear_framebuffer(struct om_hwdevconfig *dc)
+{
+	int i;
+
+	*(volatile u_int32_t *)OMFB_PLANEMASK = 0xff;	/* all planes */
+	((volatile u_int32_t *)OMFB_ROPFUNC)[5] = ~0;	/* ROP copy */
+	for (i = 0; i < dc->dc_ht * dc->dc_rowbytes / sizeof(u_int32_t); i++)
+		*((volatile u_int32_t *)dc->dc_videobase + i) = 0;
+	*(volatile u_int32_t *)OMFB_PLANEMASK = 0x01;	/* plane #0 only */
+}
+
+/*
+ * set default colormap; white on black for 1bpp, ANSI 16 colors for 4/8 bpp.
+ */
+void
+omfb_set_default_cmap(struct om_hwdevconfig *dc)
+{
+	int i;
+
+	if ((hwplanebits == 1) || (hwplanebits == 4)) {
+		struct bt454 *odac = (struct bt454 *)OMFB_RAMDAC;
+
+		odac->bt_addr = 0;
+		if (dc->dc_depth == 1) {
+			/* white on black */
+			for (i = 0; i < 16; i++) {
+				u_int8_t val = i % 2 ? 255 : 0;
+
+				odac->bt_cmap = dc->dc_cmap.r[i] = val;
+				odac->bt_cmap = dc->dc_cmap.g[i] = val;
+				odac->bt_cmap = dc->dc_cmap.b[i] = val;
+			}
+		} else {
+			for (i = 0; i < 16; i++) {
+			/* ANSI 16 colors */
+				odac->bt_cmap = dc->dc_cmap.r[i]
+				    = ansicmap[i].r;
+				odac->bt_cmap = dc->dc_cmap.g[i]
+				    = ansicmap[i].g;
+				odac->bt_cmap = dc->dc_cmap.b[i]
+				    = ansicmap[i].b;
+			}
+		}
+	} else if (hwplanebits == 8) {
+		struct bt458 *ndac = (struct bt458 *)OMFB_RAMDAC;
+
+		/*
+		 * Initialize the Bt458.  When we write to control registers,
+		 * the address is not incremented automatically. So we specify
+		 * it ourselves for each control register.
+		 */
+		ndac->bt_addr = 0x04;
+		ndac->bt_ctrl = 0xff; /* all planes will be read */
+		ndac->bt_addr = 0x05;
+		ndac->bt_ctrl = 0x00; /* all planes have non-blink */
+		ndac->bt_addr = 0x06;
+		ndac->bt_ctrl = 0x40; /* palette enabled, ovly plane disabled */
+		ndac->bt_addr = 0x07;
+		ndac->bt_ctrl = 0x00; /* no test mode */
+
+		ndac->bt_addr = 0;
+		if (dc->dc_depth == 1) {
+			/* white on black */
+			for (i = 0; i < 256; i++) {
+				u_int8_t val = i % 2 ? 255 : 0;
+
+				ndac->bt_cmap = dc->dc_cmap.r[i] = val;
+				ndac->bt_cmap = dc->dc_cmap.g[i] = val;
+				ndac->bt_cmap = dc->dc_cmap.b[i] = val;
+			}
+		} else {
+			/*
+			 * Set ANSI 16 colors.  We only supports 4bpp console
+			 * right now, repeat 16 colors in 256 colormap.
+			 */
+			for (i = 0; i < 256; i++) {
+				ndac->bt_cmap = dc->dc_cmap.r[i]
+				    = ansicmap[i % 16].r;
+				ndac->bt_cmap = dc->dc_cmap.g[i]
+				    = ansicmap[i % 16].g;
+				ndac->bt_cmap = dc->dc_cmap.b[i]
+				    = ansicmap[i % 16].b;
+			}
+		}
+	}
 }

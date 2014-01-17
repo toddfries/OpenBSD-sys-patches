@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1699 2013/12/20 22:15:50 matthew Exp 
+ *	OpenBSD: pcidevs,v 1.1712 2014/01/11 05:43:33 brad Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -5580,6 +5580,14 @@ static const struct pci_known_product pci_known_products[] = {
 	    "AR9485",
 	},
 	{
+	    PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9462,
+	    "AR9462",
+	},
+	{
+	    PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR9565,
+	    "AR9565",
+	},
+	{
 	    PCI_VENDOR_ATHEROS, PCI_PRODUCT_ATHEROS_AR5210_AP,
 	    "AR5210",
 	},
@@ -5644,12 +5652,20 @@ static const struct pci_known_product pci_known_products[] = {
 	    "L1D",
 	},
 	{
-	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L2F,
-	    "L2F",
+	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_AR8162,
+	    "AR8162",
 	},
 	{
-	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L1F,
-	    "L1F",
+	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_AR8161,
+	    "AR8161",
+	},
+	{
+	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_AR8172,
+	    "AR8172",
+	},
+	{
+	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_AR8171,
+	    "AR8171",
 	},
 	{
 	    PCI_VENDOR_ATTANSIC, PCI_PRODUCT_ATTANSIC_L2,
@@ -5786,6 +5802,14 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5716S,
 	    "BCM5716S",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57787,
+	    "BCM57787",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57764,
+	    "BCM57764",
 	},
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5725,
@@ -5970,6 +5994,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57762,
 	    "BCM57762",
+	},
+	{
+	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM57767,
+	    "BCM57767",
 	},
 	{
 	    PCI_VENDOR_BROADCOM, PCI_PRODUCT_BROADCOM_BCM5764,
@@ -8805,31 +8833,83 @@ static const struct pci_known_product pci_known_products[] = {
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6150_1,
-	    "WiFi Link 6150",
+	    "Centrino Wireless-N 6150",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_6150_2,
-	    "WiFi Link 6150",
+	    "Centrino Wireless-N 6150",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_2030_1,
+	    "Centrino Wireless-N 2030",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_2030_2,
+	    "Centrino Wireless-N 2030",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_2000_1,
+	    "Centrino Wireless-N 2000",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_2000_2,
+	    "Centrino Wireless-N 2000",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_135_1,
+	    "Centrino Wireless-N 135",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_135_2,
+	    "Centrino Wireless-N 135",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_105_1,
+	    "Centrino Wireless-N 105",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_105_2,
+	    "Centrino Wireless-N 105",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_130_1,
-	    "WiFi Link 130",
+	    "Centrino Wireless-N 130",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_130_2,
-	    "WiFi Link 130",
+	    "Centrino Wireless-N 130",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_1,
-	    "WiFi Link 100",
+	    "Centrino Wireless-N 100",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_100_2,
-	    "WiFi Link 100",
+	    "Centrino Wireless-N 100",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_7260,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_7260_1,
 	    "Dual Band Wireless AC 7260",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_7260_2,
+	    "Dual Band Wireless AC 7260",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_3160_1,
+	    "Dual Band Wireless AC 3160",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_3160_2,
+	    "Dual Band Wirelsss AC 3160",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_7265_1,
+	    "Dual Band Wireless AC 7265",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_WL_7265_2,
+	    "Dual Band Wireless AC 7265",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_80960RP,
@@ -8846,6 +8926,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_D_ULT_GT1,
 	    "HD Graphics",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_HB_1,
+	    "Core 4G Host",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_M_ULT_GT1,
@@ -8916,7 +9000,7 @@ static const struct pci_known_product pci_known_products[] = {
 	    "Atom D2000/N2000 Host",
 	},
 	{
-	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_HB,
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_CORE4G_HB_2,
 	    "Core 4G Host",
 	},
 	{
@@ -10300,6 +10384,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "7 Series SATA",
 	},
 	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7SERIES_SATA_4,
+	    "7 Series SATA",
+	},
+	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_7SERIES_RAID_4,
 	    "7 Series RAID",
 	},
@@ -10406,6 +10494,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_HM70_LPC,
 	    "HM70 LPC",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_NM70_LPC,
+	    "NM70 LPC",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_I354_BP_1GBPS,
@@ -17180,6 +17272,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "MCP61 ISA",
 	},
 	{
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_MEM1,
+	    "MCP61 Memory",
+	},
+	{
 	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_HDA_1,
 	    "MCP61 HD Audio",
 	},
@@ -17204,7 +17300,7 @@ static const struct pci_known_product pci_known_products[] = {
 	    "MCP61 PCIE",
 	},
 	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_MEM1,
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_MEM2,
 	    "MCP61 Memory",
 	},
 	{
@@ -17244,7 +17340,7 @@ static const struct pci_known_product pci_known_products[] = {
 	    "MCP61 SMU",
 	},
 	{
-	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_MEM2,
+	    PCI_VENDOR_NVIDIA, PCI_PRODUCT_NVIDIA_MCP61_MEM3,
 	    "MCP61 Memory",
 	},
 	{
@@ -19212,6 +19308,14 @@ static const struct pci_known_product pci_known_products[] = {
 	    "RT3092",
 	},
 	{
+	    PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT3290,
+	    "RT3290",
+	},
+	{
+	    PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT3298,
+	    "Bluetooth",
+	},
+	{
 	    PCI_VENDOR_RALINK, PCI_PRODUCT_RALINK_RT3562,
 	    "RT3562",
 	},
@@ -19260,8 +19364,24 @@ static const struct pci_known_product pci_known_products[] = {
 	    "RTS5209 Card Reader",
 	},
 	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTS5227,
+	    "RTS5227 Card Reader",
+	},
+	{
 	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTS5229,
 	    "RTS5229 Card Reader",
+	},
+	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTS5249,
+	    "RTS5249 Card Reader",
+	},
+	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8411B,
+	    "RTL8411B Card Reader",
+	},
+	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8411,
+	    "RTL8411 Card Reader",
 	},
 	{
 	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RT8029,
@@ -19626,6 +19746,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_SAMSUNG, PCI_PRODUCT_SAMSUNG_SWL2210P,
 	    "MagicLAN SWL-2210P",
+	},
+	{
+	    PCI_VENDOR_SAMSUNG2, PCI_PRODUCT_SAMSUNG2_XP941,
+	    "XP941",
 	},
 	{
 	    PCI_VENDOR_SANGOMA, PCI_PRODUCT_SANGOMA_A10X,
@@ -23466,6 +23590,10 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_WORKBIT,
 	    "Workbit",
+	},
+	{
+	    PCI_VENDOR_SAMSUNG2,
+	    "Samsung",
 	},
 	{
 	    PCI_VENDOR_ASKEY,

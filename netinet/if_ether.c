@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_ether.c,v 1.113 2013/11/27 12:25:30 mpi Exp $	*/
+/*	$OpenBSD: if_ether.c,v 1.117 2014/01/10 14:29:08 tedu Exp $	*/
 /*	$NetBSD: if_ether.c,v 1.31 1996/05/11 12:59:58 mycroft Exp $	*/
 
 /*
@@ -216,14 +216,14 @@ arp_rtrequest(int req, struct rtentry *rt)
 		 * Case 2:  This route may come from cloning, or a manual route
 		 * add with a LL address.
 		 */
-		R_Malloc(la, struct llinfo_arp *, sizeof(*la));
+		la = malloc(sizeof(*la), M_RTABLE, M_NOWAIT | M_ZERO);
 		rt->rt_llinfo = (caddr_t)la;
-		if (la == 0) {
+		if (la == NULL) {
 			log(LOG_DEBUG, "arp_rtrequest: malloc failed\n");
 			break;
 		}
-		arp_inuse++, arp_allocated++;
-		Bzero(la, sizeof(*la));
+		arp_inuse++;
+		arp_allocated++;
 		la->la_rt = rt;
 		rt->rt_flags |= RTF_LLINFO;
 		LIST_INSERT_HEAD(&llinfo_arp, la, la_list);
@@ -253,9 +253,10 @@ arp_rtrequest(int req, struct rtentry *rt)
 			 * interface.
 			 */
 			rt->rt_expire = 0;
-			Bcopy(((struct arpcom *)rt->rt_ifp)->ac_enaddr,
-			    LLADDR(SDL(gate)),
-			    SDL(gate)->sdl_alen = ETHER_ADDR_LEN);
+			SDL(gate)->sdl_alen = ETHER_ADDR_LEN;
+			memcpy(LLADDR(SDL(gate)),
+			    ((struct arpcom *)rt->rt_ifp)->ac_enaddr,
+			    ETHER_ADDR_LEN);
 			if (useloopback)
 				rt->rt_ifp = lo0ifp;
 			/*
@@ -283,7 +284,7 @@ arp_rtrequest(int req, struct rtentry *rt)
 			la_hold_total--;
 			m_freem(m);
 		}
-		Free((caddr_t)la);
+		free(la, M_RTABLE);
 	}
 }
 
@@ -309,20 +310,18 @@ arprequest(struct ifnet *ifp, u_int32_t *sip, u_int32_t *tip, u_int8_t *enaddr)
 	MH_ALIGN(m, sizeof(*ea));
 	ea = mtod(m, struct ether_arp *);
 	eh = (struct ether_header *)sa.sa_data;
-	bzero((caddr_t)ea, sizeof (*ea));
-	bcopy((caddr_t)etherbroadcastaddr, (caddr_t)eh->ether_dhost,
-	    sizeof(eh->ether_dhost));
+	memset(ea, 0, sizeof(*ea));
+	memcpy(eh->ether_dhost, etherbroadcastaddr, sizeof(eh->ether_dhost));
 	eh->ether_type = htons(ETHERTYPE_ARP);	/* if_output will not swap */
 	ea->arp_hrd = htons(ARPHRD_ETHER);
 	ea->arp_pro = htons(ETHERTYPE_IP);
 	ea->arp_hln = sizeof(ea->arp_sha);	/* hardware address length */
 	ea->arp_pln = sizeof(ea->arp_spa);	/* protocol address length */
 	ea->arp_op = htons(ARPOP_REQUEST);
-	bcopy((caddr_t)enaddr, (caddr_t)eh->ether_shost,
-	      sizeof(eh->ether_shost));
-	bcopy((caddr_t)enaddr, (caddr_t)ea->arp_sha, sizeof(ea->arp_sha));
-	bcopy((caddr_t)sip, (caddr_t)ea->arp_spa, sizeof(ea->arp_spa));
-	bcopy((caddr_t)tip, (caddr_t)ea->arp_tpa, sizeof(ea->arp_tpa));
+	memcpy(eh->ether_shost, enaddr, sizeof(eh->ether_shost));
+	memcpy(ea->arp_sha, enaddr, sizeof(ea->arp_sha));
+	memcpy(ea->arp_spa, sip, sizeof(ea->arp_spa));
+	memcpy(ea->arp_tpa, tip, sizeof(ea->arp_tpa));
 	sa.sa_family = pseudo_AF_HDRCMPLT;
 	sa.sa_len = sizeof(sa);
 	m->m_flags |= M_BCAST;
@@ -349,8 +348,7 @@ arpresolve(struct arpcom *ac, struct rtentry *rt, struct mbuf *m,
 	char addr[INET_ADDRSTRLEN];
 
 	if (m->m_flags & M_BCAST) {	/* broadcast */
-		bcopy((caddr_t)etherbroadcastaddr, (caddr_t)desten,
-		    sizeof(etherbroadcastaddr));
+		memcpy(desten, etherbroadcastaddr, sizeof(etherbroadcastaddr));
 		return (1);
 	}
 	if (m->m_flags & M_MCAST) {	/* multicast */
@@ -384,7 +382,7 @@ arpresolve(struct arpcom *ac, struct rtentry *rt, struct mbuf *m,
 	 */
 	if ((rt->rt_expire == 0 || rt->rt_expire > time_second) &&
 	    sdl->sdl_family == AF_LINK && sdl->sdl_alen != 0) {
-		bcopy(LLADDR(sdl), desten, sdl->sdl_alen);
+		memcpy(desten, LLADDR(sdl), sdl->sdl_alen);
 		return 1;
 	}
 	if (((struct ifnet *)ac)->if_flags & IFF_NOARP) {
@@ -562,8 +560,8 @@ in_arpinput(struct mbuf *m)
 	}
 #endif
 
-	bcopy((caddr_t)ea->arp_tpa, (caddr_t)&itaddr, sizeof(itaddr));
-	bcopy((caddr_t)ea->arp_spa, (caddr_t)&isaddr, sizeof(isaddr));
+	memcpy(&itaddr, ea->arp_tpa, sizeof(itaddr));
+	memcpy(&isaddr, ea->arp_spa, sizeof(isaddr));
 
 	/* First try: check target against our addresses */
 	TAILQ_FOREACH(ifa, &ifp->if_addrlist, ifa_list) {
@@ -616,10 +614,10 @@ in_arpinput(struct mbuf *m)
 		enaddr = ac->ac_enaddr;
 	myaddr = ifatoia(ifa)->ia_addr.sin_addr;
 
-	if (!bcmp((caddr_t)ea->arp_sha, enaddr, sizeof (ea->arp_sha)))
+	if (!memcmp(ea->arp_sha, enaddr, sizeof(ea->arp_sha)))
 		goto out;	/* it's from me, ignore it. */
 	if (ETHER_IS_MULTICAST(&ea->arp_sha[0]))
-		if (!bcmp((caddr_t)ea->arp_sha, (caddr_t)etherbroadcastaddr,
+		if (!memcmp(ea->arp_sha, etherbroadcastaddr,
 		    sizeof (ea->arp_sha))) {
 			inet_ntop(AF_INET, &isaddr, addr, sizeof(addr));
 			log(LOG_ERR, "arp: ether address is broadcast for "
@@ -638,7 +636,7 @@ in_arpinput(struct mbuf *m)
 	    rtable_l2(m->m_pkthdr.rdomain));
 	if (la && (rt = la->la_rt) && (sdl = SDL(rt->rt_gateway))) {
 		if (sdl->sdl_alen) {
-		    if (bcmp(ea->arp_sha, LLADDR(sdl), sdl->sdl_alen)) {
+		    if (memcmp(ea->arp_sha, LLADDR(sdl), sdl->sdl_alen)) {
 			if (rt->rt_flags & RTF_PERMANENT_ARP) {
 				inet_ntop(AF_INET, &isaddr, addr, sizeof(addr));
 				log(LOG_WARNING,
@@ -693,8 +691,8 @@ in_arpinput(struct mbuf *m)
 			    ac->ac_if.if_xname);
 			goto out;
 		}
-		bcopy(ea->arp_sha, LLADDR(sdl),
-		    sdl->sdl_alen = sizeof(ea->arp_sha));
+ 		sdl->sdl_alen = sizeof(ea->arp_sha);
+		memcpy(LLADDR(sdl), ea->arp_sha, sizeof(ea->arp_sha));
 		if (rt->rt_expire)
 			rt->rt_expire = time_second + arpt_keep;
 		rt->rt_flags &= ~RTF_REJECT;
@@ -729,8 +727,8 @@ out:
 	}
 	if (itaddr.s_addr == myaddr.s_addr) {
 		/* I am the target */
-		bcopy(ea->arp_sha, ea->arp_tha, sizeof(ea->arp_sha));
-		bcopy(enaddr, ea->arp_sha, sizeof(ea->arp_sha));
+		memcpy(ea->arp_tha, ea->arp_sha, sizeof(ea->arp_sha));
+		memcpy(ea->arp_sha, enaddr, sizeof(ea->arp_sha));
 	} else {
 		la = arplookup(itaddr.s_addr, 0, SIN_PROXY,
 		    rtable_l2(m->m_pkthdr.rdomain));
@@ -739,22 +737,22 @@ out:
 		rt = la->la_rt;
 		if (rt->rt_ifp->if_type == IFT_CARP && ifp->if_type != IFT_CARP)
 			goto out;
-		bcopy(ea->arp_sha, ea->arp_tha, sizeof(ea->arp_sha));
+		memcpy(ea->arp_tha, ea->arp_sha, sizeof(ea->arp_sha));
 		sdl = SDL(rt->rt_gateway);
-		bcopy(LLADDR(sdl), ea->arp_sha, sizeof(ea->arp_sha));
+		memcpy(ea->arp_sha, LLADDR(sdl), sizeof(ea->arp_sha));
 	}
 
-	bcopy(ea->arp_spa, ea->arp_tpa, sizeof(ea->arp_spa));
-	bcopy(&itaddr, ea->arp_spa, sizeof(ea->arp_spa));
+	memcpy(ea->arp_tpa, ea->arp_spa, sizeof(ea->arp_spa));
+	memcpy(ea->arp_spa, &itaddr, sizeof(ea->arp_spa));
 	ea->arp_op = htons(ARPOP_REPLY);
 	ea->arp_pro = htons(ETHERTYPE_IP); /* let's be sure! */
 	eh = (struct ether_header *)sa.sa_data;
-	bcopy(ea->arp_tha, eh->ether_dhost, sizeof(eh->ether_dhost));
+	memcpy(eh->ether_dhost, ea->arp_tha, sizeof(eh->ether_dhost));
 #if NCARP > 0
 	if (ether_shost)
 		enaddr = ether_shost;
 #endif
-	bcopy(enaddr, eh->ether_shost, sizeof(eh->ether_shost));
+	memcpy(eh->ether_shost, enaddr, sizeof(eh->ether_shost));
 
 	eh->ether_type = htons(ETHERTYPE_ARP);
 	sa.sa_family = pseudo_AF_HDRCMPLT;
@@ -774,7 +772,7 @@ arptfree(struct llinfo_arp *la)
 	struct rt_addrinfo info;
 	u_int tid = 0;
 
-	if (rt == 0)
+	if (rt == NULL)
 		panic("arptfree");
 	if (rt->rt_refcnt > 0 && (sdl = SDL(rt->rt_gateway)) &&
 	    sdl->sdl_family == AF_LINK) {
@@ -783,7 +781,7 @@ arptfree(struct llinfo_arp *la)
 		rt->rt_flags &= ~RTF_REJECT;
 		return;
 	}
-	bzero(&info, sizeof(info));
+	memset(&info, 0, sizeof(info));
 	info.rti_info[RTAX_DST] = rt_key(rt);
 	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 
@@ -802,7 +800,7 @@ arplookup(u_int32_t addr, int create, int proxy, u_int tableid)
 	struct rtentry *rt;
 	struct sockaddr_inarp sin;
 
-	bzero(&sin, sizeof(sin));
+	memset(&sin, 0, sizeof(sin));
 	sin.sin_len = sizeof(sin);
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = addr;
@@ -818,7 +816,7 @@ arplookup(u_int32_t addr, int create, int proxy, u_int tableid)
 			    (rt->rt_flags & RTF_CLONED) != 0) {
 				struct rt_addrinfo info;
 
-				bzero(&info, sizeof(info));
+				memset(&info, 0, sizeof(info));
 				info.rti_info[RTAX_DST] = rt_key(rt);
 				info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 				info.rti_info[RTAX_NETMASK] = rt_mask(rt);
@@ -850,7 +848,7 @@ arpproxy(struct in_addr in, u_int rdomain)
 		if (ifp->if_rdomain != rdomain)
 			continue;
 
-		if (!bcmp(LLADDR((struct sockaddr_dl *)la->la_rt->rt_gateway),
+		if (!memcmp(LLADDR((struct sockaddr_dl *)la->la_rt->rt_gateway),
 		    LLADDR((struct sockaddr_dl *)ifp->if_lladdr->ifa_addr),
 		    ETHER_ADDR_LEN)) {
 		    	found = 1;
@@ -947,13 +945,11 @@ in_revarpinput(struct mbuf *m)
 		goto out;
 	if (revarp_finished)
 		goto wake;
-	if (bcmp(ar->arp_tha, ((struct arpcom *)ifp)->ac_enaddr,
+	if (memcmp(ar->arp_tha, ((struct arpcom *)ifp)->ac_enaddr,
 	    sizeof(ar->arp_tha)))
 		goto out;
-	bcopy((caddr_t)ar->arp_spa, (caddr_t)&revarp_srvip,
-	    sizeof(revarp_srvip));
-	bcopy((caddr_t)ar->arp_tpa, (caddr_t)&revarp_myip,
-	    sizeof(revarp_myip));
+	memcpy(&revarp_srvip, ar->arp_spa, sizeof(revarp_srvip));
+	memcpy(&revarp_myip, ar->arp_tpa, sizeof(revarp_myip));
 	revarp_finished = 1;
 wake:	/* Do wakeup every time in case it was missed. */
 	wakeup((caddr_t)&revarp_myip);
@@ -983,21 +979,17 @@ revarprequest(struct ifnet *ifp)
 	MH_ALIGN(m, sizeof(*ea));
 	ea = mtod(m, struct ether_arp *);
 	eh = (struct ether_header *)sa.sa_data;
-	bzero((caddr_t)ea, sizeof(*ea));
-	bcopy((caddr_t)etherbroadcastaddr, (caddr_t)eh->ether_dhost,
-	    sizeof(eh->ether_dhost));
+	memset(ea, 0, sizeof(*ea));
+	memcpy(eh->ether_dhost, etherbroadcastaddr, sizeof(eh->ether_dhost));
 	eh->ether_type = htons(ETHERTYPE_REVARP);
 	ea->arp_hrd = htons(ARPHRD_ETHER);
 	ea->arp_pro = htons(ETHERTYPE_IP);
 	ea->arp_hln = sizeof(ea->arp_sha);	/* hardware address length */
 	ea->arp_pln = sizeof(ea->arp_spa);	/* protocol address length */
 	ea->arp_op = htons(ARPOP_REVREQUEST);
-	bcopy((caddr_t)ac->ac_enaddr, (caddr_t)eh->ether_shost,
-	   sizeof(ea->arp_tha));
-	bcopy((caddr_t)ac->ac_enaddr, (caddr_t)ea->arp_sha,
-	   sizeof(ea->arp_sha));
-	bcopy((caddr_t)ac->ac_enaddr, (caddr_t)ea->arp_tha,
-	   sizeof(ea->arp_tha));
+	memcpy(eh->ether_shost, ac->ac_enaddr, sizeof(ea->arp_tha));
+	memcpy(ea->arp_sha, ac->ac_enaddr, sizeof(ea->arp_sha));
+	memcpy(ea->arp_tha, ac->ac_enaddr, sizeof(ea->arp_tha));
 	sa.sa_family = pseudo_AF_HDRCMPLT;
 	sa.sa_len = sizeof(sa);
 	m->m_flags |= M_BCAST;
@@ -1031,8 +1023,8 @@ revarpwhoarewe(struct ifnet *ifp, struct in_addr *serv_in,
 	if (!revarp_finished)
 		return ENETUNREACH;
 
-	bcopy((caddr_t)&revarp_srvip, serv_in, sizeof(*serv_in));
-	bcopy((caddr_t)&revarp_myip, clnt_in, sizeof(*clnt_in));
+	memcpy(serv_in, &revarp_srvip, sizeof(*serv_in));
+	memcpy(clnt_in, &revarp_myip, sizeof(*clnt_in));
 	return 0;
 }
 

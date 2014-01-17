@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.618 2013/12/17 12:51:14 deraadt Exp $
+$OpenBSD: usbdevs,v 1.621 2014/01/08 21:15:29 jcs Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -585,6 +585,7 @@ vendor TML		0x1b91	The Mobility Lab
 vendor TCTMOBILE	0x1bbb  TCT Mobile
 vendor MDS		0x1bc8	MDS
 vendor ALTI2		0x1bc9	Alti-2
+vendor SUNPLUS		0x1bcf	Sunplus
 vendor WAGO		0x1be3	WAGO Kontakttechnik
 vendor LONGCHEER	0x1c9e	Longcheer Technology
 vendor DRESDENELEC	0x1cf1	Dresden Elektronic
@@ -912,6 +913,42 @@ product APPLE FOUNTAIN_ANSI	0x020e	Keyboard/Trackpad
 product APPLE FOUNTAIN_ISO	0x020f	Keyboard/Trackpad
 product APPLE GEYSER_ANSI	0x0214	Keyboard/Trackpad
 product APPLE GEYSER_ISO	0x0215	Keyboard/Trackpad
+product APPLE WELLSPRING_ANSI	0x0223	Keyboard/Trackpad
+product APPLE WELLSPRING_ISO	0x0224	Keyboard/Trackpad
+product APPLE WELLSPRING_JIS	0x0225	Keyboard/Trackpad
+product APPLE WELLSPRING2_ANSI	0x0230	Keyboard/Trackpad
+product APPLE WELLSPRING2_ISO	0x0231	Keyboard/Trackpad
+product APPLE WELLSPRING2_JIS	0x0232	Keyboard/Trackpad
+product APPLE WELLSPRING3_ANSI	0x0236	Keyboard/Trackpad
+product APPLE WELLSPRING3_ISO	0x0237	Keyboard/Trackpad
+product APPLE WELLSPRING3_JIS	0x0238	Keyboard/Trackpad
+product APPLE WELLSPRING4_ANSI	0x023f	Keyboard/Trackpad
+product APPLE WELLSPRING4_ISO	0x0240	Keyboard/Trackpad
+product APPLE WELLSPRING4_JIS	0x0241	Keyboard/Trackpad
+product APPLE WELLSPRING4A_ANSI	0x0242	Keyboard/Trackpad
+product APPLE WELLSPRING4A_ISO	0x0243	Keyboard/Trackpad
+product APPLE WELLSPRING4A_JIS	0x0244	Keyboard/Trackpad
+product APPLE WELLSPRING5_ANSI	0x0245	Keyboard/Trackpad
+product APPLE WELLSPRING5_ISO	0x0246	Keyboard/Trackpad
+product APPLE WELLSPRING5_JIS	0x0247	Keyboard/Trackpad
+product APPLE WELLSPRING6A_ANSI	0x0249	Keyboard/Trackpad
+product APPLE WELLSPRING6A_ISO	0x024a	Keyboard/Trackpad
+product APPLE WELLSPRING6A_JIS	0x024b	Keyboard/Trackpad
+product APPLE WELLSPRING6_ANSI	0x024c	Keyboard/Trackpad
+product APPLE WELLSPRING6_ISO	0x024d	Keyboard/Trackpad
+product APPLE WELLSPRING6_JIS	0x024e	Keyboard/Trackpad
+product APPLE WELLSPRING5A_ANSI	0x0252	Keyboard/Trackpad
+product APPLE WELLSPRING5A_ISO	0x0253	Keyboard/Trackpad
+product APPLE WELLSPRING5A_JIS	0x0254	Keyboard/Trackpad
+product APPLE WELLSPRING7_ANSI	0x0262	Keyboard/Trackpad
+product APPLE WELLSPRING7_ISO	0x0263	Keyboard/Trackpad
+product APPLE WELLSPRING7_JIS	0x0264	Keyboard/Trackpad
+product APPLE WELLSPRING7A_ANSI	0x0259	Keyboard/Trackpad
+product APPLE WELLSPRING7A_ISO	0x025a	Keyboard/Trackpad
+product APPLE WELLSPRING7A_JIS	0x025b	Keyboard/Trackpad
+product APPLE WELLSPRING8_ANSI	0x0290	Keyboard/Trackpad
+product APPLE WELLSPRING8_ISO	0x0291	Keyboard/Trackpad
+product APPLE WELLSPRING8_JIS	0x0292	Keyboard/Trackpad
 product APPLE OPTMOUSE		0x0302	Optical mouse
 product APPLE BLUETOOTH_HCI	0x1000	HID-proxy
 product APPLE SPEAKERS		0x1101	Speakers
@@ -1463,6 +1500,7 @@ product DLINK RT2570		0x3c00	RT2570
 product DLINK DUBE100B1		0x3c05	DUB-E100 rev B1
 product DLINK RT2870		0x3c09	RT2870
 product DLINK RT3072		0x3c0a	RT3072
+product DLINK DWA140B3		0x3c15	DWA-140 rev B3
 product DLINK DWA127		0x3c1b	DWA-127
 product DLINK DSB650C		0x4000	10Mbps Ethernet
 product DLINK DSB650TX1		0x4001	10/100 Ethernet
@@ -1692,6 +1730,7 @@ product FTDI FT232_5		0x6008	Serial
 product FTDI FT232_6		0x6009	Serial
 product FTDI SERIAL_2232C	0x6010	2232C Serial
 product FTDI FT4232H		0x6011	FT4232H
+product FTDI FTX		0x6015	FTX
 product FTDI PS2KBDMS		0x8371	PS/2 Keyboard/Mouse
 product FTDI SERIAL_8U100AX	0x8372	Serial
 product FTDI MJS_SIRIUS_PC_2	0x9379	MJS Sirius To PC Interface
@@ -3390,6 +3429,7 @@ product RALINK RT3071		0x3071	RT3071
 product RALINK RT3072		0x3072	RT3072
 product RALINK RT3370		0x3370	RT3370
 product RALINK RT3572		0x3572	RT3572
+product RALINK RT5370		0x5370	RT5370
 product RALINK RT8070		0x8070	RT8070
 product RALINK RT2570_3		0x9020	RT2570
 product RALINK RT2573_2		0x9021	RT2573
