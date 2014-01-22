@@ -1,4 +1,4 @@
-/*	$OpenBSD: radix.h,v 1.22 2014/01/10 14:29:08 tedu Exp $	*/
+/*	$OpenBSD: radix.h,v 1.24 2014/01/22 10:17:59 claudio Exp $	*/
 /*	$NetBSD: radix.h,v 1.8 1996/02/13 22:00:37 christos Exp $	*/
 
 /*
@@ -60,11 +60,6 @@ struct radix_node {
 			struct	radix_node *rn_R;/* progeny */
 		} rn_node;
 	} rn_u;
-#ifdef RN_DEBUG
-	int rn_info;
-	struct radix_node *rn_twin;
-	struct radix_node *rn_ybro;
-#endif
 };
 
 #define rn_dupedkey rn_u.rn_leaf.rn_Dupedkey
@@ -78,7 +73,7 @@ struct radix_node {
  * Annotations to tree concerning potential routes applying to subtrees.
  */
 
-extern struct radix_mask {
+struct radix_mask {
 	short	rm_b;			/* bit offset; -1-index(netmask) */
 	char	rm_unused;		/* cf. rn_bmask */
 	u_char	rm_flags;		/* cf. rn_flags */
@@ -88,7 +83,7 @@ extern struct radix_mask {
 		struct	radix_node *rmu_leaf;	/* for normal routes */
 	}	rm_rmu;
 	int	rm_refs;		/* # of references to this struct */
-} *rn_mkfreelist;
+};
 
 #define rm_mask rm_rmu.rmu_mask
 #define rm_leaf rm_rmu.rmu_leaf		/* extra field would make 32 bytes */

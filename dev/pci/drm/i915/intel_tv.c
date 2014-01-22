@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_tv.c,v 1.3 2013/08/13 10:23:52 jsg Exp $	*/
+/*	$OpenBSD: intel_tv.c,v 1.5 2014/01/22 05:16:55 kettenis Exp $	*/
 /*
  * Copyright © 2006-2008 Intel Corporation
  *   Jesse Barnes <jesse.barnes@intel.com>
@@ -1427,11 +1427,9 @@ intel_tv_get_modes(struct drm_connector *connector)
 static void
 intel_tv_destroy(struct drm_connector *connector)
 {
-#if 0
 	drm_sysfs_connector_remove(connector);
-#endif
 	drm_connector_cleanup(connector);
-	free(connector, M_DRM);
+	kfree(connector);
 }
 
 
@@ -1593,16 +1591,14 @@ intel_tv_init(struct drm_device *dev)
 	    (tv_dac_off & TVDAC_STATE_CHG_EN) != 0)
 		return;
 
-	intel_tv = malloc(sizeof(struct intel_tv), M_DRM,
-	    M_WAITOK | M_ZERO);
+	intel_tv = kzalloc(sizeof(struct intel_tv), GFP_KERNEL);
 	if (!intel_tv) {
 		return;
 	}
 
-	intel_connector = malloc(sizeof(struct intel_connector), M_DRM,
-	    M_WAITOK | M_ZERO);
+	intel_connector = kzalloc(sizeof(struct intel_connector), GFP_KERNEL);
 	if (!intel_connector) {
-		free(intel_tv, M_DRM);
+		kfree(intel_tv);
 		return;
 	}
 
@@ -1673,7 +1669,5 @@ intel_tv_init(struct drm_device *dev)
 	drm_object_attach_property(&connector->base,
 				   dev->mode_config.tv_bottom_margin_property,
 				   intel_tv->margin[TV_MARGIN_BOTTOM]);
-#if 0
 	drm_sysfs_connector_add(connector);
-#endif
 }

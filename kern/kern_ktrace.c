@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_ktrace.c,v 1.61 2013/09/14 02:28:01 guenther Exp $	*/
+/*	$OpenBSD: kern_ktrace.c,v 1.63 2014/01/21 01:48:44 tedu Exp $	*/
 /*	$NetBSD: kern_ktrace.c,v 1.23 1996/02/09 18:59:36 christos Exp $	*/
 
 /*
@@ -120,7 +120,7 @@ ktrsettrace(struct process *pr, int facs, struct vnode *newvp,
 void
 ktrinitheader(struct ktr_header *kth, struct proc *p, int type)
 {
-	bzero(kth, sizeof (struct ktr_header));
+	memset(kth, 0, sizeof(struct ktr_header));
 	kth->ktr_type = type;
 	nanotime(&kth->ktr_time);
 	kth->ktr_pid = p->p_p->ps_pid;
@@ -133,7 +133,7 @@ ktrstart(struct proc *p, struct vnode *vp, struct ucred *cred)
 {
 	struct ktr_header kth;
 
-	bzero(&kth, sizeof (kth));
+	memset(&kth, 0, sizeof(kth));
 	kth.ktr_type = htobe32(KTR_START);
 	nanotime(&kth.ktr_time);
 	kth.ktr_pid = (pid_t)-1;
@@ -173,7 +173,7 @@ ktrsyscall(struct proc *p, register_t code, size_t argsize, register_t args[])
 	if (code == SYS___sysctl && (p->p_emul->e_flags & EMUL_NATIVE) &&
 	    nargs &&
 	    copyin((void *)args[0], argp, nargs * sizeof(int)))
-		bzero(argp, nargs * sizeof(int));
+		memset(argp, 0, nargs * sizeof(int));
 	kth.ktr_len = len;
 	ktrwrite(p, &kth, ktp);
 	free(ktp, M_TEMP);
@@ -369,7 +369,7 @@ ktruser(struct proc *p, const char *id, const void *addr, size_t len)
 		ktp = (struct ktr_user *)memp;
 	} else
 		ktp = (struct ktr_user *)stkbuf;
-	bzero(ktp->ktr_id, KTR_USER_MAXIDLEN);
+	memset(ktp->ktr_id, 0, KTR_USER_MAXIDLEN);
 	error = copyinstr(id, ktp->ktr_id, KTR_USER_MAXIDLEN, NULL);
 	if (error)
 	    goto out;
@@ -403,7 +403,6 @@ sys_ktrace(struct proc *curp, void *v, register_t *retval)
 		syscallarg(pid_t) pid;
 	} */ *uap = v;
 	struct vnode *vp = NULL;
-	struct proc *p = NULL;
 	struct process *pr = NULL;
 	struct ucred *cred = NULL;
 	struct pgrp *pg;
@@ -437,10 +436,10 @@ sys_ktrace(struct proc *curp, void *v, register_t *retval)
 	 * Clear all uses of the tracefile
 	 */
 	if (ops == KTROP_CLEARFILE) {
-		LIST_FOREACH(p, &allproc, p_list) {
-			if (p->p_p->ps_tracevp == vp) {
-				if (ktrcanset(curp, p->p_p))
-					ktrcleartrace(p->p_p);
+		LIST_FOREACH(pr, &allprocess, ps_list) {
+			if (pr->ps_tracevp == vp) {
+				if (ktrcanset(curp, pr))
+					ktrcleartrace(pr);
 				else
 					error = EPERM;
 			}
@@ -587,6 +586,7 @@ ktrwriteraw(struct proc *p, struct vnode *vp, struct ucred *cred,
 {
 	struct uio auio;
 	struct iovec aiov[2];
+	struct process *pr;
 	int error;
 
 	auio.uio_iov = &aiov[0];
@@ -615,9 +615,9 @@ ktrwriteraw(struct proc *p, struct vnode *vp, struct ucred *cred,
 	 */
 	log(LOG_NOTICE, "ktrace write failed, errno %d, tracing stopped\n",
 	    error);
-	LIST_FOREACH(p, &allproc, p_list)
-		if (p->p_p->ps_tracevp == vp && p->p_p->ps_tracecred == cred)
-			ktrcleartrace(p->p_p);
+	LIST_FOREACH(pr, &allprocess, ps_list)
+		if (pr->ps_tracevp == vp && pr->ps_tracecred == cred)
+			ktrcleartrace(pr);
 
 	vput(vp);
 	return (error);

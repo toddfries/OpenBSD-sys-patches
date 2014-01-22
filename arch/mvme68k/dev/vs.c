@@ -1,4 +1,4 @@
-/*	$OpenBSD: vs.c,v 1.35 2010/12/23 20:25:15 miod Exp $ */
+/*	$OpenBSD: vs.c,v 1.37 2014/01/21 23:47:41 jsg Exp $ */
 
 /*
  * Copyright (c) 2004, 2009, Miodrag Vallat.
@@ -437,7 +437,7 @@ vs_scsicmd(struct scsi_xfer *xs)
 		if (cb->cb_xs != NULL) {
 			printf("%s: master command not idle\n",
 			    sc->sc_dev.dv_xname);
-			xs->error = XS_NO_CCB;
+			xs->error = XS_BUSY;
 			scsi_done(xs);
 			return;
 		}
@@ -596,7 +596,7 @@ vs_chksense(struct vs_cb *cb, struct scsi_xfer *xs)
 	int s;
 
 #ifdef VS_DEBUG
-	printf("%s: target %d\n", slp->target);
+	printf("%s: target %d\n", __func__, slp->target);
 #endif
 	/* ack and clear the error */
 	if (CRSW & M_CRSW_ER)

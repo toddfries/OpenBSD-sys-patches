@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.h,v 1.83 2013/10/31 18:10:21 bluhm Exp $	*/
+/*	$OpenBSD: route.h,v 1.86 2014/01/22 06:28:09 claudio Exp $	*/
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -92,10 +92,9 @@ struct rt_metrics {
  * gateways are marked so that the output routines know to address the
  * gateway rather than the ultimate destination.
  */
-#ifndef RNF_NORMAL
 #include <net/radix.h>
 #include <net/radix_mpath.h>
-#endif
+
 struct rtentry {
 	struct	radix_node rt_nodes[2];	/* tree glue, and other values */
 #define	rt_key(r)	((struct sockaddr *)((r)->rt_nodes->rn_key))
@@ -105,7 +104,6 @@ struct rtentry {
 	int	rt_refcnt;		/* # held references */
 	struct	ifnet *rt_ifp;		/* the answer: interface to use */
 	struct	ifaddr *rt_ifa;		/* the answer: interface addr to use */
-	struct	sockaddr *rt_genmask;	/* for generation of cloned routes */
 	caddr_t	rt_llinfo;		/* pointer to link level info cache or
 					   to an MPLS structure */ 
 	struct	rt_kmetrics rt_rmx;	/* metrics used by rx'ing protocols */
@@ -206,46 +204,6 @@ struct rt_msghdr {
 };
 /* overload no longer used field */
 #define rtm_use	rtm_rmx.rmx_pksent
-
-#if defined(_KERNEL) && ! defined(SMALL_KERNEL)
-/*
- * Compatibility structures for version 4 messages.
- * Only needed for transition during OpenBSD 5.4-current.
- */
-struct rt_ometrics {
-	u_int64_t	rmx_pksent;	/* packets sent using this route */
-	u_int		rmx_locks;	/* Kernel must leave these values */
-	u_int		rmx_mtu;	/* MTU for this path */
-	u_int		rmx_expire;	/* lifetime for route, e.g. redirect */
-	u_int		rmx_refcnt;	/* # references hold */
-	/* some apps may still need these no longer used metrics */
-	u_int		rmx_hopcount;	/* max hops expected */
-	u_int		rmx_recvpipe;	/* inbound delay-bandwidth product */
-	u_int		rmx_sendpipe;	/* outbound delay-bandwidth product */
-	u_int		rmx_ssthresh;	/* outbound gateway buffer limit */
-	u_int		rmx_rtt;	/* estimated round trip time */
-	u_int		rmx_rttvar;	/* estimated rtt variance */
-};
-struct rt_omsghdr {
-	u_short	rtm_msglen;	/* to skip over non-understood messages */
-	u_char	rtm_version;	/* future binary compatibility */
-	u_char	rtm_type;	/* message type */
-	u_short	rtm_hdrlen;	/* sizeof(rt_msghdr) to skip over the header */
-	u_short	rtm_index;	/* index for associated ifp */
-	u_short rtm_tableid;	/* routing table id */
-	u_char	rtm_priority;	/* routing priority */
-	u_char	rtm_mpls;	/* MPLS additional infos */
-	int	rtm_addrs;	/* bitmask identifying sockaddrs in msg */
-	int	rtm_flags;	/* flags, incl. kern & message, e.g. DONE */
-	int	rtm_fmask;	/* bitmask used in RTM_CHANGE message */
-	pid_t	rtm_pid;	/* identify sender */
-	int	rtm_seq;	/* for sender to identify action */
-	int	rtm_errno;	/* why failed */
-	u_int	rtm_inits;	/* which metrics we are initializing */
-	struct	rt_ometrics rtm_rmx; /* metrics themselves */
-};
-#define RTM_OVERSION	4	/* Provide backward compatibility */
-#endif /* defined(_KERNEL) && ! defined(SMALL_KERNEL) */
 
 #define RTM_VERSION	5	/* Up the ante and ignore older versions */
 

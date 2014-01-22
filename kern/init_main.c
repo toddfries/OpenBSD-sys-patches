@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.197 2014/01/01 07:08:10 fgsch Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.203 2014/01/20 21:19:27 guenther Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -218,12 +218,12 @@ main(void *framep)
 	KERNEL_LOCK_INIT();
 	SCHED_LOCK_INIT();
 
-	random_init();
-
 	uvm_init();
 	disk_init();		/* must come before autoconfiguration */
 	tty_init();		/* initialise tty's */
 	cpu_startup();
+
+	random_start();		/* Start the flow */
 
 	/*
 	 * Initialize mbuf's.  Do this now because we might attempt to
@@ -266,6 +266,7 @@ main(void *framep)
 	TAILQ_INSERT_TAIL(&process0.ps_threads, p, p_thr_link);
 	process0.ps_refcnt = 1;
 	p->p_p = pr = &process0;
+	LIST_INSERT_HEAD(&allprocess, pr, ps_list);
 
 	/* Set the default routing table/domain. */
 	process0.ps_rtableid = 0;
@@ -335,9 +336,7 @@ main(void *framep)
 	sched_init_runqueues();
 	sleep_queue_init();
 	sched_init_cpu(curcpu());
-
-	random_start();
-	srandom(arc4random());
+	p->p_cpu->ci_randseed = (arc4random() & 0x7fffffff) + 1;
 
 	/* Initialize work queues */
 	workq_init();
@@ -353,8 +352,6 @@ main(void *framep)
 
 	/* Configure the devices */
 	cpu_configure();
-
-	random_hostseed();
 
 	/* Configure virtual memory system, set vm rlimits. */
 	uvm_init_limits(p);
@@ -496,10 +493,12 @@ main(void *framep)
 	 * munched in mi_switch() after the time got set.
 	 */
 	nanotime(&boottime);
-	LIST_FOREACH(p, &allproc, p_list) {
-		p->p_p->ps_start = boottime;
-		nanouptime(&p->p_cpu->ci_schedstate.spc_runtime);
-		timespecclear(&p->p_rtime);
+	LIST_FOREACH(pr, &allprocess, ps_list) {
+		pr->ps_start = boottime;
+		TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link) {
+			nanouptime(&p->p_cpu->ci_schedstate.spc_runtime);
+			timespecclear(&p->p_rtime);
+		}
 	}
 
 	uvm_swap_init();

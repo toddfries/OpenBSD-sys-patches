@@ -1,4 +1,4 @@
-/* $OpenBSD: drmP.h,v 1.158 2013/12/21 19:36:41 kettenis Exp $ */
+/* $OpenBSD: drmP.h,v 1.161 2014/01/22 05:16:55 kettenis Exp $ */
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -147,6 +147,7 @@ typedef uint32_t __be32;
 #define __init
 #define ARRAY_SIZE nitems
 #define DRM_ARRAY_SIZE nitems
+#define DIV_ROUND_UP howmany
 
 #define ERESTARTSYS EINTR
 
@@ -224,6 +225,36 @@ IS_ERR_OR_NULL(const void *ptr)
 #define __DECONST(type, var)    ((type)(__uintptr_t)(const void *)(var))
 #endif
 
+#define GFP_ATOMIC	M_NOWAIT
+#define GFP_KERNEL	(M_WAITOK | M_CANFAIL)
+#define __GFP_NOWARN	0
+#define __GFP_NORETRY	0
+
+static inline void *
+kmalloc(size_t size, int flags)
+{
+	return malloc(size, M_DRM, flags);
+}
+
+static inline void *
+kcalloc(size_t n, size_t size, int flags)
+{
+	if (n == 0 || SIZE_MAX / n < size)
+		return NULL;
+	return malloc(n * size, M_DRM, flags | M_ZERO);
+}
+
+static inline void *
+kzalloc(size_t size, int flags)
+{
+	return malloc(size, M_DRM, flags | M_ZERO);
+}
+
+static inline void
+kfree(void *objp)
+{
+	free(objp, M_DRM);
+}
 
 /* DRM_READMEMORYBARRIER() prevents reordering of reads.
  * DRM_WRITEMEMORYBARRIER() prevents reordering of writes.
@@ -1001,6 +1032,17 @@ int	drm_agp_bind_ioctl(struct drm_device *, void *, struct drm_file *);
 /* Scatter Gather Support (drm_scatter.c) */
 int	drm_sg_alloc_ioctl(struct drm_device *, void *, struct drm_file *);
 int	drm_sg_free(struct drm_device *, void *, struct drm_file *);
+
+static inline int
+drm_sysfs_connector_add(struct drm_connector *connector)
+{
+	return 0;
+}
+
+static inline void
+drm_sysfs_connector_remove(struct drm_connector *connector)
+{
+}
 
 /* Graphics Execution Manager library functions (drm_gem.c) */
 void drm_gem_object_release(struct drm_gem_object *obj);

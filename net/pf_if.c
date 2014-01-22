@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf_if.c,v 1.70 2014/01/08 22:38:29 bluhm Exp $ */
+/*	$OpenBSD: pf_if.c,v 1.72 2014/01/22 04:33:34 henning Exp $ */
 
 /*
  * Copyright 2005 Henning Brauer <henning@openbsd.org>
@@ -118,6 +118,12 @@ pfi_kif_get(const char *kif_name)
 	kif->pfik_tzero = time_second;
 	TAILQ_INIT(&kif->pfik_dynaddrs);
 
+	if (!strcmp(kif->pfik_name, "any")) {
+		/* both so it works in the ioctl and the regular case */
+		kif->pfik_flags |= PFI_IFLAG_ANY;
+		kif->pfik_flags_new |= PFI_IFLAG_ANY;
+	}
+
 	RB_INSERT(pfi_ifhead, &pfi_ifs, kif);
 	return (kif);
 }
@@ -199,6 +205,10 @@ pfi_kif_match(struct pfi_kif *rule_kif, struct pfi_kif *packet_kif)
 		TAILQ_FOREACH(p, &packet_kif->pfik_ifp->if_groups, ifgl_next)
 			if (p->ifgl_group == rule_kif->pfik_group)
 				return (1);
+
+	if (rule_kif->pfik_flags & PFI_IFLAG_ANY && packet_kif->pfik_ifp &&
+	    !(packet_kif->pfik_ifp->if_flags & IFF_LOOPBACK))
+		return (1); 
 
 	return (0);
 }
@@ -651,7 +661,7 @@ pfi_update_status(const char *name, struct pf_status *pfs)
 		return;
 	}
 	if (p->pfik_group != NULL) {
-		bcopy(&p->pfik_group->ifg_members, &ifg_members,
+		memcpy(&ifg_members, &p->pfik_group->ifg_members,
 		    sizeof(ifg_members));
 	} else {
 		/* build a temporary list for p only */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: i915_gem.c,v 1.62 2013/12/21 15:09:23 kettenis Exp $	*/
+/*	$OpenBSD: i915_gem.c,v 1.66 2014/01/21 08:57:22 kettenis Exp $	*/
 /*
  * Copyright (c) 2008-2009 Owain G. Ainsworth <oga@openbsd.org>
  *
@@ -1803,7 +1803,7 @@ static void
 i915_gem_object_put_pages_gtt(struct drm_i915_gem_object *obj)
 {
 	int page_count = obj->base.size / PAGE_SIZE;
-#if 0
+#ifdef __linux__
 	struct scatterlist *sg;
 #endif
 	int ret, i;
@@ -1826,7 +1826,7 @@ i915_gem_object_put_pages_gtt(struct drm_i915_gem_object *obj)
 	if (obj->madv == I915_MADV_DONTNEED)
 		obj->dirty = 0;
 
-#if 0
+#ifdef __linux__
 	for_each_sg(obj->pages->sgl, sg, page_count, i) {
 		struct page *page = sg_page(sg);
 
@@ -1849,12 +1849,10 @@ i915_gem_object_put_pages_gtt(struct drm_i915_gem_object *obj)
 #endif
 	obj->dirty = 0;
 
-#if 0
+#ifdef __linux__
 	sg_free_table(obj->pages);
-	kfree(obj->pages);
-#else
-	drm_free(obj->pages);
 #endif
+	kfree(obj->pages);
 }
 
 static int
@@ -1939,7 +1937,7 @@ i915_gem_shrink_all(struct drm_i915_private *dev_priv)
 static int
 i915_gem_object_get_pages_gtt(struct drm_i915_gem_object *obj)
 {
-#if 0
+#ifdef __linux__
 	struct drm_i915_private *dev_priv = obj->base.dev->dev_private;
 	int page_count, i;
 	struct address_space *mapping;
@@ -1961,7 +1959,7 @@ i915_gem_object_get_pages_gtt(struct drm_i915_gem_object *obj)
 	BUG_ON(obj->base.read_domains & I915_GEM_GPU_DOMAINS);
 	BUG_ON(obj->base.write_domain & I915_GEM_GPU_DOMAINS);
 
-#if 0
+#ifdef __linux__
 	st = kmalloc(sizeof(*st), GFP_KERNEL);
 	if (st == NULL)
 		return -ENOMEM;
@@ -2033,7 +2031,7 @@ i915_gem_object_get_pages_gtt(struct drm_i915_gem_object *obj)
 
 	return 0;
 
-#if 0
+#ifdef __linux__
 err_pages:
 	for_each_sg(st->sgl, sg, i, page_count)
 		page_cache_release(sg_page(sg));
@@ -2042,7 +2040,7 @@ err_pages:
 	return PTR_ERR(page);
 #else
 err_pages:
-	drm_free(st);
+	free(st, M_DRM);
 	return -ENOMEM;
 #endif
 }
@@ -2155,7 +2153,7 @@ i915_gem_handle_seqno_wrap(struct drm_device *dev)
 	 */
 	ret = 0;
 	for_each_ring(ring, dev_priv, i) {
-		for (j = 0; j < nitems(ring->sync_seqno); j++)
+		for (j = 0; j < ARRAY_SIZE(ring->sync_seqno); j++)
 			ret |= ring->sync_seqno[j] != 0;
 	}
 	if (ret == 0)
@@ -2167,7 +2165,7 @@ i915_gem_handle_seqno_wrap(struct drm_device *dev)
 
 	i915_gem_retire_requests(dev);
 	for_each_ring(ring, dev_priv, i) {
-		for (j = 0; j < nitems(ring->sync_seqno); j++)
+		for (j = 0; j < ARRAY_SIZE(ring->sync_seqno); j++)
 			ring->sync_seqno[j] = 0;
 	}
 
@@ -2214,7 +2212,7 @@ i915_add_request(struct intel_ring_buffer *ring,
 	if (ret)
 		return ret;
 
-	request = drm_alloc(sizeof(*request));
+	request = kmalloc(sizeof(*request), GFP_KERNEL);
 	if (request == NULL)
 		return -ENOMEM;
 
@@ -2228,7 +2226,7 @@ i915_add_request(struct intel_ring_buffer *ring,
 
 	ret = ring->add_request(ring);
 	if (ret) {
-		drm_free(request);
+		kfree(request);
 		return ret;
 	}
 
@@ -2297,7 +2295,7 @@ static void i915_gem_reset_ring_lists(struct drm_i915_private *dev_priv,
 
 		list_del(&request->list);
 		i915_gem_request_remove_from_client(request);
-		drm_free(request);
+		kfree(request);
 	}
 
 	while (!list_empty(&ring->active_list)) {
@@ -2391,7 +2389,7 @@ i915_gem_retire_requests_ring(struct intel_ring_buffer *ring)
 
 		list_del(&request->list);
 		i915_gem_request_remove_from_client(request);
-		drm_free(request);
+		kfree(request);
 	}
 
 	/* Move any buffers on the active list that are no longer referenced
@@ -3119,7 +3117,7 @@ i915_gem_object_bind_to_gtt(struct drm_i915_gem_object *obj,
 
 	i915_gem_object_pin_pages(obj);
 
-	node = malloc(sizeof(*node), M_DRM, M_NOWAIT | M_ZERO);
+	node = kzalloc(sizeof(*node), GFP_KERNEL);
 	if (node == NULL) {
 		i915_gem_object_unpin_pages(obj);
 		/* XXX Until we've hooked up the shrinking functions. */
@@ -3146,7 +3144,7 @@ i915_gem_object_bind_to_gtt(struct drm_i915_gem_object *obj,
 		i915_gem_object_unpin_pages(obj);
 		/* XXX Until we've hooked up the shrinking functions. */
 		i915_gem_object_put_pages(obj);
-		free(node, M_DRM);
+		kfree(node);
 		return ret;
 	}
 	if (WARN_ON(!i915_gem_valid_gtt_space(dev, node, obj->cache_level))) {
@@ -3326,7 +3324,9 @@ int i915_gem_object_set_cache_level(struct drm_i915_gem_object *obj,
 				    enum i915_cache_level cache_level)
 {
 	struct drm_device *dev = obj->base.dev;
-//	drm_i915_private_t *dev_priv = dev->dev_private;
+#ifdef notyet
+	drm_i915_private_t *dev_priv = dev->dev_private;
+#endif
 	int ret;
 
 	if (obj->cache_level == cache_level)
@@ -3976,7 +3976,7 @@ void i915_gem_free_object(struct drm_gem_object *gem_obj)
 	drm_gem_object_release(&obj->base);
 	i915_gem_info_remove_obj(dev_priv, obj->base.size);
 
-	drm_free(obj->bit_17);
+	kfree(obj->bit_17);
 	pool_put(&dev->objpl, obj);
 }
 
@@ -4180,7 +4180,7 @@ int i915_gem_init(struct drm_device *dev)
 	mappable_size = dev->agp->info.ai_aperture_size;
 
 	DRM_LOCK();
-#if 0
+#ifdef notyet
 	if (intel_enable_ppgtt(dev) && HAS_ALIASING_PPGTT(dev)) {
 		/* PPGTT pdes are stolen from global gtt ptes, so shrink the
 		 * aperture accordingly when using aliasing ppgtt. */
@@ -4207,7 +4207,7 @@ int i915_gem_init(struct drm_device *dev)
 		 */
 		i915_gem_init_global_gtt(dev, 0, mappable_size,
 					 gtt_size);
-#if 0
+#ifdef notyet
 	}
 #endif
 
@@ -4218,6 +4218,11 @@ int i915_gem_init(struct drm_device *dev)
 		return ret;
 	}
 
+#ifdef __linux__
+	/* Allow hardware batchbuffers unless told otherwise, but not for KMS. */
+	if (!drm_core_check_feature(dev, DRIVER_MODESET))
+		dev_priv->dri1.allow_batchbuffer = 1;
+#endif
 	return 0;
 }
 
@@ -4379,7 +4384,7 @@ static int i915_gem_init_phys_object(struct drm_device *dev,
 	if (dev_priv->mm.phys_objs[id - 1] || !size)
 		return 0;
 
-	phys_obj = drm_alloc(sizeof(struct drm_i915_gem_phys_object));
+	phys_obj = kzalloc(sizeof(struct drm_i915_gem_phys_object), GFP_KERNEL);
 	if (!phys_obj)
 		return -ENOMEM;
 
@@ -4395,7 +4400,7 @@ static int i915_gem_init_phys_object(struct drm_device *dev,
 
 	return 0;
 kfree_obj:
-	drm_free(phys_obj);
+	kfree(phys_obj);
 	return ret;
 }
 

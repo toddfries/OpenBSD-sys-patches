@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raidp.c,v 1.55 2013/11/21 17:06:45 krw Exp $ */
+/* $OpenBSD: softraid_raid5.c,v 1.13 2014/01/22 12:31:09 jsing Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -34,6 +34,7 @@
 #include <sys/mount.h>
 #include <sys/sensors.h>
 #include <sys/stat.h>
+#include <sys/task.h>
 #include <sys/pool.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
@@ -45,56 +46,54 @@
 #include <dev/softraidvar.h>
 #include <dev/rndvar.h>
 
-/* RAID P functions. */
-int	sr_raidp_create(struct sr_discipline *, struct bioc_createraid *,
+/* RAID 5 functions. */
+int	sr_raid5_create(struct sr_discipline *, struct bioc_createraid *,
 	    int, int64_t);
-int	sr_raidp_assemble(struct sr_discipline *, struct bioc_createraid *,
+int	sr_raid5_assemble(struct sr_discipline *, struct bioc_createraid *,
 	    int, void *);
-int	sr_raidp_init(struct sr_discipline *);
-int	sr_raidp_rw(struct sr_workunit *);
-int	sr_raidp_openings(struct sr_discipline *);
-void	sr_raidp_intr(struct buf *);
-int	sr_raidp_wu_done(struct sr_workunit *);
-void	sr_raidp_set_chunk_state(struct sr_discipline *, int, int);
-void	sr_raidp_set_vol_state(struct sr_discipline *);
+int	sr_raid5_init(struct sr_discipline *);
+int	sr_raid5_rw(struct sr_workunit *);
+int	sr_raid5_openings(struct sr_discipline *);
+void	sr_raid5_intr(struct buf *);
+int	sr_raid5_wu_done(struct sr_workunit *);
+void	sr_raid5_set_chunk_state(struct sr_discipline *, int, int);
+void	sr_raid5_set_vol_state(struct sr_discipline *);
 
-void	sr_raidp_xor(void *, void *, int);
-int	sr_raidp_addio(struct sr_workunit *wu, int, daddr_t, daddr_t,
+int	sr_raid5_addio(struct sr_workunit *wu, int, daddr_t, daddr_t,
 	    void *, int, int, void *);
-void	sr_dump(void *, int);
-void	sr_raidp_scrub(struct sr_discipline *);
+int	sr_raid5_regenerate(struct sr_workunit *, int, daddr_t, daddr_t,
+	    void *);
+int	sr_raid5_write(struct sr_workunit *, struct sr_workunit *, int, int,
+	    daddr_t, daddr_t, void *, int, int);
+void	sr_raid5_xor(void *, void *, int);
 
-void	*sr_get_block(struct sr_discipline *, int);
-void	sr_put_block(struct sr_discipline *, void *, int);
+void	sr_raid5_scrub(struct sr_discipline *);
 
 /* discipline initialisation. */
 void
-sr_raidp_discipline_init(struct sr_discipline *sd, u_int8_t type)
+sr_raid5_discipline_init(struct sr_discipline *sd)
 {
 	/* Fill out discipline members. */
-	sd->sd_type = type;
-	if (sd->sd_type == SR_MD_RAID4)
-		strlcpy(sd->sd_name, "RAID 4", sizeof(sd->sd_name));
-	else
-		strlcpy(sd->sd_name, "RAID 5", sizeof(sd->sd_name));
+	sd->sd_type = SR_MD_RAID5;
+	strlcpy(sd->sd_name, "RAID 5", sizeof(sd->sd_name));
 	sd->sd_capabilities = SR_CAP_SYSTEM_DISK | SR_CAP_AUTO_ASSEMBLE |
 	    SR_CAP_REDUNDANT;
 	sd->sd_max_ccb_per_wu = 4; /* only if stripsize <= MAXPHYS */
-	sd->sd_max_wu = SR_RAIDP_NOWU;
+	sd->sd_max_wu = SR_RAID5_NOWU + 2;	/* Two for scrub/rebuild. */
 
 	/* Setup discipline specific function pointers. */
-	sd->sd_assemble = sr_raidp_assemble;
-	sd->sd_create = sr_raidp_create;
-	sd->sd_openings = sr_raidp_openings;
-	sd->sd_scsi_rw = sr_raidp_rw;
-	sd->sd_scsi_intr = sr_raidp_intr;
-	sd->sd_scsi_wu_done = sr_raidp_wu_done;
-	sd->sd_set_chunk_state = sr_raidp_set_chunk_state;
-	sd->sd_set_vol_state = sr_raidp_set_vol_state;
+	sd->sd_assemble = sr_raid5_assemble;
+	sd->sd_create = sr_raid5_create;
+	sd->sd_openings = sr_raid5_openings;
+	sd->sd_scsi_rw = sr_raid5_rw;
+	sd->sd_scsi_intr = sr_raid5_intr;
+	sd->sd_scsi_wu_done = sr_raid5_wu_done;
+	sd->sd_set_chunk_state = sr_raid5_set_chunk_state;
+	sd->sd_set_vol_state = sr_raid5_set_vol_state;
 }
 
 int
-sr_raidp_create(struct sr_discipline *sd, struct bioc_createraid *bc,
+sr_raid5_create(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, int64_t coerced_size)
 {
 	if (no_chunk < 3) {
@@ -112,23 +111,23 @@ sr_raidp_create(struct sr_discipline *sd, struct bioc_createraid *bc,
 	    ~(((u_int64_t)sd->sd_meta->ssdi.ssd_strip_size >>
 	    DEV_BSHIFT) - 1)) * (no_chunk - 1);
 
-	return sr_raidp_init(sd);
+	return sr_raid5_init(sd);
 }
 
 int
-sr_raidp_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
+sr_raid5_assemble(struct sr_discipline *sd, struct bioc_createraid *bc,
     int no_chunk, void *data)
 {
-	return sr_raidp_init(sd);
+	return sr_raid5_init(sd);
 }
 
 int
-sr_raidp_init(struct sr_discipline *sd)
+sr_raid5_init(struct sr_discipline *sd)
 {
 	/* Initialise runtime values. */
-	sd->mds.mdd_raidp.srp_strip_bits =
+	sd->mds.mdd_raid5.sr5_strip_bits =
 	    sr_validate_stripsize(sd->sd_meta->ssdi.ssd_strip_size);
-	if (sd->mds.mdd_raidp.srp_strip_bits == -1) {
+	if (sd->mds.mdd_raid5.sr5_strip_bits == -1) {
 		sr_error(sd->sd_sc, "invalid strip size");
 		return EINVAL;
 	}
@@ -137,13 +136,14 @@ sr_raidp_init(struct sr_discipline *sd)
 }
 
 int
-sr_raidp_openings(struct sr_discipline *sd)
+sr_raid5_openings(struct sr_discipline *sd)
 {
-	return (sd->sd_max_wu >> 1); /* 2 wu's per IO */
+	/* Two work units per I/O, two for rebuild/scrub. */
+	return ((sd->sd_max_wu - 2) >> 1);
 }
 
 void
-sr_raidp_set_chunk_state(struct sr_discipline *sd, int c, int new_state)
+sr_raid5_set_chunk_state(struct sr_discipline *sd, int c, int new_state)
 {
 	int			old_state, s;
 
@@ -212,13 +212,13 @@ die:
 	sd->sd_set_vol_state(sd);
 
 	sd->sd_must_flush = 1;
-	workq_add_task(NULL, 0, sr_meta_save_callback, sd, NULL);
+	task_add(systq, &sd->sd_meta_save_task);
 done:
 	splx(s);
 }
 
 void
-sr_raidp_set_vol_state(struct sr_discipline *sd)
+sr_raid5_set_vol_state(struct sr_discipline *sd)
 {
 	int			states[SR_MAX_STATES];
 	int			new_state, i, s, nd;
@@ -264,7 +264,7 @@ sr_raidp_set_vol_state(struct sr_discipline *sd)
 		panic("invalid volume state");
 	}
 
-	DNPRINTF(SR_D_STATE, "%s: %s: sr_raidp_set_vol_state %d -> %d\n",
+	DNPRINTF(SR_D_STATE, "%s: %s: sr_raid5_set_vol_state %d -> %d\n",
 	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
 	    old_state, new_state);
 
@@ -272,6 +272,7 @@ sr_raidp_set_vol_state(struct sr_discipline *sd)
 	case BIOC_SVONLINE:
 		switch (new_state) {
 		case BIOC_SVONLINE: /* can go to same state */
+		case BIOC_SVOFFLINE:
 		case BIOC_SVDEGRADED:
 		case BIOC_SVREBUILD: /* happens on boot */
 			break;
@@ -283,6 +284,28 @@ sr_raidp_set_vol_state(struct sr_discipline *sd)
 	case BIOC_SVOFFLINE:
 		/* XXX this might be a little too much */
 		goto die;
+
+	case BIOC_SVDEGRADED:
+		switch (new_state) {
+		case BIOC_SVOFFLINE:
+		case BIOC_SVREBUILD:
+		case BIOC_SVDEGRADED: /* can go to the same state */
+			break;
+		default:
+			goto die;
+		}
+		break;
+
+	case BIOC_SVBUILDING:
+		switch (new_state) {
+		case BIOC_SVONLINE:
+		case BIOC_SVOFFLINE:
+		case BIOC_SVBUILDING: /* can go to the same state */
+			break;
+		default:
+			goto die;
+		}
+		break;
 
 	case BIOC_SVSCRUB:
 		switch (new_state) {
@@ -308,17 +331,6 @@ sr_raidp_set_vol_state(struct sr_discipline *sd)
 		}
 		break;
 
-	case BIOC_SVDEGRADED:
-		switch (new_state) {
-		case BIOC_SVOFFLINE:
-		case BIOC_SVREBUILD:
-		case BIOC_SVDEGRADED: /* can go to the same state */
-			break;
-		default:
-			goto die;
-		}
-		break;
-
 	default:
 die:
 		panic("%s: %s: invalid volume state transition %d -> %d",
@@ -330,27 +342,55 @@ die:
 	sd->sd_vol_status = new_state;
 }
 
+static inline int
+sr_raid5_chunk_online(struct sr_discipline *sd, int chunk)
+{
+	switch (sd->sd_vol.sv_chunks[chunk]->src_meta.scm_status) {
+	case BIOC_SDONLINE:
+	case BIOC_SDSCRUB:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+static inline int
+sr_raid5_chunk_rebuild(struct sr_discipline *sd, int chunk)
+{
+	switch (sd->sd_vol.sv_chunks[chunk]->src_meta.scm_status) {
+	case BIOC_SDREBUILD:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 int
-sr_raidp_rw(struct sr_workunit *wu)
+sr_raid5_rw(struct sr_workunit *wu)
 {
 	struct sr_workunit	*wu_r = NULL;
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
 	struct sr_chunk		*scp;
-	int			s, i;
 	daddr_t			blk, lba;
 	int64_t			chunk_offs, lbaoffs, phys_offs, strip_offs;
 	int64_t			strip_bits, strip_no, strip_size;
 	int64_t			chunk, no_chunk;
 	int64_t			length, parity, datalen, row_size;
-	void			*xorbuf, *data;
+	void			*data;
+	int			s;
 
 	/* blk and scsi error will be handled by sr_validate_io */
-	if (sr_validate_io(wu, &blk, "sr_raidp_rw"))
+	if (sr_validate_io(wu, &blk, "sr_raid5_rw"))
 		goto bad;
 
+	DNPRINTF(SR_D_DIS, "%s: %s sr_raid5_rw %s: lba %lld size %d\n",
+	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
+	    (xs->flags & SCSI_DATA_IN) ? "read" : "write",
+	    (long long)blk, xs->datalen);
+
 	strip_size = sd->sd_meta->ssdi.ssd_strip_size;
-	strip_bits = sd->mds.mdd_raidp.srp_strip_bits;
+	strip_bits = sd->mds.mdd_raid5.sr5_strip_bits;
 	no_chunk = sd->sd_meta->ssdi.ssd_chunk_no - 1;
 	row_size = (no_chunk << strip_bits) >> DEV_BSHIFT;
 
@@ -360,7 +400,8 @@ sr_raidp_rw(struct sr_workunit *wu)
 
 	if (xs->flags & SCSI_DATA_OUT) {
 		if ((wu_r = sr_scsi_wu_get(sd, SCSI_NOSLEEP)) == NULL){
-			printf("%s: can't get wu_r", DEVNAME(sd->sd_sc));
+			printf("%s: %s failed to get read work unit",
+			    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname);
 			goto bad;
 		}
 		wu_r->swu_state = SR_WU_INPROGRESS;
@@ -378,57 +419,42 @@ sr_raidp_rw(struct sr_workunit *wu)
 		/* get size remaining in this stripe */
 		length = MIN(strip_size - strip_offs, datalen);
 
-		/* map disk offset to parity/data drive */
+		/*
+		 * Map disk offset to data and parity chunks, using a left
+		 * asymmetric algorithm for the parity assignment.
+		 */
 		chunk = strip_no % no_chunk;
-		if (sd->sd_type == SR_MD_RAID4)
-			parity = no_chunk; /* RAID4: Parity is always drive N */
-		else {
-			/* RAID5: left asymmetric algorithm */
-			parity = no_chunk - ((strip_no / no_chunk) %
-			    (no_chunk + 1));
-			if (chunk >= parity)
-				chunk++;
-		}
+		parity = no_chunk - ((strip_no / no_chunk) % (no_chunk + 1));
+		if (chunk >= parity)
+			chunk++;
 
 		lba = phys_offs >> DEV_BSHIFT;
 
 		/* XXX big hammer.. exclude I/O from entire stripe */
 		if (wu->swu_blk_start == 0)
 			wu->swu_blk_start = (strip_no / no_chunk) * row_size;
-		wu->swu_blk_end = (strip_no / no_chunk) * row_size + (row_size - 1);
+		wu->swu_blk_end = (strip_no / no_chunk) * row_size +
+		    (row_size - 1);
 
 		scp = sd->sd_vol.sv_chunks[chunk];
 		if (xs->flags & SCSI_DATA_IN) {
 			switch (scp->src_meta.scm_status) {
 			case BIOC_SDONLINE:
 			case BIOC_SDSCRUB:
-				/* drive is good. issue single read request */
-				if (sr_raidp_addio(wu, chunk, lba, length,
+				/*
+				 * Chunk is online, issue a single read
+				 * request.
+				 */
+				if (sr_raid5_addio(wu, chunk, lba, length,
 				    data, xs->flags, 0, NULL))
 					goto bad;
 				break;
 			case BIOC_SDOFFLINE:
 			case BIOC_SDREBUILD:
 			case BIOC_SDHOTSPARE:
-				/*
-				 * XXX only works if this LBA has already
-				 * been scrubbed
-				 */
-				printf("Disk %llx offline, "
-				    "regenerating buffer\n", chunk);
-				memset(data, 0, length);
-				for (i = 0; i <= no_chunk; i++) {
-					/*
-					 * read all other drives: xor result
-					 * into databuffer.
-					 */
-					if (i != chunk) {
-						if (sr_raidp_addio(wu, i, lba,
-						    length, NULL, SCSI_DATA_IN,
-						    0, data))
-							goto bad;
-					}
-				}
+				if (sr_raid5_regenerate(wu, chunk, lba,
+				    length, data))
+					goto bad;
 				break;
 			default:
 				printf("%s: is offline, can't read\n",
@@ -436,39 +462,8 @@ sr_raidp_rw(struct sr_workunit *wu)
 				goto bad;
 			}
 		} else {
-			/* XXX handle writes to failed/offline disk? */
-			if (scp->src_meta.scm_status == BIOC_SDOFFLINE)
-				goto bad;
-
-			/*
-			 * initialize XORBUF with contents of new data to be
-			 * written. This will be XORed with old data and old
-			 * parity in the intr routine. The result in xorbuf
-			 * is the new parity data.
-			 */
-			xorbuf = sr_get_block(sd, length);
-			if (xorbuf == NULL)
-				goto bad;
-			memcpy(xorbuf, data, length);
-
-			/* xor old data */
-			if (sr_raidp_addio(wu_r, chunk, lba, length, NULL,
-			    SCSI_DATA_IN, 0, xorbuf))
-				goto bad;
-
-			/* xor old parity */
-			if (sr_raidp_addio(wu_r, parity, lba, length, NULL,
-			    SCSI_DATA_IN, 0, xorbuf))
-				goto bad;
-
-			/* write new data */
-			if (sr_raidp_addio(wu, chunk, lba, length, data,
-			    xs->flags, 0, NULL))
-				goto bad;
-
-			/* write new parity */
-			if (sr_raidp_addio(wu, parity, lba, length, xorbuf,
-			    xs->flags, SR_CCBF_FREEBUF, NULL))
+			if (sr_raid5_write(wu, wu_r, chunk, parity, lba,
+			    length, data, xs->flags, 0))
 				goto bad;
 		}
 
@@ -480,15 +475,19 @@ sr_raidp_rw(struct sr_workunit *wu)
 
 	s = splbio();
 	if (wu_r) {
-		/* collide write request with reads */
-		wu_r->swu_blk_start = wu->swu_blk_start;
-		wu_r->swu_blk_end = wu->swu_blk_end;
+		if (wu_r->swu_io_count > 0) {
+			/* collide write request with reads */
+			wu_r->swu_blk_start = wu->swu_blk_start;
+			wu_r->swu_blk_end = wu->swu_blk_end;
 
-		wu->swu_state = SR_WU_DEFERRED;
-		wu_r->swu_collider = wu;
-		TAILQ_INSERT_TAIL(&sd->sd_wu_defq, wu, swu_link);
+			wu->swu_state = SR_WU_DEFERRED;
+			wu_r->swu_collider = wu;
+			TAILQ_INSERT_TAIL(&sd->sd_wu_defq, wu, swu_link);
 
-		wu = wu_r;
+			wu = wu_r;
+		} else {
+			sr_scsi_wu_put(sd, wu_r);
+		}
 	}
 	splx(s);
 
@@ -497,37 +496,189 @@ sr_raidp_rw(struct sr_workunit *wu)
 	return (0);
 
 bad:
-	/* XXX - can leak xorbuf on error. */
 	/* wu is unwound by sr_wu_put */
 	if (wu_r)
 		sr_scsi_wu_put(sd, wu_r);
 	return (1);
 }
 
+int
+sr_raid5_regenerate(struct sr_workunit *wu, int chunk, daddr_t blkno,
+    daddr_t len, void *data)
+{
+	struct sr_discipline	*sd = wu->swu_dis;
+	int			i;
+
+	/*
+	 * Regenerate a block on a RAID 5 volume by xoring the data and parity
+	 * from all of the remaining online chunks. This requires the parity
+	 * to already be correct.
+ 	 */
+
+	DNPRINTF(SR_D_DIS, "%s: %s sr_raid5_regenerate chunk %d offline, "
+	    "regenerating block %llu\n",
+	    DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname, chunk, blkno);
+
+	memset(data, 0, len);
+	for (i = 0; i < sd->sd_meta->ssdi.ssd_chunk_no; i++) {
+		if (i == chunk)
+			continue;
+		if (!sr_raid5_chunk_online(sd, i))
+			goto bad;
+		if (sr_raid5_addio(wu, i, blkno, len, NULL, SCSI_DATA_IN,
+		    0, data))
+			goto bad;
+	}
+	return (0);
+
+bad:
+	return (1);
+}
+
+int
+sr_raid5_write(struct sr_workunit *wu, struct sr_workunit *wu_r, int chunk,
+    int parity, daddr_t blkno, daddr_t len, void *data, int xsflags,
+    int ccbflags)
+{
+	struct sr_discipline	*sd = wu->swu_dis;
+	struct scsi_xfer	*xs = wu->swu_xs;
+	void			*xorbuf;
+	int			chunk_online, chunk_rebuild;
+	int			parity_online, parity_rebuild;
+	int			other_offline = 0, other_rebuild = 0;
+	int			i;
+
+	/*
+	 * Perform a write to a RAID 5 volume. This write routine does not
+	 * require the parity to already be correct and will operate on a
+	 * uninitialised volume.
+	 *
+	 * There are four possible cases:
+	 *
+	 * 1) All data chunks and parity are online. In this case we read the
+	 *    data from all data chunks, except the one we are writing to, in
+	 *    order to calculate and write the new parity.
+	 *
+	 * 2) The parity chunk is offline. In this case we only need to write
+	 *    to the data chunk. No parity calculation is required.
+	 *
+	 * 3) The data chunk is offline. In this case we read the data from all
+	 *    online chunks in order to calculate and write the new parity.
+	 *    This is the same as (1) except we do not write the data chunk.
+	 *
+	 * 4) A different data chunk is offline. The new parity is calculated
+	 *    by taking the existing parity, xoring the original data and
+	 *    xoring in the new data. This requires that the parity already be
+	 *    correct, which it will be if any of the data chunks has
+	 *    previously been written.
+	 *
+	 * There is an additional complication introduced by a chunk that is
+	 * being rebuilt. If this is the data or parity chunk, then we want
+	 * to write to it as per normal. If it is another data chunk then we
+	 * need to presume that it has not yet been regenerated and use the
+	 * same method as detailed in (4) above.
+	 */
+
+	DNPRINTF(SR_D_DIS, "%s: %s sr_raid5_write chunk %i parity %i "
+	    "blk %llu\n", DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
+	    chunk, parity, (unsigned long long)blkno);
+
+	chunk_online = sr_raid5_chunk_online(sd, chunk);
+	chunk_rebuild = sr_raid5_chunk_rebuild(sd, chunk);
+	parity_online = sr_raid5_chunk_online(sd, parity);
+	parity_rebuild = sr_raid5_chunk_rebuild(sd, parity);
+
+	for (i = 0; i < sd->sd_meta->ssdi.ssd_chunk_no; i++) {
+		if (i == chunk || i == parity)
+			continue;
+		if (sr_raid5_chunk_rebuild(sd, i))
+			other_rebuild = 1;
+		else if (!sr_raid5_chunk_online(sd, i))
+			other_offline = 1;
+	}
+
+	DNPRINTF(SR_D_DIS, "%s: %s chunk online %d, parity online %d, "
+	    "other offline %d\n", DEVNAME(sd->sd_sc), sd->sd_meta->ssd_devname,
+	    chunk_online, parity_online, other_offline);
+
+	if (!parity_online && !parity_rebuild)
+		goto data_write;
+
+	xorbuf = sr_block_get(sd, len);
+	if (xorbuf == NULL)
+		goto bad;
+	memcpy(xorbuf, data, len);
+
+	if (other_offline || other_rebuild) {
+
+		/*
+		 * XXX - If we can guarantee that this LBA has been scrubbed
+		 * then we can also take this faster path.
+		 */
+
+		/* Read in existing data and existing parity. */
+		if (sr_raid5_addio(wu_r, chunk, blkno, len, NULL,
+		    SCSI_DATA_IN, 0, xorbuf))
+			goto bad;
+		if (sr_raid5_addio(wu_r, parity, blkno, len, NULL,
+		    SCSI_DATA_IN, 0, xorbuf))
+			goto bad;
+
+	} else {
+
+		/* Read in existing data from all other chunks. */
+		for (i = 0; i < sd->sd_meta->ssdi.ssd_chunk_no; i++) {
+			if (i == chunk || i == parity)
+				continue;
+			if (sr_raid5_addio(wu_r, i, blkno, len, NULL,
+			    SCSI_DATA_IN, 0, xorbuf))
+				goto bad;
+		}
+
+	}
+
+	/* Write new parity. */
+	if (sr_raid5_addio(wu, parity, blkno, len, xorbuf, xs->flags,
+	    SR_CCBF_FREEBUF, NULL))
+		goto bad;
+
+data_write:
+	/* Write new data. */
+	if (chunk_online || chunk_rebuild)
+		if (sr_raid5_addio(wu, chunk, blkno, len, data, xs->flags,
+		    0, NULL))
+			goto bad;
+
+	return (0);
+
+bad:
+	return (1);
+}
+
 void
-sr_raidp_intr(struct buf *bp)
+sr_raid5_intr(struct buf *bp)
 {
 	struct sr_ccb		*ccb = (struct sr_ccb *)bp;
 	struct sr_workunit	*wu = ccb->ccb_wu;
 	struct sr_discipline	*sd = wu->swu_dis;
 	int			s;
 
-	DNPRINTF(SR_D_INTR, "%s: sr_raidp_intr bp %p xs %p\n",
+	DNPRINTF(SR_D_INTR, "%s: sr_raid5_intr bp %p xs %p\n",
 	    DEVNAME(sd->sd_sc), bp, wu->swu_xs);
 
 	s = splbio();
 	sr_ccb_done(ccb);
 
-	/* XXX - Should this be done via the workq? */
+	/* XXX - Should this be done via the taskq? */
 
 	/* XOR data to result. */
 	if (ccb->ccb_state == SR_CCB_OK && ccb->ccb_opaque)
-		sr_raidp_xor(ccb->ccb_opaque, ccb->ccb_buf.b_data,
+		sr_raid5_xor(ccb->ccb_opaque, ccb->ccb_buf.b_data,
 		    ccb->ccb_buf.b_bcount);
 
 	/* Free allocated data buffer. */
 	if (ccb->ccb_flags & SR_CCBF_FREEBUF) {
-		sr_put_block(sd, ccb->ccb_buf.b_data, ccb->ccb_buf.b_bcount);
+		sr_block_put(sd, ccb->ccb_buf.b_data, ccb->ccb_buf.b_bcount);
 		ccb->ccb_buf.b_data = NULL;
 	}
 
@@ -536,16 +687,16 @@ sr_raidp_intr(struct buf *bp)
 }
 
 int
-sr_raidp_wu_done(struct sr_workunit *wu)
+sr_raid5_wu_done(struct sr_workunit *wu)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct scsi_xfer	*xs = wu->swu_xs;
 
 	/* XXX - we have no way of propagating errors... */
-	if (wu->swu_flags & SR_WUF_DISCIPLINE)
+	if (wu->swu_flags & (SR_WUF_DISCIPLINE | SR_WUF_REBUILD))
 		return SR_WU_OK;
 
-	/* XXX - This is insufficient for RAID 4/5. */
+	/* XXX - This is insufficient for RAID 5. */
 	if (wu->swu_ios_succeeded > 0) {
 		xs->error = XS_NOERROR;
 		return SR_WU_OK;
@@ -559,6 +710,7 @@ sr_raidp_wu_done(struct sr_workunit *wu)
 		if (sd->sd_scsi_rw(wu) == 0)
 			return SR_WU_RESTART;
 	} else {
+		/* XXX - retry write if we just went from online to degraded. */
 		printf("%s: permanently fail write on block %lld\n",
 		    sd->sd_meta->ssd_devname, (long long)wu->swu_blk_start);
 	}
@@ -570,19 +722,19 @@ sr_raidp_wu_done(struct sr_workunit *wu)
 }
 
 int
-sr_raidp_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
+sr_raid5_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
     daddr_t len, void *data, int xsflags, int ccbflags, void *xorbuf)
 {
 	struct sr_discipline	*sd = wu->swu_dis;
 	struct sr_ccb		*ccb;
 
-	DNPRINTF(SR_D_DIS, "sr_raidp_addio: %s %d.%llx %llx %s\n",
-	    (xsflags & SCSI_DATA_IN) ? "read" : "write", chunk, 
-	    (long long)blkno, (long long)len, xorbuf ? "X0R" : "-");
+	DNPRINTF(SR_D_DIS, "sr_raid5_addio: %s chunk %d block %lld "
+	    "length %lld %s\n", (xsflags & SCSI_DATA_IN) ? "read" : "write",
+	    chunk, (long long)blkno, (long long)len, xorbuf ? "X0R" : "-");
 
 	/* Allocate temporary buffer. */
 	if (data == NULL) {
-		data = sr_get_block(sd, len);
+		data = sr_block_get(sd, len);
 		if (data == NULL)
 			return (-1);
 		ccbflags |= SR_CCBF_FREEBUF;
@@ -591,7 +743,7 @@ sr_raidp_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
 	ccb = sr_ccb_rw(sd, chunk, blkno, len, data, xsflags, ccbflags);
 	if (ccb == NULL) {
 		if (ccbflags & SR_CCBF_FREEBUF)
-			sr_put_block(sd, data, len);
+			sr_block_put(sd, data, len);
 		return (-1);
 	}
 	ccb->ccb_opaque = xorbuf;
@@ -601,27 +753,7 @@ sr_raidp_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
 }
 
 void
-sr_dump(void *blk, int len)
-{
-	uint8_t			*b = blk;
-	int			i, j, c;
-
-	for (i = 0; i < len; i += 16) {
-		for (j = 0; j < 16; j++)
-			printf("%.2x ", b[i + j]);
-		printf("  ");
-		for (j = 0; j < 16; j++) {
-			c = b[i + j];
-			if (c < ' ' || c > 'z' || i + j > len)
-				c = '.';
-			printf("%c", c);
-		}
-		printf("\n");
-	}
-}
-
-void
-sr_raidp_xor(void *a, void *b, int len)
+sr_raid5_xor(void *a, void *b, int len)
 {
 	uint32_t		*xa = a, *xb = b;
 
@@ -632,7 +764,7 @@ sr_raidp_xor(void *a, void *b, int len)
 
 #if 0
 void
-sr_raidp_scrub(struct sr_discipline *sd)
+sr_raid5_scrub(struct sr_discipline *sd)
 {
 	int64_t strip_no, strip_size, no_chunk, parity, max_strip, strip_bits;
 	int64_t i;
@@ -645,23 +777,19 @@ sr_raidp_scrub(struct sr_discipline *sd)
 
 	no_chunk = sd->sd_meta->ssdi.ssd_chunk_no - 1;
 	strip_size = sd->sd_meta->ssdi.ssd_strip_size;
-	strip_bits = sd->mds.mdd_raidp.srp_strip_bits;
+	strip_bits = sd->mds.mdd_raid5.sr5_strip_bits;
 	max_strip = sd->sd_meta->ssdi.ssd_size >> strip_bits;
 
 	for (strip_no = 0; strip_no < max_strip; strip_no++) {
-		if (sd->sd_type == SR_MD_RAID4)
-			parity = no_chunk;
-		else
-			parity = no_chunk - ((strip_no / no_chunk) %
-			    (no_chunk + 1));
+		parity = no_chunk - ((strip_no / no_chunk) % (no_chunk + 1));
 
-		xorbuf = sr_get_block(sd, strip_size);
+		xorbuf = sr_block_get(sd, strip_size);
 		for (i = 0; i <= no_chunk; i++) {
 			if (i != parity)
-				sr_raidp_addio(wu_r, i, 0xBADCAFE, strip_size,
+				sr_raid5_addio(wu_r, i, 0xBADCAFE, strip_size,
 				    NULL, SCSI_DATA_IN, 0, xorbuf);
 		}
-		sr_raidp_addio(wu_w, parity, 0xBADCAFE, strip_size, xorbuf,
+		sr_raid5_addio(wu_w, parity, 0xBADCAFE, strip_size, xorbuf,
 		    SCSI_DATA_OUT, SR_CCBF_FREEBUF, NULL);
 
 		wu_r->swu_flags |= SR_WUF_REBUILD;
@@ -690,16 +818,3 @@ done:
 	return;
 }
 #endif
-
-void *
-sr_get_block(struct sr_discipline *sd, int length)
-{
-	return dma_alloc(length, PR_NOWAIT | PR_ZERO);
-}
-
-void
-sr_put_block(struct sr_discipline *sd, void *ptr, int length)
-{
-	dma_free(ptr, length);
-}
-

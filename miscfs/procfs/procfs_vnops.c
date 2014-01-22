@@ -1,4 +1,4 @@
-/*	$OpenBSD: procfs_vnops.c,v 1.56 2013/03/28 02:08:39 guenther Exp $	*/
+/*	$OpenBSD: procfs_vnops.c,v 1.59 2014/01/21 01:48:22 tedu Exp $	*/
 /*	$NetBSD: procfs_vnops.c,v 1.40 1996/03/16 23:52:55 christos Exp $	*/
 
 /*
@@ -730,7 +730,7 @@ procfs_lookup(void *v)
 
 	found:
 		if (pt->pt_pfstype == Pfile) {
-			fvp = p->p_textvp;
+			fvp = p->p_p->ps_textvp;
 			/* We already checked that it exists. */
 			vref(fvp);
 			vn_lock(fvp, LK_EXCLUSIVE | LK_RETRY, curp);
@@ -761,7 +761,7 @@ int
 procfs_validfile(struct proc *p, struct mount *mp)
 {
 
-	return (p->p_textvp != NULLVP);
+	return (p->p_p->ps_textvp != NULLVP);
 }
 
 int
@@ -845,9 +845,9 @@ procfs_readdir(void *v)
 	/*
 	 * this is for the root of the procfs filesystem
 	 * what is needed is a special entry for "curproc"
-	 * followed by an entry for each process on allproc
+	 * followed by an entry for each process on allprocess
 #ifdef PROCFS_ZOMBIE
-	 * and zombproc.
+	 * and zombprocess.
 #endif
 	 */
 
@@ -856,16 +856,14 @@ procfs_readdir(void *v)
 		int doingzomb = 0;
 #endif
 		int pcnt = i;
-		volatile struct proc *p = LIST_FIRST(&allproc);
+		volatile struct process *pr = LIST_FIRST(&allprocess);
 
 		if (pcnt > 3)
 			pcnt = 3;
 #ifdef PROCFS_ZOMBIE
 	again:
 #endif
-		while (p && (p->p_flag & P_THREAD))
-			p = LIST_NEXT(p, p_list);
-		for (; p && uio->uio_resid >= UIO_MX; i++, pcnt++) {
+		for (; pr && uio->uio_resid >= UIO_MX; i++, pcnt++) {
 			switch (i) {
 			case 0:		/* `.' */
 			case 1:		/* `..' */
@@ -913,33 +911,22 @@ procfs_readdir(void *v)
 				/* fall through */
 
 			default:
-				while (pcnt < i) {
+				while (pcnt < i)
 					pcnt++;
-					do {
-						p = LIST_NEXT(p, p_list);
-					} while (p && (p->p_flag & P_THREAD));
-					if (!p)
-						goto done;
-				}
-				d.d_fileno = PROCFS_FILENO(p->p_pid, Pproc);
+				d.d_fileno = PROCFS_FILENO(pr->ps_pid, Pproc);
 				d.d_namlen = snprintf(d.d_name, sizeof(d.d_name),
-				    "%ld", (long)p->p_pid);
+				    "%ld", (long)pr->ps_pid);
 				d.d_type = DT_REG;
-				do {
-					p = LIST_NEXT(p, p_list);
-				} while (p && (p->p_flag & P_THREAD));
 				break;
 			}
 
 			if ((error = uiomove(&d, UIO_MX, uio)) != 0)
 				break;
 		}
-	done:
-
 #ifdef PROCFS_ZOMBIE
-		if (p == 0 && doingzomb == 0) {
+		if (pr == NULL && doingzomb == 0) {
 			doingzomb = 1;
-			p = LIST_FIRST(&zombproc);
+			pr = LIST_FIRST(&zombprocess);
 			goto again;
 		}
 #endif

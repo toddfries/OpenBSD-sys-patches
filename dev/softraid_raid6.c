@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid_raid6.c,v 1.57 2013/11/21 17:06:45 krw Exp $ */
+/* $OpenBSD: softraid_raid6.c,v 1.61 2014/01/22 05:11:36 jsing Exp $ */
 /*
  * Copyright (c) 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2009 Jordan Hargrave <jordan@openbsd.org>
@@ -34,6 +34,7 @@
 #include <sys/mount.h>
 #include <sys/sensors.h>
 #include <sys/stat.h>
+#include <sys/task.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
 
@@ -65,12 +66,8 @@ void	sr_raid6_xorp(void *, void *, int);
 void	sr_raid6_xorq(void *, void *, int, int);
 int	sr_raid6_addio(struct sr_workunit *wu, int, daddr_t, daddr_t,
 	    void *, int, int, void *, void *, int);
-void	sr_dump(void *, int);
 void	sr_raid6_scrub(struct sr_discipline *);
 int	sr_failio(struct sr_workunit *);
-
-void	*sr_get_block(struct sr_discipline *, int);
-void	sr_put_block(struct sr_discipline *, void *, int);
 
 void	gf_init(void);
 uint8_t gf_inv(uint8_t);
@@ -237,7 +234,7 @@ die:
 	sd->sd_set_vol_state(sd);
 
 	sd->sd_must_flush = 1;
-	workq_add_task(NULL, 0, sr_meta_save_callback, sd, NULL);
+	task_add(systq, &sd->sd_meta_save_task);
 done:
 	splx(s);
 }
@@ -308,12 +305,11 @@ sr_raid6_set_vol_state(struct sr_discipline *sd)
 		/* XXX this might be a little too much */
 		goto die;
 
-	case BIOC_SVSCRUB:
+	case BIOC_SVDEGRADED:
 		switch (new_state) {
-		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
-		case BIOC_SVDEGRADED:
-		case BIOC_SVSCRUB: /* can go to same state */
+		case BIOC_SVREBUILD:
+		case BIOC_SVDEGRADED: /* can go to the same state */
 			break;
 		default:
 			goto die;
@@ -331,23 +327,24 @@ sr_raid6_set_vol_state(struct sr_discipline *sd)
 		}
 		break;
 
-	case BIOC_SVREBUILD:
+	case BIOC_SVSCRUB:
 		switch (new_state) {
 		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
 		case BIOC_SVDEGRADED:
-		case BIOC_SVREBUILD: /* can go to the same state */
+		case BIOC_SVSCRUB: /* can go to same state */
 			break;
 		default:
 			goto die;
 		}
 		break;
 
-	case BIOC_SVDEGRADED:
+	case BIOC_SVREBUILD:
 		switch (new_state) {
+		case BIOC_SVONLINE:
 		case BIOC_SVOFFLINE:
-		case BIOC_SVREBUILD:
-		case BIOC_SVDEGRADED: /* can go to the same state */
+		case BIOC_SVDEGRADED:
+		case BIOC_SVREBUILD: /* can go to the same state */
 			break;
 		default:
 			goto die;
@@ -569,11 +566,11 @@ sr_raid6_rw(struct sr_workunit *wu)
 			 * parity in the intr routine. The result in pbuf
 			 * is the new parity data.
 			 */
-			qbuf = sr_get_block(sd, length);
+			qbuf = sr_block_get(sd, length);
 			if (qbuf == NULL)
 				goto bad;
 
-			pbuf = sr_get_block(sd, length);
+			pbuf = sr_block_get(sd, length);
 			if (pbuf == NULL)
 				goto bad;
 
@@ -693,7 +690,7 @@ sr_raid6_intr(struct buf *bp)
 
 	/* Free allocated data buffer. */
 	if (ccb->ccb_flags & SR_CCBF_FREEBUF) {
-		sr_put_block(sd, ccb->ccb_buf.b_data, ccb->ccb_buf.b_bcount);
+		sr_block_put(sd, ccb->ccb_buf.b_data, ccb->ccb_buf.b_bcount);
 		ccb->ccb_buf.b_data = NULL;
 	}
 
@@ -751,7 +748,7 @@ sr_raid6_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
 
 	/* Allocate temporary buffer. */
 	if (data == NULL) {
-		data = sr_get_block(sd, len);
+		data = sr_block_get(sd, len);
 		if (data == NULL)
 			return (-1);
 		ccbflags |= SR_CCBF_FREEBUF;
@@ -760,7 +757,7 @@ sr_raid6_addio(struct sr_workunit *wu, int chunk, daddr_t blkno,
 	ccb = sr_ccb_rw(sd, chunk, blkno, len, data, xsflags, ccbflags);
 	if (ccb == NULL) {
 		if (ccbflags & SR_CCBF_FREEBUF)
-			sr_put_block(sd, data, len);
+			sr_block_put(sd, data, len);
 		return (-1);
 	}
 	if (pbuf || qbuf) {

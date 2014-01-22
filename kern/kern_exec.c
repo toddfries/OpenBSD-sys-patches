@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.135 2013/06/17 19:11:54 guenther Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.137 2014/01/21 01:48:44 tedu Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -472,15 +472,15 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	TCB_SET(p, NULL);	/* reset the TCB address */
 
 	/* set command name & other accounting info */
-	bzero(p->p_comm, sizeof(p->p_comm));
+	memset(p->p_comm, 0, sizeof(p->p_comm));
 	len = min(nid.ni_cnd.cn_namelen, MAXCOMLEN);
 	bcopy(nid.ni_cnd.cn_nameptr, p->p_comm, len);
 	pr->ps_acflag &= ~AFORK;
 
 	/* record proc's vnode, for use by procfs and others */
-	otvp = p->p_textvp;
+	otvp = pr->ps_textvp;
 	vref(pack.ep_vp);
-	p->p_textvp = pack.ep_vp;
+	pr->ps_textvp = pack.ep_vp;
 	if (otvp)
 		vrele(otvp);
 

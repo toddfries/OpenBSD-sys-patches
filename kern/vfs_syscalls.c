@@ -1,4 +1,4 @@
-/*	$OpenBSD: vfs_syscalls.c,v 1.200 2013/12/01 16:40:56 krw Exp $	*/
+/*	$OpenBSD: vfs_syscalls.c,v 1.202 2014/01/21 01:48:45 tedu Exp $	*/
 /*	$NetBSD: vfs_syscalls.c,v 1.71 1996/04/23 10:29:02 mycroft Exp $	*/
 
 /*
@@ -319,7 +319,7 @@ update:
  * track of how many were replaced.  That's the number of references
  * the old vnode had that we've replaced, so finish by vrele()'ing
  * it that many times.  This puts off any possible sleeping until
- * we've finished walking the allprocs list.
+ * we've finished walking the allproc list.
  */
 void
 checkdirs(struct vnode *olddp)
@@ -958,7 +958,7 @@ sys_getfh(struct proc *p, void *v, register_t *retval)
 	if (error)
 		return (error);
 	vp = nd.ni_vp;
-	bzero(&fh, sizeof(fh));
+	memset(&fh, 0, sizeof(fh));
 	fh.fh_fsid = vp->v_mount->mnt_stat.f_fsid;
 	error = VFS_VPTOFH(vp, &fh.fh_fid);
 	vput(vp);

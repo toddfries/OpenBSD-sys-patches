@@ -1,4 +1,4 @@
-/*	$OpenBSD: in6.c,v 1.129 2014/01/15 09:25:38 mpi Exp $	*/
+/*	$OpenBSD: in6.c,v 1.131 2014/01/22 13:19:12 mpi Exp $	*/
 /*	$KAME: in6.c,v 1.372 2004/06/14 08:14:21 itojun Exp $	*/
 
 /*
@@ -136,14 +136,8 @@ void
 in6_ifloop_request(int cmd, struct ifaddr *ifa)
 {
 	struct rt_addrinfo info;
-	struct sockaddr_in6 all1_sa;
 	struct rtentry *nrt = NULL;
 	int e;
-
-	bzero(&all1_sa, sizeof(all1_sa));
-	all1_sa.sin6_family = AF_INET6;
-	all1_sa.sin6_len = sizeof(struct sockaddr_in6);
-	all1_sa.sin6_addr = in6mask128;
 
 	/*
 	 * We specify the address itself as the gateway, and set the
@@ -159,7 +153,6 @@ in6_ifloop_request(int cmd, struct ifaddr *ifa)
 	info.rti_info[RTAX_DST] = ifa->ifa_addr;
 	if (cmd != RTM_DELETE)
 		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
-	info.rti_info[RTAX_NETMASK] = sin6tosa(&all1_sa);
 	e = rtrequest1(cmd, &info, RTP_CONNECTED, &nrt,
 	    ifa->ifa_ifp->if_rdomain);
 	if (e != 0) {
@@ -1592,7 +1585,7 @@ in6_addmulti(struct in6_addr *maddr6, struct ifnet *ifp, int *errorp)
 		in6m->in6m_sin.sin6_family = AF_INET6;
 		in6m->in6m_sin.sin6_addr = *maddr6;
 		in6m->in6m_refcnt = 1;
-		in6m->in6m_ifp = ifp;
+		in6m->in6m_ifidx = ifp->if_index;
 		in6m->in6m_ifma.ifma_addr = sin6tosa(&in6m->in6m_sin);
 
 		/*
@@ -1637,21 +1630,24 @@ in6_delmulti(struct in6_multi *in6m)
 		 * that we are leaving the multicast group.
 		 */
 		mld6_stop_listening(in6m);
-		ifp = in6m->in6m_ifp;
+		ifp = if_get(in6m->in6m_ifidx);
 
 		/*
 		 * Notify the network driver to update its multicast
 		 * reception filter.
 		 */
-		bzero(&ifr.ifr_addr, sizeof(struct sockaddr_in6));
-		ifr.ifr_addr.sin6_len = sizeof(struct sockaddr_in6);
-		ifr.ifr_addr.sin6_family = AF_INET6;
-		ifr.ifr_addr.sin6_addr = in6m->in6m_addr;
-		(*ifp->if_ioctl)(in6m->in6m_ifp, SIOCDELMULTI, (caddr_t)&ifr);
+		if (ifp != NULL) {
+			bzero(&ifr.ifr_addr, sizeof(struct sockaddr_in6));
+			ifr.ifr_addr.sin6_len = sizeof(struct sockaddr_in6);
+			ifr.ifr_addr.sin6_family = AF_INET6;
+			ifr.ifr_addr.sin6_addr = in6m->in6m_addr;
+			(*ifp->if_ioctl)(ifp, SIOCDELMULTI, (caddr_t)&ifr);
 
-		s = splsoftnet();
-		TAILQ_REMOVE(&ifp->if_maddrlist, &in6m->in6m_ifma, ifma_list);
-		splx(s);
+			s = splsoftnet();
+			TAILQ_REMOVE(&ifp->if_maddrlist, &in6m->in6m_ifma,
+			    ifma_list);
+			splx(s);
+		}
 
 		free(in6m, M_IPMADDR);
 	}

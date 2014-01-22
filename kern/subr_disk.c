@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_disk.c,v 1.159 2013/11/20 23:52:42 dlg Exp $	*/
+/*	$OpenBSD: subr_disk.c,v 1.161 2014/01/22 03:46:48 krw Exp $	*/
 /*	$NetBSD: subr_disk.c,v 1.17 1996/03/16 23:17:08 christos Exp $	*/
 
 /*
@@ -318,9 +318,8 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 		if (part_blkno < extoff)
 			part_blkno = extoff;
 
-		/* read boot record */
-		bp->b_blkno = DL_BLKTOSEC(lp, part_blkno) * DL_BLKSPERSEC(lp);
-		offset = DL_BLKOFFSET(lp, part_blkno) + DOSPARTOFF;
+		/* read MBR/EBR */
+		bp->b_blkno = DL_SECTOBLK(lp, part_blkno);
 		bp->b_bcount = lp->d_secsize;
 		bp->b_error = 0; /* B_ERROR and b_error may have stale data. */
 		CLR(bp->b_flags, B_READ | B_WRITE | B_DONE | B_ERROR);
@@ -333,7 +332,7 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 			return (error);
 		}
 
-		bcopy(bp->b_data + offset, dp, sizeof(dp));
+		bcopy(bp->b_data + DOSPARTOFF, dp, sizeof(dp));
 
 		if (n == 0 && part_blkno == DOSBBSECTOR) {
 			u_int16_t mbrtest;
@@ -363,9 +362,15 @@ readdoslabel(struct buf *bp, void (*strat)(struct buf *),
 			dospartoff = letoh32(dp2->dp_start) + part_blkno;
 			dospartend = dospartoff + letoh32(dp2->dp_size);
 
-			/* found our OpenBSD partition, finish up */
-			if (partoffp)
-				goto notfat;
+			/*
+			 * Record the OpenBSD partition's placement (in
+			 * 512-byte blocks!) for the caller. No need to
+			 * finish spoofing.
+			 */
+			if (partoffp) {
+				*partoffp = DL_SECTOBLK(lp, dospartoff);
+				return (0);
+			}
 
 			if (lp->d_ntracks == 0)
 				lp->d_ntracks = dp2->dp_ehd + 1;
@@ -499,7 +504,7 @@ notmbr:
 notfat:
 	/* record the OpenBSD partition's placement for the caller */
 	if (partoffp)
-		*partoffp = dospartoff;
+		*partoffp = DL_SECTOBLK(lp, dospartoff);
 	else {
 		DL_SETBSTART(lp, dospartoff);
 		DL_SETBEND(lp, (dospartend < DL_GETDSIZE(lp)) ? dospartend :
@@ -510,9 +515,10 @@ notfat:
 	if (spoofonly)
 		return (0);
 
-	bp->b_blkno = DL_BLKTOSEC(lp, dospartoff + DOS_LABELSECTOR) *
-	    DL_BLKSPERSEC(lp);
-	offset = DL_BLKOFFSET(lp, dospartoff + DOS_LABELSECTOR);
+	bp->b_blkno = DL_BLKTOSEC(lp, DL_SECTOBLK(lp, dospartoff) +
+	    DOS_LABELSECTOR) * DL_BLKSPERSEC(lp);
+	offset = DL_BLKOFFSET(lp, DL_SECTOBLK(lp, dospartoff) +
+	    DOS_LABELSECTOR);
 	bp->b_bcount = lp->d_secsize;
 	CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
 	SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
@@ -520,8 +526,27 @@ notfat:
 	if (biowait(bp))
 		return (bp->b_error);
 
-	/* sub-MBR disklabels are always at a LABELOFFSET of 0 */
-	return checkdisklabel(bp->b_data + offset, lp, dospartoff, dospartend);
+	error = checkdisklabel(bp->b_data + offset, lp, dospartoff, dospartend);
+	/* XXX Remove after 5.5. It's meant for a short sharp transition! */
+	if (error == ENOENT && lp->d_secsize != DEV_BSIZE) {
+		/*
+		 * Try looking at the (wrong but previously used) location
+		 * specified if dospartoff is considered a DEV_BSIZE address.
+		 */
+		bp->b_blkno = DL_BLKTOSEC(lp, dospartoff + DOS_LABELSECTOR) *
+		    DL_BLKSPERSEC(lp);
+		offset = DL_BLKOFFSET(lp, dospartoff + DOS_LABELSECTOR);
+		bp->b_bcount = lp->d_secsize;
+		CLR(bp->b_flags, B_READ | B_WRITE | B_DONE);
+		SET(bp->b_flags, B_BUSY | B_READ | B_RAW);
+		(*strat)(bp);
+		if (biowait(bp))
+			return (bp->b_error);
+		error = checkdisklabel(bp->b_data + offset, lp, dospartoff,
+		    dospartend);
+	}
+
+	return (error);
 }
 
 /*
@@ -571,15 +596,15 @@ setdisklabel(struct disklabel *olp, struct disklabel *nlp, u_int openmask)
 
 	/* Generate a UID if the disklabel does not already have one. */
 	uid = 0;
-	if (bcmp(nlp->d_uid, &uid, sizeof(nlp->d_uid)) == 0) {
+	if (memcmp(nlp->d_uid, &uid, sizeof(nlp->d_uid)) == 0) {
 		do {
 			arc4random_buf(nlp->d_uid, sizeof(nlp->d_uid));
 			TAILQ_FOREACH(dk, &disklist, dk_link)
-				if (dk->dk_label && bcmp(dk->dk_label->d_uid,
+				if (dk->dk_label && memcmp(dk->dk_label->d_uid,
 				    nlp->d_uid, sizeof(nlp->d_uid)) == 0)
 					break;
 		} while (dk != NULL &&
-		    bcmp(nlp->d_uid, &uid, sizeof(nlp->d_uid)) == 0);
+		    memcmp(nlp->d_uid, &uid, sizeof(nlp->d_uid)) == 0);
 	}
 
 	nlp->d_checksum = 0;
@@ -1102,8 +1127,8 @@ setroot(struct device *bootdv, int part, int exitflags)
 	}
 
 	/* Locate DUID for boot disk if not already provided. */
-	bzero(duid, sizeof(duid));
-	if (bcmp(bootduid, duid, sizeof(bootduid)) == 0) {
+	memset(duid, 0, sizeof(duid));
+	if (memcmp(bootduid, duid, sizeof(bootduid)) == 0) {
 		TAILQ_FOREACH(dk, &disklist, dk_link)
 			if (dk->dk_device == bootdv)
 				break;
@@ -1219,11 +1244,11 @@ gotswap:
 		rootdv = bootdv;
 
 		if (bootdv->dv_class == DV_DISK) {
-			bzero(&duid, sizeof(duid));
-			if (bcmp(rootduid, &duid, sizeof(rootduid)) != 0) {
+			memset(&duid, 0, sizeof(duid));
+			if (memcmp(rootduid, &duid, sizeof(rootduid)) != 0) {
 				TAILQ_FOREACH(dk, &disklist, dk_link)
 					if ((dk->dk_flags & DKF_LABELVALID) &&
-					    dk->dk_label && bcmp(dk->dk_label->d_uid,
+					    dk->dk_label && memcmp(dk->dk_label->d_uid,
 					    &rootduid, sizeof(rootduid)) == 0)
 						break;
 				if (dk == NULL)
@@ -1439,7 +1464,7 @@ disk_map(char *path, char *mappath, int size, int flags)
 		return -1;
 
 	/* Derive label UID. */
-	bzero(uid, sizeof(uid));
+	memset(uid, 0, sizeof(uid));
 	for (i = 0; i < 16; i++) {
 		c = path[i];
 		if (c >= '0' && c <= '9')
@@ -1456,7 +1481,7 @@ disk_map(char *path, char *mappath, int size, int flags)
 	mdk = NULL;
 	TAILQ_FOREACH(dk, &disklist, dk_link) {
 		if ((dk->dk_flags & DKF_LABELVALID) && dk->dk_label &&
-		    bcmp(dk->dk_label->d_uid, uid,
+		    memcmp(dk->dk_label->d_uid, uid,
 		    sizeof(dk->dk_label->d_uid)) == 0) {
 			/* Fail if there are duplicate UIDs! */
 			if (mdk != NULL)

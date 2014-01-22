@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.149 2014/01/13 23:03:52 bluhm Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.151 2014/01/22 14:27:20 naddy Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -2514,7 +2514,7 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 		 * See if the membership already exists.
 		 */
 		LIST_FOREACH(imm, &im6o->im6o_memberships, i6mm_chain)
-			if (imm->i6mm_maddr->in6m_ifp == ifp &&
+			if (imm->i6mm_maddr->in6m_ifidx == ifp->if_index &&
 			    IN6_ARE_ADDR_EQUAL(&imm->i6mm_maddr->in6m_addr,
 			    &mreq->ipv6mr_multiaddr))
 				break;
@@ -2578,7 +2578,8 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 		 * Find the membership in the membership list.
 		 */
 		LIST_FOREACH(imm, &im6o->im6o_memberships, i6mm_chain) {
-			if ((ifp == NULL || imm->i6mm_maddr->in6m_ifp == ifp) &&
+			if ((ifp == NULL ||
+			    imm->i6mm_maddr->in6m_ifidx == ifp->if_index) &&
 			    IN6_ARE_ADDR_EQUAL(&imm->i6mm_maddr->in6m_addr,
 			    &mreq->ipv6mr_multiaddr))
 				break;
@@ -3210,7 +3211,7 @@ in6_delayed_cksum(struct mbuf *m, u_int8_t nxt)
 	if (offset <= 0 || nxtp != nxt)
 		/* If the desired next protocol isn't found, punt. */
 		return;
-	csum = (u_int16_t)(in6_cksum(m, nxt, offset, m->m_pkthdr.len - offset));
+	csum = (u_int16_t)(in6_cksum(m, 0, offset, m->m_pkthdr.len - offset));
 
 	switch (nxt) {
 	case IPPROTO_TCP:
@@ -3237,6 +3238,29 @@ in6_delayed_cksum(struct mbuf *m, u_int8_t nxt)
 void
 in6_proto_cksum_out(struct mbuf *m, struct ifnet *ifp)
 {
+	/* some hw and in6_delayed_cksum need the pseudo header cksum */
+	if (m->m_pkthdr.csum_flags &
+	    (M_TCP_CSUM_OUT|M_UDP_CSUM_OUT|M_ICMP_CSUM_OUT)) {
+		struct ip6_hdr *ip6;
+		int nxt, offset;
+		u_int16_t csum;
+
+		ip6 = mtod(m, struct ip6_hdr *);
+		offset = ip6_lasthdr(m, 0, IPPROTO_IPV6, &nxt);
+		csum = in6_cksum_phdr(&ip6->ip6_src, &ip6->ip6_dst,
+		    htonl(m->m_pkthdr.len - offset), htonl(nxt));
+		if (nxt == IPPROTO_TCP)
+			offset += offsetof(struct tcphdr, th_sum);
+		else if (nxt == IPPROTO_UDP)
+			offset += offsetof(struct udphdr, uh_sum);
+		else if (nxt == IPPROTO_ICMPV6)
+			offset += offsetof(struct icmp6_hdr, icmp6_cksum);
+		if ((offset + sizeof(u_int16_t)) > m->m_len)
+			m_copyback(m, offset, sizeof(csum), &csum, M_NOWAIT);
+		else
+			*(u_int16_t *)(mtod(m, caddr_t) + offset) = csum;
+	}
+
 	if (m->m_pkthdr.csum_flags & M_TCP_CSUM_OUT) {
 		if (!ifp || !(ifp->if_capabilities & IFCAP_CSUM_TCPv6) ||
 		    ifp->if_bridgeport != NULL) {

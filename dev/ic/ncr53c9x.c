@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53c9x.c,v 1.52 2011/11/08 18:18:41 krw Exp $	*/
+/*	$OpenBSD: ncr53c9x.c,v 1.56 2014/01/18 23:09:04 dlg Exp $	*/
 /*     $NetBSD: ncr53c9x.c,v 1.56 2000/11/30 14:41:46 thorpej Exp $    */
 
 /*
@@ -107,7 +107,6 @@ int ncr53c9x_notag = 0;
 /*static*/ void	ncr53c9x_msgin(struct ncr53c9x_softc *);
 /*static*/ void	ncr53c9x_msgout(struct ncr53c9x_softc *);
 /*static*/ void	ncr53c9x_timeout(void *arg);
-/*static*/ void ncr53c9x_watch(void *arg);
 /*static*/ void	ncr53c9x_abort(struct ncr53c9x_softc *,
 					    struct ncr53c9x_ecb *);
 /*static*/ void ncr53c9x_dequeue(struct ncr53c9x_softc *,
@@ -115,9 +114,8 @@ int ncr53c9x_notag = 0;
 
 void ncr53c9x_sense(struct ncr53c9x_softc *,
 					    struct ncr53c9x_ecb *);
-void ncr53c9x_free_ecb(struct ncr53c9x_softc *,
-					    struct ncr53c9x_ecb *, int);
-struct ncr53c9x_ecb *ncr53c9x_get_ecb(struct ncr53c9x_softc *, int);
+void ncr53c9x_free_ecb(void *, void *);
+void *ncr53c9x_get_ecb(void *);
 
 static inline int ncr53c9x_stp2cpb(struct ncr53c9x_softc *, int);
 static inline void ncr53c9x_setsync(struct ncr53c9x_softc *,
@@ -143,10 +141,23 @@ static int ncr53c9x_rdfifo(struct ncr53c9x_softc *, int);
 } while (0)
 
 static int ecb_pool_initialized = 0;
+static struct scsi_iopool ecb_iopool;
 static struct pool ecb_pool;
 
 struct cfdriver esp_cd = {
 	NULL, "esp", DV_DULL
+};
+
+void	ncr53c9x_scsi_cmd(struct scsi_xfer *);
+int	ncr53c9x_scsi_probe(struct scsi_link *);
+void	ncr53c9x_scsi_free(struct scsi_link *);
+
+struct scsi_adapter ncr53c9x_adapter = {
+	ncr53c9x_scsi_cmd,	/* cmd */
+	scsi_minphys,		/* minphys */
+	ncr53c9x_scsi_probe,	/* lun probe */
+	ncr53c9x_scsi_free,	/* lun free */
+	NULL			/* ioctl */
 };
 
 /*
@@ -185,13 +196,11 @@ ncr53c9x_lunsearch(ti, lun)
  * Attach this instance, and then all the sub-devices
  */
 void
-ncr53c9x_attach(sc, adapter)
+ncr53c9x_attach(sc)
 	struct ncr53c9x_softc *sc;
-	struct scsi_adapter *adapter;
 {
 	struct scsibus_attach_args saa;
 
-	timeout_set(&sc->sc_watchdog, ncr53c9x_watch, sc);
 	/*
 	 * Allocate SCSI message buffers.
 	 * Front-ends can override allocation to avoid alignment
@@ -263,7 +272,7 @@ ncr53c9x_attach(sc, adapter)
 	 */
 	sc->sc_link.adapter_softc = sc;
 	sc->sc_link.adapter_target = sc->sc_id;
-	sc->sc_link.adapter = adapter;
+	sc->sc_link.adapter = &ncr53c9x_adapter;
 	sc->sc_link.openings = 2;
 	sc->sc_link.adapter_buswidth = sc->sc_ntarg;
 
@@ -274,7 +283,6 @@ ncr53c9x_attach(sc, adapter)
 	 * Now try to attach all the sub-devices
 	 */
 	config_found(&sc->sc_dev, &saa, scsiprint);
-	timeout_add(&sc->sc_watchdog, 60*hz);
 }
 
 /*
@@ -387,6 +395,9 @@ ncr53c9x_init(sc, doreset)
 		/* All instances share this pool */
 		pool_init(&ecb_pool, sizeof(struct ncr53c9x_ecb), 0, 0, 0,
 		    "ncr53c9x_ecb", NULL);
+		pool_setipl(&ecb_pool, IPL_BIO);
+		scsi_iopool_init(&ecb_iopool, NULL,
+		    ncr53c9x_get_ecb, ncr53c9x_free_ecb);
 		ecb_pool_initialized = 1;
 	}
 
@@ -741,45 +752,77 @@ ncr53c9x_select(sc, ecb)
 		NCRCMD(sc, NCRCMD_SELATN);
 }
 
-void
-ncr53c9x_free_ecb(sc, ecb, flags)
-	struct ncr53c9x_softc *sc;
-	struct ncr53c9x_ecb *ecb;
-	int flags;
-{
-	int s;
-
-	s = splbio();
-	ecb->flags = 0;
-	pool_put(&ecb_pool, (void *)ecb);
-	splx(s);
-}
-
-struct ncr53c9x_ecb *
-ncr53c9x_get_ecb(sc, flags)
-	struct ncr53c9x_softc *sc;
-	int flags;
-{
-	struct ncr53c9x_ecb *ecb;
-	int s, wait = PR_NOWAIT;
-
-	if ((curproc != NULL) && ((flags & SCSI_NOSLEEP) == 0))
-		wait = PR_WAITOK;
-
-	s = splbio();
-	ecb = (struct ncr53c9x_ecb *)pool_get(&ecb_pool, wait);
-	splx(s);
-	if (ecb == NULL)
-		return (NULL);
-	bzero(ecb, sizeof(*ecb));
-	timeout_set(&ecb->to, ncr53c9x_timeout, ecb);
-	ecb->flags |= ECB_ALLOC;
-	return (ecb);
-}
-
 /*
  * DRIVER FUNCTIONS CALLABLE FROM HIGHER LEVEL DRIVERS
  */
+
+void *
+ncr53c9x_get_ecb(void *null)
+{
+	struct ncr53c9x_ecb *ecb;
+
+	ecb = pool_get(&ecb_pool, M_NOWAIT|M_ZERO);
+	if (ecb == NULL)
+		return (NULL);
+
+	timeout_set(&ecb->to, ncr53c9x_timeout, ecb);
+	ecb->flags |= ECB_ALLOC;
+
+	return (ecb);
+}
+
+void
+ncr53c9x_free_ecb(void *null, void *ecb)
+{
+	pool_put(&ecb_pool, ecb);
+}
+
+int
+ncr53c9x_scsi_probe(struct scsi_link *sc_link)
+{
+	struct ncr53c9x_softc *sc = sc_link->adapter_softc;
+	struct ncr53c9x_tinfo *ti = &sc->sc_tinfo[sc_link->target];
+	struct ncr53c9x_linfo *li;
+	int64_t lun = sc_link->lun;
+	int s;
+
+	/* Initialize LUN info and add to list. */
+	li = malloc(sizeof(*li), M_DEVBUF, M_WAITOK | M_ZERO);
+	if (li == NULL)
+		return (ENOMEM);
+
+	li->last_used = time_second;
+	li->lun = lun;
+
+	s = splbio();
+	LIST_INSERT_HEAD(&ti->luns, li, link);
+	if (lun < NCR_NLUN)
+		ti->lun[lun] = li;
+	splx(s);
+
+	return (0);
+
+}
+
+void
+ncr53c9x_scsi_free(struct scsi_link *sc_link)
+{
+	struct ncr53c9x_softc *sc = sc_link->adapter_softc;
+	struct ncr53c9x_tinfo *ti = &sc->sc_tinfo[sc_link->target];
+	struct ncr53c9x_linfo *li;
+	int64_t lun = sc_link->lun;
+	int s;
+
+	s = splbio();
+	li = TINFO_LUN(ti, lun);
+
+	LIST_REMOVE(li, link);
+	if (lun < NCR_NLUN)
+		ti->lun[lun] = NULL;
+	splx(s);
+
+	free(li, M_DEVBUF);
+}
 
 /*
  * Start a SCSI-command
@@ -820,30 +863,9 @@ ncr53c9x_scsi_cmd(xs)
 	flags = xs->flags;
 	ti = &sc->sc_tinfo[sc_link->target];
 	li = TINFO_LUN(ti, lun);
-	if (li == NULL) {
-		/* Initialize LUN info and add to list. */
-		if ((li = malloc(sizeof(*li), M_DEVBUF,
-		    M_NOWAIT | M_ZERO)) == NULL) {
-			xs->error = XS_NO_CCB;
-			scsi_done(xs);
-			return;
-		}
-		li->last_used = time_second;
-		li->lun = lun;
-		s = splbio();
-		LIST_INSERT_HEAD(&ti->luns, li, link);
-		if (lun < NCR_NLUN)
-			ti->lun[lun] = li;
-		splx(s);
-	}
-
-	if ((ecb = ncr53c9x_get_ecb(sc, flags)) == NULL) {
-		xs->error = XS_NO_CCB;
-		scsi_done(xs);
-		return;
-	}
 
 	/* Initialize ecb */
+	ecb = xs->io;
 	ecb->xs = xs;
 	ecb->timeout = xs->timeout;
 
@@ -1171,17 +1193,6 @@ ncr53c9x_done(sc, ecb)
 		}
 	}
 
-	if (xs->error == XS_SELTIMEOUT) {
-		/* Selection timeout -- discard this LUN if empty */
-		if (!li->untagged && !li->used) {
-			if (lun < NCR_NLUN)
-				ti->lun[lun] = NULL;
-			LIST_REMOVE(li, link);
-			free(li, M_DEVBUF);
-		}
-	}
-
-	ncr53c9x_free_ecb(sc, ecb, xs->flags);
 	ti->cmds++;
 	scsi_done(xs);
 }
@@ -2171,29 +2182,9 @@ again:
 			goto sched;
 
 		case NCR_SELECTING:
-		{
-			struct ncr53c9x_linfo *li;
-
 			ecb->xs->error = XS_SELTIMEOUT;
-
-			/* Selection timeout -- discard all LUNs if empty */
-			sc_link = ecb->xs->sc_link;
-			ti = &sc->sc_tinfo[sc_link->target];
-			for (li = LIST_FIRST(&ti->luns);
-			    li != LIST_END(&ti->luns); ) {
-				if (!li->untagged && !li->used) {
-					if (li->lun < NCR_NLUN)
-						ti->lun[li->lun] = NULL;
-					LIST_REMOVE(li, link);
-					free(li, M_DEVBUF);
-					/* Restart the search at the beginning */
-					li = LIST_FIRST(&ti->luns);
-					continue;
-				}
-				li = LIST_NEXT(li, link);
-			}
 			goto finish;
-		}
+
 		case NCR_CONNECTED:
 			if ((sc->sc_flags & NCR_SYNCHNEGO)) {
 #ifdef NCR53C9X_DEBUG
@@ -2824,35 +2815,4 @@ ncr53c9x_timeout(arg)
 	}
 
 	splx(s);
-}
-
-void
-ncr53c9x_watch(arg)
-	void *arg;
-{
-	struct ncr53c9x_softc *sc = (struct ncr53c9x_softc *)arg;
-	struct ncr53c9x_tinfo *ti;
-	struct ncr53c9x_linfo *li;
-	int t, s;
-	/* Delete any structures that have not been used in 10min. */
-	time_t old = time_second - (10*60);
-
-	s = splbio();
-	for (t = 0; t < sc->sc_ntarg; t++) {
-		ti = &sc->sc_tinfo[t];
-		for (li = LIST_FIRST(&ti->luns); li != LIST_END(&ti->luns); ) {
-			if (li->last_used < old && !li->untagged && !li->used) {
-				if (li->lun < NCR_NLUN)
-					ti->lun[li->lun] = NULL;
-				LIST_REMOVE(li, link);
-				free(li, M_DEVBUF);
-				/* Restart the search at the beginning */
-				li = LIST_FIRST(&ti->luns);
-				continue; 
-			}
-			li = LIST_NEXT(li, link);
-		}
-	}
-	splx(s);
-	timeout_add_sec(&sc->sc_watchdog, 60);
 }

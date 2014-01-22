@@ -1,4 +1,4 @@
-/* $OpenBSD: softraid.c,v 1.315 2014/01/05 15:03:57 jsing Exp $ */
+/* $OpenBSD: softraid.c,v 1.330 2014/01/22 09:42:13 jsing Exp $ */
 /*
  * Copyright (c) 2007, 2008, 2009 Marco Peereboom <marco@peereboom.us>
  * Copyright (c) 2008 Chris Kuethe <ckuethe@openbsd.org>
@@ -39,7 +39,7 @@
 #include <sys/stat.h>
 #include <sys/conf.h>
 #include <sys/uio.h>
-#include <sys/workq.h>
+#include <sys/task.h>
 #include <sys/kthread.h>
 #include <sys/dkio.h>
 
@@ -71,6 +71,7 @@ uint32_t	sr_debug = 0
 		    /* | SR_D_META */
 		    /* | SR_D_DIS */
 		    /* | SR_D_STATE */
+		    /* | SR_D_REBUILD */
 		;
 #endif
 
@@ -135,8 +136,9 @@ int			sr_already_assembled(struct sr_discipline *);
 int			sr_hotspare(struct sr_softc *, dev_t);
 void			sr_hotspare_rebuild(struct sr_discipline *);
 int			sr_rebuild_init(struct sr_discipline *, dev_t, int);
-void			sr_rebuild(void *);
+void			sr_rebuild_start(void *);
 void			sr_rebuild_thread(void *);
+void			sr_rebuild(struct sr_discipline *);
 void			sr_roam_chunks(struct sr_discipline *);
 int			sr_chunk_in_use(struct sr_softc *, dev_t);
 int			sr_rw(struct sr_softc *, dev_t, char *, size_t,
@@ -721,7 +723,7 @@ restart:
 	/* not all disciplines have sync */
 	if (sd->sd_scsi_sync) {
 		bzero(&wu, sizeof(wu));
-		wu.swu_fake = 1;
+		wu.swu_flags |= SR_WUF_FAKE;
 		wu.swu_dis = sd;
 		sd->sd_scsi_sync(&wu);
 	}
@@ -2101,32 +2103,29 @@ sr_ccb_done(struct sr_ccb *ccb)
 }
 
 int
-sr_wu_alloc(struct sr_discipline *sd)
+sr_wu_alloc(struct sr_discipline *sd, int wu_size)
 {
 	struct sr_workunit	*wu;
 	int			i, no_wu;
 
-	if (!sd)
-		return (1);
-
 	DNPRINTF(SR_D_WU, "%s: sr_wu_alloc %p %d\n", DEVNAME(sd->sd_sc),
 	    sd, sd->sd_max_wu);
-
-	if (sd->sd_wu)
-		return (1);
 
 	no_wu = sd->sd_max_wu;
 	sd->sd_wu_pending = no_wu;
 
-	sd->sd_wu = malloc(sizeof(struct sr_workunit) * no_wu,
-	    M_DEVBUF, M_WAITOK | M_ZERO);
 	mtx_init(&sd->sd_wu_mtx, IPL_BIO);
+	TAILQ_INIT(&sd->sd_wu);
 	TAILQ_INIT(&sd->sd_wu_freeq);
 	TAILQ_INIT(&sd->sd_wu_pendq);
 	TAILQ_INIT(&sd->sd_wu_defq);
+
 	for (i = 0; i < no_wu; i++) {
-		wu = &sd->sd_wu[i];
+		wu = malloc(wu_size, M_DEVBUF, M_WAITOK | M_ZERO);
+		TAILQ_INSERT_TAIL(&sd->sd_wu, wu, swu_next);
 		TAILQ_INIT(&wu->swu_ccb);
+		task_set(&wu->swu_task, sr_wu_done_callback, sd, wu);
+		wu->swu_dis = sd;
 		sr_wu_put(sd, wu);
 	}
 
@@ -2138,9 +2137,6 @@ sr_wu_free(struct sr_discipline *sd)
 {
 	struct sr_workunit	*wu;
 
-	if (!sd)
-		return;
-
 	DNPRINTF(SR_D_WU, "%s: sr_wu_free %p\n", DEVNAME(sd->sd_sc), sd);
 
 	while ((wu = TAILQ_FIRST(&sd->sd_wu_freeq)) != NULL)
@@ -2150,8 +2146,10 @@ sr_wu_free(struct sr_discipline *sd)
 	while ((wu = TAILQ_FIRST(&sd->sd_wu_defq)) != NULL)
 		TAILQ_REMOVE(&sd->sd_wu_defq, wu, swu_link);
 
-	if (sd->sd_wu)
-		free(sd->sd_wu, M_DEVBUF);
+	while ((wu = TAILQ_FIRST(&sd->sd_wu)) != NULL) {
+		TAILQ_REMOVE(&sd->sd_wu, wu, swu_next);
+		free(wu, M_DEVBUF);
+	}
 }
 
 void *
@@ -2200,9 +2198,12 @@ sr_wu_init(struct sr_discipline *sd, struct sr_workunit *wu)
 		panic("%s: sr_wu_init got active wu", DEVNAME(sd->sd_sc));
 	splx(s);
 
-	bzero(wu, sizeof(*wu));
-	TAILQ_INIT(&wu->swu_ccb);
-	wu->swu_dis = sd;
+	wu->swu_xs = NULL;
+	wu->swu_state = SR_WU_FREE;
+	wu->swu_flags = 0;
+	wu->swu_blk_start = 0;
+	wu->swu_blk_end = 0;
+	wu->swu_collider = NULL;
 }
 
 void
@@ -2250,8 +2251,7 @@ sr_wu_done(struct sr_workunit *wu)
 	if (wu->swu_ios_complete < wu->swu_io_count)
 		return;
 
-	workq_queue_task(sd->sd_workq, &wu->swu_wqt, 0,
-	    sr_wu_done_callback, sd, wu);
+	task_add(sd->sd_taskq, &wu->swu_task);
 }
 
 void
@@ -3234,7 +3234,7 @@ sr_rebuild_init(struct sr_discipline *sd, dev_t dev, int hotspare)
 	    sd->sd_meta->ssd_devname, devname);
 
 	sd->sd_reb_abort = 0;
-	kthread_create_deferred(sr_rebuild, sd);
+	kthread_create_deferred(sr_rebuild_start, sd);
 
 	rv = 0;
 done:
@@ -3307,9 +3307,9 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc,
 	sd = malloc(sizeof(struct sr_discipline), M_DEVBUF, M_WAITOK | M_ZERO);
 	sd->sd_sc = sc;
 	SLIST_INIT(&sd->sd_meta_opt);
-	sd->sd_workq = workq_create("srdis", 1, IPL_BIO);
-	if (sd->sd_workq == NULL) {
-		sr_error(sc, "could not create discipline workq");
+	sd->sd_taskq = taskq_create("srdis", 1, IPL_BIO);
+	if (sd->sd_taskq == NULL) {
+		sr_error(sc, "could not create discipline taskq");
 		goto unwind;
 	}
 	if (sr_discipline_init(sd, bc->bc_level)) {
@@ -3552,7 +3552,7 @@ sr_ioctl_createraid(struct sr_softc *sc, struct bioc_createraid *bc,
 	rv = sr_meta_save(sd, SR_META_DIRTY);
 
 	if (sd->sd_vol_status == BIOC_SVREBUILD)
-		kthread_create_deferred(sr_rebuild, sd);
+		kthread_create_deferred(sr_rebuild_start, sd);
 
 	sd->sd_ready = 1;
 
@@ -3896,8 +3896,8 @@ sr_discipline_shutdown(struct sr_discipline *sd, int meta_save)
 
 	sr_chunks_unwind(sc, &sd->sd_vol.sv_chunk_list);
 
-	if (sd->sd_workq)
-		workq_destroy(sd->sd_workq);
+	if (sd->sd_taskq)
+		taskq_destroy(sd->sd_taskq);
 
 	sr_discipline_free(sd);
 
@@ -3917,6 +3917,7 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 	sd->sd_ioctl_handler = NULL;
 	sd->sd_openings = NULL;
 	sd->sd_meta_opt_handler = NULL;
+	sd->sd_rebuild = sr_rebuild;
 	sd->sd_scsi_inquiry = sr_raid_inquiry;
 	sd->sd_scsi_read_cap = sr_raid_read_cap;
 	sd->sd_scsi_tur = sr_raid_tur;
@@ -3931,6 +3932,8 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 	sd->sd_set_vol_state = sr_set_vol_state;
 	sd->sd_start_discipline = NULL;
 
+	task_set(&sd->sd_meta_save_task, sr_meta_save_callback, sd, NULL);
+
 	switch (level) {
 	case 0:
 		sr_raid0_discipline_init(sd);
@@ -3938,11 +3941,8 @@ sr_discipline_init(struct sr_discipline *sd, int level)
 	case 1:
 		sr_raid1_discipline_init(sd);
 		break;
-	case 4:
-		sr_raidp_discipline_init(sd, SR_MD_RAID4);
-		break;
 	case 5:
-		sr_raidp_discipline_init(sd, SR_MD_RAID5);
+		sr_raid5_discipline_init(sd);
 		break;
 	case 6:
 		sr_raid6_discipline_init(sd);
@@ -4113,7 +4113,7 @@ sr_raid_sync(struct sr_workunit *wu)
 	DNPRINTF(SR_D_DIS, "%s: sr_raid_sync\n", DEVNAME(sd->sd_sc));
 
 	/* when doing a fake sync don't count the wu */
-	ios = wu->swu_fake ? 0 : 1;
+	ios = (wu->swu_flags & SR_WUF_FAKE) ? 0 : 1;
 
 	s = splbio();
 	sd->sd_sync = 1;
@@ -4162,6 +4162,8 @@ sr_schedule_wu(struct sr_workunit *wu)
 
 	DNPRINTF(SR_D_WU, "sr_schedule_wu: schedule wu %p state %i "
 	    "flags 0x%x\n", wu, wu->swu_state, wu->swu_flags);
+
+	KASSERT(wu->swu_io_count > 0);
 
 	s = splbio();
 
@@ -4260,7 +4262,7 @@ sr_raid_recreate_wu(struct sr_workunit *wu)
 int
 sr_alloc_resources(struct sr_discipline *sd)
 {
-	if (sr_wu_alloc(sd)) {
+	if (sr_wu_alloc(sd, sizeof(struct sr_workunit))) {
 		sr_error(sd->sd_sc, "unable to allocate work units");
 		return (ENOMEM);
 	}
@@ -4322,7 +4324,7 @@ die:
 	sd->sd_set_vol_state(sd);
 
 	sd->sd_must_flush = 1;
-	workq_add_task(NULL, 0, sr_meta_save_callback, sd, NULL);
+	task_add(systq, &sd->sd_meta_save_task);
 done:
 	splx(s);
 }
@@ -4383,6 +4385,18 @@ die:
 	}
 
 	sd->sd_vol_status = new_state;
+}
+
+void *
+sr_block_get(struct sr_discipline *sd, int length)
+{
+	return dma_alloc(length, PR_NOWAIT | PR_ZERO);
+}
+
+void
+sr_block_put(struct sr_discipline *sd, void *ptr, int length)
+{
+	dma_free(ptr, length);
 }
 
 void
@@ -4567,7 +4581,7 @@ bad:
 }
 
 void
-sr_rebuild(void *arg)
+sr_rebuild_start(void *arg)
 {
 	struct sr_discipline	*sd = arg;
 	struct sr_softc		*sc = sd->sd_sc;
@@ -4582,6 +4596,17 @@ void
 sr_rebuild_thread(void *arg)
 {
 	struct sr_discipline	*sd = arg;
+
+	sd->sd_reb_active = 1;
+	sd->sd_rebuild(sd);
+	sd->sd_reb_active = 0;
+
+	kthread_exit(0);
+}
+
+void
+sr_rebuild(struct sr_discipline *sd)
+{
 	struct sr_softc		*sc = sd->sd_sc;
 	daddr_t			whole_blk, partial_blk, blk, sz, lba;
 	daddr_t			psz, rb, restart;
@@ -4619,8 +4644,6 @@ sr_rebuild_thread(void *arg)
 		printf("%s: resuming rebuild on %s at %d%%\n",
 		    DEVNAME(sc), sd->sd_meta->ssd_devname, percent);
 	}
-
-	sd->sd_reb_active = 1;
 
 	/* currently this is 64k therefore we can use dma_alloc */
 	buf = dma_alloc(SR_REBUILD_IO_SIZE << DEV_BSHIFT, PR_WAITOK);
@@ -4741,8 +4764,6 @@ abort:
 		    DEVNAME(sc), sd->sd_meta->ssd_devname);
 fail:
 	dma_free(buf, SR_REBUILD_IO_SIZE << DEV_BSHIFT);
-	sd->sd_reb_active = 0;
-	kthread_exit(0);
 }
 
 #ifndef SMALL_KERNEL
@@ -4901,6 +4922,26 @@ sr_meta_print(struct sr_metadata *m)
 		printf("\n");
 		omh = (struct sr_meta_opt_hdr *)((void *)omh +
 		    omh->som_length);
+	}
+}
+
+void
+sr_dump_block(void *blk, int len)
+{
+	uint8_t			*b = blk;
+	int			i, j, c;
+
+	for (i = 0; i < len; i += 16) {
+		for (j = 0; j < 16; j++)
+			printf("%.2x ", b[i + j]);
+		printf("  ");
+		for (j = 0; j < 16; j++) {
+			c = b[i + j];
+			if (c < ' ' || c > 'z' || i + j > len)
+				c = '.';
+			printf("%c", c);
+		}
+		printf("\n");
 	}
 }
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.241 2013/10/22 16:40:26 guenther Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.244 2014/01/21 01:48:44 tedu Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -466,7 +466,7 @@ kern_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		struct cpu_info *ci;
 		int i;
 
-		bzero(cp_time, sizeof(cp_time));
+		memset(cp_time, 0, sizeof(cp_time));
 
 		CPU_INFO_FOREACH(cii, ci) {
 			for (i = 0; i < CPUSTATES; i++)
@@ -1188,6 +1188,7 @@ sysctl_file(int *name, u_int namelen, char *where, size_t *sizep,
 	struct filedesc *fdp;
 	struct file *fp;
 	struct proc *pp;
+	struct process *pr;
 	size_t buflen, elem_size, elem_count, outsize;
 	char *dp = where;
 	int arg, i, error = 0, needed = 0;
@@ -1245,13 +1246,13 @@ sysctl_file(int *name, u_int namelen, char *where, size_t *sizep,
 			error = EINVAL;
 			break;
 		}
-		LIST_FOREACH(pp, &allproc, p_list) {
+		LIST_FOREACH(pr, &allprocess, ps_list) {
 			/*
 			 * skip system, exiting, embryonic and undead
-			 * processes, as well as threads
+			 * processes
 			 */
-			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_THREAD)
-			    || (pp->p_p->ps_flags & PS_EXITING)
+			pp = pr->ps_mainproc;
+			if ((pp->p_flag & P_SYSTEM) || (pr->ps_flags & PS_EXITING)
 			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg > 0 && pp->p_pid != (pid_t)arg) {
@@ -1259,14 +1260,14 @@ sysctl_file(int *name, u_int namelen, char *where, size_t *sizep,
 				continue;
 			}
 			fdp = pp->p_fd;
-			if (pp->p_textvp)
-				FILLIT(NULL, NULL, KERN_FILE_TEXT, pp->p_textvp, pp);
+			if (pr->ps_textvp)
+				FILLIT(NULL, NULL, KERN_FILE_TEXT, pr->ps_textvp, pp);
 			if (fdp->fd_cdir)
 				FILLIT(NULL, NULL, KERN_FILE_CDIR, fdp->fd_cdir, pp);
 			if (fdp->fd_rdir)
 				FILLIT(NULL, NULL, KERN_FILE_RDIR, fdp->fd_rdir, pp);
-			if (pp->p_p->ps_tracevp)
-				FILLIT(NULL, NULL, KERN_FILE_TRACE, pp->p_p->ps_tracevp, pp);
+			if (pr->ps_tracevp)
+				FILLIT(NULL, NULL, KERN_FILE_TRACE, pr->ps_tracevp, pp);
 			for (i = 0; i < fdp->fd_nfiles; i++) {
 				if ((fp = fdp->fd_ofiles[i]) == NULL)
 					continue;
@@ -1277,13 +1278,13 @@ sysctl_file(int *name, u_int namelen, char *where, size_t *sizep,
 		}
 		break;
 	case KERN_FILE_BYUID:
-		LIST_FOREACH(pp, &allproc, p_list) {
+		LIST_FOREACH(pr, &allprocess, ps_list) {
+			pp = pr->ps_mainproc;
 			/*
 			 * skip system, exiting, embryonic and undead
-			 * processes, as well as threads
+			 * processes
 			 */
-			if ((pp->p_flag & P_SYSTEM) || (pp->p_flag & P_THREAD)
-			    || (pp->p_p->ps_flags & PS_EXITING)
+			if ((pp->p_flag & P_SYSTEM) || (pr->ps_flags & PS_EXITING)
 			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg >= 0 && pp->p_ucred->cr_uid != (uid_t)arg) {
@@ -1295,8 +1296,8 @@ sysctl_file(int *name, u_int namelen, char *where, size_t *sizep,
 				FILLIT(NULL, NULL, KERN_FILE_CDIR, fdp->fd_cdir, pp);
 			if (fdp->fd_rdir)
 				FILLIT(NULL, NULL, KERN_FILE_RDIR, fdp->fd_rdir, pp);
-			if (pp->p_p->ps_tracevp)
-				FILLIT(NULL, NULL, KERN_FILE_TRACE, pp->p_p->ps_tracevp, pp);
+			if (pr->ps_tracevp)
+				FILLIT(NULL, NULL, KERN_FILE_TRACE, pr->ps_tracevp, pp);
 			for (i = 0; i < fdp->fd_nfiles; i++) {
 				if ((fp = fdp->fd_ofiles[i]) == NULL)
 					continue;
@@ -1360,19 +1361,20 @@ sysctl_doproc(int *name, u_int namelen, char *where, size_t *sizep)
 	if (where != NULL)
 		kproc = malloc(sizeof(*kproc), M_TEMP, M_WAITOK);
 
-	p = LIST_FIRST(&allproc);
+	pr = LIST_FIRST(&allprocess);
 	doingzomb = 0;
 again:
-	for (; p != 0; p = LIST_NEXT(p, p_list)) {
+	for (; pr != NULL; pr = LIST_NEXT(pr, ps_list)) {
+		/* XXX skip processes in the middle of being zapped */
+		if (pr->ps_pgrp == NULL)
+			continue;
+
+		p = pr->ps_mainproc;
+
 		/*
 		 * Skip embryonic processes.
 		 */
 		if (p->p_stat == SIDL)
-			continue;
-
-		/* XXX skip processes in the middle of being zapped */
-		pr = p->p_p;
-		if (pr->ps_pgrp == NULL)
 			continue;
 
 		/*
@@ -1429,18 +1431,33 @@ again:
 			goto err;
 		}
 
-		if ((p->p_flag & P_THREAD) == 0) {
-			if (buflen >= elem_size && elem_count > 0) {
-				fill_kproc(p, kproc, 0, show_pointers);
-				/* Update %cpu for all threads */
-				if (!dothreads) {
-					TAILQ_FOREACH(pp, &pr->ps_threads,
-					    p_thr_link) {
-						if (pp == p)
-							continue;
-						kproc->p_pctcpu += pp->p_pctcpu;
-					}
+		if (buflen >= elem_size && elem_count > 0) {
+			fill_kproc(p, kproc, 0, show_pointers);
+			/* Update %cpu for all threads */
+			if (!dothreads) {
+				TAILQ_FOREACH(pp, &pr->ps_threads,
+				    p_thr_link) {
+					if (pp == p)
+						continue;
+					kproc->p_pctcpu += pp->p_pctcpu;
 				}
+			}
+			error = copyout(kproc, dp, elem_size);
+			if (error)
+				goto err;
+			dp += elem_size;
+			buflen -= elem_size;
+			elem_count--;
+		}
+		needed += elem_size;
+
+		/* Skip per-thread entries if not required by op */
+		if (!dothreads)
+			continue;
+
+		TAILQ_FOREACH(p, &pr->ps_threads, p_thr_link) {
+			if (buflen >= elem_size && elem_count > 0) {
+				fill_kproc(p, kproc, 1, show_pointers);
 				error = copyout(kproc, dp, elem_size);
 				if (error)
 					goto err;
@@ -1450,23 +1467,9 @@ again:
 			}
 			needed += elem_size;
 		}
-		/* Skip the second entry if not required by op */
-		if (!dothreads)
-			continue;
-
-		if (buflen >= elem_size && elem_count > 0) {
-			fill_kproc(p, kproc, 1, show_pointers);
-			error = copyout(kproc, dp, elem_size);
-			if (error)
-				goto err;
-			dp += elem_size;
-			buflen -= elem_size;
-			elem_count--;
-		}
-		needed += elem_size;
 	}
 	if (doingzomb == 0) {
-		p = LIST_FIRST(&zombproc);
+		pr = LIST_FIRST(&zombprocess);
 		doingzomb++;
 		goto again;
 	}
@@ -1855,8 +1858,8 @@ sysctl_diskinit(int update, struct proc *p)
 		for (dk = TAILQ_FIRST(&disklist), i = 0, l = 0; dk;
 		    dk = TAILQ_NEXT(dk, dk_link), i++) {
 			dl = dk->dk_label;
-			bzero(duid, sizeof(duid));
-			if (dl && bcmp(dl->d_uid, &uid, sizeof(dl->d_uid))) {
+			memset(duid, 0, sizeof(duid));
+			if (dl && memcmp(dl->d_uid, &uid, sizeof(dl->d_uid))) {
 				snprintf(duid, sizeof(duid), 
 				    "%02hx%02hx%02hx%02hx"
 				    "%02hx%02hx%02hx%02hx",
@@ -2004,7 +2007,7 @@ sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 					bcopy(sema[i], &semsi->semids[i],
 					    dssize);
 				else
-					bzero(&semsi->semids[i], dssize);
+					memset(&semsi->semids[i], 0, dssize);
 				break;
 #endif
 #ifdef SYSVSHM
@@ -2013,7 +2016,7 @@ sysctl_sysvipc(int *name, u_int namelen, void *where, size_t *sizep)
 					bcopy(shmsegs[i], &shmsi->shmids[i],
 					    dssize);
 				else
-					bzero(&shmsi->shmids[i], dssize);
+					memset(&shmsi->shmids[i], 0, dssize);
 				break;
 #endif
 			}

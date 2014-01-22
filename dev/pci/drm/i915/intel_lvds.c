@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_lvds.c,v 1.6 2013/12/01 14:28:40 kettenis Exp $	*/
+/*	$OpenBSD: intel_lvds.c,v 1.8 2014/01/22 05:16:55 kettenis Exp $	*/
 /*
  * Copyright © 2006-2007 Intel Corporation
  * Copyright (c) 2006 Dave Airlie <airlied@linux.ie>
@@ -568,15 +568,13 @@ static void intel_lvds_destroy(struct drm_connector *connector)
 #endif
 
 	if (!IS_ERR_OR_NULL(lvds_connector->base.edid))
-		free(lvds_connector->base.edid, M_DRM);
+		kfree(lvds_connector->base.edid);
 
 	intel_panel_fini(&lvds_connector->base.panel);
 
-#if 0
 	drm_sysfs_connector_remove(connector);
-#endif
 	drm_connector_cleanup(connector);
-	free(connector, M_DRM);
+	kfree(connector);
 }
 
 static int intel_lvds_set_property(struct drm_connector *connector,
@@ -976,15 +974,13 @@ bool intel_lvds_init(struct drm_device *dev)
 		}
 	}
 
-	lvds_encoder = malloc(sizeof(struct intel_lvds_encoder), M_DRM,
-	    M_WAITOK | M_ZERO);
+	lvds_encoder = kzalloc(sizeof(struct intel_lvds_encoder), GFP_KERNEL);
 	if (!lvds_encoder)
 		return false;
 
-	lvds_connector = malloc(sizeof(struct intel_lvds_connector), M_DRM,
-	    M_WAITOK | M_ZERO);
+	lvds_connector = kzalloc(sizeof(struct intel_lvds_connector), GFP_KERNEL);
 	if (!lvds_connector) {
-		free(lvds_encoder, M_DRM);
+		kfree(lvds_encoder);
 		return false;
 	}
 
@@ -1052,7 +1048,7 @@ bool intel_lvds_init(struct drm_device *dev)
 			drm_mode_connector_update_edid_property(connector,
 								edid);
 		} else {
-			free(edid, M_DRM);
+			kfree(edid);
 			edid = ERR_PTR(-EINVAL);
 		}
 	} else {
@@ -1143,8 +1139,8 @@ out:
 		DRM_DEBUG_KMS("lid notifier registration failed\n");
 		lvds_connector->lid_notifier.notifier_call = NULL;
 	}
-	drm_sysfs_connector_add(connector);
 #endif
+	drm_sysfs_connector_add(connector);
 
 	intel_panel_init(&intel_connector->panel, fixed_mode);
 	intel_panel_setup_backlight(connector);
@@ -1157,7 +1153,7 @@ failed:
 	drm_encoder_cleanup(encoder);
 	if (fixed_mode)
 		drm_mode_destroy(dev, fixed_mode);
-	free(lvds_encoder, M_DRM);
-	free(lvds_connector, M_DRM);
+	kfree(lvds_encoder);
+	kfree(lvds_connector);
 	return false;
 }

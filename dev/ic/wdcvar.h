@@ -1,4 +1,4 @@
-/*      $OpenBSD: wdcvar.h,v 1.52 2011/07/15 16:44:17 deraadt Exp $     */
+/*      $OpenBSD: wdcvar.h,v 1.54 2014/01/22 06:05:21 dlg Exp $     */
 /*	$NetBSD: wdcvar.h,v 1.17 1999/04/11 20:50:29 bouyer Exp $	*/
 
 /*-
@@ -223,6 +223,7 @@ struct wdc_xfer {
 #define C_MEDIA_ACCESS	0x0100 /* is a media access command */
 #define C_POLL_MACHINE	0x0200 /* machine has a poll handler */
 #define C_PRIVATEXFER	0x0400 /* privately managed xfer */
+#define C_SCSIXFER	0x0800 /* SCSI managed xfer */
 
 	/* Informations about our location */
 	struct channel_softc *chp;
@@ -266,6 +267,7 @@ void  wdc_exec_xfer(struct channel_softc *, struct wdc_xfer *);
 struct wdc_xfer *wdc_get_xfer(int); /* int = WDC_NOSLEEP/CANSLEEP */
 #define WDC_CANSLEEP	0x00
 #define WDC_NOSLEEP	0x01
+void   wdc_scrub_xfer(struct wdc_xfer *);
 void   wdc_free_xfer(struct channel_softc *, struct wdc_xfer *);
 void  wdcstart(struct channel_softc *);
 int   wdcreset(struct channel_softc *, int);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_dp.c,v 1.10 2013/10/30 02:11:33 dlg Exp $	*/
+/*	$OpenBSD: intel_dp.c,v 1.13 2014/01/22 05:16:55 kettenis Exp $	*/
 /*
  * Copyright © 2008 Intel Corporation
  *
@@ -388,7 +388,7 @@ intel_dp_aux_ch(struct intel_dp *intel_dp,
 		else
 			aux_clock_divider = 225; /* eDP input clock at 450Mhz */
 	} else if (HAS_PCH_SPLIT(dev))
-		aux_clock_divider = howmany(intel_pch_rawclk(dev), 2);
+		aux_clock_divider = DIV_ROUND_UP(intel_pch_rawclk(dev), 2);
 	else
 		aux_clock_divider = intel_hrawclk(dev) / 2;
 
@@ -2293,7 +2293,7 @@ intel_dp_get_edid(struct drm_connector *connector, struct i2c_controller *adapte
 			return NULL;
 
 		size = (intel_connector->edid->extensions + 1) * EDID_LENGTH;
-		edid = malloc(size, M_DRM, M_WAITOK);
+		edid = kmalloc(size, GFP_KERNEL);
 		if (!edid)
 			return NULL;
 
@@ -2366,7 +2366,7 @@ intel_dp_detect(struct drm_connector *connector, bool force)
 		edid = intel_dp_get_edid(connector, &intel_dp->adapter);
 		if (edid) {
 			intel_dp->has_audio = drm_detect_monitor_audio(edid);
-			free(edid, M_DRM);
+			kfree(edid);
 		}
 	}
 
@@ -2412,7 +2412,7 @@ intel_dp_detect_audio(struct drm_connector *connector)
 	edid = intel_dp_get_edid(connector, &intel_dp->adapter);
 	if (edid) {
 		has_audio = drm_detect_monitor_audio(edid);
-		free(edid, M_DRM);
+		kfree(edid);
 	}
 
 	return has_audio;
@@ -2497,16 +2497,14 @@ intel_dp_destroy(struct drm_connector *connector)
 	struct intel_connector *intel_connector = to_intel_connector(connector);
 
 	if (!IS_ERR_OR_NULL(intel_connector->edid))
-		free(intel_connector->edid, M_DRM);
+		kfree(intel_connector->edid);
 
 	if (is_edp(intel_dp))
 		intel_panel_fini(&intel_connector->panel);
 
-#ifdef notyet
 	drm_sysfs_connector_remove(connector);
-#endif
 	drm_connector_cleanup(connector);
-	free(connector, M_DRM);
+	kfree(connector);
 }
 
 void intel_dp_encoder_destroy(struct drm_encoder *encoder)
@@ -2523,7 +2521,7 @@ void intel_dp_encoder_destroy(struct drm_encoder *encoder)
 		task_del(systq, &intel_dp->panel_vdd_task);
 		ironlake_panel_vdd_off_sync(intel_dp);
 	}
-	free(intel_dig_port, M_DRM);
+	kfree(intel_dig_port);
 }
 
 static const struct drm_encoder_helper_funcs intel_dp_helper_funcs = {
@@ -2681,7 +2679,7 @@ intel_dp_init_panel_power_sequencer(struct drm_device *dev,
 	assign_final(t11_t12);
 #undef assign_final
 
-#define get_delay(field)	(howmany(final.field, 10))
+#define get_delay(field)	(DIV_ROUND_UP(final.field, 10))
 	intel_dp->panel_power_up_delay = get_delay(t1_t3);
 	intel_dp->backlight_on_delay = get_delay(t8);
 	intel_dp->backlight_off_delay = get_delay(t9);
@@ -2717,7 +2715,7 @@ intel_dp_init_panel_power_sequencer_registers(struct drm_device *dev,
 	 * formula. */
 	pp_div = ((100 * intel_pch_rawclk(dev))/2 - 1)
 			<< PP_REFERENCE_DIVIDER_SHIFT;
-	pp_div |= (howmany(seq->t11_t12, 1000)
+	pp_div |= (DIV_ROUND_UP(seq->t11_t12, 1000)
 			<< PANEL_POWER_CYCLE_DELAY_SHIFT);
 
 	/* Haswell doesn't have any port selection bits for the panel
@@ -2792,9 +2790,7 @@ intel_dp_init_connector(struct intel_digital_port *intel_dig_port,
 	timeout_set(&intel_dp->panel_vdd_to, ironlake_panel_vdd_tick, intel_dp);
 
 	intel_connector_attach_encoder(intel_connector, intel_encoder);
-#ifdef notyet
 	drm_sysfs_connector_add(connector);
-#endif
 
 	if (IS_HASWELL(dev))
 		intel_connector->get_hw_state = intel_ddi_connector_get_hw_state;
@@ -2863,7 +2859,7 @@ intel_dp_init_connector(struct intel_digital_port *intel_dig_port,
 				drm_mode_connector_update_edid_property(connector, edid);
 				drm_edid_to_eld(connector, edid);
 			} else {
-				free(edid, M_DRM);
+				kfree(edid);
 				edid = ERR_PTR(-EINVAL);
 			}
 		} else {
@@ -2914,15 +2910,13 @@ intel_dp_init(struct drm_device *dev, int output_reg, enum port port)
 	struct drm_encoder *encoder;
 	struct intel_connector *intel_connector;
 
-	intel_dig_port = malloc(sizeof(struct intel_digital_port), M_DRM,
-	    M_WAITOK | M_ZERO);
+	intel_dig_port = kzalloc(sizeof(struct intel_digital_port), GFP_KERNEL);
 	if (!intel_dig_port)
 		return;
 
-	intel_connector = malloc(sizeof(struct intel_connector), M_DRM,
-	    M_WAITOK | M_ZERO);
+	intel_connector = kzalloc(sizeof(struct intel_connector), GFP_KERNEL);
 	if (!intel_connector) {
-		free(intel_dig_port, M_DRM);
+		kfree(intel_dig_port);
 		return;
 	}
 

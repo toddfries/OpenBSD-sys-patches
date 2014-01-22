@@ -1,4 +1,4 @@
-/*	$OpenBSD: ncr53c9xvar.h,v 1.20 2010/06/28 18:31:02 krw Exp $	*/
+/*	$OpenBSD: ncr53c9xvar.h,v 1.23 2014/01/18 23:09:04 dlg Exp $	*/
 /*	$NetBSD: ncr53c9xvar.h,v 1.13 1998/05/26 23:17:34 thorpej Exp $	*/
 
 /*-
@@ -258,7 +258,6 @@ struct ncr53c9x_glue {
 struct ncr53c9x_softc {
 	struct device sc_dev;			/* us as a device */
 
-	struct timeout sc_watchdog;		/* periodic timer */
 	struct scsi_link sc_link;		/* scsi link struct */
 
 	struct ncr53c9x_glue *sc_glue;		/* glue to MD code */
@@ -424,9 +423,7 @@ struct ncr53c9x_softc {
 #define	ncr53c9x_cpb2stp(sc, cpb)	\
 	((250 * (cpb)) / (sc)->sc_freq)
 
-void	ncr53c9x_attach(struct ncr53c9x_softc *,
-	    struct scsi_adapter *);
-void	ncr53c9x_scsi_cmd(struct scsi_xfer *);
+void	ncr53c9x_attach(struct ncr53c9x_softc *);
 void	ncr53c9x_reset(struct ncr53c9x_softc *);
 int	ncr53c9x_intr(void *);
 void	ncr53c9x_init(struct ncr53c9x_softc *, int);
