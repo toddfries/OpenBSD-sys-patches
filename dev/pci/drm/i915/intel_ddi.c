@@ -1,4 +1,4 @@
-/*	$OpenBSD: intel_ddi.c,v 1.6 2014/01/21 08:57:22 kettenis Exp $	*/
+/*	$OpenBSD: intel_ddi.c,v 1.10 2014/01/23 10:42:57 jsg Exp $	*/
 /*
  * Copyright © 2012 Intel Corporation
  *
@@ -116,7 +116,7 @@ void intel_prepare_ddi(struct drm_device *dev)
 {
 	int port;
 
-	if (IS_HASWELL(dev)) {
+	if (HAS_DDI(dev)) {
 		for (port = PORT_A; port < PORT_E; port++)
 			intel_prepare_ddi_buffers(dev, port, false);
 
@@ -685,7 +685,7 @@ static void intel_ddi_mode_set(struct drm_encoder *encoder,
 		struct intel_digital_port *intel_dig_port =
 			enc_to_dig_port(encoder);
 
-		intel_dp->DP = intel_dig_port->port_reversal |
+		intel_dp->DP = intel_dig_port->saved_port_bits |
 			       DDI_BUF_CTL_ENABLE | DDI_BUF_EMP_400MV_0DB_HSW;
 		switch (intel_dp->lane_count) {
 		case 1:
@@ -1309,7 +1309,8 @@ static void intel_enable_ddi(struct intel_encoder *intel_encoder)
 		 * enabling the port.
 		 */
 		I915_WRITE(DDI_BUF_CTL(port),
-			   intel_dig_port->port_reversal | DDI_BUF_CTL_ENABLE);
+			   intel_dig_port->saved_port_bits |
+			   DDI_BUF_CTL_ENABLE);
 	} else if (type == INTEL_OUTPUT_EDP) {
 		struct intel_dp *intel_dp = enc_to_intel_dp(encoder);
 
@@ -1490,16 +1491,6 @@ void intel_ddi_init(struct drm_device *dev, enum port port)
 		return;
 	}
 
-	if (port != PORT_A) {
-		hdmi_connector = kzalloc(sizeof(struct intel_connector),
-					 GFP_KERNEL);
-		if (!hdmi_connector) {
-			kfree(dp_connector);
-			kfree(intel_dig_port);
-			return;
-		}
-	}
-
 	intel_encoder = &intel_dig_port->base;
 	encoder = &intel_encoder->base;
 
@@ -1514,12 +1505,9 @@ void intel_ddi_init(struct drm_device *dev, enum port port)
 	intel_encoder->get_hw_state = intel_ddi_get_hw_state;
 
 	intel_dig_port->port = port;
-	intel_dig_port->port_reversal = I915_READ(DDI_BUF_CTL(port)) &
-					DDI_BUF_PORT_REVERSAL;
-	if (hdmi_connector)
-		intel_dig_port->hdmi.sdvox_reg = DDI_BUF_CTL(port);
-	else
-		intel_dig_port->hdmi.sdvox_reg = 0;
+	intel_dig_port->saved_port_bits = I915_READ(DDI_BUF_CTL(port)) &
+					  (DDI_BUF_PORT_REVERSAL |
+					   DDI_A_4_LANES);
 	intel_dig_port->dp.output_reg = DDI_BUF_CTL(port);
 
 	intel_encoder->type = INTEL_OUTPUT_UNKNOWN;
@@ -1527,7 +1515,16 @@ void intel_ddi_init(struct drm_device *dev, enum port port)
 	intel_encoder->cloneable = false;
 	intel_encoder->hot_plug = intel_ddi_hot_plug;
 
-	if (hdmi_connector)
-		intel_hdmi_init_connector(intel_dig_port, hdmi_connector);
 	intel_dp_init_connector(intel_dig_port, dp_connector);
+
+	if (intel_encoder->type != INTEL_OUTPUT_EDP) {
+		hdmi_connector = kzalloc(sizeof(struct intel_connector),
+					 GFP_KERNEL);
+		if (!hdmi_connector) {
+			return;
+		}
+
+		intel_dig_port->hdmi.hdmi_reg = DDI_BUF_CTL(port);
+		intel_hdmi_init_connector(intel_dig_port, hdmi_connector);
+	}
 }

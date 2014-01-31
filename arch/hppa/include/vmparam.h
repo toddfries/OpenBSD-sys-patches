@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.39 2011/11/10 22:48:13 deraadt Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.42 2014/01/30 18:16:41 miod Exp $	*/
 
 /* 
  * Copyright (c) 1988-1994, The University of Utah and
@@ -91,24 +91,5 @@
 #define	VM_PHYSSEG_STRAT	VM_PSTRAT_RANDOM
 
 #define	VM_PHYSSEG_NOADD	/* XXX until uvm code is fixed */
-
-#if defined(_KERNEL) && !defined(_LOCORE)
-
-#include <sys/lock.h>
-
-#define __HAVE_VM_PAGE_MD
-struct pv_entry;
-struct vm_page_md {
-	struct simplelock pvh_lock;	/* locks every pv on this list */
-	struct pv_entry	*pvh_list;	/* head of list (locked by pvh_lock) */
-	u_int		pvh_attrs;	/* to preserve ref/mod */
-};
-
-#define	VM_MDPAGE_INIT(pg) do {				\
-	simple_lock_init(&(pg)->mdpage.pvh_lock);	\
-	(pg)->mdpage.pvh_list = NULL;			\
-	(pg)->mdpage.pvh_attrs = 0;			\
-} while (0)
-#endif
 
 #endif	/* _MACHINE_VMPARAM_H_ */

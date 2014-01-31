@@ -1,4 +1,4 @@
-/* $OpenBSD: drmP.h,v 1.161 2014/01/22 05:16:55 kettenis Exp $ */
+/* $OpenBSD: drmP.h,v 1.163 2014/01/30 15:10:47 kettenis Exp $ */
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -888,6 +888,7 @@ struct dmi_system_id {
         struct dmi_strmatch matches[4];
 };
 #define	DMI_MATCH(a, b) {(a), (b)}
+#define	DMI_EXACT_MATCH(a, b) {(a), (b)}
 int dmi_check_system(const struct dmi_system_id *);
 
 
@@ -1053,14 +1054,6 @@ int drm_gem_object_init(struct drm_device *dev,
 
 void	 drm_unref(struct uvm_object *);
 void	 drm_ref(struct uvm_object *);
-void	 drm_unref_locked(struct uvm_object *);
-void	 drm_ref_locked(struct uvm_object *);
-void	drm_hold_object_locked(struct drm_gem_object *);
-void	drm_hold_object(struct drm_gem_object *);
-void	drm_unhold_object_locked(struct drm_gem_object *);
-void	drm_unhold_object(struct drm_gem_object *);
-int	drm_try_hold_object(struct drm_gem_object *);
-void	drm_unhold_and_unref(struct drm_gem_object *);
 
 int drm_gem_handle_create(struct drm_file *file_priv,
 			  struct drm_gem_object *obj,
@@ -1099,37 +1092,11 @@ drm_gem_object_unreference_unlocked(struct drm_gem_object *obj)
 	DRM_UNLOCK();
 }
 
-static __inline void 
-drm_lock_obj(struct drm_gem_object *obj)
-{
-	simple_lock(&obj->uobj);
-}
-
-static __inline void 
-drm_unlock_obj(struct drm_gem_object *obj)
-{
-	simple_unlock(&obj->uobj);
-}
-
 static __inline__ int drm_core_check_feature(struct drm_device *dev,
 					     int feature)
 {
 	return ((dev->driver->flags & feature) ? 1 : 0);
 }
-
-#ifdef DRMLOCKDEBUG
-
-#define DRM_ASSERT_HELD(obj)		\
-	KASSERT(obj->do_flags & DRM_BUSY && obj->holding_proc == curproc)
-#define DRM_OBJ_ASSERT_LOCKED(obj) /* XXX mutexes */
-#define DRM_ASSERT_LOCKED(lock) MUTEX_ASSERT_LOCKED(lock)
-#else
-
-#define DRM_ASSERT_HELD(obj)
-#define DRM_OBJ_ASSERT_LOCKED(obj)
-#define DRM_ASSERT_LOCKED(lock) 
-
-#endif
 
 #define DRM_PCIE_SPEED_25 1
 #define DRM_PCIE_SPEED_50 2

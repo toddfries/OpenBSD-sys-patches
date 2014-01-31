@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.34 2013/11/24 22:09:58 miod Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.36 2014/01/30 18:16:41 miod Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.32 2000/03/07 00:05:59 matt Exp $	*/
 
 /*-
@@ -101,22 +101,5 @@
 
 #define	USRIOSIZE		(8 * VAX_NPTEPG)	/* 512MB */
 #define	VM_PHYS_SIZE		(USRIOSIZE*VAX_NBPG)
-
-/*
- * This should be in <machine/pmap.h>, but needs to be in this file
- * due to include ordering issues.
- */
-#define	__HAVE_VM_PAGE_MD
-
-struct vm_page_md {
-	struct pv_entry *pv_head;
-	int		 pv_attr;	/* write/modified bits */
-};
-
-#define	VM_MDPAGE_INIT(pg) \
-	do { \
-		(pg)->mdpage.pv_head = NULL; \
-		(pg)->mdpage.pv_attr = 0; \
-	} while (0)
 
 #endif /* _MACHINE_VMPARAM_H_ */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: lock_machdep.c,v 1.5 2014/01/30 00:51:13 dlg Exp $	*/
+/*	$OpenBSD: lock_machdep.c,v 1.1 2014/01/26 17:40:09 miod Exp $	*/
 
 /*
  * Copyright (c) 2007 Artur Grabowski <art@openbsd.org>
@@ -16,13 +16,14 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-#include <sys/atomic.h>
+
 #include <sys/param.h>
 #include <sys/lock.h>
 #include <sys/systm.h>
 
+#include <machine/atomic.h>
+#include <machine/cpu.h>
 #include <machine/lock.h>
-#include <machine/psl.h>
 
 #include <ddb/db_output.h>
 
@@ -42,39 +43,6 @@ __mp_lock_init(struct __mp_lock *lock)
 extern int __mp_lock_spinout;
 #endif
 
-/*
- * On processors with multiple threads we force a thread switch.
- *
- * On UltraSPARC T2 and its successors, the optimal way to do this
- * seems to be to do three nop reads of %ccr.  This works on
- * UltraSPARC T1 as well, even though three nop casx operations seem
- * to be slightly more optimal.  Since these instructions are
- * effectively nops, executing them on earlier non-CMT processors is
- * harmless, so we make this the default.
- *
- * On SPARC64 VI and it successors we execute the processor-specific
- * sleep instruction.
- */
-static __inline void
-__mp_lock_spin_hook(void)
-{
-	__asm __volatile(
-		"999:	rd	%%ccr, %%g0			\n"
-		"	rd	%%ccr, %%g0			\n"
-		"	rd	%%ccr, %%g0			\n"
-		"	.section .sun4u_mtp_patch, \"ax\"	\n"
-		"	.word	999b				\n"
-		"	.word	0x81b01060	! sleep		\n"
-		"	.word	999b + 4			\n"
-		"	nop					\n"
-		"	.word	999b + 8			\n"
-		"	nop					\n"
-		"	.previous				\n"
-		: : : "memory");
-}
-
-#define SPINLOCK_SPIN_HOOK __mp_lock_spin_hook()
-
 static __inline void
 __mp_lock_spin(struct __mp_lock *mpl)
 {
@@ -83,12 +51,14 @@ __mp_lock_spin(struct __mp_lock *mpl)
 		SPINLOCK_SPIN_HOOK;
 #else
 	int ticks = __mp_lock_spinout;
+	if (!CPU_IS_PRIMARY(curcpu()))				/* XXX */
+		ticks += ticks;					/* XXX */
 
 	while (mpl->mpl_count != 0 && --ticks > 0)
 		SPINLOCK_SPIN_HOOK;
 
 	if (ticks == 0) {
-		db_printf("__mp_lock(0x%x): lock spun out", mpl);
+		db_printf("__mp_lock(%p): lock spun out", mpl);
 		Debugger();
 	}
 #endif
@@ -97,6 +67,9 @@ __mp_lock_spin(struct __mp_lock *mpl)
 void
 __mp_lock(struct __mp_lock *mpl)
 {
+	int s;
+	struct cpu_info *ci = curcpu();
+
 	/*
 	 * Please notice that mpl_count gets incremented twice for the
 	 * first lock. This is on purpose. The way we release the lock
@@ -108,23 +81,20 @@ __mp_lock(struct __mp_lock *mpl)
 	 * safer to clear it and besides, setting mpl_count to 2 on the
 	 * first lock makes most of this code much simpler.
 	 */
-
 	while (1) {
-		u_int64_t s;
-
-		s = intr_disable();
-		if (atomic_cas_ulong(&mpl->mpl_count, 0, 1) == 0) {
-			sparc_membar(LoadLoad | LoadStore);
-			mpl->mpl_cpu = curcpu();
+		s = splhigh();
+		if (__cpu_cas(&mpl->mpl_count, 0, 1) == 0) {
+			alpha_mb();
+			mpl->mpl_cpu = ci;
 		}
 
-		if (mpl->mpl_cpu == curcpu()) {
+		if (mpl->mpl_cpu == ci) {
 			mpl->mpl_count++;
-			intr_restore(s);
+			splx(s);
 			break;
 		}
-		intr_restore(s);
-
+		splx(s);
+		
 		__mp_lock_spin(mpl);
 	}
 }
@@ -132,7 +102,7 @@ __mp_lock(struct __mp_lock *mpl)
 void
 __mp_unlock(struct __mp_lock *mpl)
 {
-	u_int64_t s;
+	int s;
 
 #ifdef MP_LOCKDEBUG
 	if (mpl->mpl_cpu != curcpu()) {
@@ -141,20 +111,21 @@ __mp_unlock(struct __mp_lock *mpl)
 	}
 #endif
 
-	s = intr_disable();
+	s = splhigh();
 	if (--mpl->mpl_count == 1) {
 		mpl->mpl_cpu = NULL;
-		sparc_membar(StoreStore | LoadStore);
+		alpha_mb();
 		mpl->mpl_count = 0;
 	}
-	intr_restore(s);
+
+	splx(s);
 }
 
 int
 __mp_release_all(struct __mp_lock *mpl)
 {
 	int rv = mpl->mpl_count - 1;
-	u_int64_t s;
+	int s;
 
 #ifdef MP_LOCKDEBUG
 	if (mpl->mpl_cpu != curcpu()) {
@@ -163,11 +134,11 @@ __mp_release_all(struct __mp_lock *mpl)
 	}
 #endif
 
-	s = intr_disable();
+	s = splhigh();
 	mpl->mpl_cpu = NULL;
-	sparc_membar(StoreStore | LoadStore);
+	alpha_mb();
 	mpl->mpl_count = 0;
-	intr_restore(s);
+	splx(s);
 
 	return (rv);
 }
@@ -176,7 +147,6 @@ int
 __mp_release_all_but_one(struct __mp_lock *mpl)
 {
 	int rv = mpl->mpl_count - 2;
-
 #ifdef MP_LOCKDEBUG
 	if (mpl->mpl_cpu != curcpu()) {
 		db_printf("__mp_release_all_but_one(%p): not held lock\n", mpl);

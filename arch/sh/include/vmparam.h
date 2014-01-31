@@ -1,4 +1,4 @@
-/*	$OpenBSD: vmparam.h,v 1.8 2010/12/15 05:30:19 tedu Exp $	*/
+/*	$OpenBSD: vmparam.h,v 1.10 2014/01/30 18:16:41 miod Exp $	*/
 /*	$NetBSD: vmparam.h,v 1.17 2006/03/04 01:55:03 uwe Exp $	*/
 
 /*-
@@ -85,23 +85,4 @@
 
 #define	VM_PHYS_SIZE		(USRIOSIZE * PAGE_SIZE)
 
-/* pmap-specific data store in the vm_page structure. */
-#define	__HAVE_VM_PAGE_MD
-#define	PVH_REFERENCED		1
-#define	PVH_MODIFIED		2
-
-#ifndef _LOCORE
-struct pv_entry;
-struct vm_page_md {
-	SLIST_HEAD(, pv_entry) pvh_head;
-	int pvh_flags;
-};
-
-#define	VM_MDPAGE_INIT(pg)						\
-do {									\
-	struct vm_page_md *pvh = &(pg)->mdpage;				\
-	SLIST_INIT(&pvh->pvh_head);					\
-	pvh->pvh_flags = 0;						\
-} while (/*CONSTCOND*/0)
-#endif /* _LOCORE */
 #endif /* !_SH_VMPARAM_H_ */

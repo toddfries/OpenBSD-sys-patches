@@ -1,4 +1,4 @@
-/*	$OpenBSD: scsiconf.h,v 1.158 2014/01/18 02:42:31 dlg Exp $	*/
+/*	$OpenBSD: scsiconf.h,v 1.160 2014/01/31 02:53:41 dlg Exp $	*/
 /*	$NetBSD: scsiconf.h,v 1.35 1997/04/02 02:29:38 mycroft Exp $	*/
 
 /*
@@ -171,6 +171,7 @@ _8btol(u_int8_t *bytes)
 #define DEVID_EUI	2
 #define DEVID_T10	3
 #define DEVID_SERIAL	4
+#define DEVID_WWN	5
 
 struct devid {
 	u_int8_t	d_type;
@@ -551,6 +552,7 @@ void	scsi_io_put(struct scsi_iopool *, void *);
 /*
  * default io allocator.
  */
+#define SCSI_IOPOOL_POISON ((void *)0x5c5)
 void *	scsi_default_get(void *);
 void	scsi_default_put(void *, void *);
 

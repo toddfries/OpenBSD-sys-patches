@@ -1,4 +1,4 @@
-/* $OpenBSD: i915_drv.h,v 1.45 2013/12/11 20:31:43 kettenis Exp $ */
+/* $OpenBSD: i915_drv.h,v 1.48 2014/01/24 04:05:06 jsg Exp $ */
 /* i915_drv.h -- Private header for the I915 driver -*- linux-c -*-
  */
 /*
@@ -85,7 +85,7 @@ enum port {
 };
 #define port_name(p) ((p) + 'A')
 
-#define for_each_pipe(p) for ((p) = 0; (p) < dev_priv->num_pipe; (p)++)
+#define for_each_pipe(p) for ((p) = 0; (p) < INTEL_INFO(dev)->num_pipes; (p)++)
 
 #define for_each_encoder_on_crtc(dev, __crtc, intel_encoder) \
 	list_for_each_entry((intel_encoder), &(dev)->mode_config.encoder_list, base.head) \
@@ -176,6 +176,7 @@ struct drm_i915_gt_funcs {
 };
 
 struct intel_device_info {
+	u8 num_pipes:3;
 	u8 gen;
 	u8 is_mobile:1;
 	u8 is_i85x:1;
@@ -281,6 +282,7 @@ enum intel_sbi_destination {
 #define QUIRK_PIPEA_FORCE	(1<<0)
 #define QUIRK_LVDS_SSC_DISABLE	(1<<1)
 #define QUIRK_INVERT_BRIGHTNESS	(1<<2)
+#define QUIRK_NO_PCH_PWM_ENABLE	(1<<3)
 
 struct intel_fbdev;
 
@@ -578,7 +580,6 @@ struct inteldrm_softc {
 	u_int32_t		 hotplug_supported_mask;
 	struct task	 	 hotplug_task;
 
-	int			 num_pipe;
 	int			 num_pch_pll;
 
 	struct intel_opregion	 opregion;
@@ -1619,6 +1620,8 @@ __i915_write(64, q)
 #define I915_HAS_FBC(dev)	(INTEL_INFO(dev)->has_fbc)
 
 #define HAS_PIPE_CONTROL(dev)	(INTEL_INFO(dev)->gen >= 5)
+
+#define HAS_DDI(dev)		(IS_HASWELL(dev))
 
 #define INTEL_PCH_DEVICE_ID_MASK		0xff00
 #define INTEL_PCH_IBX_DEVICE_ID_TYPE		0x3b00

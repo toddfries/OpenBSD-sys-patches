@@ -1,4 +1,4 @@
-/*	$OpenBSD: boot.c,v 1.39 2014/01/02 00:03:04 deraadt Exp $	*/
+/*	$OpenBSD: boot.c,v 1.42 2014/01/24 23:32:15 deraadt Exp $	*/
 
 /*
  * Copyright (c) 2003 Dale Rahn
@@ -89,9 +89,7 @@ boot(dev_t bootdev)
 			} while(!getcmd());
 		}
 
-		st = loadrandom(BOOTRANDOM, rnddata, sizeof(rnddata));
-		if (st)
-			printf("loadrandom: error %d\n", st);
+		loadrandom(BOOTRANDOM, rnddata, sizeof(rnddata));
 #ifdef MDRANDOM
 		mdrandom(rnddata, sizeof(rnddata));
 #endif
@@ -125,7 +123,7 @@ boot(dev_t bootdev)
 	run_loadfile(marks, cmd.boothowto);
 }
 
-int
+void
 loadrandom(char *name, char *buf, size_t buflen)
 {
 	char path[MAXPATHLEN];
@@ -147,22 +145,18 @@ loadrandom(char *name, char *buf, size_t buflen)
 		}
 	}
 
-	printf("loadrandom: %s\n", path);
-
 	fd = open(path, O_RDONLY);
 	if (fd == -1) {
-		printf("cannot open %s\n", path);
-		return -1;
+		if (errno == EPERM)
+			goto fail;
+		printf("cannot open %s: %s\n", path, strerror(errno));
+		return;
 	}
 	if (fstat(fd, &sb) == -1 ||
 	    sb.st_uid != 0 ||
 	    (sb.st_mode & (S_IWOTH|S_IROTH)))
 		goto fail;
-	if (read(fd, buf, buflen) != buflen)
-		goto fail;
-	close(fd);
- 	return 0;
+	(void) read(fd, buf, buflen);
 fail:
 	close(fd);
-	return (-1);
 }

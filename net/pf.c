@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.865 2014/01/22 04:33:34 henning Exp $ */
+/*	$OpenBSD: pf.c,v 1.868 2014/01/25 03:39:00 lteo Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -5653,16 +5653,12 @@ pf_route(struct mbuf **m, struct pf_rule *r, int dir, struct ifnet *oifp,
 
 	if (ntohs(ip->ip_len) <= ifp->if_mtu) {
 		ip->ip_sum = 0;
-		if (ifp->if_capabilities & IFCAP_CSUM_IPv4) {
+		if (ifp->if_capabilities & IFCAP_CSUM_IPv4)
 			m0->m_pkthdr.csum_flags |= M_IPV4_CSUM_OUT;
-			ipstat.ips_outhwcsum++;
-		} else
+		else {
+			ipstat.ips_outswcsum++;
 			ip->ip_sum = in_cksum(m0, ip->ip_hl << 2);
-		/* Update relevant hardware checksum stats for TCP/UDP */
-		if (m0->m_pkthdr.csum_flags & M_TCP_CSUM_OUT)
-			tcpstat.tcps_outhwcsum++;
-		else if (m0->m_pkthdr.csum_flags & M_UDP_CSUM_OUT)
-			udpstat.udps_outhwcsum++;
+		}
 		error = (*ifp->if_output)(ifp, m0, sintosa(dst), NULL);
 		goto done;
 	}
@@ -5879,26 +5875,21 @@ pf_check_proto_cksum(struct pf_pdesc *pd, int off, int len, u_int8_t p,
 		pd->csum_status = PF_CSUM_BAD;
 		return (1);
 	}
+
+	/* need to do it in software */
+	if (p == IPPROTO_TCP)
+		tcpstat.tcps_inswcsum++;
+	else if (p == IPPROTO_UDP)
+		udpstat.udps_inswcsum++;
+	
 	switch (af) {
 #ifdef INET
 	case AF_INET:
-		if (p == IPPROTO_ICMP) {
-			if (pd->m->m_len < off) {
-				pd->csum_status = PF_CSUM_BAD;
-				return (1);
-			}
-			pd->m->m_data += off;
-			pd->m->m_len -= off;
-			sum = in_cksum(pd->m, len);
-			pd->m->m_data -= off;
-			pd->m->m_len += off;
-		} else {
-			if (pd->m->m_len < sizeof(struct ip)) {
-				pd->csum_status = PF_CSUM_BAD;
-				return (1);
-			}
-			sum = in4_cksum(pd->m, p, off, len);
+		if (pd->m->m_len < sizeof(struct ip)) {
+			pd->csum_status = PF_CSUM_BAD;
+			return (1);
 		}
+		sum = in4_cksum(pd->m, (p == IPPROTO_ICMP ? 0 : p), off, len);
 		break;
 #endif /* INET */
 #ifdef INET6

@@ -1,4 +1,4 @@
-/*	$OpenBSD: qla.c,v 1.7 2014/01/21 06:10:14 jsg Exp $ */
+/*	$OpenBSD: qla.c,v 1.11 2014/01/30 23:58:41 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -274,20 +274,6 @@ qla_attach(struct qla_softc *sc)
 		qla_host_cmd(sc, QLA_HOST_CMD_RELEASE);
 	}
 
-	sc->sc_mbox[0] = QLA_MBOX_REGISTER_TEST;
-	sc->sc_mbox[1] = 0x1234;
-	sc->sc_mbox[2] = 0x4321;
-	sc->sc_mbox[3] = 0xaaa5;
-	sc->sc_mbox[4] = 0xbbbb;
-	if (qla_mbox(sc, 0x001f, 0x001f)) {
-		printf("register test command failed\n");
-		return (ENXIO);
-	} else if (sc->sc_mbox[1] != 0x1234 || sc->sc_mbox[2] != 0x4321 ||
-		    sc->sc_mbox[3] != 0xaaa5 || sc->sc_mbox[4] != 0xbbbb) {
-		printf("register test command failed\n");
-		return (ENXIO);
-	}
-
 	qla_host_cmd(sc, QLA_HOST_CMD_PAUSE);
 	qla_set_ints(sc, 0);
 
@@ -467,7 +453,7 @@ qla_attach(struct qla_softc *sc)
 
 	/* adjust firmware options a bit */
 	icb->icb_fw_options |= htole16(QLA_ICB_FW_EXTENDED_INIT_CB);
-	icb->icb_xfwoptions &= htole16(~QLA_ICB_FW_FAST_POST);
+	icb->icb_fw_options &= ~htole16(QLA_ICB_FW_FAST_POST);
 
 	sc->sc_mbox[0] = QLA_MBOX_INIT_FIRMWARE;
 	sc->sc_mbox[4] = 0;
@@ -620,7 +606,7 @@ qla_attach(struct qla_softc *sc)
 		rft->subcmd = htole16(QLA_SNS_RFT_ID);
 		rft->max_word = htole16(sizeof(struct qla_sns_req_hdr) / 4);
 		rft->port_id = htole32(sc->sc_port_id);
-		rft->fc4_types[0] = (1 << QLA_FC4_SCSI);
+		rft->fc4_types[0] = htole16(1 << QLA_FC4_SCSI);
 		if (qla_sns_req(sc, sc->sc_scratch, sizeof(*rft))) {
 			printf("%s: RFT_ID failed\n", DEVNAME(sc));
 			/* we might be able to continue after this fails */
@@ -1015,6 +1001,10 @@ qla_scsi_probe(struct scsi_link *link)
 	else if (!ISSET(sc->sc_targets[link->target]->flags,
 	    QLA_PORT_FLAG_IS_TARGET))
 		rv = ENXIO;
+	else {
+		link->port_wwn = sc->sc_targets[link->target]->port_name;
+		link->node_wwn = sc->sc_targets[link->target]->node_name;
+	}
 	mtx_leave(&sc->sc_port_mtx);
 
 	return (rv);
