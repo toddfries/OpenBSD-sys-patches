@@ -1,4 +1,4 @@
-/* $OpenBSD: trap.c,v 1.66 2014/01/26 17:40:09 miod Exp $ */
+/* $OpenBSD: trap.c,v 1.68 2014/02/04 21:52:43 miod Exp $ */
 /* $NetBSD: trap.c,v 1.52 2000/05/24 16:48:33 thorpej Exp $ */
 
 /*-
@@ -685,12 +685,12 @@ alpha_enable_fp(struct proc *p, int check)
 
 #if defined(MULTIPROCESSOR)
 	/* Need to block IPIs */
-	s = splhigh();
+	s = splipi();
 #endif
 	p->p_addr->u_pcb.pcb_fpcpu = ci;
 	ci->ci_fpcurproc = p;
 #if defined(MULTIPROCESSOR)
-	splx(s);
+	alpha_pal_swpipl(s);
 #endif
 	atomic_add_int(&uvmexp.fpswtch, 1);
 

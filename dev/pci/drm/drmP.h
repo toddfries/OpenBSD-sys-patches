@@ -1,4 +1,4 @@
-/* $OpenBSD: drmP.h,v 1.163 2014/01/30 15:10:47 kettenis Exp $ */
+/* $OpenBSD: drmP.h,v 1.166 2014/02/04 22:19:53 kettenis Exp $ */
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -170,6 +170,16 @@ do {									\
 	unlikely(__ret);						\
 })
 
+#define WARN_ONCE(condition, fmt...) ({					\
+	static int __warned;						\
+	int __ret = !!(condition);					\
+	if (__ret && !__warned) {					\
+		printf(fmt);						\
+		__warned = 1;						\
+	}								\
+	unlikely(__ret);						\
+})
+
 #define _WARN_STR(x) #x
 
 #define WARN_ON(condition) ({						\
@@ -256,6 +266,17 @@ kfree(void *objp)
 	free(objp, M_DRM);
 }
 
+#define min_t(t, a, b) ({ \
+	t __min_a = (a); \
+	t __min_b = (b); \
+	__min_a < __min_b ? __min_a : __min_b; })
+
+static inline uint64_t
+div_u64(uint64_t x, uint32_t y)
+{
+	return (x / y);
+}
+
 /* DRM_READMEMORYBARRIER() prevents reordering of reads.
  * DRM_WRITEMEMORYBARRIER() prevents reordering of writes.
  * DRM_MEMORYBARRIER() prevents reordering of reads and writes.
@@ -327,6 +348,12 @@ static __inline void
 udelay(unsigned long usecs)
 {
 	DELAY(usecs);
+}
+
+static __inline void
+usleep_range(unsigned long min, unsigned long max)
+{
+	DELAY(min);
 }
 
 static __inline void

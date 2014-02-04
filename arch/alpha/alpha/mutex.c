@@ -1,4 +1,4 @@
-/*	$OpenBSD: mutex.c,v 1.8 2014/01/26 17:40:09 miod Exp $	*/
+/*	$OpenBSD: mutex.c,v 1.10 2014/02/01 21:23:10 miod Exp $	*/
 
 /*
  * Copyright (c) 2004 Artur Grabowski <art@openbsd.org>
@@ -28,8 +28,11 @@
 #include <sys/param.h>
 #include <sys/mutex.h>
 #include <sys/systm.h>
+#include <sys/lock.h>
 
 #include <machine/intr.h>
+
+#include <ddb/db_output.h>
 
 static inline int
 try_lock(struct mutex *mtx)
@@ -46,9 +49,8 @@ try_lock(struct mutex *mtx)
 		"	mb			\n"
 		"	bis	$31, 1, %1	\n"	/* v0 = 1 */
 		"	br	4f		\n"
-		"2:	bis	$31, $31, %1	\n"	/* v0 = 0 */
-		"	br	4f		\n"
 		"3:	br	1b		\n"	/* update failed */
+		"2:	bis	$31, $31, %1	\n"	/* v0 = 0 */
 		"4:				\n"
 		: "=&r" (t0), "=r" (v0), "=m" (mtx->mtx_lock)
 		: "m" (mtx->mtx_lock)
@@ -67,6 +69,9 @@ mtx_init(struct mutex *mtx, int wantipl)
 	mtx->mtx_oldipl = IPL_NONE;
 	mtx->mtx_wantipl = wantipl;
 	mtx->mtx_lock = 0;
+#ifdef MULTIPROCESSOR
+	mtx->mtx_owner = NULL;
+#endif
 }
 
 void
@@ -88,6 +93,10 @@ mtx_enter(struct mutex *mtx)
 		}
 		if (mtx->mtx_wantipl != IPL_NONE)
 			splx(s);
+
+#ifdef MULTIPROCESSOR
+		SPINLOCK_SPIN_HOOK;
+#endif
 	}
 }
 
