@@ -1,4 +1,4 @@
-/*	$OpenBSD: ni.c,v 1.3 2014/01/24 05:17:06 jsg Exp $	*/
+/*	$OpenBSD: ni.c,v 1.5 2014/02/09 12:33:44 jsg Exp $	*/
 /*
  * Copyright 2010 Advanced Micro Devices, Inc.
  *
@@ -1614,6 +1614,12 @@ static int cayman_startup(struct radeon_device *rdev)
 	}
 
 	/* Enable IRQ */
+	if (!rdev->irq.installed) {
+		r = radeon_irq_kms_init(rdev);
+		if (r)
+			return r;
+	}
+
 	r = r600_irq_init(rdev);
 	if (r) {
 		DRM_ERROR("radeon: IH init failed (%d).\n", r);
@@ -1760,10 +1766,6 @@ int cayman_init(struct radeon_device *rdev)
 	if (r)
 		return r;
 
-	r = radeon_irq_kms_init(rdev);
-	if (r)
-		return r;
-
 	ring->ring_obj = NULL;
 	r600_ring_init(rdev, ring, 1024 * 1024);
 
@@ -1832,8 +1834,7 @@ void cayman_fini(struct radeon_device *rdev)
 	radeon_fence_driver_fini(rdev);
 	radeon_bo_fini(rdev);
 	radeon_atombios_fini(rdev);
-	if (rdev->bios)
-		free(rdev->bios, M_DRM);
+	kfree(rdev->bios);
 	rdev->bios = NULL;
 }
 

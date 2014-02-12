@@ -1,4 +1,4 @@
-/*	$OpenBSD: rv770.c,v 1.3 2013/08/26 05:15:21 jsg Exp $	*/
+/*	$OpenBSD: rv770.c,v 1.5 2014/02/09 12:33:44 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -1015,6 +1015,12 @@ static int rv770_startup(struct radeon_device *rdev)
 	}
 
 	/* Enable IRQ */
+	if (!rdev->irq.installed) {
+		r = radeon_irq_kms_init(rdev);
+		if (r)
+			return r;
+	}
+
 	r = r600_irq_init(rdev);
 	if (r) {
 		DRM_ERROR("radeon: IH init failed (%d).\n", r);
@@ -1154,10 +1160,6 @@ int rv770_init(struct radeon_device *rdev)
 	if (r)
 		return r;
 
-	r = radeon_irq_kms_init(rdev);
-	if (r)
-		return r;
-
 	rdev->ring[RADEON_RING_TYPE_GFX_INDEX].ring_obj = NULL;
 	r600_ring_init(rdev, &rdev->ring[RADEON_RING_TYPE_GFX_INDEX], 1024 * 1024);
 
@@ -1204,8 +1206,7 @@ void rv770_fini(struct radeon_device *rdev)
 	radeon_agp_fini(rdev);
 	radeon_bo_fini(rdev);
 	radeon_atombios_fini(rdev);
-	if (rdev->bios)
-		free(rdev->bios, M_DRM);
+	kfree(rdev->bios);
 	rdev->bios = NULL;
 }
 

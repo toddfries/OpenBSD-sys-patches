@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_combios.c,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: radeon_combios.c,v 1.4 2014/02/10 00:17:30 jsg Exp $	*/
 /*
  * Copyright 2004 ATI Technologies Inc., Markham, Ontario
  * Copyright 2007-8 Advanced Micro Devices, Inc.
@@ -390,14 +390,14 @@ bool radeon_combios_check_hardcoded_edid(struct radeon_device *rdev)
 
 	raw = rdev->bios + edid_info;
 	size = EDID_LENGTH * (raw[0x7e] + 1);
-	edid = malloc(size, M_DRM, M_WAITOK);
+	edid = kmalloc(size, GFP_KERNEL);
 	if (edid == NULL)
 		return false;
 
 	memcpy((unsigned char *)edid, raw, size);
 
 	if (!drm_edid_is_valid(edid)) {
-		free(edid, M_DRM);
+		kfree(edid);
 		return false;
 	}
 
@@ -413,7 +413,7 @@ radeon_bios_get_hardcoded_edid(struct radeon_device *rdev)
 	struct edid *edid;
 
 	if (rdev->mode_info.bios_hardcoded_edid) {
-		edid = malloc(rdev->mode_info.bios_hardcoded_edid_size, M_DRM, M_WAITOK);
+		edid = kmalloc(rdev->mode_info.bios_hardcoded_edid_size, GFP_KERNEL);
 		if (edid) {
 			memcpy((unsigned char *)edid,
 			       (unsigned char *)rdev->mode_info.bios_hardcoded_edid,
@@ -879,8 +879,8 @@ struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 	struct radeon_encoder_primary_dac *p_dac = NULL;
 	int found = 0;
 
-	p_dac = malloc(sizeof(struct radeon_encoder_primary_dac),
-			M_DRM, M_WAITOK | M_ZERO);
+	p_dac = kzalloc(sizeof(struct radeon_encoder_primary_dac),
+			GFP_KERNEL);
 
 	if (!p_dac)
 		return NULL;
@@ -898,16 +898,22 @@ struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 			dac = RBIOS8(dac_info + 0x3) & 0xf;
 			p_dac->ps2_pdac_adj = (bg << 8) | (dac);
 		}
-		/* if the values are all zeros, use the table */
-		if (p_dac->ps2_pdac_adj)
+		/* if the values are zeros, use the table */
+		if ((dac == 0) || (bg == 0))
+			found = 0;
+		else
 			found = 1;
 	}
 
 	/* quirks */
-	/* Radeon 9100 (R200) */
-	if ((dev->pci_device == 0x514D) &&
+	/* Radeon 7000 (RV100) */
+	if (((dev->pci_device == 0x5159) &&
 	    (dev->pci_subvendor == 0x174B) &&
-	    (dev->pci_subdevice == 0x7149)) {
+	    (dev->pci_subdevice == 0x7c28)) ||
+	/* Radeon 9100 (R200) */
+	   ((dev->pci_device == 0x514D) &&
+	    (dev->pci_subvendor == 0x174B) &&
+	    (dev->pci_subdevice == 0x7149))) {
 		/* vbios value is bad, use the default */
 		found = 0;
 	}
@@ -1024,8 +1030,7 @@ struct radeon_encoder_tv_dac *radeon_combios_get_tv_dac_info(struct
 	struct radeon_encoder_tv_dac *tv_dac = NULL;
 	int found = 0;
 
-	tv_dac = malloc(sizeof(struct radeon_encoder_tv_dac),
-	    M_DRM, M_WAITOK | M_ZERO);
+	tv_dac = kzalloc(sizeof(struct radeon_encoder_tv_dac), GFP_KERNEL);
 	if (!tv_dac)
 		return NULL;
 
@@ -1113,7 +1118,7 @@ static struct radeon_encoder_lvds *radeon_legacy_get_lvds_info_from_regs(struct
 	uint32_t ppll_div_sel, ppll_val;
 	uint32_t lvds_ss_gen_cntl = RREG32(RADEON_LVDS_SS_GEN_CNTL);
 
-	lvds = malloc(sizeof(struct radeon_encoder_lvds), M_DRM, M_WAITOK | M_ZERO);
+	lvds = kzalloc(sizeof(struct radeon_encoder_lvds), GFP_KERNEL);
 
 	if (!lvds)
 		return NULL;
@@ -1188,8 +1193,7 @@ struct radeon_encoder_lvds *radeon_combios_get_lvds_info(struct radeon_encoder
 	lcd_info = combios_get_table_offset(dev, COMBIOS_LCD_INFO_TABLE);
 
 	if (lcd_info) {
-		lvds = malloc(sizeof(struct radeon_encoder_lvds),
-		    M_DRM, M_WAITOK | M_ZERO);
+		lvds = kzalloc(sizeof(struct radeon_encoder_lvds), GFP_KERNEL);
 
 		if (!lvds)
 			return NULL;
@@ -2647,16 +2651,13 @@ void radeon_combios_get_power_modes(struct radeon_device *rdev)
 	rdev->pm.default_power_state_index = -1;
 
 	/* allocate 2 power states */
-	rdev->pm.power_state = malloc(sizeof(struct radeon_power_state) * 2,
-	    M_DRM, M_WAITOK | M_ZERO);
+	rdev->pm.power_state = kzalloc(sizeof(struct radeon_power_state) * 2, GFP_KERNEL);
 	if (rdev->pm.power_state) {
 		/* allocate 1 clock mode per state */
 		rdev->pm.power_state[0].clock_info =
-			malloc(sizeof(struct radeon_pm_clock_info) * 1,
-			    M_DRM, M_WAITOK | M_ZERO);
+			kzalloc(sizeof(struct radeon_pm_clock_info) * 1, GFP_KERNEL);
 		rdev->pm.power_state[1].clock_info =
-			malloc(sizeof(struct radeon_pm_clock_info) * 1,
-			    M_DRM, M_WAITOK | M_ZERO);
+			kzalloc(sizeof(struct radeon_pm_clock_info) * 1, GFP_KERNEL);
 		if (!rdev->pm.power_state[0].clock_info ||
 		    !rdev->pm.power_state[1].clock_info)
 			goto pm_failed;

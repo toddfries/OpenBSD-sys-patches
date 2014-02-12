@@ -1,4 +1,4 @@
-/*	$OpenBSD: r600.c,v 1.6 2013/10/30 02:11:33 dlg Exp $	*/
+/*	$OpenBSD: r600.c,v 1.8 2014/02/09 12:33:44 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -2814,6 +2814,12 @@ static int r600_startup(struct radeon_device *rdev)
 	}
 
 	/* Enable IRQ */
+	if (!rdev->irq.installed) {
+		r = radeon_irq_kms_init(rdev);
+		if (r)
+			return r;
+	}
+
 	r = r600_irq_init(rdev);
 	if (r) {
 		DRM_ERROR("radeon: IH init failed (%d).\n", r);
@@ -2968,10 +2974,6 @@ int r600_init(struct radeon_device *rdev)
 	if (r)
 		return r;
 
-	r = radeon_irq_kms_init(rdev);
-	if (r)
-		return r;
-
 	rdev->ring[RADEON_RING_TYPE_GFX_INDEX].ring_obj = NULL;
 	r600_ring_init(rdev, &rdev->ring[RADEON_RING_TYPE_GFX_INDEX], 1024 * 1024);
 
@@ -3019,8 +3021,7 @@ void r600_fini(struct radeon_device *rdev)
 	radeon_fence_driver_fini(rdev);
 	radeon_bo_fini(rdev);
 	radeon_atombios_fini(rdev);
-	if (rdev->bios)
-		free(rdev->bios, M_DRM);
+	kfree(rdev->bios);
 	rdev->bios = NULL;
 }
 

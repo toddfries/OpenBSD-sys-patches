@@ -1,4 +1,4 @@
-/*	$OpenBSD: usb_subr.c,v 1.96 2014/01/15 11:10:40 mpi Exp $ */
+/*	$OpenBSD: usb_subr.c,v 1.98 2014/02/09 13:21:48 mpi Exp $ */
 /*	$NetBSD: usb_subr.c,v 1.103 2003/01/10 11:19:13 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usb_subr.c,v 1.18 1999/11/17 22:33:47 n_hibma Exp $	*/
 
@@ -604,9 +604,6 @@ usbd_set_config_no(struct usbd_device *dev, int no, int msg)
 	usb_config_descriptor_t cd;
 	usbd_status err;
 
-	if (no == USB_UNCONFIG_NO)
-		return (usbd_set_config_index(dev, USB_UNCONFIG_INDEX, msg));
-
 	DPRINTFN(5,("usbd_set_config_no: %d\n", no));
 	/* Figure out what config index to use. */
 	for (index = 0; index < dev->ddesc.bNumConfigurations; index++) {
@@ -1165,7 +1162,7 @@ usbd_new_device(struct device *parent, struct usbd_bus *bus, int depth,
 	USETW(dev->def_ep_desc.wMaxPacketSize, dd->bMaxPacketSize);
 
 	/* Re-establish the default pipe with the new max packet size. */
-	usbd_abort_pipe(dev->default_pipe);
+	usbd_close_pipe(dev->default_pipe);
 	err = usbd_setup_pipe(dev, 0, &dev->def_ep, USBD_DEFAULT_INTERVAL,
 	    &dev->default_pipe);
 	if (err) {
@@ -1197,7 +1194,7 @@ usbd_new_device(struct device *parent, struct usbd_bus *bus, int depth,
 	bus->devices[addr] = dev;
 
 	/* Re-establish the default pipe with the new address. */
-	usbd_abort_pipe(dev->default_pipe);
+	usbd_close_pipe(dev->default_pipe);
 	err = usbd_setup_pipe(dev, 0, &dev->def_ep, USBD_DEFAULT_INTERVAL,
 	    &dev->default_pipe);
 	if (err) {

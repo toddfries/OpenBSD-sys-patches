@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon.h,v 1.5 2014/01/23 03:15:09 kettenis Exp $	*/
+/*	$OpenBSD: radeon.h,v 1.7 2014/02/10 01:59:48 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -392,6 +392,7 @@ struct radeon_sa_manager {
 	uint64_t		gpu_addr;
 	void			*cpu_ptr;
 	uint32_t		domain;
+	uint32_t		align;
 };
 
 struct radeon_sa_bo;
@@ -1426,7 +1427,7 @@ struct si_asic {
 	unsigned sc_earlyz_tile_fifo_size;
 
 	unsigned num_tile_pipes;
-	unsigned num_backends_per_se;
+	unsigned backend_enable_mask;
 	unsigned backend_disable_mask_per_asic;
 	unsigned backend_map;
 	unsigned num_texture_channel_caches;

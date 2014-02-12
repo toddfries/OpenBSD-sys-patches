@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_gart.c,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: radeon_gart.c,v 1.4 2014/02/09 23:57:04 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -352,15 +352,13 @@ int radeon_gart_init(struct radeon_device *rdev)
 		 rdev->gart.num_cpu_pages, rdev->gart.num_gpu_pages);
 #endif
 	/* Allocate pages table */
-	rdev->gart.pages = malloc(sizeof(void *) * rdev->gart.num_cpu_pages,
-	    M_DRM, M_ZERO | M_WAITOK);
+	rdev->gart.pages = vzalloc(sizeof(void *) * rdev->gart.num_cpu_pages);
 	if (rdev->gart.pages == NULL) {
 		radeon_gart_fini(rdev);
 		return -ENOMEM;
 	}
-	rdev->gart.pages_addr = malloc(sizeof(bus_addr_t) *
-					rdev->gart.num_cpu_pages,
-					M_DRM, M_ZERO | M_WAITOK);
+	rdev->gart.pages_addr = vzalloc(sizeof(bus_addr_t) *
+				        rdev->gart.num_cpu_pages);
 	if (rdev->gart.pages_addr == NULL) {
 		radeon_gart_fini(rdev);
 		return -ENOMEM;
@@ -386,10 +384,8 @@ void radeon_gart_fini(struct radeon_device *rdev)
 		radeon_gart_unbind(rdev, 0, rdev->gart.num_cpu_pages);
 	}
 	rdev->gart.ready = false;
-	if (rdev->gart.pages)
-		free(rdev->gart.pages, M_DRM);
-	if (rdev->gart.pages_addr)
-		free(rdev->gart.pages_addr, M_DRM);
+	vfree(rdev->gart.pages);
+	vfree(rdev->gart.pages_addr);
 	rdev->gart.pages = NULL;
 	rdev->gart.pages_addr = NULL;
 
@@ -468,6 +464,7 @@ int radeon_vm_manager_init(struct radeon_device *rdev)
 		size *= 2;
 		r = radeon_sa_bo_manager_init(rdev, &rdev->vm_manager.sa_manager,
 					      RADEON_GPU_PAGE_ALIGN(size),
+					      RADEON_GPU_PAGE_SIZE,
 					      RADEON_GEM_DOMAIN_VRAM);
 		if (r) {
 			dev_err(rdev->dev, "failed to allocate vm bo (%dKB)\n",
@@ -530,7 +527,7 @@ static void radeon_vm_free_pt(struct radeon_device *rdev,
 	for (i = 0; i < radeon_vm_num_pdes(rdev); i++)
 		radeon_sa_bo_free(rdev, &vm->page_tables[i], vm->fence);
 
-	free(vm->page_tables, M_DRM);
+	kfree(vm->page_tables);
 }
 
 /**
@@ -642,7 +639,7 @@ retry:
 	memset(pd_addr, 0, pd_size);
 
 	pts_size = radeon_vm_num_pdes(rdev) * sizeof(struct radeon_sa_bo *);
-	vm->page_tables = malloc(pts_size, M_DRM, M_WAITOK | M_ZERO);
+	vm->page_tables = kzalloc(pts_size, GFP_KERNEL);
 
 	if (vm->page_tables == NULL) {
 		DRM_ERROR("Cannot allocate memory for page table array\n");
@@ -790,7 +787,7 @@ struct radeon_bo_va *radeon_vm_bo_add(struct radeon_device *rdev,
 {
 	struct radeon_bo_va *bo_va;
 
-	bo_va = malloc(sizeof(struct radeon_bo_va), M_DRM, M_WAITOK | M_ZERO);
+	bo_va = kzalloc(sizeof(struct radeon_bo_va), GFP_KERNEL);
 	if (bo_va == NULL) {
 		return NULL;
 	}
@@ -1210,17 +1207,19 @@ int radeon_vm_bo_update_pte(struct radeon_device *rdev,
 int radeon_vm_bo_rmv(struct radeon_device *rdev,
 		     struct radeon_bo_va *bo_va)
 {
-	int r;
+	int r = 0;
 
 	rw_enter_write(&rdev->vm_manager.lock);
 	rw_enter_write(&bo_va->vm->rwlock);
-	r = radeon_vm_bo_update_pte(rdev, bo_va->vm, bo_va->bo, NULL);
+	if (bo_va->soffset) {
+		r = radeon_vm_bo_update_pte(rdev, bo_va->vm, bo_va->bo, NULL);
+	}
 	rw_exit_write(&rdev->vm_manager.lock);
 	list_del(&bo_va->vm_list);
 	rw_exit_write(&bo_va->vm->rwlock);
 	list_del(&bo_va->bo_list);
 
-	free(bo_va, M_DRM);
+	kfree(bo_va);
 	return r;
 }
 
@@ -1288,7 +1287,7 @@ void radeon_vm_fini(struct radeon_device *rdev, struct radeon_vm *vm)
 		if (!r) {
 			list_del_init(&bo_va->bo_list);
 			radeon_bo_unreserve(bo_va->bo);
-			free(bo_va, M_DRM);
+			kfree(bo_va);
 		}
 	}
 	radeon_fence_unref(&vm->fence);

@@ -1,4 +1,4 @@
-/*	$OpenBSD: r420.c,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: r420.c,v 1.3 2014/02/09 12:33:44 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -266,6 +266,12 @@ static int r420_startup(struct radeon_device *rdev)
 	}
 
 	/* Enable IRQ */
+	if (!rdev->irq.installed) {
+		r = radeon_irq_kms_init(rdev);
+		if (r)
+			return r;
+	}
+
 	r100_irq_set(rdev);
 	rdev->config.r300.hdp_cntl = RREG32(RADEON_HOST_PATH_CNTL);
 	/* 1M ring buffer */
@@ -353,8 +359,7 @@ void r420_fini(struct radeon_device *rdev)
 	} else {
 		radeon_combios_fini(rdev);
 	}
-	if (rdev->bios)
-		free(rdev->bios, M_DRM);
+	kfree(rdev->bios);
 	rdev->bios = NULL;
 }
 
@@ -410,10 +415,6 @@ int r420_init(struct radeon_device *rdev)
 	r420_debugfs(rdev);
 	/* Fence driver */
 	r = radeon_fence_driver_init(rdev);
-	if (r) {
-		return r;
-	}
-	r = radeon_irq_kms_init(rdev);
 	if (r) {
 		return r;
 	}

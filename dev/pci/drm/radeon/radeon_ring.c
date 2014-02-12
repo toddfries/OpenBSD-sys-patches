@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_ring.c,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: radeon_ring.c,v 1.5 2014/02/10 01:01:23 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -206,6 +206,7 @@ int radeon_ib_pool_init(struct radeon_device *rdev)
 	}
 	r = radeon_sa_bo_manager_init(rdev, &rdev->ring_tmp_bo,
 				      RADEON_IB_POOL_SIZE*64*1024,
+				      RADEON_GPU_PAGE_SIZE,
 				      RADEON_GEM_DOMAIN_GTT);
 	if (r) {
 		return r;
@@ -386,6 +387,13 @@ int radeon_ring_alloc(struct radeon_device *rdev, struct radeon_ring *ring, unsi
 		return -ENOMEM;
 	/* Align requested size with padding so unlock_commit can
 	 * pad safely */
+	radeon_ring_free_size(rdev, ring);
+	if (ring->ring_free_dw == (ring->ring_size / 4)) {
+		/* This is an empty ring update lockup info to avoid
+		 * false positive.
+		 */
+		radeon_ring_lockup_update(ring);
+	}
 	ndw = (ndw + ring->align_mask) & ~ring->align_mask;
 	while (ndw > (ring->ring_free_dw - 1)) {
 		radeon_ring_free_size(rdev, ring);
@@ -617,7 +625,7 @@ unsigned radeon_ring_backup(struct radeon_device *rdev, struct radeon_ring *ring
 	}
 
 	/* and then save the content of the ring */
-	*data = malloc(size * sizeof(uint32_t), M_DRM, M_WAITOK);
+	*data = kmalloc_array(size, sizeof(uint32_t), GFP_KERNEL);
 	if (!*data) {
 		rw_exit_write(&rdev->ring_lock);
 		return 0;
@@ -659,7 +667,7 @@ int radeon_ring_restore(struct radeon_device *rdev, struct radeon_ring *ring,
 	}
 
 	radeon_ring_unlock_commit(rdev, ring);
-	free(data, M_DRM);
+	kfree(data);
 	return 0;
 }
 
@@ -799,9 +807,11 @@ static int radeon_debugfs_ring_info(struct seq_file *m, void *data)
 	 * packet that is the root issue
 	 */
 	i = (ring->rptr + ring->ptr_mask + 1 - 32) & ring->ptr_mask;
-	for (j = 0; j <= (count + 32); j++) {
-		seq_printf(m, "r[%5d]=0x%08x\n", i, ring->ring[i]);
-		i = (i + 1) & ring->ptr_mask;
+	if (ring->ready) {
+		for (j = 0; j <= (count + 32); j++) {
+			seq_printf(m, "r[%5d]=0x%08x\n", i, ring->ring[i]);
+			i = (i + 1) & ring->ptr_mask;
+		}
 	}
 	return 0;
 }

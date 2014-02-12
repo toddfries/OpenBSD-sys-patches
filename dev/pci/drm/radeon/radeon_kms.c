@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_kms.c,v 1.19 2014/01/23 03:15:09 kettenis Exp $	*/
+/*	$OpenBSD: radeon_kms.c,v 1.22 2014/02/10 01:59:48 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -983,6 +983,16 @@ int radeon_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 		else
 			return -EINVAL;
 		break;
+	case RADEON_INFO_SI_CP_DMA_COMPUTE:
+		value = 1;
+		break;
+	case RADEON_INFO_SI_BACKEND_ENABLED_MASK:
+		if (rdev->family >= CHIP_TAHITI) {
+			value = rdev->config.si.backend_enable_mask;
+		} else {
+			DRM_DEBUG_KMS("BACKEND_ENABLED_MASK is si+ only!\n");
+		}
+		break;
 	default:
 		DRM_DEBUG_KMS("Invalid request %d\n", info->request);
 		return -EINVAL;
@@ -1052,7 +1062,7 @@ int radeon_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
 		struct radeon_bo_va *bo_va;
 		int r;
 
-		fpriv = malloc(sizeof(*fpriv), M_DRM, M_WAITOK | M_ZERO);
+		fpriv = kzalloc(sizeof(*fpriv), GFP_KERNEL);
 		if (unlikely(!fpriv)) {
 			return -ENOMEM;
 		}
@@ -1068,7 +1078,7 @@ int radeon_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)
 					  RADEON_VM_PAGE_SNOOPED);
 		if (r) {
 			radeon_vm_fini(rdev, &fpriv->vm);
-			free(fpriv, M_DRM);
+			kfree(fpriv);
 			return r;
 		}
 
@@ -1106,7 +1116,7 @@ void radeon_driver_postclose_kms(struct drm_device *dev,
 		}
 
 		radeon_vm_fini(rdev, &fpriv->vm);
-		free(fpriv, M_DRM);
+		kfree(fpriv);
 		file_priv->driver_priv = NULL;
 	}
 }

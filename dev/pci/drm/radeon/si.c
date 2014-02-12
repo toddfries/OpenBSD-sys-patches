@@ -1,4 +1,4 @@
-/*	$OpenBSD: si.c,v 1.8 2014/01/24 05:52:01 jsg Exp $	*/
+/*	$OpenBSD: si.c,v 1.13 2014/02/10 01:59:48 jsg Exp $	*/
 /*
  * Copyright 2011 Advanced Micro Devices, Inc.
  *
@@ -1460,7 +1460,7 @@ static void si_setup_spi(struct radeon_device *rdev,
 }
 
 static u32 si_get_rb_disabled(struct radeon_device *rdev,
-			      u32 max_rb_num, u32 se_num,
+			      u32 max_rb_num_per_se,
 			      u32 sh_per_se)
 {
 	u32 data, mask;
@@ -1474,14 +1474,14 @@ static u32 si_get_rb_disabled(struct radeon_device *rdev,
 
 	data >>= BACKEND_DISABLE_SHIFT;
 
-	mask = si_create_bitmask(max_rb_num / se_num / sh_per_se);
+	mask = si_create_bitmask(max_rb_num_per_se / sh_per_se);
 
 	return data & mask;
 }
 
 static void si_setup_rb(struct radeon_device *rdev,
 			u32 se_num, u32 sh_per_se,
-			u32 max_rb_num)
+			u32 max_rb_num_per_se)
 {
 	int i, j;
 	u32 data, mask;
@@ -1491,18 +1491,20 @@ static void si_setup_rb(struct radeon_device *rdev,
 	for (i = 0; i < se_num; i++) {
 		for (j = 0; j < sh_per_se; j++) {
 			si_select_se_sh(rdev, i, j);
-			data = si_get_rb_disabled(rdev, max_rb_num, se_num, sh_per_se);
+			data = si_get_rb_disabled(rdev, max_rb_num_per_se, sh_per_se);
 			disabled_rbs |= data << ((i * sh_per_se + j) * TAHITI_RB_BITMAP_WIDTH_PER_SH);
 		}
 	}
 	si_select_se_sh(rdev, 0xffffffff, 0xffffffff);
 
 	mask = 1;
-	for (i = 0; i < max_rb_num; i++) {
+	for (i = 0; i < max_rb_num_per_se * se_num; i++) {
 		if (!(disabled_rbs & mask))
 			enabled_rbs |= mask;
 		mask <<= 1;
 	}
+
+	rdev->config.si.backend_enable_mask = enabled_rbs;
 
 	for (i = 0; i < se_num; i++) {
 		si_select_se_sh(rdev, i, 0xffffffff);
@@ -2634,13 +2636,64 @@ static int si_vm_packet3_ce_check(struct radeon_device *rdev,
 	return 0;
 }
 
+static int si_vm_packet3_cp_dma_check(u32 *ib, u32 idx)
+{
+	u32 start_reg, reg, i;
+	u32 command = ib[idx + 4];
+	u32 info = ib[idx + 1];
+	u32 idx_value = ib[idx];
+	if (command & PACKET3_CP_DMA_CMD_SAS) {
+		/* src address space is register */
+		if (((info & 0x60000000) >> 29) == 0) {
+			start_reg = idx_value << 2;
+			if (command & PACKET3_CP_DMA_CMD_SAIC) {
+				reg = start_reg;
+				if (!si_vm_reg_valid(reg)) {
+					DRM_ERROR("CP DMA Bad SRC register\n");
+					return -EINVAL;
+				}
+			} else {
+				for (i = 0; i < (command & 0x1fffff); i++) {
+					reg = start_reg + (4 * i);
+					if (!si_vm_reg_valid(reg)) {
+						DRM_ERROR("CP DMA Bad SRC register\n");
+						return -EINVAL;
+					}
+				}
+			}
+		}
+	}
+	if (command & PACKET3_CP_DMA_CMD_DAS) {
+		/* dst address space is register */
+		if (((info & 0x00300000) >> 20) == 0) {
+			start_reg = ib[idx + 2];
+			if (command & PACKET3_CP_DMA_CMD_DAIC) {
+				reg = start_reg;
+				if (!si_vm_reg_valid(reg)) {
+					DRM_ERROR("CP DMA Bad DST register\n");
+					return -EINVAL;
+				}
+			} else {
+				for (i = 0; i < (command & 0x1fffff); i++) {
+					reg = start_reg + (4 * i);
+				if (!si_vm_reg_valid(reg)) {
+						DRM_ERROR("CP DMA Bad DST register\n");
+						return -EINVAL;
+					}
+				}
+			}
+		}
+	}
+	return 0;
+}
+
 static int si_vm_packet3_gfx_check(struct radeon_device *rdev,
 				   u32 *ib, struct radeon_cs_packet *pkt)
 {
+	int r;
 	u32 idx = pkt->idx + 1;
 	u32 idx_value = ib[idx];
 	u32 start_reg, end_reg, reg, i;
-	u32 command, info;
 
 	switch (pkt->opcode) {
 	case PACKET3_NOP:
@@ -2741,50 +2794,9 @@ static int si_vm_packet3_gfx_check(struct radeon_device *rdev,
 		}
 		break;
 	case PACKET3_CP_DMA:
-		command = ib[idx + 4];
-		info = ib[idx + 1];
-		if (command & PACKET3_CP_DMA_CMD_SAS) {
-			/* src address space is register */
-			if (((info & 0x60000000) >> 29) == 0) {
-				start_reg = idx_value << 2;
-				if (command & PACKET3_CP_DMA_CMD_SAIC) {
-					reg = start_reg;
-					if (!si_vm_reg_valid(reg)) {
-						DRM_ERROR("CP DMA Bad SRC register\n");
-						return -EINVAL;
-					}
-				} else {
-					for (i = 0; i < (command & 0x1fffff); i++) {
-						reg = start_reg + (4 * i);
-						if (!si_vm_reg_valid(reg)) {
-							DRM_ERROR("CP DMA Bad SRC register\n");
-							return -EINVAL;
-						}
-					}
-				}
-			}
-		}
-		if (command & PACKET3_CP_DMA_CMD_DAS) {
-			/* dst address space is register */
-			if (((info & 0x00300000) >> 20) == 0) {
-				start_reg = ib[idx + 2];
-				if (command & PACKET3_CP_DMA_CMD_DAIC) {
-					reg = start_reg;
-					if (!si_vm_reg_valid(reg)) {
-						DRM_ERROR("CP DMA Bad DST register\n");
-						return -EINVAL;
-					}
-				} else {
-					for (i = 0; i < (command & 0x1fffff); i++) {
-						reg = start_reg + (4 * i);
-						if (!si_vm_reg_valid(reg)) {
-							DRM_ERROR("CP DMA Bad DST register\n");
-							return -EINVAL;
-						}
-					}
-				}
-			}
-		}
+		r = si_vm_packet3_cp_dma_check(ib, idx);
+		if (r)
+			return r;
 		break;
 	default:
 		DRM_ERROR("Invalid GFX packet3: 0x%x\n", pkt->opcode);
@@ -2796,6 +2808,7 @@ static int si_vm_packet3_gfx_check(struct radeon_device *rdev,
 static int si_vm_packet3_compute_check(struct radeon_device *rdev,
 				       u32 *ib, struct radeon_cs_packet *pkt)
 {
+	int r;
 	u32 idx = pkt->idx + 1;
 	u32 idx_value = ib[idx];
 	u32 start_reg, reg, i;
@@ -2867,6 +2880,11 @@ static int si_vm_packet3_compute_check(struct radeon_device *rdev,
 			if (!si_vm_reg_valid(reg))
 				return -EINVAL;
 		}
+		break;
+	case PACKET3_CP_DMA:
+		r = si_vm_packet3_cp_dma_check(ib, idx);
+		if (r)
+			return r;
 		break;
 	default:
 		DRM_ERROR("Invalid Compute packet3: 0x%x\n", pkt->opcode);
@@ -4170,6 +4188,12 @@ static int si_startup(struct radeon_device *rdev)
 	}
 
 	/* Enable IRQ */
+	if (!rdev->irq.installed) {
+		r = radeon_irq_kms_init(rdev);
+		if (r)
+			return r;
+	}
+
 	r = si_irq_init(rdev);
 	if (r) {
 		DRM_ERROR("radeon: IH init failed (%d).\n", r);
@@ -4330,10 +4354,6 @@ int si_init(struct radeon_device *rdev)
 	if (r)
 		return r;
 
-	r = radeon_irq_kms_init(rdev);
-	if (r)
-		return r;
-
 	ring = &rdev->ring[RADEON_RING_TYPE_GFX_INDEX];
 	ring->ring_obj = NULL;
 	r600_ring_init(rdev, ring, 1024 * 1024);
@@ -4408,8 +4428,7 @@ void si_fini(struct radeon_device *rdev)
 	radeon_fence_driver_fini(rdev);
 	radeon_bo_fini(rdev);
 	radeon_atombios_fini(rdev);
-	if (rdev->bios)
-		free(rdev->bios, M_DRM);
+	kfree(rdev->bios);
 	rdev->bios = NULL;
 }
 

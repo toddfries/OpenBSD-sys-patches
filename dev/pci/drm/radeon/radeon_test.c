@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_test.c,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: radeon_test.c,v 1.3 2014/02/10 01:08:34 jsg Exp $	*/
 /*
  * Copyright 2009 VMware, Inc.
  *
@@ -38,8 +38,8 @@ static void radeon_do_test_moves(struct radeon_device *rdev, int flag)
 	struct radeon_bo **gtt_obj = NULL;
 	struct radeon_fence *fence = NULL;
 	uint64_t gtt_addr, vram_addr;
-	unsigned i, n, size;
-	int r, ring;
+	unsigned n, size;
+	int i, r, ring;
 
 	switch (flag) {
 	case RADEON_TEST_COPY_DMA:
@@ -67,7 +67,7 @@ static void radeon_do_test_moves(struct radeon_device *rdev, int flag)
 		n -= rdev->ih.ring_size;
 	n /= size;
 
-	gtt_obj = malloc(n * sizeof(*gtt_obj), M_DRM, M_WAITOK | M_ZERO);
+	gtt_obj = kzalloc(n * sizeof(*gtt_obj), GFP_KERNEL);
 	if (!gtt_obj) {
 		DRM_ERROR("Failed to allocate %d pointers\n", n);
 		r = 1;
@@ -235,7 +235,7 @@ out_cleanup:
 				radeon_bo_unref(&gtt_obj[i]);
 			}
 		}
-		free(gtt_obj, M_DRM);
+		kfree(gtt_obj);
 	}
 	if (fence) {
 		radeon_fence_unref(&fence);

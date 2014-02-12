@@ -1,4 +1,4 @@
-/*	$OpenBSD: r100.c,v 1.3 2013/10/30 02:11:33 dlg Exp $	*/
+/*	$OpenBSD: r100.c,v 1.6 2014/02/10 01:01:23 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -2133,7 +2133,7 @@ int r100_cs_parse(struct radeon_cs_parser *p)
 	struct r100_cs_track *track;
 	int r;
 
-	track = malloc(sizeof(*track), M_DRM, M_WAITOK | M_ZERO);
+	track = kzalloc(sizeof(*track), GFP_KERNEL);
 	if (!track)
 		return -ENOMEM;
 	r100_cs_track_clear(p->rdev, track);
@@ -3064,9 +3064,11 @@ static int r100_debugfs_cp_ring_info(struct seq_file *m, void *data)
 	seq_printf(m, "CP_RB_RPTR 0x%08x\n", rdp);
 	seq_printf(m, "%u free dwords in ring\n", ring->ring_free_dw);
 	seq_printf(m, "%u dwords in ring\n", count);
-	for (j = 0; j <= count; j++) {
-		i = (rdp + j) & ring->ptr_mask;
-		seq_printf(m, "r[%04d]=0x%08x\n", i, ring->ring[i]);
+	if (ring->ready) {
+		for (j = 0; j <= count; j++) {
+			i = (rdp + j) & ring->ptr_mask;
+			seq_printf(m, "r[%04d]=0x%08x\n", i, ring->ring[i]);
+		}
 	}
 	return 0;
 }
@@ -3999,6 +4001,12 @@ static int r100_startup(struct radeon_device *rdev)
 	}
 
 	/* Enable IRQ */
+	if (!rdev->irq.installed) {
+		r = radeon_irq_kms_init(rdev);
+		if (r)
+			return r;
+	}
+
 	r100_irq_set(rdev);
 	rdev->config.r100.hdp_cntl = RREG32(RADEON_HOST_PATH_CNTL);
 	/* 1M ring buffer */
@@ -4070,8 +4078,7 @@ void r100_fini(struct radeon_device *rdev)
 	radeon_fence_driver_fini(rdev);
 	radeon_bo_fini(rdev);
 	radeon_atombios_fini(rdev);
-	if (rdev->bios)
-		free(rdev->bios, M_DRM);
+	kfree(rdev->bios);
 	rdev->bios = NULL;
 }
 
@@ -4153,9 +4160,6 @@ int r100_init(struct radeon_device *rdev)
 	r100_mc_init(rdev);
 	/* Fence driver */
 	r = radeon_fence_driver_init(rdev);
-	if (r)
-		return r;
-	r = radeon_irq_kms_init(rdev);
 	if (r)
 		return r;
 	/* Memory manager */

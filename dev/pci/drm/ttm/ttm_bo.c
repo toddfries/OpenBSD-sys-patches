@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttm_bo.c,v 1.5 2013/12/08 07:54:06 jsg Exp $	*/
+/*	$OpenBSD: ttm_bo.c,v 1.7 2014/02/10 02:35:09 jsg Exp $	*/
 /**************************************************************************
  *
  * Copyright (c) 2006-2009 VMware, Inc., Palo Alto, CA., USA
@@ -154,7 +154,7 @@ static void ttm_bo_release_list(struct ttm_buffer_object *bo)
 	if (bo->destroy)
 		bo->destroy(bo);
 	else {
-		free(bo, M_DRM);
+		kfree(bo);
 	}
 	ttm_mem_global_free(bdev->glob->mem_glob, acc_size);
 }
@@ -1111,24 +1111,32 @@ out_unlock:
 	return ret;
 }
 
-static int ttm_bo_mem_compat(struct ttm_placement *placement,
-			     struct ttm_mem_reg *mem)
+static bool ttm_bo_mem_compat(struct ttm_placement *placement,
+			      struct ttm_mem_reg *mem,
+			      uint32_t *new_flags)
 {
 	int i;
 
 	if (mem->mm_node && placement->lpfn != 0 &&
 	    (mem->start < placement->fpfn ||
 	     mem->start + mem->num_pages > placement->lpfn))
-		return -1;
+		return false;
 
 	for (i = 0; i < placement->num_placement; i++) {
-		if ((placement->placement[i] & mem->placement &
-			TTM_PL_MASK_CACHING) &&
-			(placement->placement[i] & mem->placement &
-			TTM_PL_MASK_MEM))
-			return i;
+		*new_flags = placement->placement[i];
+		if ((*new_flags & mem->placement & TTM_PL_MASK_CACHING) &&
+		    (*new_flags & mem->placement & TTM_PL_MASK_MEM))
+			return true;
 	}
-	return -1;
+
+	for (i = 0; i < placement->num_busy_placement; i++) {
+		*new_flags = placement->busy_placement[i];
+		if ((*new_flags & mem->placement & TTM_PL_MASK_CACHING) &&
+		    (*new_flags & mem->placement & TTM_PL_MASK_MEM))
+			return true;
+	}
+
+	return false;
 }
 
 int ttm_bo_validate(struct ttm_buffer_object *bo,
@@ -1137,6 +1145,7 @@ int ttm_bo_validate(struct ttm_buffer_object *bo,
 			bool no_wait_gpu)
 {
 	int ret;
+	uint32_t new_flags;
 
 	BUG_ON(!ttm_bo_is_reserved(bo));
 	/* Check that range is valid */
@@ -1147,8 +1156,7 @@ int ttm_bo_validate(struct ttm_buffer_object *bo,
 	/*
 	 * Check whether we need to move buffer.
 	 */
-	ret = ttm_bo_mem_compat(placement, &bo->mem);
-	if (ret < 0) {
+	if (!ttm_bo_mem_compat(placement, &bo->mem, &new_flags)) {
 		ret = ttm_bo_move_buffer(bo, placement, interruptible,
 					 no_wait_gpu);
 		if (ret)
@@ -1158,7 +1166,7 @@ int ttm_bo_validate(struct ttm_buffer_object *bo,
 		 * Use the access and other non-mapping-related flag bits from
 		 * the compatible memory placement flags to the active flags
 		 */
-		ttm_flag_masked(&bo->mem.placement, placement->placement[ret],
+		ttm_flag_masked(&bo->mem.placement, new_flags,
 				~TTM_PL_MASK_MEMTYPE);
 	}
 	/*
@@ -1204,7 +1212,7 @@ int ttm_bo_init(struct ttm_bo_device *bdev,
 		if (destroy)
 			(*destroy)(bo);
 		else
-			free(bo, M_DRM);
+			kfree(bo);
 		return -ENOMEM;
 	}
 
@@ -1214,7 +1222,7 @@ int ttm_bo_init(struct ttm_bo_device *bdev,
 		if (destroy)
 			(*destroy)(bo);
 		else
-			free(bo, M_DRM);
+			kfree(bo);
 		ttm_mem_global_free(mem_glob, acc_size);
 		return -EINVAL;
 	}
@@ -1323,7 +1331,7 @@ int ttm_bo_create(struct ttm_bo_device *bdev,
 	size_t acc_size;
 	int ret;
 
-	bo = malloc(sizeof(*bo), M_DRM, M_WAITOK | M_ZERO);
+	bo = kzalloc(sizeof(*bo), GFP_KERNEL);
 	if (unlikely(bo == NULL))
 		return -ENOMEM;
 
@@ -1455,7 +1463,7 @@ static void ttm_bo_global_kobj_release(struct ttm_bo_global *glob)
 
 	ttm_mem_unregister_shrink(glob->mem_glob, &glob->shrink);
 	km_free(glob->dummy_read_page, PAGE_SIZE, &kv_any, &kp_dma_zero);
-	drm_free(glob);
+	kfree(glob);
 }
 
 void ttm_bo_global_release(struct drm_global_reference *ref)
@@ -1503,7 +1511,7 @@ int ttm_bo_global_init(struct drm_global_reference *ref)
 out_no_shrink:
 	km_free(glob->dummy_read_page, PAGE_SIZE, &kv_any, &kp_dma_zero);
 out_no_drp:
-	free(glob, M_DRM);
+	kfree(glob);
 	return ret;
 }
 EXPORT_SYMBOL(ttm_bo_global_init);

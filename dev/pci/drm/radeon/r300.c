@@ -1,4 +1,4 @@
-/*	$OpenBSD: r300.c,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: r300.c,v 1.3 2014/02/09 12:33:44 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -1258,7 +1258,7 @@ int r300_cs_parse(struct radeon_cs_parser *p)
 	struct r100_cs_track *track;
 	int r;
 
-	track = malloc(sizeof(*track), M_DRM, M_WAITOK | M_ZERO);
+	track = kzalloc(sizeof(*track), GFP_KERNEL);
 	if (track == NULL)
 		return -ENOMEM;
 	r100_cs_track_clear(p->rdev, track);
@@ -1389,6 +1389,12 @@ static int r300_startup(struct radeon_device *rdev)
 	}
 
 	/* Enable IRQ */
+	if (!rdev->irq.installed) {
+		r = radeon_irq_kms_init(rdev);
+		if (r)
+			return r;
+	}
+
 	r100_irq_set(rdev);
 	rdev->config.r300.hdp_cntl = RREG32(RADEON_HOST_PATH_CNTL);
 	/* 1M ring buffer */
@@ -1466,8 +1472,7 @@ void r300_fini(struct radeon_device *rdev)
 	radeon_fence_driver_fini(rdev);
 	radeon_bo_fini(rdev);
 	radeon_atombios_fini(rdev);
-	if (rdev->bios)
-		free(rdev->bios, M_DRM);
+	kfree(rdev->bios);
 	rdev->bios = NULL;
 }
 
@@ -1522,9 +1527,6 @@ int r300_init(struct radeon_device *rdev)
 	r300_mc_init(rdev);
 	/* Fence driver */
 	r = radeon_fence_driver_init(rdev);
-	if (r)
-		return r;
-	r = radeon_irq_kms_init(rdev);
 	if (r)
 		return r;
 	/* Memory manager */

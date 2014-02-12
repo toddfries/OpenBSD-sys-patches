@@ -1,4 +1,4 @@
-/*	$OpenBSD: arc.c,v 1.99 2014/01/24 02:47:12 dlg Exp $ */
+/*	$OpenBSD: arc.c,v 1.101 2014/02/08 16:02:42 chris Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -1018,7 +1018,7 @@ arc_intr_D(void *arg)
 	char				*kva = ARC_DMA_KVA(sc->sc_requests);
 	struct arc_io_cmd		*cmd;
 	u_int32_t			reg, intrstat, obmsg, error;
-	u_int32_t ob_write_ptr, int_enable;
+	u_int32_t ob_write_ptr;
 	u_int16_t doneq_index;
 	int				ret = 0;
 	struct arc_HBD_Msgu *pmu;
@@ -1027,9 +1027,6 @@ arc_intr_D(void *arg)
 	if (!(intrstat & (ARC_RD_INTR_STAT_POSTQUEUE | 
 		ARC_RD_INTR_STAT_DOORBELL)))
 		return (ret);
-
-	int_enable = arc_read(sc, ARC_RD_INTR_ENABLE);
-	arc_write(sc, ARC_RD_INTR_ENABLE, ARC_RD_INTR_DISABLE_ALL);
 
 	if (intrstat & ARC_RD_INTR_STAT_DOORBELL) {
 		ret = 1;
@@ -1086,7 +1083,6 @@ arc_intr_D(void *arg)
 			ob_write_ptr = pmu->done_qbuffer[0].addressLow;
 		}
 	}
-	arc_write(sc, ARC_RD_INTR_ENABLE, int_enable | ARC_RD_INTR_ENABLE_ALL);
 
 	return (ret);
 }
@@ -1734,7 +1730,7 @@ arc_chipD_firmware(struct arc_softc *sc)
 		return (1);
 	}
 
-	sc->sc_req_count = letoh32(fwinfo.queue_len);
+	sc->sc_req_count = letoh32(fwinfo.queue_len) - 1;
 
 	if (arc_msg0(sc, ARC_RD_INB_MSG0_START_BGRB) != 0) {
 		printf("%s: timeout waiting to start bg rebuild\n",

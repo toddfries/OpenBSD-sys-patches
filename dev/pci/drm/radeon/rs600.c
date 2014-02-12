@@ -1,4 +1,4 @@
-/*	$OpenBSD: rs600.c,v 1.4 2013/10/30 02:11:33 dlg Exp $	*/
+/*	$OpenBSD: rs600.c,v 1.6 2014/02/09 12:33:44 jsg Exp $	*/
 /*
  * Copyright 2008 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -929,6 +929,12 @@ static int rs600_startup(struct radeon_device *rdev)
 	}
 
 	/* Enable IRQ */
+	if (!rdev->irq.installed) {
+		r = radeon_irq_kms_init(rdev);
+		if (r)
+			return r;
+	}
+
 	rs600_irq_set(rdev);
 	rdev->config.r300.hdp_cntl = RREG32(RADEON_HOST_PATH_CNTL);
 	/* 1M ring buffer */
@@ -1004,8 +1010,7 @@ void rs600_fini(struct radeon_device *rdev)
 	radeon_fence_driver_fini(rdev);
 	radeon_bo_fini(rdev);
 	radeon_atombios_fini(rdev);
-	if (rdev->bios)
-		free(rdev->bios, M_DRM);
+	kfree(rdev->bios);
 	rdev->bios = NULL;
 }
 
@@ -1052,9 +1057,6 @@ int rs600_init(struct radeon_device *rdev)
 	rs600_debugfs(rdev);
 	/* Fence driver */
 	r = radeon_fence_driver_init(rdev);
-	if (r)
-		return r;
-	r = radeon_irq_kms_init(rdev);
 	if (r)
 		return r;
 	/* Memory manager */

@@ -1,4 +1,4 @@
-/*	$OpenBSD: pmap.c,v 1.122 2013/12/29 19:09:21 brad Exp $ */
+/*	$OpenBSD: pmap.c,v 1.125 2014/02/09 11:25:58 mpi Exp $ */
 
 /*
  * Copyright (c) 2001, 2002, 2007 Dale Rahn.
@@ -1396,17 +1396,21 @@ void
 pmap_avail_setup(void)
 {
 	struct mem_region *mp;
+	int pmap_physmem;
 
 	(fw->mem_regions) (&pmap_mem, &pmap_avail);
 	pmap_cnt_avail = 0;
-	physmem = 0;
+	pmap_physmem = 0;
 
 	ndumpmem = 0;
 	for (mp = pmap_mem; mp->size !=0; mp++, ndumpmem++) {
-		physmem += atop(mp->size);
+		pmap_physmem += atop(mp->size);
 		dumpmem[ndumpmem].start = atop(mp->start);
 		dumpmem[ndumpmem].end = atop(mp->start + mp->size);
 	}
+
+	if (physmem == 0)
+		physmem = pmap_physmem;
 
 	for (mp = pmap_avail; mp->size !=0 ; mp++) {
 		if (physmaxaddr <  mp->start + mp->size)
@@ -1647,9 +1651,11 @@ pmap_bootstrap(u_int kernelstart, u_int kernelend)
 
 	msgbuf_addr = pmap_steal_avail(MSGBUFSIZE,4);
 
+#ifdef DEBUG
 	for (mp = pmap_avail; mp->size; mp++) {
 		bzero((void *)mp->start, mp->size);
 	}
+#endif
 
 #define HTABENTS_32 1024
 #define HTABENTS_64 2048
@@ -2005,13 +2011,11 @@ copyoutstr(const void *kaddr, void *udaddr, size_t len, size_t *done)
  * sync instruction cache for user virtual address.
  * The address WAS JUST MAPPED, so we have a VALID USERSPACE mapping
  */
-#define CACHELINESIZE   32		/* For now XXX*/
 void
 pmap_syncicache_user_virt(pmap_t pm, vaddr_t va)
 {
-	vaddr_t p, start;
+	vaddr_t start;
 	int oldsr;
-	int l;
 
 	if (pm != pmap_kernel()) {
 		start = ((u_int)PPC_USER_ADDR + ((u_int)va &
@@ -2023,19 +2027,8 @@ pmap_syncicache_user_virt(pmap_t pm, vaddr_t va)
 	} else {
 		start = va; /* flush mapped page */
 	}
-	p = start;
-	l = PAGE_SIZE;
-	do {
-		__asm__ __volatile__ ("dcbst 0,%0" :: "r"(p));
-		p += CACHELINESIZE;
-	} while ((l -= CACHELINESIZE) > 0);
-	p = start;
-	l = PAGE_SIZE;
-	do {
-		__asm__ __volatile__ ("icbi 0,%0" :: "r"(p));
-		p += CACHELINESIZE;
-	} while ((l -= CACHELINESIZE) > 0);
 
+	syncicache((void *)start, PAGE_SIZE);
 
 	if (pm != pmap_kernel()) {
 		pmap_popusr(oldsr);

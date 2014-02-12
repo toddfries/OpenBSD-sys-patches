@@ -1,4 +1,4 @@
-/*	$OpenBSD: radeon_sa.c,v 1.1 2013/08/12 04:11:53 jsg Exp $	*/
+/*	$OpenBSD: radeon_sa.c,v 1.4 2014/02/09 23:57:04 jsg Exp $	*/
 /*
  * Copyright 2011 Red Hat Inc.
  * All Rights Reserved.
@@ -55,7 +55,7 @@ bool	 radeon_sa_bo_next_hole(struct radeon_sa_manager *, struct radeon_fence **,
 
 int radeon_sa_bo_manager_init(struct radeon_device *rdev,
 			      struct radeon_sa_manager *sa_manager,
-			      unsigned size, u32 domain)
+			      unsigned size, u32 align, u32 domain)
 {
 	int i, r;
 
@@ -66,14 +66,15 @@ int radeon_sa_bo_manager_init(struct radeon_device *rdev,
 	sa_manager->bo = NULL;
 	sa_manager->size = size;
 	sa_manager->domain = domain;
+	sa_manager->align = align;
 	sa_manager->hole = &sa_manager->olist;
 	INIT_LIST_HEAD(&sa_manager->olist);
 	for (i = 0; i < RADEON_NUM_RINGS; ++i) {
 		INIT_LIST_HEAD(&sa_manager->flist[i]);
 	}
 
-	r = radeon_bo_create(rdev, size, RADEON_GPU_PAGE_SIZE, true,
-			     RADEON_GEM_DOMAIN_CPU, NULL, &sa_manager->bo);
+	r = radeon_bo_create(rdev, size, align, true,
+			     domain, NULL, &sa_manager->bo);
 	if (r) {
 		dev_err(rdev->dev, "(%d) failed to allocate bo for manager\n", r);
 		return r;
@@ -156,7 +157,7 @@ static void radeon_sa_bo_remove_locked(struct radeon_sa_bo *sa_bo)
 	list_del_init(&sa_bo->olist);
 	list_del_init(&sa_bo->flist);
 	radeon_fence_unref(&sa_bo->fence);
-	free(sa_bo, M_DRM);
+	kfree(sa_bo);
 }
 
 static void radeon_sa_bo_try_free(struct radeon_sa_manager *sa_manager)
@@ -329,10 +330,10 @@ int radeon_sa_bo_new(struct radeon_device *rdev,
 	unsigned tries[RADEON_NUM_RINGS];
 	int i, r, error;
 
-	BUG_ON(align > RADEON_GPU_PAGE_SIZE);
+	BUG_ON(align > sa_manager->align);
 	BUG_ON(size > sa_manager->size);
 
-	*sa_bo = malloc(sizeof(struct radeon_sa_bo), M_DRM, M_WAITOK);
+	*sa_bo = kmalloc(sizeof(struct radeon_sa_bo), GFP_KERNEL);
 	if ((*sa_bo) == NULL) {
 		return -ENOMEM;
 	}
@@ -383,7 +384,7 @@ int radeon_sa_bo_new(struct radeon_device *rdev,
 	} while (!r);
 
 	mtx_leave(&sa_manager->wq_lock);
-	free(*sa_bo, M_DRM);
+	kfree(*sa_bo);
 	*sa_bo = NULL;
 	return r;
 }
