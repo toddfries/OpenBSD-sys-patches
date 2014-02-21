@@ -1,4 +1,4 @@
-/*	$OpenBSD: qla.c,v 1.20 2014/02/11 11:41:46 jmatthew Exp $ */
+/*	$OpenBSD: qla.c,v 1.28 2014/02/20 20:20:28 kettenis Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -38,6 +38,22 @@
 #include <dev/ic/qlareg.h>
 #include <dev/ic/qlavar.h>
 
+#define QLA_DEBUG
+
+#ifdef QLA_DEBUG
+#define DPRINTF(m, f...) do { if ((qladebug & (m)) == (m)) printf(f); } \
+    while (0)
+#define QLA_D_MBOX		0x01
+#define QLA_D_INTR		0x02
+#define QLA_D_PORT		0x04
+#define QLA_D_IO		0x08
+#define QLA_D_IOCB		0x10
+int qladebug = QLA_D_PORT;
+#else
+#define DPRINTF(m, f...)
+#endif
+
+
 #ifndef ISP_NOFIRMWARE
 extern const u_int16_t isp_2100_risc_code[];
 extern const u_int16_t isp_2200_risc_code[];
@@ -54,9 +70,11 @@ void		qla_scsi_cmd(struct scsi_xfer *);
 struct qla_ccb *qla_scsi_cmd_poll(struct qla_softc *);
 int		qla_scsi_probe(struct scsi_link *);
 
-u_int16_t	qla_read(struct qla_softc *, int);
-void		qla_write(struct qla_softc *, int, u_int16_t);
+u_int16_t	qla_read(struct qla_softc *, bus_size_t);
+void		qla_write(struct qla_softc *, bus_size_t, u_int16_t);
 void		qla_host_cmd(struct qla_softc *sc, u_int16_t);
+
+u_int16_t	qla_read_queue_2100(struct qla_softc *, bus_size_t);
 
 int		qla_mbox(struct qla_softc *, int, int);
 int		qla_sns_req(struct qla_softc *, struct qla_dmamem *, int);
@@ -66,21 +84,14 @@ void		qla_write_mbox(struct qla_softc *, int, u_int16_t);
 
 void		qla_handle_intr(struct qla_softc *, u_int16_t, u_int16_t);
 void		qla_set_ints(struct qla_softc *, int);
-int		qla_read_isr(struct qla_softc *, u_int16_t *, u_int16_t *);
+int		qla_read_isr_1G(struct qla_softc *, u_int16_t *, u_int16_t *);
+int		qla_read_isr_2G(struct qla_softc *, u_int16_t *, u_int16_t *);
 void		qla_clear_isr(struct qla_softc *, u_int16_t);
 
-int		qla_queue_reg(struct qla_softc *, enum qla_qptr);
-u_int16_t	qla_read_queue_ptr(struct qla_softc *, enum qla_qptr);
-void		qla_write_queue_ptr(struct qla_softc *, enum qla_qptr,
-		    u_int16_t);
 void		qla_update(struct qla_softc *, int);
 void		qla_put_marker(struct qla_softc *, void *);
 void		qla_put_cmd(struct qla_softc *, void *, struct scsi_xfer *,
 		    struct qla_ccb *);
-#if 0
-void		qla_put_cmd_cont(struct qla_softc *, void *,
-		    struct scsi_xfer *, bus_dmamap_t, int);
-#endif
 struct qla_ccb *qla_handle_resp(struct qla_softc *, u_int16_t);
 void		qla_put_data_seg(struct qla_iocb_seg *, bus_dmamap_t, int);
 
@@ -120,6 +131,39 @@ void		qla_put_ccb(void *, void *);
 
 void		qla_dump_iocb(struct qla_softc *, void *);
 void		qla_dump_iocb_segs(struct qla_softc *, void *, int);
+
+static const struct qla_regs qla_regs_2100 = {
+	qla_read_queue_2100,
+	qla_read_isr_1G,
+	QLA_MBOX_BASE_2100 + 0x8,
+	QLA_MBOX_BASE_2100 + 0x8,
+	QLA_MBOX_BASE_2100 + 0xa,
+	QLA_MBOX_BASE_2100 + 0xa
+};
+
+static const struct qla_regs qla_regs_2200 = {
+	qla_read,
+	qla_read_isr_1G,
+	QLA_MBOX_BASE_2200 + 0x8,
+	QLA_MBOX_BASE_2200 + 0x8,
+	QLA_MBOX_BASE_2200 + 0xa,
+	QLA_MBOX_BASE_2200 + 0xa
+};
+
+static const struct qla_regs qla_regs_23XX = {
+	qla_read,
+	qla_read_isr_2G,
+	QLA_REQ_IN,
+	QLA_REQ_OUT,
+	QLA_RESP_IN,
+	QLA_RESP_OUT
+};
+
+#define qla_queue_read(_sc, _r) ((*(_sc)->sc_regs->read)((_sc), (_r)))
+#define qla_queue_write(_sc, _r, _v) qla_write((_sc), (_r), (_v))
+
+#define qla_read_isr(_sc, _isr, _info) \
+    ((*(_sc)->sc_regs->read_isr)((_sc), (_isr), (_info)))
 
 struct scsi_adapter qla_switch = {
 	qla_scsi_cmd,
@@ -211,7 +255,7 @@ qla_add_port(struct qla_softc *sc, u_int16_t loopid, u_int32_t portid,
 	    sizeof(struct qla_get_port_db), BUS_DMASYNC_PREREAD);
 	if (qla_mbox(sc, 0x00cf, 0x0001)) {
 		if (portid != 0)
-			printf("%s: get port db for %x failed: %x\n",
+			DPRINTF(QLA_D_PORT, "%s: get port db %x failed: %x\n",
 			    DEVNAME(sc), loopid, sc->sc_mbox[0]);
 		return (1);
 	}
@@ -244,7 +288,7 @@ qla_add_port(struct qla_softc *sc, u_int16_t loopid, u_int32_t portid,
 	sc->sc_targets[loopid] = port;
 	mtx_leave(&sc->sc_port_mtx);
 
-	printf("%s: %s %d; port id %06x, name %llx\n",
+	DPRINTF(QLA_D_PORT, "%s: %s %d; port id %06x, name %llx\n",
 	    DEVNAME(sc), ISSET(port->flags, QLA_PORT_FLAG_IS_TARGET) ?
 	    "target" : "non-target", loopid,
 	    (letoh16(pdb->port_id[0]) << 16) | letoh16(pdb->port_id[1]),
@@ -266,14 +310,17 @@ qla_attach(struct qla_softc *sc)
 	switch (sc->sc_isp_gen) {
 	case QLA_GEN_ISP2100:
 		sc->sc_mbox_base = QLA_MBOX_BASE_2100;
+		sc->sc_regs = &qla_regs_2100;
 		break;
 
 	case QLA_GEN_ISP2200:
 		sc->sc_mbox_base = QLA_MBOX_BASE_2200;
+		sc->sc_regs = &qla_regs_2200;
 		break;
 
 	case QLA_GEN_ISP23XX:
 		sc->sc_mbox_base = QLA_MBOX_BASE_23XX;
+		sc->sc_regs = &qla_regs_23XX;
 		break;
 
 	default:
@@ -355,8 +402,8 @@ qla_attach(struct qla_softc *sc)
 		    sc->sc_mbox[0]);
 		return (ENXIO);
 	}
-	printf("firmware v%d.%d.%d, attrs %x\n", sc->sc_mbox[1], sc->sc_mbox[2],
-	    sc->sc_mbox[3], sc->sc_mbox[6]);
+	printf("%s: firmware rev %d.%d.%d, attrs 0x%x\n", DEVNAME(sc),
+	    sc->sc_mbox[1], sc->sc_mbox[2], sc->sc_mbox[3], sc->sc_mbox[6]);
 
 	if (sc->sc_mbox[6] & QLA_FW_ATTR_EXPANDED_LUN)
 		sc->sc_expanded_lun = 1;
@@ -514,7 +561,8 @@ qla_attach(struct qla_softc *sc)
 			}
 		}
 	} else {
-		printf("%s: loop still down, giving up\n", DEVNAME(sc));
+		DPRINTF(QLA_D_PORT, "%s: loop still down, giving up\n",
+		    DEVNAME(sc));
 	}
 
 	/* we should be good to go now, attach scsibus */
@@ -573,8 +621,8 @@ qla_handle_resp(struct qla_softc *sc, u_int16_t id)
 	    QLA_DMA_MAP(sc->sc_responses), id * QLA_QUEUE_ENTRY_SIZE,
 	    QLA_QUEUE_ENTRY_SIZE, BUS_DMASYNC_POSTREAD);
 
-	/*qla_dump_iocb(sc, entry);*/
-	switch(entry[0]) {
+	qla_dump_iocb(sc, entry);
+	switch (entry[0]) {
 	case QLA_IOCB_STATUS:
 		status = (struct qla_iocb_status *)entry;
 		handle = status->handle;
@@ -586,8 +634,8 @@ qla_handle_resp(struct qla_softc *sc, u_int16_t id)
 		ccb = &sc->sc_ccbs[handle];
 		xs = ccb->ccb_xs;
 		if (xs == NULL) {
-			printf("%s: got status for inactive ccb %d\n",
-			    DEVNAME(sc), handle);
+			DPRINTF(QLA_D_INTR, "%s: got status for inactive"
+			    " ccb %d\n", DEVNAME(sc), handle);
 			ccb = NULL;
 			break;
 		}
@@ -630,24 +678,26 @@ qla_handle_resp(struct qla_softc *sc, u_int16_t id)
 			break;
 
 		case QLA_IOCB_STATUS_DMA_ERROR:
-			printf("%s: dma error\n", DEVNAME(sc));
+			DPRINTF(QLA_D_INTR, "%s: dma error\n", DEVNAME(sc));
 			/* set resid apparently? */
 			break;
 
 		case QLA_IOCB_STATUS_RESET:
-			printf("%s: reset destroyed command\n", DEVNAME(sc));
+			DPRINTF(QLA_D_IO, "%s: reset destroyed command\n",
+			    DEVNAME(sc));
 			sc->sc_marker_required = 1;
 			xs->error = XS_RESET;
 			break;
 
 		case QLA_IOCB_STATUS_ABORTED:
-			printf("%s: aborted\n", DEVNAME(sc));
+			DPRINTF(QLA_D_IO, "%s: aborted\n", DEVNAME(sc));
 			sc->sc_marker_required = 1;
 			xs->error = XS_DRIVER_STUFFUP;
 			break;
 		
 		case QLA_IOCB_STATUS_TIMEOUT:
-			printf("%s: command timed out\n", DEVNAME(sc));
+			DPRINTF(QLA_D_IO, "%s: command timed out\n",
+			    DEVNAME(sc));
 			xs->error = XS_TIMEOUT;
 			break;
 
@@ -658,38 +708,33 @@ qla_handle_resp(struct qla_softc *sc, u_int16_t id)
 			break;
 
 		case QLA_IOCB_STATUS_QUEUE_FULL:
-			printf("%s: queue full\n", DEVNAME(sc));
+			DPRINTF(QLA_D_IO, "%s: queue full\n", DEVNAME(sc));
 			xs->error = XS_BUSY;
 			break;
 
 		case QLA_IOCB_STATUS_PORT_UNAVAIL:
 		case QLA_IOCB_STATUS_PORT_LOGGED_OUT:
 		case QLA_IOCB_STATUS_PORT_CHANGED:
-			printf("%s: dev gone\n", DEVNAME(sc));
+			DPRINTF(QLA_D_IO, "%s: dev gone\n", DEVNAME(sc));
 			xs->error = XS_SELTIMEOUT;
 			break;
 
 		default:
-			printf("%s: unexpected completion status %x\n",
-			    DEVNAME(sc), status->completion);
+			DPRINTF(QLA_D_INTR, "%s: unexpected completion"
+			    " status %x\n", DEVNAME(sc), status->completion);
 			xs->error = XS_DRIVER_STUFFUP;
 			break;
 		}
 		break;
 
 	case QLA_IOCB_STATUS_CONT:
-		printf("%s: ignoring status continuation iocb\n",
+		DPRINTF(QLA_D_INTR, "%s: ignoring status continuation iocb\n",
 		    DEVNAME(sc));
-		break;
-
-	case QLA_IOCB_MAILBOX:
-		printf("%s: eat mailbox?\n", DEVNAME(sc));
-		/* ok */
 		break;
 
 		/* check for requests that bounce back? */
 	default:
-		printf("%s: unexpected response entry type %x\n",
+		DPRINTF(QLA_D_INTR, "%s: unexpected response entry type %x\n",
 		    DEVNAME(sc), entry[0]);
 		break;
 	}
@@ -710,10 +755,7 @@ qla_handle_intr(struct qla_softc *sc, u_int16_t isr, u_int16_t info)
 		break;
 
 	case QLA_INT_TYPE_IO:
-		/* apparently can't read the out ptr with <2300 chips,
-		 * and apparently also need to debounce the in ptr reads
-		 */
-		rspin = qla_read_queue_ptr(sc, QLA_RESP_QUEUE_IN);
+		rspin = qla_queue_read(sc, sc->sc_regs->res_in);
 		if (rspin == sc->sc_last_resp_id) {
 			/* seems to happen a lot on 2200s when mbox commands
 			 * complete but it doesn't want to give us the register
@@ -723,31 +765,30 @@ qla_handle_intr(struct qla_softc *sc, u_int16_t isr, u_int16_t info)
 			 * the interrupt yet.
 			 */
 			if (sc->sc_mbox_pending) {
-				printf("%s: ignoring premature mbox int\n",
-				    DEVNAME(sc));
+				DPRINTF(QLA_D_MBOX, "%s: ignoring premature"
+				    " mbox int\n", DEVNAME(sc));
 				return;
 			}
 
-			/* isp(4) has some weird magic for this case */
-			printf("%s: nonsense interrupt (%x)\n", DEVNAME(sc),
-			    rspin);
-		} else {
-			if (sc->sc_responses == NULL)
-				break;
-
-			while (sc->sc_last_resp_id != rspin) {
-				ccb = qla_handle_resp(sc, sc->sc_last_resp_id);
-				if (ccb)
-					scsi_done(ccb->ccb_xs);
-
-				sc->sc_last_resp_id++;
-				if (sc->sc_last_resp_id == sc->sc_maxcmds)
-					sc->sc_last_resp_id = 0;
-			}
-
-			qla_write_queue_ptr(sc, QLA_RESP_QUEUE_OUT,
-			    sc->sc_last_resp_id);
+			break;
 		}
+
+		if (sc->sc_responses == NULL)
+			break;
+
+		DPRINTF(QLA_D_IO, "%s: response queue %x=>%x\n",
+		    DEVNAME(sc), sc->sc_last_resp_id, rspin);
+
+		do {
+			ccb = qla_handle_resp(sc, sc->sc_last_resp_id);
+			if (ccb)
+				scsi_done(ccb->ccb_xs);
+
+			sc->sc_last_resp_id++;
+			sc->sc_last_resp_id %= sc->sc_maxcmds;
+		} while (sc->sc_last_resp_id != rspin);
+
+		qla_queue_write(sc, sc->sc_regs->res_out, rspin);
 		break;
 
 	case QLA_INT_TYPE_MBOX:
@@ -761,8 +802,8 @@ qla_handle_intr(struct qla_softc *sc, u_int16_t isr, u_int16_t info)
 			}
 			wakeup(sc->sc_mbox);
 		} else {
-			printf("%s: unexpected mbox interrupt: %x\n",
-			    DEVNAME(sc), info);
+			DPRINTF(QLA_D_MBOX, "%s: unexpected mbox interrupt:"
+			    " %x\n", DEVNAME(sc), info);
 		}
 		break;
 
@@ -822,7 +863,8 @@ qla_scsi_cmd(struct scsi_xfer *xs)
 	bus_dmamap_t		dmap;
 
 	if (xs->cmdlen > sizeof(iocb->req_cdb)) {
-		printf("%s: too fat (%d)\n", DEVNAME(sc), xs->cmdlen);
+		DPRINTF(QLA_D_IO, "%s: cdb too big (%d)\n", DEVNAME(sc),
+		    xs->cmdlen);
 		memset(&xs->sense, 0, sizeof(xs->sense));
 		xs->sense.error_code = SSD_ERRCODE_VALID | SSD_ERRCODE_CURRENT;
 		xs->sense.flags = SKEY_ILLEGAL_REQUEST;
@@ -858,13 +900,14 @@ qla_scsi_cmd(struct scsi_xfer *xs)
 		if (sc->sc_next_req_id == sc->sc_maxcmds)
 			sc->sc_next_req_id = 0;
 
-		printf("%s: writing marker at request %d\n", DEVNAME(sc), req);
+		DPRINTF(QLA_D_IO, "%s: writing marker at request %d\n",
+		    DEVNAME(sc), req);
 		offset = (req * QLA_QUEUE_ENTRY_SIZE);
 		iocb = QLA_DMA_KVA(sc->sc_requests) + offset;
 		bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(sc->sc_requests),
 		    offset, QLA_QUEUE_ENTRY_SIZE, BUS_DMASYNC_POSTWRITE);
 		qla_put_marker(sc, iocb);
-		qla_write_queue_ptr(sc, QLA_REQ_QUEUE_IN, sc->sc_next_req_id);
+		qla_queue_write(sc, sc->sc_regs->req_in, sc->sc_next_req_id);
 		sc->sc_marker_required = 0;
 	}
 
@@ -879,9 +922,10 @@ qla_scsi_cmd(struct scsi_xfer *xs)
 	    
 	ccb->ccb_xs = xs;
 
+	DPRINTF(QLA_D_IO, "%s: writing cmd at request %d\n", DEVNAME(sc), req);
 	qla_put_cmd(sc, iocb, xs, ccb);
 
-	qla_write_queue_ptr(sc, QLA_REQ_QUEUE_IN, sc->sc_next_req_id);
+	qla_queue_write(sc, sc->sc_regs->req_in, sc->sc_next_req_id);
 
 	if (!ISSET(xs->flags, SCSI_POLL)) {
 		mtx_leave(&sc->sc_queue_mtx);
@@ -922,7 +966,7 @@ qla_scsi_cmd_poll(struct qla_softc *sc)
 			continue;
 		}
 
-		rspin = qla_read_queue_ptr(sc, QLA_RESP_QUEUE_IN);
+		rspin = qla_queue_read(sc, sc->sc_regs->res_in);
 		if (rspin != sc->sc_last_resp_id) {
 			ccb = qla_handle_resp(sc, sc->sc_last_resp_id);
 
@@ -930,7 +974,7 @@ qla_scsi_cmd_poll(struct qla_softc *sc)
 			if (sc->sc_last_resp_id == sc->sc_maxcmds)
 				sc->sc_last_resp_id = 0;
 
-			qla_write_queue_ptr(sc, QLA_RESP_QUEUE_OUT,
+			qla_queue_write(sc, sc->sc_regs->res_out,
 			    sc->sc_last_resp_id);
 		}
 
@@ -941,7 +985,7 @@ qla_scsi_cmd_poll(struct qla_softc *sc)
 }
 
 u_int16_t
-qla_read(struct qla_softc *sc, int offset)
+qla_read(struct qla_softc *sc, bus_size_t offset)
 {
 	u_int16_t v;
 	v = bus_space_read_2(sc->sc_iot, sc->sc_ioh, offset);
@@ -951,7 +995,7 @@ qla_read(struct qla_softc *sc, int offset)
 }
 
 void
-qla_write(struct qla_softc *sc, int offset, u_int16_t value)
+qla_write(struct qla_softc *sc, bus_size_t offset, u_int16_t value)
 {
 	bus_space_write_2(sc->sc_iot, sc->sc_ioh, offset, value);
 	bus_space_barrier(sc->sc_iot, sc->sc_ioh, offset, 2,
@@ -1029,12 +1073,11 @@ qla_mbox(struct qla_softc *sc, int maskin, int maskout)
 
 	case 0:
 		/* timed out; do something? */
-		printf("mbox timed out\n");
+		DPRINTF(QLA_D_MBOX, "%s: mbox timed out\n", DEVNAME(sc));
 		rv = 1;
 		break;
 
 	default:
-		/* log a thing? */
 		sc->sc_mbox[0] = result;
 		rv = result;
 		break;
@@ -1087,65 +1130,63 @@ qla_set_ints(struct qla_softc *sc, int enabled)
 }
 
 int
-qla_read_isr(struct qla_softc *sc, u_int16_t *isr, u_int16_t *info)
+qla_read_isr_1G(struct qla_softc *sc, u_int16_t *isr, u_int16_t *info)
 {
 	u_int16_t int_status;
-	u_int32_t v;
 
-	switch (sc->sc_isp_gen) {
-	case QLA_GEN_ISP2100:
-	case QLA_GEN_ISP2200:
-		if (qla_read(sc, QLA_SEMA) & QLA_SEMA_LOCK) {
-			*info = qla_read_mbox(sc, 0);
-			if (*info & QLA_MBOX_HAS_STATUS)
-				*isr = QLA_INT_TYPE_MBOX;
-			else
-				*isr = QLA_INT_TYPE_ASYNC;
-		} else {
-			int_status = qla_read(sc, QLA_INT_STATUS);
-			if ((int_status & QLA_INT_REQ) == 0)
-				return (0);
-
-			*isr = QLA_INT_TYPE_IO;
-		}
-		return (1);
-
-	case QLA_GEN_ISP23XX:
-		if ((qla_read(sc, QLA_INT_STATUS) & QLA_INT_REQ) == 0)
+	if (qla_read(sc, QLA_SEMA) & QLA_SEMA_LOCK) {
+		*info = qla_read_mbox(sc, 0);
+		if (*info & QLA_MBOX_HAS_STATUS)
+			*isr = QLA_INT_TYPE_MBOX;
+		else
+			*isr = QLA_INT_TYPE_ASYNC;
+	} else {
+		int_status = qla_read(sc, QLA_INT_STATUS);
+		if ((int_status & QLA_INT_REQ) == 0)
 			return (0);
 
-		v = bus_space_read_4(sc->sc_iot, sc->sc_ioh,
-		    QLA_RISC_STATUS_LOW);
-		bus_space_barrier(sc->sc_iot, sc->sc_ioh, QLA_RISC_STATUS_LOW,
-		    4, BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
+		*isr = QLA_INT_TYPE_IO;
+	}
 
-		switch (v & QLA_INT_STATUS_MASK) {
-		case QLA_23XX_INT_ROM_MBOX:
-		case QLA_23XX_INT_ROM_MBOX_FAIL:
-		case QLA_23XX_INT_MBOX:
-		case QLA_23XX_INT_MBOX_FAIL:
-			*isr = QLA_INT_TYPE_MBOX;
-			break;
+	return (1);
+}
 
-		case QLA_23XX_INT_ASYNC:
-			*isr = QLA_INT_TYPE_ASYNC;
-			break;
+int
+qla_read_isr_2G(struct qla_softc *sc, u_int16_t *isr, u_int16_t *info)
+{
+	u_int32_t v;
 
-		case QLA_23XX_INT_RSPQ:
-			*isr = QLA_INT_TYPE_IO;
-			break;
+	if ((qla_read(sc, QLA_INT_STATUS) & QLA_INT_REQ) == 0)
+		return (0);
 
-		default:
-			*isr = QLA_INT_TYPE_OTHER;
-			break;
-		}
+	v = bus_space_read_4(sc->sc_iot, sc->sc_ioh, QLA_RISC_STATUS_LOW);
+	bus_space_barrier(sc->sc_iot, sc->sc_ioh, QLA_RISC_STATUS_LOW,
+	    4, BUS_SPACE_BARRIER_READ | BUS_SPACE_BARRIER_WRITE);
 
-		*info = (v >> QLA_INT_INFO_SHIFT);
-		return (1);
+	switch (v & QLA_INT_STATUS_MASK) {
+	case QLA_23XX_INT_ROM_MBOX:
+	case QLA_23XX_INT_ROM_MBOX_FAIL:
+	case QLA_23XX_INT_MBOX:
+	case QLA_23XX_INT_MBOX_FAIL:
+		*isr = QLA_INT_TYPE_MBOX;
+		break;
+
+	case QLA_23XX_INT_ASYNC:
+		*isr = QLA_INT_TYPE_ASYNC;
+		break;
+
+	case QLA_23XX_INT_RSPQ:
+		*isr = QLA_INT_TYPE_IO;
+		break;
 
 	default:
-		return (0);
+		*isr = QLA_INT_TYPE_OTHER;
+		break;
 	}
+
+	*info = (v >> QLA_INT_INFO_SHIFT);
+
+	return (1);
 }
 
 void
@@ -1162,63 +1203,22 @@ qla_clear_isr(struct qla_softc *sc, u_int16_t isr)
 	}
 }
 
-int
-qla_queue_reg(struct qla_softc *sc, enum qla_qptr queue)
-{
-	switch (sc->sc_isp_gen) {
-	case QLA_GEN_ISP2100:
-	case QLA_GEN_ISP2200:
-		switch (queue) {
-		case QLA_REQ_QUEUE_IN:
-		case QLA_REQ_QUEUE_OUT:
-			return (sc->sc_mbox_base + 8);
-		case QLA_RESP_QUEUE_IN:
-		case QLA_RESP_QUEUE_OUT:
-			return (sc->sc_mbox_base + 10);
-		}
-		break;
-
-	case QLA_GEN_ISP23XX:
-		switch (queue) {
-		case QLA_REQ_QUEUE_IN:
-			return (QLA_REQ_IN);
-		case QLA_REQ_QUEUE_OUT:
-			return (QLA_REQ_OUT);
-		case QLA_RESP_QUEUE_IN:
-			return (QLA_RESP_IN);
-		case QLA_RESP_QUEUE_OUT:
-			return (QLA_RESP_OUT);
-		}
-		break;
-	}
-
-	panic("unknown queue");
-}
-
 u_int16_t
-qla_read_queue_ptr(struct qla_softc *sc, enum qla_qptr queue)
+qla_read_queue_2100(struct qla_softc *sc, bus_size_t queue)
 {
 	u_int16_t a, b, i;
-	switch (sc->sc_isp_gen) {
-	case QLA_GEN_ISP2100:
-		do {
-			a = qla_read(sc, qla_queue_reg(sc, queue));
-			b = qla_read(sc, qla_queue_reg(sc, queue));
-		} while (a != b && ++i < 1000);
-		if (i == 1000)
-			printf("%s: queue ptr unstable\n", DEVNAME(sc));
-		return (a);
 
-	default:
-		return (qla_read(sc, qla_queue_reg(sc, queue)));
+	for (i = 0; i < 1000; i++) {
+		a = qla_read(sc, queue);
+		b = qla_read(sc, queue);
+
+		if (a == b)
+			return (a);
 	}
-}
 
-void
-qla_write_queue_ptr(struct qla_softc *sc, enum qla_qptr queue,
-    u_int16_t value)
-{
-	qla_write(sc, qla_queue_reg(sc, queue), value);
+	DPRINTF(QLA_D_INTR, "%s: queue ptr unstable\n", DEVNAME(sc));
+
+	return (a);
 }
 
 int
@@ -1241,7 +1241,7 @@ qla_softreset(struct qla_softc *sc)
 	}
 
 	if (i == 1000) {
-		printf("reset didn't clear\n");
+		DPRINTF(QLA_D_INTR, "%s: reset didn't clear\n", DEVNAME(sc));
 		qla_set_ints(sc, 0);
 		return (ENXIO);
 	}
@@ -1260,10 +1260,10 @@ qla_softreset(struct qla_softc *sc)
 	qla_host_cmd(sc, QLA_HOST_CMD_RELEASE);
 
 	/* reset queue pointers */
-	qla_write_queue_ptr(sc, QLA_REQ_QUEUE_IN, 0);
-	qla_write_queue_ptr(sc, QLA_REQ_QUEUE_OUT, 0);
-	qla_write_queue_ptr(sc, QLA_RESP_QUEUE_IN, 0);
-	qla_write_queue_ptr(sc, QLA_RESP_QUEUE_OUT, 0);
+	qla_queue_write(sc, sc->sc_regs->req_in, 0);
+	qla_queue_write(sc, sc->sc_regs->req_out, 0);
+	qla_queue_write(sc, sc->sc_regs->res_in, 0);
+	qla_queue_write(sc, sc->sc_regs->res_out, 0);
 
 	qla_set_ints(sc, 1);
 	/* isp(4) sends QLA_HOST_CMD_BIOS here.. not documented? */
@@ -1271,7 +1271,8 @@ qla_softreset(struct qla_softc *sc)
 	/* do a basic mailbox operation to check we're alive */
 	sc->sc_mbox[0] = QLA_MBOX_NOP;
 	if (qla_mbox(sc, 0x0001, 0x0001)) {
-		printf("ISP not responding after reset\n");
+		DPRINTF(QLA_D_INTR, "%s: ISP not responding after reset\n",
+		    DEVNAME(sc));
 		return (ENXIO);
 	}
 
@@ -1283,7 +1284,7 @@ qla_update_topology(struct qla_softc *sc)
 {
 	sc->sc_mbox[0] = QLA_MBOX_GET_LOOP_ID;
 	if (qla_mbox(sc, 0x0001, QLA_MBOX_GET_LOOP_ID_OUT)) {
-		printf("%s: unable to get loop id\n", DEVNAME(sc));
+		DPRINTF(QLA_D_PORT, "%s: unable to get loop id\n", DEVNAME(sc));
 		sc->sc_topology = QLA_TOPO_N_PORT_NO_TARGET;
 	} else {
 		sc->sc_topology = sc->sc_mbox[6];
@@ -1292,7 +1293,7 @@ qla_update_topology(struct qla_softc *sc)
 		switch (sc->sc_topology) {
 		case QLA_TOPO_NL_PORT:
 		case QLA_TOPO_N_PORT:
-			printf("%s: loop id %d\n", DEVNAME(sc),
+			DPRINTF(QLA_D_PORT, "%s: loop id %d\n", DEVNAME(sc),
 			    sc->sc_loop_id);
 			break;
 
@@ -1300,13 +1301,13 @@ qla_update_topology(struct qla_softc *sc)
 		case QLA_TOPO_F_PORT:
 			sc->sc_port_id = sc->sc_mbox[2] |
 			    (sc->sc_mbox[3] << 16);
-			printf("%s: fabric port id %06x\n", DEVNAME(sc), 
-			    sc->sc_port_id);
+			DPRINTF(QLA_D_PORT, "%s: fabric port id %06x\n",
+			    DEVNAME(sc), sc->sc_port_id);
 			break;
 
 		case QLA_TOPO_N_PORT_NO_TARGET:
 		default:
-			printf("%s: not useful\n", DEVNAME(sc));
+			DPRINTF(QLA_D_PORT, "%s: not connected\n", DEVNAME(sc));
 			break;
 		}
 
@@ -1355,7 +1356,7 @@ qla_update_fabric(struct qla_softc *sc)
 	bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(sc->sc_scratch), 0,
 	    sizeof(struct qla_get_port_db), BUS_DMASYNC_PREREAD);
 	if (qla_mbox(sc, 0x00cf, 0x0001)) {
-		printf("%s: get port db for SNS failed: %x\n",
+		DPRINTF(QLA_D_PORT, "%s: get port db for SNS failed: %x\n",
 		    DEVNAME(sc), sc->sc_mbox[0]);
 		sc->sc_sns_port_name = 0;
 	} else {
@@ -1363,7 +1364,7 @@ qla_update_fabric(struct qla_softc *sc)
 		bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(sc->sc_scratch), 0,
 		    sizeof(struct qla_get_port_db), BUS_DMASYNC_POSTREAD);
 		pdb = QLA_DMA_KVA(sc->sc_scratch);
-		printf("%s: SNS port name %llx\n", DEVNAME(sc),
+		DPRINTF(QLA_D_PORT, "%s: SNS port name %llx\n", DEVNAME(sc),
 		    betoh64(pdb->port_name));
 		sc->sc_sns_port_name = betoh64(pdb->port_name);
 	}
@@ -1380,7 +1381,7 @@ qla_update_fabric(struct qla_softc *sc)
 	rft->port_id = htole32(sc->sc_port_id);
 	rft->fc4_types[0] = htole32(1 << QLA_FC4_SCSI);
 	if (qla_sns_req(sc, sc->sc_scratch, sizeof(*rft))) {
-		printf("%s: RFT_ID failed\n", DEVNAME(sc));
+		DPRINTF(QLA_D_PORT, "%s: RFT_ID failed\n", DEVNAME(sc));
 		/* we might be able to continue after this fails */
 	}
 
@@ -1404,8 +1405,8 @@ qla_next_fabric_port(struct qla_softc *sc, u_int32_t *firstport,
 	ga->port_id = htole32(*lastport);
 	result = qla_sns_req(sc, sc->sc_scratch, sizeof(*ga));
 	if (result) {
-		printf("%s: GA_NXT %x failed: %x\n", DEVNAME(sc), lastport,
-		    result);
+		DPRINTF(QLA_D_PORT, "%s: GA_NXT %x failed: %x\n", DEVNAME(sc),
+		    lastport, result);
 		*lastport = 0xffffffff;
 		return (NULL);
 	}
@@ -1414,7 +1415,7 @@ qla_next_fabric_port(struct qla_softc *sc, u_int32_t *firstport,
 	/* if the response is all zeroes, try again */
 	if (gar->port_type_id == 0 && gar->port_name == 0 &&
 	    gar->node_name == 0) {
-		printf("%s: GA_NXT returned junk\n", DEVNAME(sc));
+		DPRINTF(QLA_D_PORT, "%s: GA_NXT returned junk\n", DEVNAME(sc));
 		return (NULL);
 	}
 
@@ -1427,7 +1428,7 @@ qla_next_fabric_port(struct qla_softc *sc, u_int32_t *firstport,
 	if (*firstport == 0xffffffff)
 		*firstport = *lastport;
 
-	printf("%s: GA_NXT: port type/id: %x, wwpn %llx, wwnn %llx\n",
+	DPRINTF(QLA_D_PORT, "%s: GA_NXT: port id: %x, wwpn %llx, wwnn %llx\n",
 	    DEVNAME(sc), *lastport, betoh64(gar->port_name),
 	    betoh64(gar->node_name));
 
@@ -1462,7 +1463,7 @@ qla_fabric_plogi(struct qla_softc *sc, struct qla_fc_port *port)
 	mtx_leave(&sc->sc_port_mtx);
 
 	if (loopid == -1) {
-		printf("%s: ran out of loop ids\n",
+		DPRINTF(QLA_D_PORT, "%s: ran out of loop ids\n",
 		    DEVNAME(sc));
 		return (1);
 	}
@@ -1480,7 +1481,7 @@ qla_fabric_plogi(struct qla_softc *sc, struct qla_fc_port *port)
 	}
 
 	if (qla_mbox(sc, mboxin, 0x00c7)) {
-		printf("%s: port %x login failed: %x %x %x %x\n",
+		DPRINTF(QLA_D_PORT, "%s: port %x login failed: %x %x %x %x\n",
 		    DEVNAME(sc), port->portid, sc->sc_mbox[0],
 		    sc->sc_mbox[1], sc->sc_mbox[2],
 		    sc->sc_mbox[6]);
@@ -1504,7 +1505,8 @@ qla_fabric_plogo(struct qla_softc *sc, struct qla_fc_port *port)
 	}
 
 	if (qla_mbox(sc, mboxin, 0x03))
-		printf("%s: PLOGO %x failed\n", DEVNAME(sc), port->loopid);
+		DPRINTF(QLA_D_PORT, "%s: port %x logout failed\n",
+		    DEVNAME(sc), port->loopid);
 }
 
 void
@@ -1532,54 +1534,54 @@ qla_async(struct qla_softc *sc, u_int16_t info)
 		break;
 
 	case QLA_ASYNC_LIP_OCCURRED:
-		printf("%s: lip occurred\n", DEVNAME(sc));
+		DPRINTF(QLA_D_PORT, "%s: lip occurred\n", DEVNAME(sc));
 		break;
 
 	case QLA_ASYNC_LOOP_UP:
-		printf("%s: loop up\n", DEVNAME(sc));
+		DPRINTF(QLA_D_PORT, "%s: loop up\n", DEVNAME(sc));
 		sc->sc_loop_up = 1;
 		sc->sc_marker_required = 1;
 		qla_update(sc, QLA_UPDATE_FULL_SCAN);
 		break;
 
 	case QLA_ASYNC_LOOP_DOWN:
-		printf("%s: loop down\n", DEVNAME(sc));
+		DPRINTF(QLA_D_PORT, "%s: loop down\n", DEVNAME(sc));
 		sc->sc_loop_up = 0;
 		qla_update(sc, QLA_UPDATE_DISCARD);
 		break;
 
 	case QLA_ASYNC_LIP_RESET:
-		printf("%s: lip reset\n", DEVNAME(sc));
+		DPRINTF(QLA_D_PORT, "%s: lip reset\n", DEVNAME(sc));
 		sc->sc_marker_required = 1;
 		qla_update(sc, QLA_UPDATE_FABRIC_RELOGIN);
 		break;
 
 	case QLA_ASYNC_PORT_DB_CHANGE:
-		printf("%s: port db changed %x\n", DEVNAME(sc),
+		DPRINTF(QLA_D_PORT, "%s: port db changed %x\n", DEVNAME(sc),
 		    qla_read_mbox(sc, 1));
 		qla_update(sc, QLA_UPDATE_LOOP_SCAN);
 		break;
 
 	case QLA_ASYNC_CHANGE_NOTIFY:
-		printf("%s: name server change (%02x:%02x)\n", DEVNAME(sc),
-		    qla_read_mbox(sc, 1), qla_read_mbox(sc, 2));
+		DPRINTF(QLA_D_PORT, "%s: name server change (%02x:%02x)\n",
+		    DEVNAME(sc), qla_read_mbox(sc, 1), qla_read_mbox(sc, 2));
 		qla_update(sc, QLA_UPDATE_FABRIC_SCAN);
 		break;
 
 	case QLA_ASYNC_LIP_F8:
-		printf("%s: lip f8\n", DEVNAME(sc));
+		DPRINTF(QLA_D_PORT, "%s: lip f8\n", DEVNAME(sc));
 		break;
 
 	case QLA_ASYNC_LOOP_INIT_ERROR:
-		printf("%s: loop initialization error: %x", DEVNAME(sc), 
-		    qla_read_mbox(sc, 1));
+		DPRINTF(QLA_D_PORT, "%s: loop initialization error: %x\n",
+		    DEVNAME(sc), qla_read_mbox(sc, 1));
 		break;
 
 	case QLA_ASYNC_LOGIN_REJECT:
 		id = qla_read_mbox(sc, 1);
 		exp = qla_read_mbox(sc, 2);
-		printf("%s: login reject from %x (reason %d, explanation %x)",
-		    DEVNAME(sc), id >> 8, id & 0xff, exp);
+		DPRINTF(QLA_D_PORT, "%s: login reject from %x (reason %d,"
+		    " explanation %x)\n", DEVNAME(sc), id >> 8, id & 0xff, exp);
 		break;
 
 	case QLA_ASYNC_SCSI_CMD_COMPLETE:
@@ -1591,7 +1593,8 @@ qla_async(struct qla_softc *sc, u_int16_t info)
 		break;
 
 	case QLA_ASYNC_POINT_TO_POINT:
-		printf("%s: connected in point-to-point mode\n", DEVNAME(sc));
+		DPRINTF(QLA_D_PORT, "%s: connected in point-to-point mode\n",
+		    DEVNAME(sc));
 		/* we get stuck handling these if we have the wrong loop
 		 * topology; should somehow reinit with different things
 		 * somehow.
@@ -1610,7 +1613,8 @@ qla_async(struct qla_softc *sc, u_int16_t info)
 		break;
 
 	default:
-		printf("%s: unknown async %x\n", DEVNAME(sc), info);
+		DPRINTF(QLA_D_INTR, "%s: unknown async %x\n", DEVNAME(sc),
+		    info);
 		break;
 	}
 	return (1);
@@ -1619,9 +1623,13 @@ qla_async(struct qla_softc *sc, u_int16_t info)
 void
 qla_dump_iocb(struct qla_softc *sc, void *buf)
 {
+#ifdef QLA_DEBUG
 	u_int8_t *iocb = buf;
 	int l;
 	int b;
+
+	if ((qladebug & QLA_D_IOCB) == 0)
+		return;
 
 	printf("%s: iocb:\n", DEVNAME(sc));
 	for (l = 0; l < 4; l++) {
@@ -1630,13 +1638,18 @@ qla_dump_iocb(struct qla_softc *sc, void *buf)
 		}
 		printf("\n");
 	}
+#endif
 }
 
 void
 qla_dump_iocb_segs(struct qla_softc *sc, void *segs, int n)
 {
+#ifdef QLA_DEBUG
 	u_int8_t *buf = segs;
 	int s, b;
+	if ((qladebug & QLA_D_IOCB) == 0)
+		return;
+
 	printf("%s: iocb segs:\n", DEVNAME(sc));
 	for (s = 0; s < n; s++) {
 		for (b = 0; b < sizeof(struct qla_iocb_seg); b++) {
@@ -1645,6 +1658,7 @@ qla_dump_iocb_segs(struct qla_softc *sc, void *segs, int n)
 		}
 		printf("\n");
 	}
+#endif
 }
 
 void
@@ -1660,6 +1674,7 @@ qla_put_marker(struct qla_softc *sc, void *buf)
 	/* could be more specific here; isp(4) isn't */
 	marker->target = 0;
 	marker->modifier = QLA_IOCB_MARKER_SYNC_ALL;
+	qla_dump_iocb(sc, buf);
 }
 
 void
@@ -1741,24 +1756,9 @@ qla_put_cmd(struct qla_softc *sc, void *buf, struct scsi_xfer *xs,
 	req->req_totalcnt = htole32(xs->datalen);
 
 	req->req_handle = ccb->ccb_id;
-}
 
-#if 0
-void
-qla_put_cmd_cont(struct qla_softc *sc, void *buf, struct scsi_xfer *xs,
-    bus_dmamap_t dmap, int offset)
-{
-	int seg;
-	struct qla_iocb_cont1 *cont1 = buf;
-	cont1->entry_type = QLA_IOCB_CONT_TYPE_1;
-	cont1->entry_count = 1;
-	for (seg = 0; seg < QLA_IOCB_SEGS_PER_CMD_CONT; seg++) {
-		if (seg + offset == dmap->dm_nsegs)
-			break;
-		qla_put_data_seg(&cont1->segs[seg], dmap, seg + offset);
-	}
+	qla_dump_iocb(sc, buf);
 }
-#endif
 
 #ifdef ISP_NOFIRMWARE
 
@@ -1977,7 +1977,13 @@ qla_read_nvram(struct qla_softc *sc)
 	if (sc->sc_nvram.id[0] != 'I' || sc->sc_nvram.id[1] != 'S' ||
 	    sc->sc_nvram.id[2] != 'P' || sc->sc_nvram.id[3] != ' ' ||
 	    sc->sc_nvram.nvram_version < 1 || (csum != 0)) {
-		printf("%s: nvram corrupt\n", DEVNAME(sc));
+		/*
+		 * onboard 2200s on Sun hardware don't have an nvram
+		 * fitted, but will provide us with node and port name
+		 * through Open Firmware; don't complain in that case.
+		 */
+		if (sc->sc_node_name == 0 || sc->sc_port_name == 0)
+			printf("%s: nvram corrupt\n", DEVNAME(sc));
 		return (1);
 	}
 	return (0);

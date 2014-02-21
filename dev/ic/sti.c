@@ -1,4 +1,4 @@
-/*	$OpenBSD: sti.c,v 1.67 2013/10/20 20:07:29 miod Exp $	*/
+/*	$OpenBSD: sti.c,v 1.69 2014/02/20 11:13:44 kettenis Exp $	*/
 
 /*
  * Copyright (c) 2000-2003 Michael Shalayeff

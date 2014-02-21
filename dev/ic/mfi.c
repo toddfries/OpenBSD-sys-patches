@@ -1,4 +1,4 @@
-/* $OpenBSD: mfi.c,v 1.149 2013/12/04 05:21:57 dlg Exp $ */
+/* $OpenBSD: mfi.c,v 1.151 2014/02/20 11:13:44 kettenis Exp $ */
 /*
  * Copyright (c) 2006 Marco Peereboom <marco@peereboom.us>
  *
