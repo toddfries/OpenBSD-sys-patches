@@ -1,4 +1,4 @@
-/*	$OpenBSD: qla.c,v 1.28 2014/02/20 20:20:28 kettenis Exp $ */
+/*	$OpenBSD: qla.c,v 1.30 2014/02/23 10:40:19 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -112,6 +112,7 @@ void		qla_fabric_plogo(struct qla_softc *, struct qla_fc_port *);
 void		qla_update_start(struct qla_softc *, int);
 int		qla_async(struct qla_softc *, u_int16_t);
 
+int		qla_verify_firmware(struct qla_softc *sc, u_int16_t);
 int		qla_load_firmware_words(struct qla_softc *, const u_int16_t *,
 		    u_int16_t);
 int		qla_load_firmware_2100(struct qla_softc *);
@@ -301,6 +302,10 @@ qla_attach(struct qla_softc *sc)
 {
 	struct scsibus_attach_args saa;
 	struct qla_init_cb *icb;
+#ifndef ISP_NOFIRMWARE
+	int (*loadfirmware)(struct qla_softc *) = NULL;
+#endif
+	u_int16_t firmware_addr = 0;
 	int i, rv;
 
 	TAILQ_INIT(&sc->sc_ports);
@@ -311,16 +316,28 @@ qla_attach(struct qla_softc *sc)
 	case QLA_GEN_ISP2100:
 		sc->sc_mbox_base = QLA_MBOX_BASE_2100;
 		sc->sc_regs = &qla_regs_2100;
+#ifndef ISP_NOFIRMWARE
+		loadfirmware = qla_load_firmware_2100;
+#endif
+		firmware_addr = QLA_2100_CODE_ORG;
 		break;
 
 	case QLA_GEN_ISP2200:
 		sc->sc_mbox_base = QLA_MBOX_BASE_2200;
 		sc->sc_regs = &qla_regs_2200;
+#ifndef ISP_NOFIRMWARE
+		loadfirmware = qla_load_firmware_2200;
+#endif
+		firmware_addr = QLA_2200_CODE_ORG;
 		break;
 
 	case QLA_GEN_ISP23XX:
 		sc->sc_mbox_base = QLA_MBOX_BASE_23XX;
 		sc->sc_regs = &qla_regs_23XX;
+#ifndef ISP_NOFIRMWARE
+		loadfirmware = qla_load_firmware_2300;
+#endif
+		firmware_addr = QLA_2300_CODE_ORG;
 		break;
 
 	default:
@@ -353,41 +370,21 @@ qla_attach(struct qla_softc *sc)
 	if (sc->sc_port_name == 0)
 		sc->sc_port_name = QLA_DEFAULT_PORT_NAME;
 
-	switch (sc->sc_isp_gen) {
-	case QLA_GEN_ISP2100:
-		if (qla_load_firmware_2100(sc)) {
-			printf("firmware load failed\n");
-			return (ENXIO);
-		}
-		break;
-
-	case QLA_GEN_ISP2200:
-		if (qla_load_firmware_2200(sc)) {
-			printf("firmware load failed\n");
-			return (ENXIO);
-		}
-		break;
-
-	case QLA_GEN_ISP23XX:
-		if (qla_load_firmware_2300(sc)) {
-			printf("firmware load failed\n");
-			return (ENXIO);
-		}
-		break;
-
+#ifdef ISP_NOFIRMWARE
+	if (qla_verify_firmware(sc, firmware_addr)) {
+		printf("%s: no firmware loaded\n", DEVNAME(sc));
+		return (ENXIO);
 	}
+#else
+	if (loadfirmware && (loadfirmware)(sc)) {
+		printf("%s: firmware load failed\n", DEVNAME(sc));
+		return (ENXIO);
+	}
+#endif
 
 	/* execute firmware */
 	sc->sc_mbox[0] = QLA_MBOX_EXEC_FIRMWARE;
-	switch (sc->sc_isp_gen) {
-	case QLA_GEN_ISP2100:
-	case QLA_GEN_ISP2200:
-		sc->sc_mbox[1] = QLA_2200_CODE_ORG;
-		break;
-	case QLA_GEN_ISP23XX:
-		sc->sc_mbox[1] = QLA_2300_CODE_ORG;
-		break;
-	}
+	sc->sc_mbox[1] = firmware_addr;
 	if (qla_mbox(sc, 0x0003, 0x0001)) {
 		printf("ISP couldn't exec firmware: %x\n", sc->sc_mbox[0]);
 		return (ENXIO);
@@ -616,7 +613,7 @@ qla_handle_resp(struct qla_softc *sc, u_int16_t id)
 
 	ccb = NULL;
 	entry = QLA_DMA_KVA(sc->sc_responses) + (id * QLA_QUEUE_ENTRY_SIZE);
-	
+
 	bus_dmamap_sync(sc->sc_dmat,
 	    QLA_DMA_MAP(sc->sc_responses), id * QLA_QUEUE_ENTRY_SIZE,
 	    QLA_QUEUE_ENTRY_SIZE, BUS_DMASYNC_POSTREAD);
@@ -694,7 +691,7 @@ qla_handle_resp(struct qla_softc *sc, u_int16_t id)
 			sc->sc_marker_required = 1;
 			xs->error = XS_DRIVER_STUFFUP;
 			break;
-		
+
 		case QLA_IOCB_STATUS_TIMEOUT:
 			DPRINTF(QLA_D_IO, "%s: command timed out\n",
 			    DEVNAME(sc));
@@ -919,7 +916,7 @@ qla_scsi_cmd(struct scsi_xfer *xs)
 	iocb = QLA_DMA_KVA(sc->sc_requests) + offset;
 	bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(sc->sc_requests), offset,
 	    QLA_QUEUE_ENTRY_SIZE, BUS_DMASYNC_POSTWRITE);
-	    
+
 	ccb->ccb_xs = xs;
 
 	DPRINTF(QLA_D_IO, "%s: writing cmd at request %d\n", DEVNAME(sc), req);
@@ -1760,34 +1757,15 @@ qla_put_cmd(struct qla_softc *sc, void *buf, struct scsi_xfer *xs,
 	qla_dump_iocb(sc, buf);
 }
 
-#ifdef ISP_NOFIRMWARE
-
 int
-qla_load_firmware_words(struct qla_softc *sc, const u_int16_t *)
+qla_verify_firmware(struct qla_softc *sc, u_int16_t addr)
 {
-	return (0);
+	sc->sc_mbox[0] = QLA_MBOX_VERIFY_CSUM;
+	sc->sc_mbox[1] = addr;
+	return (qla_mbox(sc, 0x0003, 0x0003));
 }
 
-int
-qla_load_firmware_2100(struct qla_softc *sc)
-{
-	return (0);
-}
-
-int
-qla_load_firmware_2200(struct qla_softc *sc)
-{
-	return (0);
-}
-
-int
-qla_load_firmware_2300(struct qla_softc *sc)
-{
-	return (0);
-}
-
-#else
-
+#ifndef ISP_NOFIRMWARE
 int
 qla_load_firmware_words(struct qla_softc *sc, const u_int16_t *src,
     u_int16_t dest)
@@ -1804,15 +1782,7 @@ qla_load_firmware_words(struct qla_softc *sc, const u_int16_t *src,
 		}
 	}
 
-	sc->sc_mbox[0] = QLA_MBOX_VERIFY_CSUM;
-	sc->sc_mbox[1] = dest;
-	if (qla_mbox(sc, 0x0003, 0x0003)) {
-		printf("verification of chunk at %x failed: %x\n",
-		    dest, sc->sc_mbox[1]);
-		return (1);
-	}
-
-	return (0);
+	return (qla_verify_firmware(sc, dest));
 }
 
 int
@@ -1868,15 +1838,7 @@ qla_load_fwchunk_2300(struct qla_softc *sc, struct qla_dmamem *mem,
 		dest += words;
 	}
 
-	sc->sc_mbox[0] = QLA_MBOX_VERIFY_CSUM;
-	sc->sc_mbox[1] = origin;
-	if (qla_mbox(sc, 0x0003, 0x0003)) {
-		printf("verification of chunk at %x failed: %x\n", origin,
-		    sc->sc_mbox[1]);
-		return (1);
-	}
-
-	return (0);
+	return (qla_verify_firmware(sc, origin));
 }
 
 int
@@ -1886,7 +1848,10 @@ qla_load_firmware_2300(struct qla_softc *sc)
 	const u_int16_t *fw = isp_2300_risc_code;
 
 	mem = qla_dmamem_alloc(sc, 65536);
-	qla_load_fwchunk_2300(sc, mem, fw, QLA_2300_CODE_ORG);
+	if (qla_load_fwchunk_2300(sc, mem, fw, QLA_2300_CODE_ORG)) {
+		qla_dmamem_free(sc, mem);
+		return (1);
+	}
 
 	/* additional firmware chunks for 2322 */
 	if (sc->sc_isp_type == QLA_ISP2322) {
@@ -1896,7 +1861,10 @@ qla_load_firmware_2300(struct qla_softc *sc)
 		for (i = 0; i < 2; i++) {
 			fw += fw[3];
 			addr = fw[5] | ((fw[4] & 0x3f) << 16);
-			qla_load_fwchunk_2300(sc, mem, fw, addr);
+			if (qla_load_fwchunk_2300(sc, mem, fw, addr)) {
+				qla_dmamem_free(sc, mem);
+				return (1);
+			}
 		}
 	}
 
@@ -1904,7 +1872,7 @@ qla_load_firmware_2300(struct qla_softc *sc)
 	return (0);
 }
 
-#endif	/* ISP_NOFIRMWARE */
+#endif	/* !ISP_NOFIRMWARE */
 
 int
 qla_read_nvram(struct qla_softc *sc)
@@ -1920,7 +1888,7 @@ qla_read_nvram(struct qla_softc *sc)
 	delay(10);
 	qla_write(sc, QLA_NVRAM, QLA_NVRAM_CHIP_SEL | QLA_NVRAM_CLOCK);
 	delay(10);
-	
+
 	for (i = 0; i < nitems(data); i++) {
 		req = (i + base) | (QLA_NVRAM_CMD_READ << 8);
 
@@ -2138,7 +2106,7 @@ qla_free_ccbs(struct qla_softc *sc)
 void *
 qla_get_ccb(void *xsc)
 {
-	struct qla_softc 	*sc = xsc;
+	struct qla_softc	*sc = xsc;
 	struct qla_ccb		*ccb;
 
 	mtx_enter(&sc->sc_ccb_mtx);
