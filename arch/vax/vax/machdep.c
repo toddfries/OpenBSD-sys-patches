@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.130 2013/11/24 22:08:25 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.133 2014/03/26 05:23:42 guenther Exp $ */
 /* $NetBSD: machdep.c,v 1.108 2000/09/13 15:00:23 thorpej Exp $	 */
 
 /*
@@ -443,7 +443,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	union sigval 	val;
 {
 	struct	proc	*p = curproc;
-	struct	sigacts *psp = p->p_sigacts;
+	struct	sigacts *psp = p->p_p->ps_sigacts;
 	struct	trapframe *syscf;
 	struct	sigframe *sigf, gsigf;
 	unsigned int	cursp;
@@ -493,7 +493,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	if (copyout(&gsigf, sigf, sizeof(gsigf)))
 		sigexit(p, SIGILL);
 
-	syscf->pc = p->p_sigcode;
+	syscf->pc = p->p_p->ps_sigcode;
 	syscf->psl = PSL_U | PSL_PREVU;
 	/*
 	 * Place sp at the beginning of sigf; this ensures that possible
@@ -512,6 +512,8 @@ void
 boot(howto)
 	register int howto;
 {
+	struct device *mainbus;
+
 	/* If system is cold, just halt. */
 	if (cold) {
 		/* (Unless the user explicitly asked for reboot.) */
@@ -545,8 +547,9 @@ boot(howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		if (dep_call->cpu_halt)

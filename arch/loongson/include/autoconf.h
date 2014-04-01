@@ -1,4 +1,4 @@
-/*	$OpenBSD: autoconf.h,v 1.9 2012/10/03 21:44:51 miod Exp $ */
+/*	$OpenBSD: autoconf.h,v 1.11 2014/03/29 23:59:49 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2003 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -57,6 +57,7 @@ struct platform {
 #define	LOONGSON_FULOONG	0x0003	/* Lemote Fuloong */
 #define	LOONGSON_LYNLOONG	0x0004	/* Lemote Lynloong */
 #define	LOONGSON_EBT700		0x0005	/* eBenton EBT700 */
+#define	LOONGSON_3A		0x0066	/* Loongson 2Gq or 3A based system */
 
 	char				*vendor;
 	char				*product;
@@ -85,6 +86,9 @@ struct mainbus_attach_args {
 extern struct device *bootdv;
 extern char bootdev[];
 extern enum devclass bootdev_class;
+
+extern bus_space_tag_t early_mem_t;
+extern bus_space_tag_t early_io_t;
 
 #include <mips64/autoconf.h>
 

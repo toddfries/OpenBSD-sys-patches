@@ -1,4 +1,4 @@
-/* $OpenBSD: trap.c,v 1.69 2014/02/06 05:14:12 miod Exp $ */
+/* $OpenBSD: trap.c,v 1.71 2014/03/30 21:54:48 guenther Exp $ */
 /* $NetBSD: trap.c,v 1.52 2000/05/24 16:48:33 thorpej Exp $ */
 
 /*-
@@ -463,10 +463,9 @@ do_fault:
 			v = (caddr_t)a0;
 			typ = SEGV_MAPERR;
 			if (rv == ENOMEM) {
-				printf("UVM: pid %u (%s), uid %u killed: "
-				       "out of swap\n", p->p_pid, p->p_comm,
-				       p->p_cred && p->p_ucred ?
-				       p->p_ucred->cr_uid : -1);
+				printf("UVM: pid %u (%s), uid %d killed: "
+			           "out of swap\n", p->p_pid, p->p_comm,
+			           p->p_ucred ? (int)p->p_ucred->cr_uid : -1);
 				i = SIGKILL;
 			} else {
 				i = SIGSEGV;
@@ -549,8 +548,8 @@ syscall(code, framep)
 	p->p_md.md_tf = framep;
 	opc = framep->tf_regs[FRAME_PC] - 4;
 
-	callp = p->p_emul->e_sysent;
-	numsys = p->p_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
+	numsys = p->p_p->ps_emul->e_nsysent;
 
 	switch(code) {
 	case SYS_syscall:
@@ -570,7 +569,7 @@ syscall(code, framep)
 	if (code < numsys)
 		callp += code;
 	else
-		callp += p->p_emul->e_nosys;
+		callp += p->p_p->ps_emul->e_nosys;
 
 	nargs = callp->sy_narg + hidden;
 	switch (nargs) {

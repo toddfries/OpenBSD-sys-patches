@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.21 2012/12/31 06:46:14 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.24 2014/03/30 21:54:49 guenther Exp $	*/
 /*	$NetBSD: exception.c,v 1.32 2006/09/04 23:57:52 uwe Exp $	*/
 /*	$NetBSD: syscall.c,v 1.6 2006/03/07 07:21:50 thorpej Exp $	*/
 
@@ -257,7 +257,7 @@ general_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 		int fpscr, sigi;
 
 		/* XXX worth putting in the trapframe? */
-		__asm__ __volatile__ ("sts fpscr, %0" : "=r" (fpscr));
+		__asm__ volatile ("sts fpscr, %0" : "=r" (fpscr));
 		fpscr = (fpscr & FPSCR_CAUSE_MASK) >> FPSCR_CAUSE_SHIFT;
 		if (fpscr & FPEXC_E)
 			sigi = FPE_FLTINV;	/* XXX any better value? */
@@ -434,8 +434,7 @@ tlb_exception(struct proc *p, struct trapframe *tf, uint32_t va)
 		if (err == ENOMEM) {
 			printf("UVM: pid %d (%s), uid %d killed: out of swap\n",
 			    p->p_pid, p->p_comm,
-			    p->p_cred && p->p_ucred ?
-				(int)p->p_ucred->cr_uid : -1);
+			    p->p_ucred ? (int)p->p_ucred->cr_uid : -1);
 			trapsignal(p, SIGKILL, tf->tf_expevt, SEGV_MAPERR, sv);
 		} else
 			trapsignal(p, SIGSEGV, tf->tf_expevt, SEGV_MAPERR, sv);
@@ -528,8 +527,8 @@ syscall(struct proc *p, struct trapframe *tf)
 	opc = tf->tf_spc;
 	ocode = code = tf->tf_r0;
 
-	nsys = p->p_emul->e_nsysent;
-	callp = p->p_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
 
 	params = (caddr_t)tf->tf_r15;
 
@@ -557,13 +556,13 @@ syscall(struct proc *p, struct trapframe *tf)
 		break;
 	}
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;		/* illegal */
+		callp += p->p_p->ps_emul->e_nosys;		/* illegal */
 	else
 		callp += code;
 	argsize = callp->sy_argsize;
 #ifdef DIAGNOSTIC
 	if (argsize > sizeof args) {
-		callp += p->p_emul->e_nosys - code;
+		callp += p->p_p->ps_emul->e_nosys - code;
 		argsize = callp->sy_argsize;
 	}
 #endif

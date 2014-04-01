@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.133 2013/09/28 12:40:31 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.136 2014/03/22 00:01:04 miod Exp $ */
 
 /*
  * Copyright (c) 2003-2004 Opsycon AB  (www.opsycon.se / www.opsycon.com)
@@ -532,7 +532,7 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 		extern void xtlb_miss_err_r4k;
 		extern void xtlb_miss_err_r4000SC;
 
-		if (ci->ci_l2size == 0 ||
+		if (ci->ci_l2.size == 0 ||
 		    ((cp0_get_prid() >> 4) & 0x0f) >= 4) /* R4400 */
 			xtlb_handler = (vaddr_t)&xtlb_miss_err_r4k;
 		else {
@@ -570,6 +570,14 @@ mips_init(int argc, void *argv, caddr_t boot_esym)
 	build_trampoline(TLB_MISS_EXC_VEC, xtlb_handler);
 	build_trampoline(XTLB_MISS_EXC_VEC, xtlb_handler);
 #endif	/* } */
+
+#ifdef CPU_R4000
+	/*
+	 * Enable R4000 EOP errata workaround code if necessary.
+	 */
+	if (cpufamily == MIPS_R4000 && ((cp0_get_prid() >> 4) & 0x0f) < 3)
+		r4000_errata = 1;
+#endif
 
 	/*
 	 * Allocate U page(s) for proc[0], pm_tlbpid 1.
@@ -820,6 +828,7 @@ int	waittime = -1;
 void
 boot(int howto)
 {
+	struct device *mainbus;
 
 	/* Take a snapshot before clobbering any registers. */
 	if (curproc)
@@ -867,8 +876,9 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		if (howto & RB_POWERDOWN)

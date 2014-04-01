@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exec.c,v 1.137 2014/01/21 01:48:44 tedu Exp $	*/
+/*	$OpenBSD: kern_exec.c,v 1.140 2014/03/30 21:54:48 guenther Exp $	*/
 /*	$NetBSD: kern_exec.c,v 1.75 1996/02/09 18:59:28 christos Exp $	*/
 
 /*-
@@ -81,9 +81,8 @@
 int exec_sigcode_map(struct proc *, struct emul *);
 
 /*
- * stackgap_random specifies if the stackgap should have a random size added
- * to it. Must be a n^2. If non-zero, the stack gap will be calculated as:
- * (arc4random() * ALIGNBYTES) & (stackgap_random - 1) + STACKGAPLEN.
+ * If non-zero, stackgap_random specifies the upper limit of the random gap size
+ * added to the fixed stack gap. Must be n^2.
  */
 int stackgap_random = STACKGAP_RANDOM;
 
@@ -391,19 +390,19 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		}
 	}
 
-	dp = (char *)ALIGN(dp);
+	dp = (char *)(((long)dp + _STACKALIGNBYTES) & ~_STACKALIGNBYTES);
 
 	sgap = STACKGAPLEN;
-	if (stackgap_random != 0)
-		sgap += (arc4random() * ALIGNBYTES) & (stackgap_random - 1);
-#ifdef MACHINE_STACK_GROWS_UP
-	sgap = ALIGN(sgap);
-#endif
+	if (stackgap_random != 0) {
+		sgap += arc4random() & (stackgap_random - 1);
+		sgap = (sgap + _STACKALIGNBYTES) & ~_STACKALIGNBYTES;
+	}
+
 	/* Now check if args & environ fit into new stack */
 	len = ((argc + envc + 2 + pack.ep_emul->e_arglen) * sizeof(char *) +
 	    sizeof(long) + dp + sgap + sizeof(struct ps_strings)) - argp;
 
-	len = ALIGN(len);	/* make the stack "safely" aligned */
+	len = (len + _STACKALIGNBYTES) &~ _STACKALIGNBYTES;
 
 	if (len > pack.ep_ssize) { /* in effect, compare to initial limit */
 		error = ENOMEM;
@@ -495,10 +494,10 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	 * If process does execve() while it has a mismatched real,
 	 * effective, or saved uid/gid, we set PS_SUGIDEXEC.
 	 */
-	if (p->p_ucred->cr_uid != p->p_cred->p_ruid ||
-	    p->p_ucred->cr_uid != p->p_cred->p_svuid ||
-	    p->p_ucred->cr_gid != p->p_cred->p_rgid ||
-	    p->p_ucred->cr_gid != p->p_cred->p_svgid)
+	if (cred->cr_uid != cred->cr_ruid ||
+	    cred->cr_uid != cred->cr_svuid ||
+	    cred->cr_gid != cred->cr_rgid ||
+	    cred->cr_gid != cred->cr_svgid)
 		atomic_setbits_int(&pr->ps_flags, PS_SUGIDEXEC);
 	else
 		atomic_clearbits_int(&pr->ps_flags, PS_SUGIDEXEC);
@@ -520,11 +519,11 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 		if (pr->ps_tracevp && !(pr->ps_traceflag & KTRFAC_ROOT))
 			ktrcleartrace(pr);
 #endif
-		p->p_ucred = crcopy(cred);
+		p->p_ucred = cred = crcopy(cred);
 		if (attr.va_mode & VSUID)
-			p->p_ucred->cr_uid = attr.va_uid;
+			cred->cr_uid = attr.va_uid;
 		if (attr.va_mode & VSGID)
-			p->p_ucred->cr_gid = attr.va_gid;
+			cred->cr_gid = attr.va_gid;
 
 		/*
 		 * For set[ug]id processes, a few caveats apply to
@@ -575,7 +574,7 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 					closef(fp, p);
 					break;
 				}
-				if ((error = VOP_OPEN(vp, flags, p->p_ucred, p)) != 0) {
+				if ((error = VOP_OPEN(vp, flags, cred, p)) != 0) {
 					fdremove(p->p_fd, indx);
 					closef(fp, p);
 					vrele(vp);
@@ -595,8 +594,15 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 			goto exec_abort;
 	} else
 		atomic_clearbits_int(&pr->ps_flags, PS_SUGID);
-	p->p_cred->p_svuid = p->p_ucred->cr_uid;
-	p->p_cred->p_svgid = p->p_ucred->cr_gid;
+
+	/* reset the saved ugids */
+	if (cred->cr_uid != cred->cr_svuid ||
+	    cred->cr_gid != cred->cr_svgid) {
+		/* make sure we have unshared ucreds */
+		p->p_ucred = cred = crcopy(cred);
+		cred->cr_svuid = cred->cr_uid;
+		cred->cr_svgid = cred->cr_gid;
+	}
 
 	if (pr->ps_flags & PS_SUGIDEXEC) {
 		int i, s = splclock();
@@ -659,9 +665,9 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	 * same, the exec hook code should deallocate any old emulation
 	 * resources held previously by this process.
 	 */
-	if (p->p_emul && p->p_emul->e_proc_exit &&
-	    p->p_emul != pack.ep_emul)
-		(*p->p_emul->e_proc_exit)(p);
+	if (pr->ps_emul && pr->ps_emul->e_proc_exit &&
+	    pr->ps_emul != pack.ep_emul)
+		(*pr->ps_emul->e_proc_exit)(p);
 
 	p->p_descfd = 255;
 	if ((pack.ep_flags & EXEC_HASFD) && pack.ep_fd < 255)
@@ -674,12 +680,12 @@ sys_execve(struct proc *p, void *v, register_t *retval)
 	if (pack.ep_emul->e_proc_exec)
 		(*pack.ep_emul->e_proc_exec)(p, &pack);
 
-	/* update p_emul, the old value is no longer needed */
-	p->p_emul = pack.ep_emul;
+	/* update ps_emul, the old value is no longer needed */
+	pr->ps_emul = pack.ep_emul;
 
 #ifdef KTRACE
 	if (KTRPOINT(p, KTR_EMUL))
-		ktremul(p, p->p_emul->e_name);
+		ktremul(p);
 #endif
 
 	atomic_clearbits_int(&pr->ps_flags, PS_INEXEC);
@@ -833,9 +839,9 @@ exec_sigcode_map(struct proc *p, struct emul *e)
 		uvm_unmap(kernel_map, va, va + round_page(sz));
 	}
 
-	p->p_sigcode = 0; /* no hint */
+	p->p_p->ps_sigcode = 0; /* no hint */
 	uao_reference(e->e_sigobject);
-	if (uvm_map(&p->p_vmspace->vm_map, &p->p_sigcode, round_page(sz),
+	if (uvm_map(&p->p_vmspace->vm_map, &p->p_p->ps_sigcode, round_page(sz),
 	    e->e_sigobject, 0, 0, UVM_MAPFLAG(UVM_PROT_RX, UVM_PROT_RX,
 	    UVM_INH_SHARE, UVM_ADV_RANDOM, 0))) {
 		uao_detach(e->e_sigobject);

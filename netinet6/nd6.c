@@ -1,4 +1,4 @@
-/*	$OpenBSD: nd6.c,v 1.111 2014/02/17 21:36:05 kettenis Exp $	*/
+/*	$OpenBSD: nd6.c,v 1.113 2014/03/27 10:39:23 mpi Exp $	*/
 /*	$KAME: nd6.c,v 1.280 2002/06/08 19:52:07 itojun Exp $	*/
 
 /*
@@ -689,8 +689,7 @@ nd6_lookup(struct in6_addr *addr6, int create, struct ifnet *ifp,
 			 * called in rtrequest1 via ifa->ifa_rtrequest.
 			 */
 			bzero(&info, sizeof(info));
-			info.rti_flags = (ifa->ifa_flags | RTF_HOST |
-			    RTF_LLINFO) & ~RTF_CLONING;
+			info.rti_flags = RTF_UP | RTF_HOST | RTF_LLINFO;
 			info.rti_info[RTAX_DST] = sin6tosa(&sin6);
 			info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
 			if ((e = rtrequest1(RTM_ADD, &info, RTP_CONNECTED,
@@ -971,7 +970,7 @@ nd6_rtrequest(int req, struct rtentry *rt)
 		if (dr)
 			dr->installed = 0;
 	}
-	
+
 	if ((rt->rt_flags & RTF_GATEWAY) != 0)
 		return;
 
@@ -1022,9 +1021,8 @@ nd6_rtrequest(int req, struct rtentry *rt)
 			 * treated as on-link but is currently not
 			 * (RTF_LLINFO && !ln case).
 			 */
-			rt_setgate(rt, rt_key(rt),
-			    (struct sockaddr *)&null_sdl,
-			    rt->rt_ifp->if_rdomain);
+			rt_setgate(rt, rt_key(rt), (struct sockaddr *)&null_sdl,
+			    ifp->if_rdomain);
 			gate = rt->rt_gateway;
 			SDL(gate)->sdl_type = ifp->if_type;
 			SDL(gate)->sdl_index = ifp->if_index;
@@ -1069,9 +1067,8 @@ nd6_rtrequest(int req, struct rtentry *rt)
 			 */
 			if (gate->sa_family != AF_LINK ||
 			    gate->sa_len < sizeof(null_sdl)) {
-				log(LOG_DEBUG,
-				    "nd6_rtrequest: bad gateway value: %s\n",
-				    ifp->if_xname);
+				log(LOG_DEBUG, "%s: bad gateway value: %s\n",
+				    __func__, ifp->if_xname);
 				break;
 			}
 			SDL(gate)->sdl_type = ifp->if_type;
@@ -1086,7 +1083,7 @@ nd6_rtrequest(int req, struct rtentry *rt)
 		ln = malloc(sizeof(*ln), M_RTABLE, M_NOWAIT | M_ZERO);
 		rt->rt_llinfo = (caddr_t)ln;
 		if (!ln) {
-			log(LOG_DEBUG, "nd6_rtrequest: malloc failed\n");
+			log(LOG_DEBUG, "%s: malloc failed\n", __func__);
 			break;
 		}
 		nd6_inuse++;
@@ -1149,7 +1146,7 @@ nd6_rtrequest(int req, struct rtentry *rt)
 		 * check if rt_key(rt) is one of my address assigned
 		 * to the interface.
 		 */
-		ifa = &in6ifa_ifpwithaddr(rt->rt_ifp,
+		ifa = &in6ifa_ifpwithaddr(ifp,
 		    &satosin6(rt_key(rt))->sin6_addr)->ia_ifa;
 		if (ifa) {
 			caddr_t macp = nd6_ifptomac(ifp);

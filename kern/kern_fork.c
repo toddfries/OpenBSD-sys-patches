@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_fork.c,v 1.158 2014/02/12 05:47:36 guenther Exp $	*/
+/*	$OpenBSD: kern_fork.c,v 1.162 2014/03/30 21:54:48 guenther Exp $	*/
 /*	$NetBSD: kern_fork.c,v 1.29 1996/02/09 18:59:34 christos Exp $	*/
 
 /*
@@ -62,8 +62,7 @@
 #include "systrace.h"
 #include <dev/systrace.h>
 
-#include <uvm/uvm_extern.h>
-#include <uvm/uvm_map.h>
+#include <uvm/uvm.h>
 
 #ifdef __HAVE_MD_TCB
 # include <machine/tcb.h>
@@ -78,7 +77,7 @@ void fork_return(void *);
 void tfork_child_return(void *);
 int pidtaken(pid_t);
 
-void process_new(struct proc *, struct process *);
+void process_new(struct proc *, struct process *, int);
 
 void
 fork_return(void *arg)
@@ -152,7 +151,7 @@ tfork_child_return(void *arg)
  * Allocate and initialize a new process.
  */
 void
-process_new(struct proc *p, struct process *parent)
+process_new(struct proc *p, struct process *parent, int flags)
 {
 	struct process *pr;
 
@@ -176,9 +175,8 @@ process_new(struct proc *p, struct process *parent)
 	    (caddr_t)&pr->ps_endcopy - (caddr_t)&pr->ps_startcopy);
 
 	/* post-copy fixups */
-	pr->ps_cred = pool_get(&pcred_pool, PR_WAITOK);
-	memcpy(pr->ps_cred, parent->ps_cred, sizeof(*pr->ps_cred));
-	crhold(parent->ps_cred->pc_ucred);
+	pr->ps_ucred = parent->ps_ucred;
+	crhold(pr->ps_ucred);
 	pr->ps_limit->p_refcnt++;
 
 	/* bump references to the text vnode (for procfs) */
@@ -194,6 +192,21 @@ process_new(struct proc *p, struct process *parent)
 		atomic_setbits_int(&pr->ps_flags, PS_CONTROLT);
 
 	p->p_p = pr;
+
+	/*
+	 * Create signal actions for the child process.
+	 */
+	if (flags & FORK_SIGHAND)
+		pr->ps_sigacts = sigactsshare(parent);
+	else
+		pr->ps_sigacts = sigactsinit(parent);
+
+	if (parent->ps_flags & PS_PROFIL)
+		startprofclock(pr);
+	if ((flags & FORK_PTRACE) && (parent->ps_flags & PS_TRACED))
+		atomic_setbits_int(&pr->ps_flags, PS_TRACED);
+	if (flags & FORK_NOZOMBIE)
+		atomic_setbits_int(&pr->ps_flags, PS_NOZOMBIE);
 
 	/* it's sufficiently inited to be globally visible */
 	LIST_INSERT_HEAD(&allprocess, pr, ps_list);
@@ -237,7 +250,7 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 	 * the variable nthreads is the current number of procs, maxthread is
 	 * the limit.
 	 */
-	uid = curp->p_cred->p_ruid;
+	uid = curp->p_ucred->cr_ruid;
 	if ((nthreads >= maxthread - 5 && uid != 0) || nthreads >= maxthread) {
 		static struct timeval lasttfm;
 
@@ -295,16 +308,6 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 
 	p->p_stat = SIDL;			/* protect against others */
 	p->p_flag = 0;
-	p->p_xstat = 0;
-
-	if (flags & FORK_THREAD) {
-		atomic_setbits_int(&p->p_flag, P_THREAD);
-		p->p_p = pr = curpr;
-		pr->ps_refcnt++;
-	} else {
-		process_new(p, curpr);
-		pr = p->p_p;
-	}
 
 	/*
 	 * Make a proc table entry for the new process.
@@ -321,19 +324,19 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 	 */
 	timeout_set(&p->p_sleep_to, endtsleep, p);
 
+	if (flags & FORK_THREAD) {
+		atomic_setbits_int(&p->p_flag, P_THREAD);
+		p->p_p = pr = curpr;
+		pr->ps_refcnt++;
+	} else {
+		process_new(p, curpr, flags);
+		pr = p->p_p;
+	}
+
 	/*
 	 * Duplicate sub-structures as needed.
 	 * Increase reference counts on shared objects.
 	 */
-	if ((flags & FORK_THREAD) == 0) {
-		if (curpr->ps_flags & PS_PROFIL)
-			startprofclock(pr);
-		if ((flags & FORK_PTRACE) && (curpr->ps_flags & PS_TRACED))
-			atomic_setbits_int(&pr->ps_flags, PS_TRACED);
-		if (flags & FORK_NOZOMBIE)
-			atomic_setbits_int(&pr->ps_flags, PS_NOZOMBIE);
-	}
-
 	if (flags & FORK_SHAREFILES)
 		p->p_fd = fdshare(curp);
 	else
@@ -361,21 +364,14 @@ fork1(struct proc *curp, int flags, void *stack, pid_t *tidptr,
 	 */
 	scheduler_fork_hook(curp, p);
 
-	/*
-	 * Create signal actions for the child process.
-	 */
-	if (flags & FORK_SIGHAND)
-		p->p_sigacts = sigactsshare(curp);
-	else
-		p->p_sigacts = sigactsinit(curp);
 	if (flags & FORK_THREAD)
 		sigstkinit(&p->p_sigstk);
 
 	/*
-	 * If emulation has process fork hook, call it now.
+	 * If emulation has thread fork hook, call it now.
 	 */
-	if (p->p_emul->e_proc_fork)
-		(*p->p_emul->e_proc_fork)(p, curp);
+	if (pr->ps_emul->e_proc_fork)
+		(*pr->ps_emul->e_proc_fork)(p, curp);
 
 	p->p_addr = (struct user *)uaddr;
 

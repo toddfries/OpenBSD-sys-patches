@@ -1,4 +1,4 @@
-/*	$OpenBSD: sig_machdep.c,v 1.9 2013/05/10 10:20:23 patrick Exp $	*/
+/*	$OpenBSD: sig_machdep.c,v 1.11 2014/03/26 05:23:42 guenther Exp $	*/
 /*	$NetBSD: sig_machdep.c,v 1.22 2003/10/08 00:28:41 thorpej Exp $	*/
 
 /*
@@ -81,7 +81,7 @@ sendsig(sig_t catcher, int sig, int returnmask, u_long code, int type,
 	struct proc *p = curproc;
 	struct trapframe *tf;
 	struct sigframe *fp, frame;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 
 	tf = process_frame(p);
 
@@ -162,7 +162,7 @@ sendsig(sig_t catcher, int sig, int returnmask, u_long code, int type,
 	tf->tf_pc = (int)frame.sf_handler;
 	tf->tf_usr_sp = (int)fp;
 	
-	tf->tf_usr_lr = (int)p->p_sigcode;
+	tf->tf_usr_lr = (int)p->p_p->ps_sigcode;
 }
 
 /*

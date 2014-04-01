@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi.h,v 1.60 2013/11/19 14:04:07 pirofti Exp $ */
+/*	$OpenBSD: usbdi.h,v 1.62 2014/03/07 09:38:14 mpi Exp $ */
 /*	$NetBSD: usbdi.h,v 1.62 2002/07/11 21:14:35 augustss Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.h,v 1.18 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -31,6 +31,9 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
+#ifndef _USBDI_H_
+#define _USBDI_H_
 
 struct usbd_bus;
 struct usbd_device;
@@ -169,6 +172,8 @@ struct usbd_desc_iter {
 void usbd_desc_iter_init(struct usbd_device *, struct usbd_desc_iter *);
 const usb_descriptor_t *usbd_desc_iter_next(struct usbd_desc_iter *);
 
+int usbd_str(usb_string_descriptor_t *, int, const char *);
+
 /*
  * The usb_task structs form a queue of things to run in the USB task
  * threads.  Normally this is just device discovery when a connect/disconnect
@@ -256,3 +261,5 @@ struct usb_attach_arg {
 #endif
 #define splhardusb splbio
 #define IPL_USB IPL_BIO
+
+#endif /* _USBDI_H_ */

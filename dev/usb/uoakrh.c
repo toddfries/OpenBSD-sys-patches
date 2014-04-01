@@ -1,4 +1,4 @@
-/*	$OpenBSD: uoakrh.c,v 1.6 2013/11/11 09:16:03 pirofti Exp $   */
+/*	$OpenBSD: uoakrh.c,v 1.8 2014/03/19 08:59:37 mpi Exp $   */
 
 /*
  * Copyright (c) 2012 Yojiro UO <yuo@nui.org>
@@ -35,10 +35,6 @@
 #include <dev/usb/uhidev.h>
 #include <dev/usb/hid.h>
 #include "uoak.h"
-
-#ifdef USB_DEBUG
-#define OARKRH_DEBUG
-#endif
 
 #ifdef OARKRH_DEBUG
 int	uoakrhdebug = 0;
@@ -113,8 +109,10 @@ struct uoak_methods uoakrh_methods = {
 int
 uoakrh_match(struct device *parent, void *match, void *aux)
 {
-	struct usb_attach_arg *uaa = aux;
-	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
+	struct uhidev_attach_arg *uha = aux;
+
+	if (uha->reportid == UHIDEV_CLAIM_ALLREPORTID)
+		return (UMATCH_NONE);
 
 	if (uoakrh_lookup(uha->uaa->vendor, uha->uaa->product) == NULL)
 		return UMATCH_NONE;

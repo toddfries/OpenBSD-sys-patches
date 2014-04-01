@@ -1,4 +1,4 @@
-/* $OpenBSD: drm_drv.c,v 1.123 2014/02/23 09:36:52 kettenis Exp $ */
+/* $OpenBSD: drm_drv.c,v 1.126 2014/03/25 17:44:39 mpi Exp $ */
 /*-
  * Copyright 2007-2009 Owain G. Ainsworth <oga@openbsd.org>
  * Copyright © 2008 Intel Corporation
@@ -41,13 +41,17 @@
  */
 
 #include <sys/param.h>
+#include <sys/fcntl.h>
+#include <sys/filio.h>
 #include <sys/limits.h>
+#include <sys/poll.h>
 #include <sys/specdev.h>
 #include <sys/systm.h>
+#include <sys/ttycom.h> /* for TIOCSGRP */
+#include <sys/vnode.h>
+
 #include <uvm/uvm.h>
 #include <uvm/uvm_device.h>
-
-#include <sys/ttycom.h> /* for TIOCSGRP */
 
 #include "drmP.h"
 #include "drm.h"
@@ -63,8 +67,12 @@ int	 drm_lastclose(struct drm_device *);
 void	 drm_attach(struct device *, struct device *, void *);
 int	 drm_probe(struct device *, void *, void *);
 int	 drm_detach(struct device *, int);
+void	 drm_quiesce(struct drm_device *);
+void	 drm_wakeup(struct drm_device *);
+int	 drm_activate(struct device *, int);
 int	 drmprint(void *, const char *);
 int	 drmsubmatch(struct device *, void *, void *);
+int	 drm_do_ioctl(struct drm_device *, int, u_long, caddr_t);
 int	 drm_dequeue_event(struct drm_device *, struct drm_file *, size_t,
 	     struct drm_pending_event **);
 
@@ -211,8 +219,8 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 	dev->bridgetag = da->bridgetag;
 
 	rw_init(&dev->dev_lock, "drmdevlk");
-	mtx_init(&dev->lock.spinlock, IPL_NONE);
 	mtx_init(&dev->event_lock, IPL_TTY);
+	mtx_init(&dev->quiesce_mtx, IPL_NONE);
 
 	TAILQ_INIT(&dev->maplist);
 	SPLAY_INIT(&dev->files);
@@ -246,11 +254,6 @@ drm_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	if (drm_ctxbitmap_init(dev) != 0) {
-		printf(": couldn't allocate memory for context bitmap.\n");
-		goto error;
-	}
-
 	if (dev->driver->flags & DRIVER_GEM) {
 		mtx_init(&dev->obj_name_lock, IPL_NONE);
 		SPLAY_INIT(&dev->name_tree);
@@ -278,8 +281,6 @@ drm_detach(struct device *self, int flags)
 	if (dev->driver->flags & DRIVER_GEM)
 		pool_destroy(&dev->objpl);
 
-	drm_ctxbitmap_cleanup(dev);
-
 	extent_destroy(dev->handle_ext);
 
 	drm_vblank_cleanup(dev);
@@ -301,9 +302,47 @@ drm_detach(struct device *self, int flags)
 	return 0;
 }
 
+void
+drm_quiesce(struct drm_device *dev)
+{
+	mtx_enter(&dev->quiesce_mtx);
+	dev->quiesce = 1;
+	while (dev->quiesce_count > 0) {
+		msleep(&dev->quiesce_count, &dev->quiesce_mtx,
+		    PZERO, "drmqui", 0);
+	}
+	mtx_leave(&dev->quiesce_mtx);
+}
+
+void
+drm_wakeup(struct drm_device *dev)
+{
+	mtx_enter(&dev->quiesce_mtx);
+	dev->quiesce = 0;
+	wakeup(&dev->quiesce);
+	mtx_leave(&dev->quiesce_mtx);
+}
+
+int
+drm_activate(struct device *self, int act)
+{
+	struct drm_device *dev = (struct drm_device *)self;
+
+	switch (act) {
+	case DVACT_QUIESCE:
+		drm_quiesce(dev);
+		break;
+	case DVACT_WAKEUP:
+		drm_wakeup(dev);
+		break;
+	}
+
+	return (0);
+}
+
 struct cfattach drm_ca = {
 	sizeof(struct drm_device), drm_probe, drm_attach,
-	drm_detach
+	drm_detach, drm_activate
 };
 
 struct cfdriver drm_cd = {
@@ -354,23 +393,8 @@ drm_get_device_from_kdev(dev_t kdev)
 int
 drm_firstopen(struct drm_device *dev)
 {
-	struct drm_local_map	*map;
-	int			 i;
-
-	/* prebuild the SAREA */
-	i = drm_addmap(dev, 0, SAREA_MAX, _DRM_SHM,
-	    _DRM_CONTAINS_LOCK, &map);
-	if (i != 0)
-		return i;
-
 	if (dev->driver->firstopen)
 		dev->driver->firstopen(dev);
-
-	if (drm_core_check_feature(dev, DRIVER_DMA) &&
-	    !drm_core_check_feature(dev, DRIVER_MODESET)) {
-		if ((i = drm_dma_setup(dev)) != 0)
-			return (i);
-	}
 
 	dev->magicid = 1;
 
@@ -388,8 +412,6 @@ drm_firstopen(struct drm_device *dev)
 int
 drm_lastclose(struct drm_device *dev)
 {
-	struct drm_local_map	*map, *mapsave;
-
 	DRM_DEBUG("\n");
 
 	if (dev->driver->lastclose != NULL)
@@ -402,33 +424,6 @@ drm_lastclose(struct drm_device *dev)
 	if (!drm_core_check_feature(dev, DRIVER_MODESET))
 		drm_agp_takedown(dev);
 #endif
-	if (!drm_core_check_feature(dev, DRIVER_MODESET))
-		drm_dma_takedown(dev);
-
-	DRM_LOCK();
-	if (dev->sg != NULL &&
-	    !drm_core_check_feature(dev, DRIVER_MODESET)) {
-		struct drm_sg_mem *sg = dev->sg; 
-		dev->sg = NULL;
-
-		DRM_UNLOCK();
-		drm_sg_cleanup(dev, sg);
-		DRM_LOCK();
-	}
-
-	for (map = TAILQ_FIRST(&dev->maplist); map != TAILQ_END(&dev->maplist);
-	    map = mapsave) {
-		mapsave = TAILQ_NEXT(map, link);
-		if ((map->flags & _DRM_DRIVER) == 0)
-			drm_rmmap_locked(dev, map);
-	}
-
-	if (dev->lock.hw_lock != NULL) {
-		dev->lock.hw_lock = NULL; /* SHM removed */
-		dev->lock.file_priv = NULL;
-		wakeup(&dev->lock); /* there should be nothing sleeping on it */
-	}
-	DRM_UNLOCK();
 
 	return 0;
 }
@@ -542,18 +537,6 @@ drmclose(dev_t kdev, int flags, int fmt, struct proc *p)
 	DRM_DEBUG("pid = %d, device = 0x%lx, open_count = %d\n",
 	    DRM_CURRENTPID, (long)&dev->device, dev->open_count);
 
-	if (dev->lock.hw_lock && _DRM_LOCK_IS_HELD(dev->lock.hw_lock->lock)
-	    && dev->lock.file_priv == file_priv) {
-		DRM_DEBUG("Process %d dead, freeing lock for context %d\n",
-		    DRM_CURRENTPID,
-		    _DRM_LOCKING_CONTEXT(dev->lock.hw_lock->lock));
-
-		drm_lock_free(&dev->lock,
-		    _DRM_LOCKING_CONTEXT(dev->lock.hw_lock->lock));
-	}
-	if (dev->driver->flags & DRIVER_DMA)
-		drm_reclaim_buffers(dev, file_priv);
-
 	mtx_enter(&dev->event_lock);
 	struct drmevlist *list = &dev->vbl_events;
 	for (ev = TAILQ_FIRST(list); ev != TAILQ_END(list);
@@ -604,20 +587,13 @@ done:
 	return (retcode);
 }
 
-/* drmioctl is called whenever a process performs an ioctl on /dev/drm.
- */
 int
-drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags, 
-    struct proc *p)
+drm_do_ioctl(struct drm_device *dev, int minor, u_long cmd, caddr_t data)
 {
-	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	struct drm_file *file_priv;
 
-	if (dev == NULL)
-		return ENODEV;
-
 	DRM_LOCK();
-	file_priv = drm_find_file_by_minor(dev, minor(kdev));
+	file_priv = drm_find_file_by_minor(dev, minor);
 	DRM_UNLOCK();
 	if (file_priv == NULL) {
 		DRM_ERROR("can't find authenticator\n");
@@ -655,13 +631,6 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 	case DRM_IOCTL_GEM_CLOSE:
 		return -drm_gem_close_ioctl(dev, data, file_priv);
 
-	/* removed */
-	case DRM_IOCTL_GET_MAP:
-		/* FALLTHROUGH */
-	case DRM_IOCTL_GET_CLIENT:
-		/* FALLTHROUGH */
-	case DRM_IOCTL_GET_STATS:
-		return (EINVAL);
 	/*
 	 * no-oped ioctls, we don't check permissions on them because
 	 * they do nothing. they'll be removed as soon as userland is
@@ -682,33 +651,12 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 
 	if (file_priv->authenticated == 1) {
 		switch (cmd) {
-		case DRM_IOCTL_RM_MAP:
-			return (drm_rmmap_ioctl(dev, data, file_priv));
-		case DRM_IOCTL_GET_CTX:
-			return (drm_getctx(dev, data, file_priv));
-		case DRM_IOCTL_RES_CTX:
-			return (drm_resctx(dev, data, file_priv));
-		case DRM_IOCTL_LOCK:
-			return (drm_lock(dev, data, file_priv));
-		case DRM_IOCTL_UNLOCK:
-			return (drm_unlock(dev, data, file_priv));
-		case DRM_IOCTL_MAP_BUFS:
-			return (drm_mapbufs(dev, data, file_priv));
-		case DRM_IOCTL_FREE_BUFS:
-			return (drm_freebufs(dev, data, file_priv));
-		case DRM_IOCTL_DMA:
-			return (drm_dma(dev, data, file_priv));
-#if __OS_HAS_AGP
-		case DRM_IOCTL_AGP_INFO:
-			return (drm_agp_info_ioctl(dev, data, file_priv));
-#endif
 		case DRM_IOCTL_GEM_FLINK:
 			return (drm_gem_flink_ioctl(dev, data, file_priv));
 		case DRM_IOCTL_GEM_OPEN:
 			return -drm_gem_open_ioctl(dev, data, file_priv);
 		case DRM_IOCTL_GET_CAP:
 			return (drm_getcap(dev, data, file_priv));
-
 		}
 	}
 
@@ -721,36 +669,8 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 			return (drm_irq_by_busid(dev, data, file_priv));
 		case DRM_IOCTL_AUTH_MAGIC:
 			return (drm_authmagic(dev, data, file_priv));
-		case DRM_IOCTL_ADD_MAP:
-			return (drm_addmap_ioctl(dev, data, file_priv));
-		case DRM_IOCTL_ADD_CTX:
-			return (drm_addctx(dev, data, file_priv));
-		case DRM_IOCTL_RM_CTX:
-			return (drm_rmctx(dev, data, file_priv));
-		case DRM_IOCTL_ADD_BUFS:
-			return (drm_addbufs(dev, (struct drm_buf_desc *)data));
 		case DRM_IOCTL_CONTROL:
 			return (drm_control(dev, data, file_priv));
-#if __OS_HAS_AGP
-		case DRM_IOCTL_AGP_ACQUIRE:
-			return (drm_agp_acquire_ioctl(dev, data, file_priv));
-		case DRM_IOCTL_AGP_RELEASE:
-			return (drm_agp_release_ioctl(dev, data, file_priv));
-		case DRM_IOCTL_AGP_ENABLE:
-			return (drm_agp_enable_ioctl(dev, data, file_priv));
-		case DRM_IOCTL_AGP_ALLOC:
-			return (drm_agp_alloc_ioctl(dev, data, file_priv));
-		case DRM_IOCTL_AGP_FREE:
-			return (drm_agp_free_ioctl(dev, data, file_priv));
-		case DRM_IOCTL_AGP_BIND:
-			return (drm_agp_bind_ioctl(dev, data, file_priv));
-		case DRM_IOCTL_AGP_UNBIND:
-			return (drm_agp_unbind_ioctl(dev, data, file_priv));
-#endif
-		case DRM_IOCTL_SG_ALLOC:
-			return (drm_sg_alloc_ioctl(dev, data, file_priv));
-		case DRM_IOCTL_SG_FREE:
-			return (drm_sg_free(dev, data, file_priv));
 		case DRM_IOCTL_ADD_DRAW:
 		case DRM_IOCTL_RM_DRAW:
 		case DRM_IOCTL_UPDATE_DRAW:
@@ -833,6 +753,34 @@ drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags,
 		return (dev->driver->ioctl(dev, cmd, data, file_priv));
 	else
 		return (EINVAL);
+}
+
+/* drmioctl is called whenever a process performs an ioctl on /dev/drm.
+ */
+int
+drmioctl(dev_t kdev, u_long cmd, caddr_t data, int flags, struct proc *p)
+{
+	struct drm_device *dev = drm_get_device_from_kdev(kdev);
+	int error;
+
+	if (dev == NULL)
+		return ENODEV;
+
+	mtx_enter(&dev->quiesce_mtx);
+	while (dev->quiesce)
+		msleep(&dev->quiesce, &dev->quiesce_mtx, PZERO, "drmioc", 0);
+	dev->quiesce_count++;
+	mtx_leave(&dev->quiesce_mtx);
+
+	error = drm_do_ioctl(dev, minor(kdev), cmd, data);
+
+	mtx_enter(&dev->quiesce_mtx);
+	dev->quiesce_count--;
+	if (dev->quiesce)
+		wakeup(&dev->quiesce_count);
+	mtx_leave(&dev->quiesce_mtx);
+
+	return (error);
 }
 
 int
@@ -1036,11 +984,6 @@ drmmmap(dev_t kdev, off_t offset, int prot)
 	case _DRM_REGISTERS:
 		return (offset + map->offset);
 		break;
-	/* XXX unify all the bus_dmamem_mmap bits */
-	case _DRM_SCATTER_GATHER:
-		return (bus_dmamem_mmap(dev->dmat, dev->sg->mem->segs,
-		    dev->sg->mem->nsegs, map->offset - dev->sg->handle +
-		    offset, prot, BUS_DMA_NOWAIT));
 	case _DRM_SHM:
 	case _DRM_CONSISTENT:
 		return (bus_dmamem_mmap(dev->dmat, map->dmamem->segs,
@@ -1349,10 +1292,39 @@ drm_fault(struct uvm_faultinfo *ufi, vaddr_t vaddr, vm_page_t *pps,
 		return(VM_PAGER_ERROR);
 	}
 
+	/*
+	 * We could end up here as the result of a copyin(9) or
+	 * copyout(9) while handling an ioctl.  So we must be careful
+	 * not to deadlock.  Therefore we only block if the quiesce
+	 * count is zero, which guarantees we didn't enter from within
+	 * an ioctl code path.
+	 */
+	mtx_enter(&dev->quiesce_mtx);
+	if (dev->quiesce && dev->quiesce_count == 0) {
+		mtx_leave(&dev->quiesce_mtx);
+		uvmfault_unlockall(ufi, ufi->entry->aref.ar_amap, uobj, NULL);
+		mtx_enter(&dev->quiesce_mtx);
+		while (dev->quiesce) {
+			msleep(&dev->quiesce, &dev->quiesce_mtx,
+			    PZERO, "drmflt", 0);
+		}
+		mtx_leave(&dev->quiesce_mtx);
+		return(VM_PAGER_REFAULT);
+	}
+	dev->quiesce_count++;
+	mtx_leave(&dev->quiesce_mtx);
+
 	/* Call down into driver to do the magic */
 	ret = dev->driver->gem_fault(obj, ufi, entry->offset + (vaddr -
 	    entry->start), vaddr, pps, npages, centeridx,
 	    access_type, flags);
+
+	mtx_enter(&dev->quiesce_mtx);
+	dev->quiesce_count--;
+	if (dev->quiesce)
+		wakeup(&dev->quiesce_count);
+	mtx_leave(&dev->quiesce_mtx);
+
 	return (ret);
 }
 
@@ -1749,6 +1721,24 @@ udv_attach_drm(void *arg, vm_prot_t accessprot, voff_t off, vsize_t size)
 	drm_ref(&obj->uobj);
 	DRM_UNLOCK();
 	return &obj->uobj;
+}
+
+/*
+ * Compute order.  Can be made faster.
+ */
+int
+drm_order(unsigned long size)
+{
+	int order;
+	unsigned long tmp;
+
+	for (order = 0, tmp = size; tmp >>= 1; ++order)
+		;
+
+	if (size & ~(1 << order))
+		++order;
+
+	return order;
 }
 
 int drm_pcie_get_speed_cap_mask(struct drm_device *dev, u32 *mask)

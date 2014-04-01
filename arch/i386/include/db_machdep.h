@@ -1,4 +1,4 @@
-/*	$OpenBSD: db_machdep.h,v 1.21 2011/03/23 16:54:35 pirofti Exp $	*/
+/*	$OpenBSD: db_machdep.h,v 1.23 2014/03/16 20:31:46 guenther Exp $	*/
 /*	$NetBSD: db_machdep.h,v 1.9 1996/05/03 19:23:59 christos Exp $	*/
 
 /* 
@@ -73,15 +73,6 @@ extern db_regs_t	ddb_regs;	/* register state */
 
 #define DB_MACHINE_COMMANDS
 
-/* macros for printing OS server dependent task name */
-
-#define DB_TASK_NAME(task)	db_task_name(task)
-#define DB_TASK_NAME_TITLE	"COMMAND                "
-#define DB_TASK_NAME_LEN	23
-#define DB_NULL_TASK_NAME	"?                      "
-#define DB_ELF_SYMBOLS
-#define DB_ELFSIZE		32
-
 /*
  * Constants for KGDB.
  */
@@ -90,10 +81,6 @@ typedef	long		kgdb_reg_t;
 #define	KGDB_BUFLEN	512
 
 #define KGDB_ENTER	breakpoint()
-
-#if 0
-void		db_task_name(/* task_t */);
-#endif
 
 /* macro for checking if a thread has used floating-point */
 

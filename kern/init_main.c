@@ -1,4 +1,4 @@
-/*	$OpenBSD: init_main.c,v 1.204 2014/02/12 05:47:36 guenther Exp $	*/
+/*	$OpenBSD: init_main.c,v 1.210 2014/03/31 19:37:15 kettenis Exp $	*/
 /*	$NetBSD: init_main.c,v 1.84.4.1 1996/06/02 09:08:06 mrg Exp $	*/
 
 /*
@@ -85,7 +85,7 @@
 #include <ufs/ufs/quota.h>
 
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <net/if.h>
 #include <net/raw_cb.h>
@@ -114,7 +114,6 @@ struct	session session0;
 struct	pgrp pgrp0;
 struct	proc proc0;
 struct	process process0;
-struct	pcred cred0;
 struct	plimit limit0;
 struct	vmspace vmspace0;
 struct	sigacts sigacts0;
@@ -129,7 +128,7 @@ int	boothowto;
 struct	timespec boottime;
 int	ncpus =  1;
 int	ncpusfound = 1;			/* number of cpus we find */
-__volatile int start_init_exec;		/* semaphore for start_init() */
+volatile int start_init_exec;		/* semaphore for start_init() */
 
 #if !defined(NO_PROPOLICE)
 long	__guard_local __attribute__((section(".openbsd.randomdata")));
@@ -285,7 +284,7 @@ main(void *framep)
 	atomic_setbits_int(&p->p_flag, P_SYSTEM);
 	p->p_stat = SONPROC;
 	pr->ps_nice = NZERO;
-	p->p_emul = &emul_native;
+	pr->ps_emul = &emul_native;
 	bcopy("swapper", p->p_comm, sizeof ("swapper"));
 
 	/* Init timeouts. */
@@ -293,14 +292,13 @@ main(void *framep)
 	timeout_set(&pr->ps_realit_to, realitexpire, pr);
 
 	/* Create credentials. */
-	p->p_cred = &cred0;
-	p->p_ucred = crget();
-	p->p_ucred->cr_ngroups = 1;	/* group 0 */
+	pr->ps_ucred = crget();
+	pr->ps_ucred->cr_ngroups = 1;	/* group 0 */
 
 	/* Initialize signal state for process 0. */
 	signal_init();
-	p->p_sigacts = &sigacts0;
-	siginit(p);
+	pr->ps_sigacts = &sigacts0;
+	siginit(pr);
 
 	/* Create the file descriptor table. */
 	p->p_fd = fdinit(NULL);
@@ -345,6 +343,9 @@ main(void *framep)
 	/* Initialize the interface/address trees */
 	ifinit();
 
+	/* Lock the kernel on behalf of proc0. */
+	KERNEL_LOCK();
+
 #if NMPATH > 0
 	/* Attach mpath before hardware */
 	config_rootfound("mpath", NULL);
@@ -364,9 +365,6 @@ main(void *framep)
 
 	/* Start real time and statistics clocks. */
 	initclocks();
-
-	/* Lock the kernel on behalf of proc0. */
-	KERNEL_LOCK();
 
 #ifdef SYSVSHM
 	/* Initialize System V style shared memory. */
@@ -604,7 +602,7 @@ start_init(void *arg)
 	check_console(p);
 
 	/* process 0 ignores SIGCHLD, but we can't */
-	p->p_sigacts->ps_flags = 0;
+	p->p_p->ps_sigacts->ps_flags = 0;
 
 	/*
 	 * Need just enough stack to hold the faked-up "execve()" arguments.

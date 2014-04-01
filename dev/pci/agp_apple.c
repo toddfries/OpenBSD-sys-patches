@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_apple.c,v 1.2 2012/12/22 19:17:36 mpi Exp $	*/
+/*	$OpenBSD: agp_apple.c,v 1.5 2014/03/29 18:09:30 guenther Exp $	*/
 
 /*
  * Copyright (c) 2012 Martin Pieuchot <mpi@openbsd.org>
@@ -17,12 +17,10 @@
  */
 
 #include <sys/param.h>
-#include <sys/kernel.h>
-#include <sys/malloc.h>
 #include <sys/systm.h>
-#include <sys/conf.h>
+#include <sys/malloc.h>
 #include <sys/device.h>
-#include <sys/agpio.h>
+#include <sys/rwlock.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
@@ -169,7 +167,7 @@ agp_apple_set_aperture(void *dev, bus_size_t aperture)
 	return (0);
 }
 
-#define flushd(p) __asm __volatile("dcbst 0,%0; sync" ::"r"(p) : "memory")
+#define flushd(p) __asm volatile("dcbst 0,%0; sync" ::"r"(p) : "memory")
 
 void
 agp_apple_bind_page(void *v, bus_addr_t off, paddr_t pa, int flags)

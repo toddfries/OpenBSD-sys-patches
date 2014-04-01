@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_zyd.c,v 1.95 2014/02/15 02:20:29 jsg Exp $	*/
+/*	$OpenBSD: if_zyd.c,v 1.97 2014/03/19 10:09:19 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2006 by Damien Bergamini <damien.bergamini@free.fr>
@@ -63,10 +63,6 @@
 #include <dev/usb/usbdevs.h>
 
 #include <dev/usb/if_zydreg.h>
-
-#ifdef USB_DEBUG
-#define ZYD_DEBUG
-#endif
 
 #ifdef ZYD_DEBUG
 #define DPRINTF(x)	do { if (zyddebug > 0) printf x; } while (0)
@@ -2234,7 +2230,7 @@ zyd_start(struct ifnet *ifp)
 		/* send pending management frames first */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
+			ni = m->m_pkthdr.ph_cookie;
 			goto sendit;
 		}
 		if (ic->ic_state != IEEE80211_S_RUN)

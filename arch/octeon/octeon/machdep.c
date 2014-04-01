@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.41 2013/09/28 12:40:31 miod Exp $ */
+/*	$OpenBSD: machdep.c,v 1.43 2014/03/13 03:52:55 dlg Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.
@@ -646,6 +646,7 @@ int	waittime = -1;
 void
 boot(int howto)
 {
+	struct device *mainbus;
 
 	/* Take a snapshot before clobbering any registers. */
 	if (curproc)
@@ -693,8 +694,9 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		if (howto & RB_POWERDOWN)
@@ -892,17 +894,5 @@ hw_ipi_intr_clear(u_long cpuid)
 	uint64_t clr =
 		bus_space_read_8(&iobus_tag, iobus_h, CIU_MBOX_CLR(cpuid));
 	bus_space_write_8(&iobus_tag, iobus_h, CIU_MBOX_CLR(cpuid), clr);
-}
-
-void
-hw_cpu_init_secondary(struct cpu_info *ci)
-{
-	ci->ci_cacheways = 2;
-	ci->ci_l1instcachesize = 32 * 1024;
-	ci->ci_l1instcacheline = 64;
-	ci->ci_l1datacachesize = 32 * 1024;
-	ci->ci_l1datacacheline = 64;
-	ci->ci_l2size = ci->ci_hw.l2size;
-	ci->ci_l3size = 0;
 }
 #endif

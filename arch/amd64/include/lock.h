@@ -1,4 +1,4 @@
-/*	$OpenBSD: lock.h,v 1.7 2013/05/21 20:05:30 tedu Exp $	*/
+/*	$OpenBSD: lock.h,v 1.9 2014/03/29 18:09:28 guenther Exp $	*/
 /*	$NetBSD: lock.h,v 1.1.2.2 2000/05/03 14:40:55 sommerfeld Exp $	*/
 
 /*-
@@ -45,11 +45,11 @@
  * this "instruction", acting as a sequence point for code generation.
  */
 
-#define __lockbarrier() __asm __volatile("": : :"memory")
-#define SPINLOCK_SPIN_HOOK __asm __volatile("pause": : :"memory");
+#define __lockbarrier() __asm volatile("": : :"memory")
+#define SPINLOCK_SPIN_HOOK __asm volatile("pause": : :"memory");
 
 #include <machine/atomic.h>
 
-#define rw_cas(p, o, n) (x86_atomic_cas_ul(p, o, n) != o)
+#define rw_cas(p, o, n) (atomic_cas_ulong(p, o, n) != o)
 
 #endif /* _MACHINE_LOCK_H_ */

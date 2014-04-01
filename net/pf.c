@@ -1,4 +1,4 @@
-/*	$OpenBSD: pf.c,v 1.868 2014/01/25 03:39:00 lteo Exp $ */
+/*	$OpenBSD: pf.c,v 1.870 2014/03/10 17:27:06 jca Exp $ */
 
 /*
  * Copyright (c) 2001 Daniel Hartmeier
@@ -1932,6 +1932,7 @@ pf_translate_af(struct pf_pdesc *pd)
 		bzero(ip4, hlen);
 		ip4->ip_v   = IPVERSION;
 		ip4->ip_hl  = hlen >> 2;
+		ip4->ip_tos = pd->tos;
 		ip4->ip_len = htons(hlen + (pd->tot_len - pd->off));
 		ip4->ip_id  = htons(ip_randomid());
 		ip4->ip_off = htons(IP_DF);
@@ -1944,6 +1945,7 @@ pf_translate_af(struct pf_pdesc *pd)
 		ip6 = mtod(pd->m, struct ip6_hdr *);
 		bzero(ip6, hlen);
 		ip6->ip6_vfc  = IPV6_VERSION;
+		ip6->ip6_flow |= htonl((u_int32_t)pd->tos << 20);
 		ip6->ip6_plen = htons(pd->tot_len - pd->off);
 		ip6->ip6_nxt  = pd->proto;
 		if (!pd->ttl || pd->ttl > IPV6_DEFHLIM)
@@ -6228,7 +6230,7 @@ pf_setup_pdesc(struct pf_pdesc *pd, void *pdhdrs, sa_family_t af, int dir,
 		pd->dst = (struct pf_addr *)&h->ip6_dst;
 		pd->virtual_proto = pd->proto;
 		pd->tot_len = ntohs(h->ip6_plen) + sizeof(struct ip6_hdr);
-		pd->tos = 0;
+		pd->tos = (ntohl(h->ip6_flow) & 0x0fc00000) >> 20;
 		pd->ttl = h->ip6_hlim;
 
 		if (pd->fragoff != 0)

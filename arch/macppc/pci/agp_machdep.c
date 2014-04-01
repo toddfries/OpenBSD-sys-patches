@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_machdep.c,v 1.1 2012/12/04 10:42:05 mpi Exp $	*/
+/*	$OpenBSD: agp_machdep.c,v 1.3 2014/03/29 18:09:30 guenther Exp $	*/
 
 /*
  * Copyright (c) 2012 Martin Pieuchot <mpi@openbsd.org>
@@ -18,17 +18,13 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/device.h>
-#include <sys/malloc.h>
+#include <sys/rwlock.h>
 
 #include <dev/pci/pcivar.h>
-#include <dev/pci/pcireg.h>
-#include <dev/pci/pcidevs.h>
-
 #include <dev/pci/agpvar.h>
 
 void
 agp_flush_cache(void)
 {
-	__asm __volatile("sync" : : : "memory");
+	__asm volatile("sync" : : : "memory");
 }

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtwn.c,v 1.32 2013/09/30 05:18:57 jsg Exp $	*/
+/*	$OpenBSD: if_urtwn.c,v 1.35 2014/03/19 10:09:19 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2010 Damien Bergamini <damien.bergamini@free.fr>
@@ -60,10 +60,6 @@
 
 #include <dev/usb/if_urtwnreg.h>
 
-#ifdef USB_DEBUG
-#define URTWN_DEBUG
-#endif
-
 #ifdef URTWN_DEBUG
 #define DPRINTF(x)	do { if (urtwn_debug) printf x; } while (0)
 #define DPRINTFN(n, x)	do { if (urtwn_debug >= (n)) printf x; } while (0)
@@ -88,6 +84,7 @@ static const struct usb_devno urtwn_devs[] = {
 	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8188CU },
 	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8188CUS },
 	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8192CU },
+	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8192CU_1 },
 	{ USB_VENDOR_BELKIN,	USB_PRODUCT_BELKIN_RTL8192CU_2 },
 	{ USB_VENDOR_CHICONY,	USB_PRODUCT_CHICONY_RTL8188CUS_1 },
 	{ USB_VENDOR_CHICONY,	USB_PRODUCT_CHICONY_RTL8188CUS_2 },
@@ -1922,7 +1919,7 @@ urtwn_start(struct ifnet *ifp)
 		/* Send pending management frames first. */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
+			ni = m->m_pkthdr.ph_cookie;
 			goto sendit;
 		}
 		if (ic->ic_state != IEEE80211_S_RUN)

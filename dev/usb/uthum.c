@@ -1,4 +1,4 @@
-/*	$OpenBSD: uthum.c,v 1.24 2013/09/28 11:22:09 sasano Exp $   */
+/*	$OpenBSD: uthum.c,v 1.26 2014/03/19 08:59:37 mpi Exp $   */
 
 /*
  * Copyright (c) 2009, 2010 Yojiro UO <yuo@nui.org>
@@ -33,10 +33,6 @@
 #include <dev/usb/usbdevs.h>
 #include <dev/usb/uhidev.h>
 #include <dev/usb/hid.h>
-
-#ifdef USB_DEBUG
-#define UTHUM_DEBUG
-#endif
 
 #ifdef UTHUM_DEBUG
 #define DPRINTF(x)	do { printf x; } while (0)
@@ -171,8 +167,10 @@ const struct cfattach uthum_ca = {
 int
 uthum_match(struct device *parent, void *match, void *aux)
 {
-	struct usb_attach_arg *uaa = aux;
-	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
+	struct uhidev_attach_arg *uha = aux;
+
+	if (uha->reportid == UHIDEV_CLAIM_ALLREPORTID)
+		return (UMATCH_NONE);
 
 	if (uthum_lookup(uha->uaa->vendor, uha->uaa->product) == NULL)
 		return UMATCH_NONE;

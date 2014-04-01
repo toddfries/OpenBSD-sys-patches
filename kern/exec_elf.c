@@ -1,4 +1,4 @@
-/*	$OpenBSD: exec_elf.c,v 1.94 2014/01/21 01:48:44 tedu Exp $	*/
+/*	$OpenBSD: exec_elf.c,v 1.97 2014/03/30 21:54:48 guenther Exp $	*/
 
 /*
  * Copyright (c) 1996 Per Fogelstrom
@@ -1158,8 +1158,8 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 
 		cpi.cpi_sigpend = p->p_siglist;
 		cpi.cpi_sigmask = p->p_sigmask;
-		cpi.cpi_sigignore = p->p_sigacts->ps_sigignore;
-		cpi.cpi_sigcatch = p->p_sigacts->ps_sigcatch;
+		cpi.cpi_sigignore = pr->ps_sigacts->ps_sigignore;
+		cpi.cpi_sigcatch = pr->ps_sigacts->ps_sigcatch;
 
 		cpi.cpi_pid = pr->ps_pid;
 		cpi.cpi_ppid = pr->ps_pptr->ps_pid;
@@ -1169,13 +1169,13 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 		else
 			cpi.cpi_sid = 0;
 
-		cpi.cpi_ruid = p->p_cred->p_ruid;
+		cpi.cpi_ruid = p->p_ucred->cr_ruid;
 		cpi.cpi_euid = p->p_ucred->cr_uid;
-		cpi.cpi_svuid = p->p_cred->p_svuid;
+		cpi.cpi_svuid = p->p_ucred->cr_svuid;
 
-		cpi.cpi_rgid = p->p_cred->p_rgid;
+		cpi.cpi_rgid = p->p_ucred->cr_rgid;
 		cpi.cpi_egid = p->p_ucred->cr_gid;
-		cpi.cpi_svgid = p->p_cred->p_svgid;
+		cpi.cpi_svgid = p->p_ucred->cr_svgid;
 
 		(void)strlcpy(cpi.cpi_name, p->p_comm, sizeof(cpi.cpi_name));
 
@@ -1192,7 +1192,7 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 
 	/* Second, write an NT_OPENBSD_AUXV note. */
 	notesize = sizeof(nhdr) + elfround(sizeof("OpenBSD")) +
-	    elfround(p->p_emul->e_arglen * sizeof(char *));
+	    elfround(pr->ps_emul->e_arglen * sizeof(char *));
 	if (iocookie) {
 		iov.iov_base = &pss;
 		iov.iov_len = sizeof(pss);
@@ -1212,7 +1212,7 @@ ELFNAMEEND(coredump_notes)(struct proc *p, void *iocookie, size_t *sizep)
 			return (EIO);
 
 		nhdr.namesz = sizeof("OpenBSD");
-		nhdr.descsz = p->p_emul->e_arglen * sizeof(char *);
+		nhdr.descsz = pr->ps_emul->e_arglen * sizeof(char *);
 		nhdr.type = NT_OPENBSD_AUXV;
 
 		error = coredump_write(iocookie, UIO_SYSSPACE,

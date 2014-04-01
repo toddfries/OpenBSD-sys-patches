@@ -1,4 +1,4 @@
-/*	$OpenBSD: cdefs.h,v 1.34 2012/08/14 20:11:37 matthew Exp $	*/
+/*	$OpenBSD: cdefs.h,v 1.38 2014/03/19 05:11:06 guenther Exp $	*/
 /*	$NetBSD: cdefs.h,v 1.16 1996/04/03 20:46:39 christos Exp $	*/
 
 /*
@@ -69,9 +69,9 @@
 #if defined(__cplusplus) || defined(__PCC__)
 #define	__inline	inline		/* convert to C++ keyword */
 #else
-#if !defined(__GNUC__) && !defined(lint)
+#if !defined(__GNUC__)
 #define	__inline			/* delete GCC keyword */
-#endif /* !__GNUC__ && !lint */
+#endif /* !__GNUC__ */
 #endif /* !__cplusplus */
 
 #else	/* !(__STDC__ || __cplusplus) */
@@ -79,25 +79,12 @@
 #define	__CONCAT(x,y)	x/**/y
 #define	__STRING(x)	"x"
 
-#if !defined(__GNUC__) && !defined(lint)
+#if !defined(__GNUC__)
 #define	__const				/* delete pseudo-ANSI C keywords */
 #define	__inline
 #define	__signed
 #define	__volatile
-#endif	/* !__GNUC__ && !lint */
-
-/*
- * In non-ANSI C environments, new programs will want ANSI-only C keywords
- * deleted from the program and old programs will want them left alone.
- * Programs using the ANSI C keywords const, inline etc. as normal
- * identifiers should define -DNO_ANSI_KEYWORDS.
- */
-#ifndef	NO_ANSI_KEYWORDS
-#define	const		__const		/* convert ANSI C keywords */
-#define	inline		__inline
-#define	signed		__signed
-#define	volatile	__volatile
-#endif /* !NO_ANSI_KEYWORDS */
+#endif	/* !__GNUC__ */
 #endif	/* !(__STDC__ || __cplusplus) */
 
 /*
@@ -114,8 +101,6 @@
 #if defined(__GNUC__) && !defined(__STRICT_ANSI__)
 #define	__dead		__volatile
 #define	__pure		__const
-#elif defined(lint)
-#define __dead		/* NORETURN */
 #endif
 #elif !defined(__STRICT_ANSI__)
 #define __dead		__attribute__((__noreturn__))
@@ -132,6 +117,18 @@
 #define	__used		__attribute__((__used__))
 #else
 #define	__used		__unused	/* suppress -Wunused warnings */
+#endif
+
+#if __GNUC_PREREQ__(3,4)
+# define __warn_unused_result	__attribute__((__warn_unused_result__))
+#else
+# define __warn_unused_result	/* delete */
+#endif
+
+#if __GNUC_PREREQ__(3,3) && !defined(__clang__)
+# define __bounded(args)	__attribute__ ((__bounded__ args ))
+#else
+# define __bounded(args)	/* delete */
 #endif
 
 /*
@@ -205,10 +202,21 @@
 #define	__pure
 #endif
 
+/*
+ * The __packed macro indicates that a variable or structure members
+ * should have the smallest possible alignment, despite any host CPU
+ * alignment requirements.
+ *
+ * The __aligned(x) macro specifies the minimum alignment of a
+ * variable or structure.
+ *
+ * These macros together are useful for describing the layout and
+ * alignment of messages exchanged with hardware or other systems.
+ */
+
 #if __GNUC_PREREQ__(2, 7) || defined(__PCC__)
 #define	__packed	__attribute__((__packed__))
-#elif defined(lint)
-#define	__packed
+#define	__aligned(x)	__attribute__((__aligned__(x)))
 #endif
 
 #if !__GNUC_PREREQ__(2, 8)
@@ -217,8 +225,6 @@
 
 #if __GNUC_PREREQ__(2, 8) || defined(__PCC__)
 #define __statement(x)	__extension__(x)
-#elif defined(lint)
-#define __statement(x)	(0)
 #else
 #define __statement(x)	(x)
 #endif

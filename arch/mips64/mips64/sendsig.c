@@ -1,4 +1,4 @@
-/*	$OpenBSD: sendsig.c,v 1.20 2012/12/02 07:03:31 guenther Exp $ */
+/*	$OpenBSD: sendsig.c,v 1.22 2014/03/26 05:23:42 guenther Exp $ */
 
 /*
  * Copyright (c) 1990 The Regents of the University of California.
@@ -111,7 +111,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	struct proc *p = curproc;
 	struct sigframe *fp;
 	struct trap_frame *regs;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	int fsize;
 	struct sigcontext ksc;
 
@@ -191,7 +191,7 @@ bail:
 	regs->t9 = (register_t)catcher;
 	regs->sp = (register_t)fp;
 
-	regs->ra = p->p_sigcode;
+	regs->ra = p->p_p->ps_sigcode;
 #ifdef DEBUG
 	if ((sigdebug & SDB_FOLLOW) ||
 	    ((sigdebug & SDB_KSTACK) && (p->p_pid == sigpid)))

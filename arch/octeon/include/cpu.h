@@ -1,4 +1,4 @@
-/* $OpenBSD: cpu.h,v 1.4 2012/04/21 12:20:30 miod Exp $ */
+/* $OpenBSD: cpu.h,v 1.6 2014/03/31 20:21:19 miod Exp $ */
 /*-
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -55,18 +55,25 @@ void hw_cpu_spinup_trampoline(struct cpu_info *);
 int  hw_ipi_intr_establish(int (*)(void *), u_long);
 void hw_ipi_intr_set(u_long);
 void hw_ipi_intr_clear(u_long);
-void hw_cpu_init_secondary(struct cpu_info *);
 #endif	/* MULTIPROCESSOR && !_LOCORE */
 
+/*
+ * No need to use the per-cpu_info function pointers, as we only support
+ * one processor type.
+ */
 #define	Mips_SyncCache(ci)			\
 	Octeon_SyncCache((ci))
 #define	Mips_InvalidateICache(ci, va, l)	\
 	Octeon_InvalidateICache((ci), (va), (l))
+#define	Mips_InvalidateICachePage(ci, va)	\
+	Octeon_InvalidateICachePage((ci), (va))
+#define	Mips_SyncICache(ci)			\
+	Octeon_SyncICache((ci))
 #define	Mips_SyncDCachePage(ci, va, pa)		\
 	Octeon_SyncDCachePage((ci), (va), (pa))
-#define	Mips_HitSyncDCache(ci, va, l)	\
+#define	Mips_HitSyncDCache(ci, va, l)		\
 	Octeon_HitSyncDCache((ci), (va), (l))
-#define	Mips_IOSyncDCache(ci, va, l, h)	\
+#define	Mips_IOSyncDCache(ci, va, l, h)		\
 	Octeon_IOSyncDCache((ci), (va), (l), (h))
 #define	Mips_HitInvalidateDCache(ci, va, l)	\
 	Octeon_HitInvalidateDCache((ci), (va), (l))

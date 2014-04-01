@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.531 2014/01/05 20:23:57 mlarkin Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.536 2014/03/29 18:09:29 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.214 1996/11/10 03:16:17 thorpej Exp $	*/
 
 /*-
@@ -364,7 +364,7 @@ cyrix_write_reg(u_char reg, u_char data)
 void
 cpuid(u_int32_t ax, u_int32_t *regs)
 {
-	__asm __volatile(
+	__asm volatile(
 	    "cpuid\n\t"
 	    "movl	%%eax, 0(%2)\n\t"
 	    "movl	%%ebx, 4(%2)\n\t"
@@ -2219,32 +2219,17 @@ p3_get_bus_clock(struct cpu_info *ci)
 			goto print_msr;
 		}
 		break;
-	/* nehalem */
-	case 0x1a: /* Core i7, Xeon 3500/5500 */
-	case 0x1e: /* Core i5/i7, Xeon 3400 */
-	case 0x1f: /* Core i5/i7 */
-	case 0x2e: /* Xeon 6500/7500 */
-	/* westmere */
-	case 0x25: /* Core i3/i5, Xeon 3400 */
-	case 0x2c: /* Core i7, Xeon 3600/5600 */
-	case 0x2f: /* Xeon E7 */
-	/* sandy bridge */
-	case 0x2a: /* Core i5/i7 2nd Generation */
-	case 0x2d: /* Xeon E5 */
-	/* ivy bridge */
-	case 0x3a: /* Core i3/i5/i7 3rd Generation */
-		break;
 	default: 
-		printf("%s: unknown i686 model 0x%x, can't get bus clock",
-		    ci->ci_dev.dv_xname, ci->ci_model);
-print_msr:
-		/*
-		 * Show the EBL_CR_POWERON MSR, so we'll at least have
-		 * some extra information, such as clock ratio, etc.
-		 */
-		printf(" (0x%llx)\n", rdmsr(MSR_EBL_CR_POWERON));
+		/* no FSB on modern Intel processors */
 		break;
 	}
+	return;
+print_msr:
+	/*
+	 * Show the EBL_CR_POWERON MSR, so we'll at least have
+	 * some extra information, such as clock ratio, etc.
+	 */
+	printf(" (0x%llx)\n", rdmsr(MSR_EBL_CR_POWERON));
 }
 
 void
@@ -2319,7 +2304,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct sigframe *fp, frame;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	register_t sp;
 
 	/*
@@ -2416,7 +2401,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_gs = GSEL(GUGS_SEL, SEL_UPL);
 	tf->tf_es = GSEL(GUDATA_SEL, SEL_UPL);
 	tf->tf_ds = GSEL(GUDATA_SEL, SEL_UPL);
-	tf->tf_eip = p->p_sigcode;
+	tf->tf_eip = p->p_p->ps_sigcode;
 	tf->tf_cs = GSEL(GUCODE_SEL, SEL_UPL);
 	tf->tf_eflags &= ~(PSL_T|PSL_D|PSL_VM|PSL_AC);
 	tf->tf_esp = (int)fp;
@@ -2571,6 +2556,8 @@ struct pcb dumppcb;
 void
 boot(int howto)
 {
+	struct device *mainbus;
+
 	if (howto & RB_POWERDOWN)
 		lid_suspend = 0;
 
@@ -2617,8 +2604,9 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	i386_broadcast_ipi(I386_IPI_HALT);
@@ -3448,7 +3436,7 @@ cpu_reset()
 	bzero((caddr_t)idt, sizeof(idt_region));
 	setregion(&region, idt, sizeof(idt_region) - 1);
 	lidt(&region);
-	__asm __volatile("divl %0,%1" : : "q" (0), "a" (0));
+	__asm volatile("divl %0,%1" : : "q" (0), "a" (0));
 
 #if 1
 	/*
@@ -3941,7 +3929,7 @@ softintr(int sir)
 {
 	struct cpu_info *ci = curcpu();
 
-	__asm __volatile("orl %1, %0" :
+	__asm volatile("orl %1, %0" :
 	    "=m" (ci->ci_ipending) : "ir" (1 << sir));
 }
 

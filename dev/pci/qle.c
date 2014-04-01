@@ -1,4 +1,4 @@
-/*	$OpenBSD: qle.c,v 1.14 2014/02/25 13:08:16 jmatthew Exp $ */
+/*	$OpenBSD: qle.c,v 1.20 2014/03/31 07:41:48 dlg Exp $ */
 
 /*
  * Copyright (c) 2013, 2014 Jonathan Matthew <jmatthew@openbsd.org>
@@ -281,7 +281,7 @@ void		qle_put_marker(struct qle_softc *, void *);
 void		qle_put_cmd(struct qle_softc *, void *, struct scsi_xfer *,
 		    struct qle_ccb *, u_int32_t);
 struct qle_ccb *qle_handle_resp(struct qle_softc *, u_int32_t);
-void		qle_put_data_seg(struct qle_iocb_seg *, bus_dmamap_t, int);
+void		qle_sge(struct qle_iocb_seg *, u_int64_t, u_int32_t);
 
 struct qle_fc_port *qle_next_fabric_port(struct qle_softc *, u_int32_t *,
 		    u_int32_t *);
@@ -324,7 +324,6 @@ void		qle_dump_stuff(struct qle_softc *, void *, int);
 void		qle_dump_iocb(struct qle_softc *, void *);
 void		qle_dump_iocb_segs(struct qle_softc *, void *, int);
 
-
 static const struct pci_matchid qle_devices[] = {
 	{ PCI_VENDOR_QLOGIC,	PCI_PRODUCT_QLOGIC_ISP2422 },
 	{ PCI_VENDOR_QLOGIC,	PCI_PRODUCT_QLOGIC_ISP2432 },
@@ -345,6 +344,7 @@ qle_attach(struct device *parent, struct device *self, void *aux)
 	struct qle_softc *sc = (void *)self;
 	struct pci_attach_args *pa = aux;
 	pci_intr_handle_t ih;
+	const char *intrstr;
 	u_int32_t pcictl;
 	struct scsibus_attach_args saa;
 	struct qle_init_cb *icb;
@@ -381,14 +381,18 @@ qle_attach(struct device *parent, struct device *self, void *aux)
 		printf(": unable to map interrupt\n");
 		goto unmap;
 	}
-	printf(": %s\n", pci_intr_string(sc->sc_pc, ih));
-
+	intrstr = pci_intr_string(sc->sc_pc, ih);
 	sc->sc_ih = pci_intr_establish(sc->sc_pc, ih, IPL_BIO,
 	    qle_intr, sc, DEVNAME(sc));
 	if (sc->sc_ih == NULL) {
-		printf("%s: unable to establish interrupt\n", DEVNAME(sc));
+		printf(": unable to establish interrupt");
+		if (intrstr != NULL)
+			printf(" at %s", intrstr);
+		printf("\n");
 		goto deintr;
 	}
+
+	printf(": %s\n", intrstr);
 
 	pcictl = pci_conf_read(pa->pa_pc, pa->pa_tag, PCI_COMMAND_STATUS_REG);
 	pcictl |= PCI_COMMAND_INVALIDATE_ENABLE |
@@ -550,17 +554,16 @@ qle_attach(struct device *parent, struct device *self, void *aux)
 		icb->icb_fwoptions3 = sc->sc_nvram.fwoptions3;
 	} else {
 		/* defaults copied from isp(4) */
-		icb->icb_max_frame_len = htole16(1024);
-		icb->icb_exec_throttle = htole16(16);
+		htolem16(&icb->icb_max_frame_len, 1024);
+		htolem16(&icb->icb_exec_throttle, 16);
 		icb->icb_portname = htobe64(QLE_DEFAULT_PORT_NAME);
 		icb->icb_nodename = 0;
 		icb->icb_login_retry = 3;
 
-		icb->icb_fwoptions1 = htole16(QLE_ICB_FW1_FAIRNESS |
-		    QLE_ICB_FW1_HARD_ADDR |
-		    QLE_ICB_FW1_FULL_DUPLEX);
-		icb->icb_fwoptions2 = htole16(QLE_ICB_FW2_LOOP_PTP);
-		icb->icb_fwoptions3 = htole16(QLE_ICB_FW3_FCP_RSP_24_0 |
+		htolem32(&icb->icb_fwoptions1, QLE_ICB_FW1_FAIRNESS |
+		    QLE_ICB_FW1_HARD_ADDR | QLE_ICB_FW1_FULL_DUPLEX);
+		htolem32(&icb->icb_fwoptions2, QLE_ICB_FW2_LOOP_PTP);
+		htolem32(&icb->icb_fwoptions3, QLE_ICB_FW3_FCP_RSP_24_0 |
 		    QLE_ICB_FW3_AUTONEG);
 	}
 
@@ -569,15 +572,23 @@ qle_attach(struct device *parent, struct device *self, void *aux)
 	icb->icb_req_out = 0;
 	icb->icb_resp_in = 0;
 	icb->icb_pri_req_out = 0;
-	icb->icb_req_queue_len = htole16(sc->sc_maxcmds);
-	icb->icb_resp_queue_len = htole16(sc->sc_maxcmds);
-	icb->icb_pri_req_queue_len = htole16(8); /* apparently the minimum */
-	icb->icb_req_queue_addr = htole64(QLE_DMA_DVA(sc->sc_requests));
-	icb->icb_resp_queue_addr = htole64(QLE_DMA_DVA(sc->sc_responses));
-	icb->icb_pri_req_queue_addr =
-	    htole64(QLE_DMA_DVA(sc->sc_pri_requests));
+	htolem16(&icb->icb_req_queue_len, sc->sc_maxcmds);
+	htolem16(&icb->icb_resp_queue_len, sc->sc_maxcmds);
+	htolem16(&icb->icb_pri_req_queue_len, 8); /* apparently the minimum */
+	htolem32(&icb->icb_req_queue_addr_lo,
+	    QLE_DMA_DVA(sc->sc_requests));
+	htolem32(&icb->icb_req_queue_addr_hi,
+	    QLE_DMA_DVA(sc->sc_requests) >> 32);
+	htolem32(&icb->icb_resp_queue_addr_lo,
+	    QLE_DMA_DVA(sc->sc_responses));
+	htolem32(&icb->icb_resp_queue_addr_hi,
+	    QLE_DMA_DVA(sc->sc_responses) >> 32);
+	htolem32(&icb->icb_pri_req_queue_addr_lo,
+	    QLE_DMA_DVA(sc->sc_pri_requests));
+	htolem32(&icb->icb_pri_req_queue_addr_hi,
+	    QLE_DMA_DVA(sc->sc_pri_requests) >> 32);
 
-	icb->icb_link_down_nos = htole16(200);
+	htolem16(&icb->icb_link_down_nos, 200);
 	icb->icb_int_delay = 0;
 	icb->icb_login_timeout = 0;
 
@@ -800,7 +811,7 @@ qle_add_loop_port(struct qle_softc *sc, u_int16_t loopid)
 		return (1);
 	}
 
-	if (letoh16(pdb->prli_svc_word3) & QLE_SVC3_TARGET_ROLE)
+	if (lemtoh16(&pdb->prli_svc_word3) & QLE_SVC3_TARGET_ROLE)
 		port->flags |= QLE_PORT_FLAG_IS_TARGET;
 
 	port->port_name = betoh64(pdb->port_name);
@@ -855,7 +866,7 @@ qle_add_fabric_port(struct qle_softc *sc, struct qle_fc_port *port)
 	}
 	pdb = QLE_DMA_KVA(sc->sc_scratch);
 
-	if (letoh16(pdb->prli_svc_word3) & QLE_SVC3_TARGET_ROLE)
+	if (lemtoh16(&pdb->prli_svc_word3) & QLE_SVC3_TARGET_ROLE)
 		port->flags |= QLE_PORT_FLAG_IS_TARGET;
 
 	/* compare port and node name with what's in the port db now */
@@ -933,8 +944,8 @@ qle_handle_resp(struct qle_softc *sc, u_int32_t id)
 			bus_dmamap_unload(sc->sc_dmat, ccb->ccb_dmamap);
 		}
 
-		xs->status = letoh16(status->scsi_status) & 0x0f;
-		completion = letoh16(status->completion);
+		xs->status = lemtoh16(&status->scsi_status) & 0x0f;
+		completion = lemtoh16(&status->completion);
 		switch (completion) {
 		case QLE_IOCB_STATUS_DATA_OVERRUN:
 		case QLE_IOCB_STATUS_DATA_UNDERRUN:
@@ -942,17 +953,17 @@ qle_handle_resp(struct qle_softc *sc, u_int32_t id)
 			if (completion == QLE_IOCB_STATUS_COMPLETE) {
 				xs->resid = 0;
 			} else {
-				xs->resid = letoh32(status->resid);
+				xs->resid = lemtoh32(&status->resid);
 			}
 
-			if (letoh16(status->scsi_status) &
+			if (lemtoh16(&status->scsi_status) &
 			    QLE_SCSI_STATUS_SENSE_VALID) {
 				u_int32_t *pp;
 				int sr;
 				data = status->data +
-				    letoh32(status->fcp_rsp_len);
+				    lemtoh32(&status->fcp_rsp_len);
 				memcpy(&xs->sense, data,
-				    letoh32(status->fcp_sense_len));
+				    lemtoh32(&status->fcp_sense_len));
 				xs->error = XS_SENSE;
 				pp = (u_int32_t *)&xs->sense;
 				for (sr = 0; sr < sizeof(xs->sense)/4; sr++) {
@@ -1677,9 +1688,9 @@ qle_update_fabric(struct qle_softc *sc)
 	/*
 	rft = QLE_DMA_KVA(sc->sc_scratch);
 	memset(rft, 0, sizeof(*rft) + sizeof(struct qle_sns_req_hdr));
-	rft->subcmd = htole16(QLE_SNS_RFT_ID);
-	rft->max_word = htole16(sizeof(struct qle_sns_req_hdr) / 4);
-	rft->port_id = htole32(sc->sc_port_id);
+	htolem16(&rft->subcmd, QLE_SNS_RFT_ID);
+	htolem16(&rft->max_word, sizeof(struct qle_sns_req_hdr) / 4);
+	htolem32(&rft->port_id, sc->sc_port_id);
 	rft->fc4_types[0] = (1 << QLE_FC4_SCSI);
 	if (qle_sns_req(sc, sc->sc_scratch, sizeof(*rft))) {
 		printf("%s: RFT_ID failed\n", DEVNAME(sc));
@@ -1715,15 +1726,13 @@ qle_ct_pass_through(struct qle_softc *sc, u_int32_t port_handle,
 	iocb->entry_count = 1;
 
 	iocb->req_handle = 9;
-	iocb->req_nport_handle = htole16(port_handle);
-	iocb->req_dsd_count = htole16(1);
-	iocb->req_resp_dsd_count = htole16(1);
-	iocb->req_cmd_byte_count = htole32(req_size);
-	iocb->req_resp_byte_count = htole32(resp_size);
-	iocb->req_cmd_seg.seg_addr = htole64(QLE_DMA_DVA(mem));
-	iocb->req_cmd_seg.seg_len = htole32(req_size);
-	iocb->req_resp_seg.seg_addr = htole64(QLE_DMA_DVA(mem) + req_size);
-	iocb->req_resp_seg.seg_len = htole32(resp_size);
+	htolem16(&iocb->req_nport_handle, port_handle);
+	htolem16(&iocb->req_dsd_count, 1);
+	htolem16(&iocb->req_resp_dsd_count, 1);
+	htolem32(&iocb->req_cmd_byte_count, req_size);
+	htolem32(&iocb->req_resp_byte_count, resp_size);
+	qle_sge(&iocb->req_cmd_seg, QLE_DMA_DVA(mem), req_size);
+	qle_sge(&iocb->req_resp_seg, QLE_DMA_DVA(mem) + req_size, resp_size);
 
 	bus_dmamap_sync(sc->sc_dmat, QLE_DMA_MAP(mem), 0, QLE_DMA_LEN(mem),
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
@@ -1855,9 +1864,9 @@ qle_fabric_plogi(struct qle_softc *sc, struct qle_fc_port *port)
 	iocb->entry_count = 1;
 
 	iocb->req_handle = 7;
-	iocb->req_nport_handle = htole16(loopid);
-	iocb->req_port_id_lo = htole16(port->portid & 0xffff);
-	iocb->req_port_id_hi = htole16(port->portid >> 16);
+	htolem16(&iocb->req_nport_handle, loopid);
+	htolem16(&iocb->req_port_id_lo, port->portid);
+	iocb->req_port_id_hi = port->portid >> 16;
 	iocb->req_flags = 0;
 
 	/*qle_dump_iocb(sc, iocb);*/
@@ -2298,16 +2307,18 @@ qle_put_marker(struct qle_softc *sc, void *buf)
 }
 
 void
-qle_put_data_seg(struct qle_iocb_seg *seg, bus_dmamap_t dmap, int num)
+qle_sge(struct qle_iocb_seg *seg, u_int64_t addr, u_int32_t len)
 {
-	seg->seg_addr = htole64(dmap->dm_segs[num].ds_addr);
-	seg->seg_len = htole32(dmap->dm_segs[num].ds_len);
+	htolem32(&seg->seg_addr_lo, addr);
+	htolem32(&seg->seg_addr_hi, addr >> 32);
+	htolem32(&seg->seg_len, len);
 }
 
 void
 qle_put_cmd(struct qle_softc *sc, void *buf, struct scsi_xfer *xs,
     struct qle_ccb *ccb, u_int32_t target_port)
 {
+	bus_dmamap_t dmap = ccb->ccb_dmamap;
 	struct qle_iocb_req6 *req = buf;
 	struct qle_fcp_cmnd *cmnd;
 	u_int64_t fcp_cmnd_offset;
@@ -2315,64 +2326,66 @@ qle_put_cmd(struct qle_softc *sc, void *buf, struct scsi_xfer *xs,
 	int seg;
 	int target = xs->sc_link->target;
 	int lun = xs->sc_link->lun;
+	u_int16_t flags;
 
 	memset(req, 0, sizeof(*req));
 	req->entry_type = QLE_IOCB_CMD_TYPE_6;
 	req->entry_count = 1;
 
 	req->req_handle = ccb->ccb_id;
-	req->req_nport_handle = htole16(target);
+	htolem16(&req->req_nport_handle, target);
 	
 	/*
 	 * timeout is in seconds.  make sure it's at least 1 if a timeout
 	 * was specified in xs
 	 */
 	if (xs->timeout != 0)
-		req->req_timeout = htole16(MAX(1, xs->timeout/1000));
+		htolem16(&req->req_timeout, MAX(1, xs->timeout/1000));
 
 	if (xs->datalen > 0) {
-		req->req_data_seg_count = htole16(ccb->ccb_dmamap->dm_nsegs);
-		req->req_ctrl_flags = htole16(xs->flags & SCSI_DATA_IN ?
-		    QLE_IOCB_CTRL_FLAG_READ : QLE_IOCB_CTRL_FLAG_WRITE);
-		if (ccb->ccb_dmamap->dm_nsegs == 1) {
-			qle_put_data_seg(&req->req_data_seg,
-			    ccb->ccb_dmamap, 0);
+		flags = (xs->flags & SCSI_DATA_IN) ?
+		    QLE_IOCB_CTRL_FLAG_READ : QLE_IOCB_CTRL_FLAG_WRITE;
+		if (dmap->dm_nsegs == 1) {
+			qle_sge(&req->req_data_seg, dmap->dm_segs[0].ds_addr,
+			    dmap->dm_segs[0].ds_len);
 		} else {
-			req->req_ctrl_flags |=
-			    htole16(QLE_IOCB_CTRL_FLAG_EXT_SEG);
-			req->req_data_seg.seg_addr =
-			    htole64(QLE_DMA_DVA(sc->sc_segments) +
-			    ccb->ccb_seg_offset);
-			req->req_data_seg.seg_len = (ccb->ccb_dmamap->dm_nsegs
-			    + 1) * sizeof(struct qle_iocb_seg);
-			for (seg = 0; seg < ccb->ccb_dmamap->dm_nsegs; seg++) {
-				qle_put_data_seg(&ccb->ccb_segs[seg],
-				    ccb->ccb_dmamap, seg);
+			flags |= QLE_IOCB_CTRL_FLAG_EXT_SEG;
+			qle_sge(&req->req_data_seg,
+			    QLE_DMA_DVA(sc->sc_segments) +
+			     ccb->ccb_seg_offset,
+			    (ccb->ccb_dmamap->dm_nsegs + 1) *
+			     sizeof(struct qle_iocb_seg));
+
+			for (seg = 0; seg < dmap->dm_nsegs; seg++) {
+				qle_sge(&ccb->ccb_segs[seg],
+				    dmap->dm_segs[seg].ds_addr,
+				    dmap->dm_segs[seg].ds_len);
 			}
-			ccb->ccb_segs[ccb->ccb_dmamap->dm_nsegs].seg_addr = 0;
-			ccb->ccb_segs[ccb->ccb_dmamap->dm_nsegs].seg_len = 0;
+			qle_sge(&ccb->ccb_segs[seg], 0, 0);
+
 			bus_dmamap_sync(sc->sc_dmat,
 			    QLE_DMA_MAP(sc->sc_segments), ccb->ccb_seg_offset,
 			    sizeof(*ccb->ccb_segs) * ccb->ccb_dmamap->dm_nsegs,
 			    BUS_DMASYNC_PREWRITE);
 		}
-		req->req_data_len = htole32(xs->datalen);
-	}
-	req->req_fcp_lun[0] = htobe16(lun & 0xffff);
-	req->req_fcp_lun[1] = htobe16((lun >> 16) & 0xffff);
 
-	req->req_target_id = htole32(target_port & 0xffffff);
+		htolem16(&req->req_data_seg_count, dmap->dm_nsegs);
+		htolem32(&req->req_data_len, xs->datalen);
+		htolem16(&req->req_ctrl_flags, flags);
+	}
+
+	htobem16(&req->req_fcp_lun[0], lun);
+	htobem16(&req->req_fcp_lun[1], lun >> 16);
+	htolem32(&req->req_target_id, target_port & 0xffffff);
 
 	fcp_cmnd_offset = ccb->ccb_id * sizeof(*cmnd);
-	req->req_fcp_cmnd_addr = htole64(QLE_DMA_DVA(sc->sc_fcp_cmnds)
-	    + fcp_cmnd_offset);
-
 	/* set up FCP_CMND */
 	cmnd = (struct qle_fcp_cmnd *)QLE_DMA_KVA(sc->sc_fcp_cmnds) +
 	    ccb->ccb_id;
 
 	memset(cmnd, 0, sizeof(*cmnd));
-	memcpy(cmnd->fcp_lun, req->req_fcp_lun, sizeof(cmnd->fcp_lun));
+	htobem16(&cmnd->fcp_lun[0], lun);
+	htobem16(&cmnd->fcp_lun[1], lun >> 16);
 	/* cmnd->fcp_task_attr = TSK_SIMPLE; */
 	/* cmnd->fcp_task_mgmt = 0; */
 	memcpy(cmnd->fcp_cdb, xs->cmd, xs->cmdlen);
@@ -2380,11 +2393,11 @@ qle_put_cmd(struct qle_softc *sc, void *buf, struct scsi_xfer *xs,
 	/* FCP_DL goes after the cdb */
 	fcp_dl = htobe32(xs->datalen);
 	if (xs->cmdlen > 16) {
-		req->req_fcp_cmnd_len = htole16(12 + xs->cmdlen + 4);
+		htolem16(&req->req_fcp_cmnd_len, 12 + xs->cmdlen + 4);
 		cmnd->fcp_add_cdb_len = xs->cmdlen - 16;
-		memcpy(cmnd->fcp_cdb + xs->datalen, &fcp_dl, sizeof(fcp_dl));
+		memcpy(cmnd->fcp_cdb + xs->cmdlen, &fcp_dl, sizeof(fcp_dl));
 	} else {
-		req->req_fcp_cmnd_len = htole16(12 + 16 + 4);
+		htolem16(&req->req_fcp_cmnd_len, 12 + 16 + 4);
 		cmnd->fcp_add_cdb_len = 0;
 		memcpy(cmnd->fcp_cdb + 16, &fcp_dl, sizeof(fcp_dl));
 	}
@@ -2394,6 +2407,11 @@ qle_put_cmd(struct qle_softc *sc, void *buf, struct scsi_xfer *xs,
 	bus_dmamap_sync(sc->sc_dmat,
 	    QLE_DMA_MAP(sc->sc_fcp_cmnds), fcp_cmnd_offset,
 	    sizeof(*cmnd), BUS_DMASYNC_PREWRITE);
+
+	/* link req to cmnd */
+	fcp_cmnd_offset += QLE_DMA_DVA(sc->sc_fcp_cmnds);
+	htolem32(&req->req_fcp_cmnd_addr_lo, fcp_cmnd_offset);
+	htolem32(&req->req_fcp_cmnd_addr_hi, fcp_cmnd_offset >> 32);
 }
 
 int
@@ -2415,7 +2433,7 @@ qle_load_fwchunk(struct qle_softc *sc, struct qle_dmamem *mem,
 		words = MIN(total - done, 1 << 10);
 		copy = QLE_DMA_KVA(mem);
 		for (i = 0; i < words; i++) {
-			copy[i] = htole32(src[done++]);
+			htolem32(&copy[i], src[done++]);
 		}
 		bus_dmamap_sync(sc->sc_dmat, QLE_DMA_MAP(mem), 0, words * 4,
 		    BUS_DMASYNC_PREWRITE);

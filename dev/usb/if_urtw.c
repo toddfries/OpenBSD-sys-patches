@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_urtw.c,v 1.43 2013/08/07 01:06:43 bluhm Exp $	*/
+/*	$OpenBSD: if_urtw.c,v 1.45 2014/03/19 10:09:19 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2009 Martynas Venckus <martynas@openbsd.org>
@@ -55,10 +55,6 @@
 #include <dev/usb/usbdevs.h>
 
 #include <dev/usb/if_urtwreg.h>
-
-#ifdef USB_DEBUG
-#define	URTW_DEBUG
-#endif
 
 #ifdef URTW_DEBUG
 #define	DPRINTF(x)	do { if (urtw_debug) printf x; } while (0)
@@ -2500,8 +2496,7 @@ urtw_start(struct ifnet *ifp)
 				break;
 			}
 			IF_DEQUEUE(&ic->ic_mgtq, m0);
-			ni = (struct ieee80211_node *)m0->m_pkthdr.rcvif;
-			m0->m_pkthdr.rcvif = NULL;
+			ni = m0->m_pkthdr.ph_cookie;
 #if NBPFILTER > 0
 			if (ic->ic_rawbpf != NULL)
 				bpf_mtap(ic->ic_rawbpf, m0, BPF_DIRECTION_OUT);

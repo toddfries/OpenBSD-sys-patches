@@ -1,4 +1,4 @@
-#	$OpenBSD: files,v 1.566 2014/02/10 22:41:27 jmatthew Exp $
+#	$OpenBSD: files,v 1.569 2014/03/18 22:36:37 miod Exp $
 #	$NetBSD: files,v 1.87 1996/05/19 17:17:50 jonathan Exp $
 
 #	@(#)files.newconf	7.5 (Berkeley) 5/10/93
@@ -195,6 +195,10 @@ file	dev/ic/isp.c			isp
 file	dev/ic/isp_openbsd.c		isp
 file	dev/ic/isp_library.c		isp
 
+# QLogic ISP SCSI Controllers
+device	qlw: scsi
+file	dev/ic/qlw.c			qlw
+
 # QLogic ISP23xx FC Controllers
 device  qla: scsi
 file    dev/ic/qla.c                    qla
@@ -358,8 +362,8 @@ file	dev/ic/lpt.c			lpt & (lpt_isa | lpt_localbus |
 
 # STI (hp graphics)
 device	sti: wsemuldisplaydev
-file	dev/ic/sti.c			sti & (sti_dio | sti_gedoens |
-					       sti_pci | sti_sgc) needs-flag
+file	dev/ic/sti.c			sti & (sti_gedoens |
+					       sti_pci) needs-flag
 
 # Initio ULTRA WIDE/ULTRA2 WIDE SCSI Controllers
 device	iha: scsi
@@ -459,6 +463,10 @@ file	dev/usb/ohci.c			ohci	needs-flag
 # EHCI USB controller
 device	ehci: usbus
 file	dev/usb/ehci.c			ehci	needs-flag
+
+# XHCI USB controller
+device	xhci: usbus
+file	dev/usb/xhci.c			xhci	needs-flag
 
 # SDHC SD/MMC controller
 device	sdhc: sdmmcbus

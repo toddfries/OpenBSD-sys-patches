@@ -1,4 +1,4 @@
-/*	$OpenBSD: agp_i810.c,v 1.82 2014/02/20 22:18:22 kettenis Exp $	*/
+/*	$OpenBSD: agp_i810.c,v 1.85 2014/03/26 14:41:41 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2000 Doug Rabson
@@ -31,11 +31,8 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/malloc.h>
-#include <sys/kernel.h>
-#include <sys/lock.h>
 #include <sys/device.h>
-#include <sys/conf.h>
-#include <sys/agpio.h>
+#include <sys/rwlock.h>
 
 #include <dev/pci/pcivar.h>
 #include <dev/pci/pcireg.h>
@@ -441,6 +438,9 @@ agp_i810_attach(struct device *parent, struct device *self, void *aux)
 		} else
 			printf(": no preallocated video memory\n");
 #endif
+
+		/* XXX */
+		isc->stolen = 0;
 
 		/* GATT address is already in there, make sure it's enabled */
 		gatt->ag_physical = READ4(AGP_I810_PGTBL_CTL) & ~1;

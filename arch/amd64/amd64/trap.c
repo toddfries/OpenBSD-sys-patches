@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.33 2014/02/13 23:11:06 kettenis Exp $	*/
+/*	$OpenBSD: trap.c,v 1.35 2014/03/30 21:54:48 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.2 2003/05/04 23:51:56 fvdl Exp $	*/
 
 /*-
@@ -409,8 +409,7 @@ faultcommon:
 		if (error == ENOMEM) {
 			printf("UVM: pid %d (%s), uid %d killed: out of swap\n",
 			       p->p_pid, p->p_comm,
-			       p->p_cred && p->p_ucred ?
-			       (int)p->p_ucred->cr_uid : -1);
+			       p->p_ucred ?  (int)p->p_ucred->cr_uid : -1);
 			sv.sival_ptr = (void *)fa;
 			trapsignal(p, SIGKILL, T_PAGEFLT, SEGV_MAPERR, sv);
 		} else {
@@ -507,8 +506,8 @@ syscall(struct trapframe *frame)
 	p = curproc;
 
 	code = frame->tf_rax;
-	callp = p->p_emul->e_sysent;
-	nsys = p->p_emul->e_nsysent;
+	callp = p->p_p->ps_emul->e_sysent;
+	nsys = p->p_p->ps_emul->e_nsysent;
 	argp = &args[0];
 	argoff = 0;
 
@@ -527,7 +526,7 @@ syscall(struct trapframe *frame)
 	}
 
 	if (code < 0 || code >= nsys)
-		callp += p->p_emul->e_nosys;
+		callp += p->p_p->ps_emul->e_nosys;
 	else
 		callp += code;
 

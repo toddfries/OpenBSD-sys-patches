@@ -1,4 +1,4 @@
-/*	$OpenBSD: ttm_page_alloc.c,v 1.4 2014/02/24 21:36:49 kettenis Exp $	*/
+/*	$OpenBSD: ttm_page_alloc.c,v 1.6 2014/03/28 17:57:11 mpi Exp $	*/
 /*
  * Copyright (c) Red Hat Inc.
 

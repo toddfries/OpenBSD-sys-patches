@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahcivar.h,v 1.3 2014/01/02 08:00:35 gilles Exp $ */
+/*	$OpenBSD: ahcivar.h,v 1.7 2014/03/31 06:58:10 dlg Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -40,11 +40,10 @@ struct ahci_cmd_hdr {
 
 	u_int32_t		prdbc; /* transferred byte count */
 
-	u_int32_t		ctba_lo;
-	u_int32_t		ctba_hi;
+	u_int64_t		ctba;
 
 	u_int32_t		reserved[4];
-} __packed;
+} __packed __aligned(8);
 
 struct ahci_rfis {
 	u_int8_t		dsfis[28];
@@ -59,12 +58,11 @@ struct ahci_rfis {
 } __packed;
 
 struct ahci_prdt {
-	u_int32_t		dba_lo;
-	u_int32_t		dba_hi;
+	u_int64_t		dba;
 	u_int32_t		reserved;
 	u_int32_t		flags;
 #define AHCI_PRDT_FLAG_INTR		(1<<31) /* interrupt on completion */
-} __packed;
+} __packed __aligned(8);
 
 /* this makes ahci_cmd_table 512 bytes, supporting 128-byte alignment */
 #define AHCI_MAX_PRDT		24
@@ -75,7 +73,7 @@ struct ahci_cmd_table {
 	u_int8_t		reserved[48];
 
 	struct ahci_prdt	prdt[AHCI_MAX_PRDT];
-} __packed;
+} __packed __aligned(128);
 
 #define AHCI_MAX_PORTS		32
 
@@ -86,7 +84,7 @@ struct ahci_dmamem {
 	caddr_t			adm_kva;
 };
 #define AHCI_DMA_MAP(_adm)	((_adm)->adm_map)
-#define AHCI_DMA_DVA(_adm)	((_adm)->adm_map->dm_segs[0].ds_addr)
+#define AHCI_DMA_DVA(_adm)	((u_int64_t)(_adm)->adm_map->dm_segs[0].ds_addr)
 #define AHCI_DMA_KVA(_adm)	((void *)(_adm)->adm_kva)
 
 struct ahci_softc;

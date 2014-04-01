@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache_tfp.c,v 1.2 2013/06/28 18:56:10 miod Exp $	*/
+/*	$OpenBSD: cache_tfp.c,v 1.4 2014/03/31 20:21:19 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -53,40 +53,42 @@ tfp_ConfigCache(struct cpu_info *ci)
 	 * XXX then.
 	 */
 #if 0
+	ci->ci_l1inst.size = (1 << 11) << ((cfg >> 9) & 0x07); /* IC */
 	if (cfg & (1 << 5))	/* IB */
-		ci->ci_l1instcacheline = 32;
+		ci->ci_l1inst.linesize = 32;
 	else
-		ci->ci_l1instcacheline = 16;
-	ci->ci_l1instcachesize = (1 << 11) << ((cfg >> 9) & 0x07); /* IC */
+		ci->ci_l1inst.linesize = 16;
 
+	ci->ci_l1data.size = (1 << 12) << ((cfg >> 6) & 0x07); /* DC */
 	if (cfg & (1 << 4))	/* DB */
-		ci->ci_l1datacacheline = 32;
+		ci->ci_l1data.linesize = 32;
 	else
-		ci->ci_l1datacacheline = 16;
-	ci->ci_l1datacachesize = (1 << 12) << ((cfg >> 6) & 0x07); /* DC */
+		ci->ci_l1data.linesize = 16;
 #else
-	ci->ci_l1instcacheline = 32;
-	ci->ci_l1datacacheline = 32;
-	ci->ci_l1instcachesize = 16384;
-	ci->ci_l1datacachesize = 16384;
+	ci->ci_l1inst.size = 16384;
+	ci->ci_l1inst.linesize = 32;
+	ci->ci_l1data.size = 16384;
+	ci->ci_l1data.linesize = 32;
 #endif
 
 	/* R8000 L1 caches are direct */
-	ci->ci_cacheways = 1;
-	ci->ci_l1instcacheset = ci->ci_l1instcachesize;
-	ci->ci_l1datacacheset = ci->ci_l1datacachesize;
+	ci->ci_l1inst.setsize = ci->ci_l1inst.size;
+	ci->ci_l1inst.sets = 1;
+	ci->ci_l1data.setsize = ci->ci_l1data.size;
+	ci->ci_l1data.sets = 1;
 
 	cache_valias_mask =
-	    (max(ci->ci_l1instcachesize, ci->ci_l1datacachesize) - 1) &
+	    (max(ci->ci_l1inst.size, ci->ci_l1data.size) - 1) &
 	    ~PAGE_MASK;
 
 	/* R8000 L2 cache are platform-specific, and not covered here */
-	ci->ci_l2line = 0;
-	ci->ci_l2size = 0;
-	ci->ci_l3size = 0;
+	memset(&ci->ci_l2, 0, sizeof(struct cache_info));
+	memset(&ci->ci_l3, 0, sizeof(struct cache_info));
 
 	ci->ci_SyncCache = tfp_SyncCache;
 	ci->ci_InvalidateICache = tfp_InvalidateICache;
+	ci->ci_InvalidateICachePage = tfp_InvalidateICachePage;
+	ci->ci_SyncICache = tfp_SyncICache;
 	ci->ci_SyncDCachePage = tfp_SyncDCachePage;
 	ci->ci_HitSyncDCache = tfp_HitSyncDCache;
 	ci->ci_HitInvalidateDCache = tfp_HitInvalidateDCache;
@@ -102,10 +104,10 @@ tfp_SyncCache(struct cpu_info *ci)
 	vaddr_t va, eva;
 	register_t sr;
 
-	tfp_InvalidateICache(ci, 0, ci->ci_l1instcachesize);
+	tfp_InvalidateICache(ci, 0, ci->ci_l1inst.size);
 
 	sr = disableintr();
-	eva = ci->ci_l1datacachesize;
+	eva = ci->ci_l1data.size;
 	for (va = 0; va < eva; va += TFP_DCTW_STEP)
 		tfp_dctw_zero(va);
 	setsr(sr);
@@ -121,18 +123,43 @@ tfp_InvalidateICache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	vsize_t sz;
 	void (*inval_subr)(vsize_t);
 
-	if (_sz >= ci->ci_l1instcachesize) {
-		tfp_inval_icache(ci->ci_l1instcachesize);
+	if (_sz >= ci->ci_l1inst.size) {
+		tfp_inval_icache(ci->ci_l1inst.size);
 	} else {
 		/* extend the range to multiple of 32 bytes */
 		va = _va & ~(32UL - 1);
 		sz = ((_va + _sz + 32 - 1) & ~(32UL - 1)) - va;
 
 		/* compute cache offset */
-		va &= (ci->ci_l1instcachesize - 1);
+		va &= (ci->ci_l1inst.size - 1);
 		inval_subr = (void (*)(vsize_t))
 		    ((vaddr_t)tfp_inval_icache + va);
 		(*inval_subr)(sz);
+	}
+}
+
+/*
+ * Register a given page for I$ invalidation.
+ */
+void
+tfp_InvalidateICachePage(struct cpu_info *ci, vaddr_t va)
+{
+	/*
+	 * Since the page size matches the size of the instruction cache,
+	 * all we need to do here is remember there are postponed flushes.
+	 */
+	ci->ci_cachepending_l1i = 1;
+}
+
+/*
+ * Perform postponed I$ invalidation.
+ */
+void
+tfp_SyncICache(struct cpu_info *ci)
+{
+	if (ci->ci_cachepending_l1i != 0) {
+		tfp_inval_icache(ci->ci_l1inst.size);
+		ci->ci_cachepending_l1i = 0;
 	}
 }
 

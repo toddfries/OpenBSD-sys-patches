@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.213 2013/11/23 07:20:52 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.217 2014/03/29 18:09:29 guenther Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff
@@ -878,6 +878,8 @@ int waittime = -1;
 void
 boot(int howto)
 {
+	struct device *mainbus;
+
 	/*
 	 * On older systems without software power control, prevent mi code
 	 * from spinning disks off, in case the operator changes his mind
@@ -922,8 +924,9 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 #ifdef MULTIPROCESSOR
 	hppa_ipi_broadcast(HPPA_IPI_HALT);
@@ -943,7 +946,7 @@ haltsys:
 
 		printf("System halted!\n");
 		DELAY(2000000);
-		__asm __volatile("stwas %0, 0(%1)"
+		__asm volatile("stwas %0, 0(%1)"
 		    :: "r" (CMD_STOP), "r" (HPPA_LBCAST + iomod_command));
 	} else {
 		printf("rebooting...");
@@ -953,9 +956,9 @@ haltsys:
                 pdc_call((iodcio_t)pdc, 0, PDC_BROADCAST_RESET, PDC_DO_RESET);
 
 		/* forcably reset module if that fails */
-		__asm __volatile(".export hppa_reset, entry\n\t"
+		__asm volatile(".export hppa_reset, entry\n\t"
 		    ".label hppa_reset");
-		__asm __volatile("stwas %0, 0(%1)"
+		__asm volatile("stwas %0, 0(%1)"
 		    :: "r" (CMD_RESET), "r" (HPPA_LBCAST + iomod_command));
 	}
 
@@ -1213,7 +1216,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct pcb *pcb = &p->p_addr->u_pcb;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	struct sigcontext ksc;
 	siginfo_t ksi;
 	register_t scp, sip;
@@ -1299,7 +1302,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_arg2 = tf->tf_r4 = scp;
 	tf->tf_arg3 = (register_t)catcher;
 	tf->tf_ipsw &= ~(PSL_N|PSL_B|PSL_T);
-	tf->tf_iioq_head = HPPA_PC_PRIV_USER | p->p_sigcode;
+	tf->tf_iioq_head = HPPA_PC_PRIV_USER | p->p_p->ps_sigcode;
 	tf->tf_iioq_tail = tf->tf_iioq_head + 4;
 	tf->tf_iisq_tail = tf->tf_iisq_head = pcb->pcb_space;
 	/* disable tracing in the trapframe */

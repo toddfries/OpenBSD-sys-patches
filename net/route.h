@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.h,v 1.87 2014/01/23 10:16:30 mpi Exp $	*/
+/*	$OpenBSD: route.h,v 1.89 2014/03/21 10:44:42 mpi Exp $	*/
 /*	$NetBSD: route.h,v 1.9 1996/02/13 22:00:49 christos Exp $	*/
 
 /*
@@ -361,9 +361,11 @@ extern const struct sockaddr_rtin rt_defmask4;
 struct	socket;
 void	 route_init(void);
 int	 rtable_add(u_int);
+struct radix_node_head *rtable_get(u_int, sa_family_t);
 u_int	 rtable_l2(u_int);
 void	 rtable_l2set(u_int, u_int);
 int	 rtable_exists(u_int);
+
 int	 route_output(struct mbuf *, ...);
 int	 route_usrreq(struct socket *, int, struct mbuf *,
 			   struct mbuf *, struct mbuf *, struct proc *);
@@ -379,17 +381,17 @@ int	 rt_setgate(struct rtentry *, struct sockaddr *,
 	    struct sockaddr *, u_int);
 void	 rt_setmetrics(u_long, struct rt_metrics *, struct rt_kmetrics *);
 void	 rt_getmetrics(struct rt_kmetrics *, struct rt_metrics *);
-int      rt_timer_add(struct rtentry *,
-             void(*)(struct rtentry *, struct rttimer *),
-	     struct rttimer_queue *, u_int);
-void	 rt_timer_init(void);
-struct rttimer_queue *
-	 rt_timer_queue_create(u_int);
-void	 rt_timer_queue_change(struct rttimer_queue *, long);
-void	 rt_timer_queue_destroy(struct rttimer_queue *, int);
-void	 rt_timer_remove_all(struct rtentry *);
-unsigned long	rt_timer_count(struct rttimer_queue *);
-void	 rt_timer_timer(void *);
+
+int			 rt_timer_add(struct rtentry *,
+		             void(*)(struct rtentry *, struct rttimer *),
+			     struct rttimer_queue *, u_int);
+void			 rt_timer_remove_all(struct rtentry *);
+struct rttimer_queue	*rt_timer_queue_create(u_int);
+void			 rt_timer_queue_change(struct rttimer_queue *, long);
+void			 rt_timer_queue_destroy(struct rttimer_queue *);
+unsigned long		 rt_timer_queue_count(struct rttimer_queue *);
+void			 rt_timer_timer(void *);
+
 void	 rtalloc_noclone(struct route *);
 void	 rtalloc(struct route *);
 #ifdef SMALL_KERNEL
@@ -413,7 +415,6 @@ int	 rt_if_linkstate_change(struct radix_node *, void *, u_int);
 #endif
 int	 rtdeletemsg(struct rtentry *, u_int);
 
-struct radix_node_head	*rt_gettable(sa_family_t, u_int);
 struct rtentry		*rt_lookup(struct sockaddr *, struct sockaddr *, u_int);
 
 struct rtentry *rt_mpath_next(struct rtentry *);

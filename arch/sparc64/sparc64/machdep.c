@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.149 2013/11/01 17:36:19 krw Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.153 2014/03/26 05:23:42 guenther Exp $	*/
 /*	$NetBSD: machdep.c,v 1.108 2001/07/24 19:30:14 eeh Exp $ */
 
 /*-
@@ -424,7 +424,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	union sigval val;
 {
 	struct proc *p = curproc;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	struct sigframe *fp;
 	struct trapframe64 *tf;
 	vaddr_t addr, oldsp, newsp;
@@ -510,7 +510,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * Arrange to continue execution at the code copied out in exec().
 	 * It needs the function to call in %g1, and a new stack pointer.
 	 */
-	addr = p->p_sigcode;
+	addr = p->p_p->ps_sigcode;
 	tf->tf_global[1] = (vaddr_t)catcher;
 	tf->tf_pc = addr;
 	tf->tf_npc = addr + 4;
@@ -610,6 +610,7 @@ boot(howto)
 {
 	int i;
 	static char str[128];
+	struct device *mainbus;
 
 	/* If system is cold, just halt. */
 	if (cold) {
@@ -655,8 +656,9 @@ boot(howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	/* If powerdown was requested, do it. */
 	if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {
@@ -2102,7 +2104,7 @@ struct blink_led_softc {
 	SLIST_HEAD(, blink_led) bls_head;
 	int bls_on;
 	struct timeout bls_to;
-} blink_sc = { SLIST_HEAD_INITIALIZER(bls_head), 0 };
+} blink_sc = { SLIST_HEAD_INITIALIZER(blink_sc.bls_head), 0 };
 
 void
 blink_led_register(struct blink_led *l)

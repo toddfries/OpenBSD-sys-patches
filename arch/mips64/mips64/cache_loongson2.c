@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache_loongson2.c,v 1.3 2012/09/29 18:54:38 miod Exp $	*/
+/*	$OpenBSD: cache_loongson2.c,v 1.6 2014/03/31 20:21:19 miod Exp $	*/
 
 /*
  * Copyright (c) 2009, 2012 Miodrag Vallat.
@@ -55,7 +55,7 @@
 #define	IndexStoreData_S	0x1f
 
 #define	cache(op,set,addr) \
-    __asm__ __volatile__ \
+    __asm__ volatile \
       ("cache %0, %1(%2)" :: "i"(op), "i"(set), "r"(addr) : "memory")
 
 static __inline__ void	ls2f_hitinv_primary(vaddr_t, vsize_t);
@@ -71,17 +71,24 @@ static __inline__ void	ls2f_hitwbinv_secondary(vaddr_t, vsize_t);
 void
 Loongson2_ConfigCache(struct cpu_info *ci)
 {
-	ci->ci_l1instcacheline = LS2F_CACHE_LINE;
-	ci->ci_l1instcachesize = LS2F_L1_SIZE;
-	ci->ci_l1datacacheline = LS2F_CACHE_LINE;
-	ci->ci_l1datacachesize = LS2F_L1_SIZE;
-	ci->ci_cacheways = LS2F_CACHE_WAYS;
-	ci->ci_l1instcacheset = LS2F_L1_SIZE / LS2F_CACHE_WAYS;
-	ci->ci_l1datacacheset = LS2F_L1_SIZE / LS2F_CACHE_WAYS;
-	ci->ci_l2size = LS2F_L2_SIZE;
-	ci->ci_l3size = 0;
+	ci->ci_l1inst.size = LS2F_L1_SIZE;
+	ci->ci_l1inst.linesize = LS2F_CACHE_LINE;
+	ci->ci_l1inst.setsize = LS2F_L1_SIZE / LS2F_CACHE_WAYS;
+	ci->ci_l1inst.sets = LS2F_CACHE_WAYS;
 
-	cache_valias_mask = ci->ci_l1instcacheset & ~PAGE_MASK;
+	ci->ci_l1data.size = LS2F_L1_SIZE;
+	ci->ci_l1data.linesize = LS2F_CACHE_LINE;
+	ci->ci_l1data.setsize = LS2F_L1_SIZE / LS2F_CACHE_WAYS;
+	ci->ci_l1data.sets = LS2F_CACHE_WAYS;
+
+	ci->ci_l2.size = LS2F_L2_SIZE;
+	ci->ci_l2.linesize = LS2F_CACHE_LINE;
+	ci->ci_l2.setsize = LS2F_L2_SIZE / LS2F_CACHE_WAYS;
+	ci->ci_l2.sets = LS2F_CACHE_WAYS;
+
+	memset(&ci->ci_l3, 0, sizeof(struct cache_info));
+
+	cache_valias_mask = ci->ci_l1inst.setsize & ~PAGE_MASK;
 
 	/* should not happen as we use 16KB pages */
 	if (cache_valias_mask != 0) {
@@ -91,6 +98,8 @@ Loongson2_ConfigCache(struct cpu_info *ci)
 
 	ci->ci_SyncCache = Loongson2_SyncCache;
 	ci->ci_InvalidateICache = Loongson2_InvalidateICache;
+	ci->ci_InvalidateICachePage = Loongson2_InvalidateICachePage;
+	ci->ci_SyncICache = Loongson2_SyncICache;
 	ci->ci_SyncDCachePage = Loongson2_SyncDCachePage;
 	ci->ci_HitSyncDCache = Loongson2_HitSyncDCache;
 	ci->ci_HitInvalidateDCache = Loongson2_HitInvalidateDCache;
@@ -155,6 +164,41 @@ Loongson2_InvalidateICache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	while (sva != eva) {
 		cache(IndexInvalidate_I, 0, sva);
 		sva += LS2F_CACHE_LINE;
+	}
+}
+
+/*
+ * Register a given page for I$ invalidation.
+ */
+void
+Loongson2_InvalidateICachePage(struct cpu_info *ci, vaddr_t va)
+{
+	/*
+	 * Since the page size matches the I$ set size, and I$ maintainance
+	 * operations always operate on all the sets, all we need to do here
+	 * is remember there are postponed flushes.
+	 */
+	ci->ci_cachepending_l1i = 1;
+}
+
+/*
+ * Perform postponed I$ invalidation.
+ */
+void
+Loongson2_SyncICache(struct cpu_info *ci)
+{
+	vaddr_t sva, eva;
+
+	if (ci->ci_cachepending_l1i != 0) {
+		/* inline Loongson2_InvalidateICache(ci, 0, PAGE_SIZE); */
+		sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
+		eva = sva + PAGE_SIZE;
+		while (sva != eva) {
+			cache(IndexInvalidate_I, 0, sva);
+			sva += LS2F_CACHE_LINE;
+		}
+
+		ci->ci_cachepending_l1i = 0;
 	}
 }
 

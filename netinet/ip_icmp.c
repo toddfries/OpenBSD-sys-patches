@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_icmp.c,v 1.114 2014/01/19 05:01:50 claudio Exp $	*/
+/*	$OpenBSD: ip_icmp.c,v 1.118 2014/03/21 10:44:42 mpi Exp $	*/
 /*	$NetBSD: ip_icmp.c,v 1.19 1996/02/13 23:42:22 christos Exp $	*/
 
 /*
@@ -611,9 +611,12 @@ reflect:
 		memset(&ssrc, 0, sizeof(ssrc));
 		sdst.sin_family = sgw.sin_family = ssrc.sin_family = AF_INET;
 		sdst.sin_len = sgw.sin_len = ssrc.sin_len = sizeof(sdst);
-		memcpy(&sdst.sin_addr, &icp->icmp_ip.ip_dst, sizeof(sdst));
-		memcpy(&sgw.sin_addr, &icp->icmp_gwaddr, sizeof(sgw));
-		memcpy(&ssrc.sin_addr, &ip->ip_src, sizeof(ssrc));
+		memcpy(&sdst.sin_addr, &icp->icmp_ip.ip_dst,
+		    sizeof(sdst.sin_addr));
+		memcpy(&sgw.sin_addr, &icp->icmp_gwaddr,
+		    sizeof(sgw.sin_addr));
+		memcpy(&ssrc.sin_addr, &ip->ip_src,
+		    sizeof(ssrc.sin_addr));
 
 #ifdef	ICMPPRINTFS
 		if (icmpprintfs) {
@@ -873,8 +876,7 @@ icmp_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp,
 		    &icmp_redirtimeout);
 		if (icmp_redirect_timeout_q != NULL) {
 			if (icmp_redirtimeout == 0) {
-				rt_timer_queue_destroy(icmp_redirect_timeout_q,
-				    TRUE);
+				rt_timer_queue_destroy(icmp_redirect_timeout_q);
 				icmp_redirect_timeout_q = NULL;
 			} else
 				rt_timer_queue_change(icmp_redirect_timeout_q,

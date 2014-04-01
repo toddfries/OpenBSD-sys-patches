@@ -1,4 +1,4 @@
-#	$OpenBSD: files.pci,v 1.303 2014/02/12 23:04:26 jmatthew Exp $
+#	$OpenBSD: files.pci,v 1.305 2014/03/08 14:34:12 mpi Exp $
 #	$NetBSD: files.pci,v 1.20 1996/09/24 17:47:15 christos Exp $
 #
 # Config file and device description for machine-independent PCI code.
@@ -212,6 +212,10 @@ file	dev/pci/ciss_pci.c		ciss_pci
 # device declaration in sys/conf/files
 attach	isp at pci with isp_pci
 file	dev/pci/isp_pci.c		isp_pci
+
+# QLogic ISP SCSI Controllers
+attach  qlw at pci with qlw_pci
+file    dev/pci/qlw_pci.c               qlw_pci
 
 # QLogic ISP23xx FC Controllers
 attach  qla at pci with qla_pci
@@ -513,6 +517,10 @@ file	dev/pci/ohci_pci.c		ohci
 # EHCI USB controller
 attach	ehci at pci with ehci_pci
 file	dev/pci/ehci_pci.c		ehci
+
+# XHCI USB controller
+attach	xhci at pci with xhci_pci
+file	dev/pci/xhci_pci.c		xhci
 
 # YENTA PCI-CardBus bridge
 #device	cbb: cbbus, pcmciabus

@@ -1,4 +1,4 @@
-/*	$OpenBSD: ahci.c,v 1.7 2014/02/13 23:48:30 pelikan Exp $ */
+/*	$OpenBSD: ahci.c,v 1.12 2014/03/31 06:18:30 dlg Exp $ */
 
 /*
  * Copyright (c) 2006 David Gwynne <dlg@openbsd.org>
@@ -46,7 +46,7 @@ int ahcidebug = AHCI_D_VERBOSE;
 #endif
 
 #ifdef HIBERNATE
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 #include <sys/hibernate.h>
 #include <sys/disk.h>
 #include <sys/disklabel.h>
@@ -86,6 +86,8 @@ int			ahci_pmp_port_portreset(struct ahci_port *, int);
 int			ahci_pmp_port_probe(struct ahci_port *ap, int pmp_port);
 
 int			ahci_load_prdt(struct ahci_ccb *);
+void			ahci_load_prdt_seg(struct ahci_prdt *, u_int64_t,
+			    u_int32_t, u_int32_t);
 void			ahci_unload_prdt(struct ahci_ccb *);
 
 int			ahci_poll(struct ahci_ccb *, int, void (*)(void *));
@@ -256,7 +258,7 @@ noccc:
 			goto freeports;
 	}
 
-	bzero(&aaa, sizeof(aaa));
+	memset(&aaa, 0, sizeof(aaa));
 	aaa.aaa_cookie = sc;
 	aaa.aaa_methods = &ahci_atascsi_methods;
 	aaa.aaa_minphys = NULL;
@@ -568,10 +570,9 @@ nomem:
 		ccb->ccb_port = ap;
 		ccb->ccb_cmd_hdr = &hdr[i];
 		ccb->ccb_cmd_table = &table[i];
-		dva = AHCI_DMA_DVA(ap->ap_dmamem_cmd_table) +
-		    ccb->ccb_slot * sizeof(struct ahci_cmd_table);
-		ccb->ccb_cmd_hdr->ctba_hi = htole32((u_int32_t)(dva >> 32));
-		ccb->ccb_cmd_hdr->ctba_lo = htole32((u_int32_t)dva);
+		htolem64(&ccb->ccb_cmd_hdr->ctba,
+		    AHCI_DMA_DVA(ap->ap_dmamem_cmd_table) +
+		    ccb->ccb_slot * sizeof(struct ahci_cmd_table));
 
 		ccb->ccb_xa.fis =
 		    (struct ata_fis_h2d *)ccb->ccb_cmd_table->cfis;
@@ -982,17 +983,16 @@ ahci_port_softreset(struct ahci_port *ap)
 	/* Prep first D2H command with SRST feature & clear busy/reset flags */
 	ccb = ahci_get_err_ccb(ap);
 	cmd_slot = ccb->ccb_cmd_hdr;
-	bzero(ccb->ccb_cmd_table, sizeof(struct ahci_cmd_table));
+	memset(ccb->ccb_cmd_table, 0, sizeof(struct ahci_cmd_table));
 
 	fis = ccb->ccb_cmd_table->cfis;
 	fis[0] = ATA_FIS_TYPE_H2D;
 	fis[15] = ATA_FIS_CONTROL_SRST;
 
 	cmd_slot->prdtl = 0;
-	cmd_slot->flags = htole16(5);	/* FIS length: 5 DWORDS */
-	cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_C); /* Clear busy on OK */
-	cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_R); /* Reset */
-	cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_W); /* Write */
+	htolem16(&cmd_slot->flags, 5 /* FIS length: 5 DWORDS */ |
+	    AHCI_CMD_LIST_FLAG_C | AHCI_CMD_LIST_FLAG_R |
+	    AHCI_CMD_LIST_FLAG_W);
 
 	ccb->ccb_xa.state = ATA_S_PENDING;
 	if (ahci_poll(ccb, 1000, NULL) != 0)
@@ -1003,8 +1003,7 @@ ahci_port_softreset(struct ahci_port *ap)
 	fis[15] = 0;
 
 	cmd_slot->prdtl = 0;
-	cmd_slot->flags = htole16(5);	/* FIS length: 5 DWORDS */
-	cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_W);
+	htolem16(&cmd_slot->flags, 5 | AHCI_CMD_LIST_FLAG_W);
 
 	ccb->ccb_xa.state = ATA_S_PENDING;
 	if (ahci_poll(ccb, 1000, NULL) != 0)
@@ -1081,7 +1080,7 @@ ahci_pmp_port_softreset(struct ahci_port *ap, int pmp_port)
 		/* send first softreset FIS */
 		ccb = ahci_get_pmp_ccb(ap);
 		cmd_slot = ccb->ccb_cmd_hdr;
-		bzero(ccb->ccb_cmd_table, sizeof(struct ahci_cmd_table));
+		memset(ccb->ccb_cmd_table, 0, sizeof(struct ahci_cmd_table));
 
 		fis = ccb->ccb_cmd_table->cfis;
 		fis[0] = ATA_FIS_TYPE_H2D;
@@ -1089,11 +1088,9 @@ ahci_pmp_port_softreset(struct ahci_port *ap, int pmp_port)
 		fis[15] = ATA_FIS_CONTROL_SRST | ATA_FIS_CONTROL_4BIT;
 
 		cmd_slot->prdtl = 0;
-		cmd_slot->flags = htole16(5);	/* FIS length: 5 DWORDS */
-		cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_C);
-		cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_R);
-		cmd_slot->flags |= htole16(pmp_port <<
-		    AHCI_CMD_LIST_FLAG_PMP_SHIFT);
+		htolem16(&cmd_slot->flags, 5 /* FIS length: 5 DWORDS */ |
+		    AHCI_CMD_LIST_FLAG_C | AHCI_CMD_LIST_FLAG_R |
+		    (pmp_port << AHCI_CMD_LIST_FLAG_PMP_SHIFT));
 
 		ccb->ccb_xa.state = ATA_S_PENDING;
 
@@ -1112,15 +1109,14 @@ ahci_pmp_port_softreset(struct ahci_port *ap, int pmp_port)
 		}
 
 		/* send signature FIS */
-		bzero(ccb->ccb_cmd_table, sizeof(struct ahci_cmd_table));
+		memset(ccb->ccb_cmd_table, 0, sizeof(struct ahci_cmd_table));
 		fis[0] = ATA_FIS_TYPE_H2D;
 		fis[1] = pmp_port;
 		fis[15] = ATA_FIS_CONTROL_4BIT;
 
 		cmd_slot->prdtl = 0;
-		cmd_slot->flags = htole16(5);	/* FIS length: 5 DWORDS */
-		cmd_slot->flags |= htole16(pmp_port <<
-		    AHCI_CMD_LIST_FLAG_PMP_SHIFT);
+		htolem16(&cmd_slot->flags, 5 /* FIS length: 5 DWORDS */ |
+		    (pmp_port << AHCI_CMD_LIST_FLAG_PMP_SHIFT));
 
 		DPRINTF(AHCI_D_VERBOSE, "%s.%d: sending PMP probe status cmd\n",
 		    PORTNAME(ap), pmp_port);
@@ -1515,7 +1511,7 @@ ahci_port_detect_pmp(struct ahci_port *ap)
 		 */
 		ccb = ahci_get_pmp_ccb(ap);
 		cmd_slot = ccb->ccb_cmd_hdr;
-		bzero(ccb->ccb_cmd_table,
+		memset(ccb->ccb_cmd_table, 0,
 		    sizeof(struct ahci_cmd_table));
 
 		fis = ccb->ccb_cmd_table->cfis;
@@ -1524,10 +1520,9 @@ ahci_port_detect_pmp(struct ahci_port *ap)
 		fis[15] = ATA_FIS_CONTROL_SRST | ATA_FIS_CONTROL_4BIT;
 
 		cmd_slot->prdtl = 0;
-		cmd_slot->flags = htole16(5); /* FIS length: 5 DWORDS */
-		cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_C);
-		cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_R);
-		cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_PMP);
+		htolem16(&cmd_slot->flags, 5 /* FIS length: 5 DWORDS */ |
+		    AHCI_CMD_LIST_FLAG_C | AHCI_CMD_LIST_FLAG_R |
+		    AHCI_CMD_LIST_FLAG_PMP);
 
 		DPRINTF(AHCI_D_VERBOSE, "%s: sending PMP reset cmd\n",
 		    PORTNAME(ap));
@@ -1555,15 +1550,15 @@ ahci_port_detect_pmp(struct ahci_port *ap)
 		/* Prep second command to read status and
 		 * complete reset sequence
 		 */
-		bzero(ccb->ccb_cmd_table,
+		memset(ccb->ccb_cmd_table, 0,
 		    sizeof(struct ahci_cmd_table));
 		fis[0] = ATA_FIS_TYPE_H2D;
 		fis[1] = SATA_PMP_CONTROL_PORT;
 		fis[15] = ATA_FIS_CONTROL_4BIT;
 
 		cmd_slot->prdtl = 0;
-		cmd_slot->flags = htole16(5); /* FIS length: 5 DWORDS */
-		cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_PMP);
+		htolem16(&cmd_slot->flags, 5 /* FIS length: 5 DWORDS */ |
+		    AHCI_CMD_LIST_FLAG_PMP);
 
 		DPRINTF(AHCI_D_VERBOSE, "%s: sending PMP probe status cmd\n",
 		    PORTNAME(ap));
@@ -1640,16 +1635,25 @@ ahci_port_detect_pmp(struct ahci_port *ap)
 	return (rc);
 }
 
+void
+ahci_load_prdt_seg(struct ahci_prdt *prd, u_int64_t addr, u_int32_t len,
+    u_int32_t flags)
+{
+	flags |= len - 1;
+
+	htolem64(&prd->dba, addr);
+	htolem32(&prd->flags, flags);
+}
+
 int
 ahci_load_prdt(struct ahci_ccb *ccb)
 {
 	struct ahci_port		*ap = ccb->ccb_port;
 	struct ahci_softc		*sc = ap->ap_sc;
 	struct ata_xfer			*xa = &ccb->ccb_xa;
-	struct ahci_prdt		*prdt = ccb->ccb_cmd_table->prdt, *prd;
+	struct ahci_prdt		*prdt = ccb->ccb_cmd_table->prdt;
 	bus_dmamap_t			dmap = ccb->ccb_dmamap;
 	struct ahci_cmd_hdr		*cmd_slot = ccb->ccb_cmd_hdr;
-	u_int64_t			addr;
 	int				i, error;
 
 	if (xa->datalen == 0) {
@@ -1664,42 +1668,22 @@ ahci_load_prdt(struct ahci_ccb *ccb)
 		return (1);
 	}
 
-	for (i = 0; i < dmap->dm_nsegs; i++) {
-		prd = &prdt[i];
-
-		addr = dmap->dm_segs[i].ds_addr;
-		prd->dba_hi = htole32((u_int32_t)(addr >> 32));
-		prd->dba_lo = htole32((u_int32_t)addr);
-#ifdef DIAGNOSTIC
-		if (addr & 1) {
-			printf("%s: requested DMA at an odd address %llx\n",
-			    PORTNAME(ap), (unsigned long long)addr);
-			goto diagerr;
-		}
-		if (dmap->dm_segs[i].ds_len & 1) {
-			printf("%s: requested DMA length %d is not even\n",
-			    PORTNAME(ap), (int)dmap->dm_segs[i].ds_len);
-			goto diagerr;
-		}
-#endif
-		prd->flags = htole32(dmap->dm_segs[i].ds_len - 1);
+	for (i = 0; i < dmap->dm_nsegs - 1; i++) {
+		ahci_load_prdt_seg(&prdt[i], dmap->dm_segs[i].ds_addr,
+		    dmap->dm_segs[i].ds_len, 0);
 	}
-	if (xa->flags & ATA_F_PIO)
-		prd->flags |= htole32(AHCI_PRDT_FLAG_INTR);
 
-	cmd_slot->prdtl = htole16(dmap->dm_nsegs);
+	ahci_load_prdt_seg(&prdt[i],
+	    dmap->dm_segs[i].ds_addr, dmap->dm_segs[i].ds_len,
+	    ISSET(xa->flags, ATA_F_PIO) ? AHCI_PRDT_FLAG_INTR : 0);
+
+	htolem16(&cmd_slot->prdtl, dmap->dm_nsegs);
 
 	bus_dmamap_sync(sc->sc_dmat, dmap, 0, dmap->dm_mapsize,
 	    (xa->flags & ATA_F_READ) ? BUS_DMASYNC_PREREAD :
 	    BUS_DMASYNC_PREWRITE);
 
 	return (0);
-
-#ifdef DIAGNOSTIC
-diagerr:
-	bus_dmamap_unload(sc->sc_dmat, dmap);
-	return (1);
-#endif
 }
 
 void
@@ -1721,7 +1705,7 @@ ahci_unload_prdt(struct ahci_ccb *ccb)
 			xa->resid = 0;
 		else
 			xa->resid = xa->datalen -
-			    letoh32(ccb->ccb_cmd_hdr->prdbc);
+			    lemtoh32(&ccb->ccb_cmd_hdr->prdbc);
 	}
 }
 
@@ -2502,7 +2486,7 @@ ahci_port_read_ncq_error(struct ahci_port *ap, int *err_slotp, int pmp_port)
 	ccb->ccb_xa.data = ap->ap_err_scratch;
 	ccb->ccb_xa.datalen = 512;
 	cmd_slot = ccb->ccb_cmd_hdr;
-	bzero(ccb->ccb_cmd_table, sizeof(struct ahci_cmd_table));
+	memset(ccb->ccb_cmd_table, 0, sizeof(struct ahci_cmd_table));
 
 	fis = (struct ata_fis_h2d *)ccb->ccb_cmd_table->cfis;
 	fis->type = ATA_FIS_TYPE_H2D;
@@ -2515,8 +2499,8 @@ ahci_port_read_ncq_error(struct ahci_port *ap, int *err_slotp, int pmp_port)
 	fis->lba_mid_exp = 0;
 	fis->device = 0;
 
-	cmd_slot->flags = htole16(5);	/* FIS length: 5 DWORDS */
-	cmd_slot->flags |= htole16(pmp_port << AHCI_CMD_LIST_FLAG_PMP_SHIFT);
+	htolem16(&cmd_slot->flags, 5 /* FIS length: 5 DWORDS */ |
+	    (pmp_port << AHCI_CMD_LIST_FLAG_PMP_SHIFT));
 
 	if (ahci_load_prdt(ccb) != 0) {
 		rc = ENOMEM;	/* XXX caller must abort all commands */
@@ -2748,6 +2732,7 @@ ahci_ata_cmd(struct ata_xfer *xa)
 	struct ahci_ccb			*ccb = (struct ahci_ccb *)xa;
 	struct ahci_cmd_hdr		*cmd_slot;
 	int				s;
+	u_int16_t			flags;
 
 	if (ccb->ccb_port->ap_state == AP_S_FATAL_ERROR)
 		goto failcmd;
@@ -2755,15 +2740,16 @@ ahci_ata_cmd(struct ata_xfer *xa)
 	ccb->ccb_done = ahci_ata_cmd_done;
 
 	cmd_slot = ccb->ccb_cmd_hdr;
-	cmd_slot->flags = htole16(5); /* FIS length (in DWORDs) */
-	cmd_slot->flags |= htole16(xa->pmp_port <<
-	    AHCI_CMD_LIST_FLAG_PMP_SHIFT);
+	flags = 5 /* FIS length (in DWORDs) */;
+	flags |= xa->pmp_port << AHCI_CMD_LIST_FLAG_PMP_SHIFT;
 
 	if (xa->flags & ATA_F_WRITE)
-		cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_W);
+		flags |= AHCI_CMD_LIST_FLAG_W;
 
 	if (xa->flags & ATA_F_PACKET)
-		cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_A);
+		flags |= AHCI_CMD_LIST_FLAG_A;
+
+	htolem16(&cmd_slot->flags, flags);
 
 	if (ahci_load_prdt(ccb) != 0)
 		goto failcmd;
@@ -2940,7 +2926,7 @@ ahci_pmp_read(struct ahci_port *ap, int target, int which, u_int32_t *datap)
 	ccb->ccb_xa.pmp_port = SATA_PMP_CONTROL_PORT;
 	ccb->ccb_xa.state = ATA_S_PENDING;
 	
-	bzero(ccb->ccb_cmd_table, sizeof(struct ahci_cmd_table));
+	memset(ccb->ccb_cmd_table, 0, sizeof(struct ahci_cmd_table));
 	fis = (struct ata_fis_h2d *)ccb->ccb_cmd_table->cfis;
 	fis->type = ATA_FIS_TYPE_H2D;
 	fis->flags = ATA_H2D_FLAGS_CMD | SATA_PMP_CONTROL_PORT;
@@ -2978,7 +2964,7 @@ ahci_pmp_write(struct ahci_port *ap, int target, int which, u_int32_t data)
 	ccb->ccb_xa.pmp_port = SATA_PMP_CONTROL_PORT;
 	ccb->ccb_xa.state = ATA_S_PENDING;
 
-	bzero(ccb->ccb_cmd_table, sizeof(struct ahci_cmd_table));
+	memset(ccb->ccb_cmd_table, 0, sizeof(struct ahci_cmd_table));
 	fis = (struct ata_fis_h2d *)ccb->ccb_cmd_table->cfis;
 	fis->type = ATA_FIS_TYPE_H2D;
 	fis->flags = ATA_H2D_FLAGS_CMD | SATA_PMP_CONTROL_PORT;
@@ -3143,14 +3129,13 @@ ahci_hibernate_load_prdt(struct ahci_ccb *ccb)
 		if (buflen < seglen)
 			seglen = buflen;
 
-		prd->dba_hi = htole32((u_int32_t)(data_bus_phys >> 32));
-		prd->dba_lo = htole32((u_int32_t)data_bus_phys);
-		prd->flags = htole32(seglen - 1);
+		ahci_load_prdt_seg(&prdt[i], data_bus_phys, seglen, 0);
+
 		data_addr += seglen;
 		buflen -= seglen;
 	}
 
-	cmd_slot->prdtl = htole16(i);
+	htolem16(&cmd_slot->prdtl, i);
 }
 
 int
@@ -3178,6 +3163,7 @@ ahci_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size,
 	struct ahci_cmd_hdr *cmd_slot;
 	int rc;
 	int timeout;
+	u_int16_t flags;
 
 	if (op == HIB_INIT) {
 		struct device *disk;
@@ -3280,9 +3266,7 @@ ahci_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size,
 		my->ccb->ccb_cmd_table = &my->cmd_table;
 		item_phys = page_phys + ((void *)&my->cmd_table - page);
 #endif
-		my->ccb->ccb_cmd_hdr->ctba_hi =
-		    htole32((u_int32_t)(item_phys >> 32));
-		my->ccb->ccb_cmd_hdr->ctba_lo = htole32((u_int32_t)item_phys);
+		htolem64(&my->ccb->ccb_cmd_hdr->ctba, item_phys);
 
 		my->ccb->ccb_xa.fis =
 		    (struct ata_fis_h2d *)my->ccb->ccb_cmd_table->cfis;
@@ -3344,12 +3328,13 @@ ahci_hibernate_io(dev_t dev, daddr_t blkno, vaddr_t addr, size_t size,
 	my->ccb->ccb_xa.flags |= ATA_F_POLL;
 
 	cmd_slot = my->ccb->ccb_cmd_hdr;
-	cmd_slot->flags = htole16(5); /* FIS length (in DWORDs) */
-	cmd_slot->flags |=
-	    htole16(my->pmp_port << AHCI_CMD_LIST_FLAG_PMP_SHIFT);
+	flags = 5; /* FIS length (in DWORDs) */
+	flags |= my->pmp_port << AHCI_CMD_LIST_FLAG_PMP_SHIFT;
 
 	if (op == HIB_W)
-		cmd_slot->flags |= htole16(AHCI_CMD_LIST_FLAG_W);
+		flags |= AHCI_CMD_LIST_FLAG_W;
+
+	htolem16(&cmd_slot->flags, flags);
 
 	ahci_hibernate_load_prdt(my->ccb);
 

@@ -1,4 +1,4 @@
-/*	$OpenBSD: bus_dma.c,v 1.27 2013/12/12 21:04:50 kettenis Exp $	*/
+/*	$OpenBSD: bus_dma.c,v 1.29 2014/03/29 18:09:29 guenther Exp $	*/
 /*-
  * Copyright (c) 1996, 1997 The NetBSD Foundation, Inc.
  * All rights reserved.
@@ -373,6 +373,7 @@ _bus_dmamap_sync(bus_dma_tag_t t, bus_dmamap_t map, bus_addr_t addr,
     bus_size_t size, int op)
 {
 	/* Nothing to do here. */
+	__asm volatile("" : : : "memory");
 }
 
 /*

@@ -1,4 +1,4 @@
-/*	$OpenBSD: route.c,v 1.153 2014/02/12 12:50:13 mpi Exp $	*/
+/*	$OpenBSD: route.c,v 1.157 2014/03/27 10:39:23 mpi Exp $	*/
 /*	$NetBSD: route.c,v 1.14 1996/02/13 22:00:46 christos Exp $	*/
 
 /*
@@ -144,6 +144,7 @@ int			rttrash;	/* routes not in table but not freed */
 struct pool		rtentry_pool;	/* pool for rtentry structures */
 struct pool		rttimer_pool;	/* pool for rttimer structures */
 
+void	rt_timer_init(void);
 int	rtable_init(struct radix_node_head ***, u_int);
 int	rtflushclone1(struct radix_node *, void *, u_int);
 void	rtflushclone(struct radix_node_head *, struct rtentry *);
@@ -259,6 +260,14 @@ rtable_add(u_int id)
 	return (rtable_init(&rt_tables[id], id));
 }
 
+struct radix_node_head *
+rtable_get(u_int id, sa_family_t af)
+{
+	if (id > rtbl_id_max)
+		return (NULL);
+	return (rt_tables[id] ? rt_tables[id][af2rtafidx[af]] : NULL);
+}
+
 u_int
 rtable_l2(u_int id)
 {
@@ -325,7 +334,7 @@ rtalloc1(struct sockaddr *dst, int flags, u_int tableid)
 	bzero(&info, sizeof(info));
 	info.rti_info[RTAX_DST] = dst;
 
-	rnh = rt_gettable(dst->sa_family, tableid);
+	rnh = rtable_get(tableid, dst->sa_family);
 	if (rnh && (rn = rnh->rnh_matchaddr((caddr_t)dst, rnh)) &&
 	    ((rn->rn_flags & RNF_ROOT) == 0)) {
 		newrt = rt = (struct rtentry *)rn;
@@ -409,8 +418,7 @@ rt_sendmsg(struct rtentry *rt, int cmd, u_int rtableid)
 	info.rti_info[RTAX_GATEWAY] = rt->rt_gateway;
 	info.rti_info[RTAX_NETMASK] = rt_mask(rt);
 	if (rt->rt_ifp != NULL) {
-		info.rti_info[RTAX_IFP] =
-		    TAILQ_FIRST(&rt->rt_ifp->if_addrlist)->ifa_addr;
+		info.rti_info[RTAX_IFP] =(struct sockaddr *)rt->rt_ifp->if_sadl;
 		info.rti_info[RTAX_IFA] = rt->rt_ifa->ifa_addr;
 	}
 
@@ -729,7 +737,7 @@ rtrequest1(int req, struct rt_addrinfo *info, u_int8_t prio,
 #endif
 #define senderr(x) { error = x ; goto bad; }
 
-	if ((rnh = rt_gettable(info->rti_info[RTAX_DST]->sa_family, tableid)) ==
+	if ((rnh = rtable_get(tableid, info->rti_info[RTAX_DST]->sa_family)) ==
 	    NULL)
 		senderr(EAFNOSUPPORT);
 	if (info->rti_flags & RTF_HOST)
@@ -1110,7 +1118,7 @@ rtinit(struct ifaddr *ifa, int cmd, int flags)
 	}
 	bzero(&info, sizeof(info));
 	info.rti_ifa = ifa;
-	info.rti_flags = flags | ifa->ifa_flags;
+	info.rti_flags = flags;
 	info.rti_info[RTAX_DST] = dst;
 	if (cmd == RTM_ADD)
 		info.rti_info[RTAX_GATEWAY] = ifa->ifa_addr;
@@ -1225,15 +1233,14 @@ rt_timer_queue_change(struct rttimer_queue *rtq, long timeout)
 }
 
 void
-rt_timer_queue_destroy(struct rttimer_queue *rtq, int destroy)
+rt_timer_queue_destroy(struct rttimer_queue *rtq)
 {
 	struct rttimer	*r;
 
 	while ((r = TAILQ_FIRST(&rtq->rtq_head)) != NULL) {
 		LIST_REMOVE(r, rtt_link);
 		TAILQ_REMOVE(&rtq->rtq_head, r, rtt_next);
-		if (destroy)
-			RTTIMER_CALLOUT(r);
+		RTTIMER_CALLOUT(r);
 		pool_put(&rttimer_pool, r);
 		if (rtq->rtq_count > 0)
 			rtq->rtq_count--;
@@ -1246,7 +1253,7 @@ rt_timer_queue_destroy(struct rttimer_queue *rtq, int destroy)
 }
 
 unsigned long
-rt_timer_count(struct rttimer_queue *rtq)
+rt_timer_queue_count(struct rttimer_queue *rtq)
 {
 	return (rtq->rtq_count);
 }
@@ -1311,20 +1318,12 @@ rt_timer_add(struct rtentry *rt, void (*func)(struct rtentry *,
 	return (0);
 }
 
-struct radix_node_head *
-rt_gettable(sa_family_t af, u_int id)
-{
-	if (id > rtbl_id_max)
-		return (NULL);
-	return (rt_tables[id] ? rt_tables[id][af2rtafidx[af]] : NULL);
-}
-
 struct rtentry *
 rt_lookup(struct sockaddr *dst, struct sockaddr *mask, u_int tableid)
 {
 	struct radix_node_head	*rnh;
 
-	if ((rnh = rt_gettable(dst->sa_family, tableid)) == NULL)
+	if ((rnh = rtable_get(tableid, dst->sa_family)) == NULL)
 		return (NULL);
 
 	return ((struct rtentry *)rnh->rnh_lookup(dst, mask, rnh));
@@ -1463,7 +1462,7 @@ rt_if_remove(struct ifnet *ifp)
 
 	for (tid = 0; tid <= rtbl_id_max; tid++) {
 		for (i = 1; i <= AF_MAX; i++) {
-			if ((rnh = rt_gettable(i, tid)) != NULL)
+			if ((rnh = rtable_get(tid, i)) != NULL)
 				while ((*rnh->rnh_walktree)(rnh,
 				    rt_if_remove_rtdelete, ifp) == EAGAIN)
 					;	/* nothing */
@@ -1511,7 +1510,7 @@ rt_if_track(struct ifnet *ifp)
 
 	for (tid = 0; tid <= rtbl_id_max; tid++) {
 		for (i = 1; i <= AF_MAX; i++) {
-			if ((rnh = rt_gettable(i, tid)) != NULL) {
+			if ((rnh = rtable_get(tid, i)) != NULL) {
 				if (!rn_mpath_capable(rnh))
 					continue;
 				while ((*rnh->rnh_walktree)(rnh,

@@ -1,4 +1,4 @@
-/*	$OpenBSD: usbdi.c,v 1.67 2013/11/15 10:17:39 pirofti Exp $ */
+/*	$OpenBSD: usbdi.c,v 1.70 2014/03/07 09:38:14 mpi Exp $ */
 /*	$NetBSD: usbdi.c,v 1.103 2002/09/27 15:37:38 provos Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/usbdi.c,v 1.28 1999/11/17 22:33:49 n_hibma Exp $	*/
 
@@ -109,16 +109,6 @@ int
 usbd_iface_claimed(struct usbd_device *dev, int ifaceidx)
 {
 	return (dev->ifaces[ifaceidx].claimed);
-}
-
-static __inline int
-usbd_xfer_isread(struct usbd_xfer *xfer)
-{
-	if (xfer->rqflags & URQ_REQUEST)
-		return (xfer->request.bmRequestType & UT_READ);
-	else
-		return (xfer->pipe->endpoint->edesc->bEndpointAddress &
-		    UE_DIR_IN);
 }
 
 #ifdef USB_DEBUG
@@ -573,7 +563,7 @@ usbd_clear_endpoint_stall(struct usbd_pipe *pipe)
 	 * Clearing en endpoint stall resets the endpoint toggle, so
 	 * do the same to the HC toggle.
 	 */
-	pipe->methods->cleartoggle(pipe);
+	usbd_clear_endpoint_toggle(pipe);
 
 	req.bmRequestType = UT_WRITE_ENDPOINT;
 	req.bRequest = UR_CLEAR_FEATURE;
@@ -592,7 +582,7 @@ usbd_clear_endpoint_stall_async(struct usbd_pipe *pipe)
 	usb_device_request_t req;
 	usbd_status err;
 
-	pipe->methods->cleartoggle(pipe);
+	usbd_clear_endpoint_toggle(pipe);
 
 	req.bmRequestType = UT_WRITE_ENDPOINT;
 	req.bRequest = UR_CLEAR_FEATURE;
@@ -606,7 +596,8 @@ usbd_clear_endpoint_stall_async(struct usbd_pipe *pipe)
 void
 usbd_clear_endpoint_toggle(struct usbd_pipe *pipe)
 {
-	pipe->methods->cleartoggle(pipe);
+	if (pipe->methods->cleartoggle != NULL)
+		pipe->methods->cleartoggle(pipe);
 }
 
 int
@@ -1115,3 +1106,21 @@ usbd_desc_iter_next(struct usbd_desc_iter *iter)
 	}
 	return desc;
 }
+
+int
+usbd_str(usb_string_descriptor_t *p, int l, const char *s)
+{
+	int i;
+
+	if (l == 0)
+		return (0);
+	p->bLength = 2 * strlen(s) + 2;
+	if (l == 1)
+		return (1);
+	p->bDescriptorType = UDESC_STRING;
+	l -= 2;
+	for (i = 0; s[i] && l > 1; i++, l -= 2)
+		USETW2(p->bString[i], 0, s[i]);
+	return (2*i+2);
+}
+

@@ -1,4 +1,4 @@
-/*	$OpenBSD: utwitch.c,v 1.8 2013/08/17 08:34:45 sthen Exp $ */
+/*	$OpenBSD: utwitch.c,v 1.10 2014/03/19 08:59:37 mpi Exp $ */
 
 /*
  * Copyright (c) 2010 Yojiro UO <yuo@nui.org>
@@ -34,10 +34,6 @@
 #include <dev/usb/usbdevs.h>
 #include <dev/usb/uhidev.h>
 #include <dev/usb/hid.h>
-
-#ifdef USB_DEBUG
-#define UYUREX_DEBUG
-#endif
 
 #define	CMD_NONE	0xf0
 #define CMD_EOF		0x0d
@@ -111,8 +107,10 @@ const struct cfattach utwitch_ca = {
 int
 utwitch_match(struct device *parent, void *match, void *aux)
 {
-	struct usb_attach_arg *uaa = aux;
-	struct uhidev_attach_arg *uha = (struct uhidev_attach_arg *)uaa;
+	struct uhidev_attach_arg *uha = aux;
+
+	if (uha->reportid == UHIDEV_CLAIM_ALLREPORTID)
+		return (UMATCH_NONE);
 
 	return (usb_lookup(utwitch_devs, uha->uaa->vendor, uha->uaa->product) != NULL ?
 	    UMATCH_VENDOR_PRODUCT : UMATCH_NONE);

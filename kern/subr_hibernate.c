@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_hibernate.c,v 1.84 2014/02/01 07:10:33 mlarkin Exp $	*/
+/*	$OpenBSD: subr_hibernate.c,v 1.86 2014/03/21 21:39:36 miod Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -407,8 +407,7 @@ found:
 	while (sz > 0) {
 		KASSERT(pg->pg_flags & PQ_FREE);
 
-		atomic_clearbits_int(&pg->pg_flags,
-		    PG_PMAP0|PG_PMAP1|PG_PMAP2|PG_PMAP3);
+		atomic_clearbits_int(&pg->pg_flags, PG_PMAPMASK);
 
 		if (pg->pg_flags & PG_ZERO)
 			uvmexp.zeropages -= sz;
@@ -524,8 +523,7 @@ found:
 	TAILQ_FOREACH(pg, &pageq, pageq) {
 		KASSERT(pg->pg_flags & PQ_FREE);
 
-		atomic_clearbits_int(&pg->pg_flags,
-		    PG_PMAP0|PG_PMAP1|PG_PMAP2|PG_PMAP3);
+		atomic_clearbits_int(&pg->pg_flags, PG_PMAPMASK);
 
 		if (pg->pg_flags & PG_ZERO)
 			uvmexp.zeropages--;
@@ -1152,14 +1150,14 @@ hibernate_resume(void)
 	if (hibernate_read_image(&disk_hib))
 		goto fail;
 
-	if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_QUIESCE) != 0)
+	if (config_suspend(device_mainbus(), DVACT_QUIESCE) != 0)
 		goto fail;
 
 	(void) splhigh();
 	hibernate_disable_intr_machdep();
 	cold = 1;
 
-	if (config_suspend(TAILQ_FIRST(&alldevs), DVACT_SUSPEND) != 0) {
+	if (config_suspend(device_mainbus(), DVACT_SUSPEND) != 0) {
 		cold = 0;
 		hibernate_enable_intr_machdep();
 		goto fail;

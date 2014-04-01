@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.39 2014/01/06 16:17:33 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.44 2014/03/31 18:58:41 mpi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -49,7 +49,7 @@
 #include <sys/user.h>
 
 #include <net/if.h>
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/bat.h>
 #include <machine/bus.h>
@@ -249,10 +249,18 @@ initppc(u_int startkernel, u_int endkernel, char *args)
 	ppc_mtibat1u(0);
 	ppc_mtibat2u(0);
 	ppc_mtibat3u(0);
+	ppc_mtibat4u(0);
+	ppc_mtibat5u(0);
+	ppc_mtibat6u(0);
+	ppc_mtibat7u(0);
 	ppc_mtdbat0u(0);
 	ppc_mtdbat1u(0);
 	ppc_mtdbat2u(0);
 	ppc_mtdbat3u(0);
+	ppc_mtdbat4u(0);
+	ppc_mtdbat5u(0);
+	ppc_mtdbat6u(0);
+	ppc_mtdbat7u(0);
 
 	/*
 	 * Set up initial BAT table to only map the lowest 256 MB area
@@ -880,7 +888,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct trapframe *tf;
 	struct sigframe *fp, frame;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 
 	bzero(&frame, sizeof(frame));
 	frame.sf_signum = sig;
@@ -919,11 +927,12 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->fixreg[3] = (int)sig;
 	tf->fixreg[4] = (psp->ps_siginfo & sigmask(sig)) ? (int)&fp->sf_si : 0;
 	tf->fixreg[5] = (int)&fp->sf_sc;
-	tf->srr0 = p->p_sigcode;
+	tf->srr0 = p->p_p->ps_sigcode;
 
 #if WHEN_WE_ONLY_FLUSH_DATA_WHEN_DOING_PMAP_ENTER
 	pmap_extract(vm_map_pmap(&p->p_vmspace->vm_map),tf->srr0, &pa);
-	syncicache(pa, (p->p_emul->e_esigcode - p->p_emul->e_sigcode));
+	syncicache(pa, (p->p_p->ps_emul->e_esigcode -
+	    p->p_p->ps_emul->e_sigcode));
 #endif
 }
 
@@ -1037,6 +1046,7 @@ void
 boot(int howto)
 {
 	static int syncing;
+	struct device *mainbus;
 
 	if (cold) {
 		/*
@@ -1074,8 +1084,9 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {

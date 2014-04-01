@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.53 2013/11/23 07:20:52 uebayasi Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.57 2014/03/29 18:09:29 guenther Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -475,10 +475,10 @@ fall(int c_base, int c_count, int c_loop, int c_stride, int data)
 	for (; c_count--; c_base += c_stride)
 		for (loop = c_loop; loop--; )
 			if (data)
-				__asm __volatile("fdce 0(%%sr0,%0)"
+				__asm volatile("fdce 0(%%sr0,%0)"
 				    :: "r" (c_base));
 			else
-				__asm __volatile("fice 0(%%sr0,%0)"
+				__asm volatile("fice 0(%%sr0,%0)"
 				    :: "r" (c_base));
 }
 
@@ -537,6 +537,8 @@ int waittime = -1;
 void
 boot(int howto)
 {
+	struct device *mainbus;
+
 	/* If system is cold, just halt. */
 	if (cold) {
 		/* (Unless the user explicitly asked for reboot.) */
@@ -572,8 +574,9 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	/* in case we came on powerfail interrupt */
 	if (cold_hook)
@@ -589,7 +592,7 @@ haltsys:
 
 		printf("System halted!\n");
 		DELAY(2000000);
-		__asm __volatile("stwas %0, 0(%1)"
+		__asm volatile("stwas %0, 0(%1)"
 		    :: "r" (CMD_STOP), "r" (HPPA_LBCAST + iomod_command));
 	} else {
 		printf("rebooting...");
@@ -599,9 +602,9 @@ haltsys:
                 pdc_call((iodcio_t)pdc, 0, PDC_BROADCAST_RESET, PDC_DO_RESET);
 
 		/* forcably reset module if that fails */
-		__asm __volatile(".export hppa_reset, entry\n\t"
+		__asm volatile(".export hppa_reset, entry\n\t"
 		    ".label hppa_reset");
-		__asm __volatile("stwas %0, 0(%1)"
+		__asm volatile("stwas %0, 0(%1)"
 		    :: "r" (CMD_RESET), "r" (HPPA_LBCAST + iomod_command));
 	}
 
@@ -841,7 +844,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct trapframe *tf = p->p_md.md_regs;
 	struct pcb *pcb = &p->p_addr->u_pcb;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	struct sigcontext ksc;
 	siginfo_t ksi;
 	register_t scp, sip;
@@ -897,7 +900,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->tf_args[2] = tf->tf_r4 = scp;
 	tf->tf_args[3] = (register_t)catcher;
 	tf->tf_ipsw &= ~(PSL_N|PSL_B|PSL_T);
-	tf->tf_iioq[0] = HPPA_PC_PRIV_USER | p->p_sigcode;
+	tf->tf_iioq[0] = HPPA_PC_PRIV_USER | p->p_p->ps_sigcode;
 	tf->tf_iioq[1] = tf->tf_iioq[0] + 4;
 	tf->tf_iisq[0] = tf->tf_iisq[1] = pcb->pcb_space;
 	/* disable tracing in the trapframe */

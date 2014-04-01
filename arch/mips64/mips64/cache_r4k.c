@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache_r4k.c,v 1.11 2012/10/03 11:18:23 miod Exp $	*/
+/*	$OpenBSD: cache_r4k.c,v 1.14 2014/03/31 20:21:19 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -36,7 +36,7 @@
 #define	HitWBInvalidate_S	0x17
 
 #define	cache(op,addr) \
-    __asm__ __volatile__ ("cache %0, 0(%1)" :: "i"(op), "r"(addr) : "memory")
+    __asm__ volatile ("cache %0, 0(%1)" :: "i"(op), "r"(addr) : "memory")
 
 static __inline__ void	mips4k_hitinv_primary(vaddr_t, vsize_t, vsize_t);
 static __inline__ void	mips4k_hitinv_secondary(vaddr_t, vsize_t, vsize_t);
@@ -75,42 +75,41 @@ Mips4k_ConfigCache(struct cpu_info *ci)
 
 	cfg = cp0_get_config();
 
+	ci->ci_l1inst.size = (1 << 12) << ((cfg >> 9) & 0x07); /* IC */
 	if (cfg & (1 << 5))	/* IB */
-		ci->ci_l1instcacheline = 32;
+		ci->ci_l1inst.linesize = 32;
 	else
-		ci->ci_l1instcacheline = 16;
-	ci->ci_l1instcachesize = (1 << 12) << ((cfg >> 9) & 0x07); /* IC */
+		ci->ci_l1inst.linesize = 16;
 
+	ci->ci_l1data.size = (1 << 12) << ((cfg >> 6) & 0x07); /* DC */
 	if (cfg & (1 << 4))	/* DB */
-		ci->ci_l1datacacheline = 32;
+		ci->ci_l1data.linesize = 32;
 	else
-		ci->ci_l1datacacheline = 16;
-	ci->ci_l1datacachesize = (1 << 12) << ((cfg >> 6) & 0x07); /* DC */
+		ci->ci_l1data.linesize = 16;
 
 	/* R4000 and R4400 L1 caches are direct */
-	ci->ci_cacheways = 1;
-	ci->ci_l1instcacheset = ci->ci_l1instcachesize;
-	ci->ci_l1datacacheset = ci->ci_l1datacachesize;
+	ci->ci_l1inst.setsize = ci->ci_l1inst.size;
+	ci->ci_l1inst.sets = 1;
+	ci->ci_l1data.setsize = ci->ci_l1data.size;
+	ci->ci_l1data.sets = 1;
 
 	cache_valias_mask =
-	    (max(ci->ci_l1instcachesize, ci->ci_l1datacachesize) - 1) &
+	    (max(ci->ci_l1inst.size, ci->ci_l1data.size) - 1) &
 	    ~PAGE_MASK;
 
 	if ((cfg & (1 << 17)) == 0) {	/* SC */
 		/*
-		 * We expect the setup code to have set up ci->ci_l2size and
-		 * ci->ci_l2line for us. Unfortunately we aren't allowed to
-		 * panic() there if it didn't, because the console is not
-		 * available.
+		 * We expect the setup code to have set up ci->ci_l2 for us.
+		 * Unfortunately we aren't allowed to panic() there if it
+		 * didn't, because the console is not available.
 		 */
 
 		/* fixed 32KB aliasing to avoid VCE */
 		pmap_prefer_mask = ((1 << 15) - 1);
 	} else {
-		ci->ci_l2line = 0;
-		ci->ci_l2size = 0;
+		memset(&ci->ci_l2, 0, sizeof(struct cache_info));
 	}
-	ci->ci_l3size = 0;
+	memset(&ci->ci_l3, 0, sizeof(struct cache_info));
 
 	if (cache_valias_mask != 0) {
 		cache_valias_mask |= PAGE_MASK;
@@ -119,6 +118,8 @@ Mips4k_ConfigCache(struct cpu_info *ci)
 
 	ci->ci_SyncCache = Mips4k_SyncCache;
 	ci->ci_InvalidateICache = Mips4k_InvalidateICache;
+	ci->ci_InvalidateICachePage = Mips4k_InvalidateICachePage;
+	ci->ci_SyncICache = Mips4k_SyncICache;
 	ci->ci_SyncDCachePage = Mips4k_SyncDCachePage;
 	ci->ci_HitSyncDCache = Mips4k_HitSyncDCache;
 	ci->ci_HitInvalidateDCache = Mips4k_HitInvalidateDCache;
@@ -140,25 +141,25 @@ Mips4k_SyncCache(struct cpu_info *ci)
 	vsize_t line;
 
 	sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
-	eva = sva + ci->ci_l1instcachesize;
-	line = ci->ci_l1instcacheline;
+	eva = sva + ci->ci_l1inst.size;
+	line = ci->ci_l1inst.linesize;
 	while (sva != eva) {
 		cache(IndexInvalidate_I, sva);
 		sva += line;
 	}
 
 	sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
-	eva = sva + ci->ci_l1datacachesize;
-	line = ci->ci_l1datacacheline;
+	eva = sva + ci->ci_l1data.size;
+	line = ci->ci_l1data.linesize;
 	while (sva != eva) {
 		cache(IndexWBInvalidate_D, sva);
 		sva += line;
 	}
 
-	if (ci->ci_l2size != 0) {
+	if (ci->ci_l2.size != 0) {
 		sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
-		eva = sva + ci->ci_l2size;
-		line = ci->ci_l2line;
+		eva = sva + ci->ci_l2.size;
+		line = ci->ci_l2.linesize;
 		while (sva != eva) {
 			cache(IndexWBInvalidate_S, sva);
 			sva += line;
@@ -178,7 +179,7 @@ Mips4k_InvalidateICache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	vsize_t sz;
 	vsize_t line;
 
-	line = ci->ci_l1instcacheline;
+	line = ci->ci_l1inst.linesize;
 	/* extend the range to integral cache lines */
 	if (line == 16) {
 		va = _va & ~(16UL - 1);
@@ -191,6 +192,8 @@ Mips4k_InvalidateICache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
 	/* keep only the index bits */
 	sva += va & ((1UL << 15) - 1);
+	if (sz > ci->ci_l1inst.size)
+		sz = ci->ci_l1inst.size;
 	eva = sva + sz;
 	while (sva != eva) {
 		cache(IndexInvalidate_I, sva);
@@ -198,6 +201,62 @@ Mips4k_InvalidateICache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	}
 
 	mips_sync();
+}
+
+/*
+ * Register a given page for I$ invalidation.
+ */
+void
+Mips4k_InvalidateICachePage(struct cpu_info *ci, vaddr_t va)
+{
+	/*
+	 * Mark the particular page index bits as needing to be flushed.
+	 */
+	ci->ci_cachepending_l1i |=
+	    1ULL << ((va & ((1UL << 15) - 1)) >> PAGE_SHIFT);
+}
+
+/*
+ * Perform postponed I$ invalidation.
+ */
+void
+Mips4k_SyncICache(struct cpu_info *ci)
+{
+	vaddr_t sva, eva;
+	vsize_t line;
+	uint64_t idx;
+
+	if (ci->ci_cachepending_l1i != 0) {
+		line = ci->ci_l1inst.linesize;
+
+		if (ci->ci_l1inst.size <= PAGE_SIZE) {
+			ci->ci_cachepending_l1i = 0;
+			sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
+			eva = sva + ci->ci_l1inst.size;
+			while (sva != eva) {
+				cache(IndexInvalidate_I, sva);
+				sva += line;
+			}
+			return;
+		}
+
+		/*
+		 * Iterate on all pending page index bits.
+		 */
+		for (idx = 0; ci->ci_cachepending_l1i != 0; idx++) {
+			if ((ci->ci_cachepending_l1i & (1ULL << idx)) == 0)
+				continue;
+
+			sva = PHYS_TO_XKPHYS(idx << PAGE_SHIFT, CCA_CACHED);
+			eva = sva + PAGE_SIZE;
+			while (sva != eva) {
+				cache(IndexInvalidate_I, sva);
+				sva += line;
+			}
+
+			ci->ci_cachepending_l1i &= ~(1ULL << idx);
+		}
+	}
 }
 
 /*
@@ -209,18 +268,21 @@ Mips4k_SyncDCachePage(struct cpu_info *ci, vaddr_t va, paddr_t pa)
 	vaddr_t sva, eva;
 	vsize_t line;
 
-	line = ci->ci_l1datacacheline;
+	line = ci->ci_l1data.linesize;
 	sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
 	/* keep only the index bits */
 	sva += va & ((1UL << 15) - 1);
-	eva = sva + PAGE_SIZE;
+	if (PAGE_SIZE > ci->ci_l1data.size)
+		eva = sva + ci->ci_l1data.size;
+	else
+		eva = sva + PAGE_SIZE;
 	while (sva != eva) {
 		cache(IndexWBInvalidate_D, sva);
 		sva += line;
 	}
 
-	if (ci->ci_l2size != 0) {
-		line = ci->ci_l2line;
+	if (ci->ci_l2.size != 0) {
+		line = ci->ci_l2.linesize;
 		sva = PHYS_TO_XKPHYS(pa, CCA_CACHED);
 		eva = sva + PAGE_SIZE;
 		while (sva != eva) {
@@ -269,7 +331,7 @@ Mips4k_HitSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	vsize_t sz;
 	vsize_t line;
 
-	line = ci->ci_l1datacacheline;
+	line = ci->ci_l1data.linesize;
 	/* extend the range to integral cache lines */
 	if (line == 16) {
 		va = _va & ~(16UL - 1);
@@ -280,8 +342,8 @@ Mips4k_HitSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	}
 	mips4k_hitwbinv_primary(va, sz, line);
 
-	if (ci->ci_l2size != 0) {
-		line = ci->ci_l2line;
+	if (ci->ci_l2.size != 0) {
+		line = ci->ci_l2.linesize;
 		/* extend the range to integral cache lines */
 		va = _va & ~(line - 1);
 		sz = ((_va + _sz + line - 1) & ~(line - 1)) - va;
@@ -328,7 +390,7 @@ Mips4k_HitInvalidateDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	vsize_t sz;
 	vsize_t line;
 
-	line = ci->ci_l1datacacheline;
+	line = ci->ci_l1data.linesize;
 	/* extend the range to integral cache lines */
 	if (line == 16) {
 		va = _va & ~(16UL - 1);
@@ -339,8 +401,8 @@ Mips4k_HitInvalidateDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	}
 	mips4k_hitinv_primary(va, sz, line);
 
-	if (ci->ci_l2size != 0) {
-		line = ci->ci_l2line;
+	if (ci->ci_l2.size != 0) {
+		line = ci->ci_l2.linesize;
 		/* extend the range to integral cache lines */
 		va = _va & ~(line - 1);
 		sz = ((_va + _sz + line - 1) & ~(line - 1)) - va;
@@ -367,7 +429,7 @@ Mips4k_IOSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz, int how)
 	 * L1
 	 */
 
-	line = ci->ci_l1datacacheline;
+	line = ci->ci_l1data.linesize;
 	/* extend the range to integral cache lines */
 	if (line == 16) {
 		va = _va & ~(16UL - 1);
@@ -408,8 +470,8 @@ Mips4k_IOSyncDCache(struct cpu_info *ci, vaddr_t _va, size_t _sz, int how)
 	 * L2
 	 */
 
-	if (ci->ci_l2size != 0) {
-		line = ci->ci_l2line;
+	if (ci->ci_l2.size != 0) {
+		line = ci->ci_l2.linesize;
 		/* extend the range to integral cache lines */
 		va = _va & ~(line - 1);
 		sz = ((_va + _sz + line - 1) & ~(line - 1)) - va;

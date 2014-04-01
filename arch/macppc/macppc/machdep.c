@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.144 2014/02/08 13:17:38 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.148 2014/03/31 18:58:41 mpi Exp $	*/
 /*	$NetBSD: machdep.c,v 1.4 1996/10/16 19:33:11 ws Exp $	*/
 
 /*
@@ -53,7 +53,7 @@
 #include <sys/kcore.h>
 
 #include <net/if.h>
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <dev/cons.h>
 
@@ -532,7 +532,7 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	struct proc *p = curproc;
 	struct trapframe *tf;
 	struct sigframe *fp, frame;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 
 	bzero(&frame, sizeof(frame));
 	frame.sf_signum = sig;
@@ -571,11 +571,12 @@ sendsig(sig_t catcher, int sig, int mask, u_long code, int type,
 	tf->fixreg[3] = (int)sig;
 	tf->fixreg[4] = (psp->ps_siginfo & sigmask(sig)) ? (int)&fp->sf_si : 0;
 	tf->fixreg[5] = (int)&fp->sf_sc;
-	tf->srr0 = p->p_sigcode;
+	tf->srr0 = p->p_p->ps_sigcode;
 
 #if WHEN_WE_ONLY_FLUSH_DATA_WHEN_DOING_PMAP_ENTER
 	pmap_extract(vm_map_pmap(&p->p_vmspace->vm_map),tf->srr0, &pa);
-	syncicache(pa, (p->p_emul->e_esigcode - p->p_emul->e_sigcode));
+	syncicache(pa, (p->p_p->ps_emul->e_esigcode -
+	    p->p_p->ps_emul->e_sigcode));
 #endif
 }
 
@@ -803,6 +804,7 @@ lcsplx(int ipl)
 void
 boot(int howto)
 {
+	struct device *mainbus;
 	static int syncing;
 
 	if (cold) {
@@ -841,8 +843,9 @@ boot(int howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	if (howto & RB_HALT) {
 		if ((howto & RB_POWERDOWN) == RB_POWERDOWN) {

@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_otus.c,v 1.37 2013/11/26 20:33:18 deraadt Exp $	*/
+/*	$OpenBSD: if_otus.c,v 1.39 2014/03/19 10:09:19 mpi Exp $	*/
 
 /*-
  * Copyright (c) 2009 Damien Bergamini <damien.bergamini@free.fr>
@@ -60,10 +60,6 @@
 #include <dev/usb/usbdevs.h>
 
 #include <dev/usb/if_otusreg.h>
-
-#ifdef USB_DEBUG
-#define OTUS_DEBUG
-#endif
 
 #ifdef OTUS_DEBUG
 #define DPRINTF(x)	do { if (otus_debug) printf x; } while (0)
@@ -1442,7 +1438,7 @@ otus_start(struct ifnet *ifp)
 		/* Send pending management frames first. */
 		IF_DEQUEUE(&ic->ic_mgtq, m);
 		if (m != NULL) {
-			ni = (void *)m->m_pkthdr.rcvif;
+			ni = m->m_pkthdr.ph_cookie;
 			goto sendit;
 		}
 		if (ic->ic_state != IEEE80211_S_RUN)

@@ -1,4 +1,4 @@
-/*	$OpenBSD: asm.h,v 1.19 2013/03/28 17:41:04 martynas Exp $ */
+/*	$OpenBSD: asm.h,v 1.21 2014/03/14 16:57:21 miod Exp $ */
 
 /*
  * Copyright (c) 2001-2002 Opsycon AB  (www.opsycon.se / www.opsycon.com)

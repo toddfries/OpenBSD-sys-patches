@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.141 2014/02/24 18:21:20 mpi Exp $ */
+/*	$OpenBSD: ehci.c,v 1.146 2014/03/25 20:27:37 mpi Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -29,15 +29,6 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- */
-
-/*
- * USB Enhanced Host Controller Driver, a.k.a. USB 2.0 controller.
- *
- * The EHCI 1.0 spec can be found at
- * http://developer.intel.com/technology/usb/download/ehci-r10.pdf
- * and the USB 2.0 spec at
- * http://www.usb.org/developers/docs/usb_20.zip
  */
 
 /*
@@ -175,7 +166,6 @@ void		ehci_device_isoc_done(struct usbd_xfer *);
 void		ehci_device_clear_toggle(struct usbd_pipe *pipe);
 void		ehci_noop(struct usbd_pipe *pipe);
 
-int		ehci_str(usb_string_descriptor_t *, int, const char *);
 void		ehci_pcd(struct ehci_softc *, struct usbd_xfer *);
 void		ehci_disown(struct ehci_softc *, int, int);
 
@@ -929,7 +919,7 @@ ehci_idone(struct ehci_xfer *ex)
 		DPRINTFN(2,
 			 ("ehci_idone: error, addr=%d, endpt=0x%02x, "
 			  "status 0x%s\n",
-			  xfer->pipe->device->address,
+			  xfer->device->address,
 			  xfer->pipe->endpoint->edesc->bEndpointAddress,
 			  sbuf));
 		if (ehcidebug > 2) {
@@ -1470,8 +1460,8 @@ ehci_open(struct usbd_pipe *pipe)
 	int ival, speed, naks;
 	int hshubaddr, hshubport;
 
-	DPRINTFN(1, ("ehci_open: pipe=%p, addr=%d, endpt=%d (%d)\n",
-	    pipe, addr, ed->bEndpointAddress, sc->sc_addr));
+	DPRINTFN(1, ("ehci_open: pipe=%p, addr=%d, endpt=%d\n",
+	    pipe, addr, ed->bEndpointAddress));
 
 	if (sc->sc_bus.dying)
 		return (USBD_IOERROR);
@@ -1484,7 +1474,8 @@ ehci_open(struct usbd_pipe *pipe)
 		hshubport = 0;
 	}
 
-	if (addr == sc->sc_addr) {
+	/* Root Hub */
+	if (pipe->device->depth == 0) {
 		switch (ed->bEndpointAddress) {
 		case USB_CONTROL_ENDPOINT:
 			pipe->methods = &ehci_root_ctrl_methods;
@@ -1874,23 +1865,6 @@ usb_hub_descriptor_t ehci_hubd = {
 	{0},
 };
 
-int
-ehci_str(usb_string_descriptor_t *p, int l, const char *s)
-{
-	int i;
-
-	if (l == 0)
-		return (0);
-	p->bLength = 2 * strlen(s) + 2;
-	if (l == 1)
-		return (1);
-	p->bDescriptorType = UDESC_STRING;
-	l -= 2;
-	for (i = 0; s[i] && l > 1; i++, l -= 2)
-		USETW2(p->bString[i], 0, s[i]);
-	return (2*i+2);
-}
-
 /*
  * Simulate a hardware hub by handling all the necessary requests.
  */
@@ -1911,7 +1885,7 @@ ehci_root_ctrl_transfer(struct usbd_xfer *xfer)
 usbd_status
 ehci_root_ctrl_start(struct usbd_xfer *xfer)
 {
-	struct ehci_softc *sc = (struct ehci_softc *)xfer->pipe->device->bus;
+	struct ehci_softc *sc = (struct ehci_softc *)xfer->device->bus;
 	usb_device_request_t *req;
 	void *buf = NULL;
 	int port, i;
@@ -2013,13 +1987,13 @@ ehci_root_ctrl_start(struct usbd_xfer *xfer)
 			totlen = 1;
 			switch (value & 0xff) {
 			case 0: /* Language table */
-				totlen = ehci_str(buf, len, "\001");
+				totlen = usbd_str(buf, len, "\001");
 				break;
 			case 1: /* Vendor */
-				totlen = ehci_str(buf, len, sc->sc_vendor);
+				totlen = usbd_str(buf, len, sc->sc_vendor);
 				break;
 			case 2: /* Product */
-				totlen = ehci_str(buf, len, "EHCI root hub");
+				totlen = usbd_str(buf, len, "EHCI root hub");
 				break;
 			}
 			break;
@@ -2052,7 +2026,6 @@ ehci_root_ctrl_start(struct usbd_xfer *xfer)
 			err = USBD_IOERROR;
 			goto ret;
 		}
-		sc->sc_addr = value;
 		break;
 	case C(UR_SET_CONFIG, UT_WRITE_DEVICE):
 		if (value != 0 && value != 1) {
@@ -2933,21 +2906,17 @@ ehci_abort_isoc_xfer(struct usbd_xfer *xfer, usbd_status status)
 void
 ehci_timeout(void *addr)
 {
-	struct ehci_xfer *exfer = addr;
-	struct ehci_pipe *epipe = (struct ehci_pipe *)exfer->xfer.pipe;
-	struct ehci_softc *sc = (struct ehci_softc *)epipe->pipe.device->bus;
-
-	DPRINTF(("ehci_timeout: exfer=%p\n", exfer));
+	struct usbd_xfer *xfer = addr;
+	struct ehci_softc *sc = (struct ehci_softc *)xfer->device->bus;
 
 	if (sc->sc_bus.dying) {
-		ehci_abort_xfer(&exfer->xfer, USBD_TIMEOUT);
+		ehci_timeout_task(addr);
 		return;
 	}
 
-	/* Execute the abort in a process context. */
-	usb_init_task(&exfer->xfer.abort_task, ehci_timeout_task, addr,
+	usb_init_task(&xfer->abort_task, ehci_timeout_task, addr,
 	    USB_TASK_TYPE_ABORT);
-	usb_add_task(exfer->xfer.pipe->device, &exfer->xfer.abort_task);
+	usb_add_task(xfer->device, &xfer->abort_task);
 }
 
 void
@@ -2956,7 +2925,7 @@ ehci_timeout_task(void *addr)
 	struct usbd_xfer *xfer = addr;
 	int s;
 
-	DPRINTF(("ehci_timeout_task: xfer=%p\n", xfer));
+	DPRINTF(("%s: xfer=%p\n", __func__, xfer));
 
 	s = splusb();
 	ehci_abort_xfer(xfer, USBD_TIMEOUT);
@@ -3008,7 +2977,7 @@ ehci_device_ctrl_transfer(struct usbd_xfer *xfer)
 usbd_status
 ehci_device_ctrl_start(struct usbd_xfer *xfer)
 {
-	struct ehci_softc *sc = (struct ehci_softc *)xfer->pipe->device->bus;
+	struct ehci_softc *sc = (struct ehci_softc *)xfer->device->bus;
 	usbd_status err;
 
 	if (sc->sc_bus.dying)
@@ -3036,7 +3005,7 @@ void
 ehci_device_ctrl_done(struct usbd_xfer *xfer)
 {
 	struct ehci_xfer *ex = EXFER(xfer);
-	struct ehci_softc *sc = (struct ehci_softc *)xfer->pipe->device->bus;
+	struct ehci_softc *sc = (struct ehci_softc *)xfer->device->bus;
 	/*struct ehci_pipe *epipe = (struct ehci_pipe *)xfer->pipe;*/
 
 	DPRINTFN(10,("ehci_ctrl_done: xfer=%p\n", xfer));
@@ -3344,7 +3313,7 @@ void
 ehci_device_bulk_done(struct usbd_xfer *xfer)
 {
 	struct ehci_xfer *ex = EXFER(xfer);
-	struct ehci_softc *sc = (struct ehci_softc *)xfer->pipe->device->bus;
+	struct ehci_softc *sc = (struct ehci_softc *)xfer->device->bus;
 	struct ehci_pipe *epipe = (struct ehci_pipe *)xfer->pipe;
 	int endpt = epipe->pipe.endpoint->edesc->bEndpointAddress;
 	int rd = UE_GET_DIR(endpt) == UE_DIR_IN;
@@ -3408,7 +3377,7 @@ ehci_device_intr_start(struct usbd_xfer *xfer)
 {
 #define exfer EXFER(xfer)
 	struct ehci_pipe *epipe = (struct ehci_pipe *)xfer->pipe;
-	struct usbd_device *dev = xfer->pipe->device;
+	struct usbd_device *dev = xfer->device;
 	struct ehci_softc *sc = (struct ehci_softc *)dev->bus;
 	struct ehci_soft_qtd *data, *dataend;
 	struct ehci_soft_qh *sqh;
@@ -3519,7 +3488,7 @@ ehci_device_intr_done(struct usbd_xfer *xfer)
 {
 #define exfer EXFER(xfer)
 	struct ehci_xfer *ex = EXFER(xfer);
-	struct ehci_softc *sc = (struct ehci_softc *)xfer->pipe->device->bus;
+	struct ehci_softc *sc = (struct ehci_softc *)xfer->device->bus;
 	struct ehci_pipe *epipe = (struct ehci_pipe *)xfer->pipe;
 	struct ehci_soft_qtd *data, *dataend;
 	struct ehci_soft_qh *sqh;
@@ -3612,7 +3581,7 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 	itd = NULL;
 	trans_count = 0;
 	exfer = (struct ehci_xfer *) xfer;
-	sc = (struct ehci_softc *)xfer->pipe->device->bus;
+	sc = (struct ehci_softc *)xfer->device->bus;
 	epipe = (struct ehci_pipe *)xfer->pipe;
 
 	/*
@@ -3874,14 +3843,11 @@ ehci_device_isoc_close(struct usbd_pipe *pipe)
 void
 ehci_device_isoc_done(struct usbd_xfer *xfer)
 {
-	struct ehci_xfer *exfer;
-	struct ehci_softc *sc;
-	struct ehci_pipe *epipe;
+	struct ehci_xfer *exfer = EXFER(xfer);
+	struct ehci_softc *sc = (struct ehci_softc *)xfer->device->bus;
+	struct ehci_pipe *epipe = (struct ehci_pipe *)xfer->pipe;
 	int s;
 
-	exfer = EXFER(xfer);
-	sc = (struct ehci_softc *)xfer->pipe->device->bus;
-	epipe = (struct ehci_pipe *) xfer->pipe;
 
 	s = splusb();
 	epipe->u.isoc.cur_xfers--;

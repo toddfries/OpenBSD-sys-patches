@@ -1,4 +1,4 @@
-/*	$OpenBSD: cache_r5k.c,v 1.9 2013/11/26 20:33:13 deraadt Exp $	*/
+/*	$OpenBSD: cache_r5k.c,v 1.13 2014/03/31 20:21:19 miod Exp $	*/
 
 /*
  * Copyright (c) 2012 Miodrag Vallat.
@@ -108,31 +108,31 @@
 #define	CTYPE_HAS_XL2		0x02	/* External L2 Cache present */
 #define	CTYPE_HAS_XL3		0x04	/* External L3 Cache present */
 
-#define	nop4()			__asm__ __volatile__ \
+#define	nop4()			__asm__ volatile \
 	("nop; nop; nop; nop")
-#define	nop10()			__asm__ __volatile__ \
+#define	nop10()			__asm__ volatile \
 	("nop; nop; nop; nop; nop; nop; nop; nop; nop; nop")
 
-#define	cache(op,offs,addr)	__asm__ __volatile__ \
+#define	cache(op,offs,addr)	__asm__ volatile \
 	("cache %0, %1(%2)" :: "i"(op), "i"(offs), "r"(addr) : "memory")
 
-#define	reset_taglo()		__asm__ __volatile__ \
+#define	reset_taglo()		__asm__ volatile \
 	("mtc0 $zero, $28")	/* COP_0_TAG_LO */
-#define	reset_taghi()		__asm__ __volatile__ \
+#define	reset_taghi()		__asm__ volatile \
 	("mtc0 $zero, $29")	/* COP_0_TAG_HI */
 
 static __inline__ register_t
 get_config(void)
 {
 	register_t cfg;
-	__asm__ __volatile__ ("mfc0 %0, $16" : "=r"(cfg)); /* COP_0_CONFIG */
+	__asm__ volatile ("mfc0 %0, $16" : "=r"(cfg)); /* COP_0_CONFIG */
 	return cfg;
 }
 
 static __inline__ void
 set_config(register_t cfg)
 {
-	__asm__ __volatile__ ("mtc0 %0, $16" :: "r"(cfg)); /* COP_0_CONFIG */
+	__asm__ volatile ("mtc0 %0, $16" :: "r"(cfg)); /* COP_0_CONFIG */
 	/* MTC0_HAZARD */
 #ifdef CPU_RM7000
 	nop10();
@@ -149,6 +149,7 @@ static __inline__ void	mips5k_hitwbinv_secondary(vaddr_t, vsize_t);
 void mips5k_l2_init(register_t);
 void mips7k_l2_init(register_t);
 void mips7k_l3_init(register_t);
+void mips5k_c0_cca_update(register_t);
 static void run_uncached(void (*)(register_t), register_t);
 
 /*
@@ -223,25 +224,25 @@ mips7k_l2_init(register_t l2size)
 	va = PHYS_TO_XKPHYS(0, CCA_CACHED);
 	eva = va + l2size;
 	while (va != eva) {
+		cache(IndexStoreTag_S, 0, va);
 		va += R5K_LINE;
-		cache(IndexStoreTag_S, -4, va);
 	}
 	mips_sync();
 
 	va = PHYS_TO_XKPHYS(0, CCA_CACHED);
 	eva = va + l2size;
 	while (va != eva) {
+		__asm__ volatile
+		    ("lw $zero, 0(%0)" :: "r"(va));
 		va += R5K_LINE;
-		__asm__ __volatile__
-		    ("lw $zero, %0(%1)" :: "i"(-4), "r"(va));
 	}
 	mips_sync();
 
 	va = PHYS_TO_XKPHYS(0, CCA_CACHED);
 	eva = va + l2size;
 	while (va != eva) {
+		cache(IndexStoreTag_S, 0, va);
 		va += R5K_LINE;
-		cache(IndexStoreTag_S, -4, va);
 	}
 	mips_sync();
 }
@@ -273,6 +274,28 @@ mips7k_l3_init(register_t l3size)
 }
 
 /*
+ * Update the coherency of KSEG0.
+ * INTENDED TO BE RUN UNCACHED - BE SURE TO CHECK THAT IT WON'T STORE ANYTHING
+ * ON THE STACK IN THE ASSEMBLY OUTPUT EVERYTIME YOU CHANGE IT.
+ */
+void
+mips5k_c0_cca_update(register_t cfg)
+{
+	set_config(cfg);
+
+#if defined(CPU_R5000) || defined(CPU_RM7000)
+	/*
+	 * RM52xx and RM7000 hazard: after updating the K0 field of the Config
+	 * register, the KSEG0 and CKSEG0 address segments should not be used
+	 * for 5 cycles. The register modification and the use of these address
+	 * segments should be separated by at least five (RM52xx) or
+	 * ten (RM7000) integer instructions.
+	 */
+	nop10();
+#endif
+}
+
+/*
  * Discover cache configuration and update cpu_info accordingly.
  * Initialize L2 and L3 caches found if necessary.
  */
@@ -285,17 +308,15 @@ Mips5k_ConfigCache(struct cpu_info *ci)
 	cfg = cp0_get_config();
 
 	/* L1 cache */
-	ci->ci_l1instcacheline = R5K_LINE;
-	ci->ci_l1instcachesize = (1 << 12) << ((cfg >> 9) & 0x07); /* IC */
-	ci->ci_l1datacacheline = R5K_LINE;
-	ci->ci_l1datacachesize = (1 << 12) << ((cfg >> 6) & 0x07); /* DC */
+	ci->ci_l1inst.size = (1 << 12) << ((cfg >> 9) & 0x07); /* IC */
+	ci->ci_l1inst.linesize = R5K_LINE;
+	ci->ci_l1data.size = (1 << 12) << ((cfg >> 6) & 0x07); /* DC */
+	ci->ci_l1data.linesize = R5K_LINE;
 
 	/* sane defaults */
-	ci->ci_cacheways = 2;
 	setshift = 1;
-	ci->ci_l2line = 0;
-	ci->ci_l2size = 0;
-	ci->ci_l3size = 0;
+	memset(&ci->ci_l2, 0, sizeof(struct cache_info));
+	memset(&ci->ci_l3, 0, sizeof(struct cache_info));
 	ci->ci_cacheconfiguration = 0;
 
 	switch ((cp0_get_prid() >> 8) & 0xff) {
@@ -311,25 +332,26 @@ Mips5k_ConfigCache(struct cpu_info *ci)
 #ifdef CPU_R5000
 	case MIPS_R5000:
 	case MIPS_RM52X0:
-		/* optional external L2 cache */
+		/* optional external direct L2 cache */
 		if ((cfg & CF_5_SC) == 0) {
-			ci->ci_l2line = R5K_LINE;
-			ci->ci_l2size = (1 << 19) <<
+			ci->ci_l2.size = (1 << 19) <<
 			    ((cfg & CF_5_SS) >> CF_5_SS_AL);
+			ci->ci_l2.linesize = R5K_LINE;
+			ci->ci_l2.setsize = ci->ci_l2.size;
+			ci->ci_l2.sets = 1;
 		}
-		if (ci->ci_l2size != 0) {
+		if (ci->ci_l2.size != 0) {
 			ci->ci_cacheconfiguration |= CTYPE_HAS_XL2;
 			cfg |= CF_5_SE;
-			run_uncached(mips5k_l2_init, ci->ci_l2size);
+			run_uncached(mips5k_l2_init, ci->ci_l2.size);
 		}
 		break;
 #endif	/* CPU_R5000 */
 #ifdef CPU_RM7000
 	case MIPS_RM7000:
 	case MIPS_RM9000:
-		ci->ci_cacheways = 4;
 		setshift = 2;
-		/* optional external L3 cache */
+		/* optional external direct L3 cache */
 		if ((cfg & CF_7_TC) == 0) {
 #ifndef L3SZEXT
 			/*
@@ -339,40 +361,48 @@ Mips5k_ConfigCache(struct cpu_info *ci)
 			 * an upgrade from an R5000/RM52xx processor, such as
 			 * the SGI O2.
 			 */
-			ci->ci_l3size = (1 << 19) <<
+			ci->ci_l3.size = (1 << 19) <<
 			    ((cfg & CF_7_TS) >> CF_7_TS_AL);
+			ci->ci_l3.linesize = R5K_LINE;
+			ci->ci_l3.setsize = ci->ci_l3.size;
+			ci->ci_l3.sets = 1;
 #else
 			/*
-			 * Assume machdep has initialized ci_l3size for us.
+			 * Assume machdep has initialized ci_l3 for us.
 			 */
 #endif
 		}
-		if (ci->ci_l3size != 0) {
+		if (ci->ci_l3.size != 0) {
 			ci->ci_cacheconfiguration |= CTYPE_HAS_XL3;
 			cfg |= CF_7_TE;
-			run_uncached(mips7k_l3_init, ci->ci_l3size);
+			run_uncached(mips7k_l3_init, ci->ci_l3.size);
+
 		}
-		/* internal L2 cache */
+		/* internal 4-way L2 cache */
 		if ((cfg & CF_7_SC) == 0) {
-			ci->ci_l2line = R5K_LINE;
-			ci->ci_l2size = 256 * 1024;	/* fixed size */
+			ci->ci_l2.size = 256 * 1024;	/* fixed size */
+			ci->ci_l2.linesize = R5K_LINE;
+			ci->ci_l2.setsize = ci->ci_l2.size / 4;
+			ci->ci_l2.sets = 4;
 		}
-		if (ci->ci_l2size != 0) {
+		if (ci->ci_l2.size != 0) {
 			ci->ci_cacheconfiguration |= CTYPE_HAS_IL2;
 			if ((cfg & CF_7_SE) == 0) {
 				cfg |= CF_7_SE;
-				run_uncached(mips7k_l2_init, ci->ci_l2size);
+				run_uncached(mips7k_l2_init, ci->ci_l2.size);
 			}
 		}
 		break;
 #endif	/* CPU_RM7000 */
 	}
 
-	ci->ci_l1instcacheset = ci->ci_l1instcachesize >> setshift;
-	ci->ci_l1datacacheset = ci->ci_l1datacachesize >> setshift;
+	ci->ci_l1inst.setsize = ci->ci_l1inst.size >> setshift;
+	ci->ci_l1inst.sets = setshift == 2 ? 4 : 2;
+	ci->ci_l1data.setsize = ci->ci_l1data.size >> setshift;
+	ci->ci_l1data.sets = setshift == 2 ? 4 : 2;
 
 	cache_valias_mask =
-	    (max(ci->ci_l1instcacheset, ci->ci_l1datacacheset) - 1) &
+	    (max(ci->ci_l1inst.setsize, ci->ci_l1data.setsize) - 1) &
 	    ~PAGE_MASK;
 
 	if (cache_valias_mask != 0) {
@@ -382,6 +412,8 @@ Mips5k_ConfigCache(struct cpu_info *ci)
 
 	ci->ci_SyncCache = Mips5k_SyncCache;
 	ci->ci_InvalidateICache = Mips5k_InvalidateICache;
+	ci->ci_InvalidateICachePage = Mips5k_InvalidateICachePage;
+	ci->ci_SyncICache = Mips5k_SyncICache;
 	ci->ci_SyncDCachePage = Mips5k_SyncDCachePage;
 	ci->ci_HitSyncDCache = Mips5k_HitSyncDCache;
 	ci->ci_HitInvalidateDCache = Mips5k_HitInvalidateDCache;
@@ -389,7 +421,7 @@ Mips5k_ConfigCache(struct cpu_info *ci)
 
 	ncfg = (cfg & ~CFGR_CCA_MASK) | CCA_CACHED;
 	if (cfg != ncfg)
-		run_uncached(cp0_set_config, ncfg);
+		run_uncached(mips5k_c0_cca_update, ncfg);
 }
 
 /*
@@ -408,14 +440,14 @@ Mips5k_SyncCache(struct cpu_info *ci)
 #endif
 
 	sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
-	eva = sva + ci->ci_l1instcachesize;
+	eva = sva + ci->ci_l1inst.size;
 	while (sva != eva) {
 		cache(IndexInvalidate_I, 0, sva);
 		sva += R5K_LINE;
 	}
 
 	sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
-	eva = sva + ci->ci_l1datacachesize;
+	eva = sva + ci->ci_l1data.size;
 	while (sva != eva) {
 		cache(IndexWBInvalidate_D, 0, sva);
 		sva += R5K_LINE;
@@ -428,7 +460,7 @@ Mips5k_SyncCache(struct cpu_info *ci)
 #ifdef CPU_RM7000
 	if (ci->ci_cacheconfiguration & CTYPE_HAS_IL2) {
 		sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
-		eva = sva + ci->ci_l2size;
+		eva = sva + ci->ci_l2.size;
 		while (sva != eva) {
 			cache(IndexWBInvalidate_S, 0, sva);
 			sva += R5K_LINE;
@@ -438,7 +470,7 @@ Mips5k_SyncCache(struct cpu_info *ci)
 #ifdef CPU_R5000
 	if (ci->ci_cacheconfiguration & CTYPE_HAS_XL2) {
 		sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
-		eva = sva + ci->ci_l2size;
+		eva = sva + ci->ci_l2.size;
 		reset_taglo();
 		while (sva != eva) {
 			cache(InvalidatePage_S, 0, sva);
@@ -452,7 +484,7 @@ Mips5k_SyncCache(struct cpu_info *ci)
 #ifdef CPU_RM7000
 	if (ci->ci_cacheconfiguration & CTYPE_HAS_XL3) {
 		sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
-		eva = sva + ci->ci_l3size;
+		eva = sva + ci->ci_l3.size;
 		reset_taglo();
 		while (sva != eva) {
 			cache(InvalidatePage_T, 0, sva);
@@ -485,12 +517,12 @@ Mips5k_InvalidateICache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	sz = ((_va + _sz + R5K_LINE - 1) & ~(R5K_LINE - 1)) - va;
 
 	sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
-	offs = ci->ci_l1instcacheset;
+	offs = ci->ci_l1inst.setsize;
 	/* keep only the index bits */
 	sva |= va & (offs - 1);
 	eva = sva + sz;
 
-	switch (ci->ci_cacheways) {
+	switch (ci->ci_l1inst.sets) {
 	default:
 #ifdef CPU_RM7000
 	case 4:
@@ -524,6 +556,127 @@ Mips5k_InvalidateICache(struct cpu_info *ci, vaddr_t _va, size_t _sz)
 	setsr(sr);
 #endif
 	mips_sync();
+}
+
+/*
+ * Register a given page for I$ invalidation.
+ */
+void
+Mips5k_InvalidateICachePage(struct cpu_info *ci, vaddr_t va)
+{
+	/*
+	 * Mark the particular page index bits as needing to be flushed.
+	 */
+	ci->ci_cachepending_l1i |=
+	    1ULL << ((va & (ci->ci_l1inst.setsize - 1)) >> PAGE_SHIFT);
+}
+
+/*
+ * Perform postponed I$ invalidation.
+ */
+void
+Mips5k_SyncICache(struct cpu_info *ci)
+{
+	vaddr_t sva, eva, iva;
+	vsize_t offs;
+	uint64_t idx;
+#ifdef CPU_R4600
+	register_t sr;
+#endif
+
+	if (ci->ci_cachepending_l1i == 0)
+		return;
+
+#ifdef CPU_R4600
+	/*
+	 * Revision 1 R4600 need to perform `Index' cache operations with
+	 * interrupt disabled, to make sure both ways are correctly updated.
+	 */
+	sr = disableintr();
+#endif
+
+	offs = ci->ci_l1inst.setsize;
+
+	if (ci->ci_l1inst.setsize <= PAGE_SIZE) {
+		ci->ci_cachepending_l1i = 0;
+		sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
+		eva = sva + offs;
+		switch (ci->ci_l1inst.sets) {
+		default:
+#ifdef CPU_RM7000
+		case 4:
+			while (sva != eva) {
+				iva = sva;
+				cache(IndexInvalidate_I, 0, iva);
+				iva += offs;
+				cache(IndexInvalidate_I, 0, iva);
+				iva += offs;
+				cache(IndexInvalidate_I, 0, iva);
+				iva += offs;
+				cache(IndexInvalidate_I, 0, iva);
+				sva += R5K_LINE;
+			}
+			break;
+#endif
+#if defined(CPU_R5000) || defined(CPU_R4600)
+		case 2:
+			iva = sva + offs;
+			while (sva != eva) {
+				cache(IndexInvalidate_I, 0, iva);
+				cache(IndexInvalidate_I, 0, sva);
+				iva += R5K_LINE;
+				sva += R5K_LINE;
+			}
+			break;
+#endif
+		}
+	} else {
+		/*
+		 * Iterate on all pending page index bits.
+		 */
+		for (idx = 0; ci->ci_cachepending_l1i != 0; idx++) {
+			if ((ci->ci_cachepending_l1i & (1ULL << idx)) == 0)
+				continue;
+
+			sva = PHYS_TO_XKPHYS(idx << PAGE_SHIFT, CCA_CACHED);
+			eva = sva + offs;
+			switch (ci->ci_l1inst.sets) {
+			default:
+#ifdef CPU_RM7000
+			case 4:
+				while (sva != eva) {
+					iva = sva;
+					cache(IndexInvalidate_I, 0, iva);
+					iva += offs;
+					cache(IndexInvalidate_I, 0, iva);
+					iva += offs;
+					cache(IndexInvalidate_I, 0, iva);
+					iva += offs;
+					cache(IndexInvalidate_I, 0, iva);
+					sva += R5K_LINE;
+				}
+				break;
+#endif
+#if defined(CPU_R5000) || defined(CPU_R4600)
+			case 2:
+				iva = sva + offs;
+				while (sva != eva) {
+					cache(IndexInvalidate_I, 0, iva);
+					cache(IndexInvalidate_I, 0, sva);
+					iva += R5K_LINE;
+					sva += R5K_LINE;
+				}
+				break;
+#endif
+			}
+
+			ci->ci_cachepending_l1i &= ~(1ULL << idx);
+		}
+	}
+
+#ifdef CPU_R4600
+	setsr(sr);
+#endif
 }
 
 static __inline__ void
@@ -565,7 +718,7 @@ Mips5k_SyncDCachePage(struct cpu_info *ci, vaddr_t va, paddr_t pa)
 	register_t sr = disableintr();
 #endif
 
-	switch (ci->ci_cacheways) {
+	switch (ci->ci_l1data.sets) {
 	default:
 #ifdef CPU_RM7000
 	case 4:
@@ -589,7 +742,7 @@ Mips5k_SyncDCachePage(struct cpu_info *ci, vaddr_t va, paddr_t pa)
 		vsize_t offs;
 
 		sva = PHYS_TO_XKPHYS(0, CCA_CACHED);
-		offs = ci->ci_l1datacacheset;
+		offs = ci->ci_l1data.setsize;
 		/* keep only the index bits */
 		sva |= va & (offs - 1);
 		eva = sva + PAGE_SIZE;

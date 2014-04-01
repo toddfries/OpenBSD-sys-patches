@@ -1,4 +1,4 @@
-/*	$OpenBSD: cpu.h,v 1.95 2013/12/19 09:37:13 jasper Exp $	*/
+/*	$OpenBSD: cpu.h,v 1.100 2014/03/31 20:21:19 miod Exp $	*/
 
 /*-
  * Copyright (c) 1992, 1993
@@ -134,6 +134,16 @@ struct cpu_hwinfo {
 	uint32_t	l2size;
 };
 
+/*
+ * Cache memory configuration. One struct per cache.
+ */
+struct cache_info {
+	uint		size;		/* total cache size */
+	uint		linesize;	/* line size */
+	uint		setsize;	/* set size */
+	uint		sets;		/* number of sets */
+};
+
 struct cpu_info {
 	struct device	*ci_dev;	/* our device */
 	struct cpu_info	*ci_self;	/* pointer to this structure */
@@ -145,23 +155,21 @@ struct cpu_info {
 	struct cpu_hwinfo
 			ci_hw;
 
-	/* cache information */
+	/* cache information and pending flush state */
 	uint		ci_cacheconfiguration;
-	uint		ci_cacheways;
-	uint		ci_l1instcachesize;
-	uint		ci_l1instcacheline;
-	uint		ci_l1instcacheset;
-	uint		ci_l1datacachesize;
-	uint		ci_l1datacacheline;
-	uint		ci_l1datacacheset;
-	uint		ci_l2size;
-	uint		ci_l2line;
-	uint		ci_l3size;
+	uint64_t	ci_cachepending_l1i;
+	struct cache_info
+			ci_l1inst,
+			ci_l1data,
+			ci_l2,
+			ci_l3;
 
 	/* function pointers for the cache handling routines */
 	void		(*ci_SyncCache)(struct cpu_info *);
 	void		(*ci_InvalidateICache)(struct cpu_info *, vaddr_t,
 			    size_t);
+	void		(*ci_InvalidateICachePage)(struct cpu_info *, vaddr_t);
+	void		(*ci_SyncICache)(struct cpu_info *);
 	void		(*ci_SyncDCachePage)(struct cpu_info *, vaddr_t,
 			    paddr_t);
 	void		(*ci_HitSyncDCache)(struct cpu_info *, vaddr_t, size_t);
@@ -305,10 +313,10 @@ void	cp0_calibrate(struct cpu_info *);
 #define	aston(p)		p->p_md.md_astpending = 1
 
 #ifdef CPU_R8000
-#define	mips_sync()		__asm__ __volatile__ ("lw $0, 0(%0)" :: \
+#define	mips_sync()		__asm__ volatile ("lw $0, 0(%0)" :: \
 				    "r" (PHYS_TO_XKPHYS(0, CCA_NC)) : "memory")
 #else
-#define	mips_sync()		__asm__ __volatile__ ("sync" ::: "memory")
+#define	mips_sync()		__asm__ volatile ("sync" ::: "memory")
 #endif
 
 #endif /* _KERNEL && !_LOCORE */
@@ -395,11 +403,13 @@ void	tlb_asid_wrap(struct cpu_info *);
 void	tlb_flush(int);
 void	tlb_flush_addr(vaddr_t);
 void	tlb_init(unsigned int);
+int64_t	tlb_probe(vaddr_t);
 void	tlb_set_gbase(vaddr_t, vsize_t);
 void	tlb_set_page_mask(uint32_t);
 void	tlb_set_pid(u_int);
 void	tlb_set_wired(uint32_t);
 int	tlb_update(vaddr_t, register_t);
+void	tlb_update_indexed(vaddr_t, register_t, register_t, uint);
 
 void	build_trampoline(vaddr_t, vaddr_t);
 void	cpu_switchto_asm(struct proc *, struct proc *);
@@ -422,6 +432,21 @@ int	guarded_write_4(paddr_t, uint32_t);
 
 void	MipsFPTrap(struct trap_frame *);
 register_t MipsEmulateBranch(struct trap_frame *, vaddr_t, uint32_t, uint32_t);
+
+int	classify_insn(uint32_t);
+#define	INSNCLASS_NEUTRAL	0
+#define	INSNCLASS_CALL		1
+#define	INSNCLASS_BRANCH	2
+
+/*
+ * R4000 end-of-page errata workaround routines
+ */
+
+extern int r4000_errata;
+u_int	eop_page_check(paddr_t);
+int	eop_tlb_miss_handler(struct trap_frame *, struct cpu_info *,
+	    struct proc *);
+void	eop_cleanup(struct trap_frame *, struct proc *);
 
 /*
  * Low level access routines to CPU registers
@@ -459,6 +484,14 @@ u_int	cp1_get_prid(void);
 #ifndef	Mips_InvalidateICache
 #define	Mips_InvalidateICache(ci, va, l) \
 	((ci)->ci_InvalidateICache)(ci, va, l)
+#endif
+#ifndef	Mips_InvalidateICachePage
+#define	Mips_InvalidateICachePage(ci, va) \
+	((ci)->ci_InvalidateICachePage)(ci, va)
+#endif
+#ifndef	Mips_SyncICache
+#define	Mips_SyncICache(ci) \
+	((ci)->ci_SyncICache)(ci)
 #endif
 #ifndef	Mips_SyncDCachePage
 #define	Mips_SyncDCachePage(ci, va, pa) \

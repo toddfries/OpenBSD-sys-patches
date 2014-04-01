@@ -1,4 +1,4 @@
-/*	$OpenBSD: uhidev.c,v 1.52 2014/02/25 15:49:10 mpi Exp $	*/
+/*	$OpenBSD: uhidev.c,v 1.57 2014/03/23 12:20:14 andre Exp $	*/
 /*	$NetBSD: uhidev.c,v 1.14 2003/03/11 16:44:00 augustss Exp $	*/
 
 /*
@@ -58,7 +58,10 @@
 #ifndef SMALL_KERNEL
 /* Replacement report descriptors for devices shipped with broken ones */
 #include <dev/usb/uhid_rdesc.h>
+int uhidev_use_rdesc(struct uhidev_softc *, int, int, void **, int *);
 #endif /* !SMALL_KERNEL */
+
+#define DEVNAME(sc)		((sc)->sc_dev.dv_xname)
 
 #ifdef UHIDEV_DEBUG
 #define DPRINTF(x)	do { if (uhidevdebug) printf x; } while (0)
@@ -119,37 +122,31 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 {
 	struct uhidev_softc *sc = (struct uhidev_softc *)self;
 	struct usb_attach_arg *uaa = aux;
-	struct usbd_interface *iface = uaa->iface;
 	usb_interface_descriptor_t *id;
 	usb_endpoint_descriptor_t *ed;
 	struct uhidev_attach_arg uha;
-	struct uhidev *dev;
 	int size, nrepid, repid, repsz;
-	int repsizes[256];
-	int i;
-	void *desc;
-	const void *descptr;
-	usbd_status err;
+	int i, repsizes[256];
+	void *desc = NULL;
+	struct device *dev;
 
 	sc->sc_udev = uaa->device;
-	sc->sc_iface = iface;
-	id = usbd_get_interface_descriptor(iface);
+	sc->sc_iface = uaa->iface;
+	id = usbd_get_interface_descriptor(sc->sc_iface);
 
-	(void)usbd_set_idle(iface, 0, 0);
+	usbd_set_idle(sc->sc_iface, 0, 0);
 #if 0
-
-	qflags = usbd_get_quirks(sc->sc_udev)->uq_flags;
-	if ((qflags & UQ_NO_SET_PROTO) == 0 &&
+	if ((usbd_get_quirks(sc->sc_udev)->uq_flags & UQ_NO_SET_PROTO) == 0 &&
 	    id->bInterfaceSubClass != UISUBCLASS_BOOT)
-		(void)usbd_set_protocol(iface, 1);
+		usbd_set_protocol(sc->sc_iface, 1);
 #endif
 
 	sc->sc_iep_addr = sc->sc_oep_addr = -1;
 	for (i = 0; i < id->bNumEndpoints; i++) {
-		ed = usbd_interface2endpoint_descriptor(iface, i);
+		ed = usbd_interface2endpoint_descriptor(sc->sc_iface, i);
 		if (ed == NULL) {
 			printf("%s: could not read endpoint descriptor\n",
-			    sc->sc_dev.dv_xname);
+			    DEVNAME(sc));
 			return;
 		}
 
@@ -169,7 +166,7 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 		    (ed->bmAttributes & UE_XFERTYPE) == UE_INTERRUPT) {
 			sc->sc_oep_addr = ed->bEndpointAddress;
 		} else {
-			printf("%s: unexpected endpoint\n", sc->sc_dev.dv_xname);
+			printf("%s: unexpected endpoint\n", DEVNAME(sc));
 			return;
 		}
 	}
@@ -179,76 +176,39 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 	 * The output interrupt endpoint is optional
 	 */
 	if (sc->sc_iep_addr == -1) {
-		printf("%s: no input interrupt endpoint\n", sc->sc_dev.dv_xname);
+		printf("%s: no input interrupt endpoint\n", DEVNAME(sc));
 		return;
 	}
 
-	/* XXX need to extend this */
-	descptr = NULL;
 #ifndef SMALL_KERNEL
-	if (uaa->vendor == USB_VENDOR_WACOM) {
-		static uByte reportbuf[] = {2, 2, 2};
-
-		/* The report descriptor for the Wacom Graphire is broken. */
-		switch (uaa->product) {
-		case USB_PRODUCT_WACOM_GRAPHIRE:
-			size = sizeof uhid_graphire_report_descr;
-			descptr = uhid_graphire_report_descr;
-			break;
-		case USB_PRODUCT_WACOM_GRAPHIRE3_4X5:
-		case USB_PRODUCT_WACOM_GRAPHIRE4_4X5:
-			usbd_set_report(uaa->iface, UHID_FEATURE_REPORT, 2,
-			    &reportbuf, sizeof reportbuf);
-			size = sizeof uhid_graphire3_4x5_report_descr;
-			descptr = uhid_graphire3_4x5_report_descr;
-			break;
-		default:
-			/* Keep descriptor */
-			break;
-		}
-	} else if (uaa->vendor == USB_VENDOR_MICROSOFT &&
-	    uaa->product == USB_PRODUCT_MICROSOFT_XBOX360_CONTROLLER) {
-		/* The Xbox 360 gamepad has no report descriptor. */
-		size = sizeof uhid_xb360gp_report_descr;
-		descptr = uhid_xb360gp_report_descr;
-	}
+	if (uhidev_use_rdesc(sc, uaa->vendor, uaa->product, &desc, &size))
+		return;
 #endif /* !SMALL_KERNEL */
 
-	if (descptr) {
-		desc = malloc(size, M_USBDEV, M_NOWAIT);
-		if (desc == NULL)
-			err = USBD_NOMEM;
-		else {
-			err = USBD_NORMAL_COMPLETION;
-			memcpy(desc, descptr, size);
+	if (desc == NULL) {
+		if (usbd_read_report_desc(sc->sc_iface, &desc, &size,
+		    M_USBDEV)) {
+			printf("%s: no report descriptor\n", DEVNAME(sc));
+			return;
 		}
-	} else {
-		desc = NULL;
-		err = usbd_read_report_desc(uaa->iface, &desc, &size, M_USBDEV);
-	}
-	if (err) {
-		printf("%s: no report descriptor\n", sc->sc_dev.dv_xname);
-		return;
 	}
 
 	sc->sc_repdesc = desc;
 	sc->sc_repdesc_size = size;
 
-	uha.uaa = uaa;
 	nrepid = uhidev_maxrepid(desc, size);
 	if (nrepid < 0)
 		return;
-	printf("%s: iclass %d/%d", sc->sc_dev.dv_xname,
-	    id->bInterfaceClass, id->bInterfaceSubClass);
+	printf("%s: iclass %d/%d", DEVNAME(sc), id->bInterfaceClass,
+	    id->bInterfaceSubClass);
 	if (nrepid > 0)
-		printf(", %d report id%s", nrepid,
-		    nrepid > 1 ? "s" : "");
+		printf(", %d report id%s", nrepid, nrepid > 1 ? "s" : "");
 	printf("\n");
 	nrepid++;
 	sc->sc_subdevs = malloc(nrepid * sizeof(struct device *),
 	    M_USBDEV, M_NOWAIT | M_ZERO);
 	if (sc->sc_subdevs == NULL) {
-		printf("%s: no memory\n", sc->sc_dev.dv_xname);
+		printf("%s: no memory\n", DEVNAME(sc));
 		return;
 	}
 	sc->sc_nrepid = nrepid;
@@ -258,41 +218,86 @@ uhidev_attach(struct device *parent, struct device *self, void *aux)
 		repsz = hid_report_size(desc, size, hid_input, repid);
 		DPRINTF(("uhidev_match: repid=%d, repsz=%d\n", repid, repsz));
 		repsizes[repid] = repsz;
-		if (repsz > 0) {
-			if (repsz > sc->sc_isize)
-				sc->sc_isize = repsz;
-		}
+		if (repsz > sc->sc_isize)
+			sc->sc_isize = repsz;
 	}
-	sc->sc_isize += nrepid != 1;	/* space for report ID */
+	sc->sc_isize += (nrepid != 1);	/* one byte for the report ID */
 	DPRINTF(("uhidev_attach: isize=%d\n", sc->sc_isize));
 
+	uha.uaa = uaa;
 	uha.parent = sc;
+	uha.reportid = UHIDEV_CLAIM_ALLREPORTID;
+
+	/* Look for a driver claiming all report IDs first. */
+	dev = config_found_sm(self, &uha, NULL, uhidevsubmatch);
+	if (dev != NULL) {
+		for (repid = 0; repid < nrepid; repid++)
+			sc->sc_subdevs[repid] = (struct uhidev *)dev;
+		return;
+	}
+
 	for (repid = 0; repid < nrepid; repid++) {
-		DPRINTF(("uhidev_match: try repid=%d\n", repid));
+		DPRINTF(("%s: try repid=%d\n", __func__, repid));
 		if (hid_report_size(desc, size, hid_input, repid) == 0 &&
 		    hid_report_size(desc, size, hid_output, repid) == 0 &&
-		    hid_report_size(desc, size, hid_feature, repid) == 0) {
-			;	/* already NULL in sc->sc_subdevs[repid] */
-		} else {
-			uha.reportid = repid;
-			dev = (struct uhidev *)config_found_sm(self, &uha,
-			                           uhidevprint, uhidevsubmatch);
-			sc->sc_subdevs[repid] = dev;
-			if (dev != NULL) {
-				dev->sc_in_rep_size = repsizes[repid];
-#ifdef DIAGNOSTIC
-				DPRINTF(("uhidev_match: repid=%d dev=%p\n",
-					 repid, dev));
-				if (dev->sc_intr == NULL) {
-					DPRINTF(("%s: sc_intr == NULL\n",
-					       sc->sc_dev.dv_xname));
-					return;
-				}
-#endif
-			}
-		}
+		    hid_report_size(desc, size, hid_feature, repid) == 0)
+			continue;
+
+		uha.reportid = repid;
+		dev = config_found_sm(self, &uha, uhidevprint, uhidevsubmatch);
+		sc->sc_subdevs[repid] = (struct uhidev *)dev;
 	}
 }
+
+#ifndef SMALL_KERNEL
+int
+uhidev_use_rdesc(struct uhidev_softc *sc, int vendor, int product,
+    void **descp, int *sizep)
+{
+	static uByte reportbuf[] = {2, 2, 2};
+	const void *descptr = NULL;
+	void *desc;
+	int size;
+
+	if (vendor == USB_VENDOR_WACOM) {
+
+		/* The report descriptor for the Wacom Graphire is broken. */
+		switch (product) {
+		case USB_PRODUCT_WACOM_GRAPHIRE:
+			size = sizeof(uhid_graphire_report_descr);
+			descptr = uhid_graphire_report_descr;
+			break;
+		case USB_PRODUCT_WACOM_GRAPHIRE3_4X5:
+		case USB_PRODUCT_WACOM_GRAPHIRE4_4X5:
+			usbd_set_report(sc->sc_iface, UHID_FEATURE_REPORT, 2,
+			    &reportbuf, sizeof(reportbuf));
+			size = sizeof(uhid_graphire3_4x5_report_descr);
+			descptr = uhid_graphire3_4x5_report_descr;
+			break;
+		default:
+			break;
+		}
+	} else if (vendor == USB_VENDOR_MICROSOFT &&
+	    product == USB_PRODUCT_MICROSOFT_XBOX360_CONTROLLER) {
+		/* The Xbox 360 gamepad has no report descriptor. */
+		size = sizeof(uhid_xb360gp_report_descr);
+		descptr = uhid_xb360gp_report_descr;
+	}
+
+	if (descptr) {
+		desc = malloc(size, M_USBDEV, M_NOWAIT);
+		if (desc == NULL)
+			return (ENOMEM);
+
+		memcpy(desc, descptr, size);
+
+		*descp = desc;
+		*sizep = size;
+	}
+
+	return (0);
+}
+#endif /* !SMALL_KERNEL */
 
 int
 uhidev_maxrepid(void *buf, int len)
@@ -317,7 +322,7 @@ uhidevprint(void *aux, const char *pnp)
 
 	if (pnp)
 		printf("uhid at %s", pnp);
-	if (uha->reportid != 0)
+	if (uha->reportid != 0 && uha->reportid != UHIDEV_CLAIM_ALLREPORTID)
 		printf(" reportid %d", uha->reportid);
 	return (UNCONF);
 }
@@ -358,7 +363,7 @@ int
 uhidev_detach(struct device *self, int flags)
 {
 	struct uhidev_softc *sc = (struct uhidev_softc *)self;
-	int i, rv;
+	int i, rv = 0;
 
 	DPRINTF(("uhidev_detach: sc=%p flags=%d\n", sc, flags));
 
@@ -377,7 +382,15 @@ uhidev_detach(struct device *self, int flags)
 	if (sc->sc_repdesc != NULL)
 		free(sc->sc_repdesc, M_USBDEV);
 
-	rv = 0;
+	/*
+	 * XXX Check if we have only one children claiming all the Report
+	 * IDs, this is a hack since we need a dev -> Report ID mapping
+	 * for uhidev_intr().
+	 */
+	if (sc->sc_nrepid > 1 && sc->sc_subdevs[0] != NULL &&
+	    sc->sc_subdevs[0] == sc->sc_subdevs[1])
+		return (config_detach(&sc->sc_subdevs[0]->sc_dev, flags));
+
 	for (i = 0; i < sc->sc_nrepid; i++) {
 		if (sc->sc_subdevs[i] != NULL) {
 			rv |= config_detach(&sc->sc_subdevs[i]->sc_dev, flags);
@@ -418,8 +431,7 @@ uhidev_intr(struct usbd_xfer *xfer, void *addr, usbd_status status)
 		return;
 
 	if (status != USBD_NORMAL_COMPLETION) {
-		DPRINTF(("%s: interrupt status=%d\n", sc->sc_dev.dv_xname,
-			 status));
+		DPRINTF(("%s: interrupt status=%d\n", DEVNAME(sc), status));
 		usbd_clear_endpoint_stall_async(sc->sc_ipipe);
 		return;
 	}
@@ -438,11 +450,7 @@ uhidev_intr(struct usbd_xfer *xfer, void *addr, usbd_status status)
 		    rep, scd, scd ? scd->sc_state : 0));
 	if (scd == NULL || !(scd->sc_state & UHIDEV_OPEN))
 		return;
-#ifdef UHIDEV_DEBUG
-	if (scd->sc_in_rep_size != cc)
-		printf("%s: bad input length %d != %d\n",sc->sc_dev.dv_xname,
-		       scd->sc_in_rep_size, cc);
-#endif
+
 	scd->sc_intr(scd, p, cc);
 }
 

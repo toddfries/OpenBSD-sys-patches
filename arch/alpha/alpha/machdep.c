@@ -1,4 +1,4 @@
-/* $OpenBSD: machdep.c,v 1.149 2014/02/18 19:37:32 miod Exp $ */
+/* $OpenBSD: machdep.c,v 1.152 2014/03/26 05:23:42 guenther Exp $ */
 /* $NetBSD: machdep.c,v 1.210 2000/06/01 17:12:38 thorpej Exp $ */
 
 /*-
@@ -977,6 +977,7 @@ void
 boot(howto)
 	int howto;
 {
+	struct device *mainbus;
 #if defined(MULTIPROCESSOR)
 	u_long wait_mask;
 	int i;
@@ -1042,8 +1043,9 @@ boot(howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 #ifdef BOOTKEY
 	printf("hit any key to %s...\n", howto & RB_HALT ? "halt" : "reboot");
@@ -1425,7 +1427,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	struct sigcontext *scp, ksc;
 	struct fpreg *fpregs = (struct fpreg *)&ksc.sc_fpregs;
 	struct trapframe *frame;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	unsigned long oldsp;
 	int fsize, rndfsize, kscsize;
 	siginfo_t *sip, ksi;
@@ -1522,7 +1524,7 @@ trash:
 	/*
 	 * Set up the registers to return to sigcode.
 	 */
-	frame->tf_regs[FRAME_PC] = p->p_sigcode;
+	frame->tf_regs[FRAME_PC] = p->p_p->ps_sigcode;
 	frame->tf_regs[FRAME_A0] = sig;
 	frame->tf_regs[FRAME_A1] = (u_int64_t)sip;
 	frame->tf_regs[FRAME_A2] = (u_int64_t)scp;

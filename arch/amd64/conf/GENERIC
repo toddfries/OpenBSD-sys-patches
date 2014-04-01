@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.360 2014/02/23 09:36:52 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.366 2014/03/28 02:42:18 dlg Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -155,6 +155,7 @@ cardbus*	at cardslot?
 pcmcia*		at cardslot?
 
 # USB Controllers
+#xhci*	at pci?			# eXtensible Host Controller
 ehci*	at pci?			# Enhanced Host Controller
 ehci*	at cardbus?		# Enhanced Host Controller
 uhci*	at pci?			# Universal Host Controller (Intel)
@@ -163,6 +164,7 @@ ohci*	at pci?			# Open Host Controller
 ohci*	at cardbus?		# Open Host Controller
 
 # USB bus support
+#usb*	at xhci?
 usb*	at ehci?
 usb*	at uhci?
 usb*	at ohci?
@@ -216,6 +218,7 @@ wskbd*	at ukbd? mux 1
 ucycom*	at uhidev?			# Cypress serial
 ucom*	at ucycom?
 uhid*	at uhidev?		# USB generic HID support
+upd*	at uhidev?		# USB Power Devices sensors
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*	at uhub?		# Atmel AT76c50x based 802.11b
 axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
@@ -358,8 +361,9 @@ ciss*	at pci?				# Compaq Smart ARRAY [56]* RAID controllers
 iha*	at pci?				# Initio Ultra/UltraWide SCSI controllers
 ips*	at pci?				# IBM ServeRAID controllers
 isp*	at pci?				# Qlogic ISP [12]0x0 SCSI/FibreChannel
-#qla*	at pci?				# QLogic 2[123]xx FibreChannel
-qle*	at pci?				# QLogic 2[45]xx FibreChannel
+qlw*	at pci?				# QLogic ISP SCSI
+qla*	at pci?				# QLogic ISP 2[123]xx FibreChannel
+qle*	at pci?				# QLogic ISP 2[45]xx FibreChannel
 aic*	at pcmcia?			# PCMCIA Adaptec 152[02] SCSI
 #esp*	at pcmcia?			# PCMCIA based NCR 53C9X SCSI
 siop*	at pci?				# NCR 538XX SCSI controllers
@@ -377,6 +381,12 @@ ch*	at scsibus?			# SCSI autochangers
 safte*	at scsibus?			# SCSI accessed fault-tolerant encl
 ses*	at scsibus?			# SCSI enclosure services
 uk*	at scsibus?			# unknown SCSI
+
+mpath0	at root
+#emc*	at scsibus?
+#hds*	at scsibus?
+rdac*	at scsibus?
+sym*	at scsibus?
 
 fdc0	at isa? port 0x3f0 irq 6 drq 2	# standard PC floppy controllers
 #fdc1	at isa? port 0x370

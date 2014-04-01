@@ -1,4 +1,4 @@
-/*	$OpenBSD: sysctl.h,v 1.141 2014/02/12 05:47:36 guenther Exp $	*/
+/*	$OpenBSD: sysctl.h,v 1.144 2014/03/30 21:54:48 guenther Exp $	*/
 /*	$NetBSD: sysctl.h,v 1.16 1996/04/09 20:55:36 cgd Exp $	*/
 
 /*
@@ -448,7 +448,6 @@ struct kinfo_proc {
  *	    pre-filled with zeros; for libkvm, src is a kvm address
  *	p - source struct proc
  *	pr - source struct process
- *	pc - source struct pcreds
  *	uc - source struct ucreds
  *	pg - source struct pgrp
  *	paddr - kernel address of the source struct proc
@@ -463,7 +462,7 @@ struct kinfo_proc {
 
 #define PTRTOINT64(_x)	((u_int64_t)(u_long)(_x))
 
-#define FILL_KPROC(kp, copy_str, p, pr, pc, uc, pg, paddr, \
+#define FILL_KPROC(kp, copy_str, p, pr, uc, pg, paddr, \
     praddr, sess, vm, lim, sa, isthread, show_addresses) \
 do {									\
 	memset((kp), 0, sizeof(*(kp)));					\
@@ -473,7 +472,7 @@ do {									\
 		(kp)->p_fd = PTRTOINT64((p)->p_fd);			\
 		(kp)->p_limit = PTRTOINT64((pr)->ps_limit);		\
 		(kp)->p_vmspace = PTRTOINT64((p)->p_vmspace);		\
-		(kp)->p_sigacts = PTRTOINT64((p)->p_sigacts);		\
+		(kp)->p_sigacts = PTRTOINT64((pr)->ps_sigacts);		\
 		(kp)->p_sess = PTRTOINT64((pg)->pg_session);		\
 		(kp)->p_ru = PTRTOINT64((pr)->ps_ru);			\
 	}								\
@@ -485,11 +484,11 @@ do {									\
 	(kp)->p__pgid = (pg)->pg_id;					\
 									\
 	(kp)->p_uid = (uc)->cr_uid;					\
-	(kp)->p_ruid = (pc)->p_ruid;					\
+	(kp)->p_ruid = (uc)->cr_ruid;					\
 	(kp)->p_gid = (uc)->cr_gid;					\
-	(kp)->p_rgid = (pc)->p_rgid;					\
-	(kp)->p_svuid = (pc)->p_svuid;					\
-	(kp)->p_svgid = (pc)->p_svgid;					\
+	(kp)->p_rgid = (uc)->cr_rgid;					\
+	(kp)->p_svuid = (uc)->cr_svuid;					\
+	(kp)->p_svgid = (uc)->cr_svgid;					\
 									\
 	memcpy((kp)->p_groups, (uc)->cr_groups,				\
 	    MIN(sizeof((kp)->p_groups), sizeof((uc)->cr_groups)));	\
@@ -532,7 +531,7 @@ do {									\
 	(kp)->p_acflag = (pr)->ps_acflag;				\
 									\
 	/* XXX depends on e_name being an array and not a pointer */	\
-	copy_str((kp)->p_emul, (char *)(p)->p_emul +			\
+	copy_str((kp)->p_emul, (char *)(pr)->ps_emul +			\
 	    offsetof(struct emul, e_name), sizeof((kp)->p_emul));	\
 	strlcpy((kp)->p_comm, (p)->p_comm, sizeof((kp)->p_comm));	\
 	strlcpy((kp)->p_login, (sess)->s_login,			\

@@ -1,4 +1,4 @@
-/*	$OpenBSD: acpi_machdep.c,v 1.57 2014/01/21 09:40:54 kettenis Exp $	*/
+/*	$OpenBSD: acpi_machdep.c,v 1.59 2014/03/27 10:24:40 dlg Exp $	*/
 /*
  * Copyright (c) 2005 Thorsten Lockert <tholo@sigmasoft.com>
  *
@@ -183,7 +183,7 @@ acpi_acquire_glk(uint32_t *lock)
 		new = (old & ~GL_BIT_PENDING) | GL_BIT_OWNED;
 		if ((old & GL_BIT_OWNED) != 0)
 			new |= GL_BIT_PENDING;
-	} while (x86_atomic_cas_int32(lock, old, new) != old);
+	} while (atomic_cas_uint(lock, old, new) != old);
 
 	return ((new & GL_BIT_PENDING) == 0);
 }
@@ -201,7 +201,7 @@ acpi_release_glk(uint32_t *lock)
 	do {
 		old = *lock;
 		new = old & ~(GL_BIT_PENDING | GL_BIT_OWNED);
-	} while (x86_atomic_cas_int32(lock, old, new) != old);
+	} while (atomic_cas_uint(lock, old, new) != old);
 
 	return ((old & GL_BIT_PENDING) != 0);
 }
@@ -318,7 +318,7 @@ acpi_sleep_cpu(struct acpi_softc *sc, int state)
 		 * when we get to DVACT_POWERDOWN.
 		 */
 		boothowto |= RB_POWERDOWN;
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+		config_suspend(device_mainbus(), DVACT_POWERDOWN);
 		boothowto &= ~RB_POWERDOWN;
 
 		acpi_sleep_pm(sc, state);

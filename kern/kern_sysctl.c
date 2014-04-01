@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.244 2014/01/21 01:48:44 tedu Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.246 2014/03/30 21:54:48 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -1408,12 +1408,12 @@ again:
 			break;
 
 		case KERN_PROC_UID:
-			if (p->p_ucred->cr_uid != (uid_t)arg)
+			if (pr->ps_ucred->cr_uid != (uid_t)arg)
 				continue;
 			break;
 
 		case KERN_PROC_RUID:
-			if (p->p_cred->p_ruid != (uid_t)arg)
+			if (pr->ps_ucred->cr_ruid != (uid_t)arg)
 				continue;
 			break;
 
@@ -1501,8 +1501,8 @@ fill_kproc(struct proc *p, struct kinfo_proc *ki, int isthread,
 	struct tty *tp;
 	struct timespec ut, st;
 
-	FILL_KPROC(ki, strlcpy, p, pr, p->p_cred, p->p_ucred, pr->ps_pgrp,
-	    p, pr, s, p->p_vmspace, pr->ps_limit, p->p_sigacts, isthread,
+	FILL_KPROC(ki, strlcpy, p, pr, pr->ps_ucred, pr->ps_pgrp,
+	    p, pr, s, p->p_vmspace, pr->ps_limit, pr->ps_sigacts, isthread,
 	    show_pointers);
 
 	/* stuff that's too painful to generalize into the macros */

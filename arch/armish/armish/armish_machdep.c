@@ -1,4 +1,4 @@
-/*	$OpenBSD: armish_machdep.c,v 1.21 2013/11/13 18:30:48 jasper Exp $ */
+/*	$OpenBSD: armish_machdep.c,v 1.23 2014/03/23 18:20:59 miod Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*
@@ -249,6 +249,8 @@ void	board_powerdown(void);
 void
 boot(int howto)
 {
+	struct device *mainbus;
+
 	if (cold) {
 		/*
 		 * If the system is cold, just halt, unless the user
@@ -282,8 +284,9 @@ boot(int howto)
 	
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	/* Make sure IRQ's are disabled */
 	IRQdisable;

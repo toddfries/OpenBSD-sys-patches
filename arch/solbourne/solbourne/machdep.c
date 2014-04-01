@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.27 2013/11/20 23:57:07 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.30 2014/03/26 05:23:42 guenther Exp $	*/
 /*	OpenBSD: machdep.c,v 1.105 2005/04/11 15:13:01 deraadt Exp 	*/
 
 /*
@@ -361,7 +361,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	union sigval val;
 {
 	struct proc *p = curproc;
-	struct sigacts *psp = p->p_sigacts;
+	struct sigacts *psp = p->p_p->ps_sigacts;
 	struct sigframe *fp;
 	struct trapframe *tf;
 	int caddr, oldsp, newsp;
@@ -447,7 +447,7 @@ sendsig(catcher, sig, mask, code, type, val)
 	 * Arrange to continue execution at the code copied out in exec().
 	 * It needs the function to call in %g1, and a new stack pointer.
 	 */
-	caddr = p->p_sigcode;
+	caddr = p->p_p->ps_sigcode;
 	tf->tf_global[1] = (int)catcher;
 	tf->tf_pc = caddr;
 	tf->tf_npc = caddr + 4;
@@ -519,6 +519,7 @@ boot(howto)
 {
 	int i;
 	static char str[4];	/* room for "-sd\0" */
+	struct device *mainbus;
 
 	/* If system is cold, just halt. */
 	if (cold) {
@@ -560,8 +561,9 @@ boot(howto)
 
 haltsys:
 	doshutdownhooks();
-	if (!TAILQ_EMPTY(&alldevs))
-		config_suspend(TAILQ_FIRST(&alldevs), DVACT_POWERDOWN);
+	mainbus = device_mainbus();
+	if (mainbus != NULL)
+		config_suspend(mainbus, DVACT_POWERDOWN);
 
 	if ((howto & RB_HALT) || (howto & RB_POWERDOWN)) {
 		printf("halted\n\n");
