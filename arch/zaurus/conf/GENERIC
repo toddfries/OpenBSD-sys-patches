@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.90 2013/11/15 19:42:20 sasano Exp $
+#	$OpenBSD: GENERIC,v 1.93 2014/04/08 02:25:33 brad Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -106,9 +106,11 @@ wskbd*		at ukbd? mux 1
 ucycom*		at uhidev?		# Cypress serial
 ucom*		at ucycom?
 uhid*		at uhidev?		# USB generic HID support
+upd*		at uhidev?		# USB Power Devices sensors
 aue*		at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*		at uhub?		# Atmel AT76C50x based 802.11b
 axe*		at uhub?		# ASIX Electronics AX88172 USB Ethernet
+axen*		at uhub?		# ASIX Electronics AX88179 USB Ethernet
 cue*		at uhub?		# CATC USB-EL1201A based Ethernet
 kue*		at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 smsc*		at uhub?		# SMSC LAN95xx Ethernet
@@ -187,7 +189,7 @@ eephy* at mii?				# Marvell 88E1000 series PHY
 #xmphy*	at mii?				# XaQti XMAC-II PHYs
 nsgphy*	at mii?				# NS gigabit PHYs
 urlphy*	at mii?				# Realtek RTL8150L internal PHY
-#rgephy* at mii?			# Realtek 8169S/8110S PHY
+rgephy* at mii?				# Realtek 8169S/8110S PHY
 #ciphy* at mii?				# Cicada CS8201 10/100/1000 copper PHY
 ukphy*	at mii?				# "unknown" PHYs
 

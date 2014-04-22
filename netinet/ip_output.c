@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_output.c,v 1.259 2014/03/28 08:33:51 sthen Exp $	*/
+/*	$OpenBSD: ip_output.c,v 1.263 2014/04/21 12:22:26 henning Exp $	*/
 /*	$NetBSD: ip_output.c,v 1.28 1996/02/13 23:43:07 christos Exp $	*/
 
 /*
@@ -74,6 +74,8 @@
 
 struct mbuf *ip_insertoptions(struct mbuf *, struct mbuf *, int *);
 void ip_mloopback(struct ifnet *, struct mbuf *, struct sockaddr_in *);
+static __inline u_int16_t __attribute__((__unused__))
+    in_cksum_phdr(u_int32_t, u_int32_t, u_int32_t);
 void in_delayed_cksum(struct mbuf *);
 
 /*
@@ -84,7 +86,7 @@ void in_delayed_cksum(struct mbuf *);
  */
 int
 ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
-    struct ip_moptions *imo, struct inpcb *inp, ...)
+    struct ip_moptions *imo, struct inpcb *inp, u_int32_t ipsecflowinfo)
 {
 	struct ip *ip;
 	struct ifnet *ifp;
@@ -104,7 +106,6 @@ ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
 	struct tdb_ident *tdbi;
 
 	struct tdb *tdb;
-	u_int32_t ipsecflowinfo = 0;
 #if NPF > 0
 	struct ifnet *encif;
 #endif
@@ -113,12 +114,6 @@ ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
 #ifdef IPSEC
 	if (inp && (inp->inp_flags & INP_IPV6) != 0)
 		panic("ip_output: IPv6 pcb is passed");
-	if (flags & IP_IPSECFLOW) {
-		va_list ap;
-		va_start(ap, inp);
-		ipsecflowinfo = va_arg(ap, u_int32_t);
-		va_end(ap);
-	}
 #endif /* IPSEC */
 
 #ifdef	DIAGNOSTIC
@@ -182,7 +177,7 @@ ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
 		 */
 		if (ro->ro_rt && ((ro->ro_rt->rt_flags & RTF_UP) == 0 ||
 		    dst->sin_addr.s_addr != ip->ip_dst.s_addr ||
-		    ro->ro_tableid != m->m_pkthdr.rdomain)) {
+		    ro->ro_tableid != m->m_pkthdr.ph_rtableid)) {
 			RTFREE(ro->ro_rt);
 			ro->ro_rt = (struct rtentry *)0;
 		}
@@ -191,26 +186,10 @@ ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro, int flags,
 			dst->sin_family = AF_INET;
 			dst->sin_len = sizeof(*dst);
 			dst->sin_addr = ip->ip_dst;
-			ro->ro_tableid = m->m_pkthdr.rdomain;
+			ro->ro_tableid = m->m_pkthdr.ph_rtableid;
 		}
 
-		/*
-		 * If routing to interface only, short-circuit routing lookup.
-		 */
-		if (flags & IP_ROUTETOIF) {
-			if ((ia = ifatoia(ifa_ifwithdstaddr(sintosa(dst),
-			    m->m_pkthdr.rdomain))) == 0 &&
-			    (ia = ifatoia(ifa_ifwithnet(sintosa(dst),
-			    m->m_pkthdr.rdomain))) == 0) {
-				ipstat.ips_noroute++;
-				error = ENETUNREACH;
-				goto bad;
-			}
-
-			ifp = ia->ia_ifp;
-			mtu = ifp->if_mtu;
-			ip->ip_ttl = 1;
-		} else if ((IN_MULTICAST(ip->ip_dst.s_addr) ||
+		if ((IN_MULTICAST(ip->ip_dst.s_addr) ||
 		    (ip->ip_dst.s_addr == INADDR_BROADCAST)) &&
 		    imo != NULL && imo->imo_multicast_ifp != NULL) {
 			ifp = imo->imo_multicast_ifp;
@@ -348,7 +327,7 @@ reroute:
 		 */
 		if (ro->ro_rt && ((ro->ro_rt->rt_flags & RTF_UP) == 0 ||
 		    dst->sin_addr.s_addr != ip->ip_dst.s_addr ||
-		    ro->ro_tableid != m->m_pkthdr.rdomain)) {
+		    ro->ro_tableid != m->m_pkthdr.ph_rtableid)) {
 			RTFREE(ro->ro_rt);
 			ro->ro_rt = (struct rtentry *)0;
 		}
@@ -357,26 +336,10 @@ reroute:
 			dst->sin_family = AF_INET;
 			dst->sin_len = sizeof(*dst);
 			dst->sin_addr = ip->ip_dst;
-			ro->ro_tableid = m->m_pkthdr.rdomain;
+			ro->ro_tableid = m->m_pkthdr.ph_rtableid;
 		}
 
-		/*
-		 * If routing to interface only, short-circuit routing lookup.
-		 */
-		if (flags & IP_ROUTETOIF) {
-			if ((ia = ifatoia(ifa_ifwithdstaddr(sintosa(dst),
-			    m->m_pkthdr.rdomain))) == 0 &&
-			    (ia = ifatoia(ifa_ifwithnet(sintosa(dst),
-			    m->m_pkthdr.rdomain))) == 0) {
-				ipstat.ips_noroute++;
-				error = ENETUNREACH;
-				goto bad;
-			}
-
-			ifp = ia->ia_ifp;
-			mtu = ifp->if_mtu;
-			ip->ip_ttl = 1;
-		} else if ((IN_MULTICAST(ip->ip_dst.s_addr) ||
+		if ((IN_MULTICAST(ip->ip_dst.s_addr) ||
 		    (ip->ip_dst.s_addr == INADDR_BROADCAST)) &&
 		    imo != NULL && imo->imo_multicast_ifp != NULL) {
 			ifp = imo->imo_multicast_ifp;
@@ -521,7 +484,7 @@ reroute:
 	 * this check.
 	 */
 	if ((sproto == 0) && (in_broadcast(dst->sin_addr, ifp,
-	    m->m_pkthdr.rdomain))) {
+	    m->m_pkthdr.ph_rtableid))) {
 		if ((ifp->if_flags & IFF_BROADCAST) == 0) {
 			error = EADDRNOTAVAIL;
 			goto bad;
@@ -554,7 +517,7 @@ sendit:
 	 * Check if the packet needs encapsulation.
 	 */
 	if (sproto != 0) {
-		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
+		tdb = gettdb(rtable_l2(m->m_pkthdr.ph_rtableid),
 		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
 			DPRINTF(("ip_output: unknown TDB"));
@@ -610,7 +573,7 @@ sendit:
 				rt = NULL;
 			else if (rt == NULL || (rt->rt_flags & RTF_HOST) == 0) {
 				rt = icmp_mtudisc_clone(ip->ip_dst,
-				    m->m_pkthdr.rdomain);
+				    m->m_pkthdr.ph_rtableid);
 				rt_mtucloned = 1;
 			}
 			DPRINTF(("ip_output: spi %08x mtu %d rt %p cloned %d\n",
@@ -620,7 +583,7 @@ sendit:
 				if (ro && ro->ro_rt != NULL) {
 					RTFREE(ro->ro_rt);
 					ro->ro_rt = rtalloc1(&ro->ro_dst, RT_REPORT,
-					    m->m_pkthdr.rdomain);
+					    m->m_pkthdr.ph_rtableid);
 				}
 				if (rt_mtucloned)
 					rtfree(rt);
@@ -752,7 +715,7 @@ sendit:
 		ipstat.ips_fragmented++;
 
 done:
-	if (ro == &iproute && (flags & IP_ROUTETOIF) == 0 && ro->ro_rt)
+	if (ro == &iproute && ro->ro_rt)
 		RTFREE(ro->ro_rt);
 	return (error);
 bad:
@@ -810,9 +773,9 @@ ip_fragment(struct mbuf *m, struct ifnet *ifp, u_long mtu)
 		m->m_data += max_linkhdr;
 		mhip = mtod(m, struct ip *);
 		*mhip = *ip;
-		/* we must inherit MCAST and BCAST flags and rdomain */
+		/* we must inherit MCAST and BCAST flags and routing table */
 		m->m_flags |= m0->m_flags & (M_MCAST|M_BCAST);
-		m->m_pkthdr.rdomain = m0->m_pkthdr.rdomain;
+		m->m_pkthdr.ph_rtableid = m0->m_pkthdr.ph_rtableid;
 		if (hlen > sizeof (struct ip)) {
 			mhlen = ip_optcopy(ip, mhip) + sizeof (struct ip);
 			mhip->ip_hl = mhlen >> 2;
@@ -2045,6 +2008,29 @@ ip_mloopback(struct ifnet *ifp, struct mbuf *m, struct sockaddr_in *dst)
 		ip->ip_sum = in_cksum(copym, ip->ip_hl << 2);
 		(void) looutput(ifp, copym, sintosa(dst), NULL);
 	}
+}
+
+/*
+ *	Compute significant parts of the IPv4 checksum pseudo-header
+ *	for use in a delayed TCP/UDP checksum calculation.
+ */
+static __inline u_int16_t __attribute__((__unused__))
+in_cksum_phdr(u_int32_t src, u_int32_t dst, u_int32_t lenproto)
+{
+	u_int32_t sum;
+
+	sum = lenproto +
+	      (u_int16_t)(src >> 16) +
+	      (u_int16_t)(src /*& 0xffff*/) +
+	      (u_int16_t)(dst >> 16) +
+	      (u_int16_t)(dst /*& 0xffff*/);
+
+	sum = (u_int16_t)(sum >> 16) + (u_int16_t)(sum /*& 0xffff*/);
+
+	if (sum > 0xffff)
+		sum -= 0xffff;
+
+	return (sum);
 }
 
 /*

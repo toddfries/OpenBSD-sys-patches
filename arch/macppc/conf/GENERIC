@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.232 2014/03/19 09:07:06 mpi Exp $g
+#	$OpenBSD: GENERIC,v 1.235 2014/04/20 00:08:26 dlg Exp $g
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -258,6 +258,7 @@ upd*	at uhidev?		# USB Power Devices sensors
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*	at uhub?		# Atmel AT76c50x based 802.11b
 axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
+axen*	at uhub?		# ASIX Electronics AX88179 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 smsc*	at uhub?		# SMSC LAN95xx Ethernet
@@ -390,6 +391,12 @@ ch*		at scsibus?
 safte*		at scsibus?
 ses*		at scsibus?
 uk*		at scsibus?
+
+mpath0	at root
+emc*	at scsibus?
+hds*	at scsibus?
+rdac*	at scsibus?
+sym*	at scsibus?
 
 # 1-Wire devices
 option ONEWIREVERBOSE

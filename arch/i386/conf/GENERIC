@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.772 2014/03/28 02:42:18 dlg Exp $
+#	$OpenBSD: GENERIC,v 1.776 2014/04/20 00:08:26 dlg Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -272,9 +272,11 @@ ucom*	at ucycom?
 uticom* at uhub?		# TI serial
 ucom*	at uticom?
 uhid*	at uhidev?		# USB generic HID support
+upd*	at uhidev?		# USB Power Devices sensors
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*	at uhub?		# Atmel AT76c50x based 802.11b
 axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
+axen*	at uhub?		# ASIX Electronics AX88179 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 smsc*	at uhub?		# SMSC LAN95xx Ethernet
@@ -460,7 +462,6 @@ cac*	at eisa?
 ciss*	at pci?			# Compaq Smart ARRAY [56]* RAID controllers
 iha*	at pci?			# Initio Ultra/UltraWide SCSI controllers
 ips*	at pci?			# IBM ServeRAID controllers
-isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
 qlw*	at pci?			# QLogic ISP SCSI
 qla*	at pci?			# QLogic ISP 2[123]xx FibreChannel
 qle*	at pci?			# QLogic ISP 2[45]xx FibreChannel
@@ -492,8 +493,8 @@ ses*	at scsibus?		# SCSI enclosure services
 uk*	at scsibus?		# unknown SCSI
 
 mpath0	at root
-#emc*	at scsibus?
-#hds*	at scsibus?
+emc*	at scsibus?
+hds*	at scsibus?
 rdac*	at scsibus?
 sym*	at scsibus?
 

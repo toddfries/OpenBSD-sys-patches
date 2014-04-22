@@ -1,4 +1,4 @@
-#	$OpenBSD: RAMDISK,v 1.46 2013/11/15 19:42:20 sasano Exp $
+#	$OpenBSD: RAMDISK,v 1.48 2014/04/08 02:25:33 brad Exp $
 
 machine	zaurus	arm
 
@@ -79,6 +79,7 @@ wskbd*		at ukbd? mux 1
 #atu*		at uhub?		# Atmel AT76C50x based 802.11b
 aue*		at uhub?		# ADMtek AN986 Pegasus Ethernet
 axe*		at uhub?		# ASIX Electronics AX88172 USB Ethernet
+axen*		at uhub?		# ASIX Electronics AX88179 USB Ethernet
 cdce*		at uhub?		# CDC Ethernet
 cue*		at uhub?		# CATC USB-EL1201A based Ethernet
 kue*		at uhub?		# Kawasaki KL5KUSB101B based Ethernet
@@ -145,7 +146,7 @@ eephy* at mii?			# Marvell 88E1000 series PHY
 #xmphy*	at mii?			# XaQti XMAC-II PHYs
 nsgphy*	at mii?			# NS gigabit PHYs
 urlphy*	at mii?			# Realtek RTL8150L internal PHY
-#rgephy* at mii?		# Realtek 8169S/8110S PHY
+rgephy* at mii?			# Realtek 8169S/8110S PHY
 #ciphy* at mii?			# Cicada CS8201 10/100/1000 copper PHY
 ukphy*	at mii?			# "unknown" PHYs
 

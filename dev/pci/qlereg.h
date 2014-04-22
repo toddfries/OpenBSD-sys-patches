@@ -1,4 +1,4 @@
-/*	$OpenBSD: qlereg.h,v 1.6 2014/03/31 07:41:48 dlg Exp $ */
+/*	$OpenBSD: qlereg.h,v 1.9 2014/04/20 09:49:23 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2013, 2014 Jonathan Matthew <jmatthew@openbsd.org>
@@ -144,13 +144,6 @@
 #define QLE_MBOX_SEND_CHANGE_REQ	0x0070
 #define QLE_MBOX_LINK_INIT		0x0072
 #define QLE_MBOX_GET_PORT_NAME_LIST	0x0075
-
-/* mailbox operation register bitfields */
-#define QLE_MBOX_ABOUT_FIRMWARE_IN	0x00000001
-#define QLE_MBOX_ABOUT_FIRMWARE_OUT	0x0000004f
-#define QLE_MBOX_INIT_FIRMWARE_IN	0x000000fd
-#define QLE_MBOX_SET_FIRMWARE_OPTIONS_IN 0x0000000f
-#define QLE_MBOX_GET_LOOP_ID_OUT	0x000000cf
 
 #define QLE_MBOX_COUNT			32
 
@@ -357,6 +350,12 @@ struct qle_get_port_db {
 	u_int64_t	node_name;
 	u_int8_t	reserved3[24];
 } __packed __aligned(4);
+
+struct qle_port_name_list {
+	u_int64_t	port_name;
+	u_int16_t	loopid;
+	u_int16_t	reserved;
+} __packed;
 
 #define QLE_SVC3_TARGET_ROLE		0x0010
 
@@ -602,6 +601,23 @@ struct qle_iocb_ct_passthrough {
 	struct qle_iocb_seg req_resp_seg;
 } __packed __aligned(64);
 
+#define QLE_PLOGX_LOGIN			0x0000
+#define QLE_PLOGX_LOGIN_COND		0x0010
+
+#define QLE_PLOGX_LOGOUT		0x0008
+#define QLE_PLOGX_LOGOUT_IMPLICIT	0x0010
+#define QLE_PLOGX_LOGOUT_ALL		0x0020
+#define QLE_PLOGX_LOGOUT_EXPLICIT	0x0040
+#define QLE_PLOGX_LOGOUT_FREE_HANDLE	0x0080
+
+#define QLE_PLOGX_PORT_UNAVAILABLE	0x28
+#define QLE_PLOGX_PORT_LOGGED_OUT	0x29
+#define QLE_PLOGX_ERROR			0x31
+
+#define QLE_PLOGX_ERROR_PORT_ID_USED	0x1A
+#define QLE_PLOGX_ERROR_HANDLE_USED	0x1B
+#define QLE_PLOGX_ERROR_NO_HANDLE	0x1C
+
 struct qle_iocb_plogx {
 	u_int8_t	entry_type;	/* QLE_IOCB_PLOGX */
 	u_int8_t	entry_count;
@@ -617,5 +633,5 @@ struct qle_iocb_plogx {
 	u_int16_t	req_port_id_lo;
 	u_int8_t	req_port_id_hi;
 	u_int8_t	req_rspsize;
-	u_int16_t	req_ioparms[22];
+	u_int32_t	req_ioparms[11];
 } __packed __aligned(64);

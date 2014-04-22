@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip6_output.c,v 1.153 2014/01/23 23:51:29 henning Exp $	*/
+/*	$OpenBSD: ip6_output.c,v 1.156 2014/04/21 11:10:54 henning Exp $	*/
 /*	$KAME: ip6_output.c,v 1.172 2001/03/25 09:55:56 itojun Exp $	*/
 
 /*
@@ -132,6 +132,9 @@ int ip6_splithdr(struct mbuf *, struct ip6_exthdrs *);
 int ip6_getpmtu(struct route_in6 *, struct route_in6 *,
 	struct ifnet *, struct in6_addr *, u_long *, int *);
 int copypktopts(struct ip6_pktopts *, struct ip6_pktopts *, int);
+static __inline u_int16_t __attribute__((__unused__))
+    in6_cksum_phdr(const struct in6_addr *, const struct in6_addr *,
+    u_int32_t, u_int32_t);
 void in6_delayed_cksum(struct mbuf *, u_int8_t);
 
 /* Context for non-repeating IDs */
@@ -496,7 +499,7 @@ reroute:
 		 * packet gets tunneled?
 		 */
 
-		tdb = gettdb(rtable_l2(m->m_pkthdr.rdomain),
+		tdb = gettdb(rtable_l2(m->m_pkthdr.ph_rtableid),
 		    sspi, &sdst, sproto);
 		if (tdb == NULL) {
 			error = EHOSTUNREACH;
@@ -544,9 +547,9 @@ reroute:
 	dstsock.sin6_family = AF_INET6;
 	dstsock.sin6_addr = ip6->ip6_dst;
 	dstsock.sin6_len = sizeof(dstsock);
-	ro->ro_tableid = m->m_pkthdr.rdomain;
+	ro->ro_tableid = m->m_pkthdr.ph_rtableid;
 	if ((error = in6_selectroute(&dstsock, opt, im6o, ro, &ifp,
-	    &rt, m->m_pkthdr.rdomain)) != 0) {
+	    &rt, m->m_pkthdr.ph_rtableid)) != 0) {
 		switch (error) {
 		case EHOSTUNREACH:
 			ip6stat.ip6s_noroute++;
@@ -1218,7 +1221,7 @@ ip6_getpmtu(struct route_in6 *ro_pmtu, struct route_in6 *ro,
 		    ((ro_pmtu->ro_rt->rt_flags & RTF_UP) == 0 ||
 		     !IN6_ARE_ADDR_EQUAL(&sa6_dst->sin6_addr, dst))) {
 			RTFREE(ro_pmtu->ro_rt);
-			ro_pmtu->ro_rt = (struct rtentry *)NULL;
+			ro_pmtu->ro_rt = NULL;
 		}
 		if (ro_pmtu->ro_rt == 0) {
 			bzero(ro_pmtu, sizeof(*ro_pmtu));
@@ -2475,7 +2478,7 @@ ip6_setmoptions(int optname, struct ip6_moptions **im6op, struct mbuf *m)
 			 *   XXX: is it a good approach?
 			 */
 			bzero(&ro, sizeof(ro));
-			ro.ro_tableid = m->m_pkthdr.rdomain;
+			ro.ro_tableid = m->m_pkthdr.ph_rtableid;
 			dst = &ro.ro_dst;
 			dst->sin6_len = sizeof(struct sockaddr_in6);
 			dst->sin6_family = AF_INET6;
@@ -3200,6 +3203,43 @@ void
 ip6_randomid_init(void)
 {
 	idgen32_init(&ip6_id_ctx);
+}
+
+/*
+ *	Compute significant parts of the IPv6 checksum pseudo-header
+ *	for use in a delayed TCP/UDP checksum calculation.
+ */
+static __inline u_int16_t __attribute__((__unused__))
+in6_cksum_phdr(const struct in6_addr *src, const struct in6_addr *dst,
+    u_int32_t len, u_int32_t nxt)
+{
+	u_int32_t sum = 0;
+	const u_int16_t *w;
+
+	w = (const u_int16_t *) src;
+	sum += w[0];
+	if (!IN6_IS_SCOPE_EMBED(src))
+		sum += w[1];
+	sum += w[2]; sum += w[3]; sum += w[4]; sum += w[5];
+	sum += w[6]; sum += w[7];
+
+	w = (const u_int16_t *) dst;
+	sum += w[0];
+	if (!IN6_IS_SCOPE_EMBED(dst))
+		sum += w[1];
+	sum += w[2]; sum += w[3]; sum += w[4]; sum += w[5];
+	sum += w[6]; sum += w[7];
+
+	sum += (u_int16_t)(len >> 16) + (u_int16_t)(len /*& 0xffff*/);
+
+	sum += (u_int16_t)(nxt >> 16) + (u_int16_t)(nxt /*& 0xffff*/);
+
+	sum = (u_int16_t)(sum >> 16) + (u_int16_t)(sum /*& 0xffff*/);
+
+	if (sum > 0xffff)
+		sum -= 0xffff;
+
+	return (sum);
 }
 
 /*

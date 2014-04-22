@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.91 2014/03/26 19:38:18 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.93 2014/04/18 11:51:17 guenther Exp $	*/
 
 /*
  * Copyright (c) 1988 University of Utah.
@@ -189,6 +189,7 @@ trap(struct trap_frame *trapframe)
 		atomic_add_int(&uvmexp.traps, 1);
 	if (USERMODE(trapframe->sr)) {
 		type |= T_USER;
+		refreshcreds(p);
 	}
 
 	/*
@@ -791,7 +792,7 @@ fault_common_no_miss:
 	err:
 		disableintr();
 #if !defined(DDB) && defined(DEBUG)
-		trapDump("trap");
+		trapDump("trap", printf);
 #endif
 		printf("\nTrap cause = %d Frame %p\n", type, trapframe);
 		printf("Trap PC %p RA %p fault %p\n",
@@ -841,7 +842,7 @@ child_return(arg)
 
 #if defined(DDB) || defined(DEBUG)
 void
-trapDump(const char *msg)
+trapDump(const char *msg, int (*pr)(const char *, ...))
 {
 #ifdef MULTIPROCESSOR
 	CPU_INFO_ITERATOR cii;
@@ -851,13 +852,7 @@ trapDump(const char *msg)
 	int i;
 	uint pos;
 	int s;
-	int (*pr)(const char*, ...);
 
-#ifdef DDB
-	pr = db_printf;
-#else
-	pr = printf;
-#endif
 	s = splhigh();
 	(*pr)("trapDump(%s)\n", msg);
 #ifndef MULTIPROCESSOR

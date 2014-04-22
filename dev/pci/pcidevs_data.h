@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1720 2014/03/17 17:24:02 jasper Exp 
+ *	OpenBSD: pcidevs,v 1.1723 2014/04/12 04:42:28 dlg Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -7944,6 +7944,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "FL1009 xHCI",
 	},
 	{
+	    PCI_VENDOR_FRESCO, PCI_PRODUCT_FRESCO_FL1400,
+	    "FL1400 xHCI",
+	},
+	{
 	    PCI_VENDOR_FUJITSU, PCI_PRODUCT_FUJITSU_PW008GE5,
 	    "PW008GE5",
 	},
@@ -8366,6 +8370,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_HITACHI, PCI_PRODUCT_HITACHI_SH7751R,
 	    "SH7751R PCI",
+	},
+	{
+	    PCI_VENDOR_HITACHI_M, PCI_PRODUCT_HITACHI_M_ISP2100,
+	    "ISP2100",
 	},
 	{
 	    PCI_VENDOR_IBM, PCI_PRODUCT_IBM_0x0002,
@@ -13994,6 +14002,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_PRO_100_SERVER,
 	    "PRO 100 Server",
+	},
+	{
+	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_QEMU_NVME,
+	    "QEMU NVM Express Controller",
 	},
 	{
 	    PCI_VENDOR_INTEL, PCI_PRODUCT_INTEL_5100_HB,
@@ -23562,6 +23574,10 @@ static const struct pci_known_vendor pci_known_vendors[] = {
 	{
 	    PCI_VENDOR_FUTUREDOMAIN,
 	    "Future Domain",
+	},
+	{
+	    PCI_VENDOR_HITACHI_M,
+	    "Hitachi Micro",
 	},
 	{
 	    PCI_VENDOR_SIS,

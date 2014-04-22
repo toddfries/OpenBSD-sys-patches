@@ -1,4 +1,4 @@
-$OpenBSD: pcidevs,v 1.1720 2014/03/17 17:24:02 jasper Exp $
+$OpenBSD: pcidevs,v 1.1723 2014/04/12 04:42:28 dlg Exp $
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
 /*
@@ -78,6 +78,7 @@ vendor	TOSHIBA		0x102f	Toshiba
 vendor	MIRO		0x1031	Miro Computer Products AG
 vendor	NEC		0x1033	NEC
 vendor	FUTUREDOMAIN	0x1036	Future Domain
+vendor	HITACHI_M	0x1037	Hitachi Micro
 vendor	SIS		0x1039	SiS
 vendor	HP		0x103c	Hewlett-Packard
 vendor	PCTECH		0x1042	PC Technology
@@ -2550,6 +2551,7 @@ product FREESCALE MPC8343	0x0087	MPC8343
 /* Fresco Logic products */
 product FRESCO FL1000		0x1000	FL1000 xHCI
 product FRESCO FL1009		0x1009	FL1009 xHCI
+product FRESCO FL1400		0x1400	FL1400 xHCI
 
 /* Fujitsu products */
 product FUJITSU PW008GE5	0x11a1	PW008GE5
@@ -2680,6 +2682,9 @@ product HINT VXPRO_II_EIDE	0x8013	EIDE
 product HITACHI SWC		0x0101	MSVCC01 Video Capture
 product HITACHI SH7751		0x3505	SH7751 PCI
 product HITACHI SH7751R		0x350e	SH7751R PCI
+
+/* Hitachi Micro products */
+product HITACHI_M ISP2100	0x2100	ISP2100
 
 /* IBM products */
 product IBM 0x0002		0x0002	MCA
@@ -4105,6 +4110,7 @@ product INTEL EP80579_LAN_2	0x5044	EP80579 LAN
 product INTEL EP80579_LAN_3	0x5048	EP80579 LAN
 product INTEL 80960RD		0x5200	i960 RD
 product INTEL PRO_100_SERVER	0x5201	PRO 100 Server
+product INTEL QEMU_NVME		0x5845	QEMU NVM Express Controller
 product INTEL 5100_HB		0x65c0	5100 Host
 product INTEL 5100_PCIE_2	0x65e2	5100 PCIE
 product INTEL 5100_PCIE_3	0x65e3	5100 PCIE

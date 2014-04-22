@@ -1,4 +1,4 @@
-/*      $OpenBSD: if_gre.c,v 1.64 2013/10/19 14:46:30 mpi Exp $ */
+/*      $OpenBSD: if_gre.c,v 1.67 2014/04/21 12:22:25 henning Exp $ */
 /*	$NetBSD: if_gre.c,v 1.9 1999/10/25 19:18:11 drochner Exp $ */
 
 /*
@@ -208,10 +208,10 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	}
 
 #ifdef DIAGNOSTIC
-	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.rdomain)) {
+	if (ifp->if_rdomain != rtable_l2(m->m_pkthdr.ph_rtableid)) {
 		printf("%s: trying to send packet on wrong domain. "
 		    "if %d vs. mbuf %d, AF %d\n", ifp->if_xname,
-		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.rdomain),
+		    ifp->if_rdomain, rtable_l2(m->m_pkthdr.ph_rtableid),
 		    dst->sa_family);
 	}
 #endif
@@ -423,14 +423,14 @@ gre_output(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 	ifp->if_obytes += m->m_pkthdr.len;
 
 
-	m->m_pkthdr.rdomain = sc->g_rtableid;
+	m->m_pkthdr.ph_rtableid = sc->g_rtableid;
 
 #if NPF > 0
 	pf_pkt_addr_changed(m);
 #endif
 
 	/* Send it off */
-	error = ip_output(m, (void *)NULL, &sc->route, 0, (void *)NULL, (void *)NULL);
+	error = ip_output(m, NULL, &sc->route, 0, NULL, NULL, 0);
   end:
 	if (error)
 		ifp->if_oerrors++;

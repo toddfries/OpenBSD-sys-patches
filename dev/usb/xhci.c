@@ -1,4 +1,4 @@
-/* $OpenBSD: xhci.c,v 1.7 2014/03/28 16:19:26 mpi Exp $ */
+/* $OpenBSD: xhci.c,v 1.9 2014/04/07 15:34:27 mpi Exp $ */
 
 /*
  * Copyright (c) 2014 Martin Pieuchot
@@ -438,10 +438,14 @@ xhci_activate(struct device *self, int act)
 
 	switch (act) {
 	case DVACT_RESUME:
+		sc->sc_bus.use_polling++;
+
 		xhci_reset(sc);
 		xhci_ring_reset(sc, &sc->sc_cmd_ring);
 		xhci_ring_reset(sc, &sc->sc_evt_ring);
 		xhci_config(sc);
+
+		sc->sc_bus.use_polling--;
 		rv = config_activate_children(self, act);
 		break;
 	case DVACT_POWERDOWN:
@@ -1806,7 +1810,7 @@ xhci_root_ctrl_start(struct usbd_xfer *xfer)
 				totlen = usbd_str(buf, len, sc->sc_vendor);
 				break;
 			case 2: /* Product */
-				totlen = usbd_str(buf, len, "XHCI root hub");
+				totlen = usbd_str(buf, len, "xHCI root hub");
 				break;
 			}
 			break;

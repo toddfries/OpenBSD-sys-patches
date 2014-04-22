@@ -1,4 +1,4 @@
-/* $OpenBSD: drmP.h,v 1.174 2014/03/26 14:41:41 mpi Exp $ */
+/* $OpenBSD: drmP.h,v 1.176 2014/04/07 06:43:11 jsg Exp $ */
 /* drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
@@ -62,6 +62,7 @@
 #include <dev/pci/agpvar.h>
 #include <machine/bus.h>
 
+#include "drm_linux.h"
 #include "drm_linux_list.h"
 #include "drm.h"
 #include "drm_mm.h"
@@ -759,6 +760,13 @@ struct drm_cmdline_mode {
 	enum drm_connector_force force;
 };
 
+struct pci_dev {
+	uint16_t	vendor;
+	uint16_t	device;
+	uint16_t	subsystem_vendor;
+	uint16_t	subsystem_device;
+};
+
 /** 
  * DRM device functions structure
  */
@@ -767,10 +775,10 @@ struct drm_device {
 
 	struct drm_driver_info *driver;
 
+	struct pci_dev	 drm_pci;
+	struct pci_dev	*pdev;
 	u_int16_t	 pci_device;
 	u_int16_t	 pci_vendor;
-	u_int16_t	 pci_subdevice;
-	u_int16_t	 pci_subvendor;
 
 	pci_chipset_tag_t		 pc;
 	pcitag_t	 		*bridgetag;

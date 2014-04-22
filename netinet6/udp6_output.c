@@ -1,4 +1,4 @@
-/*	$OpenBSD: udp6_output.c,v 1.23 2013/10/23 19:57:50 deraadt Exp $	*/
+/*	$OpenBSD: udp6_output.c,v 1.29 2014/04/18 18:56:25 jca Exp $	*/
 /*	$KAME: udp6_output.c,v 1.21 2001/02/07 11:51:54 itojun Exp $	*/
 
 /*
@@ -97,7 +97,7 @@ udp6_output(struct inpcb *in6p, struct mbuf *m, struct mbuf *addr6,
 {
 	u_int32_t ulen = m->m_pkthdr.len;
 	u_int32_t plen = sizeof(struct udphdr) + ulen;
-	int error = 0, priv = 0, af, hlen, flags;
+	int error = 0, priv = 0, hlen, flags;
 	struct ip6_hdr *ip6;
 	struct udphdr *udp6;
 	struct in6_addr *laddr, *faddr;
@@ -118,14 +118,6 @@ udp6_output(struct inpcb *in6p, struct mbuf *m, struct mbuf *addr6,
 		optp = in6p->inp_outputopts6;
 
 	if (addr6) {
-		/*
-		 * IPv4 version of udp_output calls in_pcbconnect in this case,
-		 * which needs splnet and affects performance.
-		 * Since we saw no essential reason for calling in_pcbconnect,
-		 * we get rid of such kind of logic, and call in6_selectsrc
-		 * and in6_pcbsetport in order to fill in the local address
-		 * and the local port.
-		 */
 		struct sockaddr_in6 *sin6 = mtod(addr6, struct sockaddr_in6 *);
 
 		if (addr6->m_len != sizeof(*sin6)) {
@@ -138,6 +130,10 @@ udp6_output(struct inpcb *in6p, struct mbuf *m, struct mbuf *addr6,
 		}
 		if (sin6->sin6_port == 0) {
 			error = EADDRNOTAVAIL;
+			goto release;
+		}
+		if (IN6_IS_ADDR_V4MAPPED(&sin6->sin6_addr)) {
+			error = EINVAL;
 			goto release;
 		}
 
@@ -159,17 +155,12 @@ udp6_output(struct inpcb *in6p, struct mbuf *m, struct mbuf *addr6,
 			goto release;
 		}
 
-		if (1) {	/* we don't support IPv4 mapped address */
-			laddr = in6_selectsrc(sin6, optp,
-			    in6p->inp_moptions6, &in6p->inp_route6,
-			    &in6p->inp_laddr6, &error, in6p->inp_rtableid);
-		} else
-			laddr = &in6p->inp_laddr6;	/*XXX*/
-		if (laddr == NULL) {
-			if (error == 0)
-				error = EADDRNOTAVAIL;
+		error = in6_selectsrc(&laddr, sin6, optp,
+		    in6p->inp_moptions6, &in6p->inp_route6,
+		    &in6p->inp_laddr6, in6p->inp_rtableid);
+		if (error)
 			goto release;
-		}
+
 		if (in6p->inp_lport == 0 &&
 		    (error = in6_pcbsetport(laddr, in6p, p)) != 0)
 			goto release;
@@ -183,13 +174,7 @@ udp6_output(struct inpcb *in6p, struct mbuf *m, struct mbuf *addr6,
 		fport = in6p->inp_fport;
 	}
 
-	if (1) {	/* we don't support IPv4 mapped address */
-		af = AF_INET6;
-		hlen = sizeof(struct ip6_hdr);
-	} else {
-		af = AF_INET;
-		hlen = sizeof(struct ip);
-	}
+	hlen = sizeof(struct ip6_hdr);
 
 	/*
 	 * Calculate data length and get a mbuf
@@ -198,7 +183,7 @@ udp6_output(struct inpcb *in6p, struct mbuf *m, struct mbuf *addr6,
 	M_PREPEND(m, hlen + sizeof(struct udphdr), M_DONTWAIT);
 	if (m == 0) {
 		error = ENOBUFS;
-		goto release;
+		goto releaseopt;
 	}
 
 	/*
@@ -213,42 +198,35 @@ udp6_output(struct inpcb *in6p, struct mbuf *m, struct mbuf *addr6,
 		udp6->uh_ulen = 0;
 	udp6->uh_sum = 0;
 
-	switch (af) {
-	case AF_INET6:
-		ip6 = mtod(m, struct ip6_hdr *);
-		ip6->ip6_flow	= in6p->inp_flowinfo & IPV6_FLOWINFO_MASK;
-		ip6->ip6_vfc 	&= ~IPV6_VERSION_MASK;
-		ip6->ip6_vfc 	|= IPV6_VERSION;
-#if 0				/* ip6_plen will be filled in ip6_output. */
-		ip6->ip6_plen	= htons((u_short)plen);
+	ip6 = mtod(m, struct ip6_hdr *);
+	ip6->ip6_flow	= in6p->inp_flowinfo & IPV6_FLOWINFO_MASK;
+	ip6->ip6_vfc 	&= ~IPV6_VERSION_MASK;
+	ip6->ip6_vfc 	|= IPV6_VERSION;
+#if 0	/* ip6_plen will be filled in ip6_output. */
+	ip6->ip6_plen	= htons((u_short)plen);
 #endif
-		ip6->ip6_nxt	= IPPROTO_UDP;
-		ifp = NULL;
-		if (in6p->inp_route6.ro_rt &&
-		    in6p->inp_route6.ro_rt->rt_flags & RTF_UP)
-			ifp = in6p->inp_route6.ro_rt->rt_ifp;
-		ip6->ip6_hlim	= in6_selecthlim(in6p, ifp);
-		ip6->ip6_src	= *laddr;
-		ip6->ip6_dst	= *faddr;
+	ip6->ip6_nxt	= IPPROTO_UDP;
+	ifp = NULL;
+	if (in6p->inp_route6.ro_rt &&
+	    in6p->inp_route6.ro_rt->rt_flags & RTF_UP)
+		ifp = in6p->inp_route6.ro_rt->rt_ifp;
+	ip6->ip6_hlim	= in6_selecthlim(in6p, ifp);
+	ip6->ip6_src	= *laddr;
+	ip6->ip6_dst	= *faddr;
 
-		m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
+	m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
 
-		flags = 0;
-		if (in6p->inp_flags & IN6P_MINMTU)
-			flags |= IPV6_MINMTU;
+	flags = 0;
+	if (in6p->inp_flags & IN6P_MINMTU)
+		flags |= IPV6_MINMTU;
 
-		udpstat.udps_opackets++;
+	udpstat.udps_opackets++;
 
-		/* force routing domain */
-		m->m_pkthdr.rdomain = in6p->inp_rtableid;
+	/* force routing table */
+	m->m_pkthdr.ph_rtableid = in6p->inp_rtableid;
 
-		error = ip6_output(m, optp, &in6p->inp_route6,
-		    flags, in6p->inp_moptions6, NULL, in6p);
-		break;
-	case AF_INET:
-		error = EAFNOSUPPORT;
-		goto release;
-	}
+	error = ip6_output(m, optp, &in6p->inp_route6,
+	    flags, in6p->inp_moptions6, NULL, in6p);
 	goto releaseopt;
 
 release:

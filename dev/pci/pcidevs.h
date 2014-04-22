@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1720 2014/03/17 17:24:02 jasper Exp 
+ *	OpenBSD: pcidevs,v 1.1723 2014/04/12 04:42:28 dlg Exp 
  */
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
 
@@ -83,6 +83,7 @@
 #define	PCI_VENDOR_MIRO	0x1031		/* Miro Computer Products AG */
 #define	PCI_VENDOR_NEC	0x1033		/* NEC */
 #define	PCI_VENDOR_FUTUREDOMAIN	0x1036		/* Future Domain */
+#define	PCI_VENDOR_HITACHI_M	0x1037		/* Hitachi Micro */
 #define	PCI_VENDOR_SIS	0x1039		/* SiS */
 #define	PCI_VENDOR_HP	0x103c		/* Hewlett-Packard */
 #define	PCI_VENDOR_PCTECH	0x1042		/* PC Technology */
@@ -2555,6 +2556,7 @@
 /* Fresco Logic products */
 #define	PCI_PRODUCT_FRESCO_FL1000	0x1000		/* FL1000 xHCI */
 #define	PCI_PRODUCT_FRESCO_FL1009	0x1009		/* FL1009 xHCI */
+#define	PCI_PRODUCT_FRESCO_FL1400	0x1400		/* FL1400 xHCI */
 
 /* Fujitsu products */
 #define	PCI_PRODUCT_FUJITSU_PW008GE5	0x11a1		/* PW008GE5 */
@@ -2685,6 +2687,9 @@
 #define	PCI_PRODUCT_HITACHI_SWC	0x0101		/* MSVCC01 Video Capture */
 #define	PCI_PRODUCT_HITACHI_SH7751	0x3505		/* SH7751 PCI */
 #define	PCI_PRODUCT_HITACHI_SH7751R	0x350e		/* SH7751R PCI */
+
+/* Hitachi Micro products */
+#define	PCI_PRODUCT_HITACHI_M_ISP2100	0x2100		/* ISP2100 */
 
 /* IBM products */
 #define	PCI_PRODUCT_IBM_0x0002	0x0002		/* MCA */
@@ -4110,6 +4115,7 @@
 #define	PCI_PRODUCT_INTEL_EP80579_LAN_3	0x5048		/* EP80579 LAN */
 #define	PCI_PRODUCT_INTEL_80960RD	0x5200		/* i960 RD */
 #define	PCI_PRODUCT_INTEL_PRO_100_SERVER	0x5201		/* PRO 100 Server */
+#define	PCI_PRODUCT_INTEL_QEMU_NVME	0x5845		/* QEMU NVM Express Controller */
 #define	PCI_PRODUCT_INTEL_5100_HB	0x65c0		/* 5100 Host */
 #define	PCI_PRODUCT_INTEL_5100_PCIE_2	0x65e2		/* 5100 PCIE */
 #define	PCI_PRODUCT_INTEL_5100_PCIE_3	0x65e3		/* 5100 PCIE */

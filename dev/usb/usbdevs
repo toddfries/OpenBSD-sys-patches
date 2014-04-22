@@ -1,4 +1,4 @@
-$OpenBSD: usbdevs,v 1.628 2014/03/25 03:16:38 jsg Exp $
+$OpenBSD: usbdevs,v 1.630 2014/04/20 20:34:57 stsp Exp $
 /* $NetBSD: usbdevs,v 1.322 2003/05/10 17:47:14 hamajima Exp $ */
 
 /*
@@ -457,6 +457,7 @@ vendor NOVATECH		0x0eb0	Nova Tech
 vendor EGALAX		0x0eef	eGalax
 vendor ITEGNO		0x0eba	iTegno
 vendor NORITAKE		0x0eda	Noritake itron Corp
+vendor XIRING		0x0f14	XIRING
 vendor AIRPRIME		0x0f3d	Airprime
 vendor LARSENBRUSGAARD	0x0fd8	Larsen and Brusgaard
 vendor UNKNOWN4		0x0fe6	Unknown Vendor
@@ -3441,6 +3442,7 @@ product RALINK RT3072		0x3072	RT3072
 product RALINK RT3370		0x3370	RT3370
 product RALINK RT3572		0x3572	RT3572
 product RALINK RT5370		0x5370	RT5370
+product RALINK MT7601		0x7601  MT7601
 product RALINK RT8070		0x8070	RT8070
 product RALINK RT2570_3		0x9020	RT2570
 product RALINK RT2573_2		0x9021	RT2573
@@ -4270,6 +4272,9 @@ product WISTRONNEWEB AR5523_1	0x0826	AR5523
 product WISTRONNEWEB AR5523_1_NF 0x0827	AR5523
 product WISTRONNEWEB AR5523_2	0x082a	AR5523
 product WISTRONNEWEB AR5523_2_NF 0x0829	AR5523
+
+/* XIRING products */
+product	XIRING XIMAX		0x0005	Ximax CDC
 
 /* Xirlink products */
 product XIRLINK IMAGING		0x800d	Imaging Device

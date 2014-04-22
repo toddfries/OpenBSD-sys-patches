@@ -1,4 +1,4 @@
-/*	$OpenBSD: mbuf.h,v 1.174 2014/03/27 10:30:58 mpi Exp $	*/
+/*	$OpenBSD: mbuf.h,v 1.176 2014/04/22 14:41:03 mpi Exp $	*/
 /*	$NetBSD: mbuf.h,v 1.19 1996/02/09 18:25:14 christos Exp $	*/
 
 /*
@@ -82,7 +82,6 @@ struct pf_state_key;
 struct inpcb;
 
 struct pkthdr_pf {
-	void		*hdr;		/* saved hdr pos in mbuf, for ECN */
 	struct pf_state_key *statekey;	/* pf stackside statekey */
 	struct inpcb	*inp;		/* connected pcb for outgoing packet */
 	u_int32_t	 qid;		/* queue id */
@@ -117,7 +116,7 @@ struct	pkthdr {
 	u_int16_t		 pad;
 	u_int16_t		 csum_flags;	/* checksum flags */
 	u_int16_t		 ether_vtag;	/* Ethernet 802.1p+Q vlan tag */
-	u_int			 rdomain;	/* routing domain id */
+	u_int			 ph_rtableid;	/* routing table id */
 	void			*ph_cookie;	/* additional data */
 	struct pkthdr_pf	 pf;
 };

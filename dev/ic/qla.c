@@ -1,4 +1,4 @@
-/*	$OpenBSD: qla.c,v 1.31 2014/03/31 11:25:45 jmatthew Exp $ */
+/*	$OpenBSD: qla.c,v 1.38 2014/04/21 04:17:07 jmatthew Exp $ */
 
 /*
  * Copyright (c) 2011 David Gwynne <dlg@openbsd.org>
@@ -67,7 +67,6 @@ struct cfdriver qla_cd = {
 };
 
 void		qla_scsi_cmd(struct scsi_xfer *);
-struct qla_ccb *qla_scsi_cmd_poll(struct qla_softc *);
 int		qla_scsi_probe(struct scsi_link *);
 
 u_int16_t	qla_read(struct qla_softc *, bus_size_t);
@@ -76,7 +75,7 @@ void		qla_host_cmd(struct qla_softc *sc, u_int16_t);
 
 u_int16_t	qla_read_queue_2100(struct qla_softc *, bus_size_t);
 
-int		qla_mbox(struct qla_softc *, int, int);
+int		qla_mbox(struct qla_softc *, int);
 int		qla_sns_req(struct qla_softc *, struct qla_dmamem *, int);
 void		qla_mbox_putaddr(u_int16_t *, struct qla_dmamem *);
 u_int16_t	qla_read_mbox(struct qla_softc *, int);
@@ -121,6 +120,7 @@ int		qla_load_firmware_2200(struct qla_softc *);
 int		qla_load_fwchunk_2300(struct qla_softc *,
 		    struct qla_dmamem *, const u_int16_t *, u_int32_t);
 int		qla_load_firmware_2300(struct qla_softc *);
+int		qla_load_firmware_2322(struct qla_softc *);
 int		qla_read_nvram(struct qla_softc *);
 
 struct qla_dmamem *qla_dmamem_alloc(struct qla_softc *, size_t);
@@ -255,9 +255,9 @@ qla_add_port(struct qla_softc *sc, u_int16_t loopid, u_int32_t portid,
 	qla_mbox_putaddr(sc->sc_mbox, sc->sc_scratch);
 	bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(sc->sc_scratch), 0,
 	    sizeof(struct qla_get_port_db), BUS_DMASYNC_PREREAD);
-	if (qla_mbox(sc, 0x00cf, 0x0001)) {
+	if (qla_mbox(sc, 0x00cf)) {
 		if (portid != 0)
-			DPRINTF(QLA_D_PORT, "%s: get port db %x failed: %x\n",
+			DPRINTF(QLA_D_PORT, "%s: get port db %d failed: %x\n",
 			    DEVNAME(sc), loopid, sc->sc_mbox[0]);
 		return (1);
 	}
@@ -337,7 +337,8 @@ qla_attach(struct qla_softc *sc)
 		sc->sc_mbox_base = QLA_MBOX_BASE_23XX;
 		sc->sc_regs = &qla_regs_23XX;
 #ifndef ISP_NOFIRMWARE
-		loadfirmware = qla_load_firmware_2300;
+		if (sc->sc_isp_type != QLA_ISP2322)
+			loadfirmware = qla_load_firmware_2300;
 #endif
 		firmware_addr = QLA_2300_CODE_ORG;
 		break;
@@ -387,7 +388,15 @@ qla_attach(struct qla_softc *sc)
 	/* execute firmware */
 	sc->sc_mbox[0] = QLA_MBOX_EXEC_FIRMWARE;
 	sc->sc_mbox[1] = firmware_addr;
-	if (qla_mbox(sc, 0x0003, 0x0001)) {
+#ifdef ISP_NOFIRMWARE
+	sc->sc_mbox[2] = 1;
+#else
+	if (loadfirmware)
+		sc->sc_mbox[2] = 0;
+	else
+		sc->sc_mbox[2] = 1;
+#endif
+	if (qla_mbox(sc, 0x0007)) {
 		printf("ISP couldn't exec firmware: %x\n", sc->sc_mbox[0]);
 		return (ENXIO);
 	}
@@ -395,8 +404,7 @@ qla_attach(struct qla_softc *sc)
 	delay(250000);		/* from isp(4) */
 
 	sc->sc_mbox[0] = QLA_MBOX_ABOUT_FIRMWARE;
-	if (qla_mbox(sc, QLA_MBOX_ABOUT_FIRMWARE_IN,
-	    QLA_MBOX_ABOUT_FIRMWARE_OUT)) {
+	if (qla_mbox(sc, 0x0001)) {
 		printf("ISP not talking after firmware exec: %x\n",
 		    sc->sc_mbox[0]);
 		return (ENXIO);
@@ -413,7 +421,7 @@ qla_attach(struct qla_softc *sc)
 
 	/* work out how many ccbs to allocate */
 	sc->sc_mbox[0] = QLA_MBOX_GET_FIRMWARE_STATUS;
-	if (qla_mbox(sc, 0x0001, 0x0007)) {
+	if (qla_mbox(sc, 0x0001)) {
 		printf("couldn't get firmware status: %x\n", sc->sc_mbox[0]);
 		return (ENXIO);
 	}
@@ -485,7 +493,7 @@ qla_attach(struct qla_softc *sc)
 	qla_mbox_putaddr(sc->sc_mbox, sc->sc_scratch);
 	bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(sc->sc_scratch), 0,
 	    sizeof(*icb), BUS_DMASYNC_PREWRITE);
-	rv = qla_mbox(sc, QLA_MBOX_INIT_FIRMWARE_IN, 0x0001);
+	rv = qla_mbox(sc, 0x00fd);
 	bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(sc->sc_scratch), 0,
 	    sizeof(*icb), BUS_DMASYNC_POSTWRITE);
 
@@ -503,7 +511,7 @@ qla_attach(struct qla_softc *sc)
 	    QLA_FW_OPTION1_ASYNC_LOGIN_RJT;
 	sc->sc_mbox[2] = 0;
 	sc->sc_mbox[3] = 0;
-	if (qla_mbox(sc, QLA_MBOX_SET_FIRMWARE_OPTIONS_IN, 0x0001)) {
+	if (qla_mbox(sc, 0x000f)) {
 		printf("%s: setting firmware options failed: %x\n",
 		    DEVNAME(sc), sc->sc_mbox[0]);
 		goto free_scratch;
@@ -539,8 +547,9 @@ qla_attach(struct qla_softc *sc)
 
 		if (qla_update_fabric(sc) == 0) {
 			u_int32_t firstport = 0xffffffff;
-			u_int32_t lastport = 0;
+			u_int32_t lastport;
 
+			lastport = sc->sc_port_id;
 			do {
 				port = qla_next_fabric_port(sc, &firstport,
 				    &lastport);
@@ -567,9 +576,13 @@ qla_attach(struct qla_softc *sc)
 	/* we should be good to go now, attach scsibus */
 	sc->sc_link.adapter = &qla_switch;
 	sc->sc_link.adapter_softc = sc;
-	sc->sc_link.adapter_target = QLA_MAX_TARGETS;
-	sc->sc_link.adapter_buswidth = QLA_MAX_TARGETS;
-	sc->sc_link.openings = sc->sc_maxcmds; /* / sc->sc_buswidth? */
+	if (sc->sc_2k_logins) {
+		sc->sc_link.adapter_buswidth = QLA_2KL_BUSWIDTH;
+	} else {
+		sc->sc_link.adapter_buswidth = QLA_BUSWIDTH;
+	}
+	sc->sc_link.adapter_target = sc->sc_link.adapter_buswidth;
+	sc->sc_link.openings = sc->sc_maxcmds;
 	sc->sc_link.pool = &sc->sc_iopool;
 	sc->sc_link.port_wwn = sc->sc_port_name;
 	sc->sc_link.node_wwn = sc->sc_node_name;
@@ -791,16 +804,18 @@ qla_handle_intr(struct qla_softc *sc, u_int16_t isr, u_int16_t info)
 		break;
 
 	case QLA_INT_TYPE_MBOX:
+		mtx_enter(&sc->sc_mbox_mtx);
 		if (sc->sc_mbox_pending) {
-			if (info == QLA_MBOX_COMPLETE) {
-				for (i = 1; i < nitems(sc->sc_mbox); i++) {
-					sc->sc_mbox[i] = qla_read_mbox(sc, i);
-				}
-			} else {
-				sc->sc_mbox[0] = info;
+			DPRINTF(QLA_D_MBOX, "%s: mbox response %x\n",
+			    DEVNAME(sc), info);
+			for (i = 0; i < nitems(sc->sc_mbox); i++) {
+				sc->sc_mbox[i] = qla_read_mbox(sc, i);
 			}
+			sc->sc_mbox_pending = 2;
 			wakeup(sc->sc_mbox);
+			mtx_leave(&sc->sc_mbox_mtx);
 		} else {
+			mtx_leave(&sc->sc_mbox_mtx);
 			DPRINTF(QLA_D_MBOX, "%s: unexpected mbox interrupt:"
 			    " %x\n", DEVNAME(sc), info);
 		}
@@ -857,8 +872,8 @@ qla_scsi_cmd(struct scsi_xfer *xs)
 	struct qla_ccb		*ccb;
 	struct qla_iocb_req34	*iocb;
 	struct qla_ccb_list	list;
-	u_int16_t		req;
-	int			offset, error;
+	u_int16_t		req, rspin;
+	int			offset, error, done;
 	bus_dmamap_t		dmap;
 
 	if (xs->cmdlen > sizeof(iocb->req_cdb)) {
@@ -931,27 +946,9 @@ qla_scsi_cmd(struct scsi_xfer *xs)
 		return;
 	}
 
+	done = 0;
 	SIMPLEQ_INIT(&list);
 	do {
-		ccb = qla_scsi_cmd_poll(sc);
-		SIMPLEQ_INSERT_TAIL(&list, ccb, ccb_link);
-	} while (xs->io != ccb);
-
-	mtx_leave(&sc->sc_queue_mtx);
-
-	while ((ccb = SIMPLEQ_FIRST(&list)) != NULL) {
-		SIMPLEQ_REMOVE_HEAD(&list, ccb_link);
-		scsi_done(ccb->ccb_xs);
-	}
-}
-
-struct qla_ccb *
-qla_scsi_cmd_poll(struct qla_softc *sc)
-{
-	u_int16_t rspin;
-	struct qla_ccb *ccb = NULL;
-
-	while (ccb == NULL) {
 		u_int16_t isr, info;
 
 		delay(100);
@@ -966,21 +963,28 @@ qla_scsi_cmd_poll(struct qla_softc *sc)
 		}
 
 		rspin = qla_queue_read(sc, sc->sc_regs->res_in);
-		if (rspin != sc->sc_last_resp_id) {
+		while (rspin != sc->sc_last_resp_id) {
 			ccb = qla_handle_resp(sc, sc->sc_last_resp_id);
 
 			sc->sc_last_resp_id++;
 			if (sc->sc_last_resp_id == sc->sc_maxcmds)
 				sc->sc_last_resp_id = 0;
 
-			qla_queue_write(sc, sc->sc_regs->res_out,
-			    sc->sc_last_resp_id);
+			if (ccb != NULL)
+				SIMPLEQ_INSERT_TAIL(&list, ccb, ccb_link);
+			if (ccb == xs->io)
+				done = 1;
 		}
-
+		qla_queue_write(sc, sc->sc_regs->res_out, rspin);
 		qla_clear_isr(sc, isr);
-	}
+	} while (done == 0);
 
-	return (ccb);
+	mtx_leave(&sc->sc_queue_mtx);
+
+	while ((ccb = SIMPLEQ_FIRST(&list)) != NULL) {
+		SIMPLEQ_REMOVE_HEAD(&list, ccb_link);
+		scsi_done(ccb->ccb_xs);
+	}
 }
 
 u_int16_t
@@ -1023,7 +1027,7 @@ qla_host_cmd(struct qla_softc *sc, u_int16_t cmd)
 #define MBOX_COMMAND_TIMEOUT	4000
 
 int
-qla_mbox(struct qla_softc *sc, int maskin, int maskout)
+qla_mbox(struct qla_softc *sc, int maskin)
 {
 	int i;
 	int result = 0;
@@ -1037,49 +1041,47 @@ qla_mbox(struct qla_softc *sc, int maskin, int maskout)
 	}
 	qla_host_cmd(sc, QLA_HOST_CMD_SET_HOST_INT);
 
-	if (sc->sc_scsibus == NULL) {
-		for (i = 0; i < MBOX_COMMAND_TIMEOUT && result == 0; i++) {
-			u_int16_t isr, info;
-
-			delay(100);
-
-			if (qla_read_isr(sc, &isr, &info) == 0)
-				continue;
-
-			switch (isr) {
-			case QLA_INT_TYPE_MBOX:
-				result = info;
-				break;
-
-			default:
-				qla_handle_intr(sc, isr, info);
-				break;
-			}
+	if (sc->sc_scsibus != NULL) {
+		mtx_enter(&sc->sc_mbox_mtx);
+		sc->sc_mbox_pending = 1;
+		while (sc->sc_mbox_pending == 1) {
+			msleep(sc->sc_mbox, &sc->sc_mbox_mtx, PRIBIO,
+			    "qlambox", 0);
 		}
-	} else {
-		tsleep(sc->sc_mbox, PRIBIO, "qla_mbox", 0);
 		result = sc->sc_mbox[0];
+		sc->sc_mbox_pending = 0;
+		mtx_leave(&sc->sc_mbox_mtx);
+		return (result == QLA_MBOX_COMPLETE ? 0 : result);
 	}
 
-	switch (result) {
-	case QLA_MBOX_COMPLETE:
-		for (i = 1; i < nitems(sc->sc_mbox); i++) {
-			sc->sc_mbox[i] = (maskout & (1 << i)) ?
-			    qla_read_mbox(sc, i) : 0;
-		}
-		rv = 0;
-		break;
+	for (i = 0; i < MBOX_COMMAND_TIMEOUT && result == 0; i++) {
+		u_int16_t isr, info;
 
-	case 0:
+		delay(100);
+
+		if (qla_read_isr(sc, &isr, &info) == 0)
+			continue;
+
+		switch (isr) {
+		case QLA_INT_TYPE_MBOX:
+			result = info;
+			break;
+
+		default:
+			qla_handle_intr(sc, isr, info);
+			break;
+		}
+	}
+
+	if (result == 0) {
 		/* timed out; do something? */
 		DPRINTF(QLA_D_MBOX, "%s: mbox timed out\n", DEVNAME(sc));
 		rv = 1;
-		break;
-
-	default:
-		sc->sc_mbox[0] = result;
-		rv = result;
-		break;
+	} else {
+		for (i = 0; i < nitems(sc->sc_mbox); i++) {
+			sc->sc_mbox[i] = qla_read_mbox(sc, i);
+		}
+		rv = (result == QLA_MBOX_COMPLETE ? 0 : result);
 	}
 
 	qla_clear_isr(sc, QLA_INT_TYPE_MBOX);
@@ -1114,7 +1116,7 @@ qla_sns_req(struct qla_softc *sc, struct qla_dmamem *mem, int reqsize)
 
 	bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(mem), 0, QLA_DMA_LEN(mem),
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
-	rv = qla_mbox(sc, 0x00cf, 0x0003);
+	rv = qla_mbox(sc, 0x00cf);
 	bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(mem), 0, QLA_DMA_LEN(mem),
 	    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
 
@@ -1269,7 +1271,7 @@ qla_softreset(struct qla_softc *sc)
 
 	/* do a basic mailbox operation to check we're alive */
 	sc->sc_mbox[0] = QLA_MBOX_NOP;
-	if (qla_mbox(sc, 0x0001, 0x0001)) {
+	if (qla_mbox(sc, 0x0001)) {
 		DPRINTF(QLA_D_INTR, "%s: ISP not responding after reset\n",
 		    DEVNAME(sc));
 		return (ENXIO);
@@ -1282,7 +1284,7 @@ void
 qla_update_topology(struct qla_softc *sc)
 {
 	sc->sc_mbox[0] = QLA_MBOX_GET_LOOP_ID;
-	if (qla_mbox(sc, 0x0001, QLA_MBOX_GET_LOOP_ID_OUT)) {
+	if (qla_mbox(sc, 0x0001)) {
 		DPRINTF(QLA_D_PORT, "%s: unable to get loop id\n", DEVNAME(sc));
 		sc->sc_topology = QLA_TOPO_N_PORT_NO_TARGET;
 	} else {
@@ -1354,7 +1356,7 @@ qla_update_fabric(struct qla_softc *sc)
 	qla_mbox_putaddr(sc->sc_mbox, sc->sc_scratch);
 	bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(sc->sc_scratch), 0,
 	    sizeof(struct qla_get_port_db), BUS_DMASYNC_PREREAD);
-	if (qla_mbox(sc, 0x00cf, 0x0001)) {
+	if (qla_mbox(sc, 0x00cf)) {
 		DPRINTF(QLA_D_PORT, "%s: get port db for SNS failed: %x\n",
 		    DEVNAME(sc), sc->sc_mbox[0]);
 		sc->sc_sns_port_name = 0;
@@ -1401,7 +1403,7 @@ qla_get_port_name_list(struct qla_softc *sc, u_int32_t match)
 	qla_mbox_putaddr(sc->sc_mbox, sc->sc_scratch);
 	bus_dmamap_sync(sc->sc_dmat, QLA_DMA_MAP(sc->sc_scratch), 0,
 	    QLA_DMA_LEN(sc->sc_scratch), BUS_DMASYNC_PREREAD);
-	if (qla_mbox(sc, 0x04f, 0x003)) {
+	if (qla_mbox(sc, 0x04f)) {
 		DPRINTF(QLA_D_PORT, "%s: get port name list failed: %x\n",
 		    DEVNAME(sc), sc->sc_mbox[0]);
 		return (1);
@@ -1411,17 +1413,40 @@ qla_get_port_name_list(struct qla_softc *sc, u_int32_t match)
 
 	i = 0;
 	l = QLA_DMA_KVA(sc->sc_scratch);
+	mtx_enter(&sc->sc_port_mtx);
 	while (i * sizeof(*l) < sc->sc_mbox[1]) {
 		u_int16_t loopid;
 		u_int32_t loc;
 
 		loopid = letoh16(l[i].loop_id);
+		/* skip special ports */
+		switch (loopid) {
+		case QLA_F_PORT_HANDLE:
+		case QLA_SNS_HANDLE:
+		case QLA_FABRIC_CTRL_HANDLE:
+			loc = 0;
+			break;
+		default:
+			if (loopid <= sc->sc_loop_max_id) {
+				loc = QLA_LOCATION_LOOP_ID(loopid);
+			} else {
+				/*
+				 * we don't have the port id here, so just
+				 * indicate it's a fabric port.
+				 */
+				loc = QLA_LOCATION_FABRIC;
+			}
+		}
 
-		loc = (loopid < QLA_MIN_HANDLE) ? QLA_LOCATION_LOOP :
-		    QLA_LOCATION_FABRIC;
 		if (match & loc) {
 			port = malloc(sizeof(*port), M_DEVBUF, M_ZERO |
 			    M_NOWAIT);
+			if (port == NULL) {
+				printf("%s: failed to allocate port struct\n",
+				    DEVNAME(sc));
+				break;
+			}
+			port->location = loc;
 			port->loopid = loopid;
 			port->port_name = letoh64(l[i].port_name);
 			DPRINTF(QLA_D_PORT, "%s: loop id %d, port name %llx\n",
@@ -1430,6 +1455,7 @@ qla_get_port_name_list(struct qla_softc *sc, u_int32_t match)
 		}
 		i++;
 	}
+	mtx_leave(&sc->sc_port_mtx);
 
 	return (0);
 }
@@ -1451,8 +1477,8 @@ qla_next_fabric_port(struct qla_softc *sc, u_int32_t *firstport,
 	ga->port_id = htole32(*lastport);
 	result = qla_sns_req(sc, sc->sc_scratch, sizeof(*ga));
 	if (result) {
-		DPRINTF(QLA_D_PORT, "%s: GA_NXT %x failed: %x\n", DEVNAME(sc),
-		    lastport, result);
+		DPRINTF(QLA_D_PORT, "%s: GA_NXT %06x failed: %x\n", DEVNAME(sc),
+		    *lastport, result);
 		*lastport = 0xffffffff;
 		return (NULL);
 	}
@@ -1474,7 +1500,7 @@ qla_next_fabric_port(struct qla_softc *sc, u_int32_t *firstport,
 	if (*firstport == 0xffffffff)
 		*firstport = *lastport;
 
-	DPRINTF(QLA_D_PORT, "%s: GA_NXT: port id: %x, wwpn %llx, wwnn %llx\n",
+	DPRINTF(QLA_D_PORT, "%s: GA_NXT: port id: %06x, wwpn %llx, wwnn %llx\n",
 	    DEVNAME(sc), *lastport, betoh64(gar->port_name),
 	    betoh64(gar->node_name));
 
@@ -1526,11 +1552,10 @@ qla_fabric_plogi(struct qla_softc *sc, struct qla_fc_port *port)
 		sc->sc_mbox[1] = loopid << 8;
 	}
 
-	if (qla_mbox(sc, mboxin, 0x00c7)) {
-		DPRINTF(QLA_D_PORT, "%s: port %x login failed: %x %x %x %x\n",
-		    DEVNAME(sc), port->portid, sc->sc_mbox[0],
-		    sc->sc_mbox[1], sc->sc_mbox[2],
-		    sc->sc_mbox[6]);
+	if (qla_mbox(sc, mboxin)) {
+		DPRINTF(QLA_D_PORT, "%s: port %06x login %d failed: %x %x %x\n",
+		    DEVNAME(sc), port->portid, loopid, sc->sc_mbox[0],
+		    sc->sc_mbox[1], sc->sc_mbox[2]);
 		return (1);
 	}
 	port->loopid = loopid;
@@ -1550,8 +1575,8 @@ qla_fabric_plogo(struct qla_softc *sc, struct qla_fc_port *port)
 		sc->sc_mbox[1] = port->loopid << 8;
 	}
 
-	if (qla_mbox(sc, mboxin, 0x03))
-		DPRINTF(QLA_D_PORT, "%s: port %x logout failed\n",
+	if (qla_mbox(sc, mboxin))
+		DPRINTF(QLA_D_PORT, "%s: loop id %d logout failed\n",
 		    DEVNAME(sc), port->loopid);
 }
 
@@ -1811,7 +1836,7 @@ qla_verify_firmware(struct qla_softc *sc, u_int16_t addr)
 {
 	sc->sc_mbox[0] = QLA_MBOX_VERIFY_CSUM;
 	sc->sc_mbox[1] = addr;
-	return (qla_mbox(sc, 0x0003, 0x0003));
+	return (qla_mbox(sc, 0x0003));
 }
 
 #ifndef ISP_NOFIRMWARE
@@ -1825,7 +1850,7 @@ qla_load_firmware_words(struct qla_softc *sc, const u_int16_t *src,
 		sc->sc_mbox[0] = QLA_MBOX_WRITE_RAM_WORD;
 		sc->sc_mbox[1] = i + dest;
 		sc->sc_mbox[2] = src[i];
-		if (qla_mbox(sc, 0x07, 0x01)) {
+		if (qla_mbox(sc, 0x07)) {
 			printf("firmware load failed\n");
 			return (1);
 		}
@@ -1877,7 +1902,7 @@ qla_load_fwchunk_2300(struct qla_softc *sc, struct qla_dmamem *mem,
 		sc->sc_mbox[4] = words;
 		sc->sc_mbox[8] = dest >> 16;
 		qla_mbox_putaddr(sc->sc_mbox, mem);
-		if (qla_mbox(sc, 0x01ff, 0x0001)) {
+		if (qla_mbox(sc, 0x01ff)) {
 			printf("firmware load failed\n");
 			return (1);
 		}
@@ -1895,6 +1920,24 @@ qla_load_firmware_2300(struct qla_softc *sc)
 {
 	struct qla_dmamem *mem;
 	const u_int16_t *fw = isp_2300_risc_code;
+	int rv;
+
+	mem = qla_dmamem_alloc(sc, 65536);
+	rv = qla_load_fwchunk_2300(sc, mem, fw, QLA_2300_CODE_ORG);
+	qla_dmamem_free(sc, mem);
+
+	return (rv);
+}
+
+int
+qla_load_firmware_2322(struct qla_softc *sc)
+{
+	/* we don't have the 2322 firmware image yet */
+#if 0
+	struct qla_dmamem *mem;
+	const u_int16_t *fw = isp_2322_risc_code;
+	u_int32_t addr;
+	int i;
 
 	mem = qla_dmamem_alloc(sc, 65536);
 	if (qla_load_fwchunk_2300(sc, mem, fw, QLA_2300_CODE_ORG)) {
@@ -1902,22 +1945,17 @@ qla_load_firmware_2300(struct qla_softc *sc)
 		return (1);
 	}
 
-	/* additional firmware chunks for 2322 */
-	if (sc->sc_isp_type == QLA_ISP2322) {
-		u_int32_t addr;
-		int i;
-
-		for (i = 0; i < 2; i++) {
-			fw += fw[3];
-			addr = fw[5] | ((fw[4] & 0x3f) << 16);
-			if (qla_load_fwchunk_2300(sc, mem, fw, addr)) {
-				qla_dmamem_free(sc, mem);
-				return (1);
-			}
+	for (i = 0; i < 2; i++) {
+		fw += fw[3];
+		addr = fw[5] | ((fw[4] & 0x3f) << 16);
+		if (qla_load_fwchunk_2300(sc, mem, fw, addr)) {
+			qla_dmamem_free(sc, mem);
+			return (1);
 		}
 	}
 
 	qla_dmamem_free(sc, mem);
+#endif
 	return (0);
 }
 
@@ -2069,6 +2107,7 @@ qla_alloc_ccbs(struct qla_softc *sc)
 	mtx_init(&sc->sc_ccb_mtx, IPL_BIO);
 	mtx_init(&sc->sc_queue_mtx, IPL_BIO);
 	mtx_init(&sc->sc_port_mtx, IPL_BIO);
+	mtx_init(&sc->sc_mbox_mtx, IPL_BIO);
 
 	sc->sc_ccbs = malloc(sizeof(struct qla_ccb) * sc->sc_maxcmds,
 	    M_DEVBUF, M_WAITOK | M_CANFAIL | M_ZERO);

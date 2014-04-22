@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_pflow.c,v 1.41 2014/03/29 11:26:03 florian Exp $	*/
+/*	$OpenBSD: if_pflow.c,v 1.43 2014/04/21 12:22:25 henning Exp $	*/
 
 /*
  * Copyright (c) 2011 Florian Obser <florian@narrans.de>
@@ -1105,7 +1105,7 @@ pflow_sendout_mbuf(struct pflow_softc *sc, struct mbuf *m)
 	ui->ui_ulen = htons(sizeof(struct udphdr) + len);
 	ui->ui_sum = 0;
 	m->m_pkthdr.csum_flags |= M_UDP_CSUM_OUT;
-	m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
+	m->m_pkthdr.ph_rtableid = sc->sc_if.if_rdomain;
 
 	ip = (struct ip *)ui;
 	ip->ip_v = IPVERSION;
@@ -1124,7 +1124,8 @@ pflow_sendout_mbuf(struct pflow_softc *sc, struct mbuf *m)
 	sc->sc_if.if_opackets++;
 	sc->sc_if.if_obytes += m->m_pkthdr.len;
 
-	if ((err = ip_output(m, NULL, NULL, IP_RAWOUTPUT, &sc->sc_imo, NULL))) {
+	if ((err = ip_output(m, NULL, NULL, IP_RAWOUTPUT, &sc->sc_imo, NULL,
+	    0))) {
 		pflowstats.pflow_oerrors++;
 		sc->sc_if.if_oerrors++;
 	}

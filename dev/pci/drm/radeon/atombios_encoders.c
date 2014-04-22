@@ -1,4 +1,4 @@
-/*	$OpenBSD: atombios_encoders.c,v 1.5 2014/02/09 13:01:09 jsg Exp $	*/
+/*	$OpenBSD: atombios_encoders.c,v 1.7 2014/04/12 06:05:53 jsg Exp $	*/
 /*
  * Copyright 2007-11 Advanced Micro Devices, Inc.
  * Copyright 2008 Red Hat Inc.
@@ -1280,7 +1280,7 @@ atombios_dig_transmitter_setup(struct drm_encoder *encoder, int action, uint8_t 
 			}
 			if (is_dp)
 				args.v5.ucLaneNum = dp_lane_count;
-			else if (radeon_encoder->pixel_clock > 165000)
+			else if (radeon_dig_monitor_is_duallink(encoder, radeon_encoder->pixel_clock))
 				args.v5.ucLaneNum = 8;
 			else
 				args.v5.ucLaneNum = 4;
@@ -1949,9 +1949,9 @@ atombios_apply_encoder_quirks(struct drm_encoder *encoder,
 	struct radeon_crtc *radeon_crtc = to_radeon_crtc(encoder->crtc);
 
 	/* Funky macbooks */
-	if ((dev->pci_device == 0x71C5) &&
-	    (dev->pci_subvendor == 0x106b) &&
-	    (dev->pci_subdevice == 0x0080)) {
+	if ((dev->pdev->device == 0x71C5) &&
+	    (dev->pdev->subsystem_vendor == 0x106b) &&
+	    (dev->pdev->subsystem_device == 0x0080)) {
 		if (radeon_encoder->devices & ATOM_DEVICE_LCD1_SUPPORT) {
 			uint32_t lvtma_bit_depth_control = RREG32(AVIVO_LVTMA_BIT_DEPTH_CONTROL);
 

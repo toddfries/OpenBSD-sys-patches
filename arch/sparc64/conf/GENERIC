@@ -1,4 +1,4 @@
-#	$OpenBSD: GENERIC,v 1.282 2014/03/30 16:36:25 kettenis Exp $
+#	$OpenBSD: GENERIC,v 1.286 2014/04/20 00:08:26 dlg Exp $
 #
 # For further information on compiling OpenBSD kernels, see the config(8)
 # man page.
@@ -112,7 +112,6 @@ malo*	at pcmcia?		# Marvell 88W8385
 # PCI SCSI
 ahc*	at pci?			# Adaptec 2940 SCSI controllers
 siop*	at pci?			# NCR 538XX SCSI controllers
-#isp*	at pci?			# Qlogic ISP [12]0x0 SCSI/FibreChannel
 qlw*	at pci?			# QLogic ISP SCSI
 qla*	at pci?			# QLogic ISP 2[123]xx FibreChannel
 qle*	at pci?			# QLogic ISP 2[45]xx FibreChannel
@@ -216,6 +215,7 @@ upd*	at uhidev?		# USB Power Devices sensors
 aue*	at uhub?		# ADMtek AN986 Pegasus Ethernet
 atu*	at uhub?		# Atmel AT76c50x based 802.11b
 axe*	at uhub?		# ASIX Electronics AX88172 USB Ethernet
+axen*	at uhub?		# ASIX Electronics AX88179 USB Ethernet
 cue*	at uhub?		# CATC USB-EL1201A based Ethernet
 kue*	at uhub?		# Kawasaki KL5KUSB101B based Ethernet
 smsc*	at uhub?		# SMSC LAN95xx Ethernet
@@ -401,7 +401,6 @@ wd*	at wdc? flags 0x0000
 dma*	at sbus?				# SBus
 esp*	at dma?					# SBus
 esp*	at sbus?
-#isp*	at sbus?
 qlw*	at sbus?
 qla*	at sbus?
 
@@ -420,8 +419,8 @@ ses*		at scsibus?		# SCSI enclosure services
 uk*		at scsibus?		# unknown SCSI devices
 
 mpath0		at root
-#emc*		at scsibus?
-#hds*		at scsibus?
+emc*		at scsibus?
+hds*		at scsibus?
 rdac*		at scsibus?
 sym*		at scsibus?
 

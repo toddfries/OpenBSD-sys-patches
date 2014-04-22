@@ -1,4 +1,4 @@
-/*	$OpenBSD: if_vxlan.c,v 1.10 2013/10/22 08:34:04 reyk Exp $	*/
+/*	$OpenBSD: if_vxlan.c,v 1.13 2014/04/21 12:22:25 henning Exp $	*/
 
 /*
  * Copyright (c) 2013 Reyk Floeter <reyk@openbsd.org>
@@ -219,8 +219,8 @@ vxlan_multicast_join(struct ifnet *ifp, struct sockaddr_in *src,
 	if (src->sin_addr.s_addr == INADDR_ANY ||
 	    IN_MULTICAST(src->sin_addr.s_addr))
 		return (EINVAL);
-	if ((ifa = ifa_ifwithaddr(sintosa(src),
-	    sc->sc_rtableid)) == NULL || (mifp = ifa->ifa_ifp) == NULL ||
+	if ((ifa = ifa_ifwithaddr(sintosa(src), sc->sc_rdomain)) == NULL ||
+	    (mifp = ifa->ifa_ifp) == NULL ||
 	    (mifp->if_flags & IFF_MULTICAST) == 0)
 		return (EADDRNOTAVAIL);
 
@@ -410,13 +410,13 @@ vxlanioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			break;
 		}
 		s = splnet();
-		sc->sc_rtableid = ifr->ifr_rdomainid;
+		sc->sc_rdomain = ifr->ifr_rdomainid;
 		(void)vxlan_config(ifp, NULL, NULL);
 		splx(s);
 		break;
 
 	case SIOCGLIFPHYRTABLE:
-		ifr->ifr_rdomainid = sc->sc_rtableid;
+		ifr->ifr_rdomainid = sc->sc_rdomain;
 		break;
 
 	case SIOCSLIFPHYTTL:
@@ -508,7 +508,7 @@ vxlan_lookup(struct mbuf *m, struct udphdr *uh, int iphlen,
 	LIST_FOREACH(sc, &vxlan_tagh[VXLAN_TAGHASH(vni)], sc_entry) {
 		if ((uh->uh_dport == sc->sc_dstport) &&
 		    vni == sc->sc_vnetid &&
-		    sc->sc_rtableid == rtable_l2(m->m_pkthdr.rdomain))
+		    sc->sc_rdomain == rtable_l2(m->m_pkthdr.ph_rtableid))
 			goto found;
 	}
 
@@ -628,7 +628,7 @@ vxlan_output(struct ifnet *ifp, struct mbuf *m)
 	ifp->if_opackets++;
 	ifp->if_obytes += m->m_pkthdr.len;
 
-	m->m_pkthdr.rdomain = sc->sc_rtableid;
+	m->m_pkthdr.ph_rtableid = sc->sc_rdomain;
 
 #if NPF > 0
 	pf_pkt_addr_changed(m);
@@ -636,7 +636,7 @@ vxlan_output(struct ifnet *ifp, struct mbuf *m)
 
 #ifdef INET
 	if ((error =
-	    ip_output(m, NULL, NULL, IP_RAWOUTPUT, &sc->sc_imo, NULL))) {
+	    ip_output(m, NULL, NULL, IP_RAWOUTPUT, &sc->sc_imo, NULL, 0))) {
 		ifp->if_oerrors++;
 	}
 #endif

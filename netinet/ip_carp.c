@@ -1,4 +1,4 @@
-/*	$OpenBSD: ip_carp.c,v 1.225 2014/03/27 10:39:23 mpi Exp $	*/
+/*	$OpenBSD: ip_carp.c,v 1.228 2014/04/21 12:22:26 henning Exp $	*/
 
 /*
  * Copyright (c) 2002 Michael Shalayeff. All rights reserved.
@@ -1133,7 +1133,7 @@ carp_send_ad(void *v)
 		len = sizeof(*ip) + sizeof(ch);
 		m->m_pkthdr.len = len;
 		m->m_pkthdr.rcvif = NULL;
-		m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
+		m->m_pkthdr.ph_rtableid = sc->sc_if.if_rdomain;
 		m->m_pkthdr.pf.prio = CARP_IFQ_PRIO;
 		m->m_len = len;
 		MH_ALIGN(m, m->m_len);
@@ -1175,7 +1175,7 @@ carp_send_ad(void *v)
 		carpstats.carps_opackets++;
 
 		error = ip_output(m, NULL, NULL, IP_RAWOUTPUT, &sc->sc_imo,
-		    NULL);
+		    NULL, 0);
 		if (error) {
 			if (error == ENOBUFS)
 				carpstats.carps_onomem++;
@@ -1225,7 +1225,7 @@ carp_send_ad(void *v)
 		m->m_pkthdr.len = len;
 		m->m_pkthdr.rcvif = NULL;
 		m->m_pkthdr.pf.prio = CARP_IFQ_PRIO;
-		m->m_pkthdr.rdomain = sc->sc_if.if_rdomain;
+		m->m_pkthdr.ph_rtableid = sc->sc_if.if_rdomain;
 		m->m_len = len;
 		MH_ALIGN(m, m->m_len);
 		m->m_flags |= M_MCAST;
@@ -1519,20 +1519,19 @@ carp_ourether(void *v, u_int8_t *ena)
 	return (NULL);
 }
 
-void
-carp_rewrite_lladdr(struct ifnet *ifp, u_int8_t *s_enaddr)
+u_char *
+carp_get_srclladdr(struct ifnet *ifp, u_char *esrc)
 {
 	struct carp_softc *sc = ifp->if_softc;
 
 	if (sc->sc_balancing != CARP_BAL_IPSTEALTH &&
 	    sc->sc_balancing != CARP_BAL_IP && sc->cur_vhe) {
 		if (sc->cur_vhe->vhe_leader)
-			bcopy((caddr_t)sc->sc_ac.ac_enaddr,
-			    (caddr_t)s_enaddr, ETHER_ADDR_LEN);
+			return (sc->sc_ac.ac_enaddr);
 		else
-			bcopy((caddr_t)sc->cur_vhe->vhe_enaddr,
-			    (caddr_t)s_enaddr, ETHER_ADDR_LEN);
+			return (sc->cur_vhe->vhe_enaddr);
 	}
+	return (esrc);
 }
 
 int

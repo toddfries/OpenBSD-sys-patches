@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_hibernate.c,v 1.86 2014/03/21 21:39:36 miod Exp $	*/
+/*	$OpenBSD: subr_hibernate.c,v 1.88 2014/04/20 14:02:57 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -1640,7 +1640,7 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
     struct hibernate_disk_chunk *chunks)
 {
 	paddr_t img_index, img_cur, r1s, r1e, r2s, r2e;
-	paddr_t copy_start, copy_end, piglet_cur;
+	paddr_t copy_start, copy_end;
 	paddr_t piglet_base = hib->piglet_pa;
 	paddr_t piglet_end = piglet_base + HIBERNATE_CHUNK_SIZE;
 	daddr_t blkctr;
@@ -1748,7 +1748,6 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
 	 * Prepare the final output chunk list. Calculate an output
 	 * inflate strategy for overlapping chunks if needed.
 	 */
-	img_index = pig_start;
 	for (i = 0; i < nochunks ; i++) {
 		/*
 		 * If a conflict is detected, consume enough compressed
@@ -1757,26 +1756,19 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
 		if (chunks[ochunks[i]].flags & HIBERNATE_CHUNK_CONFLICT) {
 			copy_start = piglet_base;
 			copy_end = piglet_end;
-			piglet_cur = piglet_base;
 			npchunks = 0;
 			j = i;
 
 			while (copy_start < copy_end && j < nochunks) {
-				piglet_cur +=
-				    chunks[ochunks[j]].compressed_size;
 				pchunks[npchunks] = ochunks[j];
 				npchunks++;
 				copy_start +=
 				    chunks[ochunks[j]].compressed_size;
-				img_index += chunks[ochunks[j]].compressed_size;
 				i++;
 				j++;
 			}
 
-			piglet_cur = piglet_base;
 			for (j = 0; j < npchunks; j++) {
-				piglet_cur +=
-				    chunks[pchunks[j]].compressed_size;
 				fchunks[nfchunks] = pchunks[j];
 				chunks[pchunks[j]].flags |=
 				    HIBERNATE_CHUNK_USED;
@@ -1793,14 +1785,7 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
 				    HIBERNATE_CHUNK_USED;
 				nfchunks++;
 			}
-			img_index += chunks[ochunks[i]].compressed_size;
 		}
-	}
-
-	img_index = pig_start;
-	for (i = 0; i < nfchunks; i++) {
-		piglet_cur = piglet_base;
-		img_index += chunks[fchunks[i]].compressed_size;
 	}
 
 	img_cur = pig_start;

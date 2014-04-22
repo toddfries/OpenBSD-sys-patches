@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.34 2014/03/26 05:23:42 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.36 2014/04/18 11:51:16 guenther Exp $	*/
 
 /*
  * Copyright (c) 2005 Michael Shalayeff
@@ -27,7 +27,7 @@
 #include <sys/signalvar.h>
 #include <sys/user.h>
 
-#include <uvm/uvm.h>
+#include <uvm/uvm_extern.h>
 
 #include <machine/autoconf.h>
 #include <machine/cpufunc.h>
@@ -211,6 +211,9 @@ trap(int type, struct trapframe *frame)
 		mtctl(frame->tf_eiem, CR_EIEM);
 	        ssm(PSL_I, mask);
 	}
+
+	if (type & T_USER)
+		refreshcreds(p);
 
 	switch (type) {
 	case T_NONEXIST:

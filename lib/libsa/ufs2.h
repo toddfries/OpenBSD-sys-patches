@@ -1,9 +1,6 @@
-/*	$OpenBSD: altq.h,v 1.9 2011/10/07 17:10:08 henning Exp $	*/
-/*	$KAME: altq.h,v 1.6 2000/12/14 08:12:45 thorpej Exp $	*/
-
-/*
- * Copyright (C) 1998-2000
- *	Sony Computer Science Laboratories Inc.  All rights reserved.
+/*-
+ * Copyright (c) 1993
+ *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -13,11 +10,14 @@
  * 2. Redistributions in binary form must reproduce the above copyright
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
+ * 3. Neither the name of the University nor the names of its contributors
+ *    may be used to endorse or promote products derived from this software
+ *    without specific prior written permission.
  *
- * THIS SOFTWARE IS PROVIDED BY SONY CSL AND CONTRIBUTORS ``AS IS'' AND
+ * THIS SOFTWARE IS PROVIDED BY THE REGENTS AND CONTRIBUTORS ``AS IS'' AND
  * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED.  IN NO EVENT SHALL SONY CSL OR CONTRIBUTORS BE LIABLE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL THE REGENTS OR CONTRIBUTORS BE LIABLE
  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
  * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
@@ -25,37 +25,14 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ *	@(#)ufs.h	8.1 (Berkeley) 6/11/93
  */
 
-#ifndef _ALTQ_ALTQ_H_
-#define	_ALTQ_ALTQ_H_
-
-/* altq discipline type */
-#define	ALTQT_NONE		 0	/* reserved */
-#define	ALTQT_CBQ		 1	/* cbq */
-#define	ALTQT_HFSC		 8	/* hfsc */
-#define	ALTQT_PRIQ		11	/* priority queue */
-#define	ALTQT_MAX		12	/* should be max discipline type + 1 */
-
-/* simple token bucket meter profile */
-struct oldtb_profile {
-	u_int	rate;	/* rate in bit-per-sec */
-	u_int	depth;	/* depth in bytes */
-};
-
-/*
- * generic packet counter
- */
-struct pktcntr {
-	u_int64_t	packets;
-	u_int64_t	bytes;
-};
-
-#define	PKTCNTR_ADD(cntr, len)	\
-	do { (cntr)->packets++; (cntr)->bytes += len; } while (0)
-
-#ifdef _KERNEL
-#include <altq/altq_var.h>
-#endif
-
-#endif /* _ALTQ_ALTQ_H_ */
+int	ufs2_open(char *, struct open_file *);
+int	ufs2_close(struct open_file *);
+int	ufs2_read(struct open_file *, void *, size_t, size_t *);
+int	ufs2_write(struct open_file *, void *, size_t, size_t *);
+int	ufs2_stat(struct open_file *, struct stat *);
+int	ufs2_readdir(struct open_file *, char *);
+off_t	ufs2_seek(struct open_file *, off_t, int);

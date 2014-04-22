@@ -1,4 +1,4 @@
-/*	$OpenBSD: mpii.c,v 1.89 2014/03/27 12:19:55 dlg Exp $	*/
+/*	$OpenBSD: mpii.c,v 1.92 2014/04/10 01:28:32 dlg Exp $	*/
 /*
  * Copyright (c) 2010, 2012 Mike Belopuhov
  * Copyright (c) 2009 James Giannoules
@@ -290,7 +290,6 @@ void		mpii_scsi_cmd_tmo(void *);
 void		mpii_scsi_cmd_tmo_handler(void *, void *);
 void		mpii_scsi_cmd_tmo_done(struct mpii_ccb *);
 
-int		mpii_alloc_dev(struct mpii_softc *);
 int		mpii_insert_dev(struct mpii_softc *, struct mpii_device *);
 int		mpii_remove_dev(struct mpii_softc *, struct mpii_device *);
 struct mpii_device *
@@ -554,7 +553,9 @@ mpii_attach(struct device *parent, struct device *self, void *aux)
 		}
 	}
 
-	if (mpii_alloc_dev(sc) != 0) {
+	sc->sc_devs = malloc(sc->sc_max_devices *
+	    sizeof(struct mpii_device *), M_DEVBUF, M_NOWAIT | M_ZERO);
+	if (sc->sc_devs == NULL) {
 		printf("%s: unable to allocate memory for mpii_device\n",
 		    DEVNAME(sc));
 		goto free_queues;
@@ -562,7 +563,7 @@ mpii_attach(struct device *parent, struct device *self, void *aux)
 
 	if (mpii_portenable(sc) != 0) {
 		printf("%s: unable to enable port\n", DEVNAME(sc));
-		goto free_dev;
+		goto free_devs;
 	}
 
 	/* we should be good to go now, attach scsibus */
@@ -577,10 +578,10 @@ mpii_attach(struct device *parent, struct device *self, void *aux)
 	memset(&saa, 0, sizeof(saa));
 	saa.saa_sc_link = &sc->sc_link;
 
-	sc->sc_ih = pci_intr_establish(sc->sc_pc, ih, IPL_BIO | IPL_MPSAFE,
+	sc->sc_ih = pci_intr_establish(sc->sc_pc, ih, IPL_BIO,
 	    mpii_intr, sc, sc->sc_dev.dv_xname);
 	if (sc->sc_ih == NULL)
-		goto free_dev;
+		goto free_devs;
 
 	/* config_found() returns the scsibus attached to us */
 	sc->sc_scsibus = (struct scsibus_softc *) config_found(&sc->sc_dev,
@@ -607,9 +608,9 @@ mpii_attach(struct device *parent, struct device *self, void *aux)
 
 	return;
 
-free_dev:
-	if (sc->sc_devs)
-		free(sc->sc_devs, M_DEVBUF);
+free_devs:
+	free(sc->sc_devs, M_DEVBUF);
+	sc->sc_devs = NULL;
 
 free_queues:
 	bus_dmamap_sync(sc->sc_dmat, MPII_DMA_MAP(sc->sc_reply_freeq),
@@ -1611,12 +1612,13 @@ mpii_event_raid(struct mpii_softc *sc, struct mpii_msg_event_reply *enp)
 	int					i;
 
 	ccl = (struct mpii_evt_ir_cfg_change_list *)(enp + 1);
-
 	if (ccl->num_elements == 0)
 		return;
-	if (ISSET(lemtoh32(&ccl->flags), MPII_EVT_IR_CFG_CHANGE_LIST_FOREIGN))
+
+	if (ISSET(lemtoh32(&ccl->flags), MPII_EVT_IR_CFG_CHANGE_LIST_FOREIGN)) {
 		/* bail on foreign configurations */
 		return;
+	}
 
 	ce = (struct mpii_evt_ir_cfg_element *)(ccl + 1);
 
@@ -1756,7 +1758,7 @@ mpii_event_sas(void *xsc, void *x)
 
 			mpii_remove_dev(sc, dev);
 			mpii_sas_remove_device(sc, dev->dev_handle);
-			if (sc->sc_scsibus != NULL && 
+			if (sc->sc_scsibus != NULL &&
 			    !ISSET(dev->flags, MPII_DF_HIDDEN)) {
 				scsi_activate(sc->sc_scsibus, dev->slot, -1,
 				    DVACT_DEACTIVATE);
@@ -1765,6 +1767,7 @@ mpii_event_sas(void *xsc, void *x)
 			}
 
 			free(dev, M_DEVBUF);
+			break;
 		}
 	}
 
@@ -2245,7 +2248,7 @@ mpii_dmamem_alloc(struct mpii_softc *sc, size_t size)
 
 	mdm = malloc(sizeof(*mdm), M_DEVBUF, M_NOWAIT | M_ZERO);
 	if (mdm == NULL)
-	return (NULL);
+		return (NULL);
 
 	mdm->mdm_size = size;
 
@@ -2292,28 +2295,22 @@ mpii_dmamem_free(struct mpii_softc *sc, struct mpii_dmamem *mdm)
 }
 
 int
-mpii_alloc_dev(struct mpii_softc *sc)
-{
-	sc->sc_devs = malloc(sc->sc_max_devices *
-	    sizeof(struct mpii_device *), M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (sc->sc_devs == NULL)
-		return (1);
-	return (0);
-}
-
-int
 mpii_insert_dev(struct mpii_softc *sc, struct mpii_device *dev)
 {
 	int slot = dev->slot;	/* initial hint */
 
-	if (!dev || slot < 0)
+	if (dev == NULL || slot < 0)
 		return (1);
+
 	while (slot < sc->sc_max_devices && sc->sc_devs[slot] != NULL)
 		slot++;
+
 	if (slot >= sc->sc_max_devices)
 		return (1);
+
 	dev->slot = slot;
 	sc->sc_devs[slot] = dev;
+
 	return (0);
 }
 
@@ -2322,14 +2319,19 @@ mpii_remove_dev(struct mpii_softc *sc, struct mpii_device *dev)
 {
 	int			i;
 
-	if (!dev)
+	if (dev == NULL)
 		return (1);
-	for (i = 0; i < sc->sc_max_devices;  i++)
-		if (sc->sc_devs[i] &&
-		    sc->sc_devs[i]->dev_handle == dev->dev_handle) {
+
+	for (i = 0; i < sc->sc_max_devices; i++) {
+		if (sc->sc_devs[i] == NULL)
+			continue;
+
+		if (sc->sc_devs[i]->dev_handle == dev->dev_handle) {
 			sc->sc_devs[i] = NULL;
 			return (0);
 		}
+	}
+
 	return (1);
 }
 
@@ -2338,9 +2340,14 @@ mpii_find_dev(struct mpii_softc *sc, u_int16_t handle)
 {
 	int			i;
 
-	for (i = 0; i < sc->sc_max_devices;  i++)
-		if (sc->sc_devs[i] && sc->sc_devs[i]->dev_handle == handle)
+	for (i = 0; i < sc->sc_max_devices; i++) {
+		if (sc->sc_devs[i] == NULL)
+			continue;
+
+		if (sc->sc_devs[i]->dev_handle == handle)
 			return (sc->sc_devs[i]);
+	}
+
 	return (NULL);
 }
 
@@ -2717,6 +2724,7 @@ mpii_scsi_cmd(struct scsi_xfer *xs)
 	ccb->ccb_dev_handle = dev->dev_handle;
 
 	io = ccb->ccb_cmd;
+	memset(io, 0, sizeof(*io));
 	io->function = MPII_FUNCTION_SCSI_IO_REQUEST;
 	io->sense_buffer_length = sizeof(xs->sense);
 	io->sgl_offset0 = sizeof(struct mpii_msg_scsi_io) / 4;
@@ -2733,6 +2741,7 @@ mpii_scsi_cmd(struct scsi_xfer *xs)
 		break;
 	default:
 		io->direction = MPII_SCSIIO_DIR_NONE;
+		break;
 	}
 
 	io->tagging = MPII_SCSIIO_ATTR_SIMPLE_Q;
@@ -2906,6 +2915,7 @@ mpii_scsi_cmd_done(struct mpii_ccb *ccb)
 			break;
 		}
 		break;
+
 	case MPII_IOCSTATUS_SUCCESS:
 	case MPII_IOCSTATUS_SCSI_RECOVERED_ERROR:
 		switch (xs->status) {
