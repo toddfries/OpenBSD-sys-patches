@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.124 2014/03/25 20:27:37 mpi Exp $ */
+/*	$OpenBSD: ohci.c,v 1.127 2014/04/29 21:51:18 mpi Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -37,8 +37,9 @@
 #include <sys/malloc.h>
 #include <sys/kernel.h>
 #include <sys/device.h>
-#include <sys/selinfo.h>
 #include <sys/queue.h>
+#include <sys/timeout.h>
+#include <sys/pool.h>
 
 #include <machine/bus.h>
 #include <machine/endian.h>
@@ -47,7 +48,6 @@
 #include <dev/usb/usbdi.h>
 #include <dev/usb/usbdivar.h>
 #include <dev/usb/usb_mem.h>
-#include <dev/usb/usb_quirks.h>
 
 #include <dev/usb/ohcireg.h>
 #include <dev/usb/ohcivar.h>
@@ -66,10 +66,7 @@ int ohcidebug = 0;
 #define DPRINTFN(n,x)
 #endif
 
-/*
- * The OHCI controller is little endian, so on big endian machines
- * the data stored in memory needs to be swapped.
- */
+struct pool *ohcixfer;
 
 struct ohci_pipe;
 
@@ -728,7 +725,16 @@ ohci_init(struct ohci_softc *sc)
 	for (i = 0; i < OHCI_HASH_SIZE; i++)
 		LIST_INIT(&sc->sc_hash_itds[i]);
 
-	SIMPLEQ_INIT(&sc->sc_free_xfers);
+	if (ohcixfer == NULL) {
+		ohcixfer = malloc(sizeof(struct pool), M_DEVBUF, M_NOWAIT);
+		if (ohcixfer == NULL) {
+			printf("%s: unable to allocate pool descriptor\n",
+			    sc->sc_bus.bdev.dv_xname);
+			return (ENOMEM);
+		}
+		pool_init(ohcixfer, sizeof(struct ohci_xfer), 0, 0, 0,
+		    "ohcixfer", NULL);
+	}
 
 	/* XXX determine alignment by R/W */
 	/* Allocate the HCCA area. */
@@ -940,44 +946,30 @@ ohci_init(struct ohci_softc *sc)
 struct usbd_xfer *
 ohci_allocx(struct usbd_bus *bus)
 {
-	struct ohci_softc *sc = (struct ohci_softc *)bus;
-	struct usbd_xfer *xfer;
+	struct ohci_xfer *ox;
 
-	xfer = SIMPLEQ_FIRST(&sc->sc_free_xfers);
-	if (xfer != NULL) {
-		SIMPLEQ_REMOVE_HEAD(&sc->sc_free_xfers, next);
+	ox = pool_get(ohcixfer, PR_NOWAIT | PR_ZERO);
 #ifdef DIAGNOSTIC
-		if (xfer->busy_free != XFER_FREE) {
-			printf("ohci_allocx: xfer=%p not free, 0x%08x\n", xfer,
-			       xfer->busy_free);
-		}
-#endif
-	} else {
-		xfer = malloc(sizeof(struct ohci_xfer), M_USB, M_NOWAIT);
+	if (ox != NULL) {
+		ox->xfer.busy_free = XFER_BUSY;
 	}
-	if (xfer != NULL) {
-		memset(xfer, 0, sizeof (struct ohci_xfer));
-#ifdef DIAGNOSTIC
-		xfer->busy_free = XFER_BUSY;
 #endif
-	}
-	return (xfer);
+	return ((struct usbd_xfer *)ox);
 }
 
 void
 ohci_freex(struct usbd_bus *bus, struct usbd_xfer *xfer)
 {
-	struct ohci_softc *sc = (struct ohci_softc *)bus;
+	struct ohci_xfer *ox = (struct ohci_xfer*)xfer;
 
 #ifdef DIAGNOSTIC
 	if (xfer->busy_free != XFER_BUSY) {
-		printf("ohci_freex: xfer=%p not busy, 0x%08x\n", xfer,
-		       xfer->busy_free);
+		printf("%s: xfer=%p not busy, 0x%08x\n", __func__, xfer,
+		    xfer->busy_free);
 		return;
 	}
-	xfer->busy_free = XFER_FREE;
 #endif
-	SIMPLEQ_INSERT_HEAD(&sc->sc_free_xfers, xfer, next);
+	pool_put(ohcixfer, ox);
 }
 
 #ifdef OHCI_DEBUG
@@ -1450,8 +1442,8 @@ ohci_device_ctrl_done(struct usbd_xfer *xfer)
 void
 ohci_device_intr_done(struct usbd_xfer *xfer)
 {
-	struct ohci_pipe *opipe = (struct ohci_pipe *)xfer->pipe;
 	struct ohci_softc *sc = (struct ohci_softc *)xfer->device->bus;
+	struct ohci_pipe *opipe = (struct ohci_pipe *)xfer->pipe;
 	struct ohci_soft_ed *sed = opipe->sed;
 	struct ohci_soft_td *data, *tail;
 
@@ -1594,10 +1586,9 @@ ohci_poll(struct usbd_bus *bus)
 usbd_status
 ohci_device_request(struct usbd_xfer *xfer)
 {
+	struct ohci_softc *sc = (struct ohci_softc *)xfer->device->bus;
 	struct ohci_pipe *opipe = (struct ohci_pipe *)xfer->pipe;
 	usb_device_request_t *req = &xfer->request;
-	struct usbd_device *dev = xfer->device;
-	struct ohci_softc *sc = (struct ohci_softc *)dev->bus;
 	struct ohci_soft_td *setup, *stat, *next, *tail;
 	struct ohci_soft_ed *sed;
 	int isread;
@@ -1611,8 +1602,8 @@ ohci_device_request(struct usbd_xfer *xfer)
 	DPRINTFN(3,("ohci_device_control type=0x%02x, request=0x%02x, "
 		    "wValue=0x%04x, wIndex=0x%04x len=%u, addr=%d, endpt=%d\n",
 		    req->bmRequestType, req->bRequest, UGETW(req->wValue),
-		    UGETW(req->wIndex), len, dev->address,
-		    opipe->pipe.endpoint->edesc->bEndpointAddress));
+		    UGETW(req->wIndex), len, xfer->device->address,
+		    xfer->pipe->endpoint->edesc->bEndpointAddress));
 
 	setup = opipe->tail.td;
 	stat = ohci_alloc_std(sc);
@@ -1935,14 +1926,12 @@ ohci_dump_ed(struct ohci_soft_ed *sed)
 usbd_status
 ohci_open(struct usbd_pipe *pipe)
 {
-	struct usbd_device *dev = pipe->device;
-	struct ohci_softc *sc = (struct ohci_softc *)dev->bus;
+	struct ohci_softc *sc = (struct ohci_softc *)pipe->device->bus;
 	usb_endpoint_descriptor_t *ed = pipe->endpoint->edesc;
 	struct ohci_pipe *opipe = (struct ohci_pipe *)pipe;
-	u_int8_t addr = dev->address;
 	u_int8_t xfertype = ed->bmAttributes & UE_XFERTYPE;
-	struct ohci_soft_ed *sed;
-	struct ohci_soft_td *std;
+	struct ohci_soft_ed *sed = NULL;
+	struct ohci_soft_td *std = NULL;
 	struct ohci_soft_itd *sitd;
 	ohci_physaddr_t tdphys;
 	u_int32_t fmt;
@@ -1951,13 +1940,10 @@ ohci_open(struct usbd_pipe *pipe)
 	int ival;
 
 	DPRINTFN(1, ("ohci_open: pipe=%p, addr=%d, endpt=%d\n",
-		     pipe, addr, ed->bEndpointAddress));
+		     pipe, pipe->device->address, ed->bEndpointAddress));
 
 	if (sc->sc_bus.dying)
 		return (USBD_IOERROR);
-
-	std = NULL;
-	sed = NULL;
 
 	/* Root Hub */
 	if (pipe->device->depth == 0) {
@@ -1996,9 +1982,10 @@ ohci_open(struct usbd_pipe *pipe)
 			fmt = OHCI_ED_FORMAT_GEN | OHCI_ED_DIR_TD;
 		}
 		sed->ed.ed_flags = htole32(
-			OHCI_ED_SET_FA(addr) |
+			OHCI_ED_SET_FA(pipe->device->address) |
 			OHCI_ED_SET_EN(UE_GET_ADDR(ed->bEndpointAddress)) |
-			(dev->speed == USB_SPEED_LOW ? OHCI_ED_SPEED : 0) |
+			(pipe->device->speed == USB_SPEED_LOW ?
+			     OHCI_ED_SPEED : 0) |
 			fmt | OHCI_ED_SET_MAXP(UGETW(ed->wMaxPacketSize)));
 		sed->ed.ed_headp = htole32(tdphys |
 		    (pipe->endpoint->savedtoggle ? OHCI_TOGGLECARRY : 0));
@@ -2071,7 +2058,7 @@ ohci_close_pipe(struct usbd_pipe *pipe, struct ohci_soft_ed *head)
 		       (int)letoh32(sed->ed.ed_tailp),
 		       pipe, std);
 #ifdef USB_DEBUG
-		usbd_dump_pipe(&opipe->pipe);
+		usbd_dump_pipe(pipe);
 #endif
 #ifdef OHCI_DEBUG
 		ohci_dump_ed(sed);
@@ -2628,8 +2615,7 @@ ohci_root_intr_transfer(struct usbd_xfer *xfer)
 usbd_status
 ohci_root_intr_start(struct usbd_xfer *xfer)
 {
-	struct usbd_pipe *pipe = xfer->pipe;
-	struct ohci_softc *sc = (struct ohci_softc *)pipe->device->bus;
+	struct ohci_softc *sc = (struct ohci_softc *)xfer->device->bus;
 
 	if (sc->sc_bus.dying)
 		return (USBD_IOERROR);
@@ -2979,14 +2965,11 @@ ohci_device_intr_start(struct usbd_xfer *xfer)
 	return (USBD_IN_PROGRESS);
 }
 
-/* Abort a device control request. */
 void
 ohci_device_intr_abort(struct usbd_xfer *xfer)
 {
-	if (xfer->pipe->intrxfer == xfer) {
-		DPRINTF(("ohci_device_intr_abort: remove\n"));
-		xfer->pipe->intrxfer = NULL;
-	}
+	KASSERT(xfer->pipe->intrxfer == xfer);
+
 	ohci_abort_xfer(xfer, USBD_CANCELLED);
 }
 

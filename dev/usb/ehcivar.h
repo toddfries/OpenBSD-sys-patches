@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehcivar.h,v 1.29 2014/03/25 20:27:37 mpi Exp $ */
+/*	$OpenBSD: ehcivar.h,v 1.31 2014/04/29 12:45:29 mpi Exp $ */
 /*	$NetBSD: ehcivar.h,v 1.19 2005/04/29 15:04:29 augustss Exp $	*/
 
 /*
@@ -91,8 +91,6 @@ struct ehci_xfer {
 #define EHCI_XFER_ABORTING	0x0001	/* xfer is aborting. */
 #define EHCI_XFER_ABORTWAIT	0x0002	/* abort completion is being awaited. */
 
-#define EXFER(xfer) ((struct ehci_xfer *)(xfer))
-
 /* Information about an entry in the interrupt list. */
 struct ehci_soft_islot {
 	struct ehci_soft_qh *sqh;	/* Queue Head. */
@@ -148,8 +146,6 @@ struct ehci_softc {
 
 	u_int32_t sc_eintrs;
 	struct ehci_soft_qh *sc_async_head;
-
-	SIMPLEQ_HEAD(, usbd_xfer) sc_free_xfers; /* free xfers */
 
 	struct rwlock sc_doorbell_lock;
 
