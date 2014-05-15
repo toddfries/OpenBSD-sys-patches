@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.149 2014/04/29 14:11:23 mpi Exp $ */
+/*	$OpenBSD: ehci.c,v 1.153 2014/05/09 11:01:06 mpi Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -176,9 +176,8 @@ void		ehci_free_sqh(struct ehci_softc *, struct ehci_soft_qh *);
 
 struct ehci_soft_qtd *ehci_alloc_sqtd(struct ehci_softc *);
 void		ehci_free_sqtd(struct ehci_softc *, struct ehci_soft_qtd *);
-usbd_status	ehci_alloc_sqtd_chain(struct ehci_pipe *,
-		    struct ehci_softc *, u_int, int, struct usbd_xfer *,
-		    struct ehci_soft_qtd **, struct ehci_soft_qtd **);
+usbd_status	ehci_alloc_sqtd_chain(struct ehci_softc *, u_int,
+		    struct usbd_xfer *, struct ehci_soft_qtd **, struct ehci_soft_qtd **);
 void		ehci_free_sqtd_chain(struct ehci_softc *, struct ehci_xfer *);
 
 struct ehci_soft_itd *ehci_alloc_itd(struct ehci_softc *sc);
@@ -218,8 +217,6 @@ void		ehci_dump_itd(struct ehci_soft_itd *);
 void		ehci_dump_exfer(struct ehci_xfer *);
 #endif
 #endif
-
-#define EHCI_NULL htole32(EHCI_LINK_TERMINATE)
 
 #define EHCI_INTR_ENDPT 1
 
@@ -380,7 +377,7 @@ ehci_init(struct ehci_softc *sc)
 	sc->sc_flist = KERNADDR(&sc->sc_fldma, 0);
 
 	for (i = 0; i < sc->sc_flsize; i++)
-		sc->sc_flist[i] = EHCI_NULL;
+		sc->sc_flist[i] = htole32(EHCI_LINK_TERMINATE);
 
 	EOWRITE4(sc, EHCI_PERIODICLISTBASE, DMAADDR(&sc->sc_fldma, 0));
 
@@ -413,7 +410,7 @@ ehci_init(struct ehci_softc *sc)
 		sqh = sc->sc_islots[i].sqh;
 		if (i == 0) {
 			/* The last (1ms) QH terminates. */
-			sqh->qh.qh_link = EHCI_NULL;
+			sqh->qh.qh_link = htole32(EHCI_LINK_TERMINATE);
 			sqh->next = NULL;
 		} else {
 			/* Otherwise the next QH has half the poll interval */
@@ -423,9 +420,9 @@ ehci_init(struct ehci_softc *sc)
 		}
 		sqh->qh.qh_endp = htole32(EHCI_QH_SET_EPS(EHCI_QH_SPEED_HIGH));
 		sqh->qh.qh_endphub = htole32(EHCI_QH_SET_MULT(1));
-		sqh->qh.qh_curqtd = EHCI_NULL;
-		sqh->qh.qh_qtd.qtd_next = EHCI_NULL;
-		sqh->qh.qh_qtd.qtd_altnext = EHCI_NULL;
+		sqh->qh.qh_curqtd = htole32(EHCI_LINK_TERMINATE);
+		sqh->qh.qh_qtd.qtd_next = htole32(EHCI_LINK_TERMINATE);
+		sqh->qh.qh_qtd.qtd_altnext = htole32(EHCI_LINK_TERMINATE);
 		sqh->qh.qh_qtd.qtd_status = htole32(EHCI_QTD_HALTED);
 		sqh->sqtd = NULL;
 		usb_syncmem(&sqh->dma, sqh->offs, sizeof(sqh->qh),
@@ -451,12 +448,12 @@ ehci_init(struct ehci_softc *sc)
 	    htole32(EHCI_QH_SET_EPS(EHCI_QH_SPEED_HIGH) | EHCI_QH_HRECL);
 	sqh->qh.qh_link =
 	    htole32(sqh->physaddr | EHCI_LINK_QH);
-	sqh->qh.qh_curqtd = EHCI_NULL;
+	sqh->qh.qh_curqtd = htole32(EHCI_LINK_TERMINATE);
 	sqh->prev = sqh; /*It's a circular list.. */
 	sqh->next = sqh;
 	/* Fill the overlay qTD */
-	sqh->qh.qh_qtd.qtd_next = EHCI_NULL;
-	sqh->qh.qh_qtd.qtd_altnext = EHCI_NULL;
+	sqh->qh.qh_qtd.qtd_next = htole32(EHCI_LINK_TERMINATE);
+	sqh->qh.qh_qtd.qtd_altnext = htole32(EHCI_LINK_TERMINATE);
 	sqh->qh.qh_qtd.qtd_status = htole32(EHCI_QTD_HALTED);
 	sqh->sqtd = NULL;
 	usb_syncmem(&sqh->dma, sqh->offs, sizeof(sqh->qh),
@@ -909,7 +906,7 @@ ehci_idone(struct ehci_xfer *ex)
 
 		status = nstatus;
 		/* halt is ok if descriptor is last, and complete */
-		if (sqtd->qtd.qtd_next == EHCI_NULL &&
+		if (sqtd->qtd.qtd_next == htole32(EHCI_LINK_TERMINATE) &&
 		    EHCI_QTD_GET_BYTES(status) == 0)
 			status &= ~EHCI_QTD_HALTED;
 		if (EHCI_QTD_GET_PID(status) !=	EHCI_QTD_PID_SETUP)
@@ -1537,10 +1534,10 @@ ehci_open(struct usbd_pipe *pipe)
 		    EHCI_QH_SET_CMASK(0x1c) | /* XXX */
 		    EHCI_QH_SET_SMASK(xfertype == UE_INTERRUPT ? 0x01 : 0)
 		    );
-		sqh->qh.qh_curqtd = EHCI_NULL;
+		sqh->qh.qh_curqtd = htole32(EHCI_LINK_TERMINATE);
 		/* Fill the overlay qTD */
-		sqh->qh.qh_qtd.qtd_next = EHCI_NULL;
-		sqh->qh.qh_qtd.qtd_altnext = EHCI_NULL;
+		sqh->qh.qh_qtd.qtd_next = htole32(EHCI_LINK_TERMINATE);
+		sqh->qh.qh_qtd.qtd_altnext = htole32(EHCI_LINK_TERMINATE);
 		sqh->qh.qh_qtd.qtd_status =
 		    htole32(EHCI_QTD_SET_TOGGLE(pipe->endpoint->savedtoggle));
 
@@ -1683,7 +1680,7 @@ ehci_set_qh_qtd(struct ehci_soft_qh *sqh, struct ehci_soft_qtd *sqtd)
 	    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
 	sqh->qh.qh_curqtd = 0;
 	sqh->qh.qh_qtd.qtd_next = htole32(sqtd->physaddr);
-	sqh->qh.qh_qtd.qtd_altnext = EHCI_NULL;
+	sqh->qh.qh_qtd.qtd_altnext = htole32(EHCI_LINK_TERMINATE);
 	for (i = 0; i < EHCI_QTD_NBUFFERS; i++)
 		sqh->qh.qh_qtd.qtd_buffer[i] = 0;
 	sqh->sqtd = sqtd;
@@ -2308,8 +2305,7 @@ ehci_root_intr_transfer(struct usbd_xfer *xfer)
 usbd_status
 ehci_root_intr_start(struct usbd_xfer *xfer)
 {
-	struct usbd_pipe *pipe = xfer->pipe;
-	struct ehci_softc *sc = (struct ehci_softc *)pipe->device->bus;
+	struct ehci_softc *sc = (struct ehci_softc *)xfer->device->bus;
 
 	if (sc->sc_bus.dying)
 		return (USBD_IOERROR);
@@ -2319,39 +2315,29 @@ ehci_root_intr_start(struct usbd_xfer *xfer)
 	return (USBD_IN_PROGRESS);
 }
 
-/* Abort a root interrupt request. */
 void
 ehci_root_intr_abort(struct usbd_xfer *xfer)
 {
+	struct ehci_softc *sc = (struct ehci_softc *)xfer->device->bus;
 	int s;
 
-	if (xfer->pipe->intrxfer == xfer) {
-		DPRINTF(("ehci_root_intr_abort: remove\n"));
-		xfer->pipe->intrxfer = NULL;
-	}
+	sc->sc_intrxfer = NULL;
+
 	xfer->status = USBD_CANCELLED;
 	s = splusb();
 	usb_transfer_complete(xfer);
 	splx(s);
 }
 
-/* Close the root pipe. */
 void
 ehci_root_intr_close(struct usbd_pipe *pipe)
 {
-	struct ehci_softc *sc = (struct ehci_softc *)pipe->device->bus;
-
-	DPRINTF(("ehci_root_intr_close\n"));
-
-	sc->sc_intrxfer = NULL;
 }
 
 void
 ehci_root_ctrl_done(struct usbd_xfer *xfer)
 {
 }
-
-/************************/
 
 struct ehci_soft_qh *
 ehci_alloc_sqh(struct ehci_softc *sc)
@@ -2450,15 +2436,15 @@ ehci_free_sqtd(struct ehci_softc *sc, struct ehci_soft_qtd *sqtd)
 }
 
 usbd_status
-ehci_alloc_sqtd_chain(struct ehci_pipe *epipe, struct ehci_softc *sc,
-    u_int alen, int rd, struct usbd_xfer *xfer, struct ehci_soft_qtd **sp,
-    struct ehci_soft_qtd **ep)
+ehci_alloc_sqtd_chain(struct ehci_softc *sc, u_int alen, struct usbd_xfer *xfer,
+    struct ehci_soft_qtd **sp, struct ehci_soft_qtd **ep)
 {
 	struct ehci_soft_qtd *next, *cur;
 	ehci_physaddr_t dataphys, dataphyspage, dataphyslastpage, nextphys;
 	u_int32_t qtdstatus;
 	u_int len, curlen;
 	int mps, i, iscontrol, forceshort;
+	int rd = usbd_xfer_isread(xfer);
 	struct usb_dma *dma = &xfer->dmabuf;
 
 	DPRINTFN(alen<4*4096,("ehci_alloc_sqtd_chain: start len=%d\n", alen));
@@ -2537,7 +2523,7 @@ ehci_alloc_sqtd_chain(struct ehci_pipe *epipe, struct ehci_softc *sc,
 			nextphys = htole32(next->physaddr);
 		} else {
 			next = NULL;
-			nextphys = EHCI_NULL;
+			nextphys = htole32(EHCI_LINK_TERMINATE);
 		}
 
 		for (i = 0; i * EHCI_PAGE_SIZE <
@@ -2737,6 +2723,9 @@ ehci_abort_xfer(struct usbd_xfer *xfer, usbd_status status)
 		xfer->status = status;	/* make software ignore it */
 		timeout_del(&xfer->timeout_handle);
 		usb_rem_task(xfer->device, &xfer->abort_task);
+#ifdef DIAGNOSTIC
+		ex->isdone = 1;
+#endif
 		usb_transfer_complete(xfer);
 		splx(s);
 		return;
@@ -3041,18 +3030,14 @@ ehci_device_request(struct usbd_xfer *xfer)
 	usb_device_request_t *req = &xfer->request;
 	struct ehci_soft_qtd *setup, *stat, *next;
 	struct ehci_soft_qh *sqh;
-	int isread;
-	u_int len;
+	u_int len = UGETW(req->wLength);
 	usbd_status err;
 	int s;
-
-	isread = req->bmRequestType & UT_READ;
-	len = UGETW(req->wLength);
 
 	DPRINTFN(3,("ehci_device_request: type=0x%02x, request=0x%02x, "
 	    "wValue=0x%04x, wIndex=0x%04x len=%u, addr=%d, endpt=%d\n",
 	    req->bmRequestType, req->bRequest, UGETW(req->wValue),
-	    UGETW(req->wIndex), len, xfer->device->address,
+	    UGETW(req->wIndex), UGETW(req->wLength), xfer->device->address,
 	    xfer->pipe->endpoint->edesc->bEndpointAddress));
 
 	setup = ehci_alloc_sqtd(sc);
@@ -3073,8 +3058,7 @@ ehci_device_request(struct usbd_xfer *xfer)
 	if (len != 0) {
 		struct ehci_soft_qtd *end;
 
-		err = ehci_alloc_sqtd_chain(epipe, sc, len, isread, xfer,
-			  &next, &end);
+		err = ehci_alloc_sqtd_chain(sc, len, xfer, &next, &end);
 		if (err)
 			goto bad3;
 		end->qtd.qtd_status &= htole32(~EHCI_QTD_IOC);
@@ -3107,14 +3091,15 @@ ehci_device_request(struct usbd_xfer *xfer)
 
 	stat->qtd.qtd_status = htole32(
 	    EHCI_QTD_ACTIVE |
-	    EHCI_QTD_SET_PID(isread ? EHCI_QTD_PID_OUT : EHCI_QTD_PID_IN) |
+	    EHCI_QTD_SET_PID(usbd_xfer_isread(xfer) ?
+		EHCI_QTD_PID_OUT : EHCI_QTD_PID_IN) |
 	    EHCI_QTD_SET_CERR(3) |
 	    EHCI_QTD_SET_TOGGLE(1) |
 	    EHCI_QTD_IOC);
 	stat->qtd.qtd_buffer[0] = 0; /* XXX not needed? */
 	stat->qtd.qtd_buffer_hi[0] = 0; /* XXX not needed? */
 	stat->nextqtd = NULL;
-	stat->qtd.qtd_next = stat->qtd.qtd_altnext = EHCI_NULL;
+	stat->qtd.qtd_next = stat->qtd.qtd_altnext = htole32(EHCI_LINK_TERMINATE);
 	stat->len = 0;
 	usb_syncmem(&stat->dma, stat->offs, sizeof(stat->qtd),
 	    BUS_DMASYNC_PREWRITE | BUS_DMASYNC_PREREAD);
@@ -3198,8 +3183,6 @@ ehci_device_bulk_start(struct usbd_xfer *xfer)
 	struct ehci_soft_qtd *data, *dataend;
 	struct ehci_soft_qh *sqh;
 	usbd_status err;
-	u_int len;
-	int isread, endpt;
 	int s;
 
 	DPRINTFN(2, ("ehci_device_bulk_start: xfer=%p len=%u flags=%d\n",
@@ -3213,15 +3196,11 @@ ehci_device_bulk_start(struct usbd_xfer *xfer)
 		panic("ehci_device_bulk_start: a request");
 #endif
 
-	len = xfer->length;
-	endpt = xfer->pipe->endpoint->edesc->bEndpointAddress;
-	isread = UE_GET_DIR(endpt) == UE_DIR_IN;
 	sqh = epipe->sqh;
 
-	epipe->u.bulk.length = len;
+	epipe->u.bulk.length = xfer->length;
 
-	err = ehci_alloc_sqtd_chain(epipe, sc, len, isread, xfer, &data,
-	    &dataend);
+	err = ehci_alloc_sqtd_chain(sc, xfer->length, xfer, &data, &dataend);
 	if (err) {
 		DPRINTFN(-1,("ehci_device_bulk_start: no memory\n"));
 		xfer->status = err;
@@ -3302,8 +3281,6 @@ ehci_device_bulk_done(struct usbd_xfer *xfer)
 {
 	struct ehci_softc *sc = (struct ehci_softc *)xfer->device->bus;
 	struct ehci_xfer *ex = (struct ehci_xfer *)xfer;
-	int endpt = xfer->pipe->endpoint->edesc->bEndpointAddress;
-	int rd = UE_GET_DIR(endpt) == UE_DIR_IN;
 
 	DPRINTFN(10,("ehci_bulk_done: xfer=%p, actlen=%d\n",
 	    xfer, xfer->actlen));
@@ -3312,7 +3289,8 @@ ehci_device_bulk_done(struct usbd_xfer *xfer)
 		ehci_del_intr_list(sc, ex);	/* remove from active list */
 		ehci_free_sqtd_chain(sc, ex);
 		usb_syncmem(&xfer->dmabuf, 0, xfer->length,
-		    rd ? BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
+		    usbd_xfer_isread(xfer) ?
+		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
 	}
 
 	DPRINTFN(5, ("ehci_bulk_done: length=%d\n", xfer->actlen));
@@ -3368,8 +3346,6 @@ ehci_device_intr_start(struct usbd_xfer *xfer)
 	struct ehci_soft_qtd *data, *dataend;
 	struct ehci_soft_qh *sqh;
 	usbd_status err;
-	u_int len;
-	int isread, endpt;
 	int s;
 
 	DPRINTFN(2, ("ehci_device_intr_start: xfer=%p len=%u flags=%d\n",
@@ -3383,15 +3359,11 @@ ehci_device_intr_start(struct usbd_xfer *xfer)
 		panic("ehci_device_intr_start: a request");
 #endif
 
-	len = xfer->length;
-	endpt = xfer->pipe->endpoint->edesc->bEndpointAddress;
-	isread = UE_GET_DIR(endpt) == UE_DIR_IN;
 	sqh = epipe->sqh;
 
-	epipe->u.intr.length = len;
+	epipe->u.intr.length = xfer->length;
 
-	err = ehci_alloc_sqtd_chain(epipe, sc, len, isread, xfer, &data,
-	    &dataend);
+	err = ehci_alloc_sqtd_chain(sc, xfer->length, xfer, &data, &dataend);
 	if (err) {
 		DPRINTFN(-1, ("ehci_device_intr_start: no memory\n"));
 		xfer->status = err;
@@ -3474,8 +3446,7 @@ ehci_device_intr_done(struct usbd_xfer *xfer)
 	struct ehci_soft_qtd *data, *dataend;
 	struct ehci_soft_qh *sqh;
 	usbd_status err;
-	u_int len;
-	int isread, endpt, s;
+	int s;
 
 	DPRINTFN(10, ("ehci_device_intr_done: xfer=%p, actlen=%d\n",
 	    xfer, xfer->actlen));
@@ -3483,16 +3454,13 @@ ehci_device_intr_done(struct usbd_xfer *xfer)
 	if (xfer->pipe->repeat) {
 		ehci_free_sqtd_chain(sc, ex);
 
-		len = epipe->u.intr.length;
-		xfer->length = len;
-		endpt = xfer->pipe->endpoint->edesc->bEndpointAddress;
-		isread = UE_GET_DIR(endpt) == UE_DIR_IN;
-		usb_syncmem(&xfer->dmabuf, 0, len,
-		    isread ? BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
+		xfer->length = epipe->u.intr.length;
+		usb_syncmem(&xfer->dmabuf, 0, xfer->length,
+		    usbd_xfer_isread(xfer) ?
+		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
 		sqh = epipe->sqh;
 
-		err = ehci_alloc_sqtd_chain(epipe, sc, len, isread, xfer,
-		    &data, &dataend);
+		err = ehci_alloc_sqtd_chain(sc, xfer->length, xfer, &data, &dataend);
 		if (err) {
 			DPRINTFN(-1, ("ehci_device_intr_done: no memory\n"));
 			xfer->status = err;
@@ -3523,10 +3491,9 @@ ehci_device_intr_done(struct usbd_xfer *xfer)
 	} else if (xfer->status != USBD_NOMEM && ehci_active_intr_list(ex)) {
 		ehci_del_intr_list(sc, ex); /* remove from active list */
 		ehci_free_sqtd_chain(sc, ex);
-		endpt = xfer->pipe->endpoint->edesc->bEndpointAddress;
-		isread = UE_GET_DIR(endpt) == UE_DIR_IN;
 		usb_syncmem(&xfer->dmabuf, 0, xfer->length,
-		    isread ? BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
+		    usbd_xfer_isread(xfer) ?
+		    BUS_DMASYNC_POSTREAD : BUS_DMASYNC_POSTWRITE);
 	}
 }
 
@@ -3765,8 +3732,8 @@ ehci_device_isoc_start(struct usbd_xfer *xfer)
 		itd->itd.itd_next = sc->sc_flist[frindex];
 		if (itd->itd.itd_next == 0)
 			/* FIXME: frindex table gets initialized to NULL
-			 * or EHCI_NULL? */
-			itd->itd.itd_next = htole32(EHCI_NULL);
+			 * or htole32(EHCI_LINK_TERMINATE)? */
+			itd->itd.itd_next = htole32(htole32(EHCI_LINK_TERMINATE));
 
 		sc->sc_flist[frindex] = htole32(EHCI_LINK_ITD | itd->physaddr);
 		itd->u.frame_list.next = sc->sc_softitds[frindex];

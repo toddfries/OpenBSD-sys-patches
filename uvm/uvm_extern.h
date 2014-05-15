@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_extern.h,v 1.112 2014/04/03 21:40:10 tedu Exp $	*/
+/*	$OpenBSD: uvm_extern.h,v 1.115 2014/05/15 03:52:25 guenther Exp $	*/
 /*	$NetBSD: uvm_extern.h,v 1.57 2001/03/09 01:02:12 chs Exp $	*/
 
 /*
@@ -484,7 +484,6 @@ struct loadavg;
 struct proc;
 struct pmap;
 struct vmspace;
-struct vmtotal;
 struct mount;
 struct vnode;
 struct core;
@@ -513,9 +512,9 @@ int			uvm_fault(vm_map_t, vaddr_t,
 #if defined(KGDB)
 void			uvm_chgkprot(caddr_t, size_t, int);
 #endif
-void			uvm_fork(struct proc *, struct proc *, boolean_t,
-			    void *, size_t, void (*)(void *), void *);
-void			uvm_exit(struct proc *);
+vaddr_t			uvm_uarea_alloc(void);
+void			uvm_uarea_free(struct proc *);
+void			uvm_exit(struct process *);
 void			uvm_init_limits(struct proc *);
 boolean_t		uvm_kernacc(caddr_t, size_t, int);
 
@@ -668,16 +667,15 @@ struct vmspace		*uvmspace_alloc(vaddr_t, vaddr_t,
 void			uvmspace_init(struct vmspace *, struct pmap *,
 				vaddr_t, vaddr_t, boolean_t, boolean_t);
 void			uvmspace_exec(struct proc *, vaddr_t, vaddr_t);
-struct vmspace		*uvmspace_fork(struct vmspace *);
+struct vmspace		*uvmspace_fork(struct process *);
 void			uvmspace_free(struct vmspace *);
-void			uvmspace_share(struct proc *, struct proc *);
+struct vmspace		*uvmspace_share(struct process *);
 
 
 /* uvm_meter.c */
 void			uvm_meter(void);
 int			uvm_sysctl(int *, u_int, void *, size_t *, 
 				void *, size_t, struct proc *);
-void			uvm_total(struct vmtotal *);
 
 /* uvm_mmap.c */
 int			uvm_mmap(vm_map_t, vaddr_t *, vsize_t,

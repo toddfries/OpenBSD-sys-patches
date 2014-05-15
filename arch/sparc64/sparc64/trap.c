@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.81 2014/04/18 11:51:17 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.84 2014/05/11 00:12:44 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.73 2001/08/09 01:03:01 eeh Exp $ */
 
 /*
@@ -452,13 +452,8 @@ dopanic:
 
 	case T_AST:
 		p->p_md.md_astpending = 0;
-		if (p->p_flag & P_OWEUPC) {
-			KERNEL_LOCK();
-			ADDUPROF(p);
-			KERNEL_UNLOCK();
-		}
-		if (curcpu()->ci_want_resched)
-			preempt(NULL);
+		uvmexp.softs++;
+		mi_ast(p, curcpu()->ci_want_resched);
 		break;
 
 	case T_RWRET:
@@ -960,7 +955,7 @@ data_access_error(tf, type, afva, afsr, sfva, sfsr)
 
 			trap_trace_dis = 1; /* Disable traptrace for printf */
 			(void) splhigh();
-			panic("data fault: pc=%lx addr=%lx sfsr=%b",
+			panic("data fault: pc=%lx addr=%lx sfsr=%lb",
 				(u_long)pc, (long)sfva, sfsr, SFSR_BITS);
 			/* NOTREACHED */
 		}
@@ -970,7 +965,7 @@ data_access_error(tf, type, afva, afsr, sfva, sfsr)
 		 * cannot recover, so panic.
 		 */
 		if (afsr & ASFR_PRIV) {
-			panic("Privileged Async Fault: AFAR %p AFSR %lx\n%b",
+			panic("Privileged Async Fault: AFAR %p AFSR %lx\n%lb",
 				(void *)afva, afsr, afsr, AFSR_BITS);
 			/* NOTREACHED */
 		}
@@ -1134,7 +1129,8 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 		extern int trap_trace_dis;
 		trap_trace_dis = 1; /* Disable traptrace for printf */
 		(void) splhigh();
-		panic("kernel text error: pc=%lx sfsr=%b", pc, sfsr, SFSR_BITS);
+		panic("kernel text error: pc=%lx sfsr=%lb", pc,
+		    sfsr, SFSR_BITS);
 		/* NOTREACHED */
 	} else
 		p->p_md.md_tf = tf;
@@ -1168,7 +1164,7 @@ text_access_error(tf, type, pc, sfsr, afva, afsr)
 			extern int trap_trace_dis;
 			trap_trace_dis = 1; /* Disable traptrace for printf */
 			(void) splhigh();
-			panic("kernel text error: pc=%lx sfsr=%b", pc,
+			panic("kernel text error: pc=%lx sfsr=%lb", pc,
 			    sfsr, SFSR_BITS);
 			/* NOTREACHED */
 		}

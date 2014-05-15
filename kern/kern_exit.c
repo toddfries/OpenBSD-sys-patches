@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_exit.c,v 1.140 2014/04/18 11:51:17 guenther Exp $	*/
+/*	$OpenBSD: kern_exit.c,v 1.142 2014/05/15 04:43:25 guenther Exp $	*/
 /*	$NetBSD: kern_exit.c,v 1.39 1996/04/22 01:38:25 christos Exp $	*/
 
 /*
@@ -117,10 +117,6 @@ exit1(struct proc *p, int rv, int flags)
 	struct process *pr, *qr, *nqr;
 	struct rusage *rup;
 	struct vnode *ovp;
-
-	if (p->p_pid == 1)
-		panic("init died (signal %d, exit %d)",
-		    WTERMSIG(rv), WEXITSTATUS(rv));
 	
 	atomic_setbits_int(&p->p_flag, P_WEXIT);
 
@@ -139,6 +135,10 @@ exit1(struct proc *p, int rv, int flags)
 	}
 
 	if (flags == EXIT_NORMAL) {
+		if (pr->ps_pid == 1)
+			panic("init died (signal %d, exit %d)",
+			    WTERMSIG(rv), WEXITSTATUS(rv));
+
 		atomic_setbits_int(&pr->ps_flags, PS_EXITING);
 		pr->ps_mainproc->p_xstat = rv;
 
@@ -176,12 +176,10 @@ exit1(struct proc *p, int rv, int flags)
 	}
 	p->p_siglist = 0;
 
-	/*
-	 * Close open files and release open-file table.
-	 */
-	fdfree(p);
-
 	if ((p->p_flag & P_THREAD) == 0) {
+		/* close open files and release open-file table */
+		fdfree(p);
+
 		timeout_del(&pr->ps_realit_to);
 #ifdef SYSVSEM
 		semexit(pr);
@@ -241,6 +239,8 @@ exit1(struct proc *p, int rv, int flags)
 		if (pr->ps_pptr->ps_sigacts->ps_flags & SAS_NOCLDWAIT)
 			atomic_setbits_int(&pr->ps_flags, PS_NOZOMBIE);
 	}
+
+	p->p_fd = NULL;		/* zap the thread's copy */
 
 #if NSYSTRACE > 0
 	if (ISSET(p->p_flag, P_SYSTRACE))
@@ -331,7 +331,7 @@ exit1(struct proc *p, int rv, int flags)
 		ruadd(rup, &pr->ps_cru);
 
 		/* notify interested parties of our demise and clean up */
-		knote_processexit(pr);
+		knote_processexit(p);
 
 		/*
 		 * Notify parent that we're gone.  If we're not going to
@@ -446,13 +446,17 @@ reaper(void)
 		 * We must do this from a valid thread because doing
 		 * so may block.
 		 */
-		uvm_exit(p);
+		uvm_uarea_free(p);
+		p->p_vmspace = NULL;		/* zap the thread's copy */
 
 		if (p->p_flag & P_THREAD) {
 			/* Just a thread */
 			proc_free(p);
 		} else {
 			struct process *pr = p->p_p;
+
+			/* Release the rest of the process's vmspace */
+			uvm_exit(pr);
 
 			if ((pr->ps_flags & PS_NOZOMBIE) == 0) {
 				/* Process is now a true zombie. */

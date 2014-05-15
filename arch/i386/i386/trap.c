@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.114 2014/04/18 11:51:17 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.116 2014/05/11 00:12:44 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.95 1996/05/05 06:50:02 mycroft Exp $	*/
 
 /*-
@@ -335,13 +335,7 @@ trap(struct trapframe *frame)
 
 	case T_ASTFLT|T_USER:		/* Allow process switch */
 		uvmexp.softs++;
-		if (p->p_flag & P_OWEUPC) {
-			KERNEL_LOCK();
-			ADDUPROF(p);
-			KERNEL_UNLOCK();
-		}
-		if (want_resched)
-			preempt(NULL);
+		mi_ast(p, want_resched);
 		goto out;
 
 	case T_DNA|T_USER: {

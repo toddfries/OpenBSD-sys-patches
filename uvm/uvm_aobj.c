@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_aobj.c,v 1.61 2014/04/13 23:14:15 tedu Exp $	*/
+/*	$OpenBSD: uvm_aobj.c,v 1.64 2014/05/08 20:08:50 kettenis Exp $	*/
 /*	$NetBSD: uvm_aobj.c,v 1.39 2001/02/18 21:19:08 chs Exp $	*/
 
 /*
@@ -422,7 +422,8 @@ uao_shrink_flush(struct uvm_object *uobj, int startpg, int endpg)
 {
 	KASSERT(startpg < endpg);
 	KASSERT(uobj->uo_refs == 1);
-	uao_flush(uobj, startpg << PAGE_SHIFT, endpg << PAGE_SHIFT, PGO_FREE);
+	uao_flush(uobj, (voff_t)startpg << PAGE_SHIFT,
+	    (voff_t)endpg << PAGE_SHIFT, PGO_FREE);
 	uao_dropswap_range(uobj, startpg, endpg);
 }
 
@@ -431,6 +432,7 @@ uao_shrink_hash(struct uvm_object *uobj, int pages)
 {
 	struct uvm_aobj *aobj = (struct uvm_aobj *)uobj;
 	struct uao_swhash *new_swhash;
+	struct uao_swhash_elt *elt;
 	unsigned long new_hashmask;
 	int i;
 
@@ -441,6 +443,7 @@ uao_shrink_hash(struct uvm_object *uobj, int pages)
 	 * to adjust the page count.
 	 */
 	if (UAO_SWHASH_BUCKETS(aobj->u_pages) == UAO_SWHASH_BUCKETS(pages)) {
+		uao_shrink_flush(uobj, pages, aobj->u_pages);
 		aobj->u_pages = pages;
 		return 0;
 	}
@@ -456,8 +459,13 @@ uao_shrink_hash(struct uvm_object *uobj, int pages)
 	 * Even though the hash table size is changing, the hash of the buckets
 	 * we are interested in copying should not change.
 	 */
-	for (i = 0; i < UAO_SWHASH_BUCKETS(aobj->u_pages); i++)
-		LIST_FIRST(&new_swhash[i]) = LIST_FIRST(&aobj->u_swhash[i]);
+	for (i = 0; i < UAO_SWHASH_BUCKETS(aobj->u_pages); i++) {
+		while (LIST_EMPTY(&aobj->u_swhash[i]) == 0) {
+			elt = LIST_FIRST(&aobj->u_swhash[i]);
+			LIST_REMOVE(elt, list);
+			LIST_INSERT_HEAD(&new_swhash[i], elt, list);
+		}
+	}
 
 	free(aobj->u_swhash, M_UVMAOBJ);
 
@@ -609,7 +617,6 @@ uao_grow_hash(struct uvm_object *uobj, int pages)
 		return ENOMEM;
 
 	for (i = 0; i < UAO_SWHASH_BUCKETS(aobj->u_pages); i++) {
-		/* XXX pedro: shouldn't copying the list pointers be enough? */
 		while (LIST_EMPTY(&aobj->u_swhash[i]) == 0) {
 			elt = LIST_FIRST(&aobj->u_swhash[i]);
 			LIST_REMOVE(elt, list);
@@ -903,14 +910,14 @@ uao_flush(struct uvm_object *uobj, voff_t start, voff_t stop, int flags)
 
 	if (flags & PGO_ALLPAGES) {
 		start = 0;
-		stop = aobj->u_pages << PAGE_SHIFT;
+		stop = (voff_t)aobj->u_pages << PAGE_SHIFT;
 	} else {
 		start = trunc_page(start);
 		stop = round_page(stop);
-		if (stop > (aobj->u_pages << PAGE_SHIFT)) {
+		if (stop > ((voff_t)aobj->u_pages << PAGE_SHIFT)) {
 			printf("uao_flush: strange, got an out of range "
 			    "flush (fixed)\n");
-			stop = aobj->u_pages << PAGE_SHIFT;
+			stop = (voff_t)aobj->u_pages << PAGE_SHIFT;
 		}
 	}
 
@@ -1408,7 +1415,7 @@ uao_pagein_page(struct uvm_aobj *aobj, int pageidx)
 
 	pg = NULL;
 	npages = 1;
-	rv = uao_get(&aobj->u_obj, pageidx << PAGE_SHIFT,
+	rv = uao_get(&aobj->u_obj, (voff_t)pageidx << PAGE_SHIFT,
 		     &pg, &npages, 0, VM_PROT_READ|VM_PROT_WRITE, 0, 0);
 
 	switch (rv) {
@@ -1505,7 +1512,7 @@ uao_dropswap_range(struct uvm_object *uobj, voff_t start, voff_t end)
 					int slot = elt->slots[j];
 
 					KASSERT(uvm_pagelookup(&aobj->u_obj,
-					    (UAO_SWHASH_ELT_PAGEIDX_BASE(elt)
+					    (voff_t)(UAO_SWHASH_ELT_PAGEIDX_BASE(elt)
 					    + j) << PAGE_SHIFT) == NULL);
 
 					if (slot > 0) {

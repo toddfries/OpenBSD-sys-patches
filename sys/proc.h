@@ -1,4 +1,4 @@
-/*	$OpenBSD: proc.h,v 1.184 2014/04/18 11:51:17 guenther Exp $	*/
+/*	$OpenBSD: proc.h,v 1.186 2014/05/15 03:52:25 guenther Exp $	*/
 /*	$NetBSD: proc.h,v 1.44 1996/04/22 01:23:21 christos Exp $	*/
 
 /*-
@@ -166,6 +166,8 @@ struct process {
 
 	struct	sigacts *ps_sigacts;	/* Signal actions, state */
 	struct	vnode *ps_textvp;	/* Vnode of executable. */
+	struct	filedesc *ps_fd;	/* Ptr to open files structure */
+	struct	vmspace *ps_vmspace;	/* Address space */
 
 /* The following fields are all zeroed upon creation in process_new. */
 #define	ps_startzero	ps_klist
@@ -242,12 +244,13 @@ struct process {
 #define	PS_SINGLEUNWIND	0x00002000	/* Other threads must unwind. */
 #define	PS_NOZOMBIE	0x00004000	/* No signal or zombie at exit. */
 #define	PS_STOPPED	0x00008000	/* Just stopped, need sig to parent. */
+#define	PS_SYSTEM	0x00010000	/* No sigs, stats or swapping. */
 
 #define	PS_BITS \
     ("\20\01CONTROLT\02EXEC\03INEXEC\04EXITING\05SUGID" \
      "\06SUGIDEXEC\07PPWAIT\010ISPWAIT\011PROFIL\012TRACED" \
      "\013WAITED\014COREDUMP\015SINGLEEXIT\016SINGLEUNWIND" \
-     "\017NOZOMBIE\020STOPPED")
+     "\017NOZOMBIE\020STOPPED\021SYSTEM")
 
 
 struct proc {
@@ -258,8 +261,8 @@ struct proc {
 	TAILQ_ENTRY(proc) p_thr_link;/* Threads in a process linkage. */
 
 	/* substructures: */
-	struct	filedesc *p_fd;		/* Ptr to open files structure. */
-	struct	vmspace *p_vmspace;	/* Address space. */
+	struct	filedesc *p_fd;		/* copy of p_p->ps_fd */
+	struct	vmspace *p_vmspace;	/* copy of p_p->ps_vmspace */
 #define	p_rlimit	p_p->ps_limit->pl_rlimit
 
 	int	p_flag;			/* P_* flags. */
@@ -284,8 +287,7 @@ struct proc {
 	const volatile void *p_wchan;/* Sleep address. */
 	struct	timeout p_sleep_to;/* timeout for tsleep() */
 	const char *p_wmesg;	 /* Reason for sleep. */
-	fixpt_t	p_pctcpu;	 /* %cpu for this thread during p_swtime */
-	u_int	p_swtime;	 /* Time swapped in or out. */
+	fixpt_t	p_pctcpu;	 /* %cpu for this thread */
 	u_int	p_slptime;	 /* Time since last blocked. */
 	u_int	p_uticks;		/* Statclock hits in user mode. */
 	u_int	p_sticks;		/* Statclock hits in system mode. */
@@ -415,6 +417,7 @@ struct uidinfo *uid_find(uid_t);
 #define FORK_IDLE	0x00000004
 #define FORK_PPWAIT	0x00000008
 #define FORK_SHAREFILES	0x00000010
+#define FORK_SYSTEM	0x00000020
 #define FORK_NOZOMBIE	0x00000040
 #define FORK_SHAREVM	0x00000080
 #define FORK_TFORK	0x00000100

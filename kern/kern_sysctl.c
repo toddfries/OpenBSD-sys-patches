@@ -1,4 +1,4 @@
-/*	$OpenBSD: kern_sysctl.c,v 1.246 2014/03/30 21:54:48 guenther Exp $	*/
+/*	$OpenBSD: kern_sysctl.c,v 1.248 2014/05/04 05:03:26 guenther Exp $	*/
 /*	$NetBSD: kern_sysctl.c,v 1.17 1996/05/20 17:49:05 mrg Exp $	*/
 
 /*-
@@ -1252,7 +1252,7 @@ sysctl_file(int *name, u_int namelen, char *where, size_t *sizep,
 			 * processes
 			 */
 			pp = pr->ps_mainproc;
-			if ((pp->p_flag & P_SYSTEM) || (pr->ps_flags & PS_EXITING)
+			if ((pr->ps_flags & (PS_SYSTEM | PS_EXITING))
 			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg > 0 && pp->p_pid != (pid_t)arg) {
@@ -1284,7 +1284,7 @@ sysctl_file(int *name, u_int namelen, char *where, size_t *sizep,
 			 * skip system, exiting, embryonic and undead
 			 * processes
 			 */
-			if ((pp->p_flag & P_SYSTEM) || (pr->ps_flags & PS_EXITING)
+			if ((pr->ps_flags & (PS_SYSTEM | PS_EXITING))
 			    || pp->p_stat == SIDL || pp->p_stat == SZOMB)
 				continue;
 			if (arg >= 0 && pp->p_ucred->cr_uid != (uid_t)arg) {
@@ -1418,7 +1418,7 @@ again:
 			break;
 
 		case KERN_PROC_ALL:
-			if (p->p_flag & P_SYSTEM)
+			if (pr->ps_flags & PS_SYSTEM)
 				continue;
 			break;
 
@@ -1584,12 +1584,9 @@ sysctl_proc_args(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (0);
 	}
 
-	if (P_ZOMBIE(vp) || (vp->p_flag & P_SYSTEM))
+	/* Either system process or exiting/zombie */
+	if (vp->p_p->ps_flags & (PS_SYSTEM | PS_EXITING))
 		return (EINVAL);
-
-	/* Exiting - don't bother, it will be gone soon anyway */
-	if (vp->p_p->ps_flags & PS_EXITING)
-		return (ESRCH);
 
 	/* Execing - danger. */
 	if ((vp->p_p->ps_flags & PS_INEXEC))
@@ -1774,17 +1771,14 @@ sysctl_proc_cwd(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 		return (0);
 	}
 
-	if (P_ZOMBIE(findp) || (findp->p_flag & P_SYSTEM))
+	/* Either system process or exiting/zombie */
+	if (findp->p_p->ps_flags & (PS_SYSTEM | PS_EXITING))
 		return (EINVAL);
 
 	/* Only owner or root can get cwd */
-	if (findp->p_ucred->cr_uid != cp->p_ucred->cr_uid &&
+	if (findp->p_p->ps_ucred->cr_uid != cp->p_ucred->cr_uid &&
 	    (error = suser(cp, 0)) != 0)
 		return (error);
-
-	/* Exiting - don't bother, it will be gone soon anyway */
-	if (findp->p_p->ps_flags & PS_EXITING)
-		return (ESRCH);
 
 	len = *oldlenp;
 	if (len > MAXPATHLEN * 4)

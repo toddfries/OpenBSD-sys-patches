@@ -1,4 +1,4 @@
-/*	$OpenBSD: uvm_pager.c,v 1.65 2014/04/13 23:14:15 tedu Exp $	*/
+/*	$OpenBSD: uvm_pager.c,v 1.67 2014/05/09 03:54:28 tedu Exp $	*/
 /*	$NetBSD: uvm_pager.c,v 1.36 2000/11/27 18:26:41 chs Exp $	*/
 
 /*
@@ -278,7 +278,7 @@ void
 uvm_pagermapout(vaddr_t kva, int npages)
 {
 
-	pmap_remove(pmap_kernel(), kva, kva + (npages << PAGE_SHIFT));
+	pmap_remove(pmap_kernel(), kva, kva + ((vsize_t)npages << PAGE_SHIFT));
 	pmap_update(pmap_kernel());
 	uvm_pseg_release(kva);
 
@@ -724,7 +724,8 @@ uvm_aio_aiodone(struct buf *bp)
 
 	uobj = NULL;
 	for (i = 0; i < npages; i++)
-		pgs[i] = uvm_atopg((vaddr_t)bp->b_data + (i << PAGE_SHIFT));
+		pgs[i] = uvm_atopg((vaddr_t)bp->b_data +
+		    ((vsize_t)i << PAGE_SHIFT));
 	uvm_pagermapout((vaddr_t)bp->b_data, npages);
 #ifdef UVM_SWAP_ENCRYPT
 	/*
@@ -773,8 +774,5 @@ uvm_aio_aiodone(struct buf *bp)
 #ifdef UVM_SWAP_ENCRYPT
 freed:
 #endif
-	if (write && (bp->b_flags & B_AGE) != 0 && bp->b_vp != NULL) {
-		vwakeup(bp->b_vp);
-	}
 	pool_put(&bufpool, bp);
 }

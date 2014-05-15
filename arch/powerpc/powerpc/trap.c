@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.96 2014/04/18 11:51:17 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.100 2014/05/11 00:12:44 guenther Exp $	*/
 /*	$NetBSD: trap.c,v 1.3 1996/10/13 03:31:37 christos Exp $	*/
 
 /*
@@ -35,11 +35,11 @@
 #include <sys/proc.h>
 #include <sys/signalvar.h>
 #include <sys/reboot.h>
-#include <sys/syscall.h>
-#include <sys/syscall_mi.h>
 #include <sys/systm.h>
 #include <sys/user.h>
 #include <sys/pool.h>
+#include <sys/syscall.h>
+#include <sys/syscall_mi.h>
 
 #include <dev/cons.h>
 
@@ -184,8 +184,8 @@ enable_vec(struct proc *p)
 		pcb->pcb_vr = pool_get(&ppc_vecpl, PR_WAITOK | PR_ZERO);
 
 	if (curcpu()->ci_vecproc != NULL || pcb->pcb_veccpu != NULL)
-		printf("attempting to restore vector in use vecproc %x"
-		    " veccpu %x\n", curcpu()->ci_vecproc, pcb->pcb_veccpu);
+		printf("attempting to restore vector in use vecproc %p"
+		    " veccpu %p\n", curcpu()->ci_vecproc, pcb->pcb_veccpu);
 
 	/* first we enable vector so that we dont throw an exception
 	 * in kernel mode
@@ -523,7 +523,7 @@ mpc_print_pci_stat();
 			name = "0";
 			offset = frame->srr0;
 		}
-		panic ("trap type %x at %x (%s+0x%lx) lr %x",
+		panic ("trap type %x at %x (%s+0x%lx) lr %lx",
 			type, frame->srr0, name, offset, frame->lr);
 
 
@@ -619,15 +619,9 @@ for (i = 0; i < errnum; i++) {
 		break;
 
 	case EXC_AST|EXC_USER:
-		uvmexp.softs++;
 		p->p_md.md_astpending = 0;	/* we are about to do it */
-		if (p->p_flag & P_OWEUPC) {
-			KERNEL_LOCK();
-			ADDUPROF(p);
-			KERNEL_UNLOCK();
-		}
-		if (ci->ci_want_resched)
-			preempt(NULL);
+		uvmexp.softs++;
+		mi_ast(p, ci->ci_want_resched);
 		break;
 	}
 

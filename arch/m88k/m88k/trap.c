@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.90 2014/04/18 11:51:17 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.93 2014/05/11 00:12:44 guenther Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -123,18 +123,18 @@ printtrap(int type, struct trapframe *frame)
 	if (CPU_IS88100) {
 		if (type == 2) {
 			/* instruction exception */
-			printf("\nInstr access fault (%s) v = %x, frame %p\n",
+			printf("\nInstr access fault (%s) v = %lx, frame %p\n",
 			    pbus_exception_type[
 			      CMMU_PFSR_FAULT(frame->tf_ipfsr)],
 			    frame->tf_sxip & XIP_ADDR, frame);
 		} else if (type == 3) {
 			/* data access exception */
-			printf("\nData access fault (%s) v = %x, frame %p\n",
+			printf("\nData access fault (%s) v = %lx, frame %p\n",
 			    pbus_exception_type[
 			      CMMU_PFSR_FAULT(frame->tf_dpfsr)],
 			    frame->tf_sxip & XIP_ADDR, frame);
 		} else
-			printf("\nTrap type %d, v = %x, frame %p\n",
+			printf("\nTrap type %d, v = %lx, frame %p\n",
 			    type, frame->tf_sxip & XIP_ADDR, frame);
 	}
 #endif
@@ -205,16 +205,10 @@ ast(struct trapframe *frame)
 	struct cpu_info *ci = curcpu();
 	struct proc *p = ci->ci_curproc;
 
-	uvmexp.softs++;
 	p->p_md.md_astpending = 0;
-	if (p->p_flag & P_OWEUPC) {
-		KERNEL_LOCK();
-		ADDUPROF(p);
-		KERNEL_UNLOCK();
-	}
-	if (ci->ci_want_resched)
-		preempt(NULL);
 
+	uvmexp.softs++;
+	mi_ast(p, ci->ci_want_resched);
 	userret(p);
 }
 
@@ -276,7 +270,7 @@ lose:
 		return;
 #endif /* DDB */
 	case T_MISALGNFLT:
-		printf("kernel misaligned access exception @%p\n",
+		printf("kernel misaligned access exception @0x%08lx\n",
 		    frame->tf_sxip);
 		goto lose;
 	case T_INSTFLT:
@@ -1168,7 +1162,7 @@ error_fatal(struct trapframe *frame)
 #ifdef DDB
 	regdump((struct trapframe*)frame);
 #endif
-	panic("unrecoverable exception %d", frame->tf_vector);
+	panic("unrecoverable exception %ld", frame->tf_vector);
 }
 
 #ifdef M88100

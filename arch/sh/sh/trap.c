@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.25 2014/04/18 11:51:17 guenther Exp $	*/
+/*	$OpenBSD: trap.c,v 1.29 2014/05/11 00:12:44 guenther Exp $	*/
 /*	$NetBSD: exception.c,v 1.32 2006/09/04 23:57:52 uwe Exp $	*/
 /*	$NetBSD: syscall.c,v 1.6 2006/03/07 07:21:50 thorpej Exp $	*/
 
@@ -88,10 +88,9 @@
 #include <sys/signal.h>
 #include <sys/resourcevar.h>
 #include <sys/signalvar.h>
+#include <uvm/uvm_extern.h>
 #include <sys/syscall.h>
 #include <sys/syscall_mi.h>
-
-#include <uvm/uvm_extern.h>
 
 #include <sh/cache.h>
 #include <sh/cpu.h>
@@ -296,7 +295,7 @@ do_panic:
 	else
 		printf("EXPEVT 0x%03x", expevt);
 	printf(" in %s mode\n", expevt & EXP_USER ? "user" : "kernel");
-	printf("va %p spc %p ssr %p pr %p \n",
+	printf("va 0x%x spc 0x%x ssr 0x%x pr 0x%x \n",
 	    va, tf->tf_spc, tf->tf_ssr, tf->tf_pr);
 
 	panic("general_exception");
@@ -479,18 +478,9 @@ ast(struct proc *p, struct trapframe *tf)
 
 	while (p->p_md.md_astpending) {
 		p->p_md.md_astpending = 0;
-		uvmexp.softs++;
-
 		refreshcreds(p);
-		if (p->p_flag & P_OWEUPC) {
-			ADDUPROF(p);
-		}
-
-		if (want_resched) {
-			/* We are being preempted. */
-			preempt(NULL);
-		}
-
+		uvmexp.softs++;
+		mi_ast(p, want_resched);
 		userret(p);
 	}
 }
