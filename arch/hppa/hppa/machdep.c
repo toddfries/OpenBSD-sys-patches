@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.220 2014/05/08 21:32:45 miod Exp $	*/
+/*	$OpenBSD: machdep.c,v 1.222 2014/05/31 15:49:28 mpi Exp $	*/
 
 /*
  * Copyright (c) 1999-2003 Michael Shalayeff

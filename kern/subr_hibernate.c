@@ -1,4 +1,4 @@
-/*	$OpenBSD: subr_hibernate.c,v 1.89 2014/04/26 05:43:00 mlarkin Exp $	*/
+/*	$OpenBSD: subr_hibernate.c,v 1.92 2014/05/31 04:36:59 mlarkin Exp $	*/
 
 /*
  * Copyright (c) 2011 Ariane van der Steldt <ariane@stack.nl>
@@ -777,7 +777,7 @@ hibernate_inflate_page(void)
 	hibernate_state->hib_stream.avail_out = PAGE_SIZE;
 
 	/* Process next block of data */
-	i = inflate(&hibernate_state->hib_stream, Z_PARTIAL_FLUSH);
+	i = inflate(&hibernate_state->hib_stream, Z_SYNC_FLUSH);
 	if (i != Z_OK && i != Z_STREAM_END) {
 		/*
 		 * XXX - this will likely reboot/hang most machines
@@ -868,7 +868,7 @@ hibernate_deflate(union hibernate_info *hib, paddr_t src,
 	hibernate_state->hib_stream.avail_out = *remaining;
 
 	/* Process next block of data */
-	if (deflate(&hibernate_state->hib_stream, Z_PARTIAL_FLUSH) != Z_OK)
+	if (deflate(&hibernate_state->hib_stream, Z_SYNC_FLUSH) != Z_OK)
 		panic("hibernate zlib deflate error");
 
 	/* Update pointers and return number of bytes consumed */
@@ -1009,8 +1009,11 @@ hibernate_compare_signature(union hibernate_info *mine,
 		if ((mine->ranges[i].base != disk->ranges[i].base) ||
 		    (mine->ranges[i].end != disk->ranges[i].end) ) {
 			DPRINTF("hib range %d mismatch [%p-%p != %p-%p]\n",
-				i, mine->ranges[i].base, mine->ranges[i].end,
-				disk->ranges[i].base, disk->ranges[i].end);
+				i,
+				(void *)mine->ranges[i].base,
+				(void *)mine->ranges[i].end,
+				(void *)disk->ranges[i].base,
+				(void *)disk->ranges[i].end);
 			return (1);
 		}
 	}
@@ -1653,6 +1656,7 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
 	daddr_t blkctr;
 	size_t processed, compressed_size, read_size;
 	int overlap, found, nchunks, nochunks = 0, nfchunks = 0, npchunks = 0;
+	int num_io_pages;
 	short *ochunks, *pchunks, *fchunks, i, j;
 	vaddr_t tempva = (vaddr_t)NULL, hibernate_fchunk_area = (vaddr_t)NULL;
 
@@ -1665,7 +1669,8 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
 	 * used only during image read. They dissappear from existence
 	 * when the suspended kernel is unpacked on top of us.
 	 */
-	tempva = (vaddr_t)km_alloc(2*PAGE_SIZE, &kv_any, &kp_none, &kd_nowait);
+	tempva = (vaddr_t)km_alloc(MAXPHYS + PAGE_SIZE, &kv_any, &kp_none,
+		&kd_nowait);
 	if (!tempva)
 		return (1);
 	hibernate_fchunk_area = (vaddr_t)km_alloc(24*PAGE_SIZE, &kv_any,
@@ -1683,11 +1688,10 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
 	ochunks = (short *)(hibernate_fchunk_area + (16*PAGE_SIZE));
 
 	/* Map the chunk ordering region */
-	for(i=0; i<24 ; i++) {
+	for(i=0; i<24 ; i++)
 		pmap_kenter_pa(hibernate_fchunk_area + (i*PAGE_SIZE),
 			piglet_base + ((4+i)*PAGE_SIZE), VM_PROT_ALL);
-		pmap_update(pmap_kernel());
-	}
+	pmap_update(pmap_kernel());
 
 	nchunks = hib->chunk_ctr;
 
@@ -1803,23 +1807,38 @@ hibernate_read_chunks(union hibernate_info *hib, paddr_t pig_start,
 		compressed_size = chunks[fchunks[i]].compressed_size;
 
 		while (processed < compressed_size) {
-			pmap_kenter_pa(tempva, img_cur, VM_PROT_ALL);
-			pmap_kenter_pa(tempva + PAGE_SIZE, img_cur+PAGE_SIZE,
-			    VM_PROT_ALL);
-			pmap_update(pmap_kernel());
-
-			if (compressed_size - processed >= PAGE_SIZE)
-				read_size = PAGE_SIZE;
+			if (compressed_size - processed >= MAXPHYS)
+				read_size = MAXPHYS;
 			else
 				read_size = compressed_size - processed;
+
+			/*
+			 * We're reading read_size bytes, offset from the
+			 * start of a page by img_cur % PAGE_SIZE, so the
+			 * end will be read_size + (img_cur % PAGE_SIZE)
+			 * from the start of the first page.  Round that
+			 * up to the next page size.
+			 */
+			num_io_pages = (read_size + (img_cur % PAGE_SIZE)
+				+ PAGE_SIZE - 1) / PAGE_SIZE;
+
+			KASSERT(num_io_pages <= MAXPHYS/PAGE_SIZE + 1);
+
+			/* Map pages for this read */
+			for (j = 0; j < num_io_pages; j ++)
+				pmap_kenter_pa(tempva + j * PAGE_SIZE,
+					img_cur + j * PAGE_SIZE, VM_PROT_ALL);
+
+			pmap_update(pmap_kernel());
 
 			hibernate_block_io(hib, blkctr, read_size,
 			    tempva + (img_cur & PAGE_MASK), 0);
 
 			blkctr += (read_size / DEV_BSIZE);
 
-			pmap_kremove(tempva, PAGE_SIZE);
-			pmap_kremove(tempva + PAGE_SIZE, PAGE_SIZE);
+			pmap_kremove(tempva, num_io_pages * PAGE_SIZE);
+			pmap_update(pmap_kernel());
+
 			processed += read_size;
 			img_cur += read_size;
 		}

@@ -2,7 +2,7 @@
  * THIS FILE AUTOMATICALLY GENERATED.  DO NOT EDIT.
  *
  * generated from:
- *	OpenBSD: pcidevs,v 1.1725 2014/04/25 12:22:15 mpi Exp 
+ *	OpenBSD: pcidevs,v 1.1727 2014/05/18 10:49:28 stsp Exp 
  */
 
 /*	$NetBSD: pcidevs,v 1.30 1997/06/24 06:20:24 thorpej Exp $	*/
@@ -20152,6 +20152,10 @@ static const struct pci_known_product pci_known_products[] = {
 	    "RTS5249 Card Reader",
 	},
 	{
+	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8402,
+	    "RTL8402 Card Reader",
+	},
+	{
 	    PCI_VENDOR_REALTEK, PCI_PRODUCT_REALTEK_RTL8411B,
 	    "RTL8411B Card Reader",
 	},
@@ -22622,6 +22626,10 @@ static const struct pci_known_product pci_known_products[] = {
 	{
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VT8237A_PPB_2,
 	    "VT8237A",
+	},
+	{
+	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_VL80x_XHCI,
+	    "VL80x xHCI",
 	},
 	{
 	    PCI_VENDOR_VIATECH, PCI_PRODUCT_VIATECH_K8M800_4,

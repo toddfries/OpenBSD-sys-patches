@@ -1,4 +1,4 @@
-/*	$OpenBSD: armv7_machdep.c,v 1.6 2014/03/29 18:09:28 guenther Exp $ */
+/*	$OpenBSD: armv7_machdep.c,v 1.8 2014/05/31 15:49:28 mpi Exp $ */
 /*	$NetBSD: lubbock_machdep.c,v 1.2 2003/07/15 00:25:06 lukem Exp $ */
 
 /*

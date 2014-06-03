@@ -1,4 +1,4 @@
-/*	$OpenBSD: machdep.c,v 1.46 2014/05/10 22:37:12 jasper Exp $ */
+/*	$OpenBSD: machdep.c,v 1.48 2014/05/31 15:49:28 mpi Exp $ */
 
 /*
  * Copyright (c) 2009, 2010 Miodrag Vallat.

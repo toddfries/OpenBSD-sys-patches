@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci_cardbus.c,v 1.17 2013/04/15 09:23:00 mglocker Exp $ */
+/*	$OpenBSD: ehci_cardbus.c,v 1.19 2014/05/17 12:54:57 stsp Exp $ */
 /*	$NetBSD: ehci_cardbus.c,v 1.6.6.3 2004/09/21 13:27:25 skrll Exp $	*/
 
 /*
@@ -50,14 +50,6 @@
 
 #include <dev/usb/ehcireg.h>
 #include <dev/usb/ehcivar.h>
-
-#ifdef EHCI_DEBUG
-#define DPRINTF(x)	if (ehcidebug) printf x
-extern int ehcidebug;
-#else
-#define DPRINTF(x)
-#endif
-
 
 int	ehci_cardbus_match(struct device *, void *, void *);
 void	ehci_cardbus_attach(struct device *, struct device *, void *);
@@ -130,7 +122,6 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 
 	/* Disable interrupts, so we don't get any spurious ones. */
 	sc->sc.sc_offs = EREAD1(&sc->sc, EHCI_CAPLENGTH);
-	DPRINTF((": offs=%d", devname, sc->sc.sc_offs));
 	EOWRITE2(&sc->sc, EHCI_USBINTR, 0);
 
 	sc->sc_ih = cardbus_intr_establish(cc, cf, ca->ca_intrline,
@@ -162,8 +153,7 @@ ehci_cardbus_attach(struct device *parent, struct device *self, void *aux)
 	}
 
 	/* Attach usb device. */
-	sc->sc.sc_child = config_found((void *)sc, &sc->sc.sc_bus,
-				       usbctlprint);
+	config_found(self, &sc->sc.sc_bus, usbctlprint);
 }
 
 int
@@ -173,7 +163,7 @@ ehci_cardbus_detach(struct device *self, int flags)
 	struct cardbus_devfunc *ct = sc->sc_ct;
 	int rv;
 
-	rv = ehci_detach(&sc->sc, flags);
+	rv = ehci_detach(self, flags);
 	if (rv)
 		return (rv);
 	if (sc->sc_ih != NULL) {
