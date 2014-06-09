@@ -1,4 +1,4 @@
-/*	$OpenBSD: ehci.c,v 1.156 2014/05/30 13:24:59 mpi Exp $ */
+/*	$OpenBSD: ehci.c,v 1.158 2014/06/04 13:52:30 mpi Exp $ */
 /*	$NetBSD: ehci.c,v 1.66 2004/06/30 03:11:56 mycroft Exp $	*/
 
 /*
@@ -152,7 +152,6 @@ void		ehci_device_isoc_close(struct usbd_pipe *);
 void		ehci_device_isoc_done(struct usbd_xfer *);
 
 void		ehci_device_clear_toggle(struct usbd_pipe *pipe);
-void		ehci_noop(struct usbd_pipe *pipe);
 
 void		ehci_pcd(struct ehci_softc *, struct usbd_xfer *);
 void		ehci_disown(struct ehci_softc *, int, int);
@@ -216,65 +215,61 @@ void		ehci_dump_exfer(struct ehci_xfer *);
 #define ehci_active_intr_list(ex) ((ex)->inext.tqe_prev != NULL)
 
 struct usbd_bus_methods ehci_bus_methods = {
-	ehci_open,
-	ehci_softintr,
-	ehci_poll,
-	ehci_allocx,
-	ehci_freex,
+	.open_pipe = ehci_open,
+	.soft_intr = ehci_softintr,
+	.do_poll = ehci_poll,
+	.allocx = ehci_allocx,
+	.freex = ehci_freex,
 };
 
 struct usbd_pipe_methods ehci_root_ctrl_methods = {
-	ehci_root_ctrl_transfer,
-	ehci_root_ctrl_start,
-	ehci_root_ctrl_abort,
-	ehci_root_ctrl_close,
-	ehci_noop,
-	ehci_root_ctrl_done,
+	.transfer = ehci_root_ctrl_transfer,
+	.start = ehci_root_ctrl_start,
+	.abort = ehci_root_ctrl_abort,
+	.close = ehci_root_ctrl_close,
+	.done = ehci_root_ctrl_done,
 };
 
 struct usbd_pipe_methods ehci_root_intr_methods = {
-	ehci_root_intr_transfer,
-	ehci_root_intr_start,
-	ehci_root_intr_abort,
-	ehci_root_intr_close,
-	ehci_noop,
-	ehci_root_intr_done,
+	.transfer = ehci_root_intr_transfer,
+	.start = ehci_root_intr_start,
+	.abort = ehci_root_intr_abort,
+	.close = ehci_root_intr_close,
+	.done = ehci_root_intr_done,
 };
 
 struct usbd_pipe_methods ehci_device_ctrl_methods = {
-	ehci_device_ctrl_transfer,
-	ehci_device_ctrl_start,
-	ehci_device_ctrl_abort,
-	ehci_device_ctrl_close,
-	ehci_noop,
-	ehci_device_ctrl_done,
+	.transfer = ehci_device_ctrl_transfer,
+	.start = ehci_device_ctrl_start,
+	.abort = ehci_device_ctrl_abort,
+	.close = ehci_device_ctrl_close,
+	.done = ehci_device_ctrl_done,
 };
 
 struct usbd_pipe_methods ehci_device_intr_methods = {
-	ehci_device_intr_transfer,
-	ehci_device_intr_start,
-	ehci_device_intr_abort,
-	ehci_device_intr_close,
-	ehci_device_clear_toggle,
-	ehci_device_intr_done,
+	.transfer = ehci_device_intr_transfer,
+	.start = ehci_device_intr_start,
+	.abort = ehci_device_intr_abort,
+	.close = ehci_device_intr_close,
+	.cleartoggle = ehci_device_clear_toggle,
+	.done = ehci_device_intr_done,
 };
 
 struct usbd_pipe_methods ehci_device_bulk_methods = {
-	ehci_device_bulk_transfer,
-	ehci_device_bulk_start,
-	ehci_device_bulk_abort,
-	ehci_device_bulk_close,
-	ehci_device_clear_toggle,
-	ehci_device_bulk_done,
+	.transfer = ehci_device_bulk_transfer,
+	.start = ehci_device_bulk_start,
+	.abort = ehci_device_bulk_abort,
+	.close = ehci_device_bulk_close,
+	.cleartoggle = ehci_device_clear_toggle,
+	.done = ehci_device_bulk_done,
 };
 
 struct usbd_pipe_methods ehci_device_isoc_methods = {
-	ehci_device_isoc_transfer,
-	ehci_device_isoc_start,
-	ehci_device_isoc_abort,
-	ehci_device_isoc_close,
-	ehci_noop,
-	ehci_device_isoc_done,
+	.transfer = ehci_device_isoc_transfer,
+	.start = ehci_device_isoc_start,
+	.abort = ehci_device_isoc_abort,
+	.close = ehci_device_isoc_close,
+	.done = ehci_device_isoc_done,
 };
 
 /*
@@ -1224,11 +1219,6 @@ ehci_device_clear_toggle(struct usbd_pipe *pipe)
 		panic("ehci_device_clear_toggle: queue active");
 #endif
 	epipe->sqh->qh.qh_qtd.qtd_status &= htole32(~EHCI_QTD_TOGGLE_MASK);
-}
-
-void
-ehci_noop(struct usbd_pipe *pipe)
-{
 }
 
 #ifdef EHCI_DEBUG

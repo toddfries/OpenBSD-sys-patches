@@ -1,4 +1,4 @@
-/*	$OpenBSD: ohci.c,v 1.131 2014/05/30 13:24:59 mpi Exp $ */
+/*	$OpenBSD: ohci.c,v 1.133 2014/06/04 13:52:30 mpi Exp $ */
 /*	$NetBSD: ohci.c,v 1.139 2003/02/22 05:24:16 tsutsui Exp $	*/
 /*	$FreeBSD: src/sys/dev/usb/ohci.c,v 1.22 1999/11/17 22:33:40 n_hibma Exp $	*/
 
@@ -157,7 +157,6 @@ void		ohci_close_pipe(struct usbd_pipe *, struct ohci_soft_ed *);
 void		ohci_abort_xfer(struct usbd_xfer *, usbd_status);
 
 void		ohci_device_clear_toggle(struct usbd_pipe *pipe);
-void		ohci_noop(struct usbd_pipe *pipe);
 
 #ifdef OHCI_DEBUG
 void		ohci_dumpregs(struct ohci_softc *);
@@ -232,65 +231,61 @@ struct ohci_pipe {
 #define OHCI_INTR_ENDPT 1
 
 struct usbd_bus_methods ohci_bus_methods = {
-	ohci_open,
-	ohci_softintr,
-	ohci_poll,
-	ohci_allocx,
-	ohci_freex,
+	.open_pipe = ohci_open,
+	.soft_intr = ohci_softintr,
+	.do_poll = ohci_poll,
+	.allocx = ohci_allocx,
+	.freex = ohci_freex,
 };
 
 struct usbd_pipe_methods ohci_root_ctrl_methods = {
-	ohci_root_ctrl_transfer,
-	ohci_root_ctrl_start,
-	ohci_root_ctrl_abort,
-	ohci_root_ctrl_close,
-	ohci_noop,
-	ohci_root_ctrl_done,
+	.transfer = ohci_root_ctrl_transfer,
+	.start = ohci_root_ctrl_start,
+	.abort = ohci_root_ctrl_abort,
+	.close = ohci_root_ctrl_close,
+	.done = ohci_root_ctrl_done,
 };
 
 struct usbd_pipe_methods ohci_root_intr_methods = {
-	ohci_root_intr_transfer,
-	ohci_root_intr_start,
-	ohci_root_intr_abort,
-	ohci_root_intr_close,
-	ohci_noop,
-	ohci_root_intr_done,
+	.transfer = ohci_root_intr_transfer,
+	.start = ohci_root_intr_start,
+	.abort = ohci_root_intr_abort,
+	.close = ohci_root_intr_close,
+	.done = ohci_root_intr_done,
 };
 
 struct usbd_pipe_methods ohci_device_ctrl_methods = {
-	ohci_device_ctrl_transfer,
-	ohci_device_ctrl_start,
-	ohci_device_ctrl_abort,
-	ohci_device_ctrl_close,
-	ohci_noop,
-	ohci_device_ctrl_done,
+	.transfer = ohci_device_ctrl_transfer,
+	.start = ohci_device_ctrl_start,
+	.abort = ohci_device_ctrl_abort,
+	.close = ohci_device_ctrl_close,
+	.done = ohci_device_ctrl_done,
 };
 
 struct usbd_pipe_methods ohci_device_intr_methods = {
-	ohci_device_intr_transfer,
-	ohci_device_intr_start,
-	ohci_device_intr_abort,
-	ohci_device_intr_close,
-	ohci_device_clear_toggle,
-	ohci_device_intr_done,
+	.transfer = ohci_device_intr_transfer,
+	.start = ohci_device_intr_start,
+	.abort = ohci_device_intr_abort,
+	.close = ohci_device_intr_close,
+	.cleartoggle = ohci_device_clear_toggle,
+	.done = ohci_device_intr_done,
 };
 
 struct usbd_pipe_methods ohci_device_bulk_methods = {
-	ohci_device_bulk_transfer,
-	ohci_device_bulk_start,
-	ohci_device_bulk_abort,
-	ohci_device_bulk_close,
-	ohci_device_clear_toggle,
-	ohci_device_bulk_done,
+	.transfer = ohci_device_bulk_transfer,
+	.start = ohci_device_bulk_start,
+	.abort = ohci_device_bulk_abort,
+	.close = ohci_device_bulk_close,
+	.cleartoggle = ohci_device_clear_toggle,
+	.done = ohci_device_bulk_done,
 };
 
 struct usbd_pipe_methods ohci_device_isoc_methods = {
-	ohci_device_isoc_transfer,
-	ohci_device_isoc_start,
-	ohci_device_isoc_abort,
-	ohci_device_isoc_close,
-	ohci_noop,
-	ohci_device_isoc_done,
+	.transfer = ohci_device_isoc_transfer,
+	.start = ohci_device_isoc_start,
+	.abort = ohci_device_isoc_abort,
+	.close = ohci_device_isoc_close,
+	.done = ohci_device_isoc_done,
 };
 
 int
@@ -2701,11 +2696,6 @@ ohci_device_clear_toggle(struct usbd_pipe *pipe)
 	struct ohci_pipe *opipe = (struct ohci_pipe *)pipe;
 
 	opipe->sed->ed.ed_headp &= htole32(~OHCI_TOGGLECARRY);
-}
-
-void
-ohci_noop(struct usbd_pipe *pipe)
-{
 }
 
 usbd_status

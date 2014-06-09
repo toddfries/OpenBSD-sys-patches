@@ -1,4 +1,4 @@
-/*	$OpenBSD: m88110_fp.c,v 1.9 2014/03/29 18:09:29 guenther Exp $	*/
+/*	$OpenBSD: m88110_fp.c,v 1.10 2014/06/09 16:26:32 miod Exp $	*/
 
 /*
  * Copyright (c) 2007, Miodrag Vallat.
@@ -31,58 +31,10 @@
 
 #include <lib/libkern/softfloat.h>
 
-/*
- * Values for individual bits in fcmp results.
- */
-#define	CC_UN	0x00000001	/* unordered */
-#define	CC_LEG	0x00000002	/* less than, equal or greater than */
-#define	CC_EQ	0x00000004	/* equal */
-#define	CC_NE	0x00000008	/* not equal */
-#define	CC_GT	0x00000010	/* greater than */
-#define	CC_LE	0x00000020	/* less than or equal */
-#define	CC_LT	0x00000040	/* less than */
-#define	CC_GE	0x00000080	/* greater than or equal */
-#define	CC_OU	0x00000100	/* out of range */
-#define	CC_IB	0x00000200	/* in range or on boundary */
-#define	CC_IN	0x00000400	/* in range */
-#define	CC_OB	0x00000800	/* out of range or on boundary */
-#define	CC_UE	0x00001000	/* unordered or equal */
-#define	CC_LG	0x00002000	/* less than or greater than */
-#define	CC_UG	0x00004000	/* unordered or greater than */
-#define	CC_ULE	0x00008000	/* unordered or less than or equal */
-#define	CC_UL	0x00010000	/* unordered or less than */
-#define	CC_UGE	0x00020000	/* unordered or greater than or equal */
+#include <m88k/m88k/fpu.h>
 
-/*
- * Data width (matching the TD field of the instructions)
- */
-#define	FTYPE_SNG	0
-#define	FTYPE_DBL	1
-#define	FTYPE_EXT	2
-#define	FTYPE_INT	3	/* not a real T value */
-
-#define	IGNORE_PRECISION	FTYPE_SNG
-
-/* floating point value */
-typedef union {
-	float32		sng;
-	float64		dbl;
-} fparg;
-
-void	fpu_compare(struct trapframe *, fparg *, fparg *, u_int, u_int, u_int);
-int	fpu_emulate(struct trapframe *, u_int32_t);
-void	fpu_fetch(struct trapframe *, u_int, u_int, u_int, fparg *);
-u_int	fpu_precision(u_int, u_int, u_int);
-void	fpu_store(struct trapframe *, u_int, u_int, u_int, fparg *);
-
-/*
- * Inlines from softfloat-specialize.h which are not made public, needed
- * for fpu_compare.
- */
-#define	float32_is_nan(a) \
-	(0xff000000 < (a << 1))
-#define	float32_is_signaling_nan(a) \
-	((((a >> 22) & 0x1ff) == 0x1fe) && (a & 0x003fffff))
+int	m88110_fpu_emulate(struct trapframe *, u_int32_t);
+void	m88110_fpu_fetch(struct trapframe *, u_int, u_int, u_int, fparg *);
 
 /*
  * All 88110 floating-point exceptions are handled there.
@@ -171,7 +123,7 @@ m88110_fpu_exception(struct trapframe *frame)
 			fault_type = FPE_FLTINV;
 			goto deliver;
 		}
-		sig = fpu_emulate(frame, insn);
+		sig = m88110_fpu_emulate(frame, insn);
 		fault_type = SI_NOINFO;
 		/*
 		 * Update the floating point status register regardless of
@@ -229,8 +181,8 @@ deliver:
  * format (orig_width) <= width.
  */
 void
-fpu_fetch(struct trapframe *frame, u_int regno, u_int orig_width, u_int width,
-    fparg *dest)
+m88110_fpu_fetch(struct trapframe *frame, u_int regno, u_int orig_width,
+    u_int width, fparg *dest)
 {
 	u_int32_t tmp;
 
@@ -267,83 +219,11 @@ fpu_fetch(struct trapframe *frame, u_int regno, u_int orig_width, u_int width,
 }
 
 /*
- * Store a floating-point result, converting it to the required format if it
- * is of smaller precision.
- *
- * This assumes the original format (orig_width) is not FTYPE_INT, and the
- * final format (width) <= orig_width.
- */
-void
-fpu_store(struct trapframe *frame, u_int regno, u_int orig_width, u_int width,
-    fparg *src)
-{
-	u_int32_t tmp;
-	u_int rd;
-
-	switch (width) {
-	case FTYPE_INT:
-		rd = float_get_round(frame->tf_fpcr);
-		switch (orig_width) {
-		case FTYPE_SNG:
-			if (rd == FP_RZ)
-				tmp = float32_to_int32_round_to_zero(src->sng);
-			else
-				tmp = float32_to_int32(src->sng);
-			break;
-		case FTYPE_DBL:
-			if (rd == FP_RZ)
-				tmp = float64_to_int32_round_to_zero(src->dbl);
-			else
-				tmp = float64_to_int32(src->dbl);
-			break;
-		}
-		if (regno != 0)
-			frame->tf_r[regno] = tmp;
-		break;
-	case FTYPE_SNG:
-		switch (orig_width) {
-		case FTYPE_SNG:
-			tmp = src->sng;
-			break;
-		case FTYPE_DBL:
-			tmp = float64_to_float32(src->dbl);
-			break;
-		}
-		if (regno != 0)
-			frame->tf_r[regno] = tmp;
-		break;
-	case FTYPE_DBL:
-		switch (orig_width) {
-		case FTYPE_DBL:
-			tmp = (u_int32_t)(src->dbl >> 32);
-			if (regno != 0)
-				frame->tf_r[regno] = tmp;
-			tmp = (u_int32_t)src->dbl;
-			if (regno != 31)
-				frame->tf_r[regno + 1] = tmp;
-			break;
-		}
-		break;
-	}
-}
-
-/*
- * Return the largest precision of all precision inputs.
- *
- * This assumes none of the inputs is FTYPE_INT.
- */
-u_int
-fpu_precision(u_int ts1, u_int ts2, u_int td)
-{
-	return max(td, max(ts1, ts2));
-}
-
-/*
  * Emulate an FPU instruction.  On return, the trapframe registers
  * will be modified to reflect the settings the hardware would have left.
  */
 int
-fpu_emulate(struct trapframe *frame, u_int32_t insn)
+m88110_fpu_emulate(struct trapframe *frame, u_int32_t insn)
 {
 	u_int rf, rd, rs1, rs2, t1, t2, td, tmax, opcode;
 	u_int32_t old_fpsr, old_fpcr;
@@ -442,8 +322,8 @@ fpu_emulate(struct trapframe *frame, u_int32_t insn)
 	switch (opcode) {
 	case 0x00:	/* fmul */
 		tmax = fpu_precision(t1, t2, td);
-		fpu_fetch(frame, rs1, t1, tmax, &arg1);
-		fpu_fetch(frame, rs2, t2, tmax, &arg2);
+		m88110_fpu_fetch(frame, rs1, t1, tmax, &arg1);
+		m88110_fpu_fetch(frame, rs2, t2, tmax, &arg2);
 		switch (tmax) {
 		case FTYPE_SNG:
 			dest.sng = float32_mul(arg1.sng, arg2.sng);
@@ -457,19 +337,19 @@ fpu_emulate(struct trapframe *frame, u_int32_t insn)
 
 	case 0x01:	/* fcvt */
 		tmax = fpu_precision(IGNORE_PRECISION, t2, td);
-		fpu_fetch(frame, rs2, t2, tmax, &dest);
+		m88110_fpu_fetch(frame, rs2, t2, tmax, &dest);
 		fpu_store(frame, rd, tmax, td, &dest);
 		break;
 
 	case 0x04:	/* flt */
-		fpu_fetch(frame, rs2, FTYPE_INT, td, &dest);
+		m88110_fpu_fetch(frame, rs2, FTYPE_INT, td, &dest);
 		fpu_store(frame, rd, td, td, &dest);
 		break;
 
 	case 0x05:	/* fadd */
 		tmax = fpu_precision(t1, t2, td);
-		fpu_fetch(frame, rs1, t1, tmax, &arg1);
-		fpu_fetch(frame, rs2, t2, tmax, &arg2);
+		m88110_fpu_fetch(frame, rs1, t1, tmax, &arg1);
+		m88110_fpu_fetch(frame, rs2, t2, tmax, &arg2);
 		switch (tmax) {
 		case FTYPE_SNG:
 			dest.sng = float32_add(arg1.sng, arg2.sng);
@@ -483,8 +363,8 @@ fpu_emulate(struct trapframe *frame, u_int32_t insn)
 
 	case 0x06:	/* fsub */
 		tmax = fpu_precision(t1, t2, td);
-		fpu_fetch(frame, rs1, t1, tmax, &arg1);
-		fpu_fetch(frame, rs2, t2, tmax, &arg2);
+		m88110_fpu_fetch(frame, rs1, t1, tmax, &arg1);
+		m88110_fpu_fetch(frame, rs2, t2, tmax, &arg2);
 		switch (tmax) {
 		case FTYPE_SNG:
 			dest.sng = float32_sub(arg1.sng, arg2.sng);
@@ -498,14 +378,14 @@ fpu_emulate(struct trapframe *frame, u_int32_t insn)
 
 	case 0x07:	/* fcmp, fcmpu */
 		tmax = fpu_precision(t1, t2, IGNORE_PRECISION);
-		fpu_fetch(frame, rs1, t1, tmax, &arg1);
-		fpu_fetch(frame, rs2, t2, tmax, &arg2);
+		m88110_fpu_fetch(frame, rs1, t1, tmax, &arg1);
+		m88110_fpu_fetch(frame, rs2, t2, tmax, &arg2);
 		fpu_compare(frame, &arg1, &arg2, tmax, rd, td /* fcmpu */);
 		break;
 
 	case 0x09:	/* int */
 do_int:
-		fpu_fetch(frame, rs2, t2, t2, &dest);
+		m88110_fpu_fetch(frame, rs2, t2, t2, &dest);
 		fpu_store(frame, rd, t2, FTYPE_INT, &dest);
 		break;
 
@@ -523,8 +403,8 @@ do_int:
 
 	case 0x0e:	/* fdiv */
 		tmax = fpu_precision(t1, t2, td);
-		fpu_fetch(frame, rs1, t1, tmax, &arg1);
-		fpu_fetch(frame, rs2, t2, tmax, &arg2);
+		m88110_fpu_fetch(frame, rs1, t1, tmax, &arg1);
+		m88110_fpu_fetch(frame, rs2, t2, tmax, &arg2);
 		switch (tmax) {
 		case FTYPE_SNG:
 			dest.sng = float32_div(arg1.sng, arg2.sng);
@@ -538,7 +418,7 @@ do_int:
 
 	case 0x0f:	/* sqrt */
 		tmax = fpu_precision(IGNORE_PRECISION, t2, td);
-		fpu_fetch(frame, rs2, t2, tmax, &arg1);
+		m88110_fpu_fetch(frame, rs2, t2, tmax, &arg1);
 		switch (tmax) {
 		case FTYPE_SNG:
 			dest.sng = float32_sqrt(arg1.sng);
@@ -568,168 +448,4 @@ do_int:
 	frame->tf_fpcr = old_fpcr;
 
 	return (rc);
-}
-
-/*
- * Perform a compare instruction (fcmp, fcmpu).
- *
- * If either operand is NaN, the result is unordered.  This causes an
- * reserved operand exception (except for nonsignalling NaNs for fcmpu).
- */
-void
-fpu_compare(struct trapframe *frame, fparg *s1, fparg *s2, u_int width,
-    u_int rd, u_int fcmpu)
-{
-	u_int32_t cc;
-	int zero, s1positive, s2positive;
-
-	/*
-	 * Handle NaNs first, and raise invalid if fcmp or signaling NaN.
-	 */
-	switch (width) {
-	case FTYPE_SNG:
-		if (float32_is_nan(s1->sng)) {
-			if (!fcmpu || float32_is_signaling_nan(s1->sng))
-				float_set_invalid();
-			cc = CC_UN;
-			goto done;
-		}
-		if (float32_is_nan(s2->sng)) {
-			if (!fcmpu || float32_is_signaling_nan(s2->sng))
-				float_set_invalid();
-			cc = CC_UN;
-			goto done;
-		}
-		break;
-	case FTYPE_DBL:
-		if (float64_is_nan(s1->dbl)) {
-			if (!fcmpu || float64_is_signaling_nan(s1->dbl))
-				float_set_invalid();
-			cc = CC_UN;
-			goto done;
-		}
-		if (float64_is_nan(s2->dbl)) {
-			if (!fcmpu || float64_is_signaling_nan(s2->dbl))
-				float_set_invalid();
-			cc = CC_UN;
-			goto done;
-		}
-		break;
-	}
-
-	/*
-	 * Now order the two numbers.
-	 */
-	switch (width) {
-	case FTYPE_SNG:
-		if (float32_eq(s1->sng, s2->sng))
-			cc = CC_EQ;
-		else if (float32_lt(s1->sng, s2->sng))
-			cc = CC_LT | CC_NE;
-		else
-			cc = CC_GT | CC_NE;
-		break;
-	case FTYPE_DBL:
-		if (float64_eq(s1->dbl, s2->dbl))
-			cc = CC_EQ;
-		else if (float64_lt(s1->dbl, s2->dbl))
-			cc = CC_LT | CC_NE;
-		else
-			cc = CC_GT | CC_NE;
-		break;
-	}
-
-done:
-
-	/*
-	 * Complete condition code mask.
-	 */
-
-	if (cc & CC_UN)
-		cc |= CC_UE | CC_UG | CC_ULE | CC_UL | CC_UGE;
-	if (cc & CC_EQ)
-		cc |= CC_LE | CC_GE | CC_UE;
-	if (cc & CC_GT)
-		cc |= CC_GE;
-	if (cc & CC_LT)
-		cc |= CC_LE;
-	if (cc & (CC_LT | CC_GT))
-		cc |= CC_LG;
-	if (cc & (CC_LT | CC_GT | CC_EQ))
-		cc |= CC_LEG;
-	if (cc & CC_GT)
-		cc |= CC_UG;
-	if (cc & CC_LE)
-		cc |= CC_ULE;
-	if (cc & CC_LT)
-		cc |= CC_UL;
-	if (cc & CC_GE)
-		cc |= CC_UGE;
-
-	/*
-	 * Fill the interval bits.
-	 * s1 is compared to the interval [0, s2].
-	 */
-	if (!(cc & CC_UN)) {
-		if (cc & CC_EQ) {
-			/* if s1 and s2 are equal, s1 is on boundary */
-			cc |= CC_IB | CC_OB;
-			goto completed;
-		}
-
-		/* s1 and s2 are either Zero, numbers or Inf */
-		switch (width) {
-		case FTYPE_SNG:
-			zero = float32_eq(s1->sng, 0);
-			break;
-		case FTYPE_DBL:
-			zero = float64_eq(s1->dbl, 0LL);
-			break;
-		}
-		if (zero) {
-			/* if s1 is zero, it is on boundary */
-			cc |= CC_IB | CC_OB;
-			goto completed;
-		}
-
-		switch (width) {
-		case FTYPE_SNG:
-			s1positive = s1->sng >> 31 == 0;
-			s2positive = s2->sng >> 31 == 0;
-			break;
-		case FTYPE_DBL:
-			s1positive = s1->dbl >> 63 == 0;
-			s2positive = s2->dbl >> 63 == 0;
-			break;
-		}
-		if (s2positive) {
-			/* s2 is positive, the interval is [0, s2] */
-			if (cc & CC_GT) {
-				/* 0 <= s2 < s1 -> out of interval */
-				cc |= CC_OU | CC_OB;
-			} else if (s1positive) {
-				/* 0 < s1 < s2 -> in interval */
-				cc |= CC_IB | CC_IN;
-			} else {
-				/* s1 < 0 <= s2 */
-				cc |= CC_OU | CC_OB;
-			}
-		} else {
-			/* s2 is negative, the interval is [s2, 0] */
-			if (cc & CC_LT) {
-				/* s1 < s2 <= 0 */
-				cc |= CC_OU | CC_OB;
-			} else if (!s1positive) {
-				/* s2 < s1 < 0 */
-				cc |= CC_IB | CC_IN;
-			} else {
-				/* s2 < 0 < s1 */
-				cc |= CC_OU | CC_OB;
-			}
-		}
-	}
-
-completed:
-	if (rd != 0)
-		frame->tf_r[rd] = cc;
 }

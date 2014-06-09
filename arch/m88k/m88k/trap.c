@@ -1,4 +1,4 @@
-/*	$OpenBSD: trap.c,v 1.96 2014/05/31 11:27:50 miod Exp $	*/
+/*	$OpenBSD: trap.c,v 1.98 2014/06/09 16:26:32 miod Exp $	*/
 /*
  * Copyright (c) 2004, Miodrag Vallat.
  * Copyright (c) 1998 Steve Murphree, Jr.
@@ -140,7 +140,7 @@ printtrap(int type, struct trapframe *frame)
 #endif
 #ifdef M88110
 	if (CPU_IS88110) {
-		printf("\nTrap type %d, v = %x, frame %p\n",
+		printf("\nTrap type %d, v = %lx, frame %p\n",
 		    type, frame->tf_exip, frame);
 	}
 #endif
@@ -506,10 +506,9 @@ user_fault:
 		break;
 	case T_FPEPFLT+T_USER:
 		m88100_fpu_precise_exception(frame);
-		goto maysigfpe;
+		goto userexit;
 	case T_FPEIFLT+T_USER:
 		m88100_fpu_imprecise_exception(frame);
-maysigfpe:
 		/* Check for a SIGFPE condition */
 		if (frame->tf_fpsr & frame->tf_fpcr) {
 			sig = SIGFPE;
@@ -616,6 +615,7 @@ maysigfpe:
 		frame->tf_ipfsr = frame->tf_dpfsr = 0;
 	}
 
+userexit:
 	userret(p);
 }
 #endif /* M88100 */
@@ -682,14 +682,14 @@ m88110_trap(u_int type, struct trapframe *frame)
 		if (!USERMODE(frame->tf_epsr)) {
 			instr = *(u_int *)fault_addr;
 			if (instr == 0xf400cc01)
-				panic("mc88110 errata #16, exip %p enip %p",
+				panic("mc88110 errata #16, exip 0x%lx enip 0x%lx",
 				    (frame->tf_exip + 4) | 1, frame->tf_enip);
 		} else {
 			/* copyin here should not fail */
 			if (copyin((const void *)frame->tf_exip, &instr,
 			    sizeof instr) == 0 &&
 			    instr == 0xf400cc01) {
-				uprintf("mc88110 errata #16, exip %p enip %p",
+				uprintf("mc88110 errata #16, exip 0x%lx enip 0x%lx",
 				    (frame->tf_exip + 4) | 1, frame->tf_enip);
 				sig = SIGILL;
 			}
@@ -805,7 +805,7 @@ lose:
 		goto lose;
 	case T_MISALGNFLT:
 		printf("kernel misaligned access exception @%p\n",
-		    frame->tf_exip);
+		    (void *)frame->tf_exip);
 		goto lose;
 	case T_INSTFLT:
 		/* kernel mode instruction access fault.
